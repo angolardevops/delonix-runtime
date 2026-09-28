@@ -253,6 +253,12 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // the old one — cold, which turns it into a refused `Replace` rather
         // than a silent move.
         k::VOLUME => &["quota", "alertPct"],
+        // Measured on PVE 9.2.2 against a running container before being
+        // declared: `memory` and `swap` land in its cgroup at once, `cores` in
+        // its cpuset a few seconds later, and nothing is left pending. `image`,
+        // `entrypoint`, `env`, `rootfs` and `network` stay cold (ADR-0058,
+        // plan 63 slice 4).
+        k::SYSTEM_CONTAINER => &["memory", "swap", "cores"],
         k::NETWORK => &["peers"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.

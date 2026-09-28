@@ -42,6 +42,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::IPPOOL,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
+    kinds::SYSTEM_CONTAINER,
 ];
 
 /// Kinds whose listing has no `-o json` today. Listed rather than discovered,
@@ -72,6 +73,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::CLUSTER,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
+    kinds::SYSTEM_CONTAINER,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
@@ -88,6 +90,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::IPPOOL,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
+    kinds::SYSTEM_CONTAINER,
 ];
 
 /// A generic verb, as DATA — so the table below and its test can name one
@@ -322,6 +325,7 @@ pub(crate) fn get(
         k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_ls(output),
         k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_ls(output),
+        k if k == kinds::SYSTEM_CONTAINER => super::system_container::cmd_ls(output),
         // Both directions of every governed container, one row each — the
         // listing `net ingress ls`/`net egress ls` never had between them
         // (each answers only its own direction). Identity is `<target>/
@@ -400,6 +404,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_describe(&n),
         k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_describe(&n),
+        k if k == kinds::SYSTEM_CONTAINER => super::system_container::cmd_describe(&n),
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_describe_policy(&n),
         k if k == kinds::CLUSTER => {
             for name in names {
@@ -528,6 +533,12 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
                     "{}",
                     super::po::tf("networkgateway {name}: removed", &[("name", n)])
                 );
+            }
+            Ok(())
+        }
+        k if k == kinds::SYSTEM_CONTAINER => {
+            for n in names {
+                super::system_container::remove_for_replace(n)?;
             }
             Ok(())
         }

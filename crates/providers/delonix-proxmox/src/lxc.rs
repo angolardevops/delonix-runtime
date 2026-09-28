@@ -23,8 +23,9 @@ use crate::error::{Error, Result};
 use crate::{parse, Client, Ledger, TaskKind, Wrapped};
 use delonix_compute::capability::ProviderReport;
 use delonix_compute::system_container::{
-    NetworkState, SystemContainerHandle, SystemContainerNet, SystemContainerObservation,
-    SystemContainerProvider, SystemContainerSpec,
+    NetworkState, SystemContainerConfig, SystemContainerHandle, SystemContainerNet,
+    SystemContainerObservation, SystemContainerProvider, SystemContainerResources,
+    SystemContainerSpec,
 };
 use delonix_compute::vm_provider::{Provider, ProviderId};
 use std::path::Path;
@@ -270,6 +271,54 @@ pub(crate) fn config_divergence(
     out
 }
 
+/// The container's configuration as the node keeps it: `memory`/`swap`/
+/// `cores` as numbers (absent `swap`/`cores` are the node's own defaults, 512
+/// and all the node's CPUs, read as 0 here: nobody declared them), the
+/// entrypoint split back on the spaces it was joined with (an argument with a
+/// space is refused on the way in, so the split is exact), and the env split
+/// on NUL then on the first `=`. Pure.
+pub(crate) fn config_of(config: &serde_json::Value) -> SystemContainerConfig {
+    let number = |k: &str| {
+        config
+            .get(k)
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
+            .unwrap_or(0) as u32
+    };
+    let entrypoint = config
+        .get("entrypoint")
+        .and_then(|v| v.as_str())
+        .map(|l| {
+            l.split(' ')
+                .filter(|a| !a.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let env = config
+        .get("env")
+        .and_then(|v| v.as_str())
+        .map(|e| {
+            e.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(|p| match p.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => (p.to_string(), String::new()),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    SystemContainerConfig {
+        memory_mib: number("memory"),
+        swap_mib: number("swap"),
+        cores: number("cores"),
+        entrypoint,
+        env,
+    }
+}
+
 /// A [`SystemContainerProvider`] on one Proxmox node.
 pub struct ProxmoxSystemContainerProvider {
     client: Arc<Client>,
@@ -480,6 +529,61 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         Ok(())
     }
 
+    fn configuration(
+        &self,
+        _dir: &Path,
+        h: &SystemContainerHandle,
+    ) -> delonix_model::Result<Option<SystemContainerConfig>> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        match client.lxc_config(vmid) {
+            Ok(c) => Ok(Some(config_of(&c))),
+            Err(Error::NodeNotFound(_)) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn resize(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        r: SystemContainerResources,
+    ) -> delonix_model::Result<()> {
+        if r.memory_mib == 0 || r.cores == 0 {
+            return Err(Error::InvalidSystemContainer(
+                "proxmox: memory and cores must be above zero".to_string(),
+            )
+            .into());
+        }
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        let (memory, swap, cores) = (
+            r.memory_mib.to_string(),
+            r.swap_mib.to_string(),
+            r.cores.to_string(),
+        );
+        client.lxc_set_config(
+            &ledger,
+            vmid,
+            &[
+                ("memory", memory.as_str()),
+                ("swap", swap.as_str()),
+                ("cores", cores.as_str()),
+            ],
+        )?;
+        let kept = config_of(&client.lxc_config(vmid)?);
+        if (kept.memory_mib, kept.swap_mib, kept.cores) != (r.memory_mib, r.swap_mib, r.cores) {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: container {vmid} was asked for memory {} MiB, swap {} MiB, {} core(s) \
+                 and the node kept {} MiB, {} MiB, {}",
+                r.memory_mib, r.swap_mib, r.cores, kept.memory_mib, kept.swap_mib, kept.cores
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
     fn observe(
         &self,
         _dir: &Path,
@@ -562,6 +666,32 @@ mod tests {
         let leased: serde_json::Value =
             serde_json::from_str(r#"[{"name":"eth0","inet":"10.0.0.5/24"}]"#).unwrap();
         assert_eq!(ipv4_of(&leased, "eth0").as_deref(), Some("10.0.0.5"));
+    }
+
+    /// The config captured on PVE 9.2.2 after the configure and a resize.
+    #[test]
+    fn a_config_reads_back_into_its_fields() {
+        let c: serde_json::Value = serde_json::json!({
+            "memory": 384, "swap": 128, "cores": 2,
+            "entrypoint": "/bin/sleep 3600",
+            "env": "PATH=/usr/bin:/bin\u{0}DLX_TEST=one two\u{0}EMPTY=",
+            "unprivileged": 1,
+        });
+        let got = config_of(&c);
+        assert_eq!((got.memory_mib, got.swap_mib, got.cores), (384, 128, 2));
+        assert_eq!(got.entrypoint, vec!["/bin/sleep", "3600"]);
+        assert_eq!(
+            got.env,
+            vec![
+                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+                ("DLX_TEST".to_string(), "one two".to_string()),
+                ("EMPTY".to_string(), String::new()),
+            ]
+        );
+        // A container created without swap/cores/env keeps the node's defaults.
+        let bare = config_of(&serde_json::json!({"memory": 256}));
+        assert_eq!((bare.swap_mib, bare.cores), (0, 0));
+        assert!(bare.entrypoint.is_empty() && bare.env.is_empty());
     }
 
     #[test]

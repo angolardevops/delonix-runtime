@@ -2808,6 +2808,39 @@
           },
           "type": "array"
         },
+        "systemContainers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/SystemContainerSpecDoc"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "tunnels": {
           "items": {
             "additionalProperties": false,
@@ -2941,6 +2974,95 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "SystemContainerNetDoc": {
+      "properties": {
+        "bridge": {
+          "type": "string"
+        },
+        "dhcp": {
+          "default": true,
+          "type": "boolean"
+        },
+        "vlan": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bridge"
+      ],
+      "type": "object"
+    },
+    "SystemContainerSpecDoc": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: SystemContainer`.",
+      "properties": {
+        "cores": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entrypoint": {
+          "default": [],
+          "description": "The command to run as init. Empty keeps the image's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "The runtime environment. Empty keeps the image's; non-empty replaces\nit whole.",
+          "type": "object"
+        },
+        "image": {
+          "description": "The OCI image, as `image pull` takes it (`alpine:3.20`,\n`registry/repo@sha256:…`). Pulled by the engine.",
+          "type": "string"
+        },
+        "memory": {
+          "default": "512M",
+          "description": "`256M`, `1G`, `2Gi`.",
+          "type": "string"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SystemContainerNetDoc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A network interface on a bridge of the node. Absent: none."
+        },
+        "rootfs": {
+          "default": 4,
+          "description": "Size of the root filesystem, in GiB.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "swap": {
+          "default": "0",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ],
       "type": "object"
     },
     "TlsSpec": {
@@ -4175,6 +4297,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "SystemContainer"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/SystemContainerSpecDoc"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Service"
           }
         },
@@ -4336,6 +4483,7 @@
         "Secret",
         "Service",
         "Stack",
+        "SystemContainer",
         "Tunnel",
         "VirtualMachine",
         "Vm",
