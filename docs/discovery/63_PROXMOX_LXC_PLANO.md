@@ -278,6 +278,18 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
 - Uma secção no `AGENTS.md`, e checks no `scripts/e2e.sh` para as recusas que não precisam de
   nó (um `exec` num system container, `unprivileged: 0`, uma imagem com layers zstd).
 
+- **Fechada a 2026-09-28.** A matriz já tinha as 9 rotas LXC do ciclo de vida em
+  `supported+tested` (Fatia 3, trace do caso ao vivo); a razão das 53 restantes passou a nomear o
+  ADR-0058 e o `kind: SystemContainer` em vez do ADR-0049 D4. O ADR-0058 ganhou a secção
+  «Implementation» com os PRs de cada fatia e o que ficou medido e por medir. No `scripts/e2e.sh`,
+  uma secção de 7 checks sem nó. **Apanhou um defeito da Fatia 4**: `unprivileged: false` era
+  «campo desconhecido — ignorado», e com um nó o `apply` criava um container sem privilégio com
+  código 0. Passou a DX-1540, antes de resolver o provider. O `exec` num system container não
+  tem verbo (não há o que recusar pela CLI); o check lê a linha `system-container.exec`
+  `unsupported-by-provider` do `provider describe`. A layer zstd fica no teste unitário
+  `a_zstd_or_foreign_layer_is_refused_by_name`: pelo Kind só se chega lá com um nó. O laboratório
+  ficou limpo: o token `dlxs2` revogado e os arquivos `dlx-*` de teste apagados do `local`.
+
 ## Rotas que o plano chama
 
 Cerca de 13 das 62 rotas LXC: listar, criar, destruir, `config` (GET e PUT), `status/current`,
