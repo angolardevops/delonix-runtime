@@ -237,6 +237,32 @@ Segue a lista de 12 passos de `docs/dev/adding-a-kind.md`: a linha `KindFacts`, 
   `PUT …/config` feito à mão no nó dá código 2 no `plan` e aparece no `delonix drift`; `delete`
   deixa o nó sem container nem volume.
 
+- **Fechada a 2026-09-28.** O `kind: SystemContainer` (`compute.delonix.io/v1alpha1`, `sc`,
+  grupo `systemContainers`), em `bins/delonix-runtime-bin/src/cmd/system_container.rs`. O módulo
+  é a raiz de composição: lê a mesma configuração Proxmox que as VMs e constrói o
+  `ProxmoxSystemContainerProvider`.
+  - **O pull é do motor:** `resolve_or_pull`, com o digest verificado e as credenciais do
+    `image login`, e depois `write_oci_media_archive` para uma cache por digest.
+  - **O registo guarda o localizador e o que foi declarado.** O `actual()` lê do nó a memória, a
+    swap, os cores, o entrypoint e o env, através de métodos novos da porta (`configuration`,
+    `resize`).
+  - **O entrypoint e o env só entram na comparação quando são declarados.** Se não forem, o nó
+    tem os da imagem, e compará-los com «nada» daria deriva em todos os planos.
+- **Campos quentes, medidos antes de os declarar**, num container a correr no `pve`: `memory` e
+  `swap` chegam ao cgroup logo, `cores` chega ao `cpuset` passados uns segundos, e nada fica
+  pendente. `image`, `entrypoint`, `env`, `rootfs` e `network` são frios.
+- **Portão, pela CLI, contra o `pve`, com root isolado:**
+  - `stack apply` cria e arranca (18 s); `stack plan --detailed-exitcode` dá 0.
+  - Um `PUT …/config memory=384` feito à mão faz o `plan` dar 2 (`memory: 384 → 256`), e o
+    `delonix drift` mostra-o com código 2.
+  - O `apply` converge a quente e o `plan` volta a 0.
+  - A `memory` do manifesto a 512M converge a quente, com o container a correr e o cgroup a
+    536870912.
+  - Um `rootfs` diferente planeia `Replace`, que é recusado sem `--replace`, sem mexer em nada.
+    Com `--replace` o container é destruído e recriado com 2G.
+  - `delete systemcontainers` deixa o nó sem container e sem volume, e o registo vazio.
+  - A recusa sem provider configurado sai com código 69, traduzida.
+
 ## Fatia 5 — Dia 2, só a pedido
 
 Cada item entra quando for pedido, com o seu caso ao vivo: snapshots e rollback (medidos no

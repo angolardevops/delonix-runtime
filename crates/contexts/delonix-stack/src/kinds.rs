@@ -67,6 +67,9 @@ pub const VOLUME: &str = "Volume";
 pub const IMAGE: &str = "Image";
 pub const APP: &str = "App";
 pub const VM: &str = "VirtualMachine";
+/// A system container on a remote provider: a whole userland with VM-like
+/// semantics, not a `Container` (ADR-0058).
+pub const SYSTEM_CONTAINER: &str = "SystemContainer";
 pub const CONTAINER: &str = "Container";
 pub const POD: &str = "Pod";
 pub const INGRESS: &str = "Ingress";
@@ -434,6 +437,24 @@ const FACTS: &[KindFacts] = &[
         converges: true,
         teardown: true,
         namespaced: Namespaced::Always,
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        kind: SYSTEM_CONTAINER,
+        plural: "systemcontainers",
+        short: &["sc"],
+        api_version: "compute.delonix.io/v1alpha1",
+        domain: Domain::Compute,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "systemContainers",
+        converges: true,
+        teardown: true,
+        // The provider's node has no namespace of this engine's to put it in:
+        // the engine's isolation does not reach it (ADR-0058 T7).
+        namespaced: Namespaced::Never,
+        // Its own registry holds the provider's locator; what the container
+        // IS is read back from the provider.
         presence: Presence::Registry,
     },
     KindFacts {

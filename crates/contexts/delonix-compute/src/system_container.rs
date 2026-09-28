@@ -91,6 +91,28 @@ pub struct SystemContainerObservation {
     pub network: NetworkState,
 }
 
+/// What the provider holds for a container NOW, read from the provider and
+/// never from a local record — a change made on the host by hand has to show
+/// up here, or a plan would compare the record with itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemContainerConfig {
+    pub memory_mib: u32,
+    pub swap_mib: u32,
+    pub cores: u32,
+    pub entrypoint: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// The fields a running container takes without being recreated (measured on
+/// the provider before being declared: the Proxmox node writes memory and
+/// swap to the container's cgroup at once, and cores to its cpuset).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemContainerResources {
+    pub memory_mib: u32,
+    pub swap_mib: u32,
+    pub cores: u32,
+}
+
 /// The system-container lifecycle (ADR-0058).
 ///
 /// `create` leaves the container created, configured and stopped; `start`
@@ -113,4 +135,18 @@ pub trait SystemContainerProvider: Provider {
         h: &SystemContainerHandle,
         spec: &SystemContainerSpec,
     ) -> Result<SystemContainerObservation>;
+    /// `None` when the provider no longer has the container.
+    fn configuration(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+    ) -> Result<Option<SystemContainerConfig>>;
+    /// Applies `r` to a created container, running or not, and reads it
+    /// back; a provider that kept something else answers an error.
+    fn resize(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        r: SystemContainerResources,
+    ) -> Result<()>;
 }
