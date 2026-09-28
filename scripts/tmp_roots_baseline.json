@@ -22,6 +22,7 @@
   "dlx-pidfile-test-N": 1,
   "dlx-store-alloc-N-corrida": 1,
   "dlx-store-alloc-N-tecto": 1,
+  "dlx-test-vmsbacked-N": 1,
   "dlx-vmresolve-caminho-do-store-N-ThreadId(N)": 1,
   "dlx-vmresolve-contexto-N-ThreadId(N)": 1,
   "dlx-vmresolve-exclusividade-N-ThreadId(N)": 1,

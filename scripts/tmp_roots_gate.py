@@ -21,9 +21,12 @@ leak has the same name on every run, and compared with
   someone fixed a leak and must lower the baseline in the same commit
   (`--update`). Counted with `<=`, the debt would read green forever.
 
-The baseline is what the HOSTED runner leaves. Tests that need user namespaces
-skip there, so a local run leaves more (measured 2026-09-28: 29 entries
-locally); compare a local run with `--list`, not against the baseline.
+The baseline is what the HOSTED runner leaves, and a test's leak can depend on
+the host: `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` returns early
+when `qemu-img` is missing and skips its cleanup, so the runner leaves one entry
+a workstation with `qemu-img` does not (measured 2026-09-28: 30 on the runner,
+29 locally, the other 29 identical). Compare a local run with `--list`, not
+against the baseline.
 
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR"            # judge
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR" --list     # show only

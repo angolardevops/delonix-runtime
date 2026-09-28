@@ -5616,16 +5616,24 @@ checklist para quem mexer aqui do que como lista de correcções:
   CPU (400 corridas), sem falhas;
 - **um teste verde não é um teste que arrumou** — nada olhava para o temp dir depois dos testes,
   por isso uma fuga destas nunca pôs nada vermelho. Um `cargo test --workspace` inteiro com um
-  `TMPDIR` vazio (rc=0, 2026-09-28, local) deixou **29 entradas de 10 fontes**: `delonix-oci`
-  13 (`detect.rs` 12, `overlay.rs` 1), `delonix-runtime-bin` 11 (`vm.rs` 5, `mapped.rs` 4,
-  `vmbackends.rs`/`vmimage.rs` 2), `delonix-sdn` 4 (`lib.rs` 2, `infra.rs` 1,
-  `netdef_naming.rs` 1) e `delonix-state` 1 (`store.rs`). Algumas usam nomes FIXOS
-  (`dlx-detect-go`), que duas corridas em paralelo partilham. **Gate**: o job `test` corre agora
-  com um `TMPDIR` próprio, e o `scripts/tmp_roots_gate.py` compara o que lá ficou com
-  `scripts/tmp_roots_baseline.json`, com ratchet nos dois sentidos e nomes normalizados (dígitos
-  → `N`). Com o #567 revertido dá `new leak: delonix-net-race-N` (verificado); com ele, verde. A
-  linha de base é a do runner alojado, onde os testes que precisam de userns saltam, por isso
-  uma corrida local deixa mais: compara-se com `--list`;
+  `TMPDIR` vazio (rc=0, 2026-09-28) deixou **30 entradas no runner do CI e 29 localmente**:
+  `delonix-oci` 13 (`detect.rs` 12, `overlay.rs` 1), `delonix-runtime-bin` 11 no local e 12 no
+  runner (`vm.rs` 5, `mapped.rs` 4, `vmbackends.rs`/`vmimage.rs` 2, e mais 1 do `vmimage.rs` só
+  no runner), `delonix-sdn` 4 (`lib.rs` 2, `infra.rs` 1, `netdef_naming.rs` 1) e
+  `delonix-state` 1 (`store.rs`). Algumas usam nomes FIXOS (`dlx-detect-go`), que duas corridas
+  em paralelo partilham. **Gate**: o job `test` corre agora com um `TMPDIR` próprio, e o
+  `scripts/tmp_roots_gate.py` compara o que lá ficou com `scripts/tmp_roots_baseline.json`, com
+  ratchet nos dois sentidos e nomes normalizados (dígitos → `N`). Com o #567 revertido dá
+  `new leak: delonix-net-race-N` (verificado); com ele, verde. A linha de base é a do runner;
+  uma corrida local compara-se com `--list`;
+- **saltar um teste não é sair dele arrumado** — a entrada que só o runner deixa é do
+  `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` (`vmimage.rs`): cria a pasta, e se não
+  houver `qemu-img` faz `return` ANTES do `remove_dir_all`. Numa máquina com `qemu-img` limpa;
+  no runner, sem ele, fica. Eu tinha previsto o contrário (que o runner, por saltar os testes de
+  userns, deixaria MENOS), e o primeiro CI do gate desmentiu-o: as outras 29 eram idênticas.
+  **Regra: todo o `return` de um teste que já criou alguma coisa é uma saída que tem de limpar**,
+  e por isso a limpeza vai num guarda com `Drop`, não numa linha no fim. É a regra do #565 («X e
+  NÃO Y») vista do lado dos testes;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
