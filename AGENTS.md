@@ -5712,6 +5712,19 @@ checklist para quem mexer aqui do que como lista de correcções:
   baseline vazia). Os dois recenseamentos correm também quando um teste falha — é aí que uma
   limpeza na última linha não corre. Com a correcção revertida e o `panic!`, o gate chumba com os
   dois sockets;
+- **um gate depois dos testes não é um gate sobre os testes que falharam** — um passo de CI a
+  seguir ao `cargo test` herda a condição por omissão do GitHub (`if: success()`): se um teste
+  falha, o passo SALTA. Do #569 (13:46Z) ao #585 (20:57Z) de 2026-09-28, o recenseamento do
+  `TMPDIR` foi um passo assim, e saltou precisamente na corrida para que existe: o primeiro job
+  `test` do #577 (15:16Z) teve `cargo test` a falhar e o passo do gate `skipped` (medido nos
+  passos do job). Um teste que falha antes da última linha é quando uma limpeza na última linha
+  não corre; um gate que só corre com tudo verde vê o caminho que já limpava. O #585 pôs aos dois
+  recenseamentos `if: !cancelled() && (outcome == success || outcome == failure)`. **Regra: um
+  passo que existe para ver o que uma falha deixa corre depois da falha, e isso diz-se no `if:`,
+  não se presume.** Gate: `scripts/test_tmp_roots_gate.py` lê o `ci.yml` e chumba se um passo que
+  chama o `tmp_roots_gate.py` não correr depois de uma falha, ou se deixar de haver os dois
+  recenseamentos — verificado com os `if:` retirados e com o `ci.yml` de antes do #585 (rc=1 nos
+  dois);
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
