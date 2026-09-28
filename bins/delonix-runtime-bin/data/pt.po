@@ -13156,6 +13156,14 @@ msgstr "A rede ainda tem containers, membros de pod ou VMs ligados, e removê-la
 
 msgid "Remove or disconnect what the message lists (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`), then remove the network."
 msgstr "Remove ou desliga o que a mensagem lista (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`) e só depois remove a rede."
+msgid "address already taken"
+msgstr "endereço já ocupado"
+
+msgid "The address asked for is already leased to another container, or it belongs to the pool the network's DHCP server hands to VMs."
+msgstr "O endereço pedido já está arrendado a outro container, ou pertence ao pool que o servidor DHCP da rede entrega às VMs."
+
+msgid "Pick another address (`delonix network ipam ls` shows the leased ones), or leave the address to the engine."
+msgstr "Escolhe outro endereço (`delonix network ipam ls` mostra os arrendados), ou deixa o endereço ao motor."
 
 msgid "'wg' is not available on this host"
 msgstr "o 'wg' não está disponível neste host"
