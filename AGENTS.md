@@ -5684,6 +5684,28 @@ checklist para quem mexer aqui do que como lista de correcções:
   diferentes partilharam o mesmo `CARGO_TARGET_DIR` como se fossem uma e «fresca». Aconteceu
   **duas vezes no mesmo dia**, a um agente e a mim. **Regra: um antes/depois tem um
   `CARGO_TARGET_DIR` por lado, e o log do lado medido tem de dizer `Compiling <crate>`**;
+- **uma contagem por `grep` não é uma contagem de sítios** — o #577 escreveu «204 sítios» a partir
+  de um `grep` por `temp_dir().join(` depois do primeiro `#[cfg(test)]` de cada ficheiro. Lidas uma
+  a uma pelo #581, essas 204 linhas eram 195 migráveis e 9 que não o eram: 3 caminhos que o teste
+  quer INEXISTENTES, 2 caminhos esperados que a produção calcula, 2 linhas de PRODUÇÃO que vinham
+  depois do módulo de teste, 1 raiz com arrendamento e 1 teste ao vivo opt-in. Só essa última
+  ainda cria uma pasta. E o `grep` não via outras 2 (`let dir = temp_dir(); dir.join(…)`). O
+  primeiro resumo do PR disse 205, somando os relatórios de quatro agentes (um dizia «6 deixados»
+  e listava 5); a recontagem na árvore final deu 197. **Regra: um número que vai para a
+  documentação reconta-se na árvore final com o mesmo instrumento, e cada linha classifica-se pelo
+  que FAZ (cria? apaga? é produção?), não pelo texto que casa**;
+- **o TMPDIR não é o `/tmp`** — o `tmp_roots_gate.py` só vê o `TMPDIR` que o job `test` lhe dá, e
+  três binários de teste escrevem de propósito em `/tmp` literal, porque o `sun_path` de um socket
+  Unix tem 108 bytes e o `TMPDIR` de uma sessão de agente já passa dos 90: `delonix-cri/tests/
+  grpc_status.rs`, `delonix-node-api/tests/grpc_list_providers.rs` e `delonix-linux/tests/
+  cgroup_parent.rs`. Medido a 2026-09-28: no caminho verde, nenhum dos três deixa nada em `/tmp`
+  nem no `TMPDIR`. O `cgroup_parent` apaga a raiz com um guarda `Drop`; os dois de gRPC apagam o
+  socket na ÚLTIMA linha, por isso uma falha deixa um socket em `/tmp` que o gate não vê (por
+  leitura, não provocado). Dos 161 literais `"/tmp/…"` em código de teste, os outros 158 são
+  dados que nunca se criam. **Regra: um caminho curto para um socket é `tempfile::tempdir_in
+  ("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` = 22 bytes), curto E guardado, nunca um literal com o
+  pid.** Gate: nenhum ainda — o `/tmp` do runner teria de ser recenseado antes e depois do
+  `cargo test`;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para

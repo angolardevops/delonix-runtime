@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:ad6bb03af4e3ac52f5a3a1229e3f49d35b474786a3f79f6f26bab5e49ef41b46 -->
+<!-- translated-from: coding-conventions.md sha256:71fb0e69fbfb794403a15eba04eb4c0f3e6586101e2832a74e19937db534af69 -->
 # Conventions de code
 
 **Avant de lire :** [Introduction à Rust](rust-primer.md), [Architecture](architecture.md) et [Les crates](crates.md) — les règles ci-dessous font référence aux couches, aux ports et aux crates par leur nom.
@@ -7,7 +7,11 @@ Cette page vous indique comment écrire du code qui passe la revue dans ce dép�
 n'ayez pas à deviner les règles ni à inventer les vôtres. Après elle, vous pouvez appliquer la liste de vérification de la fin à votre propre diff avant qu'un relecteur ne le fasse. Chaque règle ci-dessous porte une
 étiquette et une source :
 
-- **Imposé (gate)** : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
+- `tempdir()` crée le répertoire en mode `0700` : si un
+  autre uid doit le lire (un user namespace, un subuid mappé, un hyperviseur), donnez-lui `0755`.
+  Un socket Unix a besoin d'un chemin court (`sun_path` fait 108 octets) : utilisez
+  `tempfile::tempdir_in("/tmp")`, et non un chemin littéral sous `/tmp` avec le pid, que le gate ne
+  voit pas. **Imposé (gate)** : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
   vous pouvez donc l'exécuter en local (voir [Construire et tester](build-and-test.md#the-gates-ci-runs)).
 - **Décidé (ADR/AGENTS.md)** : un Architecture Decision Record **accepté** dans `docs/adr/` ou une
   section de `AGENTS.md` le tranche. Aucun gate ne le vérifie encore, c'est donc la revue qui le fait.
@@ -698,17 +702,17 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   teste que chamasse `apply_share` … escreveria no estado REAL da máquina »). Pour les exécutions manuelles et E2E, isolez **à la fois** `DELONIX_ROOT` et
   `DELONIX_NET_RUNTIME_DIR`. N'en isoler qu'un est pire que n'en isoler aucun (AGENTS.md §
   « Meia-isolação é pior que nenhuma » ; [Cloner, compiler et tester](build-and-test.md#isolating-the-engines-state)).
-- **Un test supprime son répertoire temporaire à chaque sortie.** Un assert qui échoue, un
-  `return` anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc
-  dans une garde avec `Drop`, pas dans une ligne à la fin. Gardez le répertoire dans un
-  `tempfile::TempDir` (déclaré une seule fois dans le `Cargo.toml` racine). Une racine qu'un binaire de
-  tests entier partage via `DELONIX_ROOT` utilise le bail de
-  `delonix-sdn/tests/network_alloc_race.rs`. Un dossier nommé d'après le pid sous `temp_dir()`
-  avec un `remove_dir_all` à la fin est l'ancien idiome : ne le copiez pas. Le 2026-09-28, seul le test live opt-in
-  `delonix-vm/tests/provider_live.rs` en crée encore un. Un arbre extrait d'une couche d'image peut garder des
-  répertoires `0555` : rendez-les inscriptibles avant de le supprimer. **Imposé (gate)** :
-  `scripts/tmp_roots_gate.py` fait échouer le job `test` pour tout ce qui reste dans son `TMPDIR` ;
-  la baseline est vide depuis #572.
+- **Un test supprime son répertoire temporaire à chaque sortie.** Un assert qui échoue, un `return`
+  anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc dans une
+  garde avec `Drop`, pas dans une ligne à la fin. Gardez le répertoire dans un `tempfile::TempDir`
+  (déclaré une seule fois dans le `Cargo.toml` racine). Une racine qu'un binaire de tests entier
+  partage via `DELONIX_ROOT` utilise le bail de `delonix-sdn/tests/network_alloc_race.rs`. Un
+  dossier nommé d'après le pid sous `temp_dir()` avec un `remove_dir_all` à la fin est l'ancien
+  idiome : ne le copiez pas. Le 2026-09-28, seul le test live opt-in
+  `delonix-vm/tests/provider_live.rs` en crée encore un. Un arbre extrait d'une couche d'image peut
+  garder des répertoires `0555` : rendez-les inscriptibles avant de le supprimer. **Imposé
+  (gate)** : `scripts/tmp_roots_gate.py` fait échouer le job `test` pour tout ce qui reste dans son
+  `TMPDIR` ; la baseline est vide depuis #572.
 - **Un test de régression doit échouer lorsque la correction est annulée.** Annulez la correction,
   constatez l'échec du test, puis rétablissez la correction. Un test qui passe dans les deux cas ne
   prouve rien, et AGENTS.md en consigne plusieurs (une vérification de code de sortie que `1` ne

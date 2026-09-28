@@ -672,15 +672,19 @@ doesn't support.
   chamasse `apply_share` … escreveria no estado REAL da máquina"). For manual and E2E runs,
   isolate **both** `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR`. Isolating only one is worse than
   none (AGENTS.md § "Meia-isolação é pior que nenhuma"; [Clone, build and test](build-and-test.md#isolating-the-engines-state)).
-- **A test removes its temporary directory on every exit.** A failed assert, an early `return` and
-  a skipped check are exits too, so the removal lives in a guard with `Drop`, not in a line at the
-  end: hold the directory in a `tempfile::TempDir` (declared once in the root `Cargo.toml`). A
-  root that a whole test binary shares through `DELONIX_ROOT` uses the lease of
+- **A test removes its temporary directory on every exit.** A failed assert, an early `return` and a
+  skipped check are exits too, so the removal lives in a guard with `Drop`, not in a line at the
+  end: hold the directory in a `tempfile::TempDir` (declared once in the root `Cargo.toml`). A root
+  that a whole test binary shares through `DELONIX_ROOT` uses the lease of
   `delonix-sdn/tests/network_alloc_race.rs`. A pid-named folder under `temp_dir()` with a
-  `remove_dir_all` at the end is the old idiom: don't copy it. On 2026-09-28 only the opt-in live test
-  `delonix-vm/tests/provider_live.rs` still creates one. A tree extracted from an image layer can keep `0555` directories, so make them
-  writable before removing it. **Enforced (gate)**: `scripts/tmp_roots_gate.py` fails the `test`
-  job on anything left in its `TMPDIR`; the baseline has been empty since #572.
+  `remove_dir_all` at the end is the old idiom: don't copy it. On 2026-09-28 only the opt-in live
+  test `delonix-vm/tests/provider_live.rs` still creates one. A tree extracted from an image layer
+  can keep `0555` directories, so make them writable before removing it. `tempdir()` creates the
+  directory with mode `0700`: if another uid must read it (a user namespace, a mapped subuid, a
+  hypervisor), set `0755` on it. A Unix socket needs a short path (`sun_path` is 108 bytes): use
+  `tempfile::tempdir_in("/tmp")`, not a literal `/tmp` path with the pid, which the gate does not
+  see. **Enforced (gate)**: `scripts/tmp_roots_gate.py` fails the `test` job on anything left in its
+  `TMPDIR`; the baseline has been empty since #572.
 - **A regression test must fail with the fix reverted.** Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that `1` couldn't distinguish; a chaos scenario that stayed green with a

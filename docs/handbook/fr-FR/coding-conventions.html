@@ -215,7 +215,11 @@ th:first-child,td:first-child{white-space:nowrap}
 n'ayez pas à deviner les règles ni à inventer les vôtres. Après elle, vous pouvez appliquer la liste de vérification de la fin à votre propre diff avant qu'un relecteur ne le fasse. Chaque règle ci-dessous porte une
 étiquette et une source :</p>
 <ul>
-<li><strong>Imposé (gate)</strong> : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
+<li><code>tempdir()</code> crée le répertoire en mode <code>0700</code> : si un
+  autre uid doit le lire (un user namespace, un subuid mappé, un hyperviseur), donnez-lui <code>0755</code>.
+  Un socket Unix a besoin d'un chemin court (<code>sun_path</code> fait 108 octets) : utilisez
+  <code>tempfile::tempdir_in("/tmp")</code>, et non un chemin littéral sous <code>/tmp</code> avec le pid, que le gate ne
+  voit pas. <strong>Imposé (gate)</strong> : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
   vous pouvez donc l'exécuter en local (voir <a href="build-and-test.html#the-gates-ci-runs">Construire et tester</a>).</li>
 <li><strong>Décidé (ADR/AGENTS.md)</strong> : un Architecture Decision Record <strong>accepté</strong> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> ou une
   section de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> le tranche. Aucun gate ne le vérifie encore, c'est donc la revue qui le fait.</li>
@@ -1044,17 +1048,17 @@ let c = store.update(id_or_name, |c| match f(c) {
   teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina »). Pour les exécutions manuelles et E2E, isolez <strong>à la fois</strong> <code>DELONIX_ROOT</code> et
   <code>DELONIX_NET_RUNTIME_DIR</code>. N'en isoler qu'un est pire que n'en isoler aucun (AGENTS.md §
   « Meia-isolação é pior que nenhuma » ; <a href="build-and-test.html#isolating-the-engines-state">Cloner, compiler et tester</a>).</li>
-<li><strong>Un test supprime son répertoire temporaire à chaque sortie.</strong> Un assert qui échoue, un
-  <code>return</code> anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc
-  dans une garde avec <code>Drop</code>, pas dans une ligne à la fin. Gardez le répertoire dans un
-  <code>tempfile::TempDir</code> (déclaré une seule fois dans le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine). Une racine qu'un binaire de
-  tests entier partage via <code>DELONIX_ROOT</code> utilise le bail de
-  <code>delonix-sdn/tests/network_alloc_race.rs</code>. Un dossier nommé d'après le pid sous <code>temp_dir()</code>
-  avec un <code>remove_dir_all</code> à la fin est l'ancien idiome : ne le copiez pas. Le 2026-09-28, seul le test live opt-in
-  <code>delonix-vm/tests/provider_live.rs</code> en crée encore un. Un arbre extrait d'une couche d'image peut garder des
-  répertoires <code>0555</code> : rendez-les inscriptibles avant de le supprimer. <strong>Imposé (gate)</strong> :
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fait échouer le job <code>test</code> pour tout ce qui reste dans son <code>TMPDIR</code> ;
-  la baseline est vide depuis #572.</li>
+<li><strong>Un test supprime son répertoire temporaire à chaque sortie.</strong> Un assert qui échoue, un <code>return</code>
+  anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc dans une
+  garde avec <code>Drop</code>, pas dans une ligne à la fin. Gardez le répertoire dans un <code>tempfile::TempDir</code>
+  (déclaré une seule fois dans le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine). Une racine qu'un binaire de tests entier
+  partage via <code>DELONIX_ROOT</code> utilise le bail de <code>delonix-sdn/tests/network_alloc_race.rs</code>. Un
+  dossier nommé d'après le pid sous <code>temp_dir()</code> avec un <code>remove_dir_all</code> à la fin est l'ancien
+  idiome : ne le copiez pas. Le 2026-09-28, seul le test live opt-in
+  <code>delonix-vm/tests/provider_live.rs</code> en crée encore un. Un arbre extrait d'une couche d'image peut
+  garder des répertoires <code>0555</code> : rendez-les inscriptibles avant de le supprimer. <strong>Imposé
+  (gate)</strong> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fait échouer le job <code>test</code> pour tout ce qui reste dans son
+  <code>TMPDIR</code> ; la baseline est vide depuis #572.</li>
 <li><strong>Un test de régression doit échouer lorsque la correction est annulée.</strong> Annulez la correction,
   constatez l'échec du test, puis rétablissez la correction. Un test qui passe dans les deux cas ne
   prouve rien, et AGENTS.md en consigne plusieurs (une vérification de code de sortie que <code>1</code> ne
