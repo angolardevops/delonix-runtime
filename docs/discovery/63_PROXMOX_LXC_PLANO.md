@@ -139,6 +139,27 @@ applies do #493 e do #497 foram aceites e nunca realizados.
   checksum errado**. No spike este pedido não chegou a criar tarefa (`http=000`, causa não
   isolada); a fatia só fecha quando esse caminho estiver medido e a recusa for visível.
 
+- **Fechada a 2026-09-28.** O `upload_import` passou a `Client::upload(storage, UploadContent, …)`
+  (`import` ou `vztmpl`), e a listagem a `list_content(storage, UploadContent)`.
+  `Client::stage_template(storage, archive, manifest_digest)` recusa antes de enviar um byte:
+  - um digest que não seja sha256;
+  - um storage sem `vztmpl` (DX-6513);
+  - um storage sem espaço (DX-6514).
+
+  Nomeia o ficheiro `dlx-<hex>.tar` pelo digest do manifesto convertido e não reenvia um arquivo
+  que o nó já tenha. Uma resposta perdida resolve-se a listar o storage.
+- **O portão, medido a 2026-09-28 no `pve`** (PVE 9.2.2): o `http=000` do spike não se repete.
+  Com o checksum errado o nó responde 200 com um UPID, e a tarefa `imgcopy` acaba em erro
+  («checksum mismatch: got '…' != expect '…'»), sem guardar ficheiro nenhum. Com o certo acaba
+  em `OK` e guarda o ficheiro com o nome enviado. O caso ao vivo
+  `a_container_archive_is_staged_as_vztmpl_and_a_wrong_checksum_is_refused` corre as duas
+  coisas; correu duas vezes seguidas (envio, depois cache).
+- **O que fica para a Fatia 3**: ligar o pull do motor (`pull_from_registry_with_creds`, que já
+  verifica o digest de um pin e usa as credenciais do `image login`) ao
+  `write_oci_media_archive` e ao `stage_template`. A composição vive no provider, porque o
+  `delonix-proxmox` não depende do `delonix-oci`. Só com essa ligação o T4 fica fechado de ponta
+  a ponta.
+
 ## Fatia 3 — A porta e o provider
 
 - **A porta** vive em `delonix-compute`, num ficheiro novo, na forma do ADR-0044 (spec, handle,
