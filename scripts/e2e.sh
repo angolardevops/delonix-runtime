@@ -4049,6 +4049,43 @@ else
   done
 fi
 
+section "kind: SystemContainer — as recusas que não precisam de nó (ADR-0058, plano 63)"
+########################################
+# O que se prova sem um nó Proxmox. O ciclo com o nó (criar, deriva à mão,
+# convergir a quente, recriar, apagar) é o portão ao vivo da Fatia 4 e o caso
+# `a_system_container_runs_its_lifecycle_through_the_node` do live.rs. A recusa
+# de uma layer zstd (DX-1409) é o teste `a_zstd_or_foreign_layer_is_refused_by_name`
+# do delonix-oci: pelo Kind só se chega lá com um nó configurado.
+SCWORK="$OUT/sc-$PFX"; mkdir -p "$SCWORK"
+cat > "$SCWORK/priv.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: { name: sc-$PFX-priv }
+spec: { image: alpine:3.20, unprivileged: false }
+YAML
+cat > "$SCWORK/plain.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: { name: sc-$PFX }
+spec: { image: alpine:3.20 }
+YAML
+# Antes desta fatia, `unprivileged: false` era «campo desconhecido — ignorado»,
+# e com um nó configurado o apply criava um container SEM privilégio com
+# código 0: o contrário do que o manifesto pedia. A recusa corre antes de
+# resolver o provider, por isso sem nó ela ganha ao DX-6000.
+check "stack apply com unprivileged: false recusa com DX-1540, antes de procurar o nó" ok bash -c \
+  "$adr54_fns; adr54_bare stack apply -f '$SCWORK/priv.yaml' 2>&1 | grep -q 'DX-1540'"
+check "... com a classe inválido (1)" 1 adr54_bare stack apply -f "$SCWORK/priv.yaml"
+check "stack plan também recusa o campo de privilégio (DX-1540)" ok bash -c \
+  "$adr54_fns; adr54_bare stack plan -f '$SCWORK/priv.yaml' 2>&1 | grep -q 'DX-1540'"
+check "sem provider configurado, o apply recusa com 69" 69 adr54_bare stack apply -f "$SCWORK/plain.yaml"
+check "... e a mensagem diz o que configurar" ok bash -c \
+  "$adr54_fns; adr54_bare stack apply -f '$SCWORK/plain.yaml' 2>&1 | grep -q 'DELONIX_PROXMOX_URL'"
+check "... e não fica registo para trás" ok bash -c \
+  "$adr54_fns; ! adr54_bare get systemcontainers 2>/dev/null | grep -q 'sc-$PFX'"
+check "o exec de um system container é declarado unsupported-by-provider" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.exec' | grep -q 'unsupported-by-provider'"
+
 section "api-resources: o registo que os outros verbos leem"
 ########################################
 # É o primeiro comando da árvore-alvo a aterrar, e o único da CLI-2 que não
