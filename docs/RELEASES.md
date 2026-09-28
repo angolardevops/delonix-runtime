@@ -4,6 +4,580 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v4.5.0 — rede que falha fechada, Proxmox medido rota a rota, providers num ficheiro por nó
+
+Cento e dois commits desde a `v4.4.0` (109 contando os merges), de `#474` a `#574`.
+Numerada como MINOR: há verbos novos (`vm resize`, `vm cloud-init`,
+`vm move`, `provider ls|describe|matrix|config`, `net netns gc`,
+`serve node-api`), Kinds novos (`NetworkGateway`, `NetworkZone`), um ficheiro de
+configuração novo (`providers.yaml`) e uma ferramenta MCP nova
+(`workload.usage`). Nenhuma superfície foi removida. **Várias mudanças alteram,
+de propósito, comportamento que já existia**: um limite, uma regra ou uma
+remoção que antes passava com um aviso ou em silêncio passa a ser recusada.
+Estão todas juntas na primeira secção, antes das novidades.
+
+O fio condutor é o de sempre, levado mais longe: **um resultado que o motor
+não consegue provar não se reporta como sucesso**. Isto vale para uma regra de
+firewall inválida, para um `rm -f` cujo processo ainda não morreu, para uma
+tarefa do Proxmox que «acabou OK» sem ter aplicado nada, e para um `push` que
+morria sem dizer porquê.
+
+### Mudanças de comportamento
+
+Quem actualiza deve ler esta secção primeiro.
+
+**Rede de containers (auditoria de rede, sessões S1–S4, #554, #560, #553, #555, #552)**
+
+- **A firewall por container falha fechada.** Uma spec com uma regra inválida é
+  recusada inteira (antes, a regra era saltada e o resto aplicado). Também se
+  recusa um `dir`, uma `action` ou uma política fora dos valores documentados:
+  antes, um `dir` desconhecido era lido como `in` e uma política desconhecida
+  como `allow`.
+- **Uma falha do isolamento de namespace é um erro, não um aviso**, em
+  `container run`, `start` e `pod create`. O attach é desfeito. Antes, o `run`
+  saía com rc=0 e o container ficava alcançável a partir de outra namespace.
+- **O egress da origem é avaliado sempre.** Antes, um `accept` na chain do
+  destino terminava a avaliação e a política `egress deny` da origem nunca
+  corria (medido: A→B passou 3/3 com o egress de A em `deny`). Agora são duas
+  base chains, `fwout` e `fwcont`.
+- **Regras de entrada explícitas deixam de desligar o isolamento** (#560). Um
+  container com, por exemplo, `ingress deny tcp/22` passava a aceitar ligações
+  novas de qualquer outra namespace em todas as outras portas. Agora há um
+  guardrail que nenhuma regra de entrada retira; um `allow` explícito continua
+  a abrir o par que nomeia. **Um container com regras de entrada explícitas
+  deixa de aceitar ligações novas de outras namespaces nas portas que nenhuma
+  regra abre.**
+- **Remover a última regra (`ingress rm`/`clear`) fora da namespace `default`
+  mantém a chain**, que é também o isolamento. Antes, o container ficava aberto
+  a outras namespaces.
+- **Redes com CIDR fora de 10.200–254 passam a ter firewall e isolamento.**
+  Antes ficavam sem chain e fora do conjunto de workloads: medido em
+  `172.30.5.0/24`, duas namespaces falavam 2/2 nos dois sentidos.
+- **`network connect`/`disconnect` falham quando a firewall falha**, em vez de
+  avisar e sair com 0.
+- **`network rm` recusa uma rede com alguma coisa ligada** (**DX-5307**, exit 5)
+  e nomeia os containers, os membros de pod e as VMs. Antes saía com rc=0 e
+  deixava o container «Up» numa bridge apagada. O `stack --replace/destroy`
+  mantém o seu caminho explícito.
+- **IPAM transaccional** (#553): uma reserva de um IP que já é de outro dono é
+  recusada (**DX-5308**, antes gravava-se com um aviso); o `stop` mantém o
+  lease e o `start` volta ao mesmo endereço; o `rm` liberta também os leases
+  das redes extra. `--subnet 10.200.0.0/16` (o espaço do ingress) e
+  `10.0.2.0/24` passam a ser recusados.
+- **O pool de DHCP das VMs vive dentro da rede.** Numa rede que não é `/16` o
+  DHCP servia a rede errada (numa `/24` oferecia um endereço `/16` com outro
+  router, e a VM ficava sem IP). O pool fica agora no topo da rede, com
+  `min(240, tamanho/8)` endereços; num `/16` continua `.254.10–.249` byte a
+  byte, para nenhuma VM existente mudar de IP. Consequência: um `/28` passa a
+  ter 11 endereços para containers e 2 para o pool das VMs.
+- **O holder de rede valida cada token de controlo antes de correr um comando**
+  (S4, #552): um token que vá para um argv não pode começar por `-`, IPs e
+  gateways têm de ser IPv4 estritos, `rate`/`burst` só dígitos, e o `type` de
+  um plugin CNI tem de ser um nome simples (antes, `"type": "/tmp/x"` executava
+  esse binário no holder). As linhas que um cliente legítimo envia não mudam.
+- **`vm bridge` valida as subnets**: nem `default`, nem `/0`, nem uma subnet
+  sobreposta à SDN, e o root é verificado antes de qualquer comando.
+
+**API de gestão (`delonix-mgmt`)**
+
+- **As sete mutações de rede que escreviam o dataplane sem passar pelo registo
+  respondem `501` com `DX-6302`** (#555): firewall, egress, `attach` e
+  `attach-extra`. As leituras e o `publish`, que grava o registo, continuam.
+  Foi uma decisão explícita: recusar todas, em vez de as alargar.
+
+**Containers e cgroups**
+
+- **`--cpuset`, `--io-weight` e `--device-read/write-bps/iops` são recusados
+  (exit 69) quando o cgroup do container não tem o controlador** (#545). Antes,
+  `--device-write-bps 5mb` escrevia a 1,6 GB/s e saía com 0, só com um aviso. A
+  válvula de escape `DELONIX_ALLOW_UNENFORCED_LIMITS` continua a valer. Chega a
+  todos os pontos de entrada (CLI, manifesto, compose, Docker API, CRI); o CRI
+  passa a receber exit 69 para um `cpuset_cpus` sem `cpuset`, como já recebia
+  para CPU e memória. Como root, o `delonix.slice` passa a delegar também o
+  `cpuset`, que antes era ignorado em silêncio.
+- **`sudo delonix system setup --delegate` escreve sempre o drop-in** (#550).
+  Antes, a escrita só era alcançável num ramo que um processo root nunca toma,
+  por isso quase nunca escrevia. Sob `sudo`, o relatório passa a ser sobre o
+  utilizador que escreveu o `sudo`, e o passo seguinte nomeia
+  `systemctl restart user@<uid>.service`: um `daemon-reload` sozinho é um falso
+  verde.
+- **`container rm -f` só volta quando o processo morreu** (#562). Antes voltava
+  no sinal: com o disco carregado, o `delete pod --force` voltava em 0,76 s
+  com os membros ainda vivos em estado D. Agora espera pela saída real, com o
+  mesmo limite de 30 s do `stop`. Passado esse limite, **mantém o registo** e
+  devolve **DX-8101** `container.still_exiting` (exit 124); um `rm -f` repetido
+  remove-o quando o processo morrer.
+- **Um container `--rm` é montado com o overlay `volatile`** (ADR-0056, #537).
+  A saída deixa de esperar pelo writeback do sistema de ficheiros do host.
+  Medido com 1 GB sujo noutro ficheiro do disco: `run --rm … alpine true` em
+  0,16 s, contra 9,5–14 s num container mantido. Containers mantidos, de pod e
+  de CRI não mudam.
+
+**Providers e VMs**
+
+- **Um `defaultProvider` que o processo não consegue servir falha com 69**, a
+  nomear o provider (ADR-0054, #514). Antes era descartado, e o `vm create`
+  seguinte podia criar a VM num hipervisor local. Um `providers.yaml`
+  ilegível faz falhar os pedidos de VM sem `--backend`; os comandos que não
+  escolhem provider continuam a funcionar.
+- **Um `providers.yaml` com `type: opnsense` passa a registar o appliance**
+  (#556). Registar não contacta nada.
+- **Proxmox: `network` com o nome de uma rede do motor é recusado** (#478). Antes
+  era aceite e deitado fora: o registo dizia `Network: lab-net` e a VM ficava
+  no `vmbr0`.
+- **Proxmox: uma tarefa que acaba em `WARNINGS: <n>` é um sucesso** (#546), e as
+  linhas `WARN:` ficam no livro de tarefas. Antes era lida como falha, e a acção
+  podia ser reenviada por cima de um recurso vivo.
+- **Proxmox: um apply da SDN espera pelo reload de rede de cada nó** (#571). O
+  `reloadnetworkall` do PVE acaba `OK` logo que *arranca* os reloads; um reload
+  que falhe, ou que não apareça dentro do timeout, recusa agora o apply com
+  **DX-6512**.
+- **`vm create --require` com uma cloud image filtra de facto** (#539). Antes o
+  libvirt era pedido por nome e o filtro nunca corria.
+
+**Outros**
+
+- **O binário já não morre por SIGPIPE numa escrita para um socket** (#573). Um
+  EPIPE numa ligação de rede passa a ser um erro devolvido (com retry, no push).
+  Um stdout ou stderr fechado (`image ls | head`) continua a terminar o processo
+  por SIGPIPE, como antes.
+- **`net netns down` recusa uma raiz que não existe**, em vez de a recriar.
+- **`kind: App` deixa de apagar a cache de layers do CNB depois de cada build**
+  (#529), como o ADR-0035 já dizia.
+
+### Rede: o que mais entrou nas sessões S1–S6
+
+A auditoria de rede (`docs/discovery/62_NAAS_FASE0_AUDITORIA.md`, #544)
+inventariou a rede do motor, encontrou cinco recursos com dois escritores e
+sete achados de fail-open, e repartiu a correcção em sessões. As mudanças de
+comportamento estão acima; o resto é isto:
+
+- **Migração do despacho sem passo manual** (#560). Um holder criado por um
+  binário anterior tem o despacho antigo, de uma chain. O host migra-o agora no
+  `ensure_up` e no `apply_firewall_all` (`nsenter` para o userns e o netns do
+  pin, `nft -f`, uma transacção atómica e idempotente), uma vez por pin. Se a
+  migração falhar, é erro com o remédio.
+- **`network rm` não deixa nada no holder** (#555). Saem as chaves de
+  `@netpair`, o membro de `@dlxbr`, as regras de egress e o conjunto FQDN, e a
+  thread de DHCP pára. Antes, uma rede recriada com o mesmo nome nascia sem
+  DHCP e com o `deny` da anterior. Um `publish` que falha a meio desfaz só as
+  portas que publicou; uma rede criada por uma VM passa a aparecer no
+  `network ls`; o `httproute` escreve sob lock e de forma atómica.
+- **Um só alocador de `/16`** (#553), sob um lock, que vê os registos e as
+  NetDefs em qualquer forma. Antes havia dois, que se ignoravam. As escritas de
+  NetDef trancam e são atómicas: 60 escritas de egress concorrentes com
+  mudanças de gateway deixavam **0** sobreviventes.
+- **Posse pela marca, não pelo nome, nos providers remotos** (S6, #558). Um alias
+  ou regra do OPNsense e uma vnet da SDN do Proxmox eram do motor se tivessem o
+  nome certo, por isso uma regra feita à mão com a mesma descrição era adoptada
+  e depois apagada. Agora:
+  - no OPNsense, a marca é uma categoria de firewall `delonix-owner:<token>`.
+    Um objecto encontrado sem ela é recusado (**DX-5340**); um nosso editado no
+    appliance, **DX-5341**; um commit com alterações preparadas por outra pessoa,
+    **DX-5342**;
+  - no Proxmox, a marca vai no `alias` da vnet. Uma zona não tem campo de texto,
+    por isso só é do motor quando o registo diz que foi o motor a criá-la. O
+    commit passa por uma transacção sob o lock global da SDN, e alterações
+    pendentes alheias recusam-no (**DX-5516**);
+  - um registo anterior à marca não prova posse: o teardown não toca no remoto e
+    nomeia o que deixou.
+- **`vm unbridge` desfaz o que o `vm bridge` aplicou** (#559). O `bridge --apply`
+  grava as subnets em `<state>/ingress/vmbridge-<bridge>.subnets`, antes de correr
+  o plano, e o `unbridge` apaga as regras e a rota dessas subnets. Antes, uma
+  ponte feita com `--vm-subnet` deixava as duas regras `FORWARD … ACCEPT` e a
+  rota de retorno depois do teardown. O `unbridge` ganha `--vm-subnet`
+  (repetível).
+- **ADR-0059 (aceite, #547)**: providers de rede por papel (segment, gateway, e
+  mais tarde NAT, IPAM, DNS), escolhidos por nome e negociados pelo catálogo de
+  capacidades, com o ciclo validate → plan → apply → observe → verify. Desta
+  release só entra a fase F1 (#556):
+  - **catálogo 1.0.0 → 1.1.0**, com 27 entradas novas de rede e firewall (127 no
+    total);
+  - **`ProviderKind::Gateway`** e o **OPNsense em `provider ls`**, com um
+    relatório declarado e nunca sondado: 3 supported, 1 partial;
+  - **`type: opnsense` no `providers.yaml`**, com `keyFile`/`secretFile` (um
+    segredo escrito no ficheiro é recusado pelo nome) e `networkDefaults`.
+    Nenhum Kind resolve ainda por `networkDefaults`; isso é a F2.
+- **ADR-0051: `kind: NetworkGateway`** (#498), com o `GatewayProvider` como
+  porta e o OPNsense como primeira implementação (aliases e regras de filtro
+  pela REST API do appliance). A memória por omissão do appliance registado
+  passou de 2G para 3G, o mínimo que o fabricante documenta (#494).
+
+### Proxmox VE: a cobertura da API é uma matriz medida
+
+O ADR-0049 (#474) fixou o denominador: as **675 rotas** (método, caminho) que o
+próprio PVE 9.2.2 publica. `scripts/proxmox_api_inventory.py` lê esse schema e
+o que o `delonix-proxmox` chama a partir do código fonte, e
+`docs/proxmox/matrix-9.2.2.md` é gerada e guardada por um teste. A coluna
+«tested» vem de um trace de rotas gravado em corridas ao vivo, com a
+proveniência no cabeçalho.
+
+**No início deste ciclo: 16 rotas chamadas (2,4 %). Na `main` desta release:
+161 chamadas (23,9 %), 160 vistas num trace ao vivo.** A única por ver é o
+`GET /nodes/{node}/tasks` da reconciliação de resposta perdida, que só a
+injecção de falhas alcança. Por área: qemu 59/109, sdn 85/90, storage 5/25;
+as 62 rotas de LXC estão `unsupported-by-design`.
+
+- **Transporte** (fatia 1, #475): erros tipados por status HTTP (401, 403, 404
+  com exit 4, 409 com exit 5, 502–504 com exit 69), um **livro de tarefas por VM**
+  (`<vmdir>/proxmox-tasks.json`, UPID gravado antes da espera) e a regra de que
+  **uma resposta perdida não é um pedido perdido**: depois de uma falha de
+  transporte o cliente procura a tarefa ou o efeito, e nunca reenvia uma escrita
+  não idempotente. Toda a escrita passa pelo caminho de tarefas, e um teste lê o
+  código fonte do crate e falha com uma escrita fora dele (#478).
+- **Verbos novos do motor**, com o Proxmox testado ao vivo:
+  - `vm resize <nome> [--vcpus N] [--memory M]` (#503): resize a frio de uma
+    VM parada, também no libvirt e no Cloud Hypervisor. Recusado com a VM a
+    correr (**DX-5505**).
+  - `vm cloud-init <nome> [--hostname] [--user] [--ssh-key]` (#509): muda o
+    cloud-init de uma VM parada. No Proxmox, a prova é a renderização do próprio
+    nó; no libvirt e no Cloud Hypervisor é recusado pelo nome, porque a seed é
+    um ISO feito na criação.
+  - `vm move <nome> --node <alvo> [--live] [--with-local-disks]
+    [--target-storage <id>]` (ADR-0053, #522, #532, #536): move uma VM entre os
+    nós do seu cluster, a frio ou a quente, com o mesmo `vmid` e o mesmo
+    registo. Por omissão, uma VM com discos locais é recusada; com
+    `--with-local-disks` o nó copia-os (espelho NBD com `--live`).
+  - `provider describe proxmox --probe` (#505): cinco `GET` ao cluster do alvo
+    (quórum, nós, storages, HA, zonas SDN), só leitura.
+- **Cada VM é endereçada no seu próprio nó** (ADR-0053, #515). Antes, todos os
+  caminhos por VM usavam o nó configurado, por isso uma VM migrada pela UI do
+  Proxmox era procurada no nó errado. Uma VM movida fora do motor é encontrada
+  com uma leitura de `/cluster/resources`.
+- **Energia** (#502): `shutdown`, `reboot`, `reset`, `suspend` e `resume`. O
+  `vm pause` deixa de ser recusado no Proxmox.
+- **Criação**: `diskSize` num clone de template cresce o disco por
+  `PUT …/resize`, e um shrink é recusado pelo nome (#485); `extraDisks` e
+  `extraNics` no mesmo `POST` da VM, e o `destroy` leva todos os discos (#504).
+- **Arranque de uma imagem do store do motor** (ADR-0057, #541): o
+  `vm create --backend proxmox --disk <imagem do store>` envia a imagem para o
+  storage de importação do nó (com o sha256, verificado pelo nó, uma vez por
+  imagem e por nó) e cria a VM com `import-from`. Deixa de ser preciso preparar
+  um template à mão. Storages por `DELONIX_PROXMOX_IMPORT_STORAGE` e
+  `DELONIX_PROXMOX_DISK_STORAGE`, ou `storage.import`/`storage.disk` no
+  `providers.yaml`. O motor nunca liga o tipo de conteúdo `import` no nó
+  (**DX-6510**); espaço insuficiente é **DX-6511**.
+- **Backup e restore** por `vzdump` (#487, #489): o restore nunca escreve por
+  cima de um `vmid` ocupado. Com o guest agent (#528), um backup só é
+  reportado como quiesced quando o log do nó mostra o `fs-freeze` e o
+  `fs-thaw` (senão **DX-6509**), e o `vm describe` ganha um bloco *Guest*
+  (SO, kernel, hostname, filesystems).
+- **Firewall do próprio nó por VM** (ADR-0052, #492, #496, #512): o
+  `kind: NetworkPolicy` ganha `scope: vm`, e a política de uma direcção de uma
+  VM vai para a firewall do nó onde ela corre. O motor só substitui as regras
+  marcadas `delonix-managed:<n>`, e as regras feitas à mão ficam. Com a firewall
+  do datacenter desligada, o apply recusa com **DX-6508** antes de qualquer
+  escrita.
+- **SDN do próprio Proxmox** (#493, #497, #500, #542): zonas, vnets, subnets,
+  controladores IPAM/DNS/BGP/EVPN, fabrics, DHCP, reservas de IP, prefix lists,
+  route maps e a firewall de vnet. O lock global é usado como transacção
+  (`sdn_transaction`), com rollback se um passo falhar. **`kind: NetworkZone`**
+  (#501) liga a SDN do Proxmox a um manifesto, sem campo `provider`.
+- **Três factos medidos que o schema não diz**, e que mudaram código:
+  - `…/status/suspend` cria uma tarefa `qmpause`, não `qmsuspend`;
+  - a firewall de vnet só é aplicada pela `proxmox-firewall` nftables, e filtra
+    o tráfego em bridge dentro da vnet, **não o tráfego encaminhado entre vnets**
+    (#549, #551, só documentação);
+  - a imagem de appliance do repositório reescrevia `/etc/network/interfaces`
+    sem o `source /etc/network/interfaces.d/*`, e os applies de SDN anteriores
+    ao #500 foram aceites **sem nada realizado** no nó. O script foi corrigido.
+    As imagens Proxmox passam também a reescrever o `/etc/hosts` com o endereço
+    real do `vmbr0` em cada arranque (#548).
+- **ADR-0058 (Aceite a 2026-09-28; proposto no #543)**: um container LXC do Proxmox **não** serve o
+  `kind: Container`. Não há `exec`, nem logs, nem exit status na API, e nada da
+  SDN do motor se aplica. Se o LXC entrar, será como recurso próprio. As 62
+  rotas ficam `unsupported-by-design`, e desta release só entra a fatia 0
+  (os três desfechos de uma tarefa, acima) e a fatia 1 (abaixo). Aceite com o
+  recurso a chamar-se `kind: SystemContainer`, por paridade com o Proxmox
+  (#574); o Kind ainda não existe.
+- **Arquivo OCI que um nó Proxmox aceita** (#574, plano 63 fatia 1):
+  `delonix_oci::write_oci_media_archive` escreve um arquivo OCI layout com
+  media types OCI (os blobs do store byte a byte, só o manifesto reescrito) e
+  recusa pelo nome uma layer zstd ou estrangeira (DX-1409). Medido no nó de
+  laboratório: o arquivo do `alpine:3.20` foi aceite por `pvesh create
+  /nodes/pve/lxc`; o Docker v2 do `image save` foi recusado. **Ainda nenhum
+  comando o chama** — o upload é a fatia 2 — e o `image save` continua Docker v2.
+
+### Providers: um catálogo de capacidades e um ficheiro por nó
+
+- **Catálogo de capacidades versionado** (ADR-0050, #476). `delonix provider
+  ls|describe|matrix` responde, por provider, a cada entrada do catálogo com um
+  de seis estados. **`supported` não se auto-certifica**: tem de citar um check,
+  um e2e, um caso de caos ou um teste ao vivo, e um teste confirma que cada
+  citação existe. `provider ls` não faz nenhum pedido; o Proxmox é declarado e
+  nunca sondado. `docs/providers/capability-matrix.md` é gerada e guardada por
+  um teste. Com checks novos na bateria, 17 linhas do libvirt e do Cloud
+  Hypervisor passaram de `partial` a `supported` (#499); escrever esses checks
+  encontrou três defeitos, também corrigidos (uma VM CH na namespace `default`
+  sem regra anti-spoof, o backup ao vivo de uma VM libvirt com dois discos, e
+  `vm vnc` a imprimir `127.0.0.1:0` para uma resposta `host:N`).
+- **`vm create --require <capacidade>`** e `spec.requiredCapabilities` (#479): um
+  nome fora do catálogo é **DX-1527** (exit 1), um backend que não serve a
+  entrada é **DX-6507** (exit 69), e as duas recusas acontecem antes de o disco
+  ser tocado. Os dois predicados internos que comparavam o nome do backend lêem
+  agora o relatório de capacidades (#482).
+- **`providers.yaml`** (ADR-0054, #514, #519, #521): um ficheiro por nó
+  (`config.delonix.io/v1`) diz que providers o nó tem, como os alcançar e qual
+  serve um pedido sem `--backend`. Procura-se por esta ordem:
+  `DELONIX_PROVIDERS_CONFIG`, `$XDG_CONFIG_HOME/delonix`, `/etc/delonix`; o
+  primeiro ficheiro ganha e os ficheiros nunca se fundem. Campos desconhecidos
+  e segredos inline são recusados pelo nome. Verbos:
+  - `provider config show [-o json]`: o ficheiro lido, os ficheiros que a ordem
+    salta, o default e de onde vem. Uma credencial aparece só pela origem;
+  - `provider config validate [-f]`: o parser e aquilo para que o ficheiro aponta
+    (token legível só pelo dono, CA, segredo), sem contactar nada;
+  - `provider config schema`: o JSON Schema, publicado em
+    `docs/schema/v1/providers.json`;
+  - `vm default-backend --set/--clear` passa a editar o ficheiro;
+  - `install.sh --vm-provider <libvirt|cloud-hypervisor>` escreve-o **só se não
+    existir** (noclobber, symlinks incluídos).
+- **`vm create --allow-mac-spoofing`** / `allowMacSpoofing` (ADR-0055, #531):
+  opt-out explícito, por VM, do filtro anti-spoofing do libvirt, para um
+  hipervisor aninhado. Visível no `describe vm` (`Antispoof: OFF`), com um aviso
+  no `create`, e recusado onde não há filtro (**DX-1505**).
+- **Porta de VM no contexto de computação** (ADR-0044, aceite, #486, #517): o
+  `VmBackend` e os seus tipos passam para o `delonix-compute`, e o
+  `delonix-proxmox` deixa de depender do `delonix-vm`. É uma mudança interna;
+  nenhum chamador mudou.
+
+### Imagens OCI: pull e push sem a imagem inteira em memória
+
+Um lote de performance sobre pull, push e build. Cada ganho foi medido; as
+medições de tempo foram feitas num host partilhado e carregado, e os PRs dizem
+isso mesmo.
+
+- **Pull em streaming directo para o CAS** (#535): cada layer é escrita à medida
+  que chega, com o hash calculado no fluxo e a escrita numa thread própria.
+  Pico de RSS de um pull do `node:22`: **214 MB → 27 MB**. O config desce em
+  paralelo com as layers (#518).
+- **Pull de imagens VM directo para o disco, com retoma entre processos**
+  (#523): um parcial `<dest>.<digest12>.download` é retomado por `Range` pelo
+  processo seguinte, e só é renomeado depois de o conteúdo bater com o
+  manifesto. Pico de RSS para 276 MiB: **278 MB → 13 MB**.
+- **Primeira execução com extracção paralela das layers** (#533): até 4, em
+  streaming a partir do CAS. RSS do primeiro `run` do `node:22`: **~220 MB →
+  ~21 MB**.
+- **Um pull quente já não reescreve o registo da imagem, e o CAS sobrevive a um
+  crash** (#530): `fsync` do blob e do directório depois do rename. Custo medido:
+  18 `fsync` por pull.
+- **Push sem o tecto de 5 minutos** (#518). Antes, qualquer layer que não subisse
+  em 300 s falhava sempre (a ~1,3 MB/s, acima de ~390 MB).
+- **Push a partir do ficheiro** (#524), em vez de três cópias em memória. `vm
+  push` de 276 MiB: pico de RSS **837 MB → 10–13 MB**.
+- **Retry do upload** (#526): até 5 tentativas, com backoff de 1, 2, 4 e 8 s,
+  para falhas de transporte e respostas 5xx, 408 ou 429. Cada tentativa começa
+  com um `HEAD`, por isso um blob que o registo já aceitou não é enviado duas
+  vezes. Um 400 ou um 403 falham de imediato.
+- **Layers em paralelo no push, com barra de progresso** (#527): até 4 de cada
+  vez. `node:22` (389,5 MiB) com um tecto de 20 MB/s por ligação: **22–65 s →
+  11 s**. O `image sign` publica com o mesmo cliente que leu o manifesto.
+- **Mount entre repositórios do mesmo registo** (#538): um blob que o registo já
+  tem noutro repositório é ligado sem enviar bytes. Medido contra o ghcr.io:
+  promover uma imagem para um repositório novo levou **7,0 s**, contra 356 s no
+  primeiro push. Se o servidor de tokens recusar o âmbito mais largo, o push
+  continua sem o mount.
+- **Um push que perde a ligação diz porquê** (#573). Um `image vm push` para o
+  ghcr.io saía com código ≠ 0 ao fim de ~4 min, e a única saída era a linha
+  INFO do início. A causa, reproduzida contra um registo local que fecha a
+  ligação a meio do PUT: o processo morria por **SIGPIPE (rc 141), sem uma
+  palavra e sem retry**. Agora:
+  - um EPIPE num socket de rede é um erro, e o retry corre;
+  - a mensagem traz a cadeia de causas completa e quanto subiu
+    (`connection lost with N of M bytes sent`);
+  - uma resposta recusada traz o status e o início do corpo (o código OCI, por
+    exemplo `DIGEST_INVALID`). A pista `delonix login` só aparece em 401/403.
+
+  **O push tem retry mas não retoma**: cada tentativa reenvia o blob desde o
+  byte 0 (PUT monolítico). O pull retoma por `Range`; o push não. Ver as
+  limitações.
+
+### Containers: a morte de um processo é um facto a medir
+
+Três PRs sobre a mesma classe de defeito: um SIGKILL entregue não é um processo
+morto.
+
+- **`rm -f` espera pela saída real** (#562), descrito acima. O arnês de caos
+  passa a medir processos, e não registos (#561, #562): um veredicto
+  `sandbox-teardown` falha se ficar algum processo com a raiz do sandbox.
+- **Um arranque que falha depois do `clone` recolhe o filho e depois remove o
+  cgroup** (#564). Antes, com userns (o caminho rootless normal), ficava um
+  `dlx-<id>` vazio no host em 4 de 4 corridas, e um zombie por cada arranque
+  falhado.
+- **Uma nova incarnação é publicada sob o lock do registo** (#570). O `spawn`
+  gravava o pid novo com um `save` sem lock, e o `update` do supervisor antigo
+  podia apagá-lo depois. O registo ficava sem processo, e o `rm -f` seguinte
+  não sinalizava ninguém. Uma publicação por cima de outra incarnação viva é
+  recusada com **DX-5101** e o filho é recolhido.
+
+### Recursos, build e disco
+
+- **`system df` conta o store inteiro** (#480): entram as áreas `VM disks`,
+  `build cache` e `images-build`, uma linha `other` que fecha a tabela, e um
+  `TOTAL` que bate com o `du`. Antes, num nó real, um estado de 190 GiB
+  reportava 105.
+- **`net netns gc [--force]`** (#481): encontra pelo `/proc` a infra de rede cuja
+  raiz foi apagada (pins, controls, slirps) e, sem `--force`, só relata.
+- **Tecto de arenas do malloc** nos processos que ficam de pé (pin, control, CRI,
+  mgmt, Docker API): o `delonix-mgmt` em repouso passou de **2,3 GB para 111 MB**
+  de VmSize. Um `MALLOC_ARENA_MAX` do operador continua a mandar.
+- **Travessia paralela do disco** no `system df`, no uso de volumes e na quota
+  rootless: **2,0–2,5 s → 0,35 s** sobre 32 GiB, com a saída idêntica.
+  `DELONIX_WALK_THREADS=1` repõe a sequencial.
+- **A cache de build expira** 7 dias depois do último uso, e o `system prune`
+  varre-a. O `vm prune` nomeia os directórios de `vms/` para onde nenhum registo
+  aponta.
+- **`delonix build`** (#529): sem espera de graça por cada container de trabalho,
+  e um passo em cache fecha com ✓ (antes fechava com ✗ e o build acabava bem).
+
+### Contrato de nó e MCP
+
+- **`delonix-node-api`: o contrato de nó passa a ter servidor** (ADR-0050 D5,
+  #525). É um novo executável, `delonix-node-api` (crate `delonix-node-api-bin`),
+  que o `delonix serve node-api` corre, instalado pelo `install.sh` ao lado do
+  `delonix` e construído pelo `release.yml`. Serve gRPC e HTTP/JSON
+  dos mesmos `.proto` num socket unix `0600` com `SO_PEERCRED`. Hoje só
+  responde `NodeService.ListProviders` (também como `GET /v1/providers?kind=`);
+  o resto responde `UNIMPLEMENTED` e nomeia o passo que o traz. O contrato ganha
+  dois campos aditivos (`Capability.state`, `ProviderInfo.catalog_version`), e
+  o `buf breaking` contra a v4.4.0 passa.
+- **`workload.usage`** (MCP, #568): contadores cumulativos por workload (CPU,
+  memória e pico, I/O de bloco, pids, os tectos em vigor), lidos do cgroup de
+  cada container e do processo do VMM de cada VM local. São contadores, não
+  taxas: quem amostra duas vezes obtém a taxa. **Um número que falta é nomeado
+  com a razão, nunca zero.**
+
+### Documentação
+
+- O guia de utilizador foi posto em dia com a v4.4 (#508) e corrigido onde
+  ensinava o contrário do que o motor faz (#506): por exemplo, as contas das
+  imagens VM golden estão trancadas desde 2026-08-18, e o completion é
+  `completion shell bash`.
+- O manual do contribuidor passa a existir em chinês (24 páginas), e o pt-AO e
+  o fr-FR acompanham o inglês (#513).
+- A checklist dos PRs nomeia os gates que a CI corre de facto (#540).
+- A imagem golden de VM passa a arrancar com SeaBIOS e com OVMF na CI antes de
+  ser publicada (#516). Uma tag publicada a 2026-08-24 não arrancava com
+  SeaBIOS.
+- **Os testes deixam de sujar o `/tmp`** (#572): um `cargo test --workspace`
+  num `TMPDIR` vazio deixava 29 entradas (30 no runner); agora deixa 0, e a
+  linha de base do `tmp_roots_gate` está vazia — qualquer entrada é uma fuga
+  nova.
+
+### Limitações conhecidas e o que NÃO foi validado
+
+**Push de imagens**
+
+- **O #573 não foi reproduzido contra o ghcr.io real** (HTTPS/rustls). Foi
+  reproduzido contra um registo local que fecha a ligação a meio do PUT. A
+  causa no ghcr.io é inferida (mesmo sintoma, mesma escrita), não medida.
+- **O push não retoma.** Tem retry (5 tentativas), mas cada tentativa reenvia o
+  blob desde o byte 0. Numa ligação lenta, um blob de vários GiB pode esgotar as
+  tentativas. A retoma precisa do protocolo em chunks (`PATCH` +
+  `Content-Range`) e não foi feita.
+- A mensagem de corte diz até onde o upload chegou, não *porque* o registo
+  fechou: a resposta do registo é descartada pelo cliente HTTP.
+- O handler de SIGPIPE vale para o binário inteiro: um EPIPE num pipe interno
+  (que não seja o stdout ou o stderr) passa a ser um erro devolvido. A bateria
+  do workspace passou no CI do #573 (x86 e arm64), mas nenhum caminho com um
+  pipe interno foi exercitado de propósito contra esta mudança.
+- O fallback do mount entre repositórios (um servidor de tokens que recusa o
+  âmbito mais largo) só foi verificado por leitura, e o Docker Hub não foi
+  medido. A poupança da assinatura com um só cliente só aparece contra um
+  registo autenticado, e não foi medida.
+
+**Rede**
+
+- **Correcções dentro do holder só valem depois de o holder ser recriado**
+  (`net netns down` + `up`): a limpeza do `network rm` e do DHCP (#555), a
+  validação dos tokens (#552) e as firewalls das redes CIDR (#554). O despacho
+  da firewall migra sozinho (#560); o resto não.
+- A validação do S4 (#552) foi provada ao vivo só pelos caminhos legítimos
+  (#557). Os vectores de ataque foram reproduzidos em testes, não contra um
+  binário antigo. O `cni-add` com um plugin CNI real não foi exercitado.
+- As baterias de caos da firewall correram com `--force` (load 51) no #554, e
+  por isso os veredictos não são publicáveis pela regra da bancada. O #560
+  repetiu-as abaixo do limiar.
+- O rollback do `vm_attach` quando a firewall falha foi provado por leitura, e
+  o lock do `httproute` por um teste em processo, não com dois `stack apply`
+  reais em paralelo.
+- **O OPNsense não foi exercitado ao vivo** (#556, #558): o relatório do
+  catálogo é declarado, e `net.ownership-marker` fica `partial`. A comparação
+  entre a configuração e o que está a correr não vê uma edição dos campos de
+  match de uma regra que mantém o uuid, nem aliases com nomes de host.
+- Uma queda entre o apply de uma zona Proxmox e a gravação do registo deixa uma
+  zona sem marca de posse. O apply seguinte recusa-a, e o operador tem de a
+  apagar à mão.
+- No `vm unbridge`, a conectividade VM→container a partir de um guest real atrás
+  do `virbr0` não foi medida, e um `network rm` com a ponte de pé deixa o
+  ficheiro de registo até ao `unbridge`.
+- Continua em aberto o `PUT /v1/containers/:id/rate` da API de gestão, que
+  também escreve `tc` sem registo e ficou fora do #555.
+
+**Proxmox**
+
+- **O ADR-0049 continua Proposto.** Estão Propostos também o **ADR-0055**
+  (`--allow-mac-spoofing`, já implementado), o **ADR-0057** (arranque de uma
+  imagem do store, já implementado). O **ADR-0058** está Aceite, mas dele só
+  entraram as fatias 0 e 1: o `kind: SystemContainer` não existe nesta
+  release. A função do #574 não tem chamador nesta release: o arquivo foi
+  produzido por um exemplo descartável e copiado para o nó por `scp`.
+- Todas as corridas ao vivo foram feitas contra um cluster de laboratório de
+  dois nós (PVE 9.2.2), nunca contra um cluster de produção. A excepção é a
+  sonda de leitura do `provider describe --probe`.
+- A firewall de vnet do Proxmox está guardada mas **não é aplicada** num nó com a
+  `pve-firewall` iptables, e mesmo com nftables não filtra o tráfego entre vnets.
+  Na firewall por VM (`scope: vm`), nenhum pacote atravessou a VM num teste, e
+  as quatro entradas `firewall.*` ficam `partial`.
+- Uma falha real do reload de rede de um nó (#571) só foi injectada. O caso ao
+  vivo de controladores e firewall de vnet falha com 403 quando corrido com um
+  token: essas rotas exigem a password de `root@pam`.
+- A cópia a quente de um disco local (#536) foi medida numa VM sem SO, sem
+  escritas no disco durante o espelho.
+- O `vm.snapshot.persistent` e o `vm.snapshot.memory` do Proxmox continuam
+  `partial`.
+
+**Containers, cgroups e recursos**
+
+- O caminho `DX-8101` (processo ainda a sair ao fim de 30 s) só foi coberto por
+  teste unitário. Continuam em aberto duas corridas: um `rm -f` concorrente
+  com um `start` em curso, e o `stop` que desiste de uma saída presa em D e
+  esquece o processo.
+- O intercalar exacto que o #570 corrige não foi apanhado de novo ao vivo. A
+  prova é o teste determinístico com `Store` e `flock` reais, mais a
+  pré-condição medida.
+- O overlay `volatile` não foi validado no caminho rootful, nem o fallback em
+  kernels anteriores ao 5.10. Um container `--rm --restart always` parado com
+  `stop` não é removido.
+- O caminho sem userns do #564 (root) não foi medido.
+- O caminho `sudo` do `system setup --delegate` (#550) **não foi corrido como
+  root**, e o efeito do drop-in no `user@.service` não foi revalidado neste
+  ciclo. Foi medido a 2026-08-19 numa VM.
+- `net netns gc --force` a terminar processos a sério, e a expiração real da
+  cache de build ao fim de 7 dias, não foram exercitados: estão cobertos pelos
+  classificadores puros.
+- O ganho de tempo do build (#529) não foi provado, porque o host estava
+  carregado. O que foi provado é a contagem de ✓/✗.
+- O custo em tempo de relógio do `fsync` do CAS (#530) numa máquina calma não
+  foi medido.
+
+**Contrato de nó e MCP**
+
+- O `delonix-node-api` serve só `ListProviders`. Não há socket activation, nem
+  rotas `/openapi.json`/`/docs`, e nenhum cliente de outra linguagem foi testado
+  contra o OpenAPI.
+- O `workload.usage` não foi medido contra uma VM Cloud Hypervisor viva, nem com
+  `include_network: true` numa rede própria.
+
+**Geral**
+
+- Vários PRs correram só a secção da bateria `scripts/e2e.sh` que tocavam, e
+  não a bateria inteira, porque a máquina de desenvolvimento tem cargas de
+  produção. As medições de tempo (pull, build, extracção) vêm de um host
+  partilhado com load entre 2 e 52, e são indicações, não baselines.
+- Continua por validar o que a `v4.4.0` já listava.
+
+---
+
 ## v4.4.0 — `drift`, a matriz do Compose com denominador, e um portão de performance que se recusa a julgar
 
 Dezassete commits desde a `v4.3.0`. Numerada como MINOR: há três verbos novos
