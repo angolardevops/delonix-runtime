@@ -797,17 +797,24 @@ mod tests {
                 .unwrap();
             b.finish().unwrap();
         }
-        let dir = std::env::temp_dir().join(format!("delonix-extract-ro-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        extract_layer(&buf, &dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        extract_layer(&buf, dir).unwrap();
+        let survived = dir.join("ro/libc.so.6").exists();
+        // `extract_layer` restores the layer's 0555 on `ro/` once its children
+        // are in, and nothing can unlink a file from a directory without the
+        // write bit: the old `remove_dir_all(..).ok()` failed here on every run
+        // and left the whole tree behind. Writable again BEFORE the assert, so
+        // the guard also removes it when the assert fails.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir.join("ro"), std::fs::Permissions::from_mode(0o755));
         assert!(
-            dir.join("ro/libc.so.6").exists(),
+            survived,
             "ficheiro dentro de directório read-only tem de sobreviver a `extract_layer` \
              (o caminho que `ensure_layers`/`prepare_overlay`/`mount_rootfs` realmente usa) — \
              não só a `apply_layer_flat`"
         );
-        std::fs::remove_dir_all(&dir).ok();
+        tmp.close().unwrap();
     }
 
     /// THE bug, isolated: `rename(2)` refuses to land a directory on top of a

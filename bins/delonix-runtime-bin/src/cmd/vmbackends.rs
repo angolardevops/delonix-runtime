@@ -277,15 +277,8 @@ mod tests {
     #[test]
     fn a_credential_file_must_be_private() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-low-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let f = dir.join("tok");
         std::fs::write(&f, "s3cret\n").unwrap();
         let path = f.display().to_string();
