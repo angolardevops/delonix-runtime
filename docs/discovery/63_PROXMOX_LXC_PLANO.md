@@ -187,6 +187,40 @@ applies do #493 e do #497 foram aceites e nunca realizados.
   parar → destruir com o trace ligado, e lê o livro no fim; cenários de injecção para T2
   (config relida diferente) e T3 (arranque com avisos); o gate de evidência do ADR-0050 verde.
 
+- **Fechada a 2026-09-28.**
+  - **Porta.** `delonix_compute::system_container`: `SystemContainerSpec` (arquivo OCI local +
+    digest do manifesto, entrypoint, env, recursos, rede, `unprivileged`),
+    `SystemContainerHandle { locator }`, `SystemContainerObservation { running, network }` com
+    `NetworkState::{NotRequested, Ready, NotReady{reason}, Unknown}`. O `start` e o `observe`
+    recebem o spec, porque é ele que diz se foi pedida uma rede por DHCP.
+  - **Provider.** `delonix-proxmox/src/lxc.rs`: os métodos `lxc_*` do cliente, passados pelo
+    livro de tarefas (`vzcreate`, `vzstart`, `vzshutdown`, `vzstop`, `vzdestroy`), e o
+    `ProxmoxSystemContainerProvider`. O `task_inner` passou a devolver as linhas `WARN:`
+    (`task_collecting_warnings`), para o arranque julgar a rede com elas.
+  - **Recusas por nome (DX-1540):** `unprivileged: false`, um argumento do entrypoint com
+    espaços, um nome de variável fora de `[A-Za-z0-9_]`, um hostname inválido. Uma config relida
+    diferente do pedido destrói o container e acaba em erro que nomeia o campo.
+  - **Catálogo 1.2.0.** O domínio `system-containers` e oito entradas `system-container.*`.
+    Todos os providers respondem.
+- **Medido no `pve` antes de escrever**, pela API:
+  - o `env` é uma lista separada por NUL e o `entrypoint` uma linha, e o `PUT …/config` responde
+    `null`;
+  - o `vzstart` sem servidor DHCP no `vmbr0` acaba em `WARNINGS: 1` ao fim de cerca de 2 min,
+    com o container a correr e só IPv6 link-local no `eth0`;
+  - um shutdown com prazo de um init `sleep` acaba em «container did not stop»;
+  - o delete com `purge` e `destroy-unreferenced-disks` leva o volume.
+- **Portão.**
+  - Caso ao vivo `a_system_container_runs_its_lifecycle_through_the_node`: criar, configurar,
+    arrancar (`NotReady` com o aviso do nó), observar, parar e destruir. Passou em 134 s, com o
+    trace ligado e o livro lido no fim.
+  - Injecção T2 (config relida diferente → destruído) e T3 (arranque com avisos → `NotReady`);
+    cada uma falha com a correcção revertida.
+  - Gate de evidência do ADR-0050 verde. Matriz de rotas regenerada: as 9 rotas `…/lxc` do ciclo
+    de vida passam a `supported+tested` (170 de 675).
+- **O que fica para a Fatia 4**: puxar a imagem (`pull_from_registry_with_creds`, com o digest
+  verificado) e escrevê-la com `write_oci_media_archive` antes de chamar a porta. O `-bin` é o
+  único que conhece os dois lados.
+
 ## Fatia 4 — O Kind
 
 Segue a lista de 12 passos de `docs/dev/adding-a-kind.md`: a linha `KindFacts`, o spec com

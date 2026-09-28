@@ -1161,6 +1161,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_OCI_ARCHIVE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>由引擎写出（<code>write_oci_media_archive</code>）、带 OCI 媒体类型的镜像归档，ADR-0058 实机用例用它创建一个系统容器。它被上传到的存储必须包含 <code>vztmpl</code>。</td>
+<td>未设置：该用例跳过。</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>集群所有节点共享的存储（NFS、Ceph RBD），移动用例把 VM 的磁盘放在这里——位于本地存储上的磁盘会被拒绝，而不是被复制。</td>

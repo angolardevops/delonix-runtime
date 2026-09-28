@@ -43,6 +43,7 @@
 
 pub mod cluster;
 mod error;
+pub mod lxc;
 mod network_zone;
 mod sdn;
 mod sdn_lock;
@@ -64,6 +65,7 @@ pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_I
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
+pub use lxc::ProxmoxSystemContainerProvider;
 // `mem_mib` comes from the engine and is NOT re-implemented here. The copy that
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
@@ -426,6 +428,19 @@ impl Ledger {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TaskKind {
     Create,
+    /// `POST …/lxc` — creates a system container from an uploaded archive
+    /// (ADR-0058).
+    CtCreate,
+    /// `POST …/lxc/{vmid}/status/start`. A start whose DHCP got no answer
+    /// ends `WARNINGS: 1` (measured), which [`Client::lxc_start`] returns.
+    CtStart,
+    /// `POST …/lxc/{vmid}/status/shutdown` — asks the container's init to
+    /// stop, with a deadline; an init that ignores SIGTERM ends it in «container
+    /// did not stop» (measured with a `sleep` entrypoint).
+    CtShutdown,
+    CtStop,
+    /// `DELETE …/lxc/{vmid}` with `purge` and `destroy-unreferenced-disks`.
+    CtDestroy,
     Clone,
     Start,
     Stop,
@@ -631,6 +646,11 @@ impl TaskKind {
     fn action(self) -> &'static str {
         match self {
             TaskKind::Create => "create",
+            TaskKind::CtCreate => "ct-create",
+            TaskKind::CtStart => "ct-start",
+            TaskKind::CtShutdown => "ct-shutdown",
+            TaskKind::CtStop => "ct-stop",
+            TaskKind::CtDestroy => "ct-destroy",
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
@@ -735,6 +755,11 @@ impl TaskKind {
     fn worker_type(self) -> &'static str {
         match self {
             TaskKind::Create => "qmcreate",
+            TaskKind::CtCreate => "vzcreate",
+            TaskKind::CtStart => "vzstart",
+            TaskKind::CtShutdown => "vzshutdown",
+            TaskKind::CtStop => "vzstop",
+            TaskKind::CtDestroy => "vzdestroy",
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
@@ -3883,16 +3908,34 @@ impl Client {
         probe: Option<&dyn Fn() -> Result<bool>>,
         null_is_done: bool,
     ) -> Result<()> {
+        self.task_collecting_warnings(ledger, vmid, kind, issue, probe, null_is_done)
+            .map(|_| ())
+    }
+
+    /// [`Self::task_inner`], handing back the `WARN:` lines of a task that
+    /// ended `WARNINGS: <n>` (empty for `OK`, and for an effect found done
+    /// after a lost answer). They are logged here as everywhere else; a caller
+    /// that judges a result by them (the start of a system container) reads
+    /// them too.
+    fn task_collecting_warnings(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        kind: TaskKind,
+        issue: impl Fn() -> Result<String>,
+        probe: Option<&dyn Fn() -> Result<bool>>,
+        null_is_done: bool,
+    ) -> Result<Vec<String>> {
         let what = kind.action();
         with_lock_retry(what, || {
             let upid = match issue() {
                 Ok(body) => match upid_or_done(&body, what, null_is_done)? {
                     Some(upid) => upid,
-                    None => return Ok(()),
+                    None => return Ok(Vec::new()),
                 },
                 Err(Error::Request(why)) => match self.recover_lost_answer(vmid, kind, probe) {
                     Recovered::Task(upid) => upid,
-                    Recovered::Done => return Ok(()),
+                    Recovered::Done => return Ok(Vec::new()),
                     Recovered::Nothing => return Err(Error::Request(why)),
                 },
                 Err(e) => return Err(e),
@@ -3907,8 +3950,9 @@ impl Client {
             });
             let verdict = self.wait_task_warnings(&upid);
             ledger.settle(&upid, state_of(&verdict));
-            report_warnings(&upid, &verdict?);
-            Ok(())
+            let warnings = verdict?;
+            report_warnings(&upid, &warnings);
+            Ok(warnings)
         })
     }
 
@@ -6619,6 +6663,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
         | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
         | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
+        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged
         | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
@@ -6695,6 +6740,14 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "refused before any API call (`vm_namespace_supported`)" },
         C::VmAntispoof => S::RequiresExternalComponent { component: "the node's firewall (`…/firewall`), excluded as administration (ADR-0049 D3)" },
         C::VmRawDefinition => S::UnsupportedByProvider { reason: "no raw config passthrough (ADR-0049 D6)" },
+        C::SystemContainerLifecycle => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
+        C::SystemContainerOciImage => S::Partial { detail: "created from an OCI archive with OCI media types that the engine uploads (`stage_template`), named by its manifest digest; each container is a full copy of the image on the rootfs storage, with no layer sharing (ADR-0058 T6); pulling the image into that archive is the `SystemContainer` Kind's (plan 63 slice 4)" },
+        C::SystemContainerEntrypointEnv => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
+        C::SystemContainerExec => S::UnsupportedByProvider { reason: "the LXC API has no exec: the only ways in are interactive console websockets (`termproxy`, `vncproxy`, `spiceproxy`), never emulated (ADR-0058)" },
+        C::SystemContainerLogs => S::UnsupportedByProvider { reason: "the LXC API exposes no container output (ADR-0058)" },
+        C::SystemContainerExitStatus => S::UnsupportedByProvider { reason: "the LXC API reports running or stopped, never the entrypoint's exit status (ADR-0058)" },
+        C::SystemContainerNetworkBridge => S::Partial { detail: "`net0` on a bridge of the node, with an optional VLAN tag and DHCP; judged after the start by `GET …/interfaces`, and an address that never came is `NetworkReady=False` with the node's warning (live case); the engine's SDN, isolation, DNS and publish do not apply (ADR-0058 T7)" },
+        C::SystemContainerUnprivileged => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid

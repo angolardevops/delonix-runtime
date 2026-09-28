@@ -4636,6 +4636,165 @@ fn a_container_archive_is_staged_as_vztmpl_and_a_wrong_checksum_is_refused() {
     );
 }
 
+/// The manifest digest an OCI image layout archive's `index.json` points
+/// at. A minimal ustar walk: this crate carries no tar reader, and the
+/// archive is the engine's own (`write_oci_media_archive`).
+fn oci_archive_manifest_digest(path: &std::path::Path) -> String {
+    let bytes = std::fs::read(path).expect("read the OCI archive");
+    let mut at = 0;
+    while at + 512 <= bytes.len() {
+        let header = &bytes[at..at + 512];
+        if header.iter().all(|b| *b == 0) {
+            break;
+        }
+        let name_end = header[..100].iter().position(|b| *b == 0).unwrap_or(100);
+        let name = std::str::from_utf8(&header[..name_end]).unwrap_or_default();
+        let size_field = std::str::from_utf8(&header[124..136]).unwrap_or_default();
+        let size =
+            usize::from_str_radix(size_field.trim_matches(|c: char| c == '\0' || c == ' '), 8)
+                .expect("tar size");
+        let data = &bytes[at + 512..at + 512 + size];
+        if name == "index.json" {
+            let index: serde_json::Value = serde_json::from_slice(data).expect("index.json");
+            return index["manifests"][0]["digest"]
+                .as_str()
+                .expect("a manifest digest")
+                .to_string();
+        }
+        at += 512 + size.div_ceil(512) * 512;
+    }
+    panic!("no index.json in {}", path.display());
+}
+
+/// ADR-0058 / plan 63 slice 3: a system container from the engine's OCI
+/// archive (`DELONIX_PROXMOX_TEST_OCI_ARCHIVE`, written by
+/// `write_oci_media_archive` — e.g. `alpine:3.20`) runs its whole lifecycle
+/// through the node. The entrypoint and environment asked for are the ones
+/// the node kept; the start's network verdict is read from the interfaces
+/// (the lab's `vmbr0` has no DHCP server, so `NotReady` with the node's
+/// warning is the expected answer there); stop and destroy leave no container
+/// and no volume; and the task ledger is read at the end.
+#[test]
+fn a_system_container_runs_its_lifecycle_through_the_node() {
+    use delonix_compute::system_container::{
+        NetworkState, SystemContainerNet, SystemContainerProvider, SystemContainerSpec,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxct{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("DLX_TEST".into(), "one two".into()),
+        ],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: Some(SystemContainerNet {
+            bridge: t.bridge.clone().unwrap_or_else(|| "vmbr0".into()),
+            vlan: None,
+            dhcp: true,
+        }),
+        unprivileged: true,
+    };
+
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    let config = client.lxc_config(vmid).expect("config");
+    assert_eq!(config["entrypoint"], "/bin/sleep 3600", "{config}");
+    assert_eq!(
+        config["env"], "PATH=/usr/bin:/bin\u{0}DLX_TEST=one two",
+        "{config}"
+    );
+    assert_eq!(config["unprivileged"], 1, "{config}");
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "stopped",
+        "create must not start it"
+    );
+
+    let obs = provider.start(dir.path(), &h, &spec).expect("start");
+    assert!(obs.running, "{obs:?}");
+    match &obs.network {
+        NetworkState::Ready { ipv4 } => assert!(!ipv4.is_empty()),
+        NetworkState::NotReady { reason } => assert!(!reason.is_empty(), "{obs:?}"),
+        other => panic!("a DHCP network must be judged, got {other:?}"),
+    }
+    let again = provider.observe(dir.path(), &h, &spec).expect("observe");
+    assert!(again.running);
+
+    provider.stop(dir.path(), &h).expect("stop");
+    assert_eq!(client.lxc_status(vmid).unwrap(), "stopped");
+    provider.destroy(dir.path(), &h).expect("destroy");
+    assert!(
+        client.lxc_config(vmid).is_err(),
+        "the container is still there"
+    );
+    let left: Vec<_> = client
+        .list_images(&rootfs, vmid)
+        .expect("list")
+        .into_iter()
+        .collect();
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+
+    // The ledger: every action's LAST task succeeded (a shutdown that timed
+    // out against a `sleep` init may fail before the stop), nothing is still
+    // submitted, and the start is there.
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    assert!(
+        !recs
+            .iter()
+            .any(|r| matches!(r.state, delonix_proxmox::TaskState::Submitted)),
+        "{recs:?}"
+    );
+    let stopped_ok = recs
+        .iter()
+        .rev()
+        .find(|r| r.action == "ct-stop")
+        .map_or_else(
+            || {
+                recs.iter()
+                    .rev()
+                    .find(|r| r.action == "ct-shutdown")
+                    .is_some_and(|r| r.state == delonix_proxmox::TaskState::Ok)
+            },
+            |r| r.state == delonix_proxmox::TaskState::Ok,
+        );
+    assert!(
+        stopped_ok,
+        "neither a shutdown nor a stop ended OK: {recs:?}"
+    );
+    for action in ["ct-create", "ct-start", "ct-destroy"] {
+        let last = recs
+            .iter()
+            .rev()
+            .find(|r| r.action == action)
+            .unwrap_or_else(|| panic!("no {action} in the ledger: {recs:?}"));
+        assert!(
+            !matches!(last.state, delonix_proxmox::TaskState::Failed { .. }),
+            "{action} failed: {last:?}"
+        );
+    }
+}
+
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
 /// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused
