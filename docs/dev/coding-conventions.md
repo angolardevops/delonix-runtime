@@ -669,10 +669,18 @@ doesn't support.
 - **Tests never touch the host's real state.** Give stores a temporary root. Don't call code that
   resolves the real state root. Don't `set_var` (the `env_writes` ratchet, [§4.1](#41-the-layers-and-the-direction)).
   **Decided**: AGENTS.md § "IaC nativo", the `ShareVolume` fusion note ("Nota de método: um teste que
-  chamasse `apply_share` … escreveria no estado REAL da máquina"). **Convention (observed)**:
-  `delonix-state/src/store.rs` tests use a `tmp_dir(tag)` helper. For manual and E2E runs,
+  chamasse `apply_share` … escreveria no estado REAL da máquina"). For manual and E2E runs,
   isolate **both** `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR`. Isolating only one is worse than
   none (AGENTS.md § "Meia-isolação é pior que nenhuma"; [Clone, build and test](build-and-test.md#isolating-the-engines-state)).
+- **A test removes its temporary directory on every exit.** A failed assert, an early `return` and
+  a skipped check are exits too, so the removal lives in a guard with `Drop`, not in a line at the
+  end: hold the directory in a `tempfile::TempDir` (declared once in the root `Cargo.toml`). A
+  root that a whole test binary shares through `DELONIX_ROOT` uses the lease of
+  `delonix-sdn/tests/network_alloc_race.rs`. A pid-named folder under `temp_dir()` with a
+  `remove_dir_all` at the end is the old idiom, still at 204 sites in test code (2026-09-28):
+  don't copy it. A tree extracted from an image layer can keep `0555` directories, so make them
+  writable before removing it. **Enforced (gate)**: `scripts/tmp_roots_gate.py` fails the `test`
+  job on anything left in its `TMPDIR`; the baseline has been empty since #572.
 - **A regression test must fail with the fix reverted.** Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that `1` couldn't distinguish; a chaos scenario that stayed green with a

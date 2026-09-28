@@ -1016,10 +1016,18 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>Tests never touch the host's real state.</strong> Give stores a temporary root. Don't call code that
   resolves the real state root. Don't <code>set_var</code> (the <code>env_writes</code> ratchet, <a href="#41-the-layers-and-the-direction">§4.1</a>).
   <strong>Decided</strong>: AGENTS.md § "IaC nativo", the <code>ShareVolume</code> fusion note ("Nota de método: um teste que
-  chamasse <code>apply_share</code> … escreveria no estado REAL da máquina"). <strong>Convention (observed)</strong>:
-  <code>delonix-state/src/store.rs</code> tests use a <code>tmp_dir(tag)</code> helper. For manual and E2E runs,
+  chamasse <code>apply_share</code> … escreveria no estado REAL da máquina"). For manual and E2E runs,
   isolate <strong>both</strong> <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code>. Isolating only one is worse than
   none (AGENTS.md § "Meia-isolação é pior que nenhuma"; <a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>).</li>
+<li><strong>A test removes its temporary directory on every exit.</strong> A failed assert, an early <code>return</code> and
+  a skipped check are exits too, so the removal lives in a guard with <code>Drop</code>, not in a line at the
+  end: hold the directory in a <code>tempfile::TempDir</code> (declared once in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>). A
+  root that a whole test binary shares through <code>DELONIX_ROOT</code> uses the lease of
+  <code>delonix-sdn/tests/network_alloc_race.rs</code>. A pid-named folder under <code>temp_dir()</code> with a
+  <code>remove_dir_all</code> at the end is the old idiom, still at 204 sites in test code (2026-09-28):
+  don't copy it. A tree extracted from an image layer can keep <code>0555</code> directories, so make them
+  writable before removing it. <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fails the <code>test</code>
+  job on anything left in its <code>TMPDIR</code>; the baseline has been empty since #572.</li>
 <li><strong>A regression test must fail with the fix reverted.</strong> Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that <code>1</code> couldn't distinguish; a chaos scenario that stayed green with a
