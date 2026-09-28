@@ -7790,3 +7790,32 @@ backends estes métodos recusam por nome (DX-1501).
 - **O perímetro por `/cluster/firewall` NÃO foi feito**: o ADR-0049 D3 exclui essas escritas
   como administração do provider, e as regras de datacenter guardam os NÓS, não as VMs. Só
   entrou a leitura `GET /cluster/firewall/options`.
+
+## `workload.usage` no `delonix-mcp` — contadores, não taxas (2026-09-27)
+
+Uma tool de leitura nova no servidor MCP: uma amostra dos contadores CUMULATIVOS de cada
+container (leaf de cgroup) e de cada VM local (o processo do VMM, por `/proc`), com os tectos
+em vigor. O módulo é `delonix_linux::usage`; a tool só monta as linhas.
+
+- **O motor não guarda histórico, e a tool não finge que guarda.** É daemonless: nada está
+  acordado entre dois comandos para registar uma série. Devolve o que o kernel já conta
+  (`cpu.stat usage_usec`, `io.stat`, `utime+stime`) e o `process_started_at_unix` do dono dos
+  contadores. Quem amostra duas vezes tem uma taxa; quem vê essa hora mudar sabe que os
+  contadores recomeçaram e não subtrai através dela. Janela, quantis e retenção são de quem
+  guarda as amostras.
+- **Um número em falta vem em `unmeasured`, com a razão, nunca como zero.** Num leaf rootless
+  sem `io` delegado o `io.stat` não existe, e a razão diz isso. Um `io.stat` vazio é um zero
+  verdadeiro (nada lido ainda) e é devolvido como zero.
+- **Duas bases, e não são a mesma grandeza** (`basis`): `cgroup` para um container,
+  `vmm_process` para uma VM. A memória de uma VM é o resident set do VMM neste host, não o uso
+  do convidado; a linha diz isso em `limitations`. VMs libvirt e remotas não têm pid registado
+  e aparecem como `sampled: false` com o backend nomeado.
+- **A identidade do pid é verificada** (`is_live`: pid + `starttime`). Um pid reciclado não é
+  amostrado — sem isto a tool reportaria um processo alheio como o VMM.
+- **Rede só a pedido** (`include_network`): custa um `nsenter` por container.
+- **Validado ao vivo** (root isolado, os dois roots): um container com `--cpus 0.5` a queimar
+  CPU deu **0,498 cores** entre duas amostras com 3 s de intervalo, `cpu.max 50000/100000` e
+  `memory.max` de 64 MiB lidos do cgroup real; I/O em `unmeasured` porque este host não delega
+  `io`. **Não validado ao vivo**: uma VM Cloud Hypervisor real (o caminho do VMM está coberto
+  por testes com `/proc` falso e com o próprio processo de teste) e a rede de um container
+  numa rede custom.
