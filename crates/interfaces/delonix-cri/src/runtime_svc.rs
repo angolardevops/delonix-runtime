@@ -642,15 +642,8 @@ mod tests {
         // logo o resultado certo depende da máquina onde o teste corre, e um
         // literal aqui só pode estar certo por acaso.
         let st = delonix_sdn::infra::status();
-        let base = std::env::temp_dir().join(format!(
-            "delonix-cri-status-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let base_dir = tempfile::tempdir().unwrap();
+        let base = base_dir.path().to_path_buf();
         let streamer = crate::streaming::Streamer::new(base.clone(), "127.0.0.1:0".to_string());
         let svc = DelonixRuntime::new(base.clone(), streamer, crate::CapCeiling::unlimited());
 
@@ -718,8 +711,6 @@ mod tests {
             esperado,
             "uma condição verdadeira não tem razão de falha, e uma falsa tem de a dar"
         );
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A regra que decide `NetworkReady`, isolada do ambiente.

@@ -347,9 +347,8 @@ mod tests {
     /// and the digest are those of the whole blob.
     #[test]
     fn a_resumed_blob_continues_after_the_prefix_on_disk() {
-        let dir = std::env::temp_dir().join(format!("delonix-cas-resume-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("img.download");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("img.download");
         let whole: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
         let cut = 1_234_567;
         fs::write(&path, &whole[..cut]).unwrap();
@@ -359,19 +358,17 @@ mod tests {
         blob.append(&whole[cut..]).unwrap();
         assert_eq!(blob.finish().unwrap(), sha256_hex(&whole));
         assert_eq!(fs::read(&path).unwrap(), whole);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn size_and_head_do_not_need_the_whole_blob() {
-        let dir = std::env::temp_dir().join(format!("delonix-cas-head-{}", std::process::id()));
-        let cas = Cas::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let cas = Cas::open(dir.path()).unwrap();
         let dg = cas.write(&[0x1f, 0x8b, 7, 7, 7, 7]).unwrap();
         assert_eq!(cas.size(&dg).unwrap(), 6);
         assert_eq!(cas.head(&dg, 4).unwrap(), vec![0x1f, 0x8b, 7, 7]);
         // Shorter than asked: returns what there is, never an error.
         assert_eq!(cas.head(&dg, 64).unwrap().len(), 6);
         assert!(cas.size("sha256:0000").is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

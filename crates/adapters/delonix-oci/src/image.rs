@@ -344,11 +344,9 @@ pub use delonix_node::now_unix;
 mod tests {
     use super::*;
 
-    fn store(tag: &str) -> (ImageStore, std::path::PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("delonix-image-save-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        (ImageStore::open(&dir).unwrap(), dir)
+    fn store() -> (ImageStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (ImageStore::open(dir.path()).unwrap(), dir)
     }
 
     fn image(id: &str, tags: &[&str], created: u64) -> Image {
@@ -366,7 +364,7 @@ mod tests {
     /// its bytes.
     #[test]
     fn an_unchanged_record_is_not_rewritten() {
-        let (s, dir) = store("same");
+        let (s, _dir) = store();
         assert!(s
             .save_if_changed(&image("sha256:01", &["a:1"], 100))
             .unwrap());
@@ -376,7 +374,6 @@ mod tests {
             .save_if_changed(&image("sha256:01", &["a:1"], 200))
             .unwrap());
         assert_eq!(fs::read(&path).unwrap(), before);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A record that DID change is written, and the tag still moves off any
@@ -384,7 +381,7 @@ mod tests {
     /// there is nothing to move.
     #[test]
     fn a_changed_record_is_written_and_its_tag_still_moves() {
-        let (s, dir) = store("moved");
+        let (s, _dir) = store();
         s.save_if_changed(&image("sha256:01", &["app:v1"], 1))
             .unwrap();
         assert!(s
@@ -395,21 +392,19 @@ mod tests {
             !s.record_path("sha256:01").exists(),
             "the image left with no tag must be gone"
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// `save` leaves no scratch file behind.
     #[test]
     fn save_leaves_no_scratch_file() {
-        let (s, dir) = store("tmp");
+        let (s, dir) = store();
         s.save(&image("sha256:01", &["a:1"], 1)).unwrap();
-        let stray: Vec<_> = fs::read_dir(dir.join("images"))
+        let stray: Vec<_> = fs::read_dir(dir.path().join("images"))
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .filter(|n| n.ends_with(".tmp"))
             .collect();
         assert!(stray.is_empty(), "{stray:?}");
-        let _ = fs::remove_dir_all(&dir);
     }
 }

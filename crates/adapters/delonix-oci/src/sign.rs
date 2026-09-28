@@ -410,15 +410,8 @@ mod tests {
     #[test]
     fn ensure_signing_key_generates_once_then_persists() {
         use ring::signature::KeyPair;
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-signkey-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let path = dir.join("nested").join("image-signing.key");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("image-signing.key");
 
         let first = ensure_signing_key(&path).unwrap();
         let point1 = first.public_key().as_ref().to_vec();
@@ -436,8 +429,6 @@ mod tests {
             point1, point2,
             "loading an existing key must not regenerate it"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -462,20 +453,13 @@ mod tests {
         use crate::registry::{push_oci_artifact, serve_anon_registry};
         use ring::signature::KeyPair;
         let (port, _blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "dlx-image-sign-e2e-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let reference = format!("127.0.0.1:{port}/repo:tag");
-        let key_path = tmp.join("keys").join("image-signing.key");
+        let key_path = tmp.path().join("keys").join("image-signing.key");
 
         // an artifact has to exist before it can be signed.
-        push_oci_artifact(&tmp, &reference, "application/octet-stream", b"hello").unwrap();
+        push_oci_artifact(tmp.path(), &reference, "application/octet-stream", b"hello").unwrap();
 
         let (digest, pubkey_path) = sign_image(&store, &reference, &key_path, false).unwrap();
         assert!(pubkey_path.ends_with("image-signing.pub"));
@@ -499,11 +483,9 @@ mod tests {
         );
 
         // a DIFFERENT key must not verify this signature.
-        let other_key_path = tmp.join("keys").join("other.key");
+        let other_key_path = tmp.path().join("keys").join("other.key");
         let other_kp = ensure_signing_key(&other_key_path).unwrap();
         let other_pubkey_pem = p256_point_to_pem(other_kp.public_key().as_ref()).unwrap();
         assert!(verify_signature(&store, &reference, &other_pubkey_pem).is_err());
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

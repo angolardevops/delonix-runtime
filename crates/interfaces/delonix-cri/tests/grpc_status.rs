@@ -28,8 +28,8 @@ fn sock_curto() -> String {
 async fn o_status_chega_pelo_transporte_grpc_a_serio() {
     let sock = sock_curto();
     let _ = std::fs::remove_file(&sock);
-    let base = std::env::temp_dir().join(format!("dlx-grpc-base-{}", std::process::id()));
-    std::fs::create_dir_all(&base).unwrap();
+    let base_dir = tempfile::tempdir().unwrap();
+    let base = base_dir.path().to_path_buf();
 
     // O servidor corre numa thread própria (o `serve_blocking` tem o seu runtime).
     let s = sock.clone();
@@ -144,7 +144,6 @@ async fn o_status_chega_pelo_transporte_grpc_a_serio() {
 
     drop(cli);
     let _ = std::fs::remove_file(&sock);
-    let _ = std::fs::remove_dir_all(&base);
     // O servidor não tem paragem limpa (é um `serve_blocking`); o processo de
     // teste termina e leva-o. Não se faz `join`, que penduraria.
     drop(servidor);

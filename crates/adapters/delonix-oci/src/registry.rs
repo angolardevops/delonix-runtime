@@ -3003,20 +3003,12 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = serve_one(tx, answer);
         let port = rx.recv().unwrap();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-denied-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let err =
             pull_from_registry_with_creds(&store, &format!("127.0.0.1:{port}/repo:tag"), None)
                 .expect_err("the token was not granted");
         let _ = handle.join();
-        let _ = std::fs::remove_dir_all(&tmp);
         err.into()
     }
 
@@ -3051,15 +3043,8 @@ mod tests {
         );
         let port = rx.recv().unwrap();
 
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-pull-creds-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         // WITHOUT a local `delonix login` (auth.json does not exist) — if the precedence
         // were wrong (override ignored, only local lookup), the captured
         // Authorization would be None (no creds at all).
@@ -3082,27 +3067,17 @@ mod tests {
                 .contains(&format!("basic {}", expected_b64.to_lowercase())),
             "Authorization capturado não usa as credenciais do override: {auth:?}"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn push_e_pull_oci_artifact_round_trip() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-artifact-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         let target = format!("127.0.0.1:{port}/vm-images:golden");
         let payload = b"qcow2-conteudo-fingido-para-o-teste".to_vec();
         let digest = push_oci_artifact(
-            &tmp,
+            tmp.path(),
             &target,
             "application/vnd.delonix.vmimage.v1.qcow2",
             &payload,
@@ -3111,10 +3086,8 @@ mod tests {
         assert!(digest.starts_with("sha256:"));
 
         let pulled =
-            pull_oci_artifact(&tmp, &target).expect("pull devia ter sucesso contra o mock");
+            pull_oci_artifact(tmp.path(), &target).expect("pull devia ter sucesso contra o mock");
         assert_eq!(pulled, payload);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// BUG FIXED, found live (host kaeso-sys-01): `pull_from_registry_with_creds`
@@ -3126,15 +3099,7 @@ mod tests {
     #[test]
     fn pull_from_registry_with_creds_salta_blobs_ja_no_cas() {
         let (port, blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-cas-skip-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         // `pull_from_registry_with_creds` parses the config blob as a REAL
         // `oci_spec::image::ImageConfiguration` (requires `architecture`/`os`)
@@ -3176,7 +3141,7 @@ mod tests {
         .unwrap();
 
         let target = format!("127.0.0.1:{port}/cas-skip:tag");
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let img1 = pull_from_registry_with_creds(&store, &target, None)
             .expect("1º pull devia ter sucesso");
         let gets_after_first = blob_gets.load(std::sync::atomic::Ordering::SeqCst);
@@ -3194,21 +3159,10 @@ mod tests {
             "o 2º pull não devia ter pedido NENHUM blob novo — já estavam no CAS local"
         );
         assert_eq!(img1.id, img2.id);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "delonix-oci-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn scratch() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
     }
 
     /// The manifest of a push is now built from each blob's SIZE (metadata)
@@ -3219,8 +3173,8 @@ mod tests {
     #[test]
     fn push_manifest_from_metadata_round_trips() {
         let (port, _gets, _handle) = serve_anon_registry();
-        let src = scratch("push-meta-src");
-        let store = crate::ImageStore::open(&src).unwrap();
+        let src = scratch();
+        let store = crate::ImageStore::open(src.path()).unwrap();
         let config =
             br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#;
         let id = store.cas().write(config).unwrap();
@@ -3258,16 +3212,14 @@ mod tests {
 
         let target = format!("127.0.0.1:{port}/meta:t");
         crate::registry::push_to_registry(&store, "local/meta:t", &target).expect("push");
-        let dst = scratch("push-meta-dst");
-        let store2 = crate::ImageStore::open(&dst).unwrap();
+        let dst = scratch();
+        let store2 = crate::ImageStore::open(dst.path()).unwrap();
         let pulled = pull_from_registry_with_creds(&store2, &target, None).expect("pull");
         assert_eq!(pulled.id, id);
         assert_eq!(pulled.layers, layers);
         for (i, dg) in layers.iter().enumerate() {
             assert_eq!(store2.cas().read(dg).unwrap(), blobs[i]);
         }
-        let _ = std::fs::remove_dir_all(&src);
-        let _ = std::fs::remove_dir_all(&dst);
     }
 
     /// The config is now fetched on its own thread alongside the layers. Its
@@ -3301,15 +3253,14 @@ mod tests {
         )
         .unwrap();
 
-        let tmp = scratch("tamper");
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let tmp = scratch();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let err =
             pull_from_registry_with_creds(&store, &format!("127.0.0.1:{port}/tamper:t"), None)
                 .expect_err("a config that does not match its digest must be refused");
         assert!(err.to_string().contains("config digest mismatch"), "{err}");
         assert!(!store.cas().has(&config_digest));
         assert!(store.list().unwrap().is_empty());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Gate for the fixed 300s whole-request ceiling on container-image
@@ -3340,13 +3291,13 @@ mod tests {
         u16,
         std::sync::Arc<std::sync::atomic::AtomicUsize>,
         String,
-        std::path::PathBuf,
+        tempfile::TempDir,
     ) {
         let (port, gets, _h) = serve_anon_registry();
-        let dir = scratch(tag);
+        let dir = scratch();
         let target = format!("127.0.0.1:{port}/vm:{tag}");
         push_oci_artifact(
-            &dir,
+            dir.path(),
             &target,
             "application/vnd.delonix.vmimage.v1.qcow2",
             payload,
@@ -3369,21 +3320,21 @@ mod tests {
     #[test]
     fn a_vm_artifact_streams_to_its_file_and_is_not_pulled_twice() {
         let payload: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
-        let (_p, gets, target, dir) = artifact_fixture("to-file", &payload);
+        let (_p, gets, target, tmp) = artifact_fixture("to-file", &payload);
+        let dir = tmp.path();
         let dest = dir.join("img.qcow2");
 
-        let a = crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        let a = crate::registry::pull_oci_artifact_to_file(dir, &target, &dest, None).unwrap();
         assert!(a.downloaded);
         assert_eq!(a.size, payload.len() as u64);
         assert_eq!(a.digest, format!("sha256:{}", sha256_hex(&payload)));
         assert_eq!(std::fs::read(&dest).unwrap(), payload);
-        assert!(leftovers(&dir).is_empty());
+        assert!(leftovers(dir).is_empty());
 
         let before = gets.load(std::sync::atomic::Ordering::SeqCst);
-        let b = crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        let b = crate::registry::pull_oci_artifact_to_file(dir, &target, &dest, None).unwrap();
         assert!(!b.downloaded, "the file already held this exact blob");
         assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), before);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A partial left WHOLE by a process that died before the rename is
@@ -3393,7 +3344,8 @@ mod tests {
     fn a_partial_from_an_earlier_process_is_resumed_or_discarded() {
         let payload: Vec<u8> = (0..150_000u32).map(|i| (i % 241) as u8).collect();
         let hex = sha256_hex(&payload);
-        let (_p, gets, target, dir) = artifact_fixture("resume-file", &payload);
+        let (_p, gets, target, tmp) = artifact_fixture("resume-file", &payload);
+        let dir = tmp.path();
         let dest = dir.join("img.qcow2");
         let partial = dir.join(format!("img.qcow2.{}.download", &hex[..12]));
         let stale = dir.join("img.qcow2.aaaaaaaaaaaa.download");
@@ -3401,17 +3353,16 @@ mod tests {
         std::fs::write(&partial, &payload).unwrap();
         std::fs::write(&stale, b"an older version").unwrap();
         let before = gets.load(std::sync::atomic::Ordering::SeqCst);
-        crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        crate::registry::pull_oci_artifact_to_file(dir, &target, &dest, None).unwrap();
         assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), before);
         assert_eq!(std::fs::read(&dest).unwrap(), payload);
-        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+        assert!(leftovers(dir).is_empty(), "{:?}", leftovers(dir));
 
         std::fs::remove_file(&dest).unwrap();
         std::fs::write(&partial, vec![0xEEu8; 1000]).unwrap();
-        crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        crate::registry::pull_oci_artifact_to_file(dir, &target, &dest, None).unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), payload);
-        assert!(leftovers(&dir).is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leftovers(dir).is_empty());
     }
 
     /// Bytes that do not hash to the manifest's digest: refused, nothing under
@@ -3440,10 +3391,11 @@ mod tests {
             "application/vnd.oci.image.manifest.v1+json",
         )
         .unwrap();
-        let dir = scratch("vm-tamper");
+        let tmp = scratch();
+        let dir = tmp.path();
         let dest = dir.join("img.qcow2");
         let err = crate::registry::pull_oci_artifact_to_file(
-            &dir,
+            dir,
             &format!("127.0.0.1:{port}/vm:bad"),
             &dest,
             None,
@@ -3451,8 +3403,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, crate::Error::DigestMismatch(_)), "{err}");
         assert!(!dest.exists());
-        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leftovers(dir).is_empty(), "{:?}", leftovers(dir));
     }
 
     /// A VM image pushed straight from its file arrives whole, and the
@@ -3460,14 +3411,15 @@ mod tests {
     #[test]
     fn a_vm_artifact_pushed_from_its_file_round_trips() {
         let (port, _gets, _h) = serve_anon_registry();
-        let dir = scratch("push-file");
+        let tmp = scratch();
+        let dir = tmp.path();
         let src = dir.join("img.qcow2");
         let payload: Vec<u8> = (0..300_000u32).map(|i| (i % 239) as u8).collect();
         std::fs::write(&src, &payload).unwrap();
         let target = format!("127.0.0.1:{port}/vm:from-file");
 
         crate::registry::push_oci_artifact_file(
-            &dir,
+            dir,
             &target,
             "application/vnd.delonix.vmimage.v1.qcow2",
             &src,
@@ -3476,11 +3428,9 @@ mod tests {
         )
         .expect("push from file");
         let dest = dir.join("back.qcow2");
-        let pulled =
-            crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        let pulled = crate::registry::pull_oci_artifact_to_file(dir, &target, &dest, None).unwrap();
         assert_eq!(pulled.size, payload.len() as u64);
         assert_eq!(std::fs::read(&dest).unwrap(), payload);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A registry that answers the first blob PUT with 401 makes the push
@@ -3575,7 +3525,8 @@ mod tests {
             }
         });
 
-        let dir = scratch("put-401");
+        let tmp = scratch();
+        let dir = tmp.path();
         let path = dir.join("blob");
         let payload: Vec<u8> = (0..500_000u32).map(|i| (i % 211) as u8).collect();
         std::fs::write(&path, &payload).unwrap();
@@ -3589,7 +3540,6 @@ mod tests {
         let (_, auth, body) = &puts[1];
         assert_eq!(auth.as_deref(), Some("bearer tok"));
         assert_eq!(body, &payload, "the retry must carry the whole file again");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// What the scripted registry does with the n-th blob PUT.
@@ -3721,14 +3671,14 @@ mod tests {
             slot: 0,
         });
         let (port, puts) = serve_scripted_push(script);
-        let dir = scratch("push-retry");
+        let tmp = scratch();
+        let dir = tmp.path();
         let path = dir.join("blob");
         let payload = vec![5u8; 200_000];
         std::fs::write(&path, &payload).unwrap();
         let digest = format!("sha256:{}", sha256_hex(&payload));
         let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
         let res = c.push_blob_file(&digest, &path, payload.len() as u64, meter.as_ref());
-        let _ = std::fs::remove_dir_all(&dir);
         let seen = reports.lock().unwrap().clone();
         (res, puts.load(std::sync::atomic::Ordering::SeqCst), seen)
     }
@@ -3886,15 +3836,7 @@ mod tests {
     #[test]
     fn pull_oci_artifact_recusa_blob_adulterado() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-artifact-tamper-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         let target = format!("127.0.0.1:{port}/vm-images:golden");
         let payload = b"conteudo-original-legitimo".to_vec();
@@ -3902,7 +3844,7 @@ mod tests {
         // we need to tamper with is the blob (the same `layer_digest` the pull will fetch).
         let layer_digest = format!("sha256:{}", sha256_hex(&payload));
         push_oci_artifact(
-            &tmp,
+            tmp.path(),
             &target,
             "application/vnd.delonix.vmimage.v1.qcow2",
             &payload,
@@ -3924,11 +3866,9 @@ mod tests {
             .unwrap();
         assert!(resp.status().is_success());
 
-        let err =
-            pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
+        let err = pull_oci_artifact(tmp.path(), &target)
+            .expect_err("pull devia recusar o blob adulterado");
         assert!(format!("{err}").contains("tampered") || format!("{err}").contains("digest"));
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Security-audit finding (ALTO): a digest-pinned pull (`repo@sha256:...`) must
@@ -3941,15 +3881,7 @@ mod tests {
     #[test]
     fn pull_por_digest_recusa_manifesto_substituido() {
         let (port, blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-manifest-pin-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         // A well-formed manifest the attacker WOULD serve (points at their own blobs).
         let mut c = test_client(&format!("127.0.0.1:{port}"), "pin");
@@ -3984,7 +3916,7 @@ mod tests {
         .unwrap();
 
         let target = format!("127.0.0.1:{port}/pin@{pinned}");
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let err = pull_from_registry_with_creds(&store, &target, None)
             .expect_err("pull por digest devia recusar um manifesto que não corresponde ao pin");
         let msg = format!("{err}");
@@ -3998,8 +3930,6 @@ mod tests {
             0,
             "não devia ter pedido nenhum blob antes de validar o manifesto"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The positive half: pulling by the CORRECT digest passes the new manifest
@@ -4007,15 +3937,7 @@ mod tests {
     #[test]
     fn pull_por_digest_correto_passa_a_verificacao_do_manifesto() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-manifest-pin-ok-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         let mut c = test_client(&format!("127.0.0.1:{port}"), "pinok");
         let config_bytes =
@@ -4043,11 +3965,9 @@ mod tests {
         .unwrap();
 
         let target = format!("127.0.0.1:{port}/pinok@{real_digest}");
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         pull_from_registry_with_creds(&store, &target, None)
             .expect("pull pelo digest correcto devia passar a verificação do manifesto");
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Deterministic round-trip of the MANIFEST through the `oci_spec::image` types
@@ -4323,14 +4243,13 @@ mod tests {
             let digest = format!("sha256:{}", sha256_hex(&payload));
             let (port, _) = serve_flaky_blob(payload.clone(), cut, mode);
             let mut c = test_client(&format!("127.0.0.1:{port}"), "stream");
-            let dir = scratch("stream-cas");
-            let cas = crate::cas::Cas::open(&dir).unwrap();
+            let dir = scratch();
+            let cas = crate::cas::Cas::open(dir.path()).unwrap();
 
             c.blob_into_cas(&cas, &digest, None)
                 .expect("the cut download must end up whole in the CAS");
             assert_eq!(cas.read(&digest).unwrap(), payload);
             assert!(scratch_files(&cas).is_empty(), "{:?}", scratch_files(&cas));
-            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 
@@ -4341,15 +4260,14 @@ mod tests {
         let payload = b"what the registry actually sent".to_vec();
         let (port, _) = serve_flaky_blob(payload.clone(), 5, Resume::Honour);
         let mut c = test_client(&format!("127.0.0.1:{port}"), "tamper-layer");
-        let dir = scratch("stream-tamper");
-        let cas = crate::cas::Cas::open(&dir).unwrap();
+        let dir = scratch();
+        let cas = crate::cas::Cas::open(dir.path()).unwrap();
         let claimed = format!("sha256:{}", sha256_hex(b"what the manifest promised"));
 
         let err = c.blob_into_cas(&cas, &claimed, None).unwrap_err();
         assert!(matches!(err, crate::Error::DigestMismatch(_)), "{err}");
         assert!(!cas.has(&claimed));
         assert!(scratch_files(&cas).is_empty(), "{:?}", scratch_files(&cas));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The progress callback reports the RUNNING TOTAL for the blob, and both
@@ -4393,15 +4311,7 @@ mod tests {
     #[test]
     fn o_progresso_agregado_do_pull_nao_inventa_bytes() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-oci-progress-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
 
         let mut c = test_client(&format!("127.0.0.1:{port}"), "progresso-agregado");
         let config_bytes =
@@ -4435,7 +4345,7 @@ mod tests {
         )
         .unwrap();
 
-        let store = crate::ImageStore::open(&tmp).unwrap();
+        let store = crate::ImageStore::open(tmp.path()).unwrap();
         let peak = std::sync::atomic::AtomicU64::new(0);
         let cb = |_l: usize, _lt: usize, done: u64, _t: Option<u64>| {
             peak.fetch_max(done, std::sync::atomic::Ordering::Relaxed);
@@ -4456,7 +4366,6 @@ mod tests {
             "o agregado tem de ser os bytes REALMENTE transferidos (a layer), \
              não a soma dos totais parciais"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 
