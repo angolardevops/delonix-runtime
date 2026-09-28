@@ -22,11 +22,16 @@ leak has the same name on every run, and compared with
   (`--update`). Counted with `<=`, the debt would read green forever.
 
 The baseline is what the HOSTED runner leaves, and a test's leak can depend on
-the host: `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` returns early
-when `qemu-img` is missing and skips its cleanup, so the runner leaves one entry
-a workstation with `qemu-img` does not (measured 2026-09-28: 30 on the runner,
-29 locally, the other 29 identical). Compare a local run with `--list`, not
-against the baseline.
+the host: `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` used to return
+early when `qemu-img` was missing and skip its cleanup, so the runner left one
+entry a workstation with `qemu-img` did not (measured 2026-09-28: 30 on the
+runner, 29 locally, the other 29 identical). Compare a local run with `--list`,
+not against the baseline.
+
+The debt was paid the same day: every one of those tests now holds its temp dir
+in a guard that removes it on `Drop` (`tempfile::TempDir`, or the lease of
+`network_alloc_race.rs` for a root shared by a whole test binary), so the
+baseline is EMPTY and any entry at all is a new leak.
 
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR"            # judge
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR" --list     # show only

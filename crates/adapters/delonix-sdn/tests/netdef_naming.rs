@@ -9,8 +9,10 @@
 //!
 //! Só filesystem: `network_create` não toca em netlink nem em namespaces.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
+/// Names the root and sets `DELONIX_ROOT` once per process; the directory
+/// itself exists while a [`RootLease`] does.
 fn raiz() -> &'static std::path::PathBuf {
     static RAIZ: OnceLock<std::path::PathBuf> = OnceLock::new();
     RAIZ.get_or_init(|| {
@@ -25,13 +27,45 @@ fn raiz() -> &'static std::path::PathBuf {
         // aplicou ao reaper de slirp e ao `kill_pidfile`: uma varredura
         // destrutiva prova que o alvo não está em uso, e duas corridas em
         // paralelo (várias sessões trabalham neste clone) não se destroem.
+        //
+        // The sweep only covers runs that were KILLED; a run that ends normally
+        // removes its own root through the last [`RootLease`].
         limpa_restos_de_corridas_mortas();
         let d = std::env::temp_dir().join(format!("delonix-net-naming-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
         std::env::set_var("DELONIX_ROOT", &d);
         d
     })
+}
+
+/// The same lease as `network_alloc_race.rs` (#567): libtest has no "after all
+/// tests" hook, so the root is removed when the last test USING it drops its
+/// lease — also on panic, because `Drop` runs on unwind. A test that starts
+/// after the count hit zero gets a fresh root; none of these tests reads
+/// another's networks. Before this, every run left its root behind for the
+/// sweep above to find on the NEXT run, so the last run's root never went.
+static LEASES: Mutex<usize> = Mutex::new(0);
+
+struct RootLease(&'static std::path::Path);
+
+fn lease() -> RootLease {
+    let root = raiz();
+    let mut n = LEASES.lock().unwrap_or_else(|e| e.into_inner());
+    if *n == 0 {
+        let _ = std::fs::remove_dir_all(root);
+        std::fs::create_dir_all(root).unwrap();
+    }
+    *n += 1;
+    RootLease(root)
+}
+
+impl Drop for RootLease {
+    fn drop(&mut self) {
+        let mut n = LEASES.lock().unwrap_or_else(|e| e.into_inner());
+        *n -= 1;
+        if *n == 0 {
+            let _ = std::fs::remove_dir_all(self.0);
+        }
+    }
 }
 
 /// Remove as pastas `delonix-net-naming-<pid>` cujo processo já não existe.
@@ -61,7 +95,7 @@ fn dir_de_redes() -> std::path::PathBuf {
 
 #[test]
 fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
-    raiz();
+    let _root = lease();
     let a = delonix_sdn::infra::network_create("producao-alpha").expect("alpha");
     let b = delonix_sdn::infra::network_create("producao-alpine").expect("alpine");
 
@@ -91,7 +125,7 @@ fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
 
 #[test]
 fn remover_uma_nao_destroi_a_vizinha_de_nome_parecido() {
-    raiz();
+    let _root = lease();
     let manter = delonix_sdn::infra::network_create("contabilidade-a").expect("a");
     delonix_sdn::infra::network_create("contabilidade-b").expect("b");
 
@@ -109,7 +143,7 @@ fn remover_uma_nao_destroi_a_vizinha_de_nome_parecido() {
 
 #[test]
 fn remover_um_nome_inexistente_nao_toca_em_nada() {
-    raiz();
+    let _root = lease();
     let antes = delonix_sdn::infra::network_create("logistica-primaria").expect("cria");
     // Partilha os 12 primeiros caracteres com a de cima, e nunca foi criada.
     delonix_sdn::infra::network_remove("logistica-primaria-2");
@@ -119,7 +153,7 @@ fn remover_um_nome_inexistente_nao_toca_em_nada() {
 
 #[test]
 fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
-    raiz();
+    let _root = lease();
     // Um registo escrito pela fórmula ANTIGA (truncada a 12), como está hoje no
     // disco de quem já corre isto. Perdê-lo seria perder a bridge e o /16 de uma
     // rede possivelmente com workloads ligados.
@@ -172,7 +206,7 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
 /// correção; essa são os quatro de cima.
 #[test]
 fn um_registo_de_outra_rede_nao_e_aceite_como_este() {
-    raiz();
+    let _root = lease();
     // Defesa em profundidade: mesmo que dois nomes caiam no mesmo ficheiro, o
     // campo `name` do registo é a autoridade. O resultado é «não existe» — uma
     // recusa — e nunca a rede errada.
