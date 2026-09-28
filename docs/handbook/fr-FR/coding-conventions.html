@@ -1050,8 +1050,9 @@ let c = store.update(id_or_name, |c| match f(c) {
   <code>tempfile::TempDir</code> (déclaré une seule fois dans le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine). Une racine qu'un binaire de
   tests entier partage via <code>DELONIX_ROOT</code> utilise le bail de
   <code>delonix-sdn/tests/network_alloc_race.rs</code>. Un dossier nommé d'après le pid sous <code>temp_dir()</code>
-  avec un <code>remove_dir_all</code> à la fin est l'ancien idiome, encore présent à 204 endroits du code de
-  test (2026-09-28) : ne le copiez pas. Un arbre extrait d'une couche d'image peut garder des
+  avec un <code>remove_dir_all</code> à la fin est l'ancien idiome : ne le copiez pas. Le 2026-09-28, seuls deux tests en
+  créent encore un (dans <code>delonix-proxmox/src/lib.rs</code> et dans le test live opt-in
+  <code>delonix-vm/tests/provider_live.rs</code>). Un arbre extrait d'une couche d'image peut garder des
   répertoires <code>0555</code> : rendez-les inscriptibles avant de le supprimer. <strong>Imposé (gate)</strong> :
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fait échouer le job <code>test</code> pour tout ce qui reste dans son <code>TMPDIR</code> ;
   la baseline est vide depuis #572.</li>
