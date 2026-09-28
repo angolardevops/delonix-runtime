@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:baf3ca276f4debbf4c3a6e405c4849442b3d2062d659f6bc1727edcfb40062c3 -->
+<!-- translated-from: coding-conventions.md sha256:ad6bb03af4e3ac52f5a3a1229e3f49d35b474786a3f79f6f26bab5e49ef41b46 -->
 # 编码规范
 
 **阅读前须知：** [Rust 入门](rust-primer.md)、[架构](architecture.md) 和 [crate 一览](crates.md) —— 下面的规则会按名称引用层（layer）、端口（port）和 crate。
@@ -352,7 +352,7 @@
 - **先纯粹再说。** 把决策放进一个纯函数，把它当作数据来测试。任何需要真实 namespace、cgroup 或网络 holder 的东西，都靠实机验证或 `scripts/e2e.sh` 来验证。**已决定**：`CONTRIBUTING.md`（"Write a unit test for any new pure function"）；AGENTS.md § "IaC nativo"（`reconcile.rs` 是纯粹的，所以能被当作数据来测试）。
 - **命名**：陈述所验证行为的英语句子（见[§3.4](#34-test-names)）。
 - **测试绝不能碰宿主机的真实状态。** 给 store 一个临时根目录。不要调用那些会解析出真实 state root 的代码。不要用 `set_var`（`env_writes` 棘轮，见[§4.1](#41-the-layers-and-the-direction)）。**已决定**：AGENTS.md § "IaC nativo"，`ShareVolume` 合并那条方法论笔记（"Nota de método: um teste que chamasse `apply_share` … escreveria no estado REAL da máquina"）。对手动和 E2E 测试而言，要**同时**隔离 `DELONIX_ROOT` 和 `DELONIX_NET_RUNTIME_DIR`。只隔离一个比一个都不隔离还糟（AGENTS.md § "Meia-isolação é pior que nenhuma"；[克隆、构建与测试](build-and-test.md#isolating-the-engines-state)）。
-- **测试在每一种退出方式下都要删除自己的临时目录。** 断言失败、提前 `return`、被跳过的检查也都是退出，所以删除动作放在一个带 `Drop` 的守卫里，而不是放在最后一行：把目录放进 `tempfile::TempDir`（在根目录的 `Cargo.toml` 里统一声明一次）。整个测试二进制通过 `DELONIX_ROOT` 共享的根目录，使用 `delonix-sdn/tests/network_alloc_race.rs` 里的租约。在 `temp_dir()` 下用 pid 命名目录、最后再 `remove_dir_all` 是旧写法，测试代码里仍有 204 处（2026-09-28）：不要照抄。从镜像层解出来的目录树可能保留 `0555` 的目录，删除前先让它们可写。**强制（gate）**：`scripts/tmp_roots_gate.py` 会因为 `TMPDIR` 里残留的任何东西让 `test` 任务失败；自 #572 起基线为空。
+- **测试在每一种退出方式下都要删除自己的临时目录。** 断言失败、提前 `return`、被跳过的检查也都是退出，所以删除动作放在一个带 `Drop` 的守卫里，而不是放在最后一行：把目录放进 `tempfile::TempDir`（在根目录的 `Cargo.toml` 里统一声明一次）。整个测试二进制通过 `DELONIX_ROOT` 共享的根目录，使用 `delonix-sdn/tests/network_alloc_race.rs` 里的租约。在 `temp_dir()` 下用 pid 命名目录、最后再 `remove_dir_all` 是旧写法：不要照抄。截至 2026-09-28，只剩需要手动启用的在线测试 `delonix-vm/tests/provider_live.rs` 还在这样创建目录。从镜像层解出来的目录树可能保留 `0555` 的目录，删除前先让它们可写。**强制（gate）**：`scripts/tmp_roots_gate.py` 会因为 `TMPDIR` 里残留的任何东西让 `test` 任务失败；自 #572 起基线为空。
 - **一个回归测试必须在修复被回退之后失败。** 把修复回退掉，看着测试失败，再把修复恢复回来。一个在两种情况下都能通过的测试什么都证明不了，AGENTS.md 里记录了好几个这样的例子（一个 `1` 没办法区分开的退出码检查；一个在被回退之后依然是绿色的混沌场景）。**已决定**：AGENTS.md，全篇多处出现"verificado pela regra do repo"，例如 § "IaC nativo"（`stack_converge`）和 § "A bateria mede o `--help`"。
 - **要测试生产环境实际会走的那条路径。** 如果生产环境传的是相对路径，测试也要用相对路径。一个测试是可能把 bug 也一起写进去的。**已决定**：AGENTS.md § "Auditoria sistemática dos 208 subcomandos"（`default_project_name`）。
 - **并发类的 bug 需要一次真实的竞争。** 用线程，再在临界窗口内加一个明确的 sleep。**惯例（观察所得）**：`delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas`。

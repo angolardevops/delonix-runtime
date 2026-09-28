@@ -719,12 +719,10 @@ mod tests_sandbox_pid_identity {
     use delonix_compute::Container;
     use delonix_state::Store;
 
-    fn store_with(tag: &str, pid: Option<i32>, starttime: Option<u64>) -> std::path::PathBuf {
-        let base =
-            std::env::temp_dir().join(format!("dlx-sandbox-pid-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(base.join("containers")).unwrap();
-        let store = Store::open(base.join("containers")).unwrap();
+    fn store_with(pid: Option<i32>, starttime: Option<u64>) -> tempfile::TempDir {
+        let base = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(base.path().join("containers")).unwrap();
+        let store = Store::open(base.path().join("containers")).unwrap();
         let mut c = Container::new(
             "pod-cri-sandbox1".to_string(),
             "pod-cri-sandbox1".to_string(),
@@ -749,9 +747,8 @@ mod tests_sandbox_pid_identity {
     fn a_recycled_pid_is_refused() {
         let mine = std::process::id() as i32;
         let real = delonix_linux::proc_starttime(mine).expect("own starttime is readable");
-        let base = store_with("recycled", Some(mine), Some(real.wrapping_add(1)));
-        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), None);
-        let _ = std::fs::remove_dir_all(&base);
+        let base = store_with(Some(mine), Some(real.wrapping_add(1)));
+        assert_eq!(super::pod_sandbox_pid(base.path(), "sandbox1"), None);
     }
 
     /// The positive path, and it is a real one: same pid, same `starttime`.
@@ -761,9 +758,8 @@ mod tests_sandbox_pid_identity {
     fn the_same_process_is_accepted() {
         let mine = std::process::id() as i32;
         let real = delonix_linux::proc_starttime(mine).expect("own starttime is readable");
-        let base = store_with("same", Some(mine), Some(real));
-        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), Some(mine));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = store_with(Some(mine), Some(real));
+        assert_eq!(super::pod_sandbox_pid(base.path(), "sandbox1"), Some(mine));
     }
 
     /// A record written before `pid_starttime` existed carries `None`, and
@@ -773,25 +769,22 @@ mod tests_sandbox_pid_identity {
     #[test]
     fn a_legacy_record_without_starttime_still_resolves() {
         let mine = std::process::id() as i32;
-        let base = store_with("legacy", Some(mine), None);
-        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), Some(mine));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = store_with(Some(mine), None);
+        assert_eq!(super::pod_sandbox_pid(base.path(), "sandbox1"), Some(mine));
     }
 
     /// A sandbox with no pid at all (created, never started) has no netns.
     #[test]
     fn no_pid_is_none() {
-        let base = store_with("nopid", None, None);
-        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), None);
-        let _ = std::fs::remove_dir_all(&base);
+        let base = store_with(None, None);
+        assert_eq!(super::pod_sandbox_pid(base.path(), "sandbox1"), None);
     }
 
     /// An unknown sandbox is `None`, not a panic — the handler turns it into a
     /// `409 CONFLICT`.
     #[test]
     fn an_unknown_sandbox_is_none() {
-        let base = store_with("unknown", Some(1), None);
-        assert_eq!(super::pod_sandbox_pid(&base, "does-not-exist"), None);
-        let _ = std::fs::remove_dir_all(&base);
+        let base = store_with(Some(1), None);
+        assert_eq!(super::pod_sandbox_pid(base.path(), "does-not-exist"), None);
     }
 }

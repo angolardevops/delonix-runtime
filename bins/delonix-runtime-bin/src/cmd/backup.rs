@@ -1238,8 +1238,8 @@ mod tests {
 
     #[test]
     fn o_plano_poda_a_arvore_do_rootfs_em_vez_de_a_percorrer() {
-        let d = std::env::temp_dir().join(format!("delonix-bk-plan-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         std::fs::create_dir_all(d.join("containers/abc/rootfs/etc")).unwrap();
         std::fs::create_dir_all(d.join("ingress")).unwrap();
         std::fs::create_dir_all(d.join("networks")).unwrap();
@@ -1248,12 +1248,11 @@ mod tests {
         std::fs::write(d.join("ingress/holder.pid"), b"1").unwrap();
         std::fs::write(d.join("networks/dev"), b"210").unwrap();
 
-        let p = plan(&d, &Scope::default()).unwrap();
+        let p = plan(d, &Scope::default()).unwrap();
         assert_eq!(p.include, vec!["containers/abc.json", "networks/dev"]);
         assert_eq!(p.areas.get("containers"), Some(&1));
         assert!(p.skipped.contains_key(&Skip::Rootfs));
         assert!(p.skipped.contains_key(&Skip::Ephemeral));
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Writes a tar.gz with the given `(name, contents)` members.
@@ -1285,10 +1284,8 @@ mod tests {
         // this build never heard of, so refusing on the FIRST unknown member
         // answered "not a delonix backup" — an accusation — instead of the one
         // sentence that tells the operator what to do. Order matters here.
-        let d = std::env::temp_dir().join(format!("delonix-bk-fmt-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let a = d.join("a.tar.gz");
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.tar.gz");
         tarball(
             &a,
             &[
@@ -1301,17 +1298,14 @@ mod tests {
             e.contains("9.9.9") && !e.contains("unknown member"),
             "a recusa tinha de nomear a versão que escreveu o arquivo: {e}"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn um_arquivo_reempacotado_com_ponto_barra_continua_a_ser_lido() {
         // `tar czf … .` heads every member with `./`. Our writer never does, but
         // an unpacked-and-repacked archive is still the operator's backup.
-        let d = std::env::temp_dir().join(format!("delonix-bk-dot-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let a = d.join("a.tar.gz");
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.tar.gz");
         tarball(
             &a,
             &[
@@ -1323,17 +1317,14 @@ mod tests {
         let s = survey(&a).unwrap();
         assert_eq!(s.state, vec!["networks/dev"]);
         assert_eq!(s.volumes, vec!["pgdata"]);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn um_membro_que_nao_e_ficheiro_normal_e_recusado() {
         // A symlink member is a target the restore would have to reason about;
         // the cheapest correct answer is not to have them.
-        let d = std::env::temp_dir().join(format!("delonix-bk-link-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let a = d.join("a.tar.gz");
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.tar.gz");
         {
             let f = std::fs::File::create(&a).unwrap();
             let mut b = tar::Builder::new(flate2::write::GzEncoder::new(
@@ -1358,7 +1349,6 @@ mod tests {
         }
         let e = survey(&a).unwrap_err().to_string();
         assert!(e.contains("regular files"), "{e}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

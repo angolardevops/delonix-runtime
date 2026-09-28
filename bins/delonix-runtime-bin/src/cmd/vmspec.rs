@@ -1408,7 +1408,8 @@ mod tests {
 
     #[test]
     fn locate_builder_walks_up_and_stays_inside_scripts_appliances() {
-        let root = std::env::temp_dir().join(format!("vmspec-builder-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let deep = root.join("images/x");
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::create_dir_all(root.join("scripts/appliances")).unwrap();
@@ -1428,7 +1429,6 @@ mod tests {
             e.contains("build-missing.sh") && e.contains("checkout"),
             "{e}"
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1536,12 +1536,11 @@ mod tests {
     fn locate_prefers_yaml_extension_and_context_file() {
         assert!(locate(Some(Path::new("VMfile")), Path::new(".")).is_none());
         assert!(locate(Some(Path::new("x/ubuntu.yaml")), Path::new(".")).is_some());
-        let d = std::env::temp_dir().join(format!("vmspec-locate-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        assert!(locate(None, &d).is_none());
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        assert!(locate(None, d).is_none());
         std::fs::write(d.join("vm.yaml"), "images: {}").unwrap();
-        assert_eq!(locate(None, &d), Some(d.join("vm.yaml")));
-        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(locate(None, d), Some(d.join("vm.yaml")));
     }
 
     #[test]

@@ -825,9 +825,8 @@ mod tests {
     /// from the old one, and never touches any other key of the same secret.
     #[test]
     fn rotate_gera_valor_diferente_preserva_as_outras_chaves() {
-        let dir =
-            std::env::temp_dir().join(format!("dlx-sec-rotate-preserve-{}", std::process::id()));
-        let store = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SecretStore::open(tmp.path()).unwrap();
         let mut data = BTreeMap::new();
         data.insert("PASSWORD".to_string(), "old-value".to_string());
         data.insert("OTHER".to_string(), "untouched".to_string());
@@ -864,17 +863,14 @@ mod tests {
             Some("old-value")
         );
         assert_eq!(s.data.get("OTHER").map(String::as_str), Some("untouched"));
-
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// A key that does not exist is REFUSED, never created pretending to be
     /// a rotation — the same discipline as `secret unset`.
     #[test]
     fn rotate_recusa_chave_desconhecida() {
-        let dir =
-            std::env::temp_dir().join(format!("dlx-sec-rotate-unknown-{}", std::process::id()));
-        let store = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SecretStore::open(tmp.path()).unwrap();
         let mut data = BTreeMap::new();
         data.insert("PASSWORD".to_string(), "v".to_string());
         store
@@ -898,8 +894,6 @@ mod tests {
         let s = store.load("s").unwrap();
         assert_eq!(s.data.get("PASSWORD").map(String::as_str), Some("v"));
         assert!(!s.data.contains_key("MISSING"));
-
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

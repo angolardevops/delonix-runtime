@@ -3174,17 +3174,6 @@ mod setup_tests {
 mod df_tests {
     use super::*;
 
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "delonix-df-test-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     fn write(path: &std::path::Path, bytes: usize) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, vec![b'x'; bytes]).unwrap();
@@ -3194,7 +3183,8 @@ mod df_tests {
     /// the named list does not know about is still COUNTED, in `other`.
     #[test]
     fn the_rows_account_for_everything_in_the_root() {
-        let root = scratch("closure");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         // Two named areas…
         write(&root.join("blobs/a"), 4096);
         write(&root.join("build-cache/aa/layer.tar"), 8192);
@@ -3202,9 +3192,9 @@ mod df_tests {
         write(&root.join("a-subsystem-invented-tomorrow/data"), 16384);
         write(&root.join("stray.bin"), 2048);
 
-        let rows = df_rows(&root);
+        let rows = df_rows(root);
         let total: u64 = rows.iter().map(|r| r.bytes).sum();
-        let on_disk = dir_size(&root);
+        let on_disk = dir_size(root);
         assert_eq!(
             total, on_disk,
             "the rows sum to {total} and the store holds {on_disk} — some area is not counted"
@@ -3216,7 +3206,6 @@ mod df_tests {
             "what the list does not name has to land in `other`, and {} bytes did",
             other.bytes
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The three areas whose absence was the bug. Named explicitly: a future
@@ -3225,18 +3214,18 @@ mod df_tests {
     /// the operator, who would stop seeing WHICH thing is eating the disk.
     #[test]
     fn the_three_areas_that_were_missing_have_their_own_row() {
-        let root = scratch("named");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         for d in ["vms", "build-cache", "images-build"] {
             write(&root.join(d).join("f"), 1024);
         }
-        let rows = df_rows(&root);
+        let rows = df_rows(root);
         for label in ["VM disks", "build cache", "image builds"] {
             let row = rows.iter().find(|r| r.label == label).unwrap_or_else(|| {
                 panic!("`{label}` no longer has a row of its own in `system df`")
             });
             assert!(row.bytes >= 1024, "`{label}` measured {} bytes", row.bytes);
         }
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// An empty root is not an error, and every area still has a row: a table
@@ -3244,8 +3233,9 @@ mod df_tests {
     /// look the same.
     #[test]
     fn an_empty_root_still_prints_every_area() {
-        let root = scratch("empty");
-        let rows = df_rows(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let rows = df_rows(root);
         assert_eq!(rows.len(), DF_AREAS.len() + 1);
         assert!(rows.iter().all(|r| r.bytes == 0));
         // …and none of them as a lower bound: a directory that was never
@@ -3258,6 +3248,5 @@ mod df_tests {
                 .map(|r| r.label.as_str())
                 .collect::<Vec<_>>()
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -693,23 +693,26 @@ mod tests {
                 .unwrap();
             b.finish().unwrap();
         }
-        let dir = std::env::temp_dir().join(format!("delonix-flat-ro-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        apply_layer_flat(&buf, &dir).unwrap();
-        assert!(
-            dir.join("ro/libc.so.6").exists(),
-            "ficheiro dentro de directório read-only tem de ser extraído (bug rootless)"
-        );
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        apply_layer_flat(&buf, dir).unwrap();
+        let extracted = dir.join("ro/libc.so.6").exists();
         let mode = std::fs::metadata(dir.join("ro"))
             .unwrap()
             .permissions()
             .mode();
+        // Writable again BEFORE the asserts: on a regression `ro/` keeps 0555
+        // and the guard could not remove what is inside it.
+        let _ = std::fs::set_permissions(dir.join("ro"), std::fs::Permissions::from_mode(0o755));
+        assert!(
+            extracted,
+            "ficheiro dentro de directório read-only tem de ser extraído (bug rootless)"
+        );
         assert!(
             mode & 0o200 != 0,
             "o directório tem de ficar gravável pelo dono (fix)"
         );
-        std::fs::remove_dir_all(&dir).ok();
+        tmp.close().unwrap();
     }
 
     /// Regression B.3 (Kind): a `0o644` directory (write WITHOUT execute — e.g.
@@ -736,20 +739,23 @@ mod tests {
                 .unwrap();
             b.finish().unwrap();
         }
-        let dir = std::env::temp_dir().join(format!("delonix-flat-nox-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        apply_layer_flat(&buf, &dir).unwrap();
-        assert!(
-            dir.join("cfgdir/config.toml").exists(),
-            "ficheiro num dir 0644 (sem x) tem de ser extraído (regressão Kind/containerd)"
-        );
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        apply_layer_flat(&buf, dir).unwrap();
+        let extracted = dir.join("cfgdir/config.toml").exists();
         let mode = std::fs::metadata(dir.join("cfgdir"))
             .unwrap()
             .permissions()
             .mode();
+        // Same as above: without w+x on `cfgdir/` the guard cannot empty it.
+        let _ =
+            std::fs::set_permissions(dir.join("cfgdir"), std::fs::Permissions::from_mode(0o755));
+        assert!(
+            extracted,
+            "ficheiro num dir 0644 (sem x) tem de ser extraído (regressão Kind/containerd)"
+        );
         assert_eq!(mode & 0o300, 0o300, "o dir tem de ficar com w+x do dono");
-        std::fs::remove_dir_all(&dir).ok();
+        tmp.close().unwrap();
     }
 
     /// Builds a tar with one file and returns the bytes.
@@ -831,10 +837,8 @@ mod tests {
     /// engine.
     #[test]
     fn publish_layer_dir_replaces_a_stale_dir_with_no_marker() {
-        let root =
-            std::env::temp_dir().join(format!("delonix-publish-stale-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
 
         // The stale, pre-existing `dir`: has content, but never got a valid
         // `.extracted` marker — a partial extraction from a crashed run, or
@@ -871,18 +875,14 @@ mod tests {
             !tmp.exists(),
             "the source tmp dir is consumed by the rename"
         );
-
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// The ordinary case (no prior `dir` at all) must keep working exactly as
     /// before — this is the path every FIRST extraction of an image takes.
     #[test]
     fn publish_layer_dir_handles_a_dir_that_never_existed() {
-        let root =
-            std::env::temp_dir().join(format!("delonix-publish-fresh-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
 
         let dir = root.join("layerhash");
         let tmp = root.join(".layerhash.1234.tmp");
@@ -892,8 +892,6 @@ mod tests {
         publish_layer_dir(&tmp, &dir).expect("publish must succeed when dir never existed");
         assert!(dir.join("file.txt").exists());
         assert!(!tmp.exists());
-
-        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -902,8 +900,8 @@ mod tests {
         let zstd_bytes = zstd::encode_all(&tar[..], 0).unwrap();
         assert_eq!(&zstd_bytes[..4], &[0x28, 0xb5, 0x2f, 0xfd]); // zstd magic
 
-        let dir = std::env::temp_dir().join(format!("delonix-zstd-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("layer");
         std::fs::create_dir_all(&dir).unwrap();
         extract_layer(&zstd_bytes, &dir).unwrap();
         assert_eq!(
@@ -926,7 +924,6 @@ mod tests {
             std::fs::read_to_string(dir.join("hello.txt")).unwrap(),
             "camada"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 }
 
@@ -951,10 +948,9 @@ mod parallel_extract_tests {
         gz
     }
 
-    fn store(tag: &str) -> (ImageStore, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("delonix-par-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        (ImageStore::open(&dir).unwrap(), dir)
+    fn store() -> (ImageStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (ImageStore::open(dir.path()).unwrap(), dir)
     }
 
     fn image(layers: Vec<String>) -> Image {
@@ -983,7 +979,8 @@ mod parallel_extract_tests {
     /// its own layer's file, and no scratch directory is left behind.
     #[test]
     fn parallel_extraction_keeps_the_image_order_and_each_layers_content() {
-        let (s, root) = store("order");
+        let (s, tmp) = store();
+        let root = tmp.path();
         let mut digests = Vec::new();
         for i in 0..6 {
             let d = s
@@ -1007,8 +1004,7 @@ mod parallel_extract_tests {
             );
             assert!(dir.join(".extracted").exists());
         }
-        assert!(scratch_left(&root).is_empty(), "{:?}", scratch_left(&root));
-        let _ = std::fs::remove_dir_all(&root);
+        assert!(scratch_left(root).is_empty(), "{:?}", scratch_left(root));
     }
 
     /// ADR-0056: an ephemeral container's overlay carries the `volatile` marker,
@@ -1016,7 +1012,8 @@ mod parallel_extract_tests {
     /// stale marker would mount a kept container's write layer without syncs.
     #[test]
     fn the_volatile_marker_follows_the_last_preparation() {
-        let (s, root) = store("volatile");
+        let (s, tmp) = store();
+        let root = tmp.path();
         let d = s.cas().write(&layer("a.txt", b"a")).unwrap();
         let img = image(vec![d]);
         let marker = root
@@ -1038,14 +1035,14 @@ mod parallel_extract_tests {
             .join("containers/c2")
             .join(ImageStore::VOLATILE_FILE)
             .exists());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A layer that does not decompress fails the call, is not marked
     /// extracted, and leaves no scratch directory; the next call tries again.
     #[test]
     fn a_broken_layer_fails_and_leaves_nothing_half_done() {
-        let (s, root) = store("broken");
+        let (s, tmp) = store();
+        let root = tmp.path();
         let good = s.cas().write(&layer("ok.txt", b"ok")).unwrap();
         let mut bad = layer("bad.txt", b"bad");
         let n = bad.len();
@@ -1055,7 +1052,6 @@ mod parallel_extract_tests {
         assert!(err.is_err());
         let bad_dir = root.join("layers").join(crate::cas::strip(&bad));
         assert!(!bad_dir.join(".extracted").exists());
-        assert!(scratch_left(&root).is_empty(), "{:?}", scratch_left(&root));
-        let _ = std::fs::remove_dir_all(&root);
+        assert!(scratch_left(root).is_empty(), "{:?}", scratch_left(root));
     }
 }

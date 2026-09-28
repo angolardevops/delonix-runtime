@@ -1538,13 +1538,6 @@ pub fn is_running(w: Where) -> bool {
 mod compose_tests {
     use super::*;
 
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("dlx-httproute-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     fn empty() -> ProxyConfig {
         serde_json::from_str(r#"{"listeners":[],"routes":[]}"#).unwrap()
     }
@@ -1554,7 +1547,8 @@ mod compose_tests {
     /// there) and later writes erase earlier stamps.
     #[test]
     fn concurrent_manual_updates_lose_nothing() {
-        let dir = scratch("rmw");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         write_manual_in(&dir, &empty()).unwrap();
         let threads: Vec<_> = (0..8)
             .map(|i| {
@@ -1578,7 +1572,6 @@ mod compose_tests {
             assert!(t.join().unwrap());
         }
         let got = read_manual_in(&dir).unwrap().stamps.len();
-        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, 8, "stamps lost to an unlocked read-modify-write");
     }
 
@@ -1586,7 +1579,8 @@ mod compose_tests {
     /// file while it is being rewritten.
     #[test]
     fn the_served_config_is_never_seen_half_written() {
-        let dir = scratch("atomic");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
         let mut cfg = empty();
         for i in 0..400 {
             cfg.routes.push(Route {
@@ -1616,7 +1610,6 @@ mod compose_tests {
         }
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let torn = reader.join().unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(torn, 0, "the proxy could read a truncated config.json");
     }
 }

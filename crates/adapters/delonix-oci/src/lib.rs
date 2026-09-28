@@ -50,15 +50,14 @@ mod tests {
 
     #[test]
     fn cas_write_read_dedup_verify() {
-        let dir = std::env::temp_dir().join(format!("delonix-cas-{}", sha256_hex(b"t")));
-        let cas = Cas::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let cas = Cas::open(dir.path()).unwrap();
         let d1 = cas.write(b"layer-data").unwrap();
         let d2 = cas.write(b"layer-data").unwrap();
         assert_eq!(d1, d2);
         assert!(d1.starts_with("sha256:"));
         assert_eq!(cas.read(&d1).unwrap(), b"layer-data");
         assert!(cas.verify(&d1).unwrap());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -88,9 +87,8 @@ mod tests {
     #[test]
     fn retag_move_a_tag_e_nao_a_duplica() {
         use image::{Image, ImageConfig, ImageStore};
-        let root = std::env::temp_dir().join(format!("delonix-tagtest-{}", std::process::id()));
-        std::fs::remove_dir_all(&root).ok();
-        let store = ImageStore::open(&root).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let store = ImageStore::open(root.path()).unwrap();
         let mk = |id: &str, tag: &str| Image {
             id: format!("sha256:{id}"),
             repo_tags: vec![tag.to_string()],
@@ -114,7 +112,6 @@ mod tests {
             .filter(|i| i.repo_tags.iter().any(|t| t == "app:latest"))
             .count();
         assert_eq!(holders, 1, "a tag não pode apontar para duas imagens");
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Loading an archive must never DROP a name the same image already had.
@@ -128,9 +125,8 @@ mod tests {
     #[test]
     fn loading_an_archive_keeps_the_images_other_names() {
         use image::{Image, ImageConfig, ImageStore};
-        let root = std::env::temp_dir().join(format!("delonix-loadtags-{}", std::process::id()));
-        std::fs::remove_dir_all(&root).ok();
-        let store = ImageStore::open(&root).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let store = ImageStore::open(root.path()).unwrap();
         let id = format!("sha256:{}", "c".repeat(64));
         store
             .save(&Image {
@@ -150,6 +146,5 @@ mod tests {
         );
         assert!(merged.contains(&"mirror/app:v1".to_string()));
         assert_eq!(merged.len(), 2, "and no name may end up duplicated");
-        std::fs::remove_dir_all(&root).ok();
     }
 }

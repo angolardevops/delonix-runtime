@@ -2120,9 +2120,8 @@ mod tests {
     /// pack or `ctr` call used to leave the archive behind.
     #[test]
     fn the_load_archive_is_removed_on_an_early_return() {
-        let dir = std::env::temp_dir().join(format!("delonix-load-guard-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(".load-x.tar");
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".load-x.tar");
         let run = || -> std::io::Result<()> {
             let guard = RemoveOnDrop(path.clone());
             std::fs::write(&guard.0, b"partial")?;
@@ -2130,7 +2129,6 @@ mod tests {
         };
         assert!(run().is_err());
         assert!(!path.exists(), "the archive survived the failure");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Real shape of `kubectl get --raw=/readyz?verbose` on a healthy node —

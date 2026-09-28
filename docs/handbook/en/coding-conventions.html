@@ -1024,8 +1024,8 @@ let c = store.update(id_or_name, |c| match f(c) {
   end: hold the directory in a <code>tempfile::TempDir</code> (declared once in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>). A
   root that a whole test binary shares through <code>DELONIX_ROOT</code> uses the lease of
   <code>delonix-sdn/tests/network_alloc_race.rs</code>. A pid-named folder under <code>temp_dir()</code> with a
-  <code>remove_dir_all</code> at the end is the old idiom, still at 204 sites in test code (2026-09-28):
-  don't copy it. A tree extracted from an image layer can keep <code>0555</code> directories, so make them
+  <code>remove_dir_all</code> at the end is the old idiom: don't copy it. On 2026-09-28 only the opt-in live test
+  <code>delonix-vm/tests/provider_live.rs</code> still creates one. A tree extracted from an image layer can keep <code>0555</code> directories, so make them
   writable before removing it. <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fails the <code>test</code>
   job on anything left in its <code>TMPDIR</code>; the baseline has been empty since #572.</li>
 <li><strong>A regression test must fail with the fix reverted.</strong> Revert the fix, watch the test fail, then

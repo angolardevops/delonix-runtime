@@ -573,19 +573,13 @@ pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn tmpdir(nome: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("delonix-mapped-{nome}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     #[test]
     fn rmtree_apaga_a_arvore() {
-        let d = tmpdir("rm");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         std::fs::create_dir_all(d.join("a/b")).unwrap();
         std::fs::write(d.join("a/b/f"), b"x").unwrap();
-        rmtree(&d).unwrap();
+        rmtree(d).unwrap();
         assert!(!d.exists());
     }
 
@@ -593,14 +587,16 @@ mod tests {
     fn rmtree_e_idempotente() {
         // The goal is "not being there" — deleting what no longer exists is
         // success, otherwise a repeated `container rm` would fail for no reason.
-        let d = tmpdir("rm-idem");
-        std::fs::remove_dir_all(&d).unwrap();
-        rmtree(&d).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::remove_dir_all(d).unwrap();
+        rmtree(d).unwrap();
     }
 
     #[test]
     fn volsnap_round_trip_preserva_conteudo() {
-        let base = tmpdir("snap");
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let data = base.join("_data");
         std::fs::create_dir_all(data.join("sub")).unwrap();
         std::fs::write(data.join("sub/ficheiro"), b"conteudo").unwrap();
@@ -624,14 +620,14 @@ mod tests {
             !data.join("intruso").exists(),
             "o restore tem de limpar o que não estava no snapshot"
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn volsnap_restore_mantem_o_proprio_data() {
         // `_data` may be mounted in a live container: the contents are cleared,
         // never the directory (otherwise the mount would point at a dead inode).
-        let base = tmpdir("snap-inode");
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let data = base.join("_data");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(data.join("f"), b"v1").unwrap();
@@ -644,12 +640,12 @@ mod tests {
             std::fs::metadata(&data).unwrap().rt_ino(),
             "o inode do _data mudou"
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn buildtar_empacota_o_rootfs() {
-        let base = tmpdir("buildtar");
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let rootfs = base.join("rootfs");
         std::fs::create_dir_all(rootfs.join("etc")).unwrap();
         std::fs::write(rootfs.join("etc/hostname"), b"delonix").unwrap();
@@ -675,18 +671,17 @@ mod tests {
             nomes.iter().any(|n| n.ends_with("app")),
             "faltou app: {nomes:?}"
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn volsnap_modo_invalido_e_erro_claro() {
-        let d = tmpdir("snap-modo");
-        let err = volsnap("destruir", &d, &d.join("t.tar.gz")).unwrap_err();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let err = volsnap("destruir", d, &d.join("t.tar.gz")).unwrap_err();
         assert!(
             format!("{err}").contains("unknown mode"),
             "erro pouco claro: {err}"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     trait RtIno {

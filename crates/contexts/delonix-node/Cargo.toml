@@ -11,5 +11,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 
+[dev-dependencies]
+# A per-test temp dir that is removed when the test ends, also on panic
+# (`scripts/tmp_roots_gate.py`).
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

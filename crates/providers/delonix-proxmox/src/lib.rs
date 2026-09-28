@@ -8457,8 +8457,8 @@ mod tests {
         ));
         assert_eq!(tail, b"\r\n--B--\r\n");
 
-        let dir = std::env::temp_dir().join(format!("dlx-img-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let file = dir.join("a.qcow2");
         std::fs::write(&file, &h).unwrap();
         assert!(matches!(
@@ -8468,7 +8468,7 @@ mod tests {
         assert!(parse_disk_spec(&dir.join("missing.qcow2").to_string_lossy()).is_err());
         let err = parse_disk_spec("images/x").err().unwrap().to_string();
         assert!(err.contains("image of the engine's store"), "{err}");
-        std::fs::remove_dir_all(&dir).unwrap();
+        tmp.close().unwrap();
     }
 
     #[test]

@@ -110,9 +110,8 @@ mod tests {
     /// version keeps the /16 its workloads are already addressed on.
     #[test]
     fn a_vm_network_gets_a_network_store_record() {
-        let root = std::env::temp_dir().join(format!("dlx-vmnet-rec-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let store = crate::NetworkStore::open(&root).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::NetworkStore::open(root.path()).unwrap();
         let fresh = record_for(&store, "vmnet", None).unwrap();
         assert_eq!(store.get("vmnet").unwrap().prefix, fresh.prefix);
         assert!(store.list().unwrap().iter().any(|n| n.name == "vmnet"));
@@ -120,6 +119,5 @@ mod tests {
         let adopted = record_for(&store, "oldvm", Some("10.233")).unwrap();
         assert_eq!(adopted.prefix, "10.233");
         assert_eq!(store.get("oldvm").unwrap().prefix, "10.233");
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -401,9 +401,8 @@ mod tests {
 
     #[test]
     fn sync_writes_the_file_and_is_a_no_op_the_second_time() {
-        let dir = std::env::temp_dir().join(format!("dlx-hosts-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("hosts");
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("hosts");
         std::fs::write(&f, "127.0.0.1 localhost\n").unwrap();
         sync_at(&f, &h(&["a.pt"]), ID).unwrap();
         let first = std::fs::read_to_string(&f).unwrap();
@@ -416,6 +415,5 @@ mod tests {
             std::fs::read_to_string(&f).unwrap(),
             "127.0.0.1 localhost\n"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -5672,20 +5672,21 @@ Format specific information:
 
     #[test]
     fn a_lista_preservada_le_so_xml_e_ordena() {
-        let tmp = std::env::temp_dir().join(format!("dlx-snapmeta-{}", std::process::id()));
-        let dir = super::snapshot_meta_dir(&tmp, "dev");
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+        let dir = super::snapshot_meta_dir(tmp, "dev");
         // No directory at all is the normal case (a VM that was never stopped,
         // or never had a snapshot) — not an error, and never a panic.
-        assert!(super::preserved_snapshot_names(&tmp, "dev").is_empty());
+        assert!(super::preserved_snapshot_names(tmp, "dev").is_empty());
         std::fs::create_dir_all(&dir).unwrap();
         for f in ["s2.xml", "s1.xml", "s1.xml.redefine", "notes.txt"] {
             std::fs::write(dir.join(f), b"x").unwrap();
         }
         assert_eq!(
-            super::preserved_snapshot_names(&tmp, "dev"),
+            super::preserved_snapshot_names(tmp, "dev"),
             vec!["s1".to_string(), "s2".to_string()]
         );
-        std::fs::remove_dir_all(&tmp).unwrap();
+        tmp_dir.close().unwrap();
     }
 
     #[test]
@@ -5719,9 +5720,8 @@ Format specific information:
     /// REAL positive, and a false positive here would fail every `vm stop`.
     #[test]
     fn disk_looks_corrupt_says_no_for_a_clean_image() {
-        let path =
-            std::env::temp_dir().join(format!("dlx-diskhealth-clean-{}.qcow2", std::process::id()));
-        let _ = std::fs::remove_file(&path);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("clean.qcow2");
         if !run_ok(
             "qemu-img",
             &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
@@ -5732,7 +5732,6 @@ Format specific information:
             !super::disk_looks_corrupt(&path),
             "a fresh image is not corrupt"
         );
-        std::fs::remove_file(&path).ok();
     }
 
     /// A genuinely corrupted qcow2 has to read as corrupt — this is the exact
@@ -5744,11 +5743,8 @@ Format specific information:
     /// region exceeding the end of the file"), not a stand-in for it.
     #[test]
     fn disk_looks_corrupt_says_yes_for_a_truncated_image() {
-        let path = std::env::temp_dir().join(format!(
-            "dlx-diskhealth-truncated-{}.qcow2",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("truncated.qcow2");
         if !run_ok(
             "qemu-img",
             &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
@@ -5759,7 +5755,6 @@ Format specific information:
             "qemu-io",
             &["-c", "write -P 0x5a 0 1M", &path.to_string_lossy()],
         ) {
-            std::fs::remove_file(&path).ok();
             return; // qemu-io absent: same reasoning
         }
         let len = std::fs::metadata(&path).unwrap().len();
@@ -5771,7 +5766,6 @@ Format specific information:
             super::disk_looks_corrupt(&path),
             "a truncated image with real allocated data has to read as corrupt"
         );
-        std::fs::remove_file(&path).ok();
     }
 
     /// A path that does not exist must not panic, and must not read as
@@ -5944,16 +5938,10 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-paused-status-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let mut vm = Vm::new(
             "p".into(),
             "d".into(),
@@ -5970,18 +5958,17 @@ Format specific information:
         st.save("p", &vm).unwrap();
 
         ALIVE.store(true, Ordering::SeqCst);
-        assert_eq!(status(&base, "p").unwrap().status, Status::Paused);
+        assert_eq!(status(base, "p").unwrap().status, Status::Paused);
         assert_eq!(st.load("p").unwrap().status, Status::Paused);
 
         ALIVE.store(false, Ordering::SeqCst);
-        assert_eq!(status(&base, "p").unwrap().status, Status::Stopped);
+        assert_eq!(status(base, "p").unwrap().status, Status::Stopped);
         assert_eq!(
             st.load("p").unwrap().status,
             Status::Stopped,
             "`vm ls` said Stopped while the record on disk stayed Paused"
         );
 
-        let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "pausavel");
     }
 
@@ -6138,9 +6125,9 @@ Format specific information:
         // Regression from the bug report: `vm stop dev` without a record answered
         // "no such container: dev" — wrong noun for a VM — and
         // `vm rm` of a non-existent name returned silent success.
-        let base = std::env::temp_dir().join(format!("delonix-vm-test-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&base);
-        for res in [super::stop(&base, "nope"), super::remove(&base, "nope")] {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        for res in [super::stop(base, "nope"), super::remove(base, "nope")] {
             match res {
                 // DX-4501 is «no such VM» — the variant this test pins, asked by
                 // its dictionary number instead of by a pattern a wrapped error
@@ -6152,7 +6139,6 @@ Format specific information:
                 other => panic!("expected VmNotFound, got {other:?}"),
             }
         }
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn test_vm_cfg(mem: &str) -> VmConfig {
@@ -6258,9 +6244,9 @@ Format specific information:
 
     #[test]
     fn create_recusa_clobber_de_vm_run() {
-        let tmp = std::env::temp_dir().join(format!("dlx-vmclob-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let vmdir = vms_dir(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+        let vmdir = vms_dir(tmp);
         std::fs::create_dir_all(&vmdir).unwrap();
         // direct-QEMU record (raw scheme, WITHOUT `backend`) — as `vm run` writes it.
         std::fs::write(
@@ -6270,12 +6256,11 @@ Format specific information:
         .unwrap();
         let mut cfg = hpc_cfg();
         cfg.name = "myvm".into();
-        let err = create(&tmp, &cfg).unwrap_err();
+        let err = create(tmp, &cfg).unwrap_err();
         assert!(
             format!("{err}").contains("vm run"),
             "create should refuse the clobber of a direct-QEMU record: {err}"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// O tamanho virtual lê-se dos BYTES entre parênteses, não do número
@@ -6459,48 +6444,39 @@ Format specific information:
 
     #[test]
     fn default_backend_persistence_roundtrip() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-vm-default-backend-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
 
         // Nothing set yet.
-        assert_eq!(get_default_backend(&dir), None);
+        assert_eq!(get_default_backend(dir), None);
 
-        set_default_backend(&dir, "KVM").unwrap();
-        assert_eq!(get_default_backend(&dir).as_deref(), Some("libvirt"));
+        set_default_backend(dir, "KVM").unwrap();
+        assert_eq!(get_default_backend(dir).as_deref(), Some("libvirt"));
 
-        set_default_backend(&dir, "ch").unwrap();
+        set_default_backend(dir, "ch").unwrap();
         assert_eq!(
-            get_default_backend(&dir).as_deref(),
+            get_default_backend(dir).as_deref(),
             Some("cloud-hypervisor")
         );
 
         // Unknown name refused, previous value untouched.
-        assert!(set_default_backend(&dir, "hyperv").is_err());
+        assert!(set_default_backend(dir, "hyperv").is_err());
         assert_eq!(
-            get_default_backend(&dir).as_deref(),
+            get_default_backend(dir).as_deref(),
             Some("cloud-hypervisor")
         );
 
-        clear_default_backend(&dir).unwrap();
-        assert_eq!(get_default_backend(&dir), None);
+        clear_default_backend(dir).unwrap();
+        assert_eq!(get_default_backend(dir), None);
         // Clearing an already-cleared default is not an error.
-        clear_default_backend(&dir).unwrap();
+        clear_default_backend(dir).unwrap();
 
         // ADR-0054 §3: a name this process has not registered is kept, not
         // dropped — so selecting it fails instead of falling through to a
         // local hypervisor.
-        std::fs::write(default_backend_file(&dir), "Nave-Remota\n").unwrap();
-        assert_eq!(get_default_backend(&dir).as_deref(), Some("nave-remota"));
-        assert!(select_backend(get_default_backend(&dir).as_deref()).is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::write(default_backend_file(dir), "Nave-Remota\n").unwrap();
+        assert_eq!(get_default_backend(dir).as_deref(), Some("nave-remota"));
+        assert!(select_backend(get_default_backend(dir).as_deref()).is_err());
     }
 
     #[test]
@@ -7634,15 +7610,8 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-own-storage-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         // The victim: a real file whose NAME is what the backend was handed.
         // A remote backend is free to accept a path — this engine does not get
         // to reinterpret, nor to delete, a name that means something elsewhere.
@@ -7656,14 +7625,13 @@ Format specific information:
             memory: "256M".into(),
             ..Default::default()
         };
-        let e = create_with(&base, &cfg, &|_| {}).unwrap_err();
+        let e = create_with(base, &cfg, &|_| {}).unwrap_err();
         assert!(e.to_string().contains("refused"), "{e}");
         assert!(
             vitima.exists(),
             "o boot falhou e o motor apagou um ficheiro que nao criou"
         );
 
-        let _ = std::fs::remove_dir_all(&base);
         backends()
             .write()
             .unwrap()
@@ -7715,22 +7683,16 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-destroy-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let vmdir = vms_dir(&base);
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let vmdir = vms_dir(base);
         std::fs::create_dir_all(vmdir.join("d")).unwrap();
         let outside = base.join("outside.qcow2");
         std::fs::write(vmdir.join("d.qcow2"), vec![0u8; 4096]).unwrap();
         std::fs::write(vmdir.join("d").join("seed.iso"), vec![0u8; 1024]).unwrap();
         std::fs::write(vmdir.join("d-data.qcow2"), vec![0u8; 2048]).unwrap();
         std::fs::write(&outside, b"operator image").unwrap();
-        let st = store(&base).unwrap();
+        let st = store(base).unwrap();
         let mut vm = Vm::new(
             "d".into(),
             "b".into(),
@@ -7761,7 +7723,7 @@ Format specific information:
         }];
         st.save("d", &vm).unwrap();
 
-        let d = destroy(&base, "d", false, false).expect("destroy");
+        let d = destroy(base, "d", false, false).expect("destroy");
         assert!(!vmdir.join("d.qcow2").exists());
         assert!(!vmdir.join("d").exists());
         assert!(!vmdir.join("d-data.qcow2").exists(), "extra disk owned");
@@ -7774,9 +7736,8 @@ Format specific information:
         // Second incarnation: `purge_disks` takes the outside disk too.
         st.save("d", &vm).unwrap();
         std::fs::write(vmdir.join("d.qcow2"), b"x").unwrap();
-        destroy(&base, "d", false, true).expect("destroy purge");
+        destroy(base, "d", false, true).expect("destroy purge");
         assert!(!outside.exists());
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// `stop` and `destroy` are the SAME call locally and NOT remotely, and
@@ -7839,16 +7800,10 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-stop-destroy-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let mut vm = Vm::new(
             "r".into(),
             "local-lvm:8".into(),
@@ -7863,7 +7818,7 @@ Format specific information:
         vm.backend = "contador".into();
         st.save("r", &vm).unwrap();
 
-        stop(&base, "r").expect("stop");
+        stop(base, "r").expect("stop");
         assert_eq!(STOPS.load(Ordering::SeqCst), 1);
         assert_eq!(
             DESTROYS.load(Ordering::SeqCst),
@@ -7871,7 +7826,7 @@ Format specific information:
             "`vm stop` destruiu a VM — o disco de um backend remoto vai com ela"
         );
 
-        remove(&base, "r").expect("rm");
+        remove(base, "r").expect("rm");
         assert_eq!(
             DESTROYS.load(Ordering::SeqCst),
             1,
@@ -7915,7 +7870,6 @@ Format specific information:
             "sem override, destroy TEM de ser stop — e o que mantem os locais iguais"
         );
 
-        let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "contador");
     }
 
@@ -7991,16 +7945,10 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-resume-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let mut vm = Vm::new(
             "s".into(),
             "local-lvm:8".into(),
@@ -8016,7 +7964,7 @@ Format specific information:
         vm.status = Status::Stopped;
         st.save("s", &vm).unwrap();
 
-        let out = start(&base, "s").expect("start");
+        let out = start(base, "s").expect("start");
         assert_eq!(RESUMES.load(Ordering::SeqCst), 1);
         assert_eq!(
             BOOTS.load(Ordering::SeqCst),
@@ -8028,7 +7976,6 @@ Format specific information:
             "o registo tem de continuar a apontar para a MESMA VM"
         );
 
-        let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "retomavel");
     }
 
@@ -8149,16 +8096,10 @@ Format specific information:
             new: Box::new(|| Ok(Box::new(Talks))),
         })
         .expect("registar");
-        let base = std::env::temp_dir().join(format!(
-            "delonix-guest-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         for (name, status) in [("parada", Status::Stopped), ("viva", Status::Running)] {
             let mut vm = Vm::new(
                 name.into(),
@@ -8175,13 +8116,12 @@ Format specific information:
             vm.status = status;
             st.save(name, &vm).unwrap();
         }
-        assert_eq!(guest_info(&base, "parada").unwrap(), None);
+        assert_eq!(guest_info(base, "parada").unwrap(), None);
         assert_eq!(ASKED.load(Ordering::SeqCst), 0, "a stopped VM was asked");
-        let g = guest_info(&base, "viva").unwrap().expect("an answer");
+        let g = guest_info(base, "viva").unwrap().expect("an answer");
         assert_eq!(g.hostname.as_deref(), Some("g1"));
         assert_eq!(ASKED.load(Ordering::SeqCst), 1);
-        assert!(guest_info(&base, "nao-existe").unwrap_err().is_not_found());
-        let _ = std::fs::remove_dir_all(&base);
+        assert!(guest_info(base, "nao-existe").unwrap_err().is_not_found());
         backends().write().unwrap().retain(|b| b.id != "fala");
     }
 
@@ -8290,16 +8230,10 @@ Format specific information:
             .expect("registar");
         }
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-move-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let save = |name: &str, backend: &str, status: Status| {
             let mut vm = Vm::new(
                 name.into(),
@@ -8335,7 +8269,7 @@ Format specific information:
             ..Default::default()
         };
         assert_eq!(
-            code_of(move_to_node(&base, "parada", "b", &storage_only).unwrap_err()),
+            code_of(move_to_node(base, "parada", "b", &storage_only).unwrap_err()),
             1538
         );
         let empty_storage = MoveOptions {
@@ -8344,30 +8278,30 @@ Format specific information:
             ..Default::default()
         };
         assert_eq!(
-            code_of(move_to_node(&base, "parada", "b", &empty_storage).unwrap_err()),
+            code_of(move_to_node(base, "parada", "b", &empty_storage).unwrap_err()),
             1538
         );
         assert_eq!(
-            code_of(move_to_node(&base, "parada", " ", &offline).unwrap_err()),
+            code_of(move_to_node(base, "parada", " ", &offline).unwrap_err()),
             1538
         );
         assert_eq!(
-            code_of(move_to_node(&base, "parada", "b", &online).unwrap_err()),
+            code_of(move_to_node(base, "parada", "b", &online).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "a-correr", "b", &offline).unwrap_err()),
+            code_of(move_to_node(base, "a-correr", "b", &offline).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "pausada", "b", &online).unwrap_err()),
+            code_of(move_to_node(base, "pausada", "b", &online).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "pausada", "b", &offline).unwrap_err()),
+            code_of(move_to_node(base, "pausada", "b", &offline).unwrap_err()),
             5507
         );
-        assert!(move_to_node(&base, "nao-existe", "b", &offline)
+        assert!(move_to_node(base, "nao-existe", "b", &offline)
             .unwrap_err()
             .is_not_found());
         assert!(
@@ -8379,7 +8313,7 @@ Format specific information:
         }
 
         FAIL.store(true, Ordering::SeqCst);
-        assert!(move_to_node(&base, "parada", "b", &offline).is_err());
+        assert!(move_to_node(base, "parada", "b", &offline).is_err());
         assert_eq!(
             handle("parada"),
             "fake:a:7",
@@ -8387,10 +8321,10 @@ Format specific information:
         );
         FAIL.store(false, Ordering::SeqCst);
 
-        let vm = move_to_node(&base, "parada", "b", &offline).unwrap();
+        let vm = move_to_node(base, "parada", "b", &offline).unwrap();
         assert_eq!(vm.api_socket, "fake:b:7");
         assert_eq!(handle("parada"), "fake:b:7");
-        let vm = move_to_node(&base, "a-correr", "b", &online).unwrap();
+        let vm = move_to_node(base, "a-correr", "b", &online).unwrap();
         assert_eq!(vm.api_socket, "fake:b:7");
         assert_eq!(
             *CALLS.lock().unwrap(),
@@ -8401,13 +8335,12 @@ Format specific information:
             ]
         );
 
-        let e = move_to_node(&base, "n", "b", &offline).unwrap_err();
+        let e = move_to_node(base, "n", "b", &offline).unwrap_err();
         assert_eq!(e.number(), 1501, "{e}");
         let e = e.to_string();
         assert!(e.contains("sem-cluster") && e.contains("vm migrate"), "{e}");
         assert_eq!(handle("n"), "fake:a:7");
 
-        let _ = std::fs::remove_dir_all(&base);
         backends()
             .write()
             .unwrap()
@@ -8515,16 +8448,10 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-resize-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let save = |name: &str, backend: &str, status: Status| {
             let mut vm = Vm::new(
                 name.into(),
@@ -8555,28 +8482,25 @@ Format specific information:
         };
 
         let code_of = |e: Error| e.number();
-        assert_eq!(code_of(resize(&base, "r", None, None).unwrap_err()), 1536);
+        assert_eq!(code_of(resize(base, "r", None, None).unwrap_err()), 1536);
+        assert_eq!(code_of(resize(base, "r", Some(0), None).unwrap_err()), 1536);
         assert_eq!(
-            code_of(resize(&base, "r", Some(0), None).unwrap_err()),
+            code_of(resize(base, "r", None, Some("2GB")).unwrap_err()),
             1536
         );
         assert_eq!(
-            code_of(resize(&base, "r", None, Some("2GB")).unwrap_err()),
+            code_of(resize(base, "r", None, Some("0")).unwrap_err()),
             1536
         );
         assert_eq!(
-            code_of(resize(&base, "r", None, Some("0")).unwrap_err()),
-            1536
-        );
-        assert_eq!(
-            code_of(resize(&base, "a-correr", Some(2), None).unwrap_err()),
+            code_of(resize(base, "a-correr", Some(2), None).unwrap_err()),
             5505
         );
         assert_eq!(
-            code_of(resize(&base, "pausada", Some(2), None).unwrap_err()),
+            code_of(resize(base, "pausada", Some(2), None).unwrap_err()),
             5505
         );
-        assert!(resize(&base, "nao-existe", Some(2), None)
+        assert!(resize(base, "nao-existe", Some(2), None)
             .unwrap_err()
             .is_not_found());
         assert!(
@@ -8587,14 +8511,14 @@ Format specific information:
         unchanged("a-correr");
 
         FAIL.store(true, Ordering::SeqCst);
-        assert!(resize(&base, "r", Some(4), None).is_err());
+        assert!(resize(base, "r", Some(4), None).is_err());
         unchanged("r");
         FAIL.store(false, Ordering::SeqCst);
 
         // Only memory: vCPUs keep the record's value, and the backend is told both.
-        let vm = resize(&base, "r", None, Some("4Gi")).unwrap();
+        let vm = resize(base, "r", None, Some("4Gi")).unwrap();
         assert_eq!((vm.vcpus, vm.memory.as_str()), (1, "4Gi"));
-        let vm = resize(&base, "r", Some(3), None).unwrap();
+        let vm = resize(base, "r", Some(3), None).unwrap();
         assert_eq!((vm.vcpus, vm.memory.as_str()), (3, "4Gi"));
         assert_eq!(st.load("r").unwrap().vcpus, 3);
         assert_eq!(
@@ -8602,11 +8526,10 @@ Format specific information:
             vec![(4, 1024), (1, 4096), (3, 4096)]
         );
 
-        let e = resize(&base, "n", Some(2), None).unwrap_err().to_string();
+        let e = resize(base, "n", Some(2), None).unwrap_err().to_string();
         assert!(e.contains("resize") && e.contains("sem-resize"), "{e}");
         unchanged("n");
 
-        let _ = std::fs::remove_dir_all(&base);
         backends()
             .write()
             .unwrap()
@@ -8695,16 +8618,10 @@ Format specific information:
         })
         .expect("registar");
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-cloudinit-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         let save = |name: &str, backend: &str, status: Status, appliance: bool| {
             let mut vm = Vm::new(
                 name.into(),
@@ -8735,38 +8652,38 @@ Format specific information:
         let code_of = |e: Error| e.number();
         let key = |k: &str| Some(vec![k.to_string()]);
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", None, None, None).unwrap_err()),
+            code_of(set_cloud_init(base, "c", None, None, None).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", Some("-x"), None, None).unwrap_err()),
+            code_of(set_cloud_init(base, "c", Some("-x"), None, None).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", Some("a.b"), None, None).unwrap_err()),
+            code_of(set_cloud_init(base, "c", Some("a.b"), None, None).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", None, Some("Root"), None).unwrap_err()),
+            code_of(set_cloud_init(base, "c", None, Some("Root"), None).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", None, None, Some(vec![])).unwrap_err()),
+            code_of(set_cloud_init(base, "c", None, None, Some(vec![])).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "c", None, None, key("a\nb")).unwrap_err()),
+            code_of(set_cloud_init(base, "c", None, None, key("a\nb")).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "app", Some("h"), None, None).unwrap_err()),
+            code_of(set_cloud_init(base, "app", Some("h"), None, None).unwrap_err()),
             1537
         );
         assert_eq!(
-            code_of(set_cloud_init(&base, "viva", Some("h"), None, None).unwrap_err()),
+            code_of(set_cloud_init(base, "viva", Some("h"), None, None).unwrap_err()),
             5506
         );
-        assert!(set_cloud_init(&base, "nada", Some("h"), None, None)
+        assert!(set_cloud_init(base, "nada", Some("h"), None, None)
             .unwrap_err()
             .is_not_found());
         assert!(
@@ -8778,21 +8695,15 @@ Format specific information:
             Some("velho")
         );
 
-        let vm = set_cloud_init(&base, "c", Some("novo"), None, None).unwrap();
+        let vm = set_cloud_init(base, "c", Some("novo"), None, None).unwrap();
         assert_eq!(vm.boot.hostname.as_deref(), Some("novo"));
         assert_eq!(
             vm.boot.ssh_keys,
             vec!["ssh-ed25519 AAAA velha".to_string()],
             "keys kept"
         );
-        let vm = set_cloud_init(
-            &base,
-            "c",
-            None,
-            Some("ops"),
-            key(" ssh-ed25519 AAAA nova "),
-        )
-        .unwrap();
+        let vm =
+            set_cloud_init(base, "c", None, Some("ops"), key(" ssh-ed25519 AAAA nova ")).unwrap();
         assert_eq!(
             vm.boot.ssh_keys,
             vec!["ssh-ed25519 AAAA nova".to_string()],
@@ -8810,7 +8721,7 @@ Format specific information:
         assert_eq!(got[1].hostname.as_deref(), Some("novo"));
         assert_eq!(got[1].ci_user.as_deref(), Some("ops"));
 
-        let e = set_cloud_init(&base, "sem", Some("h"), None, None)
+        let e = set_cloud_init(base, "sem", Some("h"), None, None)
             .unwrap_err()
             .to_string();
         assert!(e.contains("cloud-init") && e.contains("libvirt"), "{e}");
@@ -8819,7 +8730,6 @@ Format specific information:
             Some("velho")
         );
 
-        let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "com-ci");
     }
 
@@ -8871,16 +8781,10 @@ Format specific information:
             new: Box::new(|| Ok(Box::new(Moved))),
         })
         .expect("registar");
-        let base = std::env::temp_dir().join(format!(
-            "delonix-relocated-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(vms_dir(&base)).unwrap();
-        let st = store(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::create_dir_all(vms_dir(base)).unwrap();
+        let st = store(base).unwrap();
         for name in ["m", "fica"] {
             let mut vm = Vm::new(
                 name.into(),
@@ -8897,15 +8801,14 @@ Format specific information:
             vm.status = Status::Stopped;
             st.save(name, &vm).unwrap();
         }
-        assert_eq!(status(&base, "m").unwrap().api_socket, "remote:novo:7");
+        assert_eq!(status(base, "m").unwrap().api_socket, "remote:novo:7");
         assert_eq!(
             st.load("m").unwrap().api_socket,
             "remote:novo:7",
             "persisted"
         );
-        assert_eq!(status(&base, "fica").unwrap().api_socket, "remote:velho:7");
+        assert_eq!(status(base, "fica").unwrap().api_socket, "remote:velho:7");
         assert_eq!(st.load("fica").unwrap().api_socket, "remote:velho:7");
-        let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "movido");
     }
 }
@@ -9012,19 +8915,18 @@ mod tests_identidade_do_vmm {
     /// Escrito com o MESMO `JsonStore` que o motor usa, e sem o campo novo.
     #[test]
     fn um_registo_em_disco_sem_o_campo_continua_a_carregar() {
-        let dir = std::env::temp_dir().join(format!("dlx-vmpid-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let antigo = concat!(
             r#"{"name":"v","disk":"d","overlay":"o","vcpus":1,"#,
             r#""memory":"1G","network":"n","tap":"t","mac":"m","pid":42,"#,
             r#""api_socket":"s","status":"Running","created_unix":0}"#
         );
         std::fs::write(dir.join("v.json"), antigo).unwrap();
-        let st: JsonStore<Vm> = JsonStore::open(&dir).unwrap();
+        let st: JsonStore<Vm> = JsonStore::open(dir).unwrap();
         let vm = st.load("v").expect("um registo antigo tem de carregar");
         assert_eq!(vm.pid, Some(42));
         assert_eq!(vm.pid_starttime, None);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -9166,15 +9068,6 @@ mod tests_boot_confirms_the_vmm {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
 
-    /// A short, per-test directory: the api-socket inside it has to fit in
-    /// `sun_path`, which is the very limit under test elsewhere.
-    fn dir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("dlxboot-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// The same shape `boot_ch` writes, around a fake VMM `cmd`.
     fn script(cmd: &str, log: &Path, pidfile: &Path) -> String {
         format!(
@@ -9224,7 +9117,8 @@ mod tests_boot_confirms_the_vmm {
     /// the error has to carry the cause from the VM log.
     #[test]
     fn a_vmm_that_dies_at_startup_is_an_error_with_the_log() {
-        let d = dir("dies");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let (log, pid, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
         let s = script(
             "sh -c 'echo \"Fatal error: path must be shorter than SUN_LEN\" >&2; exit 1'",
@@ -9242,14 +9136,14 @@ mod tests_boot_confirms_the_vmm {
             began.elapsed() < Duration::from_secs(4),
             "the exit was not noticed; it waited for the grace instead"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// The answer of an api that is up is not enough when the process is not:
     /// the api answered and the VMM left — a zombie included.
     #[test]
     fn an_answering_api_does_not_rescue_a_dead_vmm() {
-        let d = dir("zombie");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let (log, sock) = (d.join("v.log"), d.join("v.sock"));
         fake_api(&sock, "Running");
         let mut child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
@@ -9261,12 +9155,12 @@ mod tests_boot_confirms_the_vmm {
         assert_eq!(proc_state(pid), Some('Z'), "the subject has to be a zombie");
         assert!(wait_vmm_ready(pid, &sock, &log, Duration::from_secs(2)).is_err());
         let _ = child.wait();
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_vmm_whose_vm_is_running_is_returned() {
-        let d = dir("ok");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let (log, pidf, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
         fake_api(&sock, "Running");
         let s = script("sleep 30", &log, &pidf);
@@ -9274,14 +9168,14 @@ mod tests_boot_confirms_the_vmm {
             .expect("a live VMM reporting Running has to be accepted");
         assert!(matches!(proc_state(pid), Some(st) if st != 'Z'));
         kill(pid);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Alive but never `Running` (a silent or stuck VMM): an error once the
     /// grace is up, and the process does not stay behind holding the disk.
     #[test]
     fn a_vmm_that_never_reports_running_is_terminated() {
-        let d = dir("silent");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let (log, pidf, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
         fake_api(&sock, "Created");
         let s = script("sleep 30", &log, &pidf);
@@ -9306,7 +9200,6 @@ mod tests_boot_confirms_the_vmm {
             wait_vmm_left(pid, None, Duration::from_secs(3)),
             "the silent VMM was left running"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

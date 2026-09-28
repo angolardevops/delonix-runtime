@@ -1159,17 +1159,8 @@ mod tests {
     /// the filter does not undo the sort.
     #[test]
     fn members_of_reads_the_declared_order_back_out_of_a_real_store() {
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-pod-order-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let store = delonix_state::Store::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
         // Saved back-to-front, and with a container that is not in the pod at
         // all, so the filter has something to drop.
         store.save(&member("p", "side", Some(1))).unwrap();
@@ -1180,7 +1171,6 @@ mod tests {
             .into_iter()
             .map(|c| c.name)
             .collect();
-        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(names, ["p-web", "p-side"]);
     }
 }

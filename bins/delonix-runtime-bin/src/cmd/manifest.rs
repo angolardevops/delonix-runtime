@@ -987,15 +987,14 @@ kind: Container
 metadata: { name: web }
 spec: { image: \"alpine:3.19\" }
 ";
-        let p =
-            std::env::temp_dir().join(format!("delonix-manifest-test-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-test.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(docs.len(), 3);
         assert_eq!(docs[0].kind, "Network");
         assert_eq!(docs[0].metadata.name, "appnet");
         assert_eq!(docs[2].kind, "Container");
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
@@ -1017,8 +1016,8 @@ spec:
   type: vm
   vm: { disk: \"golden.qcow2\" }
 ";
-        let p =
-            std::env::temp_dir().join(format!("delonix-workload-test-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-workload-test.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(docs.len(), 2);
@@ -1029,7 +1028,6 @@ spec:
         assert_eq!(docs[1].metadata.name, "db");
         // No `Workload` doc survives the load.
         assert!(of_kind(&docs, "Workload").is_empty());
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
@@ -1045,16 +1043,13 @@ kind: Volume
 metadata: { name: b }
 spec: {}
 ";
-        let p = std::env::temp_dir().join(format!(
-            "delonix-manifest-test2-{}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-test2.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(of_kind(&docs, "Network").len(), 1);
         assert_eq!(of_kind(&docs, "Volume").len(), 1);
         assert_eq!(of_kind(&docs, "VirtualMachine").len(), 0);
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
@@ -1070,17 +1065,14 @@ kind: VM
 metadata: { name: node2 }
 spec: { disk: k8s-golden }
 ";
-        let p = std::env::temp_dir().join(format!(
-            "delonix-manifest-vm-alias-{}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-vm-alias.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         // Both synonyms become the canonical `Vm`, caught by `of_kind`.
         assert_eq!(of_kind(&docs, "VirtualMachine").len(), 2);
         assert_eq!(docs[0].kind, "VirtualMachine");
         assert_eq!(docs[1].kind, "VirtualMachine");
-        let _ = std::fs::remove_file(&p);
     }
 
     /// Every Kind survives a round-trip through its typed spec without losing or changing a
@@ -1253,8 +1245,8 @@ kind: Volume
 metadata: { name: sem-labels }
 spec: {}
 ";
-        let p =
-            std::env::temp_dir().join(format!("delonix-manifest-meta-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-meta.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(
@@ -1268,7 +1260,6 @@ spec: {}
         // Without a labels/annotations block → empty maps, never an error.
         assert!(docs[1].metadata.labels.is_empty());
         assert!(docs[1].metadata.annotations.is_empty());
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
@@ -1279,16 +1270,13 @@ kind: Container
 metadata: { name: web }
 spec: { image: alpine, memroy: 2G, restartPolicy: always }
 ";
-        let p = std::env::temp_dir().join(format!(
-            "delonix-manifest-unknown-{}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-unknown.yaml");
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         let unknown = unknown_fields(&docs[0], crate::cmd::container::CONTAINER_SPEC_FIELDS);
         // `memroy` (typo) is flagged; `image`/`restartPolicy` (canonical) are not.
         assert_eq!(unknown, vec!["memroy".to_string()]);
-        let _ = std::fs::remove_file(&p);
     }
 
     /// O `validate` dizia `OK` na linha a seguir a avisar que um campo tinha
@@ -1296,9 +1284,8 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
     /// foi impresso — e ao `--strict` transformá-lo em exit code.
     #[test]
     fn campo_ignorado_e_contado() {
-        let dir = std::env::temp_dir().join(format!("dlx-warncount-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("m.yaml");
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
         std::fs::write(
             &p,
             "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
@@ -1311,7 +1298,6 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             antes + 1,
             "carregar um manifesto com um campo inventado tem de contar UM aviso"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Drift-guard: each file in `examples/` must parse without A single
@@ -1379,41 +1365,32 @@ metadata: {}
 spec: { image: alpine }
 ";
         assert!(is_delonix_manifest(text));
-        let p = std::env::temp_dir().join(format!(
-            "delonix-manifest-partido-{}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-partido.yaml");
         std::fs::write(&p, text).unwrap();
         assert!(
             load(&p).is_err(),
             "manifesto marcado mas sem metadata.name devia falhar o load"
         );
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
     fn ficheiro_vazio_e_erro_claro() {
-        let p = std::env::temp_dir().join(format!(
-            "delonix-manifest-empty-{}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-manifest-empty.yaml");
         std::fs::write(&p, "").unwrap();
         let err = load(&p).unwrap_err();
         assert!(format!("{err}").contains("is empty"));
-        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
     fn resolve_path_sem_flag_nem_ficheiro_e_erro_claro() {
-        let dir =
-            std::env::temp_dir().join(format!("delonix-manifest-resolve-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
         let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&dir).unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
         let err = resolve_path(None).unwrap_err();
         assert!(format!("{err}").contains("no manifest"));
         std::env::set_current_dir(orig).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1424,11 +1401,10 @@ kind: Container
 metadata: { name: web }
 spec: { image: nginx }
 ";
-        let dir = std::env::temp_dir();
-        let p = dir.join(format!("delonix-dryrun-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-dryrun.yaml");
         std::fs::write(&p, yaml).unwrap();
         let docs = load(&p).unwrap();
-        let _ = std::fs::remove_file(&p);
         let out = render_with_defaults(&docs).unwrap();
         // The user only wrote `image: nginx`; the defaults must materialize.
         assert!(out.contains("image: nginx"));
@@ -1505,10 +1481,10 @@ spec: { image: nginx }
             "apiVersion: core.delonix.io/v1alpha1\nkind: Stack\n\
              metadata:\n  name: all\n  namespace: prod\nspec:\n{body}"
         );
-        let p = std::env::temp_dir().join(format!("delonix-stack-all-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-stack-all.yaml");
         std::fs::write(&p, yaml).unwrap();
         let docs = load(&p);
-        let _ = std::fs::remove_file(&p);
         let docs = docs.unwrap();
         for (group, lands_as) in expected {
             // By NAME as well as by Kind: `workloads` lands as a Container and so
@@ -1646,11 +1622,10 @@ spec:
       namespace: data
       spec: { image: postgres }
 ";
-        let dir = std::env::temp_dir();
-        let p = dir.join(format!("delonix-stack-{}.yaml", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("delonix-stack.yaml");
         std::fs::write(&p, yaml).unwrap();
         let docs = load(&p).unwrap();
-        let _ = std::fs::remove_file(&p);
         // The Stack itself is gone; children present, in dependency order.
         assert!(!docs.iter().any(|d| d.kind == "Stack"));
         assert_eq!(docs.len(), 3);

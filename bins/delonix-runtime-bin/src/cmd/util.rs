@@ -335,31 +335,13 @@ pub fn silence_cgroup_warning() {
 mod tests {
     use super::*;
 
-    /// Six tests share this helper and cargo runs them in PARALLEL, in one
-    /// process — so `pid` is the same for all of them and only the timestamp
-    /// separates the directories. Two threads that read the clock in the same
-    /// tick get the SAME path, and each test ends with `remove_dir_all`: one
-    /// deletes the other's store mid-run, and the victim fails on whichever
-    /// assertion it happened to reach. That is the shape of the CI flake seen
-    /// on 2026-08-27 (`a_unique_bare_name_still_resolves_exactly_as_before`
-    /// getting something other than `NotFound` for a name that was never
-    /// there) — it passed on every local run, because losing that race needs
-    /// the timing a loaded runner gives.
-    ///
-    /// A counter cannot tie. The clock is kept because it also separates one
-    /// RUN from the next, which the counter alone would not.
-    fn tmp_store() -> (Store, PathBuf) {
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-util-test-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        (Store::open(&dir).unwrap(), dir)
+    /// Each test gets its own store in a unique temp dir. Cargo runs these
+    /// tests in parallel in one process, so a name built from the pid (and the
+    /// clock) once let one test delete another's store mid-run; the returned
+    /// guard removes the dir when the test ends, also on a failed assert.
+    fn tmp_store() -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (Store::open(dir.path()).unwrap(), dir)
     }
 
     fn mk(id: &str, name: &str) -> Container {
@@ -384,7 +366,7 @@ mod tests {
         // `db`. Every destructive verb resolves through `find`, so picking one
         // would be picking a TENANT — `stop db` hitting the wrong team's
         // database. It refuses and names both instead.
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         store.save(&mk_ns("aaa1", "db", "teamA")).unwrap();
         store.save(&mk_ns("bbb2", "db", "teamB")).unwrap();
 
@@ -399,20 +381,18 @@ mod tests {
         assert_eq!(find(&store, "bbb2").unwrap().name, "db");
         // A qualified name that does not exist is NotFound, not ambiguity.
         assert!(find(&store, "teamC/db").is_err_and(|e| e.is_not_found()));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_unique_bare_name_still_resolves_exactly_as_before() {
         // Every node that does not use namespaces is this case; it must not
         // change at all.
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         store.save(&mk_ns("aaa1", "web", "default")).unwrap();
         store.save(&mk_ns("bbb2", "api", "teamA")).unwrap();
         assert_eq!(find(&store, "web").unwrap().id, "aaa1");
         assert_eq!(find(&store, "api").unwrap().id, "bbb2");
         assert!(find(&store, "nope").is_err_and(|e| e.is_not_found()));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -420,7 +400,7 @@ mod tests {
         // BUG regression guard: `find` used to silently return the FIRST
         // (newest-created) match on an ambiguous id prefix instead of
         // erroring — the exact opposite of Docker/Podman semantics.
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         store.save(&mk("a1f3000000000000", "old")).unwrap();
         store.save(&mk("a1f9000000000000", "new")).unwrap();
         let err = find(&store, "a1").unwrap_err();
@@ -429,17 +409,15 @@ mod tests {
             msg.contains("a1f300000000") || msg.contains("a1f900000000"),
             "{msg}"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn find_prefixo_unico_resolve_normalmente() {
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         store.save(&mk("a1f3000000000000", "old")).unwrap();
         store.save(&mk("b2000000000000000", "other")).unwrap();
         let c = find(&store, "a1f3").unwrap();
         assert_eq!(c.name, "old");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -447,11 +425,10 @@ mod tests {
         // An exact id/name match is unambiguous by definition and must win
         // outright, even if OTHER containers' ids happen to share a prefix
         // with the query string.
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         store.save(&mk("a1f3000000000000", "web")).unwrap();
         store.save(&mk("a1f9000000000000", "other")).unwrap();
         let c = find(&store, "web").unwrap();
         assert_eq!(c.id, "a1f3000000000000");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1823,10 +1823,8 @@ mod tests {
 
     #[test]
     fn a_retencao_guarda_os_mais_novos_e_diz_o_que_tirou() {
-        let d = std::env::temp_dir().join(format!("delonix-rbk-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let d = d.as_path();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let mut made = Vec::new();
         for i in 0..5u64 {
             let n = archive_name(Kind::Container, "db", 1_700_000_000 + i * 3600);
@@ -1848,7 +1846,6 @@ mod tests {
         );
         // Idempotent: pruning again removes nothing.
         assert!(prune(d, Kind::Container, "db", 2).is_empty());
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

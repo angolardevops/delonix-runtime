@@ -669,43 +669,37 @@ fn cmd_unset(force: bool) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("dlx-pol-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// A file that exists and does not parse is an ERROR. Treating it as «no
     /// policy» would let a typo silently disable the node's ceiling.
     #[test]
     fn an_unparseable_policy_is_an_error_not_an_absent_one() {
-        let d = tmp("bad");
-        std::fs::write(path(&d), "{ not json").unwrap();
-        assert!(load(&d).is_err());
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(path(d), "{ not json").unwrap();
+        assert!(load(d).is_err());
         // An unknown field is refused too — `denyPriviledged` spelled wrong
         // would otherwise read as "allowed".
-        std::fs::write(path(&d), r#"{"denyPriviledged": true}"#).unwrap();
-        assert!(load(&d).is_err(), "a typo must not read as permissive");
-        std::fs::remove_dir_all(&d).ok();
+        std::fs::write(path(d), r#"{"denyPriviledged": true}"#).unwrap();
+        assert!(load(d).is_err(), "a typo must not read as permissive");
     }
 
     #[test]
     fn no_file_means_no_ceiling() {
-        let d = tmp("none");
-        assert_eq!(load(&d).unwrap(), None);
-        assert!(enforce(&d, "web", &Request::container("alpine:latest", true, true)).is_ok());
-        std::fs::remove_dir_all(&d).ok();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        assert_eq!(load(d).unwrap(), None);
+        assert!(enforce(d, "web", &Request::container("alpine:latest", true, true)).is_ok());
     }
 
     /// The gap this crate was written to close, end to end through the file.
     #[test]
     fn a_vm_with_passthrough_is_refused_by_the_file_on_disk() {
-        let d = tmp("vm");
-        std::fs::write(path(&d), r#"{"denyDevicePassthrough": true}"#).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(path(d), r#"{"denyDevicePassthrough": true}"#).unwrap();
         let devices = vec!["0000:01:00.0".to_string()];
-        let e = enforce(&d, "db-01", &Request::virtual_machine(None, &devices, None)).unwrap_err();
+        let e = enforce(d, "db-01", &Request::virtual_machine(None, &devices, None)).unwrap_err();
         assert!(format!("{e}").contains("0000:01:00.0"), "{e}");
-        std::fs::remove_dir_all(&d).ok();
     }
 
     /// Every refusal is rendered — a violation with no message would reach the

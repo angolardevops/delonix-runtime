@@ -2034,23 +2034,6 @@ mod tests {
         )));
     }
 
-    /// Unique temp dir (without depending on the `tempfile` crate).
-    fn tmp_dir(tag: &str) -> std::path::PathBuf {
-        // SAFETY: getpid() has no preconditions.
-        let uniq = format!(
-            "delonix-prune-{tag}-{}-{}",
-            // SAFETY: `getpid` takes no arguments and has no preconditions.
-            unsafe { libc::getpid() },
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let d = std::env::temp_dir().join(uniq);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// STRESS test of the orphan-rootfs reaper: create→destroy of N container
     /// directories at the disk level, crossed with the "Store" (set of live
     /// ids). Asserts that the reaper catches ALL the orphans (containers killed
@@ -2060,8 +2043,8 @@ mod tests {
     #[test]
     fn stress_reaper_leaves_zero_orphan_rootfs() {
         const N: usize = 300;
-        let root = tmp_dir("rootfs");
-        let containers = root.join("containers");
+        let tmp = tempfile::tempdir().unwrap();
+        let containers = tmp.path().join("containers");
         std::fs::create_dir_all(&containers).unwrap();
 
         // N dead container directories + M live ones, and some `<id>.json`
@@ -2102,7 +2085,5 @@ mod tests {
         for id in &live {
             assert!(containers.join(id).is_dir(), "vivo preservado no disco");
         }
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

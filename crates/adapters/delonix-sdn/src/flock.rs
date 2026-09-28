@@ -80,9 +80,8 @@ mod tests {
 
     #[test]
     fn a_fechadura_exclui_de_facto() {
-        let d = std::env::temp_dir().join(format!("dlx-flock-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let p = d.join("f.lock");
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("f.lock");
 
         let contador = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let max = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -106,7 +105,6 @@ mod tests {
             h.join().unwrap();
         }
         assert_eq!(max.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -13,5 +13,10 @@ serde_json = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 
+[dev-dependencies]
+# A per-test temp dir that is removed when the test ends, also on panic
+# (`scripts/tmp_roots_gate.py`).
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

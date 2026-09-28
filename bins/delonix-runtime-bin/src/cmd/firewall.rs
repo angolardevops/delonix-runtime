@@ -2133,12 +2133,11 @@ mod tests {
     // `list().find(|c| c.name == name)` returns Ok("10.0.0.22/32") here.
     #[test]
     fn a_rule_refuses_a_workload_name_that_two_namespaces_share() {
-        let root = std::env::temp_dir().join(format!("dlx-fwns-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        seed(&root, "aaaa000000000001", "db", "teamA", "10.0.0.11");
-        seed(&root, "bbbb000000000002", "db", "teamB", "10.0.0.22");
-        let store = Store::open(root.clone()).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        seed(root, "aaaa000000000001", "db", "teamA", "10.0.0.11");
+        seed(root, "bbbb000000000002", "db", "teamB", "10.0.0.22");
+        let store = Store::open(root).unwrap();
 
         let err = workload_cidr(&store, "db").unwrap_err().to_string();
         assert!(
@@ -2155,8 +2154,6 @@ mod tests {
             "10.0.0.22/32",
             "the qualified form has to keep working"
         );
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn rule(dir: &str, proto: &str, port: &str, src: &str, action: &str) -> FwRule {

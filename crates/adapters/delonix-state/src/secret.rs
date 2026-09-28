@@ -308,8 +308,9 @@ mod tests {
 
     #[test]
     fn store_roundtrip_and_resolve() {
-        let dir = std::env::temp_dir().join(format!("dlx-sec-{}", std::process::id()));
-        let s = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let s = SecretStore::open(dir).unwrap();
         let mut data = BTreeMap::new();
         data.insert("DB_PASS".to_string(), "xyz".to_string());
         s.save(&Secret {
@@ -326,7 +327,6 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         let env = s.resolve_env(&["db".to_string(), "missing".to_string()]);
         assert_eq!(env, vec!["DB_PASS=xyz".to_string()]);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -337,15 +337,15 @@ mod tests {
         // reached FILES OUTSIDE `<root>/secrets` entirely: an
         // arbitrary-file-read (via `load`/`resolve_env`) and
         // arbitrary-file-delete (via `remove`) primitive.
-        let dir = std::env::temp_dir().join(format!("dlx-sec-traversal-{}", std::process::id()));
-        let s = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let s = SecretStore::open(dir).unwrap();
         let evil = "../../../etc/passwd";
         assert!(s.load(evil).is_err_and(|e| e.is_invalid_argument()));
         assert!(s.remove(evil).is_err_and(|e| e.is_invalid_argument()));
         // resolve_env funnels through load() and is best-effort (ignores
         // failures) — must NOT silently include a file read from outside root.
         assert!(s.resolve_env(&[evil.to_string()]).is_empty());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -356,8 +356,9 @@ mod tests {
         // flock makes each call a self-contained read-modify-write, so
         // calling it twice in a row must accumulate both keys rather than
         // the second overwriting the first's in-memory read.
-        let dir = std::env::temp_dir().join(format!("dlx-sec-update-{}", std::process::id()));
-        let s = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let s = SecretStore::open(dir).unwrap();
         s.update("db", |sec| {
             sec.data.insert("A".to_string(), "1".to_string());
             true
@@ -389,14 +390,13 @@ mod tests {
             "mas nada foi persistido — f devolveu false"
         );
         assert!(!s.load("db").unwrap().data.contains_key("C"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn value_encrypted_at_rest_and_legacy_plaintext_readable() {
-        let dir = std::env::temp_dir().join(format!("dlx-sec-enc-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let store = SecretStore::open(dir).unwrap();
         let mut data = BTreeMap::new();
         data.insert("TOKEN".to_string(), "PLAINTEXT-MARKER-XYZ".to_string());
         store
@@ -435,14 +435,13 @@ mod tests {
         std::fs::write(dir.join("secrets/old.json"), &legacy).unwrap();
         assert_eq!(store.load("old").unwrap().data.get("K").unwrap(), "v");
         assert_eq!(store.list().len(), 2);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn materialize_writes_files_0600() {
-        let dir = std::env::temp_dir().join(format!("dlx-sec-mat-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let store = SecretStore::open(dir).unwrap();
         let mut data = BTreeMap::new();
         data.insert("DB_PASS".to_string(), "xyz".to_string());
         data.insert("DB_USER".to_string(), "admin".to_string());
@@ -467,14 +466,13 @@ mod tests {
         assert_eq!(fmode & 0o777, 0o600);
         let dmode = std::fs::metadata(&out).unwrap().permissions().mode();
         assert_eq!(dmode & 0o777, 0o700);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn rotate_key_preserves_values_and_changes_key() {
-        let dir = std::env::temp_dir().join(format!("dlx-sec-rot-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut store = SecretStore::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut store = SecretStore::open(dir).unwrap();
         let mut d1 = BTreeMap::new();
         d1.insert("A".to_string(), "1".to_string());
         store
@@ -502,8 +500,7 @@ mod tests {
         // values preserved, readable with the new key (in memory and reopening from disk).
         assert_eq!(store.load("s1").unwrap().data.get("A").unwrap(), "1");
         assert_eq!(store.load("s2").unwrap().data.get("B").unwrap(), "2");
-        let store2 = SecretStore::open(&dir).unwrap();
+        let store2 = SecretStore::open(dir).unwrap();
         assert_eq!(store2.load("s1").unwrap().data.get("A").unwrap(), "1");
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -10,9 +10,8 @@ use std::io::Write;
 /// `import_iptables` não toca no host: lê, conta e relata.
 #[test]
 fn import_iptables_conta_sem_aplicar() {
-    let d = std::env::temp_dir().join(format!("dlx-ipt-{}", std::process::id()));
-    std::fs::create_dir_all(&d).unwrap();
-    let f = d.join("save.txt");
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("save.txt");
     let mut fh = std::fs::File::create(&f).unwrap();
     writeln!(
         fh,
@@ -24,8 +23,6 @@ fn import_iptables_conta_sem_aplicar() {
     assert!(r.contains("1 tabela"), "contagem de tabelas: {r}");
     assert!(r.contains("2 cadeia"), "contagem de cadeias: {r}");
     assert!(r.contains("1 regra"), "contagem de regras: {r}");
-
-    let _ = std::fs::remove_dir_all(&d);
 }
 
 /// Um ficheiro que não existe dá erro NOMEADO — não um relatório de zeros.
@@ -50,10 +47,10 @@ fn import_iptables_recusa_ficheiro_ausente() {
 /// mundos, porque nada assinala o problema.
 #[test]
 fn attach_on_ip_recusa_endereco_fora_da_rede() {
-    let d = std::env::temp_dir().join(format!("dlx-attach-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    std::env::set_var("DELONIX_ROOT", &d);
+    // The only test in this binary that reads `DELONIX_ROOT`, so a per-test
+    // dir is safe even though the variable is process-wide.
+    let d = tempfile::tempdir().unwrap();
+    std::env::set_var("DELONIX_ROOT", d.path());
 
     let net = delonix_sdn::infra::network_create("rede-teste").expect("cria rede");
     let fora = "10.99.0.5";
@@ -68,6 +65,4 @@ fn attach_on_ip_recusa_endereco_fora_da_rede() {
     let t = e.to_string();
     assert!(t.contains(fora), "o erro devia nomear o IP: {t}");
     assert!(t.contains("rede-teste"), "e a rede: {t}");
-
-    let _ = std::fs::remove_dir_all(&d);
 }

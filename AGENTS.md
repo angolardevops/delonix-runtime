@@ -5665,8 +5665,25 @@ checklist para quem mexer aqui do que como lista de correcções:
   se não estiver, o comentário é uma hipótese de quem o escreveu. E quando a regra certa existe
   só como prática, escreve-a: o #572 deixou-a em `coding-conventions.md` §9 («A test removes its
   temporary directory on every exit»), que antes citava o `tmp_dir(tag)` sem guarda como a
-  convenção observada. O idioma antigo continua em 204 sítios de código de teste (2026-09-28):
-  limpos no caminho feliz, sujos num assert que falhe;
+  convenção observada. O idioma antigo estava em 204 linhas de código de teste; a migração de
+  2026-09-28 passou 195 delas ao `TempDir` (e mais 2 que o `grep` não via, por guardarem o
+  `temp_dir()` numa variável: 197 no total). Das 9 que ficaram, 1 ainda cria pasta: o teste ao vivo opt-in
+  `delonix-vm/tests/provider_live.rs`, que entrega a pasta a um hipervisor que pode correr com
+  outro uid (o `tempdir()` cria-a com `0700`) e que não se pode validar sem esse hipervisor. (O do
+  `delonix-proxmox` esperou que a sessão que tinha o ficheiro aberto fundisse o #579.) As outras 8 não criam nada que se apague:
+  caminhos que têm de faltar, caminhos esperados que a produção calcula, código de produção e o
+  arrendamento do `netdef_naming`. Numa corrida verde a bateria deixava 0 antes e 0 depois (2419
+  testes, as mesmas listas); a diferença está na falha: com um `panic!` provocado depois de a pasta
+  existir (`store_roundtrip_and_resolve`, `delonix-state`), a base deixa `dlx-sec-<pid>` e a
+  migração não deixa nada, com rc=101 nas duas (verificado);
+- **duas cópias do mesmo repo não são dois builds** — a prova acima deu primeiro o resultado
+  ERRADO: a cópia migrada também deixava `dlx-sec-<pid>`. O log não tinha `Compiling
+  delonix-state`: o cargo tinha corrido o binário da BASE. As duas cópias vinham de `git archive`,
+  que põe nos ficheiros a data do commit (mais antiga que o artefacto acabado de compilar), e o
+  cargo identifica um membro do workspace pelo caminho relativo à raiz, por isso duas pastas
+  diferentes partilharam o mesmo `CARGO_TARGET_DIR` como se fossem uma e «fresca». Aconteceu
+  **duas vezes no mesmo dia**, a um agente e a mim. **Regra: um antes/depois tem um
+  `CARGO_TARGET_DIR` por lado, e o log do lado medido tem de dizer `Compiling <crate>`**;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para

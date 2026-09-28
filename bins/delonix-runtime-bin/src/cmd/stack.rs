@@ -3272,20 +3272,10 @@ mod tests {
     /// Parses multi-doc YAML to `Vec<ManifestDoc>` via the same real `load`
     /// (so the canonicalization/apiVersion rules hold in the tests).
     fn docs(yaml: &str) -> Vec<manifest::ManifestDoc> {
-        // UNIQUE name per call: the tests run in threads of the SAME process,
-        // so `process::id()` is not enough to distinguish them — without the counter,
-        // two calls collided on the path and one deleted the other's file.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!(
-            "delonix-stack-test-{}-{n}.yaml",
-            std::process::id()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("stack.yaml");
         std::fs::write(&p, yaml).unwrap();
-        let d = manifest::load(&p).unwrap();
-        let _ = std::fs::remove_file(&p);
-        d
+        manifest::load(&p).unwrap()
     }
 
     fn check(yaml: &str) -> Vec<String> {
@@ -3727,8 +3717,8 @@ spec: { image: nginx, network: prod-net }
     /// purpose, which is the only form that proves anything.
     #[test]
     fn stack_name_vem_do_directorio_mesmo_com_caminho_relativo() {
-        let base = std::env::temp_dir().join(format!("dlx-stackname-{}", std::process::id()));
-        let dir = base.join("o-meu-projecto");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("o-meu-projecto");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("delonix-manifest.yaml");
         std::fs::write(
@@ -3756,7 +3746,6 @@ spec: {}
         // an empty stack name that would own nothing.
         assert_eq!(super::stack_name(&file, Some("outro")), "outro");
         assert_eq!(super::stack_name(&file, Some("  ")), "o-meu-projecto");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A `kind: Stack` names the stack, and it has to be read from the RAW file:
@@ -3764,9 +3753,8 @@ spec: {}
     /// itself does not survive the load.
     #[test]
     fn um_kind_stack_da_o_nome_e_ganha_ao_directorio() {
-        let dir = std::env::temp_dir().join(format!("dlx-stackkind-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("m.yaml");
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("m.yaml");
         std::fs::write(
             &file,
             "apiVersion: delonix.io/v1\nkind: Stack\nmetadata: { name: loja }\nspec:\n  volumes:\n    - name: v\n      spec: {}\n",
@@ -3775,7 +3763,6 @@ spec: {}
         assert_eq!(super::stack_name(&file, None), "loja");
         // ...but an explicit `--name` still wins over it.
         assert_eq!(super::stack_name(&file, Some("x")), "x");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Teardown must be the REVERSE of creation: pulling a network out from

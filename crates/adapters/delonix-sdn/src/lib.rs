@@ -2550,9 +2550,9 @@ mod tests {
     #[test]
     fn uma_rede_com_cidr_nao_perde_a_posse() {
         use super::NetworkStore;
-        let tmp = std::env::temp_dir().join(format!("dlx-net-cidr-meta-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let store = NetworkStore::open(tmp).unwrap();
         let c = super::Cidr::parse("10.251.0.0/16").expect("cidr valido");
         store.create_with_cidr("comcidr", c).unwrap();
         // Pré-condição: o registo é MESMO da forma que perdia os labels.
@@ -2592,7 +2592,6 @@ mod tests {
             found.labels.get("delonix.io/stack").map(String::as_str),
             Some("loja")
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// `create` still writes the LEGACY form (the bare base octet), which has
@@ -2603,9 +2602,9 @@ mod tests {
     #[test]
     fn set_metadata_actualiza_um_registo_legado_sem_mudar_a_rede() {
         use super::NetworkStore;
-        let tmp = std::env::temp_dir().join(format!("dlx-net-meta-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let store = NetworkStore::open(tmp).unwrap();
         let before = store.create("interna").unwrap();
         // Precondition: the record really is the legacy bare-integer form.
         let raw = std::fs::read_to_string(tmp.join("networks/interna")).unwrap();
@@ -2633,7 +2632,6 @@ mod tests {
         let reread = store.get("interna").unwrap();
         assert_eq!(reread.labels, after.labels);
         assert_eq!(reread.subnet, before.subnet);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The record has several independent writers, so `set_metadata` rewrites it
@@ -2658,16 +2656,15 @@ mod tests {
     /// `write_atomic` to `fs::write` makes this fail.
     #[test]
     fn escrita_de_rede_nunca_deixa_um_leitor_ver_registo_parcial() {
-        let tmp = std::env::temp_dir().join(format!("dlx-net-atomic-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let st = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let st = NetworkStore::open(tmp).unwrap();
         st.create_overlay("ov", 42, &[], None).unwrap();
 
         std::thread::scope(|sc| {
             for i in 0..16 {
-                let tmp = tmp.clone();
                 sc.spawn(move || {
-                    let st = NetworkStore::open(&tmp).unwrap();
+                    let st = NetworkStore::open(tmp).unwrap();
                     // Peers of growing length: the body changes size on every write.
                     let peer = format!("10.0.0.{}={}", i + 1, "k".repeat(i * 9));
                     let _ = st.add_overlay_peer("ov", &peer);
@@ -2684,15 +2681,14 @@ mod tests {
         let n = st.get("ov").expect("estado final tem de ser legivel");
         assert_eq!(n.driver, "overlay");
         assert_eq!(n.vni, Some(42));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn set_metadata_preserva_vni_e_peers_de_um_overlay() {
         use super::NetworkStore;
-        let tmp = std::env::temp_dir().join(format!("dlx-net-ovl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let store = NetworkStore::open(tmp).unwrap();
         store
             .create_overlay("malha", 42, &["10.0.0.7".to_string()], Some("10.9.0.1"))
             .unwrap();
@@ -2708,7 +2704,6 @@ mod tests {
         assert_eq!(after.wg_ip.as_deref(), Some("10.9.0.1"));
         assert_eq!(after.driver, super::DRIVER_OVERLAY);
         assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "infra");
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// O inverso do `add_overlay_peer`, que durante muito tempo não existiu: um
@@ -2721,9 +2716,9 @@ mod tests {
     #[test]
     fn remove_overlay_peer_tira_o_peer_e_preserva_vni_wgip_e_labels() {
         use super::NetworkStore;
-        let tmp = std::env::temp_dir().join(format!("dlx-net-rmp-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let store = NetworkStore::open(tmp).unwrap();
         store
             .create_overlay(
                 "malha",
@@ -2771,7 +2766,6 @@ mod tests {
         // Não é overlay → recusa, como o add.
         store.create("simples").unwrap();
         assert!(store.remove_overlay_peer("simples", "10.0.0.7").is_err());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// A literal newline in a value would split the record in two and the second
@@ -2781,9 +2775,9 @@ mod tests {
     #[test]
     fn set_metadata_recusa_um_valor_com_newline() {
         use super::NetworkStore;
-        let tmp = std::env::temp_dir().join(format!("dlx-net-nl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let store = NetworkStore::open(tmp).unwrap();
         store.create("interna").unwrap();
         assert!(store
             .set_metadata(
@@ -2797,7 +2791,6 @@ mod tests {
         // The default bridge has no record on disk — stamping it would make a
         // stack believe it owns something it cannot own.
         assert!(store.set_metadata("bridge", &[], &[]).is_err());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The Docker `[hostIp:]hostPort:contPort` form: the address is what lets a
@@ -3027,9 +3020,9 @@ mod tests {
 
     #[test]
     fn overlay_add_peer_dedup() {
-        let dir = std::env::temp_dir().join(format!("dlx-addpeer-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = NetworkStore::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let store = NetworkStore::open(dir).unwrap();
         store
             .create_overlay("ov", 7, &[], Some("10.250.0.1"))
             .unwrap();
@@ -3049,14 +3042,13 @@ mod tests {
             .add_overlay_peer("ov", "10.0.0.3=PUB3=10.250.0.3")
             .unwrap();
         assert_eq!(n3.peers.len(), 2);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn overlay_wgip_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("dlx-wgo-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = NetworkStore::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let store = NetworkStore::open(dir).unwrap();
         let peers = vec!["10.0.0.2=PUB2=10.250.0.2".to_string()];
         let n = store
             .create_overlay("ov", 42, &peers, Some("10.250.0.1"))
@@ -3066,7 +3058,6 @@ mod tests {
         let n2 = store.get("ov").unwrap();
         assert_eq!(n2.wg_ip.as_deref(), Some("10.250.0.1"));
         assert_eq!(n2.peers, peers);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3264,9 +3255,9 @@ mod tests {
 
     #[test]
     fn network_store_create_get_list_remove() {
-        let tmp = std::env::temp_dir().join(format!("dlxnet-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let s = NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
+        let s = NetworkStore::open(tmp).unwrap();
         assert!(s.get("bridge").unwrap().name == DEFAULT_NET);
         assert!(s.get("nope").is_err());
         let a = s.create("alpha").unwrap();
@@ -3277,7 +3268,6 @@ mod tests {
         assert!(s.create("bridge").is_err(), "nome reservado deve falhar");
         s.remove("alpha").unwrap();
         assert_eq!(s.list().unwrap().len(), 1);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -3317,13 +3307,9 @@ mod tests {
 
     #[test]
     fn create_with_base_e_idempotente_mas_nao_renumera() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-netstore-test-{}-{}",
-            std::process::id(),
-            fnv32("renumera")
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = NetworkStore::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let store = NetworkStore::open(dir).unwrap();
 
         let a = store.create_with_base("vpc", 210).unwrap();
         assert_eq!(a.subnet, "10.210.0.0/16");
@@ -3340,19 +3326,13 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("already used by network 'vpc'"), "{e}");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn create_with_base_recusa_fora_do_espaco_de_workload() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-netstore-range-{}-{}",
-            std::process::id(),
-            fnv32("range")
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = NetworkStore::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let store = NetworkStore::open(dir).unwrap();
         // 50 is a valid octet but not a valid WORKLOAD one; the old guard was
         // `1..=254`, which let a network be created where nothing else looks.
         assert!(store.create_with_base("x", 50).is_err());
@@ -3361,7 +3341,6 @@ mod tests {
         // (a user network sharing the ingress's addresses) written as a test.
         assert!(store.create_with_base("x", 200).is_err());
         assert!(store.create_with_base("x", 201).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -3604,16 +3583,14 @@ mod tests_posse_do_slirp {
 mod tests_single_allocator {
     use super::*;
 
-    fn with_root<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+    fn with_root<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
         let mut env = crate::testenv::lock();
-        let d = std::env::temp_dir().join(format!("dlx-allocator-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_ROOT", d);
         env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
-        let out = f(&d);
-        let _ = std::fs::remove_dir_all(&d);
-        out
+        f(d)
     }
 
     #[test]
@@ -3636,7 +3613,7 @@ mod tests_single_allocator {
     /// the default ingress network. Fill the whole space; none lands there.
     #[test]
     fn the_network_store_never_hands_out_the_ingress_slash16() {
-        with_root("ingress", |root| {
+        with_root(|root| {
             let store = NetworkStore::open(root).unwrap();
             let mut seen = std::collections::HashSet::new();
             for i in 0.. {
@@ -3662,7 +3639,7 @@ mod tests_single_allocator {
     /// occupies its `/16` for the `NetworkStore` too.
     #[test]
     fn the_network_store_sees_networks_only_vms_created() {
-        with_root("vmnet", |root| {
+        with_root(|root| {
             let vm = infra::network_create("s2vmnet").unwrap();
             let store = NetworkStore::open(root).unwrap();
             for i in 0..20 {
@@ -3682,7 +3659,7 @@ mod tests_single_allocator {
     /// declared network is realized on ITS prefix, and others stay off it.
     #[test]
     fn the_vm_allocator_sees_the_registry() {
-        with_root("registry", |root| {
+        with_root(|root| {
             let store = NetworkStore::open(root).unwrap();
             let declared = store.create_with_base("s2decl", first_user_base()).unwrap();
             let cidr = store
@@ -3706,7 +3683,7 @@ mod tests_single_allocator {
     /// `create_with_base` on the ingress octet is refused, saying why.
     #[test]
     fn create_with_base_refuses_the_ingress() {
-        with_root("base200", |root| {
+        with_root(|root| {
             let store = NetworkStore::open(root).unwrap();
             let e = store.create_with_base("s2ing", 200).unwrap_err();
             assert!(format!("{e}").contains("ingress"), "{e}");
@@ -3717,7 +3694,7 @@ mod tests_single_allocator {
     /// `/16` to two networks.
     #[test]
     fn both_allocators_in_parallel_never_share_a_slash16() {
-        with_root("parallel", |root| {
+        with_root(|root| {
             let root = root.to_path_buf();
             let hs: Vec<_> = (0..24)
                 .map(|i| {

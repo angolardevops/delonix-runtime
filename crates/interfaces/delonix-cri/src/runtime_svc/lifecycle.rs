@@ -2610,17 +2610,8 @@ mod tests {
         }
     }
 
-    fn tmp_base(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "dlx-cri-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn tmp_base() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
     }
 
     /// `hostNetwork: true` tem de virar REDE DO HOST no ARGV do motor.
@@ -2852,8 +2843,9 @@ mod tests {
             b"KUBERNETES_SERVICE_HOST=10.96.0.1\0CERT=-----BEGIN-----\n  line\n-----END-----\0"
         );
 
-        let base = tmp_base("env0");
-        let path = write_env_file(&base, "abc", &envs).unwrap();
+        let base_dir = tmp_base();
+        let base = base_dir.path();
+        let path = write_env_file(base, "abc", &envs).unwrap();
         use std::os::unix::fs::PermissionsExt as _;
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(Path::new(&path)), 0o600);
@@ -2874,13 +2866,12 @@ mod tests {
             .env
             .iter()
             .any(|e| e == "KUBERNETES_SERVICE_HOST=10.96.0.1"));
-        let spec = write_run_spec(&base, &o).unwrap();
+        let spec = write_run_spec(base, &o).unwrap();
         assert_eq!(mode(&spec), 0o600);
         assert_eq!(mode(spec.parent().unwrap()), 0o700);
         let spec_arg = spec.to_string_lossy().into_owned();
         let argv = ["__apirun", spec_arg.as_str()];
         assert!(!argv.iter().any(|a| a.contains("10.96.0.1")), "{argv:?}");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The ceiling has to bite at CREATE, on the real CRI request path — not just
@@ -2889,10 +2880,11 @@ mod tests {
     /// go through untouched.
     #[test]
     fn create_container_recusa_o_que_o_tecto_do_no_proibe() {
-        let base = tmp_base("ceiling");
+        let base_dir = tmp_base();
+        let base = base_dir.path();
         let ceiling = crate::CapCeiling::parse("default,NET_ADMIN", "reject").unwrap();
 
-        let err = create_container(&base, req_with_caps(&["SYS_ADMIN"], false), ceiling)
+        let err = create_container(base, req_with_caps(&["SYS_ADMIN"], false), ceiling)
             .expect_err("SYS_ADMIN está acima do tecto");
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         assert!(
@@ -2901,26 +2893,24 @@ mod tests {
             err.message()
         );
 
-        let err = create_container(&base, req_with_caps(&[], true), ceiling)
+        let err = create_container(base, req_with_caps(&[], true), ceiling)
             .expect_err("privileged pede tudo, o tecto não dá tudo");
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
 
         // Within the ceiling → created normally.
-        create_container(&base, req_with_caps(&["NET_ADMIN"], false), ceiling)
+        create_container(base, req_with_caps(&["NET_ADMIN"], false), ceiling)
             .expect("NET_ADMIN está no tecto");
         // No ceiling → a privileged pod is created exactly as before.
         create_container(
-            &base,
+            base,
             req_with_caps(&[], true),
             crate::CapCeiling::unlimited(),
         )
         .expect("sem tecto nada muda");
         // `clamp` mode never refuses; the reduction happens at start.
         let clamp = crate::CapCeiling::parse("default", "clamp").unwrap();
-        create_container(&base, req_with_caps(&["SYS_ADMIN"], true), clamp)
+        create_container(base, req_with_caps(&["SYS_ADMIN"], true), clamp)
             .expect("clamp corta, não recusa");
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The flags `start_container` actually puts on the `delonix run` command line.
@@ -3026,8 +3016,8 @@ mod tests {
     /// manager ran without stats.
     #[test]
     fn writable_layer_points_at_the_engine_directory_and_measures_it() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cri-wl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
         let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let c = delonix_compute::Container::new(
             "e1e1e1e1e1e1e1e1".into(),
@@ -3044,7 +3034,7 @@ mod tests {
         std::fs::create_dir_all(upper.join("var")).unwrap();
         std::fs::write(upper.join("var").join("data"), vec![7u8; 64 * 1024]).unwrap();
 
-        let fs = writable_layer_usage(&tmp, "abc", 1);
+        let fs = writable_layer_usage(tmp, "abc", 1);
         let mp = fs.fs_id.unwrap().mountpoint;
         assert_eq!(mp, upper.to_string_lossy());
         assert!(
@@ -3055,10 +3045,9 @@ mod tests {
         assert_eq!(fs.inodes_used.unwrap().value, 3, "upper, var, data");
 
         // Unknown to the engine: a path that exists, and no invented usage.
-        let gone = writable_layer_usage(&tmp, "nope", 1);
+        let gone = writable_layer_usage(tmp, "nope", 1);
         assert_eq!(gone.fs_id.unwrap().mountpoint, tmp.to_string_lossy());
         assert_eq!(gone.used_bytes.unwrap().value, 0);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Removal is judged by the engine's store, three ways: present, absent, and
@@ -3066,8 +3055,8 @@ mod tests {
     /// deleted with its container still on disk.
     #[test]
     fn engine_has_answers_from_the_store_and_unreadable_is_not_absent() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cri-has-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
         let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let c = delonix_compute::Container::new(
             "a9c6bb47c90e87bf".into(),
@@ -3077,15 +3066,14 @@ mod tests {
             String::new(),
         );
         store.save(&c).unwrap();
-        assert_eq!(engine_has(&tmp, "bfc39487ccd4adf6"), Some(true));
-        assert_eq!(engine_has(&tmp, "0000000000000000"), Some(false));
+        assert_eq!(engine_has(tmp, "bfc39487ccd4adf6"), Some(true));
+        assert_eq!(engine_has(tmp, "0000000000000000"), Some(false));
 
         // A store that cannot be read (here: `containers` is a file) is unknown.
         let broken = tmp.join("broken");
         std::fs::create_dir_all(&broken).unwrap();
         std::fs::write(broken.join("containers"), b"not a directory").unwrap();
         assert_eq!(engine_has(&broken, "bfc39487ccd4adf6"), None);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -3093,8 +3081,8 @@ mod tests {
         // Container marked `Running` in the store but with a DEAD pid — simulates a
         // not-yet-reconciled crash. Without the fix, delonix_exit returned None → the
         // kubelet saw exit 0 (Completed) and restartPolicy OnFailure did NOT restart.
-        let tmp = std::env::temp_dir().join(format!("dlx-cri-exit-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
         let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let mut c = delonix_compute::Container::new(
             "cri-abc".into(),
@@ -3109,12 +3097,12 @@ mod tests {
 
         // reconciles (Running+dead → Crashed) → exit 137 + state Exited.
         assert_eq!(
-            delonix_exit(&tmp, "abc"),
+            delonix_exit(tmp, "abc"),
             Some(137),
             "crash deve reportar 137, não 0"
         );
         assert_eq!(
-            delonix_state(&tmp, "abc"),
+            delonix_state(tmp, "abc"),
             ContainerState::ContainerExited as i32
         );
 
@@ -3122,13 +3110,11 @@ mod tests {
         let mut ok = c.clone();
         ok.status = delonix_model::records::Status::Stopped;
         store.save(&ok).unwrap();
-        assert_eq!(delonix_exit(&tmp, "abc"), Some(0));
+        assert_eq!(delonix_exit(tmp, "abc"), Some(0));
         let mut failed = c.clone();
         failed.status = delonix_model::records::Status::Failed(2);
         store.save(&failed).unwrap();
-        assert_eq!(delonix_exit(&tmp, "abc"), Some(2));
-
-        let _ = std::fs::remove_dir_all(&tmp);
+        assert_eq!(delonix_exit(tmp, "abc"), Some(2));
     }
 
     /// BUG FIXED: `ContainerStatus.finished_at` used to be `now_ns()` recomputed on
@@ -3137,15 +3123,8 @@ mod tests {
     /// across repeated polls.
     #[test]
     fn container_status_finished_at_e_started_at_sao_estaveis_entre_polls() {
-        let tmp = std::env::temp_dir().join(format!(
-            "dlx-cri-status-stable-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
 
         let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let mut c = delonix_compute::Container::new(
@@ -3167,9 +3146,9 @@ mod tests {
             finished_at: 0,
             ..Default::default()
         };
-        write_rec(&ct_dir(&tmp), "abc", &rec).unwrap();
+        write_rec(&ct_dir(tmp), "abc", &rec).unwrap();
 
-        let s1 = container_status(&tmp, "abc".into())
+        let s1 = container_status(tmp, "abc".into())
             .unwrap()
             .into_inner()
             .status
@@ -3184,7 +3163,7 @@ mod tests {
         );
 
         std::thread::sleep(std::time::Duration::from_millis(5));
-        let s2 = container_status(&tmp, "abc".into())
+        let s2 = container_status(tmp, "abc".into())
             .unwrap()
             .into_inner()
             .status
@@ -3194,17 +3173,15 @@ mod tests {
             "finished_at não pode mudar entre polls sucessivos"
         );
         assert_eq!(s1.started_at, s2.started_at);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// A base with two sandboxes and three containers: two in `sbaaaa`, one in `sbbbbb`.
-    fn base_with_two_pods(tag: &str) -> PathBuf {
-        let tmp = std::env::temp_dir().join(format!("dlx-cri-filter-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+    fn base_with_two_pods() -> tempfile::TempDir {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
         for (id, name) in [("sbaaaa", "etcd"), ("sbbbbb", "kube-apiserver")] {
             write_rec(
-                &sb_dir(&tmp),
+                &sb_dir(tmp),
                 id,
                 &SandboxRec {
                     id: id.into(),
@@ -3225,7 +3202,7 @@ mod tests {
             ("ctbbb1", "sbbbbb", "kube-apiserver"),
         ] {
             write_rec(
-                &ct_dir(&tmp),
+                &ct_dir(tmp),
                 id,
                 &ContainerRec {
                     id: id.into(),
@@ -3240,7 +3217,7 @@ mod tests {
             )
             .unwrap();
         }
-        tmp
+        tmp_dir
     }
 
     /// The 6th wall of the DKS control-plane: `ListContainers` ignored the filter, so the
@@ -3251,9 +3228,10 @@ mod tests {
     /// Fails with the fix reverted: unfiltered, this returns all three.
     #[test]
     fn list_containers_honra_o_filtro_de_sandbox_do_kubelet() {
-        let tmp = base_with_two_pods("ctsb");
+        let tmp_dir = base_with_two_pods();
+        let tmp = tmp_dir.path();
         let got = list_containers(
-            &tmp,
+            tmp,
             Some(ContainerFilter {
                 pod_sandbox_id: "sbaaaa".into(),
                 ..Default::default()
@@ -3269,7 +3247,6 @@ mod tests {
             vec!["ctaaa1", "ctaaa2"],
             "o filtro por sandbox devolveu containers de outro pod"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// No filter (and an empty filter) still means "everything" — the CRI contract. Without
@@ -3277,9 +3254,10 @@ mod tests {
     /// full-node sweep, which passes no filter at all.
     #[test]
     fn sem_filtro_continua_a_listar_tudo() {
-        let tmp = base_with_two_pods("all");
+        let tmp_dir = base_with_two_pods();
+        let tmp = tmp_dir.path();
         assert_eq!(
-            list_containers(&tmp, None)
+            list_containers(tmp, None)
                 .unwrap()
                 .into_inner()
                 .containers
@@ -3287,7 +3265,7 @@ mod tests {
             3
         );
         assert_eq!(
-            list_containers(&tmp, Some(ContainerFilter::default()))
+            list_containers(tmp, Some(ContainerFilter::default()))
                 .unwrap()
                 .into_inner()
                 .containers
@@ -3295,21 +3273,21 @@ mod tests {
             3
         );
         assert_eq!(
-            list_pod_sandbox(&tmp, None)
+            list_pod_sandbox(tmp, None)
                 .unwrap()
                 .into_inner()
                 .items
                 .len(),
             2
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn list_pod_sandbox_honra_o_id_e_o_estado() {
-        let tmp = base_with_two_pods("sb");
+        let tmp_dir = base_with_two_pods();
+        let tmp = tmp_dir.path();
         let got = list_pod_sandbox(
-            &tmp,
+            tmp,
             Some(PodSandboxFilter {
                 id: "sbbbbb".into(),
                 ..Default::default()
@@ -3324,7 +3302,7 @@ mod tests {
         // A state the records do not have must match nothing — a filter that silently
         // ignored `state` would report a terminated pod as alive to the kubelet.
         let none = list_pod_sandbox(
-            &tmp,
+            tmp,
             Some(PodSandboxFilter {
                 state: Some(PodSandboxStateValue {
                     state: PodSandboxState::SandboxNotready as i32,
@@ -3336,7 +3314,6 @@ mod tests {
         .into_inner()
         .items;
         assert!(none.is_empty(), "o filtro de estado não foi aplicado");
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The kubelet compares `linux.namespaces.options.network` against what the pod asks
@@ -3347,10 +3324,10 @@ mod tests {
     /// pod in under four minutes, and no control plane could ever finish `kubeadm init`.
     #[test]
     fn pod_sandbox_status_reports_the_namespace_modes() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cri-ns-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
         write_rec(
-            &sb_dir(&tmp),
+            &sb_dir(tmp),
             "sbhost",
             &SandboxRec {
                 id: "sbhost".into(),
@@ -3362,7 +3339,7 @@ mod tests {
         )
         .unwrap();
 
-        let st = pod_sandbox_status(&tmp, "sbhost".into())
+        let st = pod_sandbox_status(tmp, "sbhost".into())
             .unwrap()
             .into_inner()
             .status
@@ -3384,16 +3361,16 @@ mod tests {
         // `network` alone and leaving the neighbours reporting whatever the zero value is.
         assert_eq!(opts.pid, NamespaceMode::Pod as i32);
         assert_eq!(opts.ipc, NamespaceMode::Pod as i32);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// `label_selector` is a SUBSET match. Comparing whole maps would match nothing in
     /// practice, because a real container carries every label the kubelet set on it.
     #[test]
     fn o_label_selector_e_subconjunto_e_nao_igualdade() {
-        let tmp = base_with_two_pods("lbl");
+        let tmp_dir = base_with_two_pods();
+        let tmp = tmp_dir.path();
         let got = list_containers(
-            &tmp,
+            tmp,
             Some(ContainerFilter {
                 label_selector: HashMap::from([(
                     "io.kubernetes.container.name".to_string(),
@@ -3407,7 +3384,6 @@ mod tests {
         .containers;
         assert_eq!(got.len(), 1, "esperava só o container 'etcd'");
         assert_eq!(got[0].id, "ctaaa1");
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The CRI spec's own rule for `Metric.name`: a name that never appeared
@@ -3418,9 +3394,10 @@ mod tests {
     /// rather than trusting the two literal name lists to stay in sync by hand.
     #[test]
     fn every_emitted_metric_name_has_a_descriptor() {
-        let tmp = tmp_base("metrics-names");
+        let tmp_dir = tmp_base();
+        let tmp = tmp_dir.path();
         write_rec(
-            &sb_dir(&tmp),
+            &sb_dir(tmp),
             "sb1",
             &SandboxRec {
                 id: "sb1".into(),
@@ -3429,7 +3406,7 @@ mod tests {
         )
         .unwrap();
         write_rec(
-            &ct_dir(&tmp),
+            &ct_dir(tmp),
             "ct1",
             &ContainerRec {
                 id: "ct1".into(),
@@ -3452,7 +3429,7 @@ mod tests {
             "descriptor names must be unique and cover both tables"
         );
 
-        let pods = list_pod_sandbox_metrics(&tmp)
+        let pods = list_pod_sandbox_metrics(tmp)
             .unwrap()
             .into_inner()
             .pod_metrics;
@@ -3476,7 +3453,6 @@ mod tests {
                 m.name
             );
         }
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// A container belonging to a DIFFERENT sandbox must never show up under
@@ -3484,10 +3460,11 @@ mod tests {
     /// `pod_sandbox_stats_for` already gives the older Stats API.
     #[test]
     fn container_metrics_are_scoped_to_their_own_sandbox() {
-        let tmp = tmp_base("metrics-scope");
+        let tmp_dir = tmp_base();
+        let tmp = tmp_dir.path();
         for (sb_id, ct_id) in [("sbA", "ctA"), ("sbB", "ctB")] {
             write_rec(
-                &sb_dir(&tmp),
+                &sb_dir(tmp),
                 sb_id,
                 &SandboxRec {
                     id: sb_id.into(),
@@ -3496,7 +3473,7 @@ mod tests {
             )
             .unwrap();
             write_rec(
-                &ct_dir(&tmp),
+                &ct_dir(tmp),
                 ct_id,
                 &ContainerRec {
                     id: ct_id.into(),
@@ -3507,7 +3484,7 @@ mod tests {
             .unwrap();
         }
 
-        let pods = list_pod_sandbox_metrics(&tmp)
+        let pods = list_pod_sandbox_metrics(tmp)
             .unwrap()
             .into_inner()
             .pod_metrics;
@@ -3526,6 +3503,5 @@ mod tests {
             };
             assert_eq!(pod.container_metrics[0].container_id, expected_ct);
         }
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

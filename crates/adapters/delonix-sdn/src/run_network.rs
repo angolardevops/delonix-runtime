@@ -311,16 +311,14 @@ mod lease_lifecycle_tests {
     use delonix_compute::{Container, ExtraNet};
 
     /// BOTH roots isolated — the teardown talks to the control socket.
-    fn with_roots<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+    fn with_roots<T>(f: impl FnOnce() -> T) -> T {
         let mut env = crate::testenv::lock();
-        let d = std::env::temp_dir().join(format!("dlx-leases-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_ROOT", d);
         env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
-        let out = f();
-        let _ = std::fs::remove_dir_all(&d);
-        out
+        f()
     }
 
     /// A container on one network, connected to a second (`network connect`).
@@ -349,7 +347,7 @@ mod lease_lifecycle_tests {
     /// another container's attach could come back on a different address.
     #[test]
     fn stop_keeps_the_leases_of_every_network() {
-        with_roots("stop", || {
+        with_roots(|| {
             let c = multi_homed("stop000000000001");
             super::stop_ports(&c, None);
             assert_eq!(
@@ -369,7 +367,7 @@ mod lease_lifecycle_tests {
     /// additional network's lease behind forever.
     #[test]
     fn rm_frees_the_leases_of_every_network() {
-        with_roots("rm", || {
+        with_roots(|| {
             let c = multi_homed("rm00000000000001");
             super::unpublish_ports(&c, None);
             assert_eq!(crate::ipam::lookup("10.84", &c.id), None);
@@ -385,7 +383,7 @@ mod lease_lifecycle_tests {
     /// through the teardown: without this, the leases the stop kept went orphan.
     #[test]
     fn pruning_a_stopped_container_frees_its_leases() {
-        with_roots("prune", || {
+        with_roots(|| {
             let c = multi_homed("prune00000000001");
             super::stop_ports(&c, None);
             super::release_leases(&c);
