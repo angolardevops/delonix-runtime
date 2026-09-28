@@ -134,6 +134,15 @@ pub enum Error {
     #[error("{0}")]
     AlreadyRunning(String),
 
+    // ---- timeout --------------------------------------------------------
+    /// `rm -f` sent the SIGKILL, but the container's init had not finished
+    /// exiting when the deadline passed — in practice stuck in the kernel
+    /// (state `D`) while its mount namespace flushes the overlay's upper
+    /// filesystem. The record is KEPT: removing it would leave a live process
+    /// nothing tracks any more.
+    #[error("{0}")]
+    StillExiting(String),
+
     // ---- invalid argument, about the HOST's own capability -----------------
     /// The AppArmor confinement asked for could not be set up: AppArmor is not
     /// enabled on this host, `apparmor_parser` is not on `PATH`, or it refused
@@ -211,6 +220,7 @@ impl Error {
             Error::NotRunning(_) => 3101,
             Error::CdiDeviceNotFound(_) => 4102,
             Error::AlreadyRunning(_) => 5101,
+            Error::StillExiting(_) => 8101,
             Error::ApparmorUnavailable(_) => 1901,
             Error::NoCdiSpec(_) => 1902,
             Error::Syscall { .. } => 9901,
@@ -257,6 +267,7 @@ impl From<Error> for Dx {
             Error::NotRunning(t) => Dx::NotRunning(t),
             Error::CdiDeviceNotFound(t) => Dx::NotFound(t),
             Error::AlreadyRunning(t) => Dx::Conflict(t),
+            Error::StillExiting(t) => Dx::Timeout(t),
             Error::Syscall { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
         };
@@ -300,6 +311,7 @@ mod tests {
                 "'nvidia.com/gpu=7': not found in any discovered CDI spec".into(),
             ),
             Error::AlreadyRunning("container web is running (use --force)".into()),
+            Error::StillExiting("container web: pid 42 is still exiting".into()),
             Error::ApparmorUnavailable(
                 "--apparmor delonix-default: AppArmor is not enabled on this host, so nothing \
                  would confine this container"

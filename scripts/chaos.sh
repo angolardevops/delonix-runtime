@@ -113,9 +113,73 @@ neton() {
   dlx container exec "$1" ping -c1 -W2 "$gw" 2>/dev/null | grep -q "1 packets received"
 }
 
-# Remove os pods nomeados e MEDE que os membros saíram do `container ps -a`.
-# Imprime os membros que sobraram; rc 0 = limpo, 1 = sobrou algum, 2 = o
-# `ps -a` não respondeu (um `ps` vazio por falha não pode passar por limpo).
+# Os PIDs cujo `DELONIX_ROOT` está debaixo do sandbox — lido do
+# `/proc/<pid>/environ`, nunca pelo nome: o host pode correr outra instância do
+# motor, com os mesmos nomes de processo, e essa não é nossa. Apanha o que o
+# motor lança (pin, control, slirp, o supervisor `netns run`, o log shim); NÃO
+# apanha o workload, cujo ambiente é o do container — esse conta-se pelo pid
+# registado (`member_procs`).
+sandbox_pids() {
+  SANDBOX="$SANDBOX" python3 - <<'EOF'
+import os
+want = os.environ["SANDBOX"].rstrip("/") + "/"
+for d in os.listdir("/proc"):
+    if not d.isdigit():
+        continue
+    try:
+        env = open(f"/proc/{d}/environ", "rb").read().split(b"\0")
+    except OSError:
+        continue
+    for kv in env:
+        if kv.startswith(b"DELONIX_ROOT="):
+            if (kv[len(b"DELONIX_ROOT="):].decode(errors="replace") + "/").startswith(want):
+                print(d)
+            break
+EOF
+}
+
+# Os processos de um membro, lidos ANTES de o remover: o init do workload (o
+# pid registado — PID 1 da sua pid namespace), o supervisor que o reapa (o
+# `netns run`, pai dele) e os filhos desse supervisor (o log shim). O supervisor
+# só entra se for comprovadamente do sandbox (`sandbox_pids`), para a medição
+# nunca apontar a um processo alheio.
+#
+#   member_procs rp-c0   →   "4101 4099 4103"
+member_procs() {
+  local pid sup mine out=""
+  pid=$(cpid "$1"); [ -n "$pid" ] && [ -e "/proc/$pid" ] || return 0
+  out="$pid"
+  sup=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)
+  mine=" $(sandbox_pids | tr '\n' ' ') "
+  if [ -n "$sup" ] && [[ "$mine" == *" $sup "* ]]; then
+    out+=" $sup $(cat "/proc/$sup/task/"*/children 2>/dev/null | tr ' ' '\n' | grep -vx "$pid")"
+  fi
+  printf '%s' "$out"
+}
+
+# Dos PIDs dados, os que ainda existem, como `pid:estado:comm` (o `comm` e não o
+# `cmdline`: um processo a meio da saída já largou a memória, e o seu `cmdline`
+# vem vazio — era exactamente o caso a mostrar). Espera até
+# `$2` décimos de segundo por eles — o supervisor só sai DEPOIS de reapar o
+# workload, e esses milissegundos não são o defeito; os 15 s medidos são.
+procs_left() {
+  local pids=$1 ticks=${2:-20} p left
+  while :; do
+    left=""
+    for p in $pids; do
+      [ -e "/proc/$p" ] || continue
+      left+="$p:$(awk '{print $3}' "/proc/$p/stat" 2>/dev/null):$(cat "/proc/$p/comm" 2>/dev/null) "
+    done
+    [ -z "$left" ] || [ "$ticks" -le 0 ] && break
+    ticks=$((ticks-1)); sleep 0.1
+  done
+  printf '%s' "$left"
+}
+
+# Remove os pods nomeados e MEDE que os membros saíram — do `container ps -a` E
+# do host. Imprime o que sobrou; rc 0 = limpo, 1 = sobrou algum membro no `ps
+# -a`, 2 = o `ps -a` não respondeu (um `ps` vazio por falha não pode passar por
+# limpo), 3 = os registos saíram mas os PROCESSOS ficaram.
 #
 # Um pod por chamada: o `delete pod` pára no primeiro que falha, e uma limpeza
 # não pode deixar os seguintes de pé por causa de um que nunca chegou a existir.
@@ -123,17 +187,26 @@ neton() {
 # `delete pod`: falhava em silêncio (>/dev/null), os pods ficavam vivos até ao
 # `teardown_quiet`, e um cenário vazava para o seguinte. Por isso mede-se.
 #
+# E mede-se nos processos, não só nos registos: a 2026-09-27, com load ~111, o
+# `delete pod --force` devolveu sucesso, o `ps -a` deixou de listar os membros,
+# e os cinco workloads (`sleep 300` em estado D, a esvaziar o overlay para o
+# disco) mais os seus supervisores continuavam no host depois de o harness
+# apagar o sandbox. O `rm -f` devolvia no SIGKILL, não na saída do processo.
+#
 #   pod_cleanup "pa pa2 pb" pa-c0 pa2-c0 pb-c0
 pod_cleanup() {
   local pods=$1; shift
-  local p ps m left=""
+  local p ps m left="" pids=""
+  for m in "$@"; do pids+="$(member_procs "$m") "; done
   for p in $pods; do dlx delete pod "$p" --force >/dev/null 2>&1; done
   ps=$(dlx container ps -a 2>/dev/null) || return 2
   for m in "$@"; do
     printf '%s\n' "$ps" | grep -qw -- "$m" && left+="$m "
   done
+  if [ -n "$left" ]; then printf '%s' "$left"; return 1; fi
+  left=$(procs_left "$pids")
   printf '%s' "$left"
-  [ -z "$left" ]
+  [ -z "$left" ] || return 3
 }
 
 setup() {
@@ -729,10 +802,12 @@ scen_pod_namespace_isolation() {
     bad "pod-namespace-isolation-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
   elif [ "${listed:-0}" -eq 0 ]; then
     skip "pod-namespace-isolation-cleanup" "nenhum membro listado antes da limpeza — nada a medir"
+  elif [ "$rc" -eq 3 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`delete pod --force\` tirou os registos mas os processos ficaram: $left"
   elif [ "$rc" -ne 0 ]; then
     bad "pod-namespace-isolation-cleanup" "\`delete pod --force\` deixou membros no \`container ps -a\`: $left"
   else
-    ok "pod-namespace-isolation-cleanup (\`delete pod --force\` removeu os $listed membros)"
+    ok "pod-namespace-isolation-cleanup (\`delete pod --force\` removeu os $listed membros, e nenhum processo deles ficou)"
   fi
   rm -rf "$d"
 }
@@ -1003,10 +1078,12 @@ reporta pin: o nó fica meio-de-pé e o attach seguinte falha"
   left=$(pod_cleanup rp rp-c0 rp-c1); rc=$?
   if [ "$rc" -eq 2 ]; then
     bad "pod-holder-respawn-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
+  elif [ "$rc" -eq 3 ]; then
+    bad "pod-holder-respawn-cleanup" "\`delete pod rp --force\` tirou os registos mas os processos ficaram: $left"
   elif [ "$rc" -ne 0 ]; then
     bad "pod-holder-respawn-cleanup" "\`delete pod rp --force\` deixou membros no \`container ps -a\`: $left"
   else
-    ok "pod-holder-respawn-cleanup (\`delete pod --force\` removeu rp-c0 e rp-c1)"
+    ok "pod-holder-respawn-cleanup (\`delete pod --force\` removeu rp-c0 e rp-c1, e nenhum processo deles ficou)"
   fi
   rm -rf "$d"
   # E o sandbox volta SERVÍVEL para o cenário seguinte, seja qual for o veredicto
@@ -1782,6 +1859,22 @@ trap '[ $KEEP -eq 0 ] && teardown_quiet' EXIT
 for s in "${SELECTED[@]}"; do
   "scen_${s}" || true
 done
+
+# O teardown também é medido, e nos PROCESSOS: depois dele nada com
+# `DELONIX_ROOT` debaixo do sandbox pode continuar no host — nem infra, nem
+# supervisores, nem shims. Foi depois do teardown que a fuga de 2026-09-27 se
+# viu (os workloads de cinco pods vivos com o sandbox já apagado), e nenhum
+# veredicto a registava. O workload em si não herda `DELONIX_ROOT`; o seu
+# supervisor sim, e só sai depois de o reapar — por isso é ele que o denuncia.
+if [ "$KEEP" -eq 0 ]; then
+  teardown_quiet
+  leftover=$(procs_left "$(sandbox_pids | tr '\n' ' ')" 50)
+  if [ -n "$leftover" ]; then
+    bad "sandbox-teardown" "processos do sandbox continuam no host depois do teardown: $leftover"
+  else
+    ok "sandbox-teardown (nenhum processo com DELONIX_ROOT em $SANDBOX ficou no host)"
+  fi
+fi
 
 printf '\n\033[1m── resumo ──\033[0m\n'
 for r in "${RESULTS[@]}"; do printf '  %s\n' "$r"; done
