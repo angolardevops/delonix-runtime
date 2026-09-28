@@ -2207,6 +2207,34 @@ fn the_lock_refused_for_pending_changes_runs_nothing() {
 
 const THREE_NODES: &str = r#"[{"node":"pve","status":"online"},{"node":"pve2","status":"online"},{"node":"pve3","status":"offline"}]"#;
 
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+/// A node's `srvreload`/`networking` task, as its task list shows it.
+fn reload_task(node: &str, tag: &str, start: u64) -> String {
+    format!(
+        r#"{{"upid":"UPID:{node}:0000{tag}:00000BBB:6AB9{tag}:srvreload:networking:root@pam:","type":"srvreload","id":"networking","starttime":{start},"status":"OK"}}"#
+    )
+}
+
+fn reload_upid(node: &str, tag: &str) -> String {
+    format!("UPID:{node}:0000{tag}:00000BBB:6AB9{tag}:srvreload:networking:root@pam:")
+}
+
+/// One online node's network reload as an SDN apply sees it: the task list
+/// read BEFORE the apply (an older reload only) and AFTER it (a fresh one,
+/// `1111`, on top). The fresh reload's status is the mock's stock `OK`.
+fn reload_lists(node: &str) -> [(&'static str, &'static str, Reply); 2] {
+    let path = leak(format!("/nodes/{node}/tasks"));
+    let old = reload_task(node, "0AAA", 100);
+    let fresh = reload_task(node, "1111", 200);
+    [
+        ("GET", path, ok_data(&format!("[{old}]"))),
+        ("GET", path, ok_data(&format!("[{fresh},{old}]"))),
+    ]
+}
+
 /// The apply's task ends OK when only the ENTRY node's reload succeeded —
 /// measured on a two-node cluster, 2026-09-27: `reloadnetworkall` OK, the
 /// second node's `srvreload` failed on a missing `dnsmasq`, its vnet `error`.
@@ -2216,27 +2244,35 @@ const THREE_NODES: &str = r#"[{"node":"pve","status":"online"},{"node":"pve2","s
 fn an_sdn_apply_the_second_node_did_not_realize_is_refused() {
     let content_ok = r#"{"data":[{"vnet":"v1","status":"available","statusmsg":null}]}"#;
     let content_err = r#"{"data":[{"vnet":"v1","status":"error","statusmsg":"vnet is not generated. Please check the 'reload network' task log."}]}"#;
-    let node = MockNode::start(script(&[
-        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
-        (
-            "GET",
-            "/cluster/sdn/zones",
-            ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
-        ),
-        // Twice: `connect` reads the node list too.
-        ("GET", "/nodes", ok_data(THREE_NODES)),
-        ("GET", "/nodes", ok_data(THREE_NODES)),
-        (
-            "GET",
-            "/nodes/pve/sdn/zones/z1/content",
-            Reply::Json(200, content_ok.into()),
-        ),
-        (
-            "GET",
-            "/nodes/pve2/sdn/zones/z1/content",
-            Reply::Json(200, content_err.into()),
-        ),
-    ]));
+    let node = MockNode::start(script(
+        &[
+            ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+            (
+                "GET",
+                "/cluster/sdn/zones",
+                ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
+            ),
+            // Three times: `connect`, the apply's reload follow-up and the
+            // realization check each read the node list.
+            ("GET", "/nodes", ok_data(THREE_NODES)),
+            ("GET", "/nodes", ok_data(THREE_NODES)),
+            ("GET", "/nodes", ok_data(THREE_NODES)),
+            (
+                "GET",
+                "/nodes/pve/sdn/zones/z1/content",
+                Reply::Json(200, content_ok.into()),
+            ),
+            (
+                "GET",
+                "/nodes/pve2/sdn/zones/z1/content",
+                Reply::Json(200, content_err.into()),
+            ),
+        ]
+        .into_iter()
+        .chain(reload_lists("pve"))
+        .chain(reload_lists("pve2"))
+        .collect::<Vec<_>>(),
+    ));
     let cli = sdn_client(&node);
     let dir = tempfile::tempdir().unwrap();
     let err = cli.apply_sdn(&Ledger::at(dir.path())).unwrap_err();
@@ -2267,26 +2303,33 @@ fn an_sdn_apply_the_second_node_did_not_realize_is_refused() {
 #[test]
 fn an_sdn_apply_every_online_node_realized_succeeds() {
     let content_ok = r#"{"data":[{"vnet":"v1","status":"available","statusmsg":null}]}"#;
-    let node = MockNode::start(script(&[
-        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
-        (
-            "GET",
-            "/cluster/sdn/zones",
-            ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
-        ),
-        ("GET", "/nodes", ok_data(TWO_NODES)),
-        ("GET", "/nodes", ok_data(TWO_NODES)),
-        (
-            "GET",
-            "/nodes/pve/sdn/zones/z1/content",
-            Reply::Json(200, content_ok.into()),
-        ),
-        (
-            "GET",
-            "/nodes/pve2/sdn/zones/z1/content",
-            Reply::Json(200, content_ok.into()),
-        ),
-    ]));
+    let node = MockNode::start(script(
+        &[
+            ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+            (
+                "GET",
+                "/cluster/sdn/zones",
+                ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
+            ),
+            ("GET", "/nodes", ok_data(TWO_NODES)),
+            ("GET", "/nodes", ok_data(TWO_NODES)),
+            ("GET", "/nodes", ok_data(TWO_NODES)),
+            (
+                "GET",
+                "/nodes/pve/sdn/zones/z1/content",
+                Reply::Json(200, content_ok.into()),
+            ),
+            (
+                "GET",
+                "/nodes/pve2/sdn/zones/z1/content",
+                Reply::Json(200, content_ok.into()),
+            ),
+        ]
+        .into_iter()
+        .chain(reload_lists("pve"))
+        .chain(reload_lists("pve2"))
+        .collect::<Vec<_>>(),
+    ));
     let cli = sdn_client(&node);
     let dir = tempfile::tempdir().unwrap();
     cli.apply_sdn(&Ledger::at(dir.path()))
@@ -2297,6 +2340,146 @@ fn an_sdn_apply_every_online_node_realized_succeeds() {
         .filter(|s| s.path.ends_with("/content"))
         .count();
     assert_eq!(asked, 2, "both online nodes were read");
+}
+
+/// The apply's own task only STARTS each node's `srvreload networking`
+/// (PVE's `SDN.pm`, with an upstream FIXME saying so): the apply finds each
+/// online node's fresh reload by what its task list did not show before, and
+/// waits for it. A reload that ends `WARNINGS` succeeds; one that appears late
+/// is waited for; an older reload is never taken for this apply's.
+#[test]
+fn an_sdn_apply_follows_each_nodes_reload_and_takes_only_the_fresh_one() {
+    let pve2_path = "/nodes/pve2/tasks";
+    let old2 = reload_task("pve2", "0AAA", 100);
+    let fresh2 = reload_task("pve2", "1111", 200);
+    let mut entries: Vec<(&str, &str, Reply)> = vec![
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        // pve2: before, then twice without the fresh reload, then with it.
+        ("GET", pve2_path, ok_data(&format!("[{old2}]"))),
+        ("GET", pve2_path, ok_data(&format!("[{old2}]"))),
+        ("GET", pve2_path, ok_data(&format!("[{old2}]"))),
+        ("GET", pve2_path, ok_data(&format!("[{fresh2},{old2}]"))),
+        (
+            "GET",
+            leak(format!(
+                "/nodes/pve/tasks/{}/status",
+                reload_upid("pve", "1111")
+            )),
+            ok_data(r#"{"status":"stopped","exitstatus":"WARNINGS: 1"}"#),
+        ),
+        (
+            "GET",
+            leak(format!(
+                "/nodes/pve/tasks/{}/log",
+                reload_upid("pve", "1111")
+            )),
+            ok_data(
+                r#"[{"n":1,"t":"WARN: missing 'source /etc/network/interfaces.d/sdn' directive for SDN support!"},{"n":2,"t":"TASK WARNINGS: 1"}]"#,
+            ),
+        ),
+    ];
+    entries.extend(reload_lists("pve"));
+    let node = MockNode::start(script(&entries));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    cli.apply_sdn(&Ledger::at(dir.path()))
+        .expect("a reload with warnings, and one that came late, are both a success");
+
+    let statuses: Vec<String> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.contains("srvreload") && s.path.ends_with("/status"))
+        .map(|s| s.path)
+        .collect();
+    assert!(
+        statuses
+            .iter()
+            .any(|p| p.contains(&reload_upid("pve", "1111")))
+            && statuses
+                .iter()
+                .any(|p| p.contains(&reload_upid("pve2", "1111"))),
+        "each node's fresh reload was waited on: {statuses:?}"
+    );
+    assert!(
+        !statuses.iter().any(|p| p.contains("0AAA")),
+        "an older reload is never taken for this apply's: {statuses:?}"
+    );
+    let lists: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path == pve2_path)
+        .collect();
+    assert_eq!(lists.len(), 4, "pve2 polled until its reload appeared");
+    assert!(
+        lists[0].query.contains("typefilter=srvreload") && lists[0].query.contains("source=all"),
+        "{:?}",
+        lists[0]
+    );
+}
+
+/// The parent ended OK and a node's reload failed: the apply fails with
+/// DX-6512, naming that node and its reason.
+#[test]
+fn an_sdn_apply_whose_node_reload_failed_is_refused_despite_the_parent_ok() {
+    let mut entries: Vec<(&str, &str, Reply)> = vec![
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        (
+            "GET",
+            leak(format!(
+                "/nodes/pve2/tasks/{}/status",
+                reload_upid("pve2", "1111")
+            )),
+            ok_data(
+                r#"{"status":"stopped","exitstatus":"command 'ifreload -a' failed: exit code 1"}"#,
+            ),
+        ),
+    ];
+    entries.extend(reload_lists("pve"));
+    entries.extend(reload_lists("pve2"));
+    let node = MockNode::start(script(&entries));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let err = cli.apply_sdn(&Ledger::at(dir.path())).unwrap_err();
+    let shown = err.to_string();
+    assert_eq!(delonix_model::Error::from(err).number(), 6512, "{shown}");
+    assert!(
+        shown.contains("pve2:") && shown.contains("ifreload -a"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("pve: "),
+        "the node that reloaded is not named: {shown}"
+    );
+}
+
+/// A node that never starts a reload within the task timeout fails the apply
+/// by name — never read as "nothing to do".
+#[test]
+fn an_sdn_apply_with_no_reload_on_a_node_is_refused() {
+    let old2 = reload_task("pve2", "0AAA", 100);
+    let mut entries: Vec<(&str, &str, Reply)> = vec![
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+    ];
+    for _ in 0..30 {
+        entries.push(("GET", "/nodes/pve2/tasks", ok_data(&format!("[{old2}]"))));
+    }
+    entries.extend(reload_lists("pve"));
+    let node = MockNode::start(script(&entries));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let err = cli.apply_sdn(&Ledger::at(dir.path())).unwrap_err();
+    let shown = err.to_string();
+    assert_eq!(delonix_model::Error::from(err).number(), 6512, "{shown}");
+    assert!(
+        shown.contains("pve2: no network reload appeared"),
+        "{shown}"
+    );
 }
 
 /// A staged write while another holder has the lock is DX-5515, not a generic

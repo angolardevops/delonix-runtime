@@ -5595,6 +5595,45 @@ checklist para quem mexer aqui do que como lista de correcções:
   antes de confiar num gate de caminho de falha, confirmar que a falha chegou ao sítio que se
   quer medir.** O gate do `e2e.sh` fá-lo pelo evento `create`: sem ele, o `run` falhou antes do
   `clone` e o check FALHA em vez de passar por nada ter sobrado;
+- **corrigir um ficheiro não é corrigir o irmão copiado dele** — o `network_alloc_race.rs`
+  (2026-08-14) e o `netdef_naming.rs` nasceram com a mesma `raiz()`: uma pasta por pid em
+  `/tmp`, criada num `OnceLock` e nunca removida. A 2026-08-15 o `netdef_naming` passou a varrer
+  as pastas dos pids mortos, depois de 23 restos terem tornado inútil um check de caos que
+  contava `/tmp/delonix-net-*`. O vizinho, no mesmo `tests/` do mesmo crate, ficou de fora e
+  deixou uma pasta por corrida durante 44 dias (~2400 medidas a 2026-09-28, corrigido no #567).
+  E na sessão do #567 o varrimento foi desenhado DE NOVO, sem ir ver o do vizinho. **Regra: ao
+  corrigir um padrão, procurar o PADRÃO, não o nome, no resto do repo** (aqui
+  `temp_dir().join(format!(… process::id()))`) e dizer quantos sítios ficam de fora. É a
+  segunda ocorrência da mesma fuga no mesmo crate;
+- **varrer os restos das corridas mortas não é limpar no fim** — o varrimento por pid morto
+  nunca apanha a corrida que acabou de sair: o `netdef_naming` deixa sempre a SUA pasta à espera
+  da próxima corrida (medido: 1 depois de um `cargo test --workspace`). O libtest não tem gancho
+  «depois de todos» nem diz a um teste quantos vão correr (filtros e `--test-threads` mudam
+  isso), por isso o #567 conta os testes que ESTÃO a usar a raiz: o primeiro `lease()` cria-a, o
+  último `RootLease` a sair apaga-a, também em unwind. O varrimento fica só para o que o `Drop`
+  não cobre (Ctrl-C, timeout, SIGKILL). Medido: o binário anterior levou `/tmp` de 2 a 202 em 200
+  corridas; o novo ficou em 0 → 0 com threads por omissão, com `--test-threads=1` e preso a uma
+  CPU (400 corridas), sem falhas;
+- **um teste verde não é um teste que arrumou** — nada olhava para o temp dir depois dos testes,
+  por isso uma fuga destas nunca pôs nada vermelho. Um `cargo test --workspace` inteiro com um
+  `TMPDIR` vazio (rc=0, 2026-09-28) deixou **30 entradas no runner do CI e 29 localmente**:
+  `delonix-oci` 13 (`detect.rs` 12, `overlay.rs` 1), `delonix-runtime-bin` 11 no local e 12 no
+  runner (`vm.rs` 5, `mapped.rs` 4, `vmbackends.rs`/`vmimage.rs` 2, e mais 1 do `vmimage.rs` só
+  no runner), `delonix-sdn` 4 (`lib.rs` 2, `infra.rs` 1, `netdef_naming.rs` 1) e
+  `delonix-state` 1 (`store.rs`). Algumas usam nomes FIXOS (`dlx-detect-go`), que duas corridas
+  em paralelo partilham. **Gate**: o job `test` corre agora com um `TMPDIR` próprio, e o
+  `scripts/tmp_roots_gate.py` compara o que lá ficou com `scripts/tmp_roots_baseline.json`, com
+  ratchet nos dois sentidos e nomes normalizados (dígitos → `N`). Com o #567 revertido dá
+  `new leak: delonix-net-race-N` (verificado); com ele, verde. A linha de base é a do runner;
+  uma corrida local compara-se com `--list`;
+- **saltar um teste não é sair dele arrumado** — a entrada que só o runner deixa é do
+  `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` (`vmimage.rs`): cria a pasta, e se não
+  houver `qemu-img` faz `return` ANTES do `remove_dir_all`. Numa máquina com `qemu-img` limpa;
+  no runner, sem ele, fica. Eu tinha previsto o contrário (que o runner, por saltar os testes de
+  userns, deixaria MENOS), e o primeiro CI do gate desmentiu-o: as outras 29 eram idênticas.
+  **Regra: todo o `return` de um teste que já criou alguma coisa é uma saída que tem de limpar**,
+  e por isso a limpeza vai num guarda com `Drop`, não numa linha no fim. É a regra do #565 («X e
+  NÃO Y») vista do lado dos testes;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
@@ -6496,10 +6535,33 @@ segredo do token em qualquer `{:?}`.
   reload de cada nó em segundo plano e não o acompanha (`PVE/API2/Network/SDN.pm`, com um
   `FIXME` do upstream a dizê-lo). Logo o terceiro veredicto **não chega** a um apply de SDN: o
   `OK` dele quer dizer «pedidos enviados», e foi assim que os applies do #493 e do #497 foram
-  aceites e nunca realizados. **Por fechar** (Fatia 0b do plano 63): o `apply_sdn` tem de
-  encontrar o `srvreload networking` de cada nó (tipo, id e hora de início a partir da mãe) e
-  esperar por cada um, com os três veredictos. Não se fez aqui porque o #542 está aberto a
-  mexer no apply de SDN.
+  aceites e nunca realizados.
+- **Fechado na Fatia 0b do plano 63 (2026-09-27): um apply de SDN espera pelo reload de cada
+  nó.** Antes do `PUT /cluster/sdn`, o `apply_sdn_with` guarda por nó online os UPIDs
+  `srvreload networking` que já existem (`GET /nodes/{node}/tasks?typefilter=srvreload&source=all`);
+  depois da mãe, a filha de cada nó é o primeiro UPID que não estava nessa lista, e é esperada
+  com os três veredictos. **Não se identifica a filha pela hora**, e a medição é que o decidiu:
+  nas 13 mães do histórico, as filhas chegam 0 a 37 s depois dela, as do apply anterior 1 a 5 s
+  ANTES, e em applies seguidos as janelas sobrepõem-se; as filhas correm como `root@pam` mesmo
+  quando a mãe é de um token, logo o utilizador também não serve. Um nó sem filha até ao
+  `task_timeout` é erro com o nome do nó; uma filha falhada faz o apply falhar com DX-6512 mesmo
+  com a mãe em `OK`; os avisos sobem para `tracing::warn!` com `node=` e o texto. Vale também
+  para o apply com o lock do SDN (`apply_sdn_locked`). Três cenários de injecção (filha com
+  aviso e só a fresca seguida; filha falhada; nó sem filha), o do meio chumba com a espera
+  revertida. **Ao vivo**, com `source /etc/network/interfaces.d/*` retirado do `pve2`, o caso
+  `sdn_apply_waits_for_every_nodes_network_reload` passou e escreveu `node=pve2 … warning=missing
+  'source /etc/network/interfaces.d/sdn' directive for SDN support!`; reposto o ficheiro, a
+  corrida seguinte não escreveu aviso nenhum. O `live.rs` passou a aceitar um API token
+  (`DELONIX_PROXMOX_TEST_TOKEN_FILE`) e a mostrar o `tracing` com `DELONIX_LOG`. **Não medido**:
+  uma filha a FALHAR de verdade no nó (o `ifreload` a sair com erro) — só por injecção.
+  **Re-medido a 2026-09-28** (lab de dois nós, token de laboratório por ficheiro): o trace de
+  rotas mostra a lista de tarefas de cada nó lida antes do `PUT`, e depois o `srvreload`
+  NOVO do `pve2` encontrado e esperado até ao fim, não só o do nó de entrada. E apareceu um
+  aviso que ninguém provocou: no `pve` o reload acaba com `reloading frr configuration
+  failed` (`frr-reload.py` a sair 1) com a mãe em `OK` — antes disto perdia-se. O caso
+  `sdn_routing_chain_vnet_firewall_and_the_lock…` passa o apply com o lock e chumba depois,
+  na firewall de vnet, com 403 `user != root@pam`: essa rota recusa QUALQUER token, mesmo sem
+  privsep, e só corre com a password da conta.
 
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
 — a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
