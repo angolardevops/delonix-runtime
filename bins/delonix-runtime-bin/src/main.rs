@@ -762,10 +762,19 @@ fn main() {
     // kernel end the process quietly on SIGPIPE, exactly like every other UNIX
     // tool in a pipeline.
     //
-    // SAFETY: `signal(2)` with SIG_DFL has no preconditions; done first, before
-    // any thread exists, so no other thread can be mid-write.
+    // But SIG_DFL kills on EVERY EPIPE, and a socket gives one too: a registry
+    // that closes the connection in the middle of a `vm push` upload made the
+    // next `writev` on the socket raise SIGPIPE, and the push died with 141
+    // and not one word — no retry, no error line (seen 2026-09-28 against
+    // ghcr.io; reproduced with a local registry that closes mid-PUT). So
+    // the handler below keeps the quiet death for what it was meant for — a
+    // closed stdout/stderr — and lets any other EPIPE come back as an error
+    // the caller reports.
+    //
+    // SAFETY: `sigaction(2)` has no preconditions; done first, before any
+    // thread exists, so no other thread can be mid-write.
     unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        install_sigpipe_handler();
     }
     // The PIN: owns the userns/netns/mountns and does nothing else, for the whole
     // life of the infra. The CONTROL runs inside it and is restartable — that
@@ -926,6 +935,58 @@ fn main() {
         // TYPE: a second decision site is how two answers to the same question
         // start disagreeing.
         std::process::exit(cmd::exitcode::for_error(&e));
+    }
+}
+
+/// SIGPIPE: die like SIG_DFL when stdout or stderr is the broken pipe, and
+/// return otherwise, so the write that raised it fails with EPIPE.
+///
+/// The signal does not say which descriptor raised it, so the handler asks
+/// fds 1 and 2 directly: a pipe whose reader is gone polls `POLLERR`, a
+/// socket whose peer went away `POLLHUP`. Anything else — the upload socket
+/// of a push — is left to the `EPIPE` the interrupted `write` returns.
+///
+/// Only async-signal-safe calls inside (`poll`, `signal`, `raise`). A caught
+/// signal is reset to SIG_DFL across `execve`, so the programs this one
+/// starts see exactly the disposition they saw before.
+unsafe fn install_sigpipe_handler() {
+    extern "C" fn on_sigpipe(_: libc::c_int) {
+        let mut fds = [
+            libc::pollfd {
+                fd: 1,
+                events: 0,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: 2,
+                events: 0,
+                revents: 0,
+            },
+        ];
+        // SAFETY: `fds` is a live array of 2 `pollfd`; timeout 0 never blocks.
+        let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, 0) };
+        let broken = n > 0
+            && fds
+                .iter()
+                .any(|f| f.revents & (libc::POLLERR | libc::POLLHUP) != 0);
+        if broken {
+            // SAFETY: both are async-signal-safe. SIGPIPE is blocked while this
+            // handler runs, so the raised one is delivered — with the default
+            // action, killing the process — the moment it returns.
+            unsafe {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                libc::raise(libc::SIGPIPE);
+            }
+        }
+    }
+    // SAFETY: a zeroed `sigaction` is valid; the handler is an `extern "C"`
+    // function that lives for the whole program.
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = on_sigpipe as extern "C" fn(libc::c_int) as usize;
+        sa.sa_flags = libc::SA_RESTART;
+        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigaction(libc::SIGPIPE, &sa, std::ptr::null_mut());
     }
 }
 
