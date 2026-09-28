@@ -270,6 +270,22 @@ spike em `local-lvm`), a firewall por container (as rotas `…/lxc/{vmid}/firewa
 caminho do ADR-0052), backup com `vzdump`, clone e template, redimensionar o disco, e migração
 entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
 
+- **Decisão do dono (2026-09-28), revê a D3.** As seis operações entram todas, um PR por operação.
+  O que cabe num manifesto vai para o Kind (o `rootfs` a crescer, a firewall por `kind:
+  NetworkPolicy` com `scope: systemcontainer`); o pontual vai para um grupo novo, `delonix
+  systemcontainer` (snapshot, clone, migrate), e para `backup create systemcontainer`.
+- **Snapshots e rollback: feito.** `delonix systemcontainer snapshot create|ls|rm|restore`, os
+  quatro verbos do `vm snapshot`; porta `snapshot`/`snapshots`/`delete_snapshot`/`restore`; as
+  quatro rotas `…/lxc/{vmid}/snapshot*` em `supported+tested` (13 rotas LXC); catálogo 1.3.0
+  (`system-container.snapshot`). Medido no `pve`: um snapshot de container é só do volume (o
+  `vmstate` está comentado no schema do nó); o rollback pára um container a correr e deixa-o parado
+  sem `start=1`, por isso o `restore` manda `start=1` quando estava a correr. **E apanhou um defeito
+  de desenho**: depois de um rollback com `start=1` a tarefa acaba antes de o nó voltar a responder
+  pelo container — o `status/current` ficou pendurado ~40 s (curl) e o pveproxy respondeu HTTP 596
+  ao cliente. O `restore` espera agora por `running` dentro do tempo das tarefas, e uma leitura
+  falhada conta como «ainda não». Pela CLI: um `restore` que desfaz uma mudança feita por `stack
+  apply` aparece no `plan` seguinte como deriva (2), que é o honesto.
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes

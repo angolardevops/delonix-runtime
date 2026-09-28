@@ -441,6 +441,13 @@ enum TaskKind {
     CtStop,
     /// `DELETE …/lxc/{vmid}` with `purge` and `destroy-unreferenced-disks`.
     CtDestroy,
+    /// `POST …/lxc/{vmid}/snapshot` — the root volume only: the node has no
+    /// RAM state for a container (`vmstate` is commented out in its schema).
+    CtSnapshot,
+    /// `POST …/lxc/{vmid}/snapshot/{snapname}/rollback`.
+    CtRollback,
+    /// `DELETE …/lxc/{vmid}/snapshot/{snapname}`.
+    CtDeleteSnapshot,
     Clone,
     Start,
     Stop,
@@ -651,6 +658,9 @@ impl TaskKind {
             TaskKind::CtShutdown => "ct-shutdown",
             TaskKind::CtStop => "ct-stop",
             TaskKind::CtDestroy => "ct-destroy",
+            TaskKind::CtSnapshot => "ct-snapshot",
+            TaskKind::CtRollback => "ct-rollback",
+            TaskKind::CtDeleteSnapshot => "ct-delete-snapshot",
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
@@ -760,6 +770,11 @@ impl TaskKind {
             TaskKind::CtShutdown => "vzshutdown",
             TaskKind::CtStop => "vzstop",
             TaskKind::CtDestroy => "vzdestroy",
+            // Read from `PVE/API2/LXC/Snapshot.pm` on a PVE 9.2.2 node
+            // (`fork_worker('vzsnapshot'…)`, `vzrollback`, `vzdelsnapshot`).
+            TaskKind::CtSnapshot => "vzsnapshot",
+            TaskKind::CtRollback => "vzrollback",
+            TaskKind::CtDeleteSnapshot => "vzdelsnapshot",
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
@@ -4761,7 +4776,7 @@ fn parse_agent_ip(v: &serde_json::Value) -> Option<String> {
 }
 
 /// A snapshot name goes into a URL path and into `qm`'s own namespace.
-fn validate_snapshot_name(name: &str) -> Result<()> {
+pub(crate) fn validate_snapshot_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
         && name.len() <= 40
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -6663,7 +6678,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
         | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
         | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged
+        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot
         | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
@@ -6748,6 +6763,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::SystemContainerExitStatus => S::UnsupportedByProvider { reason: "the LXC API reports running or stopped, never the entrypoint's exit status (ADR-0058)" },
         C::SystemContainerNetworkBridge => S::Partial { detail: "`net0` on a bridge of the node, with an optional VLAN tag and DHCP; judged after the start by `GET …/interfaces`, and an address that never came is `NetworkReady=False` with the node's warning (live case); the engine's SDN, isolation, DNS and publish do not apply (ADR-0058 T7)" },
         C::SystemContainerUnprivileged => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
+        C::SystemContainerSnapshot => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_snapshot_is_rolled_back_and_deleted" },
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid

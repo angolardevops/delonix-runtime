@@ -199,6 +199,10 @@
 ~	system boot disable
 ~	system boot enable
 ~	system boot status
+=	systemcontainer snapshot create
+=	systemcontainer snapshot ls
+=	systemcontainer snapshot restore
+=	systemcontainer snapshot rm
 =	system df
 =	system doctor
 =	system events

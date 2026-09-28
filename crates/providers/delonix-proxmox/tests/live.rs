@@ -4795,6 +4795,124 @@ fn a_system_container_runs_its_lifecycle_through_the_node() {
     }
 }
 
+/// Plan 63 slice 5, snapshots: a snapshot of a running container, a change
+/// made after it (memory), and the rollback that undoes the change and
+/// leaves the container running as it was. A taken name is a conflict
+/// (DX-5503), a missing one not found (DX-4503), and `current` — the API's
+/// pseudo-entry for the live state — is neither listed nor accepted.
+#[test]
+fn a_system_containers_snapshot_is_rolled_back_and_deleted() {
+    use delonix_compute::system_container::{
+        SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxsnap{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: None,
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    provider.start(dir.path(), &h, &spec).expect("start");
+
+    assert!(
+        provider.snapshots(dir.path(), &h).unwrap().is_empty(),
+        "`current` must not be listed"
+    );
+    provider.snapshot(dir.path(), &h, "s1").expect("snapshot");
+    assert_eq!(
+        provider.snapshots(dir.path(), &h).unwrap(),
+        vec!["s1".to_string()]
+    );
+    let taken = provider.snapshot(dir.path(), &h, "s1").unwrap_err();
+    assert_eq!(taken.number(), 5503, "{taken}");
+    let current = provider.snapshot(dir.path(), &h, "current").unwrap_err();
+    assert!(current.to_string().contains("current"), "{current}");
+
+    provider
+        .resize(
+            dir.path(),
+            &h,
+            SystemContainerResources {
+                memory_mib: 384,
+                swap_mib: 0,
+                cores: 1,
+            },
+        )
+        .expect("resize");
+    assert_eq!(client.lxc_config(vmid).unwrap()["memory"], 384);
+    provider.restore(dir.path(), &h, "s1").expect("restore");
+    assert_eq!(
+        client.lxc_config(vmid).unwrap()["memory"],
+        256,
+        "the rollback undid the change"
+    );
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "running",
+        "running before, running after"
+    );
+    let missing = provider.restore(dir.path(), &h, "nope").unwrap_err();
+    assert_eq!(missing.number(), 4503, "{missing}");
+
+    provider.stop(dir.path(), &h).expect("stop");
+    provider
+        .restore(dir.path(), &h, "s1")
+        .expect("restore stopped");
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "stopped",
+        "stopped before, stopped after"
+    );
+
+    provider
+        .delete_snapshot(dir.path(), &h, "s1")
+        .expect("delete snapshot");
+    assert!(provider.snapshots(dir.path(), &h).unwrap().is_empty());
+    let gone = provider.delete_snapshot(dir.path(), &h, "s1").unwrap_err();
+    assert_eq!(gone.number(), 4503, "{gone}");
+
+    provider.destroy(dir.path(), &h).expect("destroy");
+    let left = client.list_images(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    for action in ["ct-snapshot", "ct-rollback", "ct-delete-snapshot"] {
+        let last = recs
+            .iter()
+            .rev()
+            .find(|r| r.action == action)
+            .unwrap_or_else(|| panic!("no {action} in the ledger: {recs:?}"));
+        assert_eq!(
+            last.state,
+            delonix_proxmox::TaskState::Ok,
+            "{action}: {last:?}"
+        );
+    }
+}
+
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
 /// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused

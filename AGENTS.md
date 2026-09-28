@@ -7987,6 +7987,10 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
     escreve-os no cgroup e no cpuset). O resto é frio: planeia um `Replace`, recusado sem
     `--replace SystemContainer/<nome>`.
   - **Entrypoint e env não declarados** ficam fora da comparação: o nó tem os da imagem.
+- **Dia 2 (Fatia 5, a pedido; a D3 foi revista):** o pontual vive em `delonix systemcontainer`.
+  Os snapshots (`snapshot create|ls|rm|restore`) estão feitos. Um `restore` de um container a correr
+  espera por `running`: medido, o nó fica ~40 s sem responder pelo container depois da tarefa de
+  rollback, e o pveproxy dá HTTP 596 a quem espera. «A tarefa acabou» não é «o container responde».
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
