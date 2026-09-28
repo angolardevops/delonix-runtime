@@ -7687,6 +7687,37 @@ fn process_gone(pid: i32, starttime: Option<u64>) -> bool {
         .unwrap_or(true)
 }
 
+/// Polls [`process_gone`] every 100 ms, up to `ticks` times. `true` once the
+/// process is gone; `false` when the budget ran out with it still there.
+fn wait_until_gone(pid: i32, starttime: Option<u64>, ticks: u64) -> bool {
+    let mut waited = 0u64;
+    while !process_gone(pid, starttime) && waited < ticks {
+        std::thread::sleep(Duration::from_millis(100));
+        waited += 1;
+    }
+    process_gone(pid, starttime)
+}
+
+/// What a process that outlived its SIGKILL is doing, for the error that says
+/// so: its state letter and the kernel function it sleeps in (`/proc/<pid>/wchan`),
+/// e.g. `state D in wb_wait_for_completion`. Empty when `/proc` has no answer.
+fn exit_blocker(pid: i32) -> String {
+    let state = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|s| {
+            s.rfind(')')
+                .and_then(|i| s[i + 1..].split_whitespace().next().map(str::to_string))
+        });
+    let wchan = std::fs::read_to_string(format!("/proc/{pid}/wchan"))
+        .ok()
+        .filter(|w| !w.is_empty() && w != "0");
+    match (state, wchan) {
+        (Some(st), Some(w)) => format!(" (state {st} in {w})"),
+        (Some(st), None) => format!(" (state {st})"),
+        _ => String::new(),
+    }
+}
+
 pub fn stop(
     store: &impl StateRepository<Container>,
     container: &mut Container,
@@ -7708,12 +7739,7 @@ pub fn stop(
     let target = Pid::from_raw(pid);
 
     let _ = kill(target, Signal::SIGTERM);
-    let mut waited = 0u64;
-    while !process_gone(pid, st) && waited < timeout_secs * 10 {
-        std::thread::sleep(Duration::from_millis(100));
-        waited += 1;
-    }
-    if !process_gone(pid, st) {
+    if !wait_until_gone(pid, st, timeout_secs * 10) {
         let _ = kill(target, Signal::SIGKILL);
         // SIGKILL is delivered at once; the EXIT is not. `stop` returning while
         // the process still exists is what let a `start` run a second incarnation
@@ -7722,11 +7748,7 @@ pub fn stop(
         // after the SIGKILL). Docker's `stop` also returns only once the container
         // is gone. Bounded, so a process stuck in the kernel for good cannot hang
         // the CLI; the record's guard in `record_exit` still holds past it.
-        let mut waited = 0u64;
-        while !process_gone(pid, st) && waited < KILL_EXIT_WAIT_TICKS {
-            std::thread::sleep(Duration::from_millis(100));
-            waited += 1;
-        }
+        wait_until_gone(pid, st, KILL_EXIT_WAIT_TICKS);
     }
     // INTENTIONAL stop (by the user) → always Stopped, even if SIGKILL was
     // needed (it is not a crash: it was a requested stop).
@@ -8565,20 +8587,71 @@ pub fn update_limits(
 }
 
 /// Removes a container. If it is running, requires `force` (and kills it).
+///
+/// **With `force`, it returns only once the process has EXITED, not once it was
+/// signalled** — the same wait [`stop`] already had. SIGKILL is delivered at
+/// once; the exit is not: the init is PID 1 of its own pid namespace, and its
+/// exit tears down its mount namespace, whose overlay flushes the upper
+/// filesystem to disk (`wb_wait_for_completion`, state `D`). Measured
+/// 2026-09-28 on a pod member (`sleep 300`): 0.4 s with a quiet disk, 20 s with
+/// a build writing to the same filesystem — and at load ~111 the members of five
+/// pods were still there after the chaos harness had deleted its whole sandbox.
+/// Returning at the signal made `rm -f` report success, and `ps -a` stop
+/// listing the container, while its process, its supervisor (the `netns run`
+/// that reaps it) and its log shim (a zombie by then) were all still on the host;
+/// the caller went on to purge the directory the overlay was still flushing, and
+/// `delete pod` to detach the netns under it.
+///
+/// Waiting on PID 1 covers the whole pid namespace: the kernel kills and reaps
+/// every other process in it before PID 1 becomes a zombie. The supervisor then
+/// reaps it and exits on its own.
+///
+/// Bounded like [`stop`]. Past the bound the record is KEPT and the error says
+/// so ([`Error::StillExiting`]): dropping it would leave a live process that no
+/// listing shows and no later `rm` can find.
 pub fn remove(
     store: &impl StateRepository<Container>,
     container: &Container,
     force: bool,
 ) -> Result<()> {
+    remove_waiting(
+        store,
+        container,
+        force,
+        Signal::SIGKILL,
+        KILL_EXIT_WAIT_TICKS,
+    )
+}
+
+/// [`remove`] with the signal and the exit-wait budget (100 ms ticks) as
+/// parameters — the tests need a process that outlives its signal, and no
+/// process outlives a SIGKILL on demand.
+fn remove_waiting(
+    store: &impl StateRepository<Container>,
+    container: &Container,
+    force: bool,
+    signal: Signal,
+    exit_ticks: u64,
+) -> Result<()> {
     if let Some(pid) = container.pid {
-        if safe_to_signal(pid, container.pid_starttime) {
+        let st = container.pid_starttime;
+        if safe_to_signal(pid, st) {
             if !force {
                 return Err(Error::AlreadyRunning(format!(
                     "container {} is running (use --force)",
                     container.short_id()
                 )));
             }
-            let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
+            let _ = kill(Pid::from_raw(pid), signal);
+            if !wait_until_gone(pid, st, exit_ticks) {
+                return Err(Error::StillExiting(format!(
+                    "container {}: {signal} sent, but pid {pid} is still exiting after {}s{} — \
+                     the container is kept; run `rm -f` again once it is gone",
+                    container.short_id(),
+                    exit_ticks / 10,
+                    exit_blocker(pid)
+                )));
+            }
         }
     }
     remove_container_cgroup(container);
@@ -8656,6 +8729,142 @@ mod record_exit_tests {
         assert!(record_exit(&mut c, 100, Some(5), &Status::Crashed, true));
         assert_eq!(c.status, Status::Crashed);
         assert_eq!(c.crash_reason.as_deref(), Some(OOM_KILLED));
+    }
+}
+
+#[cfg(test)]
+mod remove_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A one-record store: all `remove` needs, and it says whether the record
+    /// is still there afterwards.
+    struct OneRecord(RefCell<Option<Container>>);
+
+    impl StateRepository<Container> for OneRecord {
+        fn get(&self, _id: &str) -> delonix_model::Result<Container> {
+            self.0
+                .borrow()
+                .clone()
+                .ok_or_else(|| delonix_model::Error::NotFound("container".into()))
+        }
+        fn list(&self) -> delonix_model::Result<Vec<Container>> {
+            Ok(self.0.borrow().iter().cloned().collect())
+        }
+        fn set(&self, _id: &str, value: &Container) -> delonix_model::Result<()> {
+            *self.0.borrow_mut() = Some(value.clone());
+            Ok(())
+        }
+        fn update<F>(&self, id: &str, f: F) -> delonix_model::Result<Container>
+        where
+            F: FnOnce(&mut Container) -> bool,
+        {
+            let mut c = self.get(id)?;
+            if f(&mut c) {
+                self.set(id, &c)?;
+            }
+            Ok(c)
+        }
+        fn remove(&self, _id: &str) -> delonix_model::Result<()> {
+            *self.0.borrow_mut() = None;
+            Ok(())
+        }
+    }
+
+    /// A running container whose init is `child` — a real process of this test.
+    fn record_of(child: &std::process::Child) -> Container {
+        let pid = child.id() as i32;
+        let mut c = Container::new(
+            format!("rmwait{:010}", child.id()),
+            "rmwait".into(),
+            "/tmp/nonexistent".into(),
+            vec!["sleep".into()],
+            "64M".into(),
+        );
+        c.pid = Some(pid);
+        c.pid_starttime = proc_starttime(pid);
+        c.status = Status::Running;
+        c
+    }
+
+    /// **`rm -f` returns once the process has exited, not once it was signalled.**
+    /// Returning at the signal is what let pod members outlive `delete pod
+    /// --force` under load (measured 2026-09-28; see [`remove`]).
+    ///
+    /// The process here exits a full second AFTER its signal — the shape of an
+    /// init whose exit is stuck flushing its overlay. A plain `sleep` would not
+    /// do: it dies at once on SIGKILL, and the test passed with the wait removed.
+    #[test]
+    fn a_forced_remove_returns_after_the_process_exited() {
+        let mut child = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "trap 'sleep 1; exit 0' TERM; while :; do sleep 0.1; done",
+            ])
+            .spawn()
+            .expect("sh");
+        // The trap must be installed before the signal, or `sh` dies at once.
+        std::thread::sleep(Duration::from_millis(300));
+        let c = record_of(&child);
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let t0 = std::time::Instant::now();
+        let r = remove_waiting(&store, &c, true, Signal::SIGTERM, KILL_EXIT_WAIT_TICKS);
+        let took = t0.elapsed();
+        let gone = process_gone(c.pid.unwrap(), c.pid_starttime);
+        let _ = child.kill();
+        let _ = child.wait();
+        r.expect("rm -f");
+        assert!(
+            gone,
+            "rm -f returned after {took:?} with the process still there"
+        );
+        assert!(took >= Duration::from_millis(800), "it waited: {took:?}");
+        assert!(store.0.borrow().is_none(), "the record is removed");
+    }
+
+    /// **Past the budget, the record is KEPT and the error says why.** Dropping
+    /// it left a live process that no listing showed and no later `rm` could find.
+    /// SIGWINCH stands in for a SIGKILL whose exit never comes: `sleep` ignores it.
+    #[test]
+    fn a_process_that_outlives_the_wait_keeps_its_record() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let c = record_of(&child);
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let err = remove_waiting(&store, &c, true, Signal::SIGWINCH, 2).unwrap_err();
+        let alive = !process_gone(c.pid.unwrap(), c.pid_starttime);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(alive, "the stand-in signal must not have ended the process");
+        assert!(matches!(err, Error::StillExiting(_)), "{err}");
+        assert_eq!(err.number(), 8101);
+        let msg = err.to_string();
+        assert!(msg.contains("still exiting"), "{msg}");
+        assert!(
+            msg.contains("(state S"),
+            "names what the process is doing: {msg}"
+        );
+        assert!(store.0.borrow().is_some(), "the record must survive: {msg}");
+    }
+
+    /// Without `--force`, a running container is refused and nothing is signalled.
+    #[test]
+    fn remove_without_force_refuses_and_leaves_the_process_alone() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let c = record_of(&child);
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let err = remove(&store, &c, false).unwrap_err();
+        let alive = !process_gone(c.pid.unwrap(), c.pid_starttime);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(matches!(err, Error::AlreadyRunning(_)), "{err}");
+        assert!(alive);
+        assert!(store.0.borrow().is_some());
     }
 }
 
