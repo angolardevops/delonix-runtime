@@ -450,6 +450,9 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Real multi-container pods (``kind: Pod``): create, logs, exec, cp, attach, port-forward — N containers sharing netns/IPC/UTS as one unit. Listing and removal go through ``get pods``/``delete pods``.
    * - ``vm``
      - Declarative microVMs: create, ls, start, stop, pause/unpause, destroy, console, ssh, apply, snapshot (create/ls/rm/restore), migrate.
+   * - ``systemcontainer``
+     - One-off operations on a system container (``kind: SystemContainer``, ADR-0058):
+       ``snapshot create|ls|rm|restore``
    * - ``workload``
      - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
    * - ``image``
