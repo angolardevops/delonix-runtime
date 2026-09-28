@@ -414,8 +414,8 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 /// pod's IP DOES join `@dlxall`/`@dlxns_<ns>` — which means other namespaces'
 /// containers already refuse new connections coming FROM the pod. What never
 /// existed is the other direction. The isolation rules live in each workload's
-/// OWN chain (`fw_chain_body`: same-namespace accept, then `@dlxall ct state
-/// new drop`), and a pod had no chain at all, so nothing dropped traffic INTO
+/// OWN chain (`fw_chain_body`: the explicit rules, then the `@dlxall ct state
+/// new drop` guardrail for other namespaces), and a pod had no chain at all, so nothing dropped traffic INTO
 /// it. The boundary was open in exactly one direction, which is the same as
 /// open.
 ///

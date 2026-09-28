@@ -4525,6 +4525,9 @@ msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por I
 msgid "Tear down a `vm bridge` (dry-run without `--apply`)."
 msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`)."
 
+msgid "Tear down a `vm bridge` (dry-run without `--apply`).\n\nRemoves the subnets `vm bridge --apply` recorded. A bridge made before that record existed falls back to the auto-detected `virbr*`."
+msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`).\n\nRemove as subnets que o `vm bridge --apply` registou. Uma ponte feita antes de existir esse registo recorre às `virbr*` auto-detectadas."
+
 msgid "Take a named snapshot (libvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend."
 msgstr "Tira um snapshot com nome (libvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele). Ainda não suportado no backend cloud-hypervisor."
 
@@ -5126,6 +5129,9 @@ msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM"
 msgid "Actually run the privileged plan (requires root). Without it: dry-run"
 msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
 
+msgid "Actually run the privileged teardown (requires root). Without it: dry-run"
+msgstr "Executa mesmo o desmontar privilegiado (precisa de root). Sem isto: dry-run"
+
 msgid "A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path"
 msgstr "Um nome de imagem VM local (`vm ls`) ou um caminho literal `.qcow2`/`.raw`"
 
@@ -5170,6 +5176,9 @@ msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCP
 
 msgid "VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable"
 msgstr "Subnet(s) de VM a rotear de volta (por omissão: as `virbr*` auto-detectadas). Repetível"
+
+msgid "VM subnet(s) to close as well (default: the ones `vm bridge` recorded). Repeatable"
+msgstr "Subnet(s) de VM a fechar também (por omissão: as que o `vm bridge` registou). Repetível"
 
 msgid "With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one"
 msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes (só o motor `delonix`, pronto a rootless) em vez da de Kubernetes"
@@ -7217,8 +7226,11 @@ msgstr "encaminha de volta uma subnet de VM que a auto-detecção de `virbr*` n�
 msgid "what the teardown would remove, without removing it"
 msgstr "o que o teardown removeria, sem o remover"
 
-msgid "actually tear the veth and the routes down, as root"
-msgstr "derruba mesmo o veth e as rotas, como root"
+msgid "actually tear the veth and the routes down, as root — the subnets `vm bridge --apply` recorded, whatever `virbr*` exists now"
+msgstr "derruba mesmo o veth e as rotas, como root — as subnets que o `vm bridge --apply` registou, sejam quais forem as `virbr*` que existem agora"
+
+msgid "also close a subnet a bridge from before the record opened"
+msgstr "fecha também uma subnet que uma ponte anterior ao registo abriu"
 
 msgid "build a bootable qcow2 from the `VMfile` in this directory"
 msgstr "constrói um qcow2 arrancável a partir do `VMfile` deste directório"
@@ -14356,6 +14368,12 @@ msgstr "o --vm-subnet '{subnet}' abrange todos os endereços, não é uma subred
 
 msgid "--vm-subnet '{subnet}' overlaps the SDN network {sdn}"
 msgstr "o --vm-subnet '{subnet}' sobrepõe-se à rede SDN {sdn}"
+
+msgid "could not record the bridged subnets in {path}: {err}"
+msgstr "não foi possível registar as subnets da ponte em {path}: {err}"
+
+msgid "could not remove the bridge record {path}: {err}"
+msgstr "não foi possível remover o registo da ponte {path}: {err}"
 
 msgid "`--apply` needs root: this command changes the host's network namespace (run it with sudo, or drop `--apply` for the dry-run)"
 msgstr "o `--apply` precisa de root: este comando altera o namespace de rede do host (corre-o com sudo, ou tira o `--apply` para ver o plano)"

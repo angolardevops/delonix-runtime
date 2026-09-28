@@ -588,8 +588,10 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                 ('Voltar a arrancar uma VM parada, sem repetir as flags do create',
                  'delonix vm start dev')]},
             "unbridge": {"examples": [
-                ('Fechar a ponte VM↔container',
-                 'sudo delonix vm unbridge minha-rede')]},
+                ('Fechar a ponte VM↔container — as subnets que o `vm bridge --apply` registou',
+                 'sudo delonix vm unbridge minha-rede --apply'),
+                ('Fechar também uma subnet de uma ponte anterior ao registo',
+                 'sudo delonix vm unbridge minha-rede --apply --vm-subnet 192.168.200.0/24')]},
             "bridge": {"examples": [
                 ('Ver o plano SEM aplicar (o default é dry-run)',
                  'delonix vm bridge minha-rede'),
@@ -2814,7 +2816,10 @@ EXAMPLES_EN = {
     ],
     ("vm", "restart"): ["Forced restart (stops and boots again)"],
     ("vm", "start"): ["Boot a stopped VM again, without repeating the create flags"],
-    ("vm", "unbridge"): ["Close the VM↔container bridge"],
+    ("vm", "unbridge"): [
+        "Close the VM↔container bridge — the subnets `vm bridge --apply` recorded",
+        "Also close a subnet from a bridge older than the record",
+    ],
     ("vm", "bridge"): [
         "See the plan WITHOUT applying it (dry-run is the default)",
         "Actually apply it — needs root, the deliberate exception to rootless",

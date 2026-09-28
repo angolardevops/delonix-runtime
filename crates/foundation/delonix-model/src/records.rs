@@ -54,12 +54,13 @@ pub struct ContainerFw {
     pub policy_out: String,
     #[serde(default)]
     pub rules: Vec<FwRule>,
-    /// Logical namespace of the container (default `default`). When the container does NOT
-    /// have an explicit inbound policy (no inbound `rules` and `policy_in` !=
-    /// `deny`), the inbound applies **namespace isolation**: accepts the same
-    /// namespace (`@dlxns_<ns>`) and drops NEW connections from containers of another
-    /// namespace (`@dlxall` + `ct state new`). An explicit policy (Dependency/
-    /// Ingress) is authoritative and overrides this (see `fw_chain_body`).
+    /// Logical namespace of the container (default `default`). The inbound always
+    /// applies **namespace isolation**: NEW connections from workloads of another
+    /// namespace (`@dlxall` + `ct state new`) are dropped. Explicit inbound rules
+    /// come first, so an `allow` (a Dependency) still admits its peer, but no rule
+    /// removes the isolation for the rest. With no explicit inbound policy the same
+    /// namespace (`@dlxns_<ns>`) is also accepted; with one, it falls to that
+    /// policy (see `fw_chain_body`).
     #[serde(default = "default_namespace")]
     pub namespace: String,
 }

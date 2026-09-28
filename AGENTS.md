@@ -3695,6 +3695,16 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
   `--vm-subnet` (e cada subnet detectada) tem de ser `a.b.c.d/len` estrito, nem `/0`
   nem sobreposta à rede SDN, e segue canónica para o argv — `default` chegava ao
   `ip route add` do holder como rota por omissão.
+- **O `unbridge` desfaz o que o `bridge` abriu (2026-09-27)**: o `bridge --apply` grava
+  as subnets canónicas em `<state>/ingress/vmbridge-<bridge>.subnets` ANTES de correr o
+  plano (uma ponte que falha a meio também se desfaz), e o `unbridge` apaga as regras
+  FORWARD e a rota de retorno dessas subnets, mais as de `--vm-subnet`, e remove o
+  ficheiro no fim. Sem registo (ponte anterior), usa o `--vm-subnet` ou, na falta dele,
+  a detecção `virbr*`. Antes, o `unbridge` só detectava: uma ponte feita com
+  `--vm-subnet` explícito, ou num host sem `virbr*`, perdia o veth e deixava as duas
+  regras ACCEPT e a rota no holder, com a abertura VM↔SDN viva depois do teardown.
+  O re-`bridge` com outras subnets limpa também as registadas. Puro e testado:
+  `teardown_subnets`, `read_applied_subnets`/`write_applied_subnets`.
 - **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
   (`<vm-subnet>↔<sdn>`) contra o REJECT default do libvirt; establish
   IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
@@ -3702,10 +3712,9 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
   192.168.200.0/24 --apply` como root numa rede `172.20.4.0/22` põe `172.20.7.254/22`
   na ponta do host; ping host→containers e container→host com 0% de perda. As
   recusas medidas: `--apply` sem root, `default`, `0.0.0.0/0`, uma subnet sobreposta à
-  SDN, e uma sem comprimento. **Lacuna por fechar**: o `unbridge` não aceita
-  `--vm-subnet` e volta a DETECTAR as subnets pelos `virbr*`. Uma ponte feita com
-  `--vm-subnet` explícito deixa as duas regras `iptables FORWARD … ACCEPT` e a rota
-  de retorno no holder; só o veth sai. Medido: 2 regras e a rota ficaram.
+  SDN, e uma sem comprimento. A lacuna que esta passagem mediu — o `unbridge` a
+  deixar as duas regras `iptables FORWARD … ACCEPT` e a rota de retorno de uma ponte
+  feita com `--vm-subnet` — está fechada pelo registo das subnets (bullet acima).
 - **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
   (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
   DIRECTO (`10.210.37.150:8069` → HTTP 200, ttl=63 = uma hop pelo forward do

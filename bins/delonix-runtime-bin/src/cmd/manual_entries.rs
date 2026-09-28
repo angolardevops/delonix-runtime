@@ -2593,7 +2593,8 @@ pub static ENTRIES: &[Entry] = &[
         group: "Networking",
         examples: &[
             ("what the teardown would remove, without removing it", "delonix vm unbridge app"),
-            ("actually tear the veth and the routes down, as root", "sudo delonix vm unbridge app --apply"),
+            ("actually tear the veth and the routes down, as root — the subnets `vm bridge --apply` recorded, whatever `virbr*` exists now", "sudo delonix vm unbridge app --apply"),
+            ("also close a subnet a bridge from before the record opened", "sudo delonix vm unbridge app --apply --vm-subnet 192.168.200.0/24"),
         ],
         see_also: &["vm bridge", "vm reach", "network ls"],
     },
