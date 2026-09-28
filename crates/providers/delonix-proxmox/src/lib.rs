@@ -1905,9 +1905,18 @@ impl Client {
     /// answers «failed to stat … no format» (measured on PVE 9.2.2), which
     /// does not say «does not exist», so it cannot tell a miss from a fault.
     pub fn list_import_volumes(&self, storage: &str) -> Result<Vec<String>> {
+        self.list_content(storage, UploadContent::Import)
+    }
+
+    /// The volumes of one content type a storage holds (`volid`s), from
+    /// `GET …/storage/{storage}/content?content=<type>`. The node filters by
+    /// type, so an `import` image and a `vztmpl` archive of the same name are
+    /// never confused.
+    pub fn list_content(&self, storage: &str, content: UploadContent) -> Result<Vec<String>> {
         let body = self.get(&format!(
-            "/nodes/{}/storage/{storage}/content?content=import",
-            self.node
+            "/nodes/{}/storage/{storage}/content?content={}",
+            self.node,
+            content.as_str()
         ))?;
         let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
         Ok(w.data
@@ -1916,19 +1925,23 @@ impl Client {
             .collect())
     }
 
-    /// Uploads a local image to `storage` under `import/<filename>` and waits
-    /// for the node's `imgcopy` task (ADR-0057).
+    /// Uploads a local file to `storage` as `content` (`import/<filename>` for
+    /// a VM image, ADR-0057; `template/cache/<filename>` for a container
+    /// archive, ADR-0058) and waits for the node's `imgcopy` task.
     ///
     /// The upload carries the file's sha256 (`checksum`,
-    /// `checksum-algorithm`), so the NODE verifies what it received and a
-    /// damaged transfer fails the task instead of being kept. The text fields
-    /// go before the file: the node reads the multipart body as a stream.
+    /// `checksum-algorithm`), so the NODE verifies what it received: a wrong
+    /// checksum fails the task («checksum mismatch: got … != expect …»,
+    /// measured for both content types on PVE 9.2.2) and nothing is kept. The
+    /// text fields go before the file: the node reads the multipart body as a
+    /// stream. The node stores the file under the name sent.
     ///
     /// Not in the per-VM ledger: no VM exists yet, and a lost answer is
     /// settled by the caller listing the storage for the volume.
-    pub fn upload_import(
+    pub fn upload(
         &self,
         storage: &str,
+        content: UploadContent,
         local: &Path,
         filename: &str,
         sha256: &str,
@@ -1945,6 +1958,7 @@ impl Client {
             .len();
         let body = self.post_multipart(
             &format!("/nodes/{}/storage/{storage}/upload", self.node),
+            content,
             local,
             filename,
             sha256,
@@ -1999,7 +2013,13 @@ impl Client {
                     )));
                 }
             }
-            match self.upload_import(&storage, path, &filename, &img.sha256) {
+            match self.upload(
+                &storage,
+                UploadContent::Import,
+                path,
+                &filename,
+                &img.sha256,
+            ) {
                 Ok(()) => {}
                 // A lost answer is not a lost upload: if the node now lists the
                 // volume, it verified the checksum and kept it.
@@ -2018,6 +2038,85 @@ impl Client {
         })
     }
 
+    /// Puts a container archive on the node, for a system container to be
+    /// created from (ADR-0058, plan 63 slice 2): checks `storage` accepts
+    /// `vztmpl` and has room, uploads the archive unless the node already has
+    /// it, and returns the volume to create from.
+    ///
+    /// The file is named by the digest of the manifest INSIDE the archive
+    /// (`dlx-<hex>.tar`), not by a registry tag: the node's own pull names its
+    /// file after the tag and keeps no digest, so its name is not an identity.
+    /// Two uploads of the same archive land on the same name, and the second
+    /// is not made. The upload itself carries the file's sha256, which the
+    /// node checks.
+    ///
+    /// Everything that can be refused is refused before a byte is sent: a
+    /// digest that is not a sha256, a storage without `vztmpl`, a storage
+    /// without room. The engine never changes a storage's content types
+    /// (ADR-0049 D3).
+    pub fn stage_template(
+        &self,
+        storage: &str,
+        archive: &Path,
+        manifest_digest: &str,
+    ) -> Result<StagedTemplate> {
+        let filename = template_filename(manifest_digest)?;
+        let st = self.storage_status(storage)?;
+        if !st.active || !st.content.iter().any(|c| c == "vztmpl") {
+            return Err(Error::TemplateNotEnabled(format!(
+                "proxmox: storage '{storage}' on node '{}' does not accept container archives \
+                 (its content types are: {}) — enable `vztmpl` on it (`pvesm set {storage} \
+                 --content {},vztmpl`), or use a storage that has it",
+                self.node,
+                if st.content.is_empty() {
+                    "none".to_string()
+                } else {
+                    st.content.join(",")
+                },
+                st.content.join(",")
+            )));
+        }
+        let volid = format!("{storage}:vztmpl/{filename}");
+        if self
+            .list_content(storage, UploadContent::Vztmpl)?
+            .contains(&volid)
+        {
+            return Ok(StagedTemplate {
+                volid,
+                uploaded: false,
+            });
+        }
+        let (size, sha256) = file_sha256(archive)?;
+        if let Some(avail) = st.avail {
+            if avail < size {
+                return Err(Error::TemplateNoSpace(format!(
+                    "proxmox: storage '{storage}' on node '{}' has {avail} bytes free and the \
+                     archive '{}' is {size} bytes",
+                    self.node,
+                    archive.display()
+                )));
+            }
+        }
+        match self.upload(storage, UploadContent::Vztmpl, archive, &filename, &sha256) {
+            Ok(()) => {}
+            // A lost answer is not a lost upload: if the node now lists the
+            // archive, it verified the checksum and kept it.
+            Err(Error::Request(why)) => {
+                if !self
+                    .list_content(storage, UploadContent::Vztmpl)?
+                    .contains(&volid)
+                {
+                    return Err(Error::Request(why));
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(StagedTemplate {
+            volid,
+            uploaded: true,
+        })
+    }
+
     /// A multipart `POST` of one file with the import fields, re-authenticating
     /// once on a 401 like [`Self::send_authed`]. Written out because the file
     /// has to be reopened for the retry, and opening can fail.
@@ -2029,6 +2128,7 @@ impl Client {
     fn post_multipart(
         &self,
         path: &str,
+        content: UploadContent,
         local: &Path,
         filename: &str,
         sha256: &str,
@@ -2036,7 +2136,7 @@ impl Client {
     ) -> Result<String> {
         let url = self.url(path);
         let boundary = format!("delonix-{}", &sha256[..sha256.len().min(32)]);
-        let (head, tail) = multipart_frame(&boundary, filename, sha256);
+        let (head, tail) = multipart_frame(&boundary, content, filename, sha256);
         let build = || -> Result<reqwest::blocking::RequestBuilder> {
             let unreadable = |e: std::io::Error| {
                 Error::ImageUnreadable(format!("proxmox: cannot read '{}': {e}", local.display()))
@@ -5308,6 +5408,77 @@ pub struct StagedImport {
     pub uploaded: bool,
 }
 
+/// The content type of an upload to a node's storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadContent {
+    /// A VM disk image, kept under `import/` (ADR-0057).
+    Import,
+    /// A container archive, kept under `template/cache/` (ADR-0058).
+    Vztmpl,
+}
+
+impl UploadContent {
+    /// The value of the API's `content` field.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UploadContent::Import => "import",
+            UploadContent::Vztmpl => "vztmpl",
+        }
+    }
+}
+
+/// A container archive staged on the node ([`Client::stage_template`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedTemplate {
+    /// The volume to create from (`local:vztmpl/dlx-<hex>.tar`).
+    pub volid: String,
+    /// Whether this call uploaded it (`false`: the node already had it).
+    pub uploaded: bool,
+}
+
+/// `dlx-<hex>.tar` for a `sha256:<hex>` manifest digest. Only lowercase hex
+/// and the fixed prefix and suffix, which the node keeps as sent (measured on
+/// PVE 9.2.2). Anything else is refused: the name is the archive's identity.
+fn template_filename(manifest_digest: &str) -> Result<String> {
+    let hex = manifest_digest.strip_prefix("sha256:").unwrap_or("");
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(Error::ImageUnreadable(format!(
+            "proxmox: '{manifest_digest}' is not a sha256 manifest digest"
+        )));
+    }
+    Ok(format!("dlx-{hex}.tar"))
+}
+
+/// The size and sha256 (hex) of a local file, read in 1 MiB blocks.
+fn file_sha256(path: &Path) -> Result<(u64, String)> {
+    use sha2::Digest;
+    use std::io::Read;
+    let unreadable = |e: std::io::Error| {
+        Error::ImageUnreadable(format!("proxmox: cannot read '{}': {e}", path.display()))
+    };
+    let mut f = std::fs::File::open(path).map_err(unreadable)?;
+    let size = f.metadata().map_err(unreadable)?.len();
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(unreadable)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hex = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok((size, hex))
+}
+
 /// What the upload needs to know about a local image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LocalImage {
@@ -5403,7 +5574,12 @@ fn import_grow_plan(virtual_size: u64, asked: Option<u32>) -> Result<Option<u32>
 /// The multipart framing around the one file of an import upload: the
 /// `content`, `checksum-algorithm` and `checksum` fields, then the file part's
 /// header (`head`), and the closing boundary (`tail`). Pure.
-fn multipart_frame(boundary: &str, filename: &str, sha256: &str) -> (Vec<u8>, Vec<u8>) {
+fn multipart_frame(
+    boundary: &str,
+    content: UploadContent,
+    filename: &str,
+    sha256: &str,
+) -> (Vec<u8>, Vec<u8>) {
     let field = |name: &str, value: &str| {
         format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
@@ -5417,7 +5593,7 @@ fn multipart_frame(boundary: &str, filename: &str, sha256: &str) -> (Vec<u8>, Ve
     // Content-Disposition». Measured: `checksum` before `checksum-algorithm`
     // failed exactly so.
     let mut head = String::new();
-    head.push_str(&field("content", "import"));
+    head.push_str(&field("content", content.as_str()));
     head.push_str(&field("checksum-algorithm", "sha256"));
     head.push_str(&field("checksum", sha256));
     head.push_str(&format!(
@@ -6562,6 +6738,48 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_template_is_named_by_its_manifest_digest_and_nothing_else() {
+        let hex = "a14b44155e4b8cefde8433bcf0f6fb5f460169571f5bff684d06572a98759035";
+        assert_eq!(
+            template_filename(&format!("sha256:{hex}")).unwrap(),
+            format!("dlx-{hex}.tar")
+        );
+        for bad in [
+            hex.to_string(),                          // no algorithm
+            format!("sha512:{hex}"),                  // another algorithm
+            format!("sha256:{}", &hex[..63]),         // short
+            format!("sha256:{}", hex.to_uppercase()), // the node keeps case; one name only
+            "sha256:../../etc/passwd".to_string(),
+            format!("sha256:{}/x", &hex[..62]),
+        ] {
+            let err = template_filename(&bad).unwrap_err();
+            assert!(err.to_string().contains("not a sha256"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_container_archive_is_uploaded_as_vztmpl() {
+        let (head, _) = multipart_frame("B", UploadContent::Vztmpl, "dlx-x.tar", "abc");
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.starts_with(
+            "--B\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\nvztmpl\r\n"
+        ));
+    }
+
+    #[test]
+    fn a_file_sha256_is_the_sha256_of_its_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f");
+        std::fs::write(&p, b"abc").unwrap();
+        let (size, hex) = file_sha256(&p).unwrap();
+        assert_eq!(size, 3);
+        assert_eq!(
+            hex,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     fn cfg_com(ssh: &[&str]) -> VmConfig {
         VmConfig {
@@ -8170,7 +8388,7 @@ mod tests {
         assert!(!lvm.content.iter().any(|c| c == "import"));
         assert!(!parse_storage_status(&serde_json::json!({})).active);
 
-        let (head, tail) = multipart_frame("B", "delonix-x.qcow2", "abc");
+        let (head, tail) = multipart_frame("B", UploadContent::Import, "delonix-x.qcow2", "abc");
         let head = String::from_utf8(head).unwrap();
         assert!(head.starts_with(
             "--B\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\nimport\r\n"

@@ -90,6 +90,14 @@ pub enum Error {
     /// The import storage has less free space than the image being uploaded.
     #[error("{0}")]
     ImportNoSpace(String),
+    /// The storage does not list `vztmpl` among its content types, so a
+    /// container archive cannot be uploaded to it (ADR-0058). Never enabled
+    /// for the operator: that is administering the provider.
+    #[error("{0}")]
+    TemplateNotEnabled(String),
+    /// The storage has less free space than the container archive.
+    #[error("{0}")]
+    TemplateNoSpace(String),
     /// A local image to upload could not be read or is not an image.
     #[error("{0}")]
     ImageUnreadable(String),
@@ -268,6 +276,8 @@ impl Error {
             Error::BackupNotQuiesced(_) => 6509,
             Error::ImportNotEnabled(_) => 6510,
             Error::ImportNoSpace(_) => 6511,
+            Error::TemplateNotEnabled(_) => 6513,
+            Error::TemplateNoSpace(_) => 6514,
             Error::ImageUnreadable(_) => 1539,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
@@ -323,6 +333,8 @@ impl From<Error> for Dx {
             | Error::BackupNotQuiesced(text)
             | Error::ImportNotEnabled(text)
             | Error::ImportNoSpace(text)
+            | Error::TemplateNotEnabled(text)
+            | Error::TemplateNoSpace(text)
             | Error::SdnNotRealized(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
