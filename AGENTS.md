@@ -7936,8 +7936,8 @@ em vigor. O módulo é `delonix_linux::usage`; a tool só monta as linhas.
 
 O ADR-0058 decidiu, depois de um spike no PVE 9.2.2, que um LXC do Proxmox não serve
 `kind: Container`: a API não tem `exec`, logs nem código de saída, e o dataplane do motor não
-chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As fatias 0 a 3 do plano
-63 estão fundidas; a Fatia 4 (o `kind: SystemContainer`) vem a seguir.
+chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As fatias 0 a 4 do plano
+63 estão feitas; a 5 (dia 2) só entra a pedido.
 
 - **O arquivo que o nó aceita** (Fatia 1): `delonix_oci::write_oci_media_archive` reescreve só o
   manifesto com media types OCI. O nó recusa o Docker v2 do `image save` com «Unsupported CPU
@@ -7956,3 +7956,12 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
 - **O catálogo passou a 1.2.0** (domínio `system-containers`). `exec`, logs e código de saída
   ficam `unsupported-by-provider` com a razão medida. A imagem e a rede ficam `partial`: cópia
   inteira por container (T6), e bridge e VLAN do nó sem a SDN do motor (T7).
+- **O Kind** (Fatia 4): `kind: SystemContainer`, em `cmd/system_container.rs`. O módulo é a raiz de
+  composição (lê a mesma configuração Proxmox que as VMs). O motor puxa a imagem e escreve o
+  arquivo OCI. O registo guarda o localizador. O que o container É (memória, swap, cores,
+  entrypoint, env) é lido do nó em cada plano, por isso um `PUT` feito à mão no nó é deriva (o
+  `plan` dá 2 e o `drift` mostra-a).
+  - **Campos:** `memory`, `swap` e `cores` são quentes, medidos num container a correr (o nó
+    escreve-os no cgroup e no cpuset). O resto é frio: planeia um `Replace`, recusado sem
+    `--replace SystemContainer/<nome>`.
+  - **Entrypoint e env não declarados** ficam fora da comparação: o nó tem os da imagem.

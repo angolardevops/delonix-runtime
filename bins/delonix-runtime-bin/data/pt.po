@@ -14515,3 +14515,41 @@ msgstr "Ainda não está em vigor. O daemon-reload sozinho é um falso verde: o 
 
 msgid "Then check it AS THAT USER, not as root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"
 msgstr "Depois confirma COMO ESSE UTILIZADOR, não como root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"
+
+# kind: SystemContainer (ADR-0058, plan 63 slice 4)
+msgid "no system-container provider is configured: set DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE and a credential, or a proxmox entry in providers.yaml"
+msgstr "nenhum provider de containers de sistema está configurado: define DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE e uma credencial, ou uma entrada proxmox no providers.yaml"
+
+msgid "systemcontainer: {field} '{raw}' is not a size (256M, 1G, 2Gi)"
+msgstr "systemcontainer: {field} '{raw}' não é um tamanho (256M, 1G, 2Gi)"
+
+msgid "systemcontainer: {field} '{raw}' is too large"
+msgstr "systemcontainer: {field} '{raw}' é grande demais"
+
+msgid "systemcontainer/{name}: spec.image is empty"
+msgstr "systemcontainer/{name}: o spec.image está vazio"
+
+msgid "systemcontainer/{name}: {fields} cannot change in place — use `stack apply --replace SystemContainer/{name}` to recreate it"
+msgstr "systemcontainer/{name}: {fields} não pode mudar no lugar — usa `stack apply --replace SystemContainer/{name}` para o recriar"
+
+msgid "systemcontainer/{name}: converged"
+msgstr "systemcontainer/{name}: convergido"
+
+msgid "systemcontainer/{name}: the provider no longer has it ({locator}) — creating it again"
+msgstr "systemcontainer/{name}: o provider já não o tem ({locator}) — a criá-lo de novo"
+
+msgid "systemcontainer/{name}: running on {locator}, network: {network}"
+msgstr "systemcontainer/{name}: a correr em {locator}, rede: {network}"
+
+msgid "warning: systemcontainer/{name} is running without the address it asked for: {reason}"
+msgstr "aviso: systemcontainer/{name} está a correr sem o endereço que pediu: {reason}"
+
+msgid "systemcontainer/{name}: destroyed ({locator})"
+msgstr "systemcontainer/{name}: destruído ({locator})"
+
+msgid "gone from the provider"
+msgstr "já não existe no provider"
+
+msgid "not read: {err}"
+msgstr "não lido: {err}"
+

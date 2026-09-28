@@ -123,6 +123,18 @@ spec:
         memory: 1G
         network: blog-net
 
+  # A system container: a whole userland on the runtime's configured remote
+  # provider (today: a Proxmox node, via DELONIX_PROXMOX_URL), never named here.
+  # The engine pulls the image; memory/swap/cores change in place, the rest
+  # recreates (ADR-0058).
+  systemContainers:
+    - name: tools
+      spec:
+        image: alpine:3.20
+        entrypoint: ["/bin/sleep", "infinity"]
+        memory: 256M
+        cores: 1
+
   containers:
     - name: web
       labels: { app: web }     # what the Service below selects by

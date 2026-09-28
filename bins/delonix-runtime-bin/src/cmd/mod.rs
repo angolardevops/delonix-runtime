@@ -77,6 +77,7 @@ pub mod stack;
 pub mod storage;
 pub mod svc;
 pub mod system;
+pub mod system_container;
 pub mod tunnel;
 pub mod util;
 pub(crate) mod verbs;
