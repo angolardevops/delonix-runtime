@@ -20,9 +20,11 @@
 //! made on the node by hand is drift, not something the record hides.
 //!
 //! `memory`, `swap` and `cores` converge in place (measured on a running
-//! container: the node writes them to its cgroup and cpuset). `image`,
-//! `entrypoint`, `env`, `rootfs` and `network` are cold: changing one plans a
-//! `Replace`, refused without `--replace SystemContainer/<name>`.
+//! container: the node writes them to its cgroup and cpuset). `rootfs`
+//! converges in place when it grows (plan 63 slice 5) and plans a `Replace`
+//! when it shrinks. `image`, `entrypoint`, `env` and `network` are cold:
+//! changing one plans a `Replace`, refused without `--replace
+//! SystemContainer/<name>`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -315,7 +317,15 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         fields.insert("memory".into(), live.memory_mib.to_string());
         fields.insert("swap".into(), live.swap_mib.to_string());
         fields.insert("cores".into(), live.cores.to_string());
-        fields.insert("rootfs".into(), rec.rootfs_gib.to_string());
+        // The node's size, not the record's: a volume grown by hand on the
+        // node is drift. A size the provider could not read (0) falls back to
+        // the record, so an unreadable answer is never a planned change.
+        let rootfs = if live.rootfs_gib > 0 {
+            live.rootfs_gib
+        } else {
+            rec.rootfs_gib
+        };
+        fields.insert("rootfs".into(), rootfs.to_string());
         fields.insert("network".into(), network_field(&rec.network));
         out.push(super::reconcile::Actual {
             kind: k::SYSTEM_CONTAINER.into(),
@@ -391,13 +401,21 @@ fn network_words(state: &NetworkState) -> String {
 }
 
 /// The cold fields of a spec, for the refusal of an in-place change.
-fn cold_fields(fields: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    fields
-        .iter()
-        .filter(|(k, _)| {
-            !super::reconcile::hot_fields_for(super::kinds::SYSTEM_CONTAINER).contains(&k.as_str())
+/// The fields of `now` that changed from `had` and cannot converge live —
+/// the same rule the reconciler plans with (`is_hot_change`), so `apply` and
+/// `plan` never disagree about what needs a recreate.
+fn cold_changes(had: &BTreeMap<String, String>, now: &BTreeMap<String, String>) -> Vec<String> {
+    now.iter()
+        .filter(|(k, v)| had.get(*k) != Some(v))
+        .filter(|(k, v)| {
+            !super::reconcile::is_hot_change(
+                super::kinds::SYSTEM_CONTAINER,
+                k,
+                had.get(*k).map(String::as_str),
+                Some(v),
+            )
         })
-        .map(|(k, v)| (k.clone(), v.clone()))
+        .map(|(k, _)| k.clone())
         .collect()
 }
 
@@ -437,14 +455,13 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     if let Ok(rec) = s.load(&name) {
         let h = handle_of(&rec);
         if provider.configuration(&dir, &h)?.is_some() {
-            let had = cold_fields(&record_fields(&rec)?);
-            let now = cold_fields(&wanted);
-            if had != now {
-                let changed: Vec<&String> = now
-                    .iter()
-                    .filter(|(k, v)| had.get(*k) != Some(v))
-                    .map(|(k, _)| k)
-                    .collect();
+            let live = provider.configuration(&dir, &h)?;
+            let mut had = record_fields(&rec)?;
+            if let Some(gib) = live.as_ref().map(|c| c.rootfs_gib).filter(|g| *g > 0) {
+                had.insert("rootfs".into(), gib.to_string());
+            }
+            let changed = cold_changes(&had, &wanted);
+            if !changed.is_empty() {
                 return Err(Error::Invalid(po::tf(
                     "systemcontainer/{name}: {fields} cannot change in place — use `stack apply \
                      --replace SystemContainer/{name}` to recreate it",
@@ -462,6 +479,13 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 )));
             }
             provider.resize(&dir, &h, resources_of(&spec)?)?;
+            if had.get("rootfs") != Some(&spec.rootfs.to_string()) {
+                provider.grow_rootfs(&dir, &h, spec.rootfs)?;
+                s.update(&name, |r| {
+                    r.rootfs_gib = spec.rootfs;
+                    true
+                })?;
+            }
             println!(
                 "{}",
                 po::tf("systemcontainer/{name}: converged", &[("name", &name)])
@@ -835,15 +859,28 @@ mod tests {
         assert!(desired(&docs[0]).is_ok());
     }
 
+    /// Memory, swap and cores converge live; the root volume only when it
+    /// grows; image and network never. The same rule as the reconciler's.
     #[test]
-    fn only_the_hot_fields_are_left_out_of_the_cold_ones() {
-        let f = spec_fields(&spec()).unwrap();
-        let cold = cold_fields(&f);
-        for hot in ["memory", "swap", "cores"] {
-            assert!(!cold.contains_key(hot), "{hot}");
-        }
-        for c in ["image", "rootfs", "network"] {
-            assert!(cold.contains_key(c), "{c}");
-        }
+    fn only_a_cold_change_asks_for_a_recreate() {
+        let had = spec_fields(&spec()).unwrap();
+        let change = |field: &str, value: &str| {
+            let mut now = had.clone();
+            now.insert(field.into(), value.into());
+            cold_changes(&had, &now)
+        };
+        assert!(change("memory", "1024").is_empty());
+        assert!(change("cores", "4").is_empty());
+        assert!(change("rootfs", "8").is_empty(), "growing converges live");
+        assert_eq!(
+            change("rootfs", "1"),
+            vec!["rootfs".to_string()],
+            "shrinking is cold"
+        );
+        assert_eq!(change("image", "nginx"), vec!["image".to_string()]);
+        assert_eq!(
+            change("network", "bridge=vmbr1"),
+            vec!["network".to_string()]
+        );
     }
 }

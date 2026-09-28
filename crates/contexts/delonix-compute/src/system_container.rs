@@ -101,6 +101,9 @@ pub struct SystemContainerConfig {
     pub cores: u32,
     pub entrypoint: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Size of the root volume in GiB, as the provider reports it; 0 when it
+    /// reports none it could read.
+    pub rootfs_gib: u32,
 }
 
 /// The fields a running container takes without being recreated (measured on
@@ -159,4 +162,7 @@ pub trait SystemContainerProvider: Provider {
     /// Rolls the container back to a snapshot and leaves it in the state it
     /// was in before the call: running if it was running, stopped if not.
     fn restore(&self, dir: &Path, h: &SystemContainerHandle, name: &str) -> Result<()>;
+    /// Grows the root volume to `gib`, running or not, and reads the size
+    /// back. Never shrinks: a smaller size than the current one is refused.
+    fn grow_rootfs(&self, dir: &Path, h: &SystemContainerHandle, gib: u32) -> Result<()>;
 }

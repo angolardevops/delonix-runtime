@@ -8014,6 +8014,9 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   Os snapshots (`snapshot create|ls|rm|restore`) estão feitos. Um `restore` de um container a correr
   espera por `running`: medido, o nó fica ~40 s sem responder pelo container depois da tarefa de
   rollback, e o pveproxy dá HTTP 596 a quem espera. «A tarefa acabou» não é «o container responde».
+  O `rootfs` é o primeiro campo **só a crescer** do reconciliador (`grow_only_fields`): cresce a
+  quente, encolher planeia `Replace`. A mesma função (`is_hot_change`) decide no `plan` e no
+  `apply`, para os dois nunca discordarem sobre o que exige recriar.
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.

@@ -4913,6 +4913,94 @@ fn a_system_containers_snapshot_is_rolled_back_and_deleted() {
     }
 }
 
+/// Plan 63 slice 5, resize: memory and the root volume of a RUNNING
+/// container change without recreating it — the node grows the volume
+/// (`PUT …/resize`) and never shrinks it, and a smaller size is refused
+/// before any request (DX-1540), leaving the volume as it was.
+#[test]
+fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
+    use delonix_compute::system_container::{
+        SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxgrow{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: None,
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    provider.start(dir.path(), &h, &spec).expect("start");
+    let cfg = provider.configuration(dir.path(), &h).unwrap().unwrap();
+    assert_eq!(cfg.rootfs_gib, 1, "the create's size read back");
+
+    provider
+        .resize(
+            dir.path(),
+            &h,
+            SystemContainerResources {
+                memory_mib: 384,
+                swap_mib: 128,
+                cores: 2,
+            },
+        )
+        .expect("resize");
+    provider.grow_rootfs(dir.path(), &h, 2).expect("grow");
+    let cfg = provider.configuration(dir.path(), &h).unwrap().unwrap();
+    assert_eq!(
+        (cfg.memory_mib, cfg.swap_mib, cfg.cores, cfg.rootfs_gib),
+        (384, 128, 2, 2)
+    );
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "running",
+        "still the same running container"
+    );
+
+    let shrink = provider.grow_rootfs(dir.path(), &h, 1).unwrap_err();
+    assert_eq!(shrink.number(), 1540, "{shrink}");
+    let cfg = provider.configuration(dir.path(), &h).unwrap().unwrap();
+    assert_eq!(cfg.rootfs_gib, 2, "the refusal left the volume as it was");
+    provider
+        .grow_rootfs(dir.path(), &h, 2)
+        .expect("the same size is a no-op");
+
+    provider.stop(dir.path(), &h).expect("stop");
+    provider.destroy(dir.path(), &h).expect("destroy");
+    let left = client.list_images(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    let grow = recs
+        .iter()
+        .rev()
+        .find(|r| r.action == "resize")
+        .unwrap_or_else(|| panic!("no resize in the ledger: {recs:?}"));
+    assert_eq!(grow.state, delonix_proxmox::TaskState::Ok, "{grow:?}");
+}
+
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
 /// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused

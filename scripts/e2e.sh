@@ -4091,6 +4091,8 @@ check "systemcontainer snapshot ls de um nome não registado diz 4" 4 adr54_bare
 check "systemcontainer snapshot create de um nome não registado diz 4" 4 adr54_bare systemcontainer snapshot create "sc-$PFX-nada" s1
 check "o snapshot de um system container é declarado supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.snapshot' | grep -q 'supported'"
+check "o resize de um system container é declarado supported no proxmox" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.resize' | grep -q 'supported'"
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################
