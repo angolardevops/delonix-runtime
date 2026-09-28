@@ -14,20 +14,92 @@
 //! próprio `open`, logo threads do mesmo processo excluem-se de facto.
 
 use std::collections::HashSet;
-use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// `DELONIX_ROOT` é lido do ambiente do PROCESSO. Definir por-teste faz os
-/// testes paralelos lutarem pela mesma variável, por isso é uma raiz por
-/// processo, criada uma vez.
+/// `DELONIX_ROOT` is read from the PROCESS environment. Setting it per test
+/// makes parallel tests fight over the same variable, so there is one root per
+/// process and the variable is set once. This only names the path; the
+/// directory itself exists while a [`RootLease`] does.
 fn raiz() -> &'static std::path::PathBuf {
     static RAIZ: OnceLock<std::path::PathBuf> = OnceLock::new();
     RAIZ.get_or_init(|| {
-        let d = std::env::temp_dir().join(format!("delonix-net-race-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
+        let tmp = std::env::temp_dir();
+        sweep_dead_roots(&tmp);
+        let d = tmp.join(format!("{ROOT_PREFIX}{}", std::process::id()));
         std::env::set_var("DELONIX_ROOT", &d);
         d
     })
+}
+
+const ROOT_PREFIX: &str = "delonix-net-race-";
+
+/// libtest has no "after all tests" hook, and it does not tell a test how many
+/// others will run (filters, `--test-threads`), so "the last test removes the
+/// root" cannot be decided by counting tests. It is decided by counting the
+/// tests USING the root right now: the first lease creates it, the last one to
+/// be dropped removes it — also when that test panics, because `Drop` runs on
+/// unwind. If a later test starts after the count hit zero, it simply gets a
+/// fresh root; no test here depends on another's networks. Measured on
+/// 2026-09-28 before this: 2400 runs left ~2400 roots in the temp dir.
+static LEASES: Mutex<usize> = Mutex::new(0);
+
+struct RootLease(&'static std::path::Path);
+
+fn lease() -> RootLease {
+    let root = raiz();
+    let mut n = LEASES.lock().unwrap_or_else(|e| e.into_inner());
+    if *n == 0 {
+        let _ = std::fs::remove_dir_all(root);
+        std::fs::create_dir_all(root).unwrap();
+    }
+    *n += 1;
+    RootLease(root)
+}
+
+impl std::ops::Deref for RootLease {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        self.0
+    }
+}
+
+impl Drop for RootLease {
+    fn drop(&mut self) {
+        let mut n = LEASES.lock().unwrap_or_else(|e| e.into_inner());
+        *n -= 1;
+        if *n == 0 {
+            let _ = std::fs::remove_dir_all(self.0);
+        }
+    }
+}
+
+/// The lease does not run when the process is KILLED (Ctrl-C, a CI timeout,
+/// SIGKILL), so each process also removes the roots of runs that died that
+/// way: a `delonix-net-race-<pid>` whose pid is no longer alive has no owner
+/// left to use it. A live pid is left alone even if it was reused by something
+/// else — the cost of being wrong that way is one stale directory. Without
+/// `/proc` every pid would look dead, so nothing is swept then.
+fn sweep_dead_roots(tmp: &std::path::Path) {
+    let proc = std::path::Path::new("/proc");
+    if !proc.join("self").exists() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(tmp) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix(ROOT_PREFIX))
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid != std::process::id() && !proc.join(pid.to_string()).exists() {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 /// The three tests share the root and run in parallel. The ones that CREATE
@@ -48,8 +120,8 @@ fn quiet() -> RwLockWriteGuard<'static, ()> {
 }
 
 /// Cria `n` redes em paralelo e devolve os `NetDef` resultantes.
+/// The caller holds a [`RootLease`] for as long as it reads the results.
 fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_sdn::infra::NetDef> {
-    raiz();
     let barreira = std::sync::Arc::new(std::sync::Barrier::new(n));
     let mut hs = Vec::with_capacity(n);
     for i in 0..n {
@@ -74,6 +146,7 @@ fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_sdn::infra:
 #[test]
 fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
     let _g = writing();
+    let _root = lease();
     let defs = criar_em_paralelo("corrida", 16);
 
     let prefixos: HashSet<&str> = defs.iter().map(|d| d.prefix.as_str()).collect();
@@ -110,7 +183,7 @@ fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
 #[test]
 fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
     let _g = writing();
-    raiz();
+    let _root = lease();
     const N: usize = 12;
     let barreira = std::sync::Arc::new(std::sync::Barrier::new(N));
     let hs: Vec<_> = (0..N)
@@ -163,8 +236,9 @@ fn a_fechadura_nao_entra_no_registo_de_redes() {
     // longer in flight: it is junk `write_atomic` left behind, and that must
     // break this test too.
     let _g = quiet();
+    let root = lease();
     let _ = criar_em_paralelo("vizinha", 2);
-    let dir = raiz().join("ingress").join("networks");
+    let dir = root.join("ingress").join("networks");
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let n = e.file_name().to_string_lossy().into_owned();
         assert!(
@@ -172,5 +246,5 @@ fn a_fechadura_nao_entra_no_registo_de_redes() {
             "ficheiro estranho no registo de redes: {n}"
         );
     }
-    assert!(raiz().join("ingress").join("networks.lock").exists());
+    assert!(root.join("ingress").join("networks.lock").exists());
 }
