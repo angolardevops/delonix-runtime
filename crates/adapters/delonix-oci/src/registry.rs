@@ -63,7 +63,47 @@ fn read_capped(resp: reqwest::blocking::Response, max: u64, what: &str) -> Resul
 }
 
 fn reg_err(e: reqwest::Error) -> Error {
-    Error::Registry(e.to_string())
+    Error::Registry(transport_chain(&e))
+}
+
+/// A `reqwest::Error` with every cause under it, `: `-joined.
+///
+/// `reqwest`'s own `Display` stops at the top layer, and for an upload that
+/// layer is `request or response body error for url (…)` — true of every
+/// dropped transfer and useless for telling them apart. The cause that names
+/// what happened (`Broken pipe`, `Connection reset by peer`, `operation timed
+/// out`) is two or three `source()`s down. A cause whose text the layer above
+/// already carries is skipped, so the line does not say the same thing twice.
+fn transport_chain(e: &reqwest::Error) -> String {
+    let mut out = e.to_string();
+    let mut cur: Option<&dyn std::error::Error> = std::error::Error::source(e);
+    while let Some(c) = cur {
+        let msg = c.to_string();
+        if !msg.is_empty() && !out.contains(&msg) {
+            out.push_str(": ");
+            out.push_str(&msg);
+        }
+        cur = c.source();
+    }
+    out
+}
+
+/// What a registry said when it refused: `HTTP <status>` plus the start of its
+/// body, which is where the OCI error codes live (`BLOB_UPLOAD_INVALID`,
+/// `DENIED`, `SIZE_INVALID`…). The status alone told a 400 for a digest
+/// mismatch apart from nothing; the body says which one.
+fn http_failure(resp: reqwest::blocking::Response) -> String {
+    let status = resp.status();
+    let detail = read_capped(resp, 64 * 1024, "error body")
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    let detail: String = detail.chars().take(300).collect();
+    if detail.is_empty() {
+        format!("HTTP {status}")
+    } else {
+        format!("HTTP {status} {detail}")
+    }
 }
 
 /// The same error, plus the one hint that turns it into an action.
@@ -801,7 +841,12 @@ impl Client {
 
     /// Sends a small blob held in memory (a config, a signature).
     fn push_blob(&mut self, digest: &str, data: &[u8]) -> Result<()> {
-        self.push_blob_with(digest, &|| Ok(reqwest::blocking::Body::from(data.to_vec())))
+        self.push_blob_with(digest, &|| {
+            Ok((
+                Box::new(std::io::Cursor::new(data.to_vec())) as Box<dyn std::io::Read + Send>,
+                data.len() as u64,
+            ))
+        })
     }
 
     /// Sends a blob STRAIGHT FROM ITS FILE: the body is read from disk as it
@@ -821,7 +866,7 @@ impl Client {
                 pos: 0,
                 meter: meter.cloned(),
             };
-            Ok(reqwest::blocking::Body::sized(body, size))
+            Ok((Box::new(body) as Box<dyn std::io::Read + Send>, size))
         })?;
         // Done, including a blob the registry already had (HEAD) or whose
         // answer was lost: the bar must not stop short of it.
@@ -848,11 +893,14 @@ impl Client {
     /// `PUT` usually invalidates its upload URL); any other answer (400 for a
     /// digest mismatch, 403) fails at once, since sending the same bytes again
     /// cannot change it. `body` is called once per attempt.
-    fn push_blob_with(
-        &mut self,
-        digest: &str,
-        body: &dyn Fn() -> Result<reqwest::blocking::Body>,
-    ) -> Result<()> {
+    ///
+    /// **Retried, not resumed.** The pull continues a cut blob from where it
+    /// stopped (`Range`); an upload here is ONE monolithic `PUT`, so every
+    /// attempt sends the blob from byte 0 — over a ~500 KB/s link a 1.2 GiB
+    /// image that drops at 90% costs another 40 minutes. Resuming needs the
+    /// chunked protocol (`PATCH` with `Content-Range`, then `GET` on the
+    /// session to learn the offset the registry kept) — not done yet.
+    fn push_blob_with(&mut self, digest: &str, body: &BlobBody<'_>) -> Result<()> {
         let mut last = String::new();
         for attempt in 1..=Self::PUSH_ATTEMPTS {
             if attempt > 1 {
@@ -888,10 +936,13 @@ impl Client {
         );
         match self.write_req_raw(&|http| Ok(http.head(&url))) {
             Err(e) => Err(UploadFailure::Fatal(e)),
-            Ok(Err(e)) => Err(UploadFailure::Retry(format!("blob HEAD: {e}"))),
+            Ok(Err(e)) => Err(UploadFailure::Retry(format!(
+                "blob HEAD: {}",
+                transport_chain(&e)
+            ))),
             Ok(Ok(r)) if retryable_status(r.status()) => Err(UploadFailure::Retry(format!(
-                "blob HEAD: HTTP {}",
-                r.status()
+                "blob HEAD: {}",
+                http_failure(r)
             ))),
             Ok(Ok(r)) => Ok(r.status().is_success()),
         }
@@ -902,7 +953,7 @@ impl Client {
     fn upload_once(
         &mut self,
         digest: &str,
-        body: &dyn Fn() -> Result<reqwest::blocking::Body>,
+        body: &BlobBody<'_>,
     ) -> std::result::Result<(), UploadFailure> {
         let start = upload_start_url(
             scheme_for(&self.host),
@@ -914,7 +965,10 @@ impl Client {
         let resp = match self.write_req_raw(&|http| Ok(http.post(&start))) {
             Err(e) => return Err(UploadFailure::Fatal(e)),
             Ok(Err(e)) => {
-                return Err(UploadFailure::Retry(format!("upload start: {e}")));
+                return Err(UploadFailure::Retry(format!(
+                    "upload start: {}",
+                    transport_chain(&e)
+                )));
             }
             Ok(Ok(r)) => r,
         };
@@ -928,10 +982,16 @@ impl Client {
         }
         if resp.status() != reqwest::StatusCode::ACCEPTED {
             let status = resp.status();
-            let msg = format!(
-                "upload start: HTTP {status} (run `delonix login {}`?)",
-                self.host
-            );
+            // The login hint only where a login can be the answer: on a 500
+            // it sent the reader to their credentials for the registry's fault.
+            let hint = if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                format!(" (run `delonix login {}`?)", self.host)
+            } else {
+                String::new()
+            };
+            let msg = format!("upload start: {}{hint}", http_failure(resp));
             return Err(if retryable_status(status) {
                 UploadFailure::Retry(msg)
             } else {
@@ -954,27 +1014,46 @@ impl Client {
         };
         let sep = if base.contains('?') { '&' } else { '?' };
         let put_url = format!("{base}{sep}digest={digest}");
+        // Counted, because when the connection drops mid-body the only error
+        // `reqwest`'s blocking client hands back is its own internal channel's
+        // (`send failed because receiver is gone`): the registry's answer and
+        // the socket error are dropped with the request future. How far the
+        // body got is the one fact left to tell the user.
+        let sent = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let total = std::cell::Cell::new(0u64);
         let resp = match self.write_req_raw(&|http| {
+            let (reader, size) = body()?;
+            sent.store(0, std::sync::atomic::Ordering::Relaxed);
+            total.set(size);
+            let reader = CountingReader {
+                inner: reader,
+                sent: sent.clone(),
+            };
             Ok(http
                 .put(&put_url)
                 .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                .body(body()?))
+                .body(reqwest::blocking::Body::sized(reader, size)))
         }) {
             Err(e) => return Err(UploadFailure::Fatal(e)),
-            Ok(Err(e)) => return Err(UploadFailure::Retry(format!("blob PUT {digest}: {e}"))),
+            Ok(Err(e)) => {
+                return Err(UploadFailure::Retry(format!(
+                    "blob PUT {digest}: {} (connection lost with {} of {} bytes sent)",
+                    transport_chain(&e),
+                    sent.load(std::sync::atomic::Ordering::Relaxed),
+                    total.get()
+                )))
+            }
             Ok(Ok(r)) => r,
         };
         let status = resp.status();
         if status.is_success() {
-            Ok(())
-        } else if retryable_status(status) {
-            Err(UploadFailure::Retry(format!(
-                "blob PUT {digest}: HTTP {status}"
-            )))
+            return Ok(());
+        }
+        let msg = format!("blob PUT {digest}: {}", http_failure(resp));
+        if retryable_status(status) {
+            Err(UploadFailure::Retry(msg))
         } else {
-            Err(UploadFailure::Fatal(Error::Registry(format!(
-                "blob PUT {digest}: HTTP {status}"
-            ))))
+            Err(UploadFailure::Fatal(Error::Registry(msg)))
         }
     }
 
@@ -988,13 +1067,9 @@ impl Client {
                 .body(payload.clone())
         })?;
         if !resp.status().is_success() {
-            let status = resp.status();
-            let detail = read_capped(resp, 64 * 1024, "error body")
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default();
-            let detail = detail.chars().take(200).collect::<String>();
             return Err(Error::Registry(format!(
-                "manifest PUT: HTTP {status} {detail}"
+                "manifest PUT: {}",
+                http_failure(resp)
             )));
         }
         Ok(())
@@ -1098,6 +1173,25 @@ impl std::io::Read for MeteredFile {
         if let Some(m) = &self.meter {
             m.set(self.pos);
         }
+        Ok(n)
+    }
+}
+
+/// A blob's upload body: a fresh reader over its bytes and their count,
+/// built again for every attempt.
+type BlobBody<'a> = dyn Fn() -> Result<(Box<dyn std::io::Read + Send>, u64)> + 'a;
+
+/// An upload body that records how many bytes `reqwest` has taken from it.
+struct CountingReader {
+    inner: Box<dyn std::io::Read + Send>,
+    sent: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl std::io::Read for CountingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.sent
+            .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
         Ok(n)
     }
 }
@@ -3372,6 +3466,10 @@ mod tests {
         Drop,
         /// Store the blob, then close without answering: the answer is lost.
         StoreThenDrop,
+        /// Answer with this status and this body (an OCI error document).
+        StatusBody(u16, &'static str),
+        /// Read this many bytes of the body, then close: a cut upload.
+        CutAfter(usize),
     }
 
     /// A registry whose blob PUTs follow `script`, in order (the last entry
@@ -3409,6 +3507,13 @@ mod tests {
                     .find(|l| l.starts_with("content-length:"))
                     .and_then(|l| l[15..].trim().parse().ok())
                     .unwrap_or(0);
+                let act = head
+                    .starts_with("put ")
+                    .then(|| script[counter.load(Ordering::SeqCst).min(script.len() - 1)]);
+                let len = match act {
+                    Some(PutAct::CutAfter(n)) => n.min(len),
+                    _ => len,
+                };
                 let mut body_len = buf.len() - hend - 4;
                 while body_len < len {
                     let n = s.read(&mut chunk).unwrap_or(0);
@@ -3440,8 +3545,17 @@ mod tests {
                             }
                             reply(&mut s, &format!("{code} X"), "");
                         }
-                        PutAct::Drop => {}
+                        PutAct::Drop | PutAct::CutAfter(_) => {}
                         PutAct::StoreThenDrop => stored = true,
+                        PutAct::StatusBody(code, body) => {
+                            let _ = s.write_all(
+                                format!(
+                                    "HTTP/1.1 {code} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                                    body.len()
+                                )
+                                .as_bytes(),
+                            );
+                        }
                     }
                 } else {
                     reply(&mut s, "404 Not Found", "");
@@ -3511,6 +3625,63 @@ mod tests {
             push_with_script(vec![PutAct::Status(503), PutAct::Drop, PutAct::Status(201)]);
         res.expect("two transient failures must not fail the push");
         assert_eq!(puts, 3);
+    }
+
+    /// A refused PUT says what the registry said, not just its status: the
+    /// OCI error code in the body is what tells a digest mismatch from a
+    /// size limit or a denied write.
+    #[test]
+    fn a_refused_push_carries_the_registry_s_error_body() {
+        let (res, puts) = push_with_script(vec![PutAct::StatusBody(
+            400,
+            r#"{"errors":[{"code":"DIGEST_INVALID","message":"provided digest did not match"}]}"#,
+        )]);
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.contains("HTTP 400"), "{msg}");
+        assert!(msg.contains("DIGEST_INVALID"), "{msg}");
+        assert_eq!(puts, 1);
+    }
+
+    /// A connection cut in the middle of the body comes back from
+    /// `reqwest`'s blocking client as its internal channel's error only —
+    /// nothing about the network. The attempt must still say that the
+    /// connection went and how far the upload got.
+    #[test]
+    fn a_cut_upload_says_how_far_it_got() {
+        let (port, puts) = serve_scripted_push(vec![PutAct::CutAfter(4096)]);
+        let payload = vec![7u8; 8 * 1024 * 1024];
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
+        let body = || {
+            Ok((
+                Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>,
+                payload.len() as u64,
+            ))
+        };
+        let Err(crate::registry::UploadFailure::Retry(msg)) = c.upload_once(&digest, &body) else {
+            panic!("a cut connection must be a retryable failure");
+        };
+        assert!(msg.contains("connection lost with"), "{msg}");
+        assert!(
+            msg.contains(&format!("of {} bytes sent", payload.len())),
+            "{msg}"
+        );
+        assert_eq!(puts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// Every cause under a `reqwest::Error`, not just its top line: a
+    /// refused connection names the refusal.
+    #[test]
+    fn transport_chain_names_the_cause() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(); // bound and dropped: nothing listens there now
+        let e = reqwest::blocking::get(format!("http://127.0.0.1:{port}/")).unwrap_err();
+        let msg = crate::registry::transport_chain(&e);
+        assert!(msg.len() > e.to_string().len(), "no cause added: {msg}");
+        assert!(msg.to_lowercase().contains("refused"), "{msg}");
     }
 
     /// A PUT that landed but whose answer was lost is NOT sent again: the
