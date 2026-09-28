@@ -888,6 +888,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1050,6 +1051,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tempfile",
  "thiserror 2.0.19",
 ]
 
@@ -1088,6 +1090,7 @@ dependencies = [
  "delonix-model",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1140,6 +1143,7 @@ dependencies = [
  "delonix-node",
  "delonix-state",
  "libc",
+ "tempfile",
  "thiserror 2.0.19",
  "tracing",
 ]
@@ -1154,6 +1158,7 @@ dependencies = [
  "delonix-state",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
 ]
 
