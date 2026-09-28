@@ -18,8 +18,9 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
-use delonix_opnsense::{Auth, Client, Error, Target, MAX_RESPONSE_BYTES};
+use delonix_opnsense::{Auth, Client, Error, Staging, Target, MAX_RESPONSE_BYTES};
 use delonix_sdn::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayRule};
+use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 
 // ===========================================================================
 // The mock appliance
@@ -38,6 +39,7 @@ enum Reply {
 struct Seen {
     method: String,
     path: String,
+    body: String,
 }
 
 struct MockAppliance {
@@ -58,6 +60,14 @@ fn stock(method: &str, path: &str) -> Reply {
             200,
             r#"{"CORE_ABI":"26.1","CORE_NICKNAME":"Witty Woodpecker"}"#.into(),
         ),
+        // Two owner labels (ours and another record's) and an operator's own
+        // category, which says nothing about ownership.
+        ("POST", "firewall/category/search_item") => Reply::Json(
+            200,
+            format!(
+                r#"{{"rows":[{{"uuid":"{CAT_OURS}","name":"delonix-owner:dlx-0123456789abcdef"}},{{"uuid":"{CAT_OTHER}","name":"delonix-owner:dlx-ffffffffffffffff"}},{{"uuid":"{CAT_HAND}","name":"web servers"}}]}}"#
+            ),
+        ),
         ("POST", p) if p.ends_with("search_item") || p.ends_with("search_rule") => Reply::Json(
             200,
             r#"{"total":0,"rowCount":0,"current":1,"rows":[]}"#.into(),
@@ -69,6 +79,19 @@ fn stock(method: &str, path: &str) -> Reply {
         ("POST", p) if p.ends_with("apply") || p.ends_with("reconfigure") => {
             Reply::Json(200, r#"{"status":"OK\n\n"}"#.into())
         }
+        ("POST", p) if p.contains("/del_item/") || p.contains("/del_rule/") => {
+            Reply::Json(200, r#"{"result":"deleted"}"#.into())
+        }
+        // The running state of a clean appliance: nothing loaded in pf that
+        // the config does not also say.
+        ("GET", "diagnostics/firewall/list_rule_ids") => Reply::Json(200, r#"{"items":[]}"#.into()),
+        ("GET", "firewall/alias_util/aliases") => {
+            Reply::Json(200, r#"["bogons","__lan_network"]"#.into())
+        }
+        ("GET", p) if p.starts_with("firewall/alias_util/list/") => Reply::Json(
+            200,
+            r#"{"total":0,"rowCount":0,"current":1,"rows":[]}"#.into(),
+        ),
         _ => Reply::Json(
             500,
             r#"{"errorMessage":"mock: no script for this route"}"#.into(),
@@ -115,6 +138,16 @@ impl MockAppliance {
 
     fn log(&self) -> Vec<Seen> {
         self.log.lock().unwrap().clone()
+    }
+
+    /// The body of the LAST request to (method, path).
+    fn body_of(&self, method: &str, path: &str) -> String {
+        self.log()
+            .iter()
+            .rev()
+            .find(|s| s.method == method && s.path == path)
+            .map(|s| s.body.clone())
+            .unwrap_or_default()
     }
 
     fn count(&self, method: &str, path: &str) -> usize {
@@ -171,6 +204,7 @@ fn serve_one(
     log.lock().unwrap().push(Seen {
         method: method.clone(),
         path: path.clone(),
+        body: String::from_utf8_lossy(&body).into_owned(),
     });
     let reply = {
         let mut s = script.lock().unwrap();
@@ -345,12 +379,16 @@ fn a_validation_failure_at_http_200_is_typed_not_treated_as_success() {
     )]));
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client
-        .ensure_rule(&GatewayRule {
-            description: "adr0051spike".into(),
-            source: "any".into(),
-            destination: "10.0.0.0/24".into(),
-            protocol: Some("BOGUS".into()),
-        })
+        .ensure_rule(
+            &GatewayRule {
+                description: "adr0051spike".into(),
+                source: "any".into(),
+                destination: "10.0.0.0/24".into(),
+                protocol: Some("BOGUS".into()),
+            },
+            &mark(),
+            &Staging::default(),
+        )
         .unwrap_err();
     assert!(matches!(err, Error::Validation(_)), "{err}");
     assert!(err.to_string().contains("rule.protocol"));
@@ -365,12 +403,16 @@ fn a_result_failed_without_validations_is_http_status_not_a_silent_success() {
     )]));
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client
-        .ensure_rule(&GatewayRule {
-            description: "x".into(),
-            source: "any".into(),
-            destination: "10.0.0.0/24".into(),
-            protocol: None,
-        })
+        .ensure_rule(
+            &GatewayRule {
+                description: "x".into(),
+                source: "any".into(),
+                destination: "10.0.0.0/24".into(),
+                protocol: None,
+            },
+            &mark(),
+            &Staging::default(),
+        )
         .unwrap_err();
     assert!(matches!(err, Error::HttpStatus(_)), "{err}");
 }
@@ -432,11 +474,26 @@ fn ensure_alias_creates_when_absent_and_reports_already_present_when_found() {
         content: vec!["10.99.99.99".into()],
         description: "test".into(),
     };
+    let staging = Staging::default();
     let outcome = client
-        .ensure_alias(&alias)
+        .ensure_alias(&alias, &mark(), &staging)
         .expect("stock add_item succeeds");
     assert_eq!(outcome, EnsureOutcome::Created);
     assert_eq!(appliance.count("POST", "firewall/alias/add_item"), 1);
+    let sent = appliance.body_of("POST", "firewall/alias/add_item");
+    assert!(
+        sent.contains(&format!(r#""categories":"{CAT_OURS}""#)),
+        "the created alias must carry the owner category: {sent}"
+    );
+    assert!(
+        sent.contains(r#""description":"test""#),
+        "the description stays the declared text: {sent}"
+    );
+    assert_eq!(
+        staging.changes().len(),
+        1,
+        "the commit must know it is ours"
+    );
 }
 
 #[test]
@@ -446,8 +503,10 @@ fn ensure_alias_already_present_never_calls_add_item() {
         "firewall/alias/search_item",
         Reply::Json(
             200,
-            r#"{"total":1,"rowCount":1,"current":1,"rows":[{"uuid":"11111111-1111-1111-1111-111111111111","name":"adr0051spike"}]}"#
-                .into(),
+            rows(&[serde_json::json!({
+                "uuid": U1, "name": "adr0051spike", "type": "host", "enabled": "1",
+                "content": "10.99.99.99", "description": "test", "categories": CAT_OURS,
+            })]),
         ),
     )]));
     let client = Client::connect(&target(&appliance)).unwrap();
@@ -457,7 +516,9 @@ fn ensure_alias_already_present_never_calls_add_item() {
         content: vec!["10.99.99.99".into()],
         description: "test".into(),
     };
-    let outcome = client.ensure_alias(&alias).unwrap();
+    let outcome = client
+        .ensure_alias(&alias, &mark(), &Staging::default())
+        .unwrap();
     assert_eq!(outcome, EnsureOutcome::AlreadyPresent);
     assert_eq!(
         appliance.count("POST", "firewall/alias/add_item"),
@@ -476,7 +537,9 @@ fn ensure_rule_creates_when_absent() {
         destination: "10.0.0.0/24".into(),
         protocol: Some("TCP".into()),
     };
-    let outcome = client.ensure_rule(&rule).expect("stock add_rule succeeds");
+    let outcome = client
+        .ensure_rule(&rule, &mark(), &Staging::default())
+        .expect("stock add_rule succeeds");
     assert_eq!(outcome, EnsureOutcome::Created);
     assert_eq!(appliance.count("POST", "firewall/filter/add_rule"), 1);
 }
@@ -485,9 +548,10 @@ fn ensure_rule_creates_when_absent() {
 fn remove_alias_is_a_no_op_when_nothing_matches() {
     let appliance = MockAppliance::start(script(&[]));
     let client = Client::connect(&target(&appliance)).unwrap();
-    client
-        .remove_alias("does-not-exist")
+    let outcome = client
+        .remove_alias("does-not-exist", &mark(), &Staging::default())
         .expect("removing something absent is not an error");
+    assert_eq!(outcome, RemoveOutcome::Absent);
     assert_eq!(appliance.count("POST", "firewall/alias/del_item"), 0);
 }
 
@@ -510,4 +574,569 @@ fn commit_calls_reconfigure_then_apply_in_order() {
         reconfigure_at < apply_at,
         "aliases must be reconfigured before the filter is applied"
     );
+}
+
+// ===========================================================================
+// Ownership (audit 62, §6 P1): found by name is not owned
+// ===========================================================================
+
+const U1: &str = "11111111-1111-1111-1111-111111111111";
+const U2: &str = "22222222-2222-2222-2222-222222222222";
+const CAT_OURS: &str = "c0000000-0000-0000-0000-00000000000a";
+const CAT_OTHER: &str = "c0000000-0000-0000-0000-00000000000b";
+const CAT_HAND: &str = "c0000000-0000-0000-0000-00000000000c";
+
+fn mark() -> OwnerMark {
+    OwnerMark::new("dlx-0123456789abcdef").unwrap()
+}
+
+/// A search answer with these rows.
+fn rows(rows: &[serde_json::Value]) -> String {
+    serde_json::json!({ "total": rows.len(), "rowCount": rows.len(), "current": 1, "rows": rows })
+        .to_string()
+}
+
+fn rule_row(uuid: &str, description: &str) -> serde_json::Value {
+    serde_json::json!({
+        "uuid": uuid, "enabled": "1", "description": description,
+        "source_net": "10.1.0.0/24", "destination_net": "10.0.0.0/24", "protocol": "TCP",
+    })
+}
+
+/// A rule described "allow web" carrying OUR owner category — and an
+/// operator's own category next to it, which must not confuse the reading.
+fn ours_row(uuid: &str) -> serde_json::Value {
+    let mut row = rule_row(uuid, "allow web");
+    row["categories"] = format!("{CAT_HAND},{CAT_OURS}").into();
+    row
+}
+
+fn web_rule() -> GatewayRule {
+    GatewayRule {
+        description: "allow web".into(),
+        source: "10.1.0.0/24".into(),
+        destination: "10.0.0.0/24".into(),
+        protocol: Some("TCP".into()),
+    }
+}
+
+fn host_alias() -> GatewayAlias {
+    GatewayAlias {
+        name: "web".into(),
+        kind: AliasKind::Host,
+        content: vec!["10.1.0.5".into()],
+        description: "web hosts".into(),
+    }
+}
+
+#[test]
+fn a_hand_made_alias_with_the_same_name_is_refused_not_adopted() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/alias/search_item",
+        Reply::Json(
+            200,
+            rows(&[serde_json::json!({
+                "uuid": U1, "name": "web", "type": "host", "enabled": "1",
+                "content": "10.1.0.5", "description": "made by hand",
+            })]),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_alias(&host_alias(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::NotOwned(_)), "{err}");
+    assert_eq!(err.number(), 5340);
+    assert_eq!(appliance.count("POST", "firewall/alias/add_item"), 0);
+}
+
+#[test]
+fn another_records_alias_is_refused_and_named_as_such() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/alias/search_item",
+        Reply::Json(
+            200,
+            rows(&[serde_json::json!({
+                "uuid": U1, "name": "web", "type": "host", "enabled": "1", "content": "10.1.0.5",
+                "description": "web hosts", "categories": CAT_OTHER,
+            })]),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_alias(&host_alias(), &mark(), &Staging::default())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("dlx-ffffffffffffffff"), "{err}");
+}
+
+#[test]
+fn a_hand_made_rule_with_the_same_description_is_refused_not_adopted() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[rule_row(U1, "allow web")])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::NotOwned(_)), "{err}");
+    assert_eq!(appliance.count("POST", "firewall/filter/add_rule"), 0);
+}
+
+#[test]
+fn an_owned_rule_that_matches_is_already_present() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[ours_row(U1)])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let outcome = client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap();
+    assert_eq!(outcome, EnsureOutcome::AlreadyPresent);
+    assert_eq!(appliance.count("POST", "firewall/filter/add_rule"), 0);
+}
+
+#[test]
+fn an_owned_rule_edited_on_the_appliance_is_drift_not_present() {
+    let mut row = ours_row(U1);
+    row["destination_net"] = "any".into();
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[row])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::Drifted(_)), "{err}");
+    assert_eq!(err.number(), 5341);
+    assert!(
+        err.to_string().contains("destination_net is 'any'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_owned_alias_whose_content_changed_is_drift() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/alias/search_item",
+        Reply::Json(
+            200,
+            rows(&[serde_json::json!({
+                "uuid": U1, "name": "web", "type": "host", "enabled": "1",
+                "content": "10.1.0.5\n10.9.9.9", "description": "web hosts", "categories": CAT_OURS,
+            })]),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_alias(&host_alias(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::Drifted(_)), "{err}");
+    assert!(err.to_string().contains("10.9.9.9"), "{err}");
+}
+
+#[test]
+fn remove_rule_deletes_ours_by_uuid_and_leaves_the_hand_made_one() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[rule_row(U1, "allow web"), ours_row(U2)])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    let outcome = client.remove_rule("allow web", &mark(), &staging).unwrap();
+    assert_eq!(outcome, RemoveOutcome::NotOwned(Owner::Unmarked));
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/filter/del_rule/{U2}")),
+        1
+    );
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/filter/del_rule/{U1}")),
+        0,
+        "the hand-made rule must never be deleted"
+    );
+    assert_eq!(staging.changes().len(), 1);
+}
+
+#[test]
+fn remove_alias_leaves_an_alias_it_does_not_own() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/alias/search_item",
+        Reply::Json(
+            200,
+            rows(&[serde_json::json!({
+                "uuid": U1, "name": "web", "type": "host", "content": "10.1.0.5",
+                "description": "made by hand",
+            })]),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let outcome = client
+        .remove_alias("web", &mark(), &Staging::default())
+        .unwrap();
+    assert_eq!(outcome, RemoveOutcome::NotOwned(Owner::Unmarked));
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/alias/del_item/{U1}")),
+        0
+    );
+}
+
+#[test]
+fn an_add_rule_answer_without_a_uuid_is_refused_since_the_commit_could_not_claim_it() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/add_rule",
+        Reply::Json(200, r#"{"result":"saved"}"#.into()),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::Decode(_)), "{err}");
+}
+
+// ===========================================================================
+// Commit: only when everything staged is ours
+// ===========================================================================
+
+#[test]
+fn a_foreign_rule_staged_and_not_applied_refuses_the_commit_before_any_apply() {
+    // A rule configured and enabled that pf does not run: someone saved it
+    // and did not apply. It is not in this caller's staging.
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[rule_row(U1, "operator's half-finished rule")])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client.commit(&Staging::default()).unwrap_err();
+    assert!(matches!(err, Error::ForeignPending(_)), "{err}");
+    assert_eq!(err.number(), 5342);
+    assert!(err.to_string().contains(U1), "{err}");
+    assert_eq!(appliance.count("POST", "firewall/alias/reconfigure"), 0);
+    assert_eq!(appliance.count("POST", "firewall/filter/apply"), 0);
+}
+
+#[test]
+fn a_foreign_deletion_not_applied_refuses_the_pre_check() {
+    // pf still runs a rule the config no longer has.
+    let appliance = MockAppliance::start(script(&[(
+        "GET",
+        "diagnostics/firewall/list_rule_ids",
+        Reply::Json(
+            200,
+            format!(r#"{{"items":[{{"id":"{U2}","descr":"gone"}}]}}"#),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .check_no_foreign_pending(&Staging::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("deleted, not applied"), "{err}");
+}
+
+#[test]
+fn a_foreign_alias_edit_not_applied_is_seen_through_the_pf_table() {
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(
+                200,
+                rows(&[serde_json::json!({
+                    "uuid": U1, "name": "office", "type": "network", "enabled": "1",
+                    "content": "10.5.0.0/24\n10.6.0.0/24", "description": "by hand",
+                })]),
+            ),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/aliases",
+            Reply::Json(200, r#"["office","bogons"]"#.into()),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/list/office",
+            Reply::Json(200, rows(&[serde_json::json!({ "ip": "10.5.0.0/24" })])),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let pending = client.pending_changes().unwrap();
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0].id, "office");
+    assert_eq!(pending[0].what, "content changed, not applied");
+}
+
+#[test]
+fn a_host_alias_matches_its_table_when_pf_shows_a_bare_address() {
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(
+                200,
+                rows(&[serde_json::json!({
+                    "uuid": U1, "name": "one", "type": "host", "enabled": "1",
+                    "content": "10.5.0.7/32", "description": "",
+                })]),
+            ),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/aliases",
+            Reply::Json(200, r#"["one"]"#.into()),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/list/one",
+            Reply::Json(200, rows(&[serde_json::json!({ "ip": "10.5.0.7" })])),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert!(client.pending_changes().unwrap().is_empty());
+}
+
+#[test]
+fn our_own_staged_rule_is_applied_and_proven_running_afterwards() {
+    let created = "00000000-0000-0000-0000-000000000000";
+    let appliance = MockAppliance::start(script(&[
+        // ensure_rule: nothing yet.
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[])),
+        ),
+        // commit's check: our rule configured, not running.
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(created)])),
+        ),
+        (
+            "GET",
+            "diagnostics/firewall/list_rule_ids",
+            Reply::Json(200, r#"{"items":[]}"#.into()),
+        ),
+        // after the apply: running.
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(created)])),
+        ),
+        (
+            "GET",
+            "diagnostics/firewall/list_rule_ids",
+            Reply::Json(
+                200,
+                format!(r#"{{"items":[{{"id":"{created}","descr":"allow web"}}]}}"#),
+            ),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    client.ensure_rule(&web_rule(), &mark(), &staging).unwrap();
+    client.commit(&staging).expect("only our change is staged");
+    assert_eq!(appliance.count("POST", "firewall/filter/apply"), 1);
+    assert!(staging.changes().is_empty(), "a committed staging is empty");
+}
+
+#[test]
+fn an_apply_that_leaves_our_rule_not_running_is_an_error_not_a_success() {
+    let created = "00000000-0000-0000-0000-000000000000";
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[])),
+        ),
+        // Every later search: our rule configured; pf never loads it.
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(created)])),
+        ),
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(created)])),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    client.ensure_rule(&web_rule(), &mark(), &staging).unwrap();
+    let err = client.commit(&staging).unwrap_err();
+    assert!(err.to_string().contains("still"), "{err}");
+    assert!(err.to_string().contains(created), "{err}");
+}
+
+#[test]
+fn a_foreign_change_staged_after_ours_refuses_and_takes_ours_back_out() {
+    // The race the pre-check cannot close: between our writes and the
+    // commit, someone else saves a rule. The commit refuses, and the rule
+    // THIS caller created is deleted again, so the operator's next apply
+    // does not push it either.
+    let created = "00000000-0000-0000-0000-000000000000";
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[])),
+        ),
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(
+                200,
+                rows(&[ours_row(created), rule_row(U1, "someone else's")]),
+            ),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    client.ensure_rule(&web_rule(), &mark(), &staging).unwrap();
+    let err = client.commit(&staging).unwrap_err();
+    assert!(matches!(err, Error::ForeignPending(_)), "{err}");
+    assert!(err.to_string().contains(U1), "{err}");
+    assert!(
+        !err.to_string().contains(created),
+        "ours is not foreign: {err}"
+    );
+    assert_eq!(appliance.count("POST", "firewall/filter/apply"), 0);
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/filter/del_rule/{created}")),
+        1,
+        "our staged rule must be taken back out"
+    );
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/filter/del_rule/{U1}")),
+        0,
+        "never someone else's"
+    );
+}
+
+// ===========================================================================
+// The owner category (ADR-0059 D1.5)
+// ===========================================================================
+
+#[test]
+fn an_operators_own_category_is_not_an_owner_mark() {
+    let mut row = rule_row(U1, "allow web");
+    row["categories"] = CAT_HAND.into();
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/filter/search_rule",
+        Reply::Json(200, rows(&[row])),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap_err();
+    assert!(matches!(err, Error::NotOwned(_)), "{err}");
+}
+
+#[test]
+fn the_first_write_of_a_record_creates_its_category_and_uses_the_answered_uuid() {
+    let fresh = "c0000000-0000-0000-0000-0000000000ff";
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/category/search_item",
+            Reply::Json(200, rows(&[])),
+        ),
+        (
+            "POST",
+            "firewall/category/add_item",
+            Reply::Json(200, format!(r#"{{"result":"saved","uuid":"{fresh}"}}"#)),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    client
+        .ensure_rule(&web_rule(), &mark(), &Staging::default())
+        .unwrap();
+    let category = appliance.body_of("POST", "firewall/category/add_item");
+    assert!(
+        category.contains("delonix-owner:dlx-0123456789abcdef"),
+        "{category}"
+    );
+    let rule = appliance.body_of("POST", "firewall/filter/add_rule");
+    assert!(
+        rule.contains(&format!(r#""categories":"{fresh}""#)),
+        "{rule}"
+    );
+    assert!(rule.contains(r#""description":"allow web""#), "{rule}");
+}
+
+#[test]
+fn release_owner_deletes_our_category_only() {
+    let appliance = MockAppliance::start(script(&[]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert_eq!(
+        client.release_owner(&mark()).unwrap(),
+        RemoveOutcome::Removed
+    );
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/category/del_item/{CAT_OURS}")),
+        1
+    );
+    assert_eq!(
+        appliance.count("POST", &format!("firewall/category/del_item/{CAT_OTHER}")),
+        0
+    );
+    let stranger = OwnerMark::new("dlx-1111111111111111").unwrap();
+    assert_eq!(
+        client.release_owner(&stranger).unwrap(),
+        RemoveOutcome::Absent
+    );
+}
+
+#[test]
+fn a_category_still_in_use_is_surfaced_not_forced() {
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        &format!("firewall/category/del_item/{CAT_OURS}"),
+        Reply::Json(
+            500,
+            r#"{"errorMessage":"Cannot delete a category which is still in use.","errorTitle":"Category in use"}"#
+                .into(),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client.release_owner(&mark()).unwrap_err().to_string();
+    assert!(err.contains("still in use"), "{err}");
+}
+
+// ===========================================================================
+// Through the trait: the dictionary number survives the port
+// ===========================================================================
+
+#[test]
+fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
+    use delonix_sdn::gateway::GatewayProvider;
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[rule_row(U1, "allow web")])),
+        ),
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[rule_row(U2, "someone else's")])),
+        ),
+    ]));
+    let provider = delonix_opnsense::OpnsenseGatewayProvider::connect(&target(&appliance)).unwrap();
+    let e = provider.ensure_rule(&web_rule(), &mark()).unwrap_err();
+    assert_eq!(e.number(), 5340, "{e}");
+    let e = provider.check_no_foreign_pending().unwrap_err();
+    assert_eq!(e.number(), 5342, "{e}");
 }

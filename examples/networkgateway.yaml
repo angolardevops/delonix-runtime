@@ -6,9 +6,14 @@
 # the appliance. `manifest validate` does not contact it.
 #
 # Aliases are applied before rules and removed after them, because the
-# appliance checks a rule's source against its alias table. A rule's identity
-# on the appliance is its `description`. There is no update in place: a changed
-# spec is removed and applied again.
+# appliance checks a rule's source against its alias table. A rule is FOUND by
+# its `description` and an alias by its `name`, but OWNED only when it carries
+# this document's owner mark — a firewall category `delonix-owner:<token>` the
+# engine creates and attaches. One with the same name and no mark is refused,
+# never adopted, and the teardown leaves it alone. The apply is also refused
+# while the appliance has changes someone saved and did not apply: its apply
+# pushes everything staged. There is no update in place: a changed spec is
+# removed and applied again.
 apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkGateway
 metadata: { name: edge }

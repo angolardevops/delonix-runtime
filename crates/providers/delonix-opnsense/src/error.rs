@@ -59,6 +59,22 @@ pub enum Error {
     #[error("{0}")]
     Decode(String),
 
+    /// An alias or rule under the requested name/description exists on the
+    /// appliance without this engine's owner mark — someone else's. Refused
+    /// instead of adopted (`delonix_sdn::ownership`).
+    #[error("{0}")]
+    NotOwned(String),
+
+    /// An alias or rule this engine owns was edited on the appliance and no
+    /// longer matches the declaration.
+    #[error("{0}")]
+    Drifted(String),
+
+    /// The appliance carries staged changes that are not this engine's; its
+    /// apply would push them too.
+    #[error("{0}")]
+    ForeignPending(String),
+
     /// A failure of the layers underneath (filesystem, JSON, state), with
     /// its own class.
     #[error(transparent)]
@@ -91,6 +107,9 @@ impl Error {
             Error::Forbidden(_) => 9306,
             Error::ResponseTooLarge(_) => 9307,
             Error::Decode(_) => 9308,
+            Error::NotOwned(_) => 5340,
+            Error::Drifted(_) => 5341,
+            Error::ForeignPending(_) => 5342,
             Error::Engine(e) => e.number(),
         }
     }
@@ -118,6 +137,9 @@ impl From<Error> for delonix_model::Error {
         let class = match e {
             Error::RouteNotFound(text) => delonix_model::Error::NotFound(text),
             Error::Validation(text) => delonix_model::Error::Invalid(text),
+            Error::NotOwned(text) | Error::Drifted(text) | Error::ForeignPending(text) => {
+                delonix_model::Error::Conflict(text)
+            }
             Error::Engine(e) => return e,
             e => delonix_model::Error::Runtime {
                 context: "opnsense api",
@@ -153,6 +175,9 @@ mod tests {
             ),
             Error::ResponseTooLarge("response exceeds 16 MiB".into()),
             Error::Decode("response body is not valid JSON".into()),
+            Error::NotOwned("alias 'x' is not this engine's".into()),
+            Error::Drifted("rule 'x': source differs".into()),
+            Error::ForeignPending("1 staged change is not this engine's".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
         ]
     }

@@ -28,6 +28,22 @@
 //! (`--replace NetworkZone/<name>`, or dropping it under `stack apply
 //! --prune`) removes every vnet the registry last recorded, then the zone.
 //!
+//! **Ownership on the cluster** (audit 62, §6 P1). A zone or vnet found
+//! under the declared name is not this engine's by being there. Each record
+//! carries an owner token ([`OwnerMark`]), saved before the first remote
+//! write: the provider writes it into every vnet's `alias` (the vnet's one
+//! free-text field) and refuses a vnet of that name without it. A ZONE has no
+//! free-text field, so it is this engine's only when the record says this
+//! engine CREATED it (`zone_owned`); an existing zone it did not create is
+//! refused, never adopted, and never deleted by the teardown. A record from
+//! before the token existed owns nothing it can prove — its teardown touches
+//! nothing on the cluster and says so.
+//!
+//! **One transaction per apply and per teardown**
+//! ([`NetworkZoneProvider::transaction`]): refused up front when the cluster
+//! carries someone else's staged SDN changes, rolled back if any step fails,
+//! applied once when all succeed.
+//!
 //! **Teardown order is vnets, then the zone, then ONE commit**: a real
 //! Proxmox node refuses to delete a zone a vnet still references
 //! (`delonix_proxmox`'s own `Client::delete_sdn_zone` doc comment) — the
@@ -41,7 +57,8 @@ use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
-use delonix_sdn::network_zone::{NetworkZoneProvider, NetworkZoneSpec, VNetSpec};
+use delonix_sdn::network_zone::{EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec};
+use delonix_sdn::ownership::{OwnerMark, RemoveOutcome};
 use delonix_state::JsonStore;
 
 /// `spec` of `kind: NetworkZone`.
@@ -76,6 +93,14 @@ struct NetworkZoneRecord {
     labels: BTreeMap<String, String>,
     #[serde(default)]
     annotations: BTreeMap<String, String>,
+    /// The owner token written into every vnet's alias. Empty in a record
+    /// from before the token existed.
+    #[serde(default)]
+    owner: String,
+    /// This engine created the zone itself (the zone has no field to carry
+    /// the mark). Only then does the teardown remove it.
+    #[serde(default)]
+    zone_owned: bool,
 }
 
 fn store() -> Result<JsonStore<NetworkZoneRecord>> {
@@ -139,29 +164,71 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .collect())
 }
 
-/// Applies one document: ensures the zone, then every declared vnet inside
-/// it (zone first — a vnet referencing one that does not exist is refused
-/// by the provider), commits once, and overwrites the registry record —
-/// preserving any existing ownership stamp, the same two-step apply-then-
-/// stamp order every other ownable Kind here follows.
+/// The record's owner token, generating one when it has none yet.
+fn owner_mark(rec: &mut NetworkZoneRecord) -> Result<OwnerMark> {
+    if rec.owner.is_empty() {
+        let mut bytes = [0u8; 16];
+        delonix_state::cred_vault::random_bytes(&mut bytes)?;
+        rec.owner = OwnerMark::from_random(&bytes).token().to_string();
+    }
+    Ok(OwnerMark::new(&rec.owner)?)
+}
+
+/// Applies one document, in ONE transaction on the cluster: ensures the
+/// zone, then every declared vnet inside it (zone first — a vnet
+/// referencing one that does not exist is refused by the provider), and
+/// applies once. A zone that was already there and that this record did not
+/// create is refused; so is a vnet without this record's mark. The record is
+/// saved before the transaction (write-ahead: the token, and every vnet
+/// about to be ensured — a teardown removes only what carries the mark) and
+/// again after it, preserving any existing ownership stamp.
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
     let provider = resolve_provider()?;
 
-    provider.ensure_zone(&NetworkZoneSpec { name: name.clone() })?;
-    for v in &spec.vnets {
-        provider.ensure_vnet(&VNetSpec {
-            name: v.name.clone(),
-            zone: name.clone(),
-            alias: v.alias.clone(),
-        })?;
-    }
-    provider.commit()?;
-
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
+    let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
+    let mut vnets = rec.vnets.clone();
+    vnets.retain(|o| !spec.vnets.iter().any(|n| n.name == o.name));
+    vnets.extend(spec.vnets.iter().cloned());
+    rec.vnets = vnets;
+    s.save(&name, &rec)?;
+
+    let zone_owned = rec.zone_owned;
+    let mut created_zone = false;
+    provider.transaction(&mut || {
+        match provider.ensure_zone(&NetworkZoneSpec { name: name.clone() })? {
+            EnsureOutcome::Created => created_zone = true,
+            EnsureOutcome::AlreadyPresent if !zone_owned => {
+                return Err(delonix_sdn::Error::RemoteObjectNotOwned(super::po::tf(
+                    "zone '{name}' already exists in the cluster's SDN and this engine did not \
+                     create it — refusing to adopt it by name; pick another zone name, or \
+                     remove the zone on the cluster if it is really stale",
+                    &[("name", &name)],
+                ))
+                .into());
+            }
+            EnsureOutcome::AlreadyPresent => {}
+        }
+        for v in &spec.vnets {
+            provider.ensure_vnet(
+                &VNetSpec {
+                    name: v.name.clone(),
+                    zone: name.clone(),
+                    alias: v.alias.clone(),
+                },
+                &owner,
+            )?;
+        }
+        Ok(())
+    })?;
+
+    if created_zone {
+        rec.zone_owned = true;
+    }
     rec.vnets = spec.vnets.clone();
     s.save(&name, &rec)?;
     println!(
@@ -216,18 +283,69 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 /// just what a NEW spec says — a document being removed entirely has no new
 /// spec to consult), then the zone, commits once, then drops the record.
 /// Idempotent: a name with no record is not an error.
+///
+/// In one transaction: only vnets carrying the record's mark are removed,
+/// and the zone only when the record says this engine created it; whatever
+/// is left is named. A zone that still holds someone else's vnet is refused
+/// by the node, and the whole teardown is rolled back.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let s = store()?;
     let Ok(rec) = s.load(name) else {
         return Ok(());
     };
-    let provider = resolve_provider()?;
-    for v in &rec.vnets {
-        provider.remove_vnet(&v.name)?;
+    if rec.owner.is_empty() {
+        for v in &rec.vnets {
+            report_left(
+                name,
+                "vnet",
+                &v.name,
+                "no owner mark (record predates marks)",
+            );
+        }
+        report_left(name, "zone", name, "no owner mark (record predates marks)");
+        return s.remove(name).map_err(Into::into);
     }
-    provider.remove_zone(name)?;
-    provider.commit()?;
+    let owner = OwnerMark::new(&rec.owner)?;
+    let provider = resolve_provider()?;
+    let mut left: Vec<(String, String, String)> = Vec::new();
+    provider.transaction(&mut || {
+        left.clear();
+        for v in &rec.vnets {
+            if let RemoveOutcome::NotOwned(who) = provider.remove_vnet(&v.name, &owner)? {
+                left.push(("vnet".into(), v.name.clone(), who.describe()));
+            }
+        }
+        if rec.zone_owned {
+            provider.remove_zone(name)?;
+        } else {
+            left.push((
+                "zone".into(),
+                name.to_string(),
+                "this engine did not create it".into(),
+            ));
+        }
+        Ok(())
+    })?;
+    for (kind, object, why) in &left {
+        report_left(name, kind, object, why);
+    }
     s.remove(name).map_err(Into::into)
+}
+
+/// The audible half of a teardown that skipped an object.
+fn report_left(name: &str, kind: &str, object: &str, why: &str) {
+    println!(
+        "{}",
+        super::po::tf(
+            "networkzone/{name}: {kind} '{object}' left on the cluster: {why}",
+            &[
+                ("name", name),
+                ("kind", kind),
+                ("object", object),
+                ("why", why)
+            ],
+        )
+    );
 }
 
 /// For `stack ls`/`describe`: declared vs. what the registry last recorded.

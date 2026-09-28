@@ -37,13 +37,23 @@ fn backend(t: &Target) -> Result<ProxmoxBackend, delonix_proxmox::Error> {
 }
 
 fn target() -> Option<Target> {
-    Some(Target {
-        base_url: std::env::var("DELONIX_PROXMOX_TEST_URL").ok()?,
-        node: std::env::var("DELONIX_PROXMOX_TEST_NODE").unwrap_or_else(|_| "pve".into()),
-        auth: Auth::Password {
+    // An API token (`DELONIX_PROXMOX_TEST_TOKEN_ID` + `_TOKEN`) when one is
+    // given — revocable on the node, and the form a lab run can mint without
+    // anybody's password — else the account.
+    let auth = match (
+        std::env::var("DELONIX_PROXMOX_TEST_TOKEN_ID"),
+        std::env::var("DELONIX_PROXMOX_TEST_TOKEN"),
+    ) {
+        (Ok(id), Ok(secret)) => Auth::ApiToken { id, secret },
+        _ => Auth::Password {
             username: std::env::var("DELONIX_PROXMOX_TEST_USER").ok()?,
             password: std::env::var("DELONIX_PROXMOX_TEST_PASS").ok()?,
         },
+    };
+    Some(Target {
+        base_url: std::env::var("DELONIX_PROXMOX_TEST_URL").ok()?,
+        node: std::env::var("DELONIX_PROXMOX_TEST_NODE").unwrap_or_else(|_| "pve".into()),
+        auth,
         insecure_tls: true,
         bridge: None,
         vlan: None,
@@ -4488,4 +4498,152 @@ fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
 
     b.destroy(vmdir, &vm).expect("destroy");
     assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
+
+/// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
+/// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
+/// the owner mark in its alias; another record's mark, or none, is refused
+/// and never deleted; a vnet edited on the cluster is drift; and someone
+/// else's staged change refuses the whole transaction before it writes,
+/// leaving that change pending and not applied.
+#[test]
+fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change() {
+    use delonix_sdn::network_zone::{
+        EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
+    };
+    use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
+
+    let Some(t) = target() else {
+        return;
+    };
+    let opts = delonix_proxmox::ClientOptions {
+        trace_routes: std::env::var_os(delonix_proxmox::TRACE_ROUTES_ENV)
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from),
+        ..Default::default()
+    };
+    let client =
+        std::sync::Arc::new(delonix_proxmox::Client::connect_with(&t, opts).expect("connect"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let provider = delonix_proxmox::ProxmoxNetworkZoneProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "the lab cluster must start with no pending SDN change"
+    );
+
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("o{suffix}");
+    let vnet = format!("w{suffix}");
+    let foreign = format!("f{suffix}");
+    let owner = OwnerMark::new(&format!("dlx-live-{suffix:08}")).unwrap();
+    let stranger = OwnerMark::new("dlx-stranger-0000").unwrap();
+    let spec = VNetSpec {
+        name: vnet.clone(),
+        zone: zone.clone(),
+        alias: Some("s6 live".into()),
+    };
+    let apply = |mark: &OwnerMark| {
+        provider.transaction(&mut || {
+            provider.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?;
+            provider.ensure_vnet(&spec, mark)?;
+            Ok(())
+        })
+    };
+
+    // 1. Created, marked, applied (running, not only pending).
+    apply(&owner).expect("create and apply the zone and the vnet");
+    let running = client.sdn_vnet(&vnet).expect("read the vnet");
+    let alias = running["alias"].as_str().unwrap_or_default().to_string();
+    assert!(
+        alias.contains(&owner.tag()),
+        "the vnet alias must carry the mark: {alias}"
+    );
+    assert!(
+        client.sdn_pending_changes().unwrap().is_empty(),
+        "applied, nothing pending"
+    );
+
+    // 2. The same record again: already present. (Nothing asserts INSIDE a
+    // transaction: a panic there would leave the cluster's lock held.)
+    let mut again = None;
+    provider
+        .transaction(&mut || {
+            again = Some(provider.ensure_vnet(&spec, &owner)?);
+            Ok(())
+        })
+        .expect("an unchanged second apply");
+    assert_eq!(again, Some(EnsureOutcome::AlreadyPresent));
+
+    // 3. Another record's mark: refused inside the transaction, rolled back.
+    let e = apply(&stranger).unwrap_err();
+    assert_eq!(e.number(), 5340, "{e}");
+    assert!(
+        client.sdn_pending_changes().unwrap().is_empty(),
+        "the refusal left nothing staged"
+    );
+    let mut left = None;
+    provider
+        .transaction(&mut || {
+            left = Some(provider.remove_vnet(&vnet, &stranger)?);
+            Ok(())
+        })
+        .expect("a stranger's teardown runs");
+    assert_eq!(
+        left,
+        Some(RemoveOutcome::NotOwned(Owner::Other(
+            owner.token().to_string()
+        )))
+    );
+    assert!(
+        client.sdn_vnet(&vnet).is_ok(),
+        "a stranger's teardown must not delete it"
+    );
+
+    // 4. Someone else stages a zone and does not apply it: the next apply is
+    //    refused before any write, and their change is still pending.
+    client
+        .create_sdn_zone(&ledger, &foreign)
+        .expect("stage someone else's zone");
+    let e = apply(&owner).unwrap_err();
+    assert_eq!(e.number(), 5516, "{e}");
+    let pending = client.sdn_pending_changes().unwrap();
+    assert!(
+        pending.iter().any(|p| p.id == foreign && p.state == "new"),
+        "their zone must still be pending, not applied: {pending:?}"
+    );
+    client
+        .rollback_sdn(&ledger, None)
+        .expect("discard their staged zone");
+
+    // 5. Edited on the cluster (the alias, keeping the mark): drift.
+    client
+        .sdn_transaction(&ledger, || {
+            client.update_sdn_vnet(&ledger, &vnet, Some(&owner.stamp("edited by hand")))
+        })
+        .expect("edit the vnet by hand");
+    let e = apply(&owner).unwrap_err();
+    assert_eq!(e.number(), 5341, "{e}");
+
+    // 6. Teardown by the owner: vnet then zone, one transaction.
+    let mut removed = None;
+    provider
+        .transaction(&mut || {
+            removed = Some(provider.remove_vnet(&vnet, &owner)?);
+            provider.remove_zone(&zone)
+        })
+        .expect("tear down");
+    assert_eq!(removed, Some(RemoveOutcome::Removed));
+    assert!(
+        !client
+            .sdn_zones()
+            .unwrap()
+            .iter()
+            .any(|z| z["zone"].as_str() == Some(zone.as_str())),
+        "the zone must be gone"
+    );
+    assert!(client.sdn_pending_changes().unwrap().is_empty());
 }
