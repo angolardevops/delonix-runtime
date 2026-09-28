@@ -5,8 +5,12 @@
 use delonix_node_api::proto::v1::node_service_client::NodeServiceClient;
 use delonix_node_api::proto::v1::{GetNodeInfoRequest, ListProvidersRequest};
 
-fn short_sock() -> String {
-    format!("/tmp/dlx-node-t{}.sock", std::process::id())
+/// A SHORT socket path (`sun_path` is 108 bytes): a `TempDir` in `/tmp`
+/// itself, removed on every exit, a failed assert included.
+fn short_sock() -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir_in("/tmp").expect("a directory under /tmp");
+    let sock = dir.path().join("x.sock").to_str().unwrap().to_owned();
+    (dir, sock)
 }
 
 async fn wait_for(path: &str) {
@@ -21,8 +25,7 @@ async fn wait_for(path: &str) {
 
 #[tokio::test]
 async fn list_providers_answers_over_grpc_on_the_unix_socket() {
-    let sock = short_sock();
-    let _ = std::fs::remove_file(&sock);
+    let (_sock_dir, sock) = short_sock();
     let s = sock.clone();
     std::thread::spawn(move || {
         let _ = delonix_node_api::serve_blocking(&format!("unix://{s}"));
@@ -90,7 +93,6 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .expect_err("GetNodeInfo is not served yet");
     assert_eq!(info.code(), tonic::Code::Unimplemented);
     assert!(info.message().contains("ADR-0042"), "{}", info.message());
-    let _ = std::fs::remove_file(&sock);
 }
 
 #[tokio::test]
