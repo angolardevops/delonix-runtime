@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 delonix-node = { workspace = true }
 delonix-model = { workspace = true }
+delonix-net-rules = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

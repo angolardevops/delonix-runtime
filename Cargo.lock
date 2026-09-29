@@ -740,6 +740,7 @@ name = "delonix-compute"
 version = "4.5.0"
 dependencies = [
  "delonix-model",
+ "delonix-net-rules",
  "delonix-node",
  "schemars",
  "serde",
@@ -1141,7 +1142,6 @@ version = "4.5.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
- "delonix-net-rules",
  "delonix-node",
  "delonix-state",
  "libc",
