@@ -14677,6 +14677,50 @@ msgstr "Copiar a partir deste snapshot em vez do container tal como está agora"
 msgid "a copy of a running container — the provider takes a temporary snapshot and deletes it"
 msgstr "uma cópia de um container a correr — o provider tira um snapshot temporário e apaga-o"
 
+# systemcontainer move (plano 63, fatia 5)
+msgid "Move a system container to another node of its provider's cluster"
+msgstr "Mover um container de sistema para outro nó do cluster do seu provider"
+
+msgid ""
+"Move a system container to another node of its provider's cluster.\n"
+"\n"
+"The node cannot move a running container live: `--restart` stops it, moves it and starts it on the target."
+msgstr ""
+"Mover um container de sistema para outro nó do cluster do seu provider.\n"
+"\n"
+"O nó não move um container a correr a quente: `--restart` pára-o, move-o e arranca-o no destino."
+
+msgid "The node to move it to"
+msgstr "O nó para onde o mover"
+
+msgid "Stop a running container, move it, and start it on the target"
+msgstr "Parar um container a correr, movê-lo e arrancá-lo no destino"
+
+msgid "Let the node copy volumes on a storage the target does not share (a full copy)"
+msgstr "Deixar o nó copiar volumes num storage que o destino não partilha (uma cópia completa)"
+
+msgid "The target's storage the copied volumes land on"
+msgstr "O storage do destino onde os volumes copiados ficam"
+
+msgid "systemcontainer/{name}: moved to node {node} ({locator})"
+msgstr "systemcontainer/{name}: movido para o nó {node} ({locator})"
+
+msgid "a running container, stopped, moved and started on the other node"
+msgstr "um container a correr, parado, movido e arrancado no outro nó"
+
+msgid "a container whose volume is on local storage — the node copies it in full"
+msgstr "um container cujo volume está em storage local — o nó copia-o por inteiro"
+
+# DX-5517 — systemcontainer move recusado
+msgid "the system container cannot be moved as asked"
+msgstr "o container de sistema não pode ser movido como pedido"
+
+msgid "`systemcontainer move` was refused before anything moved: the container is running and `--restart` was not given (the node cannot move a running container live), its volumes are on a storage the target does not share and `--with-local-disks` was not given (the node would copy them in full), or the node's own precheck does not list the target."
+msgstr "O `systemcontainer move` foi recusado antes de qualquer coisa se mover: o container está a correr e não foi dado `--restart` (o nó não move um container a correr a quente), os seus volumes estão num storage que o destino não partilha e não foi dado `--with-local-disks` (o nó copiá-los-ia por inteiro), ou a verificação prévia do próprio nó não lista o destino."
+
+msgid "Pass `--restart` to stop it, move it and start it on the target, or `--with-local-disks` to let the node copy its volumes, or pick a node the precheck allows."
+msgstr "Passa `--restart` para o parar, mover e arrancar no destino, ou `--with-local-disks` para deixar o nó copiar os volumes, ou escolhe um nó que a verificação prévia permita."
+
 msgid "a copy of the container as it was at a snapshot"
 msgstr "uma cópia do container tal como estava num snapshot"
 

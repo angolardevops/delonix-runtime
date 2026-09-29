@@ -2689,6 +2689,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["systemcontainer snapshot create", "get", "apply"],
     },
     Entry {
+        path: "systemcontainer move",
+        group: "Lifecycle",
+        examples: &[
+            ("a running container, stopped, moved and started on the other node", "delonix systemcontainer move tools --node pve2 --restart"),
+            ("a container whose volume is on local storage — the node copies it in full", "delonix systemcontainer move tools --node pve2 --with-local-disks"),
+        ],
+        see_also: &["systemcontainer clone", "vm move", "get"],
+    },
+    Entry {
         path: "systemcontainer snapshot",
         group: "Maintenance",
         examples: &[

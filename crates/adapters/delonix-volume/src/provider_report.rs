@@ -145,6 +145,7 @@ pub fn report(host: &StorageHost) -> ProviderReport {
             | C::SystemContainerBackup
             | C::SystemContainerClone
             | C::SystemContainerFirewall
+            | C::SystemContainerMove
             | C::ContainerLifecycle
             | C::ContainerExec
             | C::ContainerLogs

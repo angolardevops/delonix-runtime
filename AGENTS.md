@@ -8050,6 +8050,14 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   `scope: vm` (`GuestFirewall`, uma implementação QEMU e uma LXC): posse por comentário, datacenter
   recusado quando desligado, `firewall=1` no `net0`. Um container sem `net0` é recusado antes de
   qualquer regra. `partial`, como as linhas `scope: vm`: nenhum pacote atravessou o container.
+  A migração (`systemcontainer move --node`) é offline: o nó não move um container a correr a
+  quente (`online=1` é aceite e a tarefa falha), e o `restart=1` dele desliga com `--nokill` e
+  **aborta** quando o init ignora o SIGTERM, com o container ainda na origem e o `pvesh` a sair 0.
+  O provider pára-o ele próprio, migra e arranca no destino; um volume que o destino não partilha
+  é copiado por inteiro, por isso pede `--with-local-disks` (DX-5517).
+  Cada operação resolve o container por `located`: um registo que ficou a apontar para o nó antigo
+  (uma sessão morta a meio do `move`) é seguido pelo `/cluster/resources`, em vez de lido como
+  ausente — o que planearia um segundo container.
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.

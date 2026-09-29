@@ -682,6 +682,27 @@ pub enum SystemContainerCmd {
         #[arg(long)]
         from_snapshot: Option<String>,
     },
+    /// Move a system container to another node of its provider's cluster.
+    ///
+    /// The node cannot move a running container live: `--restart` stops it,
+    /// moves it and starts it on the target.
+    Move {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+        /// The node to move it to.
+        #[arg(long)]
+        node: String,
+        /// Stop a running container, move it, and start it on the target.
+        #[arg(long)]
+        restart: bool,
+        /// Let the node copy volumes on a storage the target does not share
+        /// (a full copy).
+        #[arg(long)]
+        with_local_disks: bool,
+        /// The target's storage the copied volumes land on.
+        #[arg(long)]
+        target_storage: Option<String>,
+    },
 }
 
 /// The same four verbs, in the same order, as `vm snapshot` and `volume
@@ -742,6 +763,20 @@ pub fn run(cmd: SystemContainerCmd) -> Result<()> {
             new_name,
             from_snapshot,
         } => return cmd_clone(&name, &new_name, from_snapshot.as_deref()),
+        SystemContainerCmd::Move {
+            name,
+            node,
+            restart,
+            with_local_disks,
+            target_storage,
+        } => {
+            let opts = delonix_compute::system_container::SystemContainerMoveOptions {
+                restart,
+                with_local_disks,
+                target_storage,
+            };
+            return cmd_move(&name, &node, &opts);
+        }
     };
     match action {
         SnapshotCmd::Create { name, snapshot } => {
@@ -924,6 +959,30 @@ fn cmd_clone(name: &str, new_name: &str, from_snapshot: Option<&str>) -> Result<
         s.save(new_name, &rec)?;
     }
     println!("{new_name}");
+    Ok(())
+}
+
+/// Moves a registered container and points its record at the node it is on
+/// now. The record changes only after the provider proved the move.
+fn cmd_move(
+    name: &str,
+    node: &str,
+    opts: &delonix_compute::system_container::SystemContainerMoveOptions,
+) -> Result<()> {
+    let rec = record(name)?;
+    let provider = resolve_provider()?;
+    let h = provider.move_to(&ledger_dir(name), &handle_of(&rec), node, opts)?;
+    store()?.update(name, |r| {
+        r.locator = h.locator.clone();
+        true
+    })?;
+    println!(
+        "{}",
+        po::tf(
+            "systemcontainer/{name}: moved to node {node} ({locator})",
+            &[("name", name), ("node", node), ("locator", &h.locator)]
+        )
+    );
     Ok(())
 }
 

@@ -4131,6 +4131,10 @@ check "um scope mal escrito é recusado e a mensagem lista os válidos" ok bash 
   "$adr54_fns; adr54_bare stack validate -f '$SCWORK/fw-typo.yaml' 2>&1 | grep -q 'container|network|vm|systemcontainer'"
 check "a firewall de um system container é declarada partial no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.firewall' | grep -q 'partial'"
+check "systemcontainer move de um nome não registado diz 4" 4 adr54_bare systemcontainer move "sc-$PFX-nada" --node pve2
+check "systemcontainer move sem --node é recusado pelo parser" 2 adr54_bare systemcontainer move "sc-$PFX-nada"
+check "a migração de um system container é declarada supported no proxmox" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.move' | grep -q 'supported'"
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################

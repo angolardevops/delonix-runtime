@@ -129,6 +129,7 @@ pub fn capability_report(configured: bool) -> ProviderReport {
             | C::SystemContainerBackup
             | C::SystemContainerClone
             | C::SystemContainerFirewall
+            | C::SystemContainerMove
             | C::ContainerLifecycle
             | C::ContainerExec
             | C::ContainerLogs
