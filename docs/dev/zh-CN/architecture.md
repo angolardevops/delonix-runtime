@@ -436,7 +436,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 - `delonix-sdn` → `delonix-state` — 移除于 **P4**
 - `delonix-vm` → `delonix-provider-cloud-hypervisor` — 移除于 **P5**
 - `delonix-vm` → `delonix-provider-libvirt` — 移除于 **P5**
-- `delonix-vm` → `delonix-state` — 移除于 **P4**
+- `delonix-vm` → `delonix-state` — 移除于 **P5**
 - `delonix-volume` → `delonix-state` — 移除于 **P4**
 <!-- dev-docs:end layers -->
 

@@ -2677,6 +2677,55 @@ impl LibvirtBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REGRESSION: every tool whose OUTPUT this crate parses runs with a
+    /// pinned locale. `virsh` is a gettext program, and with its catalogues
+    /// installed and `LANG=pt_PT` a running domain would report as stopped.
+    /// This crate carries its own copy of `stable_cmd` (a provider may not
+    /// depend on another provider or on an adapter, docs/discovery/61), so
+    /// the copy carries its own guard. Dropping the `LC_ALL` from
+    /// `stable_cmd` makes this test fail.
+    #[test]
+    fn stable_cmd_pins_the_locale_so_the_output_is_machine_stable() {
+        let cmd = stable_cmd("virsh");
+        let envs: std::collections::HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(envs.get("LC_ALL").and_then(|v| v.as_deref()), Some("C"));
+        assert_eq!(envs.get("LANG").and_then(|v| v.as_deref()), Some("C"));
+    }
+
+    /// The liveness decisions this locale pin protects are still made against
+    /// the English `virsh` strings. The check reads this file's CODE only
+    /// (comments and the test module cut away): the same assertion over the
+    /// whole file would be satisfied by its own string literals and by the
+    /// doc comment on `stable_cmd`, and so would never fail.
+    #[test]
+    fn liveness_is_decided_against_the_english_virsh_states() {
+        let src = include_str!("lib.rs");
+        let code: String = src
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            code.contains(r#"state == "shut off""#),
+            "the power-off comparison changed shape; re-check that stable_cmd still covers it"
+        );
+        assert!(
+            code.contains(r#"s == "running""#),
+            "the liveness comparison changed shape; re-check that stable_cmd still covers it"
+        );
+    }
     use delonix_compute::{VmBootSpec, VmVolume};
 
     fn test_vm_cfg(mem: &str) -> VmConfig {

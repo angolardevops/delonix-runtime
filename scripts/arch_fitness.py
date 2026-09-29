@@ -65,7 +65,7 @@ LAYERS = {
     "delonix-oci": ADAPTER,
     "delonix-scanner": ADAPTER,
     "delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)
-    "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
+    "delonix-vm": ADAPTER,  # the VM composition root since P4b.4; absorbed by the application layer (P5)
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
     "delonix-provider-libvirt": PROVIDER,
     "delonix-provider-cloud-hypervisor": PROVIDER,
@@ -121,11 +121,12 @@ EXCEPTIONS = {
         "SecretVault port closes those, not yet built",
     ),
     ("dep", "delonix-vm", "delonix-state"): (
-        "P4",
-        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root — "
-        "AND writes 4 files (set_default_backend's marker, 3 libvirt XML sites including one reached from stop, "
-        "not just create) with the state layer's atomic write; a ConfigWriter port closes those, scope mapped but "
-        "not yet built (ADR-0044 D6 addendum, 2026-09-19)",
+        "P5",
+        "delonix-vm is the VM composition root (ADR-0044 P4b.4): it opens the JsonStore it hands the "
+        "engine as its StateRepository<Vm>, and writes the default-backend marker with the state "
+        "layer's atomic write; the backends no longer touch the state layer (the libvirt XML writes "
+        "use delonix-node's write_atomic_mode since P4b.4b). The application layer absorbs the "
+        "composition in P5",
     ),
     ("dep", "delonix-sdn", "delonix-state"): (
         "P4",

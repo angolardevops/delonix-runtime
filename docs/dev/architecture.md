@@ -443,7 +443,7 @@ Declared exceptions (each one names the ADR-0040 phase that removes it):
 - `delonix-sdn` → `delonix-state` — removed in **P4**
 - `delonix-vm` → `delonix-provider-cloud-hypervisor` — removed in **P5**
 - `delonix-vm` → `delonix-provider-libvirt` — removed in **P5**
-- `delonix-vm` → `delonix-state` — removed in **P4**
+- `delonix-vm` → `delonix-state` — removed in **P5**
 - `delonix-volume` → `delonix-state` — removed in **P4**
 <!-- dev-docs:end layers -->
 

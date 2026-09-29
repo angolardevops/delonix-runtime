@@ -448,3 +448,34 @@ Provado, por `grep` sobre o código do #597: as zonas e as contagens, os helpers
 repartição dos testes, e que só o `-bin` e as três interfaces dependem do `delonix-vm`. Não
 validado: o custo da partição dos 3 924 linhas de testes (a classificação acima é por palavras,
 não por leitura) e se o `LocalVmProvider` cabe na montagem sem arrastar mais nada.
+
+## Fecho da P4b.4 (2026-09-29) — #599, #602, #608 e a P4b.4d
+
+**O que ficou como a adenda disse:** os dois backends locais vivem nos seus crates
+(`delonix-provider-libvirt`, #602; `delonix-provider-cloud-hypervisor`, #608), o registo e o
+`mac_for` no compute (#599), e o `delonix-vm` é a raiz de composição até à P5, com as duas
+excepções declaradas. A rede de VMs (`set_network`/`network()`) desceu também para o
+`vm_registry` do compute, porque o provider CH precisa dela e não pode depender do adapter.
+
+**O que se desviou da adenda, e porquê:** o adapter `delonix-guestfs` não foi criado. Nenhum
+provider precisa do `cloudinit.rs` nem do disco local, e criá-lo daria uma terceira excepção sem
+consumidor. O disco e o seed ficam no `local_ports.rs` do `delonix-vm`, com os helpers do
+`qemu-img` que lhes pertencem (P4b.4d).
+
+**O que a P4b.4d encontrou e fechou:**
+
+- **A promessa do ponto 2 não tinha sido cumprida.** A adenda dizia que cada cópia do
+  `stable_cmd` levava o teste que fixa o `LC_ALL=C`; nas P4b.4b/c os dois testes ficaram no
+  `delonix-vm`, e nenhum provider tinha o seu. Cada provider tem agora o seu teste do locale.
+- **Um teste oco.** O `os_estados_comparados_sao_os_literais_en_do_virsh` procurava
+  `state == "shut off"` no `lib.rs` do `delonix-vm`, de onde a comparação saíra na P4b.4b; passava
+  porque a string está no próprio código do teste. Foi retirado dali, e o libvirt ganhou a versão
+  que lê só o código (sem comentários nem o módulo de testes).
+- **A razão da excepção `delonix-vm → delonix-state` estava desactualizada** (falava de um porto
+  que já existe e de escritas XML que já estão no provider). Passou à fase P5, com o que é hoje:
+  o `JsonStore` que a montagem entrega ao engine e o marcador do backend por omissão.
+
+**Números:** o `delonix-vm` fica com 4 346 linhas (era 9 249 antes da P4b.3b), das quais o
+`lib.rs` é montagem, os invólucros públicos e os seus testes. Testes unitários (`#[test]` no `src/`): 64 no
+`delonix-vm`, 38 no libvirt, 31 no Cloud Hypervisor.
+
