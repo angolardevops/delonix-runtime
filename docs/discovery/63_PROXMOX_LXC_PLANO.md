@@ -374,6 +374,11 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   VMs). Provado com a sobra real (plano `=`, move recusado por «already on node», volta a mover) e
   no caso ao vivo, com o handle antigo a ler o container a correr no destino. O registo em si não é
   corrigido pela leitura: só o `move` seguinte o actualiza.
+  **Storage partilhado, medido depois pela CLI** (o `nfs-lab` do lab com `rootdir` acrescentado
+  só para a medição, e reposto a `images` no fim): um rootfs em `nfs-lab` é aceite sem
+  `--with-local-disks`; o log do `vzmigrate` diz «volume … is on shared storage 'nfs-lab'» e a
+  tarefa acaba em 16 s, sem cópia. O `move --restart` inteiro demorou 102 s — o grosso é o
+  prazo do `shutdown` que o `sleep` do init ignora, antes do `stop`.
 
 ## Fatia 6 — Fecho
 
