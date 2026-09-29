@@ -8133,11 +8133,12 @@ se mediram sob carga dizem-no.
   do `build` não têm overlay (rootfs plano), ao contrário do que o ADR dizia na primeira versão.
 - **`cluster load` em todos os nós ao mesmo tempo** (U9, #605): 3 nós, 33,2 → 17,6 s.
 
-**Decidido não fazer, com a razão**:
-- **P3, cache do token do registo em disco.** O token da Docker Hub dura 300 s e vale para UM
-  repositório; dentro de um pull já é partilhado. Guardá-lo em disco poupa 0,6–4,6 s por comando,
-  só dentro dessa janela, e deixa uma credencial de leitura de repositórios privados no disco. O
-  Docker CLI também não o faz. Fica para quem decidir que a troca vale, e aí é um ADR.
+**Decidido não fazer, ou só depois de medir, com a razão**:
+- **P3, cache do token do registo em disco — FEITO depois, pelo ADR-0060.** Primeiro recusado
+  por guardar uma credencial em disco; a medição do token anónimo da Docker Hub (`sub` vazio,
+  `pull` sobre um repositório público, 300 s) mostrou que um token pedido SEM credenciais não
+  expõe nada. Só esses são guardados (`auth/tokens/`, 0600), nunca com `image login` para o
+  host nem num push. Pull a quente do `alpine:3.20`: 1,50–1,64 s → 0,94–0,99 s.
 - **U3 passo 2, retomar um upload a meio.** O ghcr aceita upload por partes (`PATCH` devolve
   `range: 0-1048575`) mas o `GET` do estado do upload responde `303` para uma página web: o
   cliente não consegue saber quanto o registo guardou depois de uma ligação cair.

@@ -8,7 +8,9 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
+use crate::token_cache;
 use crate::{Error, Result};
+use std::path::{Path, PathBuf};
 // Canonical OCI types (crate `oci-spec`, feature `image`) — replace the hand-rolled
 // structs of the OCI/distribution schema that used to be here (C3-IMG).
 use oci_spec::image::{
@@ -315,6 +317,12 @@ fn target_arch() -> &'static str {
     }
 }
 
+/// The root an anonymous read may cache its token under (ADR-0060): the state
+/// root when there are no credentials for the host, nothing otherwise.
+fn anonymous_cache(root: &Path, creds: &Option<(String, String)>) -> Option<PathBuf> {
+    creds.is_none().then(|| root.to_path_buf())
+}
+
 #[derive(Clone)]
 struct Client {
     http: reqwest::blocking::Client,
@@ -327,6 +335,14 @@ struct Client {
     /// (U6): an upload asks the registry to MOUNT the blob from there instead of
     /// sending its bytes. `None` is a plain upload.
     mount_from: Option<String>,
+    /// The state root under which an ANONYMOUS token may be kept between
+    /// commands (ADR-0060). Set only on the read paths, and only when there are
+    /// no credentials for the host: a token that can read private repositories
+    /// never reaches the disk, and a push never uses the cache.
+    token_cache: Option<PathBuf>,
+    /// `token` came from that cache and has not been accepted by the registry
+    /// yet — a `401` on it drops the entry instead of being a real refusal.
+    token_from_cache: bool,
 }
 
 impl Client {
@@ -366,10 +382,32 @@ impl Client {
         // `_with_hint` here and in `write_req` only: these are the first two
         // contacts with the registry, and a plain-HTTP registry fails right
         // there — the transport gives up before there is any state to report.
+        // ADR-0060: a read with no token yet first tries the anonymous token an
+        // earlier command left, which skips the `401` and the token request.
+        let scope = token_cache::pull_scope(&self.repo);
+        if self.token.is_none() {
+            if let Some(root) = &self.token_cache {
+                if let Some(t) = token_cache::load(root, &self.host, &scope, now_unix()) {
+                    self.token = Some(t);
+                    self.token_from_cache = true;
+                }
+            }
+        }
         let resp = self
             .send_once(url, accept, from)
             .map_err(|e| reg_err_with_hint(e, &self.host))?;
+        if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
+            self.token_from_cache = false;
+        }
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // A cached token the registry refused is gone for good; the `401` it
+            // earned carries a fresh challenge, so the ordinary path runs once.
+            if self.token_from_cache {
+                if let Some(root) = &self.token_cache {
+                    token_cache::forget(root, &self.host, &scope);
+                }
+                self.token_from_cache = false;
+            }
             let www = resp
                 .headers()
                 .get(reqwest::header::WWW_AUTHENTICATE)
@@ -377,7 +415,10 @@ impl Client {
                 .unwrap_or("")
                 .to_string();
             self.token = Some(match self.request_token(&www, None)? {
-                Ok(token) => token,
+                Ok((token, expires_in)) => {
+                    self.remember_anonymous(&www, &scope, &token, expires_in);
+                    token
+                }
                 // A read the registry will not authorise: it answers this way for
                 // a repository that does not exist as well as for one these
                 // credentials cannot see (ghcr: 403 on the token), and it will
@@ -449,8 +490,26 @@ impl Client {
     /// `force_scope`, requests that scope (e.g. `…:pull,push` for the `push`) instead
     /// of the one indicated by the server — the server grants it if the credentials
     /// allow it.
+    /// Keeps an anonymous token for the next command (ADR-0060) — only when
+    /// this client may cache at all, and only when the registry asked for
+    /// exactly the read scope the cache is keyed on, so every stored entry is
+    /// one a later read can find.
+    fn remember_anonymous(&self, www: &str, scope: &str, token: &str, expires_in: Option<u64>) {
+        let Some(root) = &self.token_cache else {
+            return;
+        };
+        if extract(www, "scope").as_deref() != Some(scope) {
+            return;
+        }
+        let now = now_unix();
+        if let Some(until) = token_cache::expiry(token, expires_in, now) {
+            token_cache::store(root, &self.host, scope, token, until, now);
+        }
+    }
+
     fn get_token(&self, www: &str, force_scope: Option<&str>) -> Result<String> {
         self.request_token(www, force_scope)?
+            .map(|(token, _)| token)
             .map_err(|status| Error::Registry(format!("failed to obtain token: HTTP {status}")))
     }
 
@@ -460,7 +519,7 @@ impl Client {
         &self,
         www: &str,
         force_scope: Option<&str>,
-    ) -> Result<std::result::Result<String, reqwest::StatusCode>> {
+    ) -> Result<std::result::Result<(String, Option<u64>), reqwest::StatusCode>> {
         let realm = extract(www, "realm")
             .ok_or_else(|| Error::Registry("authentication without `realm`".into()))?;
         let scope = match force_scope {
@@ -483,10 +542,11 @@ impl Client {
             return Ok(Err(resp.status()));
         }
         let v: serde_json::Value = resp.json().map_err(reg_err)?;
+        let expires_in = v.get("expires_in").and_then(|e| e.as_u64());
         v.get("token")
             .or_else(|| v.get("access_token"))
             .and_then(|t| t.as_str())
-            .map(|t| Ok(t.to_string()))
+            .map(|t| Ok((t.to_string(), expires_in)))
             .ok_or_else(|| Error::Registry("authentication response without token".into()))
     }
 
@@ -1304,6 +1364,8 @@ pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryCl
             token: None,
             creds,
             mount_from: None,
+            token_cache: None,
+            token_from_cache: false,
         },
         reference: refr,
     })
@@ -1473,6 +1535,7 @@ pub fn pull_from_registry_with_creds_full(
     let (host, repo, refr) = parse_reference(reference);
     let http = transfer_client()?;
     let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
+    let cache = anonymous_cache(store.root(), &creds);
     let mut c = Client {
         http,
         host: host.clone(),
@@ -1480,6 +1543,8 @@ pub fn pull_from_registry_with_creds_full(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pulling {repo}:{refr} from {host}");
@@ -1874,6 +1939,8 @@ pub fn push_to_registry_with_progress(
         token: None,
         creds,
         mount_from: mount_source(&image.repo_tags, &host, &repo),
+        token_cache: None,
+        token_from_cache: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing {repo}:{refr} to {host}");
@@ -2038,6 +2105,8 @@ fn push_artifact(
         token: None,
         creds,
         mount_from: None,
+        token_cache: None,
+        token_from_cache: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing artifact {repo}:{refr} to {host}");
@@ -2127,6 +2196,8 @@ pub fn push_oci_artifact_with_layer_annotations(
         token: None,
         creds,
         mount_from: None,
+        token_cache: None,
+        token_from_cache: false,
     };
     push_layer_annotated(&mut c, &refr, layer_media_type, data, layer_annotations)
 }
@@ -2192,6 +2263,7 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
     let (host, repo, _refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2199,6 +2271,8 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
     };
     c.list_tags()
 }
@@ -2231,6 +2305,7 @@ pub fn describe_remote_artifact(
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2238,6 +2313,8 @@ pub fn describe_remote_artifact(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
     };
     let url = c.manifest_url(tag);
     let bytes = read_capped(
@@ -2292,6 +2369,7 @@ pub fn pull_oci_artifact_with_meta(
     let (host, repo, refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2299,6 +2377,8 @@ pub fn pull_oci_artifact_with_meta(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2379,6 +2459,7 @@ pub fn pull_oci_artifact_to_file(
     let (host, repo, refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2386,6 +2467,8 @@ pub fn pull_oci_artifact_to_file(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2840,6 +2923,8 @@ mod tests {
             token: None,
             creds: None,
             mount_from: None,
+            token_cache: None,
+            token_from_cache: false,
         }
     }
 
@@ -4408,6 +4493,197 @@ mod cross_repo_mount_tests {
         assert_eq!(
             upload_start_url("https", "ghcr.io", "org/b", "sha256:ab", Some("org/a")),
             "https://ghcr.io/v2/org/b/blobs/uploads/?mount=sha256:ab&from=org/a"
+        );
+    }
+}
+
+#[cfg(test)]
+mod anonymous_token_cache_tests {
+    //! ADR-0060 — the three behaviours the ADR requires before merge, against a
+    //! registry that answers `401` without the right token.
+
+    use super::list_remote_tags;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    const GOOD: &str = "good-token";
+
+    #[derive(Default)]
+    struct Seen {
+        token_requests: usize,
+        unauthenticated: usize,
+    }
+
+    /// A registry on 127.0.0.1 whose token service hands out `GOOD` for
+    /// `expires_in: 300`, and whose tag list answers only to `Bearer GOOD`.
+    fn registry() -> (u16, Arc<Mutex<Seen>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Seen::default()));
+        let s = seen.clone();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                let Ok(mut c) = conn else { continue };
+                let mut buf = [0u8; 8192];
+                let n = c.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
+                let bearer = req
+                    .lines()
+                    .find(|l| l.to_ascii_lowercase().starts_with("authorization: bearer "))
+                    .map(|l| l["authorization: bearer ".len()..].trim().to_string());
+                let (status, headers, body) = if path.starts_with("/token") {
+                    s.lock().unwrap().token_requests += 1;
+                    (
+                        "200 OK",
+                        "content-type: application/json\r\n".to_string(),
+                        format!(r#"{{"token":"{GOOD}","expires_in":300}}"#),
+                    )
+                } else if bearer.as_deref() == Some(GOOD) {
+                    (
+                        "200 OK",
+                        "content-type: application/json\r\n".to_string(),
+                        r#"{"name":"x","tags":["1"]}"#.to_string(),
+                    )
+                } else {
+                    if bearer.is_none() {
+                        s.lock().unwrap().unauthenticated += 1;
+                    }
+                    (
+                        "401 Unauthorized",
+                        format!(
+                            "www-authenticate: Bearer realm=\"http://127.0.0.1:{port}/token\",service=\"t\",scope=\"repository:x:pull\"\r\n"
+                        ),
+                        String::new(),
+                    )
+                };
+                let _ = c.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (port, seen)
+    }
+
+    fn cached_files(root: &std::path::Path) -> usize {
+        walk(&root.join("auth").join("tokens"))
+    }
+
+    fn walk(d: &std::path::Path) -> usize {
+        std::fs::read_dir(d)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| {
+                        let p = e.path();
+                        if p.is_dir() {
+                            walk(&p)
+                        } else {
+                            1
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Without credentials, the second command sends the token the first one
+    /// obtained: no `401`, no second token request.
+    #[test]
+    fn an_anonymous_token_is_reused_by_the_next_command() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let src = format!("127.0.0.1:{port}/x");
+        assert_eq!(list_remote_tags(root.path(), &src).unwrap(), vec!["1"]);
+        assert_eq!(list_remote_tags(root.path(), &src).unwrap(), vec!["1"]);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.token_requests, 1,
+            "the second command asked for a token again"
+        );
+        assert_eq!(
+            seen.unauthenticated, 1,
+            "the second command started without a token"
+        );
+        assert_eq!(cached_files(root.path()), 1);
+    }
+
+    /// With credentials for the host, the cache is neither read — even a valid
+    /// token sitting in it is not sent — nor written.
+    #[test]
+    fn with_credentials_the_cache_is_neither_read_nor_written() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        crate::auth::login(root.path(), &host, "u", "p").unwrap();
+        let now = crate::image::now_unix();
+        crate::token_cache::store(
+            root.path(),
+            &host,
+            &crate::token_cache::pull_scope("x"),
+            GOOD,
+            now + 200,
+            now,
+        );
+        let src = format!("{host}/x");
+        list_remote_tags(root.path(), &src).unwrap();
+        list_remote_tags(root.path(), &src).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.unauthenticated, 2,
+            "a client with credentials used the cached token"
+        );
+        assert_eq!(seen.token_requests, 2);
+        assert_eq!(
+            cached_files(root.path()),
+            1,
+            "a client with credentials wrote to the cache"
+        );
+    }
+
+    /// A refused cached token is dropped even when the fresh one is not stored
+    /// over it — here the registry challenges for another scope than the one the
+    /// cache is keyed on, so without the drop the refused entry would be sent,
+    /// and refused, by every command after this one.
+    #[test]
+    fn a_refused_cached_token_is_dropped_even_when_nothing_replaces_it() {
+        let (port, _seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        let scope = crate::token_cache::pull_scope("y");
+        let now = crate::image::now_unix();
+        crate::token_cache::store(root.path(), &host, &scope, "revoked", now + 200, now);
+        list_remote_tags(root.path(), &format!("{host}/y")).unwrap();
+        assert_eq!(
+            crate::token_cache::load(root.path(), &host, &scope, now),
+            None
+        );
+        assert_eq!(cached_files(root.path()), 0);
+    }
+
+    /// A cached token the registry refuses is dropped, the ordinary path runs
+    /// once, and the command succeeds with the fresh token — which is stored.
+    #[test]
+    fn a_refused_cached_token_is_dropped_and_the_command_still_succeeds() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        let scope = crate::token_cache::pull_scope("x");
+        let now = crate::image::now_unix();
+        crate::token_cache::store(root.path(), &host, &scope, "revoked", now + 200, now);
+        assert_eq!(
+            list_remote_tags(root.path(), &format!("{host}/x")).unwrap(),
+            vec!["1"]
+        );
+        assert_eq!(seen.lock().unwrap().token_requests, 1);
+        assert_eq!(
+            crate::token_cache::load(root.path(), &host, &scope, now).as_deref(),
+            Some(GOOD),
+            "the refused token was not replaced"
         );
     }
 }

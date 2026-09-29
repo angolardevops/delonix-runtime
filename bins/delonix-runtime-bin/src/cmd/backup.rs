@@ -192,6 +192,12 @@ pub fn classify(rel: &str, scope: &Scope) -> Decision {
     if top == "build-cache" || rel.starts_with("vm-images/_base/") {
         return Decision::Skip(Skip::Cache);
     }
+    // Anonymous registry tokens (ADR-0060): minutes of life, and a restored node
+    // asks for new ones on its first pull. `auth.json`, the credentials, is not
+    // under this path and still travels.
+    if rel.starts_with("auth/tokens/") {
+        return Decision::Skip(Skip::Cache);
+    }
     // `containers/<id>.json` is the registry; anything DEEPER is inside the
     // container's own directory, i.e. its rootfs.
     if top == "containers" {
@@ -1138,6 +1144,15 @@ mod tests {
             classify("containers/abc/hostname", &s),
             Decision::Skip(Skip::Rootfs)
         );
+    }
+
+    #[test]
+    fn registry_tokens_never_travel_and_credentials_still_do() {
+        assert_eq!(
+            classify("auth/tokens/registry-1.docker.io/ab.json", &all()),
+            Decision::Skip(Skip::Cache)
+        );
+        assert_eq!(classify("auth.json", &Scope::default()), Decision::Include);
     }
 
     #[test]
