@@ -20,6 +20,7 @@ pub mod vm_backend;
 pub mod vm_error;
 pub mod vm_firewall;
 pub mod vm_provider;
+pub mod vm_registry;
 pub mod workload_net;
 
 pub use notice::Notice;

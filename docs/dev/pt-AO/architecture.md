@@ -684,6 +684,7 @@ flowchart TB
     delonix_runtime_bin["delonix-runtime-bin"]
   end
   delonix_compute --> delonix_model
+  delonix_compute --> delonix_net_rules
   delonix_compute --> delonix_node
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
@@ -779,7 +780,6 @@ flowchart TB
   delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_model
-  delonix_vm --> delonix_net_rules
   delonix_vm --> delonix_node
   delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
