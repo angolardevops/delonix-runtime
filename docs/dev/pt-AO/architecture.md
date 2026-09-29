@@ -448,7 +448,7 @@ Excepções declaradas (cada uma nomeia a fase do ADR-0040 que a remove):
 - `delonix-sdn` → `delonix-state` — removida na **P4**
 - `delonix-vm` → `delonix-provider-cloud-hypervisor` — removida na **P5**
 - `delonix-vm` → `delonix-provider-libvirt` — removida na **P5**
-- `delonix-vm` → `delonix-state` — removida na **P4**
+- `delonix-vm` → `delonix-state` — removida na **P5**
 - `delonix-volume` → `delonix-state` — removida na **P4**
 <!-- dev-docs:end layers -->
 

@@ -1355,6 +1355,29 @@ fn ch_socket_paths_fit(vmdir: &Path, cfg: &VmConfig) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// REGRESSION: every tool whose OUTPUT this crate parses runs with a
+    /// pinned locale. `virsh` is a gettext program, and with its catalogues
+    /// installed and `LANG=pt_PT` a running domain would report as stopped.
+    /// This crate carries its own copy of `stable_cmd` (a provider may not
+    /// depend on another provider or on an adapter, docs/discovery/61), so
+    /// the copy carries its own guard. Dropping the `LC_ALL` from
+    /// `stable_cmd` makes this test fail.
+    #[test]
+    fn stable_cmd_pins_the_locale_so_the_output_is_machine_stable() {
+        let cmd = stable_cmd("cloud-hypervisor");
+        let envs: std::collections::HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(envs.get("LC_ALL").and_then(|v| v.as_deref()), Some("C"));
+        assert_eq!(envs.get("LANG").and_then(|v| v.as_deref()), Some("C"));
+    }
+
     #[test]
     fn o_edk2_vem_antes_do_hypervisor_fw_na_procura_de_firmware() {
         // The order IS the fix. A host that has both (the installer fetches
