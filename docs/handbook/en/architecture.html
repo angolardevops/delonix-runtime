@@ -1140,6 +1140,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
+  delonix_compute --&gt; delonix_net_rules
   delonix_compute --&gt; delonix_node
   delonix_cri --&gt; delonix_compute
   delonix_cri --&gt; delonix_linux
@@ -1235,7 +1236,6 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
-  delonix_vm --&gt; delonix_net_rules
   delonix_vm --&gt; delonix_node
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute

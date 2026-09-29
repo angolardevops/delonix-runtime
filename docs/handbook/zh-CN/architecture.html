@@ -1128,6 +1128,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
+  delonix_compute --&gt; delonix_net_rules
   delonix_compute --&gt; delonix_node
   delonix_cri --&gt; delonix_compute
   delonix_cri --&gt; delonix_linux
@@ -1223,7 +1224,6 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
-  delonix_vm --&gt; delonix_net_rules
   delonix_vm --&gt; delonix_node
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute
