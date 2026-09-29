@@ -8086,3 +8086,70 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   não precisam de nó» do `scripts/e2e.sh` (7 checks; 3 chumbam com a recusa revertida,
   verificado). A layer zstd (DX-1409) fica no teste unitário do `delonix-oci`: pelo Kind só se
   chega lá com um nó.
+
+## Performance de imagens: pull, push, build e arranque (2026-09-26 a 2026-09-29, 14 PRs)
+
+Levantamento com três agentes de performance, e depois uma correcção por item, cada uma com a
+sua medição no PR. Os números abaixo são os que ficaram de pé com a máquina calma; os que só
+se mediram sob carga dizem-no.
+
+- **Pull e push em streaming, sem o blob inteiro em memória** (#520/#535, #523, #524). O CAS
+  escreve para um ficheiro temporário e calcula o sha256 à medida, com a escrita em disco numa
+  thread própria (um buffer maior não chegou: só a thread tirou as caudas). Memória no pull do
+  `node:22`: 214 → 27 MB; no pull de VM: 278 → 13 MB, e retoma entre processos (um `kill -9` a
+  meio deixou 48,6 MB e o pull seguinte continuou daí, com o digest certo); no push de VM:
+  837 → 10–13 MB.
+- **O push tenta outra vez e corre em paralelo** (#526, #527). Um PUT cortado a meio é repetido
+  com um HEAD antes de cada tentativa (um blob já aceite nunca vai duas vezes); 5xx/408/429 e
+  erros de transporte repetem, o resto falha logo. Quatro layers em simultâneo: `node:22` a
+  20 MB/s por ligação passou de 65 s para 11 s.
+- **Montar em vez de enviar** (U6, #538). Se uma tag da imagem nomeia outro repositório do
+  MESMO registo, o upload pede `?mount=<digest>&from=<repo>`: 201 é o blob ligado sem bytes, 202
+  é um upload normal. Medido no ghcr: 356 s → 7,0 s. Um servidor de tokens que recuse o scope de
+  `pull` sobre a origem é perguntado outra vez sem ele — uma optimização nunca pode fazer um push
+  falhar.
+- **O pull a quente não reescreve o registo, e o CAS sobrevive a uma queda** (#530). O
+  `save_if_changed` compara ignorando o `created_unix`. Os `fsync` do CAS custaram 18 chamadas por
+  pull do `node:22` e zero no tempo total com a máquina calma (42–45 s nos dois lados, o pull é da
+  rede). **Os 19–30 s medidos antes eram o disco do host saturado, não o `fsync`** — com carga
+  alta, uma medição de I/O mede o vizinho.
+- **Build** (#529). O container de trabalho tem `sleep infinity` como PID 1, que ignora o
+  SIGTERM, por isso cada `stop` gastava os 5 s de tolerância inteiros; agora pára com 0. Um passo
+  que acerta na cache fecha com `✓` (fechava com `✗` e o build saía 0). A cache CNB por app deixou
+  de ser apagada no fim de cada build. Medianas: a frio 6,8 → 2,2 s, só o `COPY` mudado
+  7,2 → 1,1 s.
+- **Primeiro arranque: layers em paralelo, lidas em streaming** (P5, #533). Memória no primeiro
+  `run` do `node:22`: 219 → 21 MB; extracção 4,3 → 2,1 s. O tempo total quase não mexeu, e foi daí
+  que saiu o achado seguinte.
+- **A saída de um container espera pelo disco INTEIRO do host** (ADR-0056, #534 e #537). Ao sair o
+  último processo da mount namespace, o overlay é desmontado e o kernel sincroniza o sistema de
+  ficheiros da upper, que é o do host. Um overlay sem nenhuma escrita esperou 29 s por 1 GB que
+  OUTRO ficheiro tinha por escrever. Um container `--rm` (a upper é apagada à saída) monta agora
+  com `volatile`: `run --rm … true` com 1 GB sujo no disco, 9,5–14 s → 0,14 s. **A marca
+  `incompat/volatile` fica no workdir mesmo depois de uma desmontagem limpa**, e o kernel recusa o
+  mount seguinte: por isso o `work/` é esvaziado antes de cada mount (um `--rm --restart` monta
+  duas vezes). Os containers mantidos ficam como estavam (D4 do ADR). Os containers de trabalho
+  do `build` não têm overlay (rootfs plano), ao contrário do que o ADR dizia na primeira versão.
+- **`cluster load` em todos os nós ao mesmo tempo** (U9, #605): 3 nós, 33,2 → 17,6 s.
+
+**Decidido não fazer, com a razão**:
+- **P3, cache do token do registo em disco.** O token da Docker Hub dura 300 s e vale para UM
+  repositório; dentro de um pull já é partilhado. Guardá-lo em disco poupa 0,6–4,6 s por comando,
+  só dentro dessa janela, e deixa uma credencial de leitura de repositórios privados no disco. O
+  Docker CLI também não o faz. Fica para quem decidir que a troca vale, e aí é um ADR.
+- **U3 passo 2, retomar um upload a meio.** O ghcr aceita upload por partes (`PATCH` devolve
+  `range: 0-1048575`) mas o `GET` do estado do upload responde `303` para uma página web: o
+  cliente não consegue saber quanto o registo guardou depois de uma ligação cair.
+
+**Armadilhas de método desta série** (cada uma custou uma medição ou um PR):
+- **Um PR empilhado não corre CI** enquanto a base não é a `main`, e `gh pr merge --delete-branch`
+  no pai FECHA o filho (o #520, continuado no #535). Reapontar o filho antes do merge do pai, e
+  refazer a branch só com os commits próprios — os do hook `ngola-ci` são merges.
+- **`git checkout -- <ficheiro>` para desfazer uma mutação apaga o trabalho por commitar desse
+  ficheiro.** Guardar uma cópia antes da mutação e repô-la.
+- **Com o host carregado (load 37–53 em 32 núcleos), um tempo não decide nada**: o mesmo cenário
+  deu 22,2 s e 1,2 s. Sob carga mede-se o que é determinístico (contagens de passos, de `fsync`,
+  de bytes, memória máxima) e o tempo fica para uma janela calma.
+- **Um processo em estado D depois do SIGKILL não é um bug do motor**: `wb_wait_for_completion` é
+  a saída à espera do writeback do disco. O `stop` desiste ao fim de 30 s e diz 0; o processo sai
+  minutos depois num host saturado.
