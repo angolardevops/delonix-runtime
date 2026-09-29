@@ -1296,46 +1296,78 @@ pub(crate) fn load(
         delonix_oci::write_oci_archive(images, &image, &ref_name, tar)?;
         p.ok();
 
-        for node in &running {
-            p.step(&format!("{ref_name} → {}", node.name), "🚚");
-            let file = tar.file_name().unwrap_or_default().to_string_lossy();
-            // `--snapshotter`: `ctr` would otherwise extract with containerd's
-            // GLOBAL default (overlayfs), which cannot mount in a rootless userns
-            // — see `node_snapshotter`.
-            let snap = node_snapshotter(node)
-                .map(|s| format!(" --snapshotter {s}"))
-                .unwrap_or_default();
-            // `--platform` with the image's OWN architecture, and deliberately NOT
-            // `--all-platforms`: found live on containerd 2.1 — once the snapshotter
-            // above lets the unpack actually run, `--all-platforms` fails it with
-            // `no unpack platforms defined`. A concrete platform also stops ctr from
-            // filtering the archive down to nothing against its default matcher.
-            let plat = format!("linux/{}", image.config.architecture);
-            let local = if node_ctr_supports_local(node) {
-                " --local"
-            } else {
-                ""
-            };
-            let (code, out) = node_exec_capture(
-                node,
-                &format!(
-                    "ctr -n k8s.io images import{local} --platform {plat}{snap} {NODE_SHARED}/{file}"
-                ),
-            )?;
-            if code != 0 {
-                // The open step closes with ✗ on drop (see `Progress::drop`) —
-                // no explicit failure call needed, and none exists.
-                return Err(Error::Invalid(super::po::tf(
-                    "`ctr images import` failed on node '{node}' (exit {code}): {out}",
-                    &[
-                        ("node", &node.name),
-                        ("code", &code.to_string()),
-                        ("out", out.trim()),
-                    ],
-                )));
-            }
-            p.ok();
+        // Every node IN PARALLEL (U9): each import is its own `ctr` in its own
+        // node, reading the same archive through the shared mount, and in
+        // series a cluster of N nodes waited N times as long. Every failure is
+        // reported, not just the first — the same rule as the workers' join.
+        p.step(
+            &super::po::tf(
+                "{image} → {count} node(s)",
+                &[("image", &ref_name), ("count", &running.len().to_string())],
+            ),
+            "🚚",
+        );
+        let file = tar.file_name().unwrap_or_default().to_string_lossy();
+        let plat = format!("linux/{}", image.config.architecture);
+        let errors: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = running
+                .iter()
+                .map(|node| {
+                    let (file, plat) = (&file, &plat);
+                    scope.spawn(move || -> Result<()> {
+                        // `--snapshotter`: `ctr` would otherwise extract with
+                        // containerd's GLOBAL default (overlayfs), which cannot
+                        // mount in a rootless userns — see `node_snapshotter`.
+                        let snap = node_snapshotter(node)
+                            .map(|s| format!(" --snapshotter {s}"))
+                            .unwrap_or_default();
+                        // `--platform` with the image's OWN architecture, and
+                        // deliberately NOT `--all-platforms`: found live on
+                        // containerd 2.1 — once the snapshotter above lets the
+                        // unpack actually run, `--all-platforms` fails it with `no
+                        // unpack platforms defined`. A concrete platform also
+                        // stops ctr from filtering the archive down to nothing
+                        // against its default matcher.
+                        let local = if node_ctr_supports_local(node) {
+                            " --local"
+                        } else {
+                            ""
+                        };
+                        let (code, out) = node_exec_capture(
+                            node,
+                            &format!(
+                                "ctr -n k8s.io images import{local} --platform {plat}{snap} {NODE_SHARED}/{file}"
+                            ),
+                        )?;
+                        if code != 0 {
+                            return Err(Error::Invalid(super::po::tf(
+                                "`ctr images import` failed on node '{node}' (exit {code}): {out}",
+                                &[
+                                    ("node", &node.name),
+                                    ("code", &code.to_string()),
+                                    ("out", out.trim()),
+                                ],
+                            )));
+                        }
+                        Ok(())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| match h.join() {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(e.to_string()),
+                    // A panic in a thread cannot pass for "imported".
+                    Err(_) => Some(super::po::t("an import thread panicked").to_string()),
+                })
+                .collect()
+        });
+        if !errors.is_empty() {
+            // The open step closes with ✗ on drop (see `Progress::drop`).
+            return Err(Error::Invalid(errors.join("; ")));
         }
+        p.ok();
     }
     eprintln!(
         "{}",

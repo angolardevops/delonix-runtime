@@ -2775,6 +2775,12 @@ msgstr "join do worker '{wnode}'"
 msgid "a worker thread panicked"
 msgstr "uma thread de worker entrou em panic"
 
+msgid "an import thread panicked"
+msgstr "uma thread de importação entrou em panic"
+
+msgid "{image} → {count} node(s)"
+msgstr "{image} → {count} nó(s)"
+
 msgid "{n} worker(s) failed:\n  {list}"
 msgstr "{n} worker(s) falharam:\n  {list}"
 
