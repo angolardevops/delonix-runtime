@@ -37,6 +37,10 @@ impl VmBackends for RegistryBackends {
         super::backend_declares(backend_id, cap)
     }
 
+    fn admit(&self, backend_id: &str, cfg: &VmConfig) -> delonix_model::Result<()> {
+        Ok(super::check_allow_mac_spoofing(cfg, backend_id)?)
+    }
+
     /// Only libvirt keeps a VM after its record is gone: a domain an old `rm`
     /// left behind. The other local backend's VM is a process that dies with
     /// its record.

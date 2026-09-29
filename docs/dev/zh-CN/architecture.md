@@ -72,13 +72,14 @@ crate 如何分层并相互调用，以及状态在磁盘上位于何处。它�
 | 只能下降、不能上升的 ratchet（见下文）——例如库 crate 重新运行引擎自己的二进制文件、库中出现 `println!`、进程环境写入、适配器把共享的 `Error` 当作自己的来导入 | ratchet 的各个模式（`SELF_EXEC`、`PRINTS`、`ENV_WRITES`、`SHARED_ERROR`……），基线在 `scripts/arch_baseline.json` 中 |
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` 维护 **5 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：
+`scripts/arch_fitness.py` 维护 **6 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
 - `raw_error_variant_matches`
+- `context_spawns`
 <!-- dev-docs:end ratchets -->
 
 `python3 scripts/arch_fitness.py --list` 会逐个文件显示每个 ratchet 今天统计到的数量。

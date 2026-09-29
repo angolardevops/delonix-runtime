@@ -168,6 +168,13 @@ EXCEPTIONS = {
 # becomes a call into a use case, or a typed spec handed to delonix-launcher.
 SELF_EXEC = re.compile(r"current_exe\(\)|\bcli_bin\(\)|\bdelonix_bin\(\)")
 PRINTS = re.compile(r"\b(?:e?println!|print!)\s*[(\[]")
+# A context crate running an external program (ADR-0044 P4b.3b). The VM use
+# cases moved into `delonix-compute` precisely because `qemu-img`/`cloud-localds`
+# went behind ports an adapter implements; the first `Command::new` in
+# `crates/contexts/` is how that would quietly come back. Adapters and providers
+# are not counted — running programs is what they are for.
+CONTEXT_SPAWNS = re.compile(r"\bCommand::new\s*\(")
+CONTEXT_DIRS = ("crates/contexts/",)
 # Writes to the PROCESS environment. Tests run on parallel threads, and a write
 # there races every reader of the environment (libc's `getenv` takes no Rust lock);
 # in the engine's own code a write is only sound in a single-threaded child. The
@@ -392,12 +399,14 @@ def main() -> int:
     prints, print_where = count(PRINTS)
     env_writes, env_where = count(ENV_WRITES, skip_bin=False)
     shared_err, shared_err_where = count(SHARED_ERROR, only=SHARED_ERROR_DIRS)
+    spawns, spawn_where = count(CONTEXT_SPAWNS, only=CONTEXT_DIRS)
     current = {
         "self_exec_sites": self_exec,
         "library_prints": prints,
         "env_writes": env_writes,
         "shared_error_imports": shared_err,
         "raw_error_variant_matches": count(RAW_VARIANT_MATCH, skip_bin=False)[0],
+        "context_spawns": spawns,
     }
 
     if args.list:
@@ -412,6 +421,9 @@ def main() -> int:
             print(f"  {w}")
         print("\nadapters/providers using the shared error as their own:")
         for w in shared_err_where:
+            print(f"  {w}")
+        print("\ncontext crates running an external program (Command::new):")
+        for w in spawn_where:
             print(f"  {w}")
         print("\nexceptions still standing:")
         for (kind, a, b), (phase, reason) in sorted(EXCEPTIONS.items()):
