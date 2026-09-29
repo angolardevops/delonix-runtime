@@ -4093,6 +4093,11 @@ check "o snapshot de um system container é declarado supported no proxmox" ok b
   "'$BIN' provider describe proxmox | grep 'system-container.snapshot' | grep -q 'supported'"
 check "o resize de um system container é declarado supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.resize' | grep -q 'supported'"
+# Fatia 5 (backup): um arquivo do provider é reconhecido pelo nome e o dono é
+# procurado no registo antes de ir ao nó, por isso sem registo diz 4.
+check "backup restore de um arquivo de container de sistema sem dono registado diz 4" 4 adr54_bare backup restore "local:backup/vzdump-lxc-999-2026_01_01-00_00_00.tar.zst" --force
+check "backup create systemcontainer de um nome não registado diz 4" 4 adr54_bare backup create systemcontainer "sc-$PFX-nada"
+check "backup create systemcontainer --quiesce é recusado (é só para VMs)" fail adr54_bare backup create systemcontainer "sc-$PFX-nada" --quiesce
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################

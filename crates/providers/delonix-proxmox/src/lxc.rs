@@ -203,6 +203,67 @@ impl Client {
         )
     }
 
+    /// `POST /nodes/{node}/vzdump` for one container: `snapshot` mode archives
+    /// a running container without stopping it, `stop` stops it for the
+    /// length of the archive and starts it again. The probe is a new archive
+    /// of this container in `storage`.
+    pub fn lxc_backup(&self, ledger: &Ledger, vmid: u32, storage: &str, stop: bool) -> Result<()> {
+        let before = self.list_backups(storage, vmid)?.len();
+        let id = vmid.to_string();
+        let mode = if stop { "stop" } else { "snapshot" };
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Backup,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/vzdump", self.node),
+                    &[
+                        ("vmid", id.as_str()),
+                        ("storage", storage),
+                        ("mode", mode),
+                        ("remove", "0"),
+                    ],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.list_backups(storage, vmid)?.len() > before)),
+        )
+    }
+
+    /// `POST /nodes/{node}/lxc` with `restore=1` and `force=1`: puts container
+    /// `vmid` back from `archive`, over the container of the same id, with its
+    /// root volume on `rootfs_storage`. The container must be stopped. No
+    /// probe: nothing reads «restored» apart from «not restored».
+    pub fn lxc_restore(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        archive: &str,
+        rootfs_storage: &str,
+    ) -> Result<()> {
+        let id = vmid.to_string();
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtRestore,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/lxc", self.node),
+                    &[
+                        ("vmid", id.as_str()),
+                        ("ostemplate", archive),
+                        ("restore", "1"),
+                        ("force", "1"),
+                        ("storage", rootfs_storage),
+                    ],
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
     /// `GET …/lxc/{vmid}/snapshot`: the snapshot names, without the API's
     /// `current` pseudo-entry (the live state, not a snapshot anybody took).
     pub fn lxc_snapshots(&self, vmid: u32) -> Result<Vec<String>> {
@@ -307,6 +368,63 @@ fn taken_ct_snapshot(vmid: u32, name: &str) -> Error {
     Error::SnapshotTaken(format!(
         "Proxmox container {vmid} already has a snapshot named '{name}'"
     ))
+}
+
+/// The container id an archive name carries (`…/vzdump-lxc-<vmid>-<date>.…`),
+/// or `None` for anything that is not a container archive.
+pub(crate) fn archive_vmid(archive: &str) -> Option<u32> {
+    let file = archive.rsplit('/').next()?;
+    let rest = file.strip_prefix("vzdump-lxc-")?;
+    rest.split('-').next()?.parse().ok()
+}
+
+/// The storage of an archive that belongs to container `vmid`; another
+/// container's archive, or a name that is not an archive, is refused before
+/// any request.
+pub(crate) fn own_archive(archive: &str, vmid: u32) -> Result<&str> {
+    let (storage, _) = archive.split_once(':').ok_or_else(|| {
+        Error::InvalidSystemContainer(format!(
+            "proxmox: '{archive}' is not a node archive id (<storage>:backup/vzdump-lxc-…)"
+        ))
+    })?;
+    if !crate::valid_storage_id(storage) {
+        return Err(Error::InvalidSystemContainer(format!(
+            "proxmox: '{storage}' is not a storage id"
+        )));
+    }
+    match archive_vmid(archive) {
+        Some(v) if v == vmid => Ok(storage),
+        Some(v) => Err(Error::InvalidSystemContainer(format!(
+            "proxmox: '{archive}' is an archive of container {v}, not of {vmid}"
+        ))),
+        None => Err(Error::InvalidSystemContainer(format!(
+            "proxmox: '{archive}' is not a container archive (vzdump-lxc-…)"
+        ))),
+    }
+}
+
+/// The raw `lxc.*` keys of a container config, as the node answers them
+/// (`"lxc": [["lxc.init.cwd", "/"], …]`).
+pub(crate) fn raw_lxc_keys(config: &serde_json::Value) -> Vec<(String, String)> {
+    config
+        .get("lxc")
+        .and_then(|l| l.as_array())
+        .map(|l| {
+            l.iter()
+                .filter_map(|kv| {
+                    let kv = kv.as_array()?;
+                    Some((
+                        kv.first()?.as_str()?.to_string(),
+                        kv.get(1)?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn missing_archive(vmid: u32, archive: &str) -> Error {
+    Error::NodeNotFound(format!("archive {archive} of container {vmid}"))
 }
 
 pub(crate) fn entrypoint_line(args: &[String]) -> Result<String> {
@@ -835,6 +953,113 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         Ok(())
     }
 
+    fn backup(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        storage: &str,
+        stop: bool,
+    ) -> delonix_model::Result<String> {
+        crate::valid_storage_id_or_err(storage)?;
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        let before: Vec<String> = client
+            .list_backups(storage, vmid)?
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect();
+        client.lxc_backup(&ledger, vmid, storage, stop)?;
+        let after = client.list_backups(storage, vmid)?;
+        after
+            .into_iter()
+            .map(|(v, _)| v)
+            .find(|v| !before.contains(v))
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: the backup of container {vmid} ended and {storage} lists no new archive of it"
+                ))
+                .into()
+            })
+    }
+
+    fn backups(
+        &self,
+        _dir: &Path,
+        h: &SystemContainerHandle,
+        storage: &str,
+    ) -> delonix_model::Result<Vec<(String, u64)>> {
+        crate::valid_storage_id_or_err(storage)?;
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let mut all = self.client_for(&node)?.list_backups(storage, vmid)?;
+        all.retain(|(v, _)| archive_vmid(v) == Some(vmid));
+        all.sort();
+        Ok(all)
+    }
+
+    fn delete_backup(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        archive: &str,
+    ) -> delonix_model::Result<()> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let storage = own_archive(archive, vmid)?;
+        let client = self.client_for(&node)?;
+        if !client
+            .list_backups(storage, vmid)?
+            .iter()
+            .any(|(v, _)| v == archive)
+        {
+            return Err(missing_archive(vmid, archive).into());
+        }
+        client.delete_backup(&Ledger::at(dir), vmid, storage, archive)?;
+        Ok(())
+    }
+
+    fn restore_backup(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        archive: &str,
+    ) -> delonix_model::Result<Vec<String>> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let storage = own_archive(archive, vmid)?;
+        let client = self.client_for(&node)?;
+        if !client
+            .list_backups(storage, vmid)?
+            .iter()
+            .any(|(v, _)| v == archive)
+        {
+            return Err(missing_archive(vmid, archive).into());
+        }
+        // Measured on PVE 9.2.2: a restore by anyone but root@pam drops the
+        // raw `lxc.*` keys (the working directory and halt signal the node
+        // wrote from the image) with a warning, and only root@pam may write
+        // them back. They are read before and after, so what was lost is
+        // named to the caller instead of left in a task log.
+        let before = raw_lxc_keys(&client.lxc_config(vmid)?);
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        // The node overwrites a container only when it is stopped; the state
+        // before the call is put back afterwards, as a snapshot restore does.
+        let was_running = client.lxc_status(vmid)? == "running";
+        if was_running {
+            client.lxc_stop(&ledger, vmid)?;
+        }
+        client.lxc_restore(&ledger, vmid, archive, &self.rootfs_storage)?;
+        let after = raw_lxc_keys(&client.lxc_config(vmid)?);
+        if was_running {
+            client.lxc_start(&ledger, vmid)?;
+        }
+        Ok(before
+            .into_iter()
+            .filter(|kv| !after.contains(kv))
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect())
+    }
+
     fn restore(
         &self,
         dir: &Path,
@@ -960,6 +1185,37 @@ mod tests {
         let bare = config_of(&serde_json::json!({"memory": 256}));
         assert_eq!((bare.swap_mib, bare.cores), (0, 0));
         assert!(bare.entrypoint.is_empty() && bare.env.is_empty());
+    }
+
+    #[test]
+    fn the_raw_lxc_keys_are_read_from_the_config() {
+        let c = serde_json::json!({"lxc": [["lxc.init.cwd", "/"], ["lxc.signal.halt", "SIGTERM"]]});
+        assert_eq!(
+            raw_lxc_keys(&c),
+            vec![
+                ("lxc.init.cwd".to_string(), "/".to_string()),
+                ("lxc.signal.halt".to_string(), "SIGTERM".to_string())
+            ]
+        );
+        assert!(raw_lxc_keys(&serde_json::json!({"memory": 256})).is_empty());
+    }
+
+    #[test]
+    fn an_archive_is_owned_by_the_container_its_name_carries() {
+        let a = "local:backup/vzdump-lxc-100-2026_09_29-09_00_00.tar.zst";
+        assert_eq!(archive_vmid(a), Some(100));
+        assert_eq!(own_archive(a, 100).unwrap(), "local");
+        assert!(own_archive(a, 101).is_err(), "another container's archive");
+        assert!(own_archive("local:backup/vzdump-qemu-100-x.vma.zst", 100).is_err());
+        assert!(
+            own_archive("vzdump-lxc-100-x.tar", 100).is_err(),
+            "no storage"
+        );
+        assert!(own_archive("../x:backup/vzdump-lxc-100-x.tar", 100).is_err());
+        assert_eq!(
+            archive_vmid("local:backup/vzdump-lxc-1000-x.tar"),
+            Some(1000)
+        );
     }
 
     #[test]

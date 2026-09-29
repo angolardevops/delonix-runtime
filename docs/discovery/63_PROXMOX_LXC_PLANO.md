@@ -297,6 +297,24 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   um `pct resize` à mão para 3G aparece no `drift` e no plano; pedir menos do que o nó tem planeia
   `-/+` e o `apply` recusa sem `--replace`, sem mexer em nada.
 
+- **Backup: feito.** `backup create|schedule systemcontainer <nome>` arquiva no storage do nó
+  (`--to <storage>`, `.` é o de omissão: `DELONIX_PROXMOX_BACKUP_STORAGE`, senão `local`), e
+  `backup ls --kind systemcontainer`, `inspect`, `restore` e `remove` reconhecem um arquivo do nó
+  pelo nome (`<storage>:backup/vzdump-lxc-<vmid>-…`) e vão ao nó em vez de ler um ficheiro local.
+  Porta `backup`/`backups`/`delete_backup`/`restore_backup`, com o `vzdump` (modo `snapshot`, ou
+  `stop` com `--stop`) e o `POST …/lxc` com `restore=1 force=1` (worker `vzrestore`, lido do
+  `PVE/API2/LXC.pm`). O arquivo de OUTRO container é recusado antes de qualquer pedido; o
+  `restore` de um container a correr pede `--force`, pára-o, repõe e volta a arrancá-lo.
+  Capacidade `system-container.backup`, `partial` pela razão medida a seguir. **Medido no `pve`,
+  e é o achado**: um restore feito por um API token acaba em `WARNINGS` e **larga as chaves
+  `lxc.*` cruas** que o nó escreveu da imagem (`lxc.init.cwd`, `lxc.signal.halt`) — só o
+  `root@pam` as pode escrever (`restricted` no `PVE/LXC/Create.pm`). Sem o `lxc.signal.halt`, um
+  `shutdown` manda SIGPWR em vez de SIGTERM. O provider lê-as antes e depois e o `restore` nomeia
+  cada uma que se perdeu, em vez de a deixar num log de tarefa. **De caminho**: o timer do
+  `backup schedule` corria `backup <kind> <nome>`, a forma anterior à separação em verbos, que a
+  CLI recusa — todo o backup agendado falhava; passa a `backup create`, e há teste que passa o
+  argv pelo parser real.
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes

@@ -8017,6 +8017,12 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   O `rootfs` é o primeiro campo **só a crescer** do reconciliador (`grow_only_fields`): cresce a
   quente, encolher planeia `Replace`. A mesma função (`is_hot_change`) decide no `plan` e no
   `apply`, para os dois nunca discordarem sobre o que exige recriar.
+  O backup (`backup create systemcontainer`) arquiva no storage do NÓ; os verbos `ls`/`inspect`/
+  `restore`/`remove` reconhecem o arquivo pelo nome (`<storage>:backup/vzdump-lxc-…`). **Um
+  restore por API token larga as chaves `lxc.*` cruas** (medido: `lxc.signal.halt`,
+  `lxc.init.cwd`; só o `root@pam` as escreve), e o restore nomeia cada uma. E o timer do
+  `backup schedule` corria uma forma que a CLI já não aceitava — **um teste que fixa um argv
+  tem de o passar pelo parser**, senão fixa o defeito.
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
