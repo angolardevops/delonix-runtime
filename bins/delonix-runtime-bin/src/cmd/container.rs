@@ -3847,7 +3847,29 @@ fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>) -> Option<Er
 /// (rootless: the flat copy in `containers/<id>/rootfs`; root: remounts the
 /// overlay, whose `upper` preserves the writes). It's what `rm`+`run` lacks: it
 /// doesn't lose the state written inside the container.
+/// `container start`. A start that FAILS after its record was removed takes
+/// the container's directory with it — see [`discard_unstarted`].
+///
+/// `rm -f` of a container whose start is in flight purges the directory while
+/// the start is still writing into it: its init creates the overlay's mount
+/// points under `merged/` and its log shim opens `log`, so the purge fails with
+/// `Directory not empty`, or finishes and is undone. The start then fails (its
+/// rootfs is gone, or its publish is refused: the record is gone), and nothing
+/// will ever find the directory again — `rm` and `prune` go through records.
+/// Measured 2026-09-29, `rm -f` 5 ms after `start`: `rm` rc 0, record gone,
+/// `containers/<id>/{log,merged/sys,merged/proc,merged/.delonix_old}` left.
+/// The start is the last writer, so the start cleans; only on the host's pass,
+/// where `rm` itself would have run.
 pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+    let cid = find(store, id)?.id;
+    let started = start_container(images, store, &cid);
+    if started.is_err() && std::env::var("DELONIX_REEXEC_ID").is_err() {
+        discard_unstarted(images, store, &cid);
+    }
+    started
+}
+
+fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
     // `start` reasserts the desired state = running (clears the user's `stop`).
@@ -6185,8 +6207,16 @@ impl Drop for UnstartedGuard<'_> {
 /// records, and a start that failed never wrote one, so the directory was orphaned on
 /// every failed `run -d` (measured 2026-09-16: one per attempt). Guarded by the record:
 /// if one exists, this is a real container and its state is left alone.
+///
+/// Only a record that DOES NOT EXIST lets it through — not a read that failed. Since
+/// a failed `start` also comes here (see [`cmd_start`]), `is_ok()` would have purged
+/// the rootfs of a real container whose record could not be read for a moment (an
+/// I/O error, a record half-way through its rename).
 fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
-    if store.load(id).is_ok() {
+    if !matches!(
+        store.load(id),
+        Err(delonix_state::Error::NoSuchContainer(_))
+    ) {
         return;
     }
     let _ = images.unmount_rootfs(id);
@@ -6194,6 +6224,72 @@ fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
     // kernel leaves `work/work` at mode 0000, which only the mapped removal takes.
     // Measured: every `run -d` whose command failed to exec left the directory.
     purge_container_dir(images, id);
+}
+
+#[cfg(test)]
+mod discard_tests {
+    use super::*;
+
+    /// The layout the engine uses: records and container directories side by side
+    /// under `<root>/containers`.
+    fn stores(root: &std::path::Path) -> (ImageStore, Store) {
+        let images = ImageStore::open(root).unwrap();
+        let store = Store::open(root.join("containers")).unwrap();
+        (images, store)
+    }
+
+    fn leftover(images: &ImageStore, id: &str) -> std::path::PathBuf {
+        let dir = images.container_path(id);
+        std::fs::create_dir_all(dir.join("merged/proc")).unwrap();
+        std::fs::write(dir.join("log"), b"").unwrap();
+        dir
+    }
+
+    /// What a failed `start` leaves after `rm -f` removed its record goes (measured
+    /// 2026-09-29: `log` and the overlay's mount points under `merged/`).
+    #[test]
+    fn a_container_with_no_record_loses_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let dir = leftover(&images, "a1b2c3d4e5f60718");
+        discard_unstarted(&images, &store, "a1b2c3d4e5f60718");
+        assert!(!dir.exists(), "the orphaned directory is still there");
+    }
+
+    /// A container that has a record is a real one: a failed start leaves it be.
+    #[test]
+    fn a_container_with_a_record_keeps_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "keep".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        store.save(&c).unwrap();
+        let dir = leftover(&images, &c.id);
+        discard_unstarted(&images, &store, &c.id);
+        assert!(dir.exists(), "a real container's directory was purged");
+    }
+
+    /// A record that cannot be READ is not a record that does not exist: purging
+    /// on any load error would take the rootfs of a real container on a transient
+    /// failure, now that a failed `start` comes here too.
+    #[test]
+    fn an_unreadable_record_keeps_the_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        std::fs::write(
+            root.path().join("containers/a1b2c3d4e5f60718.json"),
+            b"{ half",
+        )
+        .unwrap();
+        let dir = leftover(&images, "a1b2c3d4e5f60718");
+        discard_unstarted(&images, &store, "a1b2c3d4e5f60718");
+        assert!(dir.exists(), "purged on a read error");
+    }
 }
 
 /// Starts the health monitor as a CHILD PROCESS of the supervisor, not a thread.

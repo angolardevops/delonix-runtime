@@ -64,6 +64,7 @@ impl WorkloadRuntime for HostWorkload<'_> {
                 state_root: self.state_root,
                 on_first_start: self.on_first_start,
                 silent_death: self.silent_death,
+                discard: self.discard,
             },
         )?;
         (self.on_supervised)(c);

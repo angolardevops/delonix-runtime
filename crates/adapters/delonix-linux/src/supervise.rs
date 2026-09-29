@@ -20,6 +20,10 @@ pub struct Supervision<'a> {
     pub on_first_start: &'a dyn Fn(&Container),
     /// The error when the supervisor died before reporting why the start failed.
     pub silent_death: &'a str,
+    /// Removes what a start left behind, unless a record of the container exists
+    /// — called when a policy restart fails, which is how a restart that `rm -f`
+    /// removed mid-flight ends (its directory would otherwise stay orphaned).
+    pub discard: &'a dyn Fn(&str),
 }
 
 /// The operation a failed detached start is reported as.
@@ -166,6 +170,11 @@ pub fn run_supervised(
                 (sup.on_first_start)(c);
             }
             if started.is_err() {
+                // A first start's failure is its caller's to clean; a restart
+                // has no caller left.
+                if restarts > 0 {
+                    (sup.discard)(&c.id);
+                }
                 std::process::exit(1);
             }
             // We're the container's PARENT: this captures the REAL exit code and records it.

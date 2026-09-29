@@ -7876,10 +7876,49 @@ fn exit_blocker(pid: i32) -> String {
     }
 }
 
+/// Stops a running container: SIGTERM, `timeout_secs` for it to exit, then
+/// SIGKILL.
+///
+/// **It returns once the process has EXITED, and past the bound it keeps the
+/// record.** SIGKILL is delivered at once; the exit is not — the init is PID 1
+/// of its own pid namespace, and its exit flushes the overlay's upper
+/// filesystem to disk (`wb_wait_for_completion`, state `D`), for seconds on a
+/// busy disk and minutes on a saturated one (measured 2026-09-29: SIGKILLed
+/// `sleep` workloads still in D 3 to 4½ min after they were started, with
+/// `/proc/pressure/io` at full 53 %).
+///
+/// It used to give up after the bound and record `Stopped` with no pid anyway.
+/// The process was still there, and nothing named it: `rm -f` found a record
+/// with no pid to signal, and a `restart` went on to start a second incarnation
+/// next to the dying one — whose supervisor, reaping it at last, then wrote its
+/// update over the new incarnation's record (the lost update #570 closed on the
+/// store side; this closes the precondition). Now the record keeps the pid and
+/// the error says so ([`Error::StillExiting`], DX-8101), the same answer `rm -f`
+/// gives since #562; a retried `stop` finishes the job once the process is gone,
+/// and the supervisor records the `Stopped` itself when it reaps it.
 pub fn stop(
     store: &impl StateRepository<Container>,
     container: &mut Container,
     timeout_secs: u64,
+) -> Result<()> {
+    stop_waiting(
+        store,
+        container,
+        timeout_secs,
+        Signal::SIGKILL,
+        KILL_EXIT_WAIT_TICKS,
+    )
+}
+
+/// [`stop`] with the final signal and the exit-wait budget (100 ms ticks) as
+/// parameters — the tests need a process that outlives its signal, and no
+/// process outlives a SIGKILL on demand.
+fn stop_waiting(
+    store: &impl StateRepository<Container>,
+    container: &mut Container,
+    timeout_secs: u64,
+    kill_signal: Signal,
+    exit_ticks: u64,
 ) -> Result<()> {
     let pid = container
         .pid
@@ -7898,15 +7937,23 @@ pub fn stop(
 
     let _ = kill(target, Signal::SIGTERM);
     if !wait_until_gone(pid, st, timeout_secs * 10) {
-        let _ = kill(target, Signal::SIGKILL);
+        let _ = kill(target, kill_signal);
         // SIGKILL is delivered at once; the EXIT is not. `stop` returning while
         // the process still exists is what let a `start` run a second incarnation
         // next to a dying first one (measured 2026-09-17, pod member `sh` +
         // `nc -l`: the child in `D`, `wb_wait_for_completion`, for 1.5 to 6.8 s
         // after the SIGKILL). Docker's `stop` also returns only once the container
         // is gone. Bounded, so a process stuck in the kernel for good cannot hang
-        // the CLI; the record's guard in `record_exit` still holds past it.
-        wait_until_gone(pid, st, KILL_EXIT_WAIT_TICKS);
+        // the CLI — and past the bound the record keeps the process (see [`stop`]).
+        if !wait_until_gone(pid, st, exit_ticks) {
+            return Err(Error::StillExiting(format!(
+                "container {}: {kill_signal} sent, but pid {pid} is still exiting after {}s{} — \
+                 it stays recorded as running; run `stop` again once it is gone",
+                container.short_id(),
+                exit_ticks / 10,
+                exit_blocker(pid)
+            )));
+        }
     }
     // INTENTIONAL stop (by the user) → always Stopped, even if SIGKILL was
     // needed (it is not a crash: it was a requested stop).
@@ -9057,6 +9104,61 @@ mod remove_tests {
         );
         // `child` is not waited on again: `discard_child` already reaped it.
         std::mem::forget(child);
+    }
+
+    /// **A `stop` that outlives its budget keeps the process in the record.**
+    ///
+    /// It used to record `Stopped` with no pid after the bound, over a process
+    /// still exiting: `rm -f` then had no pid to signal, and a `restart` started
+    /// a second incarnation beside the dying one (see [`stop`]). SIGWINCH stands
+    /// in for a SIGKILL whose exit never comes, and SIGTERM is ignored: the
+    /// shell sets it to SIG_IGN, and `exec` hands that to `sleep`.
+    #[test]
+    fn a_stop_past_its_budget_keeps_the_process_recorded() {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; exec sleep 30"])
+            .spawn()
+            .expect("sh");
+        // The disposition must be in place before the SIGTERM, or it dies at once.
+        std::thread::sleep(Duration::from_millis(300));
+        let mut c = record_of(&child);
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let err = stop_waiting(&store, &mut c, 0, Signal::SIGWINCH, 2).unwrap_err();
+        let alive = !process_gone(c.pid.unwrap(), c.pid_starttime);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            alive,
+            "the stand-in signals must not have ended the process"
+        );
+        assert!(matches!(err, Error::StillExiting(_)), "{err}");
+        assert_eq!(err.number(), 8101);
+        assert!(err.to_string().contains("still exiting"), "{err}");
+        let rec = store.0.borrow().clone().expect("the record");
+        assert_eq!(
+            (rec.status, rec.pid),
+            (Status::Running, Some(child.id() as i32)),
+            "the record must still name the process that has not exited"
+        );
+        assert!(c.pid.is_some(), "the caller's copy is not cleared either");
+    }
+
+    /// And a process that does exit is recorded `Stopped`, with no pid — the
+    /// ordinary stop is unchanged.
+    #[test]
+    fn a_stop_that_ends_the_process_records_it_stopped() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let mut c = record_of(&child);
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let r = stop_waiting(&store, &mut c, 5, Signal::SIGKILL, KILL_EXIT_WAIT_TICKS);
+        let _ = child.kill();
+        let _ = child.wait();
+        r.expect("stop");
+        let rec = store.0.borrow().clone().expect("the record");
+        assert_eq!((rec.status, rec.pid), (Status::Stopped, None));
     }
 
     /// Without `--force`, a running container is refused and nothing is signalled.
