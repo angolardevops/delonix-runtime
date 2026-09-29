@@ -149,7 +149,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (26 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (27 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -301,7 +301,7 @@ leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/s
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 26 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 27 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-model</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -310,7 +310,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     RT[&quot;delonix-linux&lt;br&gt;motor de containers: clone e namespaces, setup_rootfs,&lt;br&gt;cgroups v2, seccomp, caps, exec, log shim, reconcile_status&quot;]
     NET[&quot;delonix-sdn&lt;br&gt;SDN rootless: modulo infra — holder netns, slirp unico,&lt;br&gt;publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover&quot;]
     IMG[&quot;delonix-oci&lt;br&gt;imagens OCI: registry pull e push, cas, overlay,&lt;br&gt;build Dockerfile, buildpack CNB, sign, internal_registry&quot;]
-    VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
+    VM2[&quot;delonix-vm&lt;br&gt;raiz de composicao das VMs ate a P5:&lt;br&gt;semeia o registo e monta o VmEngine&quot;]
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
     NODECTX[&quot;delonix-node&lt;br&gt;contexto do no: eventos, verificacoes do host,&lt;br&gt;peer_cred, dispatch e as perguntas ao host e aos processos&quot;]
     STATECRATE[&quot;delonix-state&lt;br&gt;estado persistido: Store e JsonStore com flock,&lt;br&gt;escrita atomica, SecretStore e CredVault cifrados&quot;]
@@ -319,6 +319,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     SCAN[&quot;delonix-scanner&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
     SEC[&quot;delonix-security-runtime&lt;br&gt;decisoes de seguranca do no: politica, admissao&lt;br&gt;unica (container E VM), evento, score, redaccao&lt;br&gt;(ADR-0026) — puro, sem sensores e sem inquilino&quot;]
     RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
+    CHV[&quot;delonix-provider-cloud-hypervisor&lt;br&gt;backend VmBackend Cloud Hypervisor (microVM por processo, api-socket)&lt;br&gt;(ADR-0044 P4b.4c) — saiu do delonix-vm, que o regista&quot;]
     LVIRT[&quot;delonix-provider-libvirt&lt;br&gt;backend VmBackend libvirt/KVM (QEMU via virsh)&lt;br&gt;(ADR-0044 P4b.4b) — saiu do delonix-vm, que o regista&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
     NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
@@ -382,6 +383,10 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     NET --&gt; RULES
     PVE --&gt; VM2
     VM2 --&gt; LVIRT
+    VM2 --&gt; CHV
+    CHV --&gt; COMPUTE
+    CHV --&gt; MODEL
+    CHV --&gt; NODECTX
     LVIRT --&gt; COMPUTE
     LVIRT --&gt; MODEL
     LVIRT --&gt; NODECTX

@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (26 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (27 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 26 crates)
+## C4 — Nível 3: Componentes (os 27 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
@@ -141,7 +141,7 @@ graph TB
     RT["delonix-linux<br>motor de containers: clone e namespaces, setup_rootfs,<br>cgroups v2, seccomp, caps, exec, log shim, reconcile_status"]
     NET["delonix-sdn<br>SDN rootless: modulo infra — holder netns, slirp unico,<br>publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover"]
     IMG["delonix-oci<br>imagens OCI: registry pull e push, cas, overlay,<br>build Dockerfile, buildpack CNB, sign, internal_registry"]
-    VM2["delonix-vm<br>microVMs declarativas: trait VmBackend —<br>Cloud Hypervisor ou libvirt"]
+    VM2["delonix-vm<br>raiz de composicao das VMs ate a P5:<br>semeia o registo e monta o VmEngine"]
     VOL["delonix-volume<br>volumes nomeados e bind mounts, sintaxe -v Docker,<br>driver local ou nfs"]
     NODECTX["delonix-node<br>contexto do no: eventos, verificacoes do host,<br>peer_cred, dispatch e as perguntas ao host e aos processos"]
     STATECRATE["delonix-state<br>estado persistido: Store e JsonStore com flock,<br>escrita atomica, SecretStore e CredVault cifrados"]
@@ -150,6 +150,7 @@ graph TB
     SCAN["delonix-scanner<br>SBOM e varredura de CVE — image scan<br>e a imposicao de scan-on-pull"]
     SEC["delonix-security-runtime<br>decisoes de seguranca do no: politica, admissao<br>unica (container E VM), evento, score, redaccao<br>(ADR-0026) — puro, sem sensores e sem inquilino"]
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
+    CHV["delonix-provider-cloud-hypervisor<br>backend VmBackend Cloud Hypervisor (microVM por processo, api-socket)<br>(ADR-0044 P4b.4c) — saiu do delonix-vm, que o regista"]
     LVIRT["delonix-provider-libvirt<br>backend VmBackend libvirt/KVM (QEMU via virsh)<br>(ADR-0044 P4b.4b) — saiu do delonix-vm, que o regista"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
@@ -213,6 +214,10 @@ graph TB
     NET --> RULES
     PVE --> VM2
     VM2 --> LVIRT
+    VM2 --> CHV
+    CHV --> COMPUTE
+    CHV --> MODEL
+    CHV --> NODECTX
     LVIRT --> COMPUTE
     LVIRT --> MODEL
     LVIRT --> NODECTX

@@ -407,3 +407,25 @@ pub fn mac_for(name: &str) -> String {
         h & 0xff
     )
 }
+
+/// The node's VM network, registered once per process by the composition root
+/// (it moved here with the registry in P4b.4c, so a provider crate reaches it).
+static NETWORK: std::sync::OnceLock<Box<dyn crate::ports::VmNetwork>> = std::sync::OnceLock::new();
+
+/// Registers the node's [`VmNetwork`]. The first registration wins: the network
+/// is a fact of the process, not something to swap between two VMs.
+pub fn set_network(network: Box<dyn crate::ports::VmNetwork>) {
+    let _ = NETWORK.set(network);
+}
+
+/// The registered network, or the reason there is none — a VM on the SDN cannot
+/// be attached without one, and saying so beats a VM with no network.
+pub fn network() -> Result<&'static dyn crate::ports::VmNetwork> {
+    NETWORK
+        .get()
+        .map(|n| n.as_ref())
+        .ok_or_else(|| Error::Command {
+            context: "vm",
+            message: "no VM network provider is registered in this process".into(),
+        })
+}

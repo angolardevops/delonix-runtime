@@ -13,6 +13,7 @@ delonix-compute = { workspace = true }
 # layer (P5) exists: a declared, phase-tagged exception in
 # `scripts/arch_fitness.py` (ADR-0044 P4b.4, docs/discovery/61).
 delonix-provider-libvirt = { workspace = true }
+delonix-provider-cloud-hypervisor = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
