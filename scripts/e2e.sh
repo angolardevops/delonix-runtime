@@ -4101,6 +4101,24 @@ check "backup create systemcontainer --quiesce é recusado (é só para VMs)" fa
 check "systemcontainer clone de um nome não registado diz 4" 4 adr54_bare systemcontainer clone "sc-$PFX-nada" "sc-$PFX-copia"
 check "o clone de um system container é declarado supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.clone' | grep -q 'supported'"
+# Fatia 5 (firewall): `kind: NetworkPolicy` com `scope: systemcontainer` põe a
+# política na firewall do container no nó. O alvo é verificado contra os
+# SystemContainers declarados e registados antes de qualquer pedido, e um scope
+# mal escrito é recusado em vez de cair no `container` por omissão.
+cat > "$SCWORK/fw-orfao.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sc-$PFX-fw }
+spec: { target: sc-$PFX-nada, direction: ingress, scope: systemcontainer, defaultPolicy: deny }
+YAML
+sed 's/scope: systemcontainer/scope: systemcontainr/' "$SCWORK/fw-orfao.yaml" > "$SCWORK/fw-typo.yaml"
+check "stack validate recusa scope: systemcontainer sobre um alvo que não é SystemContainer" 1 adr54_bare stack validate -f "$SCWORK/fw-orfao.yaml"
+check "... e a mensagem nomeia o alvo" ok bash -c \
+  "$adr54_fns; adr54_bare stack validate -f '$SCWORK/fw-orfao.yaml' 2>&1 | grep -q \"target 'sc-$PFX-nada' is not a declared or registered SystemContainer\""
+check "um scope mal escrito é recusado e a mensagem lista os válidos" ok bash -c \
+  "$adr54_fns; adr54_bare stack validate -f '$SCWORK/fw-typo.yaml' 2>&1 | grep -q 'container|network|vm|systemcontainer'"
+check "a firewall de um system container é declarada partial no proxmox" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.firewall' | grep -q 'partial'"
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################

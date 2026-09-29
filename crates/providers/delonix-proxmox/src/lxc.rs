@@ -328,6 +328,115 @@ impl Client {
         )
     }
 
+    /// `GET /nodes/{node}/lxc/{vmid}/firewall/options`: the container's own
+    /// firewall switch and default verdicts.
+    pub fn lxc_firewall_options(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!("/nodes/{}/lxc/{vmid}/firewall/options", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "container firewall options")?;
+        Ok(w.data)
+    }
+
+    /// `PUT /nodes/{node}/lxc/{vmid}/firewall/options` with one key
+    /// (`enable`, `policy_in`, `policy_out`). The probe re-reads the option.
+    pub fn lxc_set_firewall_option(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        key: &str,
+        value: &str,
+    ) -> Result<()> {
+        if key != "enable" {
+            crate::validate_firewall_action(value)?;
+        }
+        let path = format!("/nodes/{}/lxc/{vmid}/firewall/options", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::FirewallOptions,
+            || self.put_form(&path, &[(key, value)]),
+            Some(&|| {
+                let o = self.lxc_firewall_options(vmid)?;
+                let got = o.get(key);
+                Ok(got.and_then(|v| v.as_str()) == Some(value)
+                    || got
+                        .and_then(|v| v.as_u64())
+                        .map(|n| n.to_string())
+                        .as_deref()
+                        == Some(value))
+            }),
+        )
+    }
+
+    /// `GET /nodes/{node}/lxc/{vmid}/firewall/rules`, in the node's order.
+    pub fn lxc_firewall_rules(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/lxc/{vmid}/firewall/rules", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "container firewall rules")?;
+        Ok(w.data)
+    }
+
+    /// `POST /nodes/{node}/lxc/{vmid}/firewall/rules`: one rule, inserted at
+    /// the top by the node.
+    pub fn lxc_add_firewall_rule(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        rule_type: &str,
+        action: &str,
+        opts: &crate::FirewallRuleOpts,
+    ) -> Result<()> {
+        crate::validate_firewall_direction(rule_type)?;
+        crate::validate_firewall_action(action)?;
+        let enable = if opts.enable.unwrap_or(true) {
+            "1"
+        } else {
+            "0"
+        };
+        let mut form: Vec<(&str, String)> = vec![
+            ("type", rule_type.to_string()),
+            ("action", action.to_string()),
+            ("enable", enable.to_string()),
+        ];
+        form.extend(crate::firewall_rule_common_fields(opts));
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let path = format!("/nodes/{}/lxc/{vmid}/firewall/rules", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::AddFirewallRule,
+            || self.post_form(&path, &form, true),
+            None,
+        )
+    }
+
+    /// `DELETE /nodes/{node}/lxc/{vmid}/firewall/rules/{pos}`.
+    pub fn lxc_delete_firewall_rule(&self, ledger: &Ledger, vmid: u32, pos: u32) -> Result<()> {
+        let path = format!("/nodes/{}/lxc/{vmid}/firewall/rules/{pos}", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallRule,
+            || self.delete(&path),
+            None,
+        )
+    }
+
+    /// Puts `firewall=1` on the container's `net0`, without which the node
+    /// never routes its traffic through the firewall. A container with no
+    /// `net0` has nothing to filter, and that is refused by name; a `net0`
+    /// that already has it is left alone.
+    pub fn lxc_ensure_nic_firewall(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        let cfg = self.lxc_config(vmid)?;
+        let net0 = cfg.get("net0").and_then(|v| v.as_str()).ok_or_else(|| {
+            Error::InvalidSystemContainer(format!(
+                "proxmox: container {vmid} has no network (net0), so a firewall has nothing to filter — declare spec.network"
+            ))
+        })?;
+        let Some(wanted) = crate::vm_firewall::net0_with_firewall(net0) else {
+            return Ok(());
+        };
+        self.lxc_set_config(ledger, vmid, &[("net0", wanted.as_str())])
+    }
+
     /// `GET …/lxc/{vmid}/snapshot`: the snapshot names, without the API's
     /// `current` pseudo-entry (the live state, not a snapshot anybody took).
     pub fn lxc_snapshots(&self, vmid: u32) -> Result<Vec<String>> {
@@ -1135,6 +1244,41 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
             name: new_name.to_string(),
             locator: format!("proxmox:{}:{newid}", client.node),
         })
+    }
+
+    fn apply_firewall(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        policy: &delonix_compute::vm_firewall::Policy,
+    ) -> delonix_model::Result<()> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let guest = crate::vm_firewall::LxcFirewall {
+            client: &client,
+            vmid,
+        };
+        Ok(crate::vm_firewall::apply_on(
+            &client,
+            &guest,
+            &Ledger::at(dir),
+            policy,
+        )?)
+    }
+
+    fn read_firewall(
+        &self,
+        _dir: &Path,
+        h: &SystemContainerHandle,
+        direction: delonix_compute::vm_firewall::Direction,
+    ) -> delonix_model::Result<delonix_compute::vm_firewall::Policy> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let guest = crate::vm_firewall::LxcFirewall {
+            client: &client,
+            vmid,
+        };
+        Ok(crate::vm_firewall::read_on(&guest, direction)?)
     }
 
     fn restore_backup(

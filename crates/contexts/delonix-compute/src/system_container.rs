@@ -194,6 +194,22 @@ pub trait SystemContainerProvider: Provider {
         new_name: &str,
         snapshot: Option<&str>,
     ) -> Result<SystemContainerHandle>;
+    /// Replaces this engine's rules and default verdict for one direction of
+    /// the container's own firewall on the provider (`scope: systemcontainer`),
+    /// the same policy a `scope: vm` document puts on a VM.
+    fn apply_firewall(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        policy: &crate::vm_firewall::Policy,
+    ) -> Result<()>;
+    /// What the provider holds for one direction of the container's firewall.
+    fn read_firewall(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        direction: crate::vm_firewall::Direction,
+    ) -> Result<crate::vm_firewall::Policy>;
     /// Puts the container back from one of its own archives, and leaves it in
     /// the state it was in before the call. Answers the settings the provider
     /// did not put back (each as `key: value`), empty when it restored all.

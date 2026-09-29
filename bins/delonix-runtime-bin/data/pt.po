@@ -14679,3 +14679,13 @@ msgstr "uma cópia de um container a correr — o provider tira um snapshot temp
 
 msgid "a copy of the container as it was at a snapshot"
 msgstr "uma cópia do container tal como estava num snapshot"
+
+# NetworkPolicy scope: systemcontainer (plano 63, fatia 5)
+msgid "{kind}/{name}: invalid scope '{scope}' (use container|network|vm|systemcontainer)"
+msgstr "{kind}/{name}: scope inválido '{scope}' (usa container|network|vm|systemcontainer)"
+
+msgid "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm|systemcontainer)"
+msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm|systemcontainer)"
+
+msgid "{kind} '{name}' (scope systemcontainer) → target '{target}' is not a declared or registered SystemContainer"
+msgstr "{kind} '{name}' (scope systemcontainer) → o target '{target}' não é um SystemContainer declarado ou registado"

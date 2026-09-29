@@ -1238,6 +1238,13 @@ variable au moment où le programme s’exécute.</p>
 <td>Sans elle, la moitié « contrôleur » de ce test est sautée ; le reste s’exécute quand même.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
+<td>Le pont du nœud sur lequel le conteneur système du test de pare-feu est branché : le pare-feu a besoin d’un <code>net0</code> où poser <code>firewall=1</code>.</td>
+<td>Un pont qui existe sur le nœud.</td>
+<td><code>vmbr0</code>.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
 <td>Une VM existante, avec l’agent invité QEMU en cours d’exécution, dont le test lit l’IP.</td>

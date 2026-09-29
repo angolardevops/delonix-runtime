@@ -956,6 +956,31 @@ pub(crate) fn is_running(name: &str) -> Result<bool> {
         .running)
 }
 
+/// Puts a `scope: systemcontainer` policy on the container's own firewall on
+/// its provider.
+pub(crate) fn apply_firewall(name: &str, policy: &delonix_vm::firewall::Policy) -> Result<()> {
+    let rec = record(name)?;
+    resolve_provider()?.apply_firewall(&ledger_dir(name), &handle_of(&rec), policy)
+}
+
+/// What the provider holds for one direction of a registered container's
+/// firewall; `None` when no container of that name is registered (the plan
+/// then says Create).
+pub(crate) fn read_firewall(
+    name: &str,
+    direction: delonix_vm::firewall::Direction,
+) -> Result<Option<delonix_vm::firewall::Policy>> {
+    let Ok(rec) = store()?.load(name) else {
+        return Ok(None);
+    };
+    let p = resolve_provider()?;
+    let h = handle_of(&rec);
+    if p.configuration(&ledger_dir(name), &h)?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(p.read_firewall(&ledger_dir(name), &h, direction)?))
+}
+
 pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     let s = store()?;
     for name in names {

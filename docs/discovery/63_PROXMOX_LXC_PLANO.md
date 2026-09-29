@@ -332,6 +332,20 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   ficou volume» dos cinco casos LXC ao vivo eram vazias. Leem agora `rootdir`
   (`list_ct_volumes`), e os cinco passaram assim (572 s).
 
+- **Firewall: feita.** `kind: NetworkPolicy` com `scope: systemcontainer` põe a política na
+  firewall do container no nó, pelas mesmas regras do `scope: vm` (ADR-0052): posse por comentário
+  `delonix-managed:<n>`, a política por omissão escrita em último, e o `enable` do DATACENTER
+  recusado quando desligado (DX-6508), nunca ligado pelo motor. O provider liga o `enable` do
+  container e `firewall=1` no `net0`; um container sem `net0` é recusado (DX-1540) antes de
+  escrever regras. O código é UM só para os dois scopes (`GuestFirewall`, com uma implementação
+  QEMU e uma LXC), para a VM e o container nunca discordarem sobre a ordem ou a posse. O alvo é
+  verificado contra os SystemContainers declarados e registados no `stack validate`/`apply`.
+  Capacidade `system-container.firewall`, `partial`: nenhum pacote atravessou o container num
+  teste. **Medido pela CLI no `pve`**: apply → plan sem mudanças; uma regra apagada à mão no nó
+  deu `~` com a regra em falta, o apply convergiu e o plan voltou limpo; o delete não deixou volume.
+  As escritas de firewall respondem em linha (sem UPID), por isso não deixam registo no livro de
+  tarefas.
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes

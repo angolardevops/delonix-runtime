@@ -1250,11 +1250,14 @@ pub(crate) struct FwDocSpec {
     /// preserves it; `apply` reads it directly from `doc.spec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     direction: Option<String>,
-    /// `container` (default), `network` or `vm`. In `network` (only `Egress`), the
-    /// `target` is a NETWORK NAME and the per-network egress policy + CIDR/FQDN
-    /// allowlist + L4 rate-limit apply — not per-container L4 rules. In `vm`, the
-    /// `target` is a VM NAME and the rules land on the firewall of the node the
-    /// VM runs on — today a Proxmox node; any other backend refuses (ADR-0052).
+    /// `container` (default), `network`, `vm` or `systemcontainer`. In `network`
+    /// (only `Egress`), the `target` is a NETWORK NAME and the per-network egress
+    /// policy + CIDR/FQDN allowlist + L4 rate-limit apply — not per-container L4
+    /// rules. In `vm`, the `target` is a VM NAME and the rules land on the
+    /// firewall of the node the VM runs on — today a Proxmox node; any other
+    /// backend refuses (ADR-0052). In `systemcontainer`, the `target` is a
+    /// `SystemContainer` and the rules land on its own firewall on the node, the
+    /// same way (ADR-0058).
     #[serde(default)]
     scope: Option<String>,
     /// `container` (default): container name. `network`: network name. `vm`: VM name.
@@ -1365,7 +1368,10 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             other => {
                 return Err(Error::Invalid(super::po::tf(
                     "FirewallPolicy/{name}: direction is required and ∈ {{ingress, egress}} (got {other})",
-                    &[("name", &doc.metadata.name), ("other", &format!("{other:?}"))],
+                    &[
+                        ("name", &doc.metadata.name),
+                        ("other", &format!("{other:?}")),
+                    ],
                 )));
             }
         };
@@ -1433,10 +1439,10 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         "defaultPolicy".into(),
         spec.default_policy.clone().unwrap_or_else(|| "deny".into()),
     );
-    // scope: vm — the node keeps the rules IN ORDER and the first match wins,
-    // so order IS meaning here (unlike the container chain, built from the
-    // set): the keys are not sorted.
-    if spec.scope.as_deref() == Some("vm") {
+    // scope: vm / systemcontainer — the node keeps the rules IN ORDER and
+    // the first match wins, so order IS meaning here (unlike the container
+    // chain, built from the set): the keys are not sorted.
+    if is_guest_scope(spec.scope.as_deref()) {
         let dir = if spec.direction.as_deref() == Some("egress") {
             "out"
         } else {
@@ -1511,7 +1517,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
             continue;
         };
-        if spec.scope.as_deref() == Some("vm") {
+        if is_guest_scope(spec.scope.as_deref()) {
             if let Some(a) = actual_vm(doc, &spec)? {
                 out.push(a);
             }
@@ -1575,6 +1581,12 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
 /// backend. A VM not created yet is `None` (the plan says Create); any other
 /// failure — the node unreachable, a backend with no VM firewall — is an
 /// error, never an empty policy that would read as "nothing applied yet".
+/// `vm` and `systemcontainer` put the policy on the provider's own firewall
+/// for that guest, with the same rules and the same ordered comparison.
+fn is_guest_scope(scope: Option<&str>) -> bool {
+    matches!(scope, Some("vm") | Some("systemcontainer"))
+}
+
 fn actual_vm(doc: &ManifestDoc, spec: &FwDocSpec) -> Result<Option<super::reconcile::Actual>> {
     use delonix_vm::firewall::Direction;
     let direction = match spec.direction.as_deref() {
@@ -1582,21 +1594,29 @@ fn actual_vm(doc: &ManifestDoc, spec: &FwDocSpec) -> Result<Option<super::reconc
         Some("egress") => Direction::Out,
         _ => return Ok(None),
     };
-    let root = super::util::state_root();
-    if delonix_vm::list(&root)?
-        .iter()
-        .all(|v| v.name != spec.target)
-    {
-        return Ok(None);
-    }
-    let policy = delonix_vm::read_firewall(&root, &spec.target, direction)?;
+    let scope = spec.scope.clone().unwrap_or_default();
+    let policy = if scope == "systemcontainer" {
+        match super::system_container::read_firewall(&spec.target, direction)? {
+            Some(p) => p,
+            None => return Ok(None),
+        }
+    } else {
+        let root = super::util::state_root();
+        if delonix_vm::list(&root)?
+            .iter()
+            .all(|v| v.name != spec.target)
+        {
+            return Ok(None);
+        }
+        delonix_vm::read_firewall(&root, &spec.target, direction)?
+    };
     let mut f = std::collections::BTreeMap::new();
     f.insert("target".into(), spec.target.clone());
     f.insert(
         "direction".into(),
         spec.direction.clone().unwrap_or_default(),
     );
-    f.insert("scope".into(), "vm".into());
+    f.insert("scope".into(), scope);
     f.insert(
         "defaultPolicy".into(),
         if policy.default_allow {
@@ -1689,9 +1709,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     // Validate the scope explicitly — a typo (`netowrk`) must not fall silently
     // into the container path and fail later with 'container does not exist'.
     let scope = spec.scope.as_deref().unwrap_or("container");
-    if !matches!(scope, "container" | "network" | "vm") {
+    if !matches!(scope, "container" | "network" | "vm" | "systemcontainer") {
         return Err(Error::Invalid(super::po::tf(
-            "{kind}/{name}: invalid scope '{scope}' (use container|network|vm)",
+            "{kind}/{name}: invalid scope '{scope}' (use container|network|vm|systemcontainer)",
             &[
                 ("kind", kind),
                 ("name", &doc.metadata.name),
@@ -1718,6 +1738,26 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         delonix_vm::apply_firewall(&super::util::state_root(), &spec.target, &policy)?;
         println!(
             "{kind}/{}: applied to VM {} on its node's firewall ({} rule(s), default {})",
+            doc.metadata.name,
+            spec.target,
+            policy.rules.len(),
+            if policy.default_allow {
+                "allow"
+            } else {
+                "deny"
+            }
+        );
+        return Ok(());
+    }
+
+    // scope: systemcontainer — the provider's OWN firewall for that system
+    // container (ADR-0058, plan 63 slice 5): the same policy, the same node
+    // switches, under the container's firewall routes.
+    if scope == "systemcontainer" {
+        let policy = vm_policy(kind, &doc.metadata.name, &spec, dir)?;
+        super::system_container::apply_firewall(&spec.target, &policy)?;
+        println!(
+            "{kind}/{}: applied to system container {} on its node's firewall ({} rule(s), default {})",
             doc.metadata.name,
             spec.target,
             policy.rules.len(),

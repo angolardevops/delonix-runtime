@@ -199,29 +199,172 @@ pub fn datacenter_enabled(options: &serde_json::Value) -> bool {
     }
 }
 
+/// The firewall of one guest on the node, as the policy engine needs it. A VM
+/// and a system container have the same firewall API under different paths
+/// (`/qemu/{vmid}/firewall/…` and `/lxc/{vmid}/firewall/…`), and the same
+/// three switches: the datacenter `enable`, the guest's own `enable`, and
+/// `firewall=1` on its `net0`.
+pub trait GuestFirewall {
+    /// `VM 100`, `container 100`: how an error names the guest.
+    fn label(&self) -> String;
+    /// The `scope` value a policy targets this kind of guest with.
+    fn scope(&self) -> &'static str;
+    fn settle(&self, ledger: &Ledger) -> Result<()>;
+    fn options(&self) -> Result<serde_json::Value>;
+    fn rules(&self) -> Result<Vec<serde_json::Value>>;
+    fn ensure_nic(&self, ledger: &Ledger) -> Result<()>;
+    fn set_enabled(&self, ledger: &Ledger) -> Result<()>;
+    fn set_policy(&self, ledger: &Ledger, direction: &str, verdict: &str) -> Result<()>;
+    fn add_rule(
+        &self,
+        ledger: &Ledger,
+        direction: &str,
+        action: &str,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()>;
+    fn delete_rule(&self, ledger: &Ledger, pos: u32) -> Result<()>;
+}
+
+/// A VM's firewall (`/qemu/{vmid}/firewall/…`).
+pub struct QemuFirewall<'a> {
+    pub client: &'a Client,
+    pub vmid: u32,
+}
+
+impl GuestFirewall for QemuFirewall<'_> {
+    fn label(&self) -> String {
+        format!("VM {}", self.vmid)
+    }
+    fn scope(&self) -> &'static str {
+        "vm"
+    }
+    fn settle(&self, ledger: &Ledger) -> Result<()> {
+        self.client.settle_pending(ledger, self.vmid)
+    }
+    fn options(&self) -> Result<serde_json::Value> {
+        self.client.firewall_options(self.vmid)
+    }
+    fn rules(&self) -> Result<Vec<serde_json::Value>> {
+        self.client.firewall_rules(self.vmid)
+    }
+    fn ensure_nic(&self, ledger: &Ledger) -> Result<()> {
+        self.client.ensure_nic_firewall(ledger, self.vmid)
+    }
+    fn set_enabled(&self, ledger: &Ledger) -> Result<()> {
+        self.client.set_firewall_enabled(ledger, self.vmid, true)
+    }
+    fn set_policy(&self, ledger: &Ledger, direction: &str, verdict: &str) -> Result<()> {
+        self.client
+            .set_firewall_policy(ledger, self.vmid, direction, verdict)
+    }
+    fn add_rule(
+        &self,
+        ledger: &Ledger,
+        direction: &str,
+        action: &str,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        self.client
+            .add_firewall_rule(ledger, self.vmid, direction, action, opts)
+    }
+    fn delete_rule(&self, ledger: &Ledger, pos: u32) -> Result<()> {
+        self.client.delete_firewall_rule(ledger, self.vmid, pos)
+    }
+}
+
+/// A system container's firewall (`/lxc/{vmid}/firewall/…`, ADR-0058).
+pub struct LxcFirewall<'a> {
+    pub client: &'a Client,
+    pub vmid: u32,
+}
+
+impl GuestFirewall for LxcFirewall<'_> {
+    fn label(&self) -> String {
+        format!("container {}", self.vmid)
+    }
+    fn scope(&self) -> &'static str {
+        "systemcontainer"
+    }
+    fn settle(&self, ledger: &Ledger) -> Result<()> {
+        self.client.settle_pending(ledger, self.vmid)
+    }
+    fn options(&self) -> Result<serde_json::Value> {
+        self.client.lxc_firewall_options(self.vmid)
+    }
+    fn rules(&self) -> Result<Vec<serde_json::Value>> {
+        self.client.lxc_firewall_rules(self.vmid)
+    }
+    fn ensure_nic(&self, ledger: &Ledger) -> Result<()> {
+        self.client.lxc_ensure_nic_firewall(ledger, self.vmid)
+    }
+    fn set_enabled(&self, ledger: &Ledger) -> Result<()> {
+        self.client
+            .lxc_set_firewall_option(ledger, self.vmid, "enable", "1")
+    }
+    fn set_policy(&self, ledger: &Ledger, direction: &str, verdict: &str) -> Result<()> {
+        let key = match direction {
+            "in" => "policy_in",
+            "out" => "policy_out",
+            other => {
+                return Err(Error::InvalidDiskSpec(format!(
+                    "proxmox: '{other}' is not a firewall direction (in, out)"
+                )));
+            }
+        };
+        self.client
+            .lxc_set_firewall_option(ledger, self.vmid, key, verdict)
+    }
+    fn add_rule(
+        &self,
+        ledger: &Ledger,
+        direction: &str,
+        action: &str,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        self.client
+            .lxc_add_firewall_rule(ledger, self.vmid, direction, action, opts)
+    }
+    fn delete_rule(&self, ledger: &Ledger, pos: u32) -> Result<()> {
+        self.client.lxc_delete_firewall_rule(ledger, self.vmid, pos)
+    }
+}
+
 /// Replaces this engine's rules and default verdict for one direction of a VM.
+pub fn apply(client: &Client, ledger: &Ledger, vmid: u32, policy: &Policy) -> Result<()> {
+    apply_on(client, &QemuFirewall { client, vmid }, ledger, policy)
+}
+
+/// Replaces this engine's rules and default verdict for one direction of a
+/// guest.
 ///
 /// Order, and why: the datacenter check first (refuse before touching
-/// anything); then the NIC switch and the VM's `enable` — so the VM is never
-/// left with rules that look present and filter nothing; then the old managed
-/// rules out, the new ones in, and the default verdict LAST, so a `deny`
-/// default is never in force with the allow rules not yet written.
-pub fn apply(client: &Client, ledger: &Ledger, vmid: u32, policy: &Policy) -> Result<()> {
+/// anything); then the NIC switch and the guest's `enable` — so the guest is
+/// never left with rules that look present and filter nothing; then the old
+/// managed rules out, the new ones in, and the default verdict LAST, so a
+/// `deny` default is never in force with the allow rules not yet written.
+pub fn apply_on(
+    client: &Client,
+    guest: &dyn GuestFirewall,
+    ledger: &Ledger,
+    policy: &Policy,
+) -> Result<()> {
     let dc = client.cluster_firewall_options()?;
     if !datacenter_enabled(&dc) {
         return Err(Error::DatacenterFirewallDisabled(format!(
-            "proxmox: the datacenter firewall of this cluster is off, so no rule of VM {vmid} \
+            "proxmox: the datacenter firewall of this cluster is off, so no rule of {} \
              would filter anything — enable it (Datacenter › Firewall › Options) before applying \
-             a `scope: vm` policy; this engine never turns it on"
+             a `scope: {}` policy; this engine never turns it on",
+            guest.label(),
+            guest.scope()
         )));
     }
-    client.settle_pending(ledger, vmid)?;
-    client.ensure_nic_firewall(ledger, vmid)?;
-    client.set_firewall_enabled(ledger, vmid, true)?;
+    guest.settle(ledger)?;
+    guest.ensure_nic(ledger)?;
+    guest.set_enabled(ledger)?;
 
-    let existing = client.firewall_rules(vmid)?;
+    let existing = guest.rules()?;
     for pos in managed_positions(&existing, policy.direction) {
-        client.delete_firewall_rule(ledger, vmid, pos)?;
+        guest.delete_rule(ledger, pos)?;
     }
     // The node inserts at the top: write in reverse to read back in order.
     for r in node_rules(policy).iter().rev() {
@@ -243,20 +386,25 @@ pub fn apply(client: &Client, ledger: &Ledger, vmid: u32, policy: &Policy) -> Re
             rule_type: None,
             action: None,
         };
-        client.add_firewall_rule(ledger, vmid, policy.direction.as_str(), r.action, &opts)?;
+        guest.add_rule(ledger, policy.direction.as_str(), r.action, &opts)?;
     }
     let verdict = if policy.default_allow {
         "ACCEPT"
     } else {
         "DROP"
     };
-    client.set_firewall_policy(ledger, vmid, policy.direction.as_str(), verdict)
+    guest.set_policy(ledger, policy.direction.as_str(), verdict)
 }
 
-/// What the node holds for one direction (see [`policy_from_node`]).
+/// What the node holds for one direction of a VM (see [`policy_from_node`]).
 pub fn read(client: &Client, vmid: u32, direction: Direction) -> Result<Policy> {
-    let options = client.firewall_options(vmid)?;
-    let rules = client.firewall_rules(vmid)?;
+    read_on(&QemuFirewall { client, vmid }, direction)
+}
+
+/// What the node holds for one direction of a guest.
+pub fn read_on(guest: &dyn GuestFirewall, direction: Direction) -> Result<Policy> {
+    let options = guest.options()?;
+    let rules = guest.rules()?;
     Ok(policy_from_node(&options, &rules, direction))
 }
 

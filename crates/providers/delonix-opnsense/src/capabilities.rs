@@ -34,50 +34,155 @@ pub fn capability_report(configured: bool) -> ProviderReport {
     const LIVE: &str = "live:crates/providers/delonix-opnsense/tests/live.rs::ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance";
     ProviderReport::build(crate::ID, ProviderKind::Gateway, configured, health, |c| {
         match c {
-        C::NetGatewayFilter | C::NetGatewayAlias | C::NetApplyStaged => S::Supported { evidence: LIVE },
-        C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder => S::NotImplemented,
-        C::NetGatewayMultiWan | C::NetGatewayVpn => S::NotImplemented,
-        C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
-        C::NetLbL4 | C::NetLbHealthCheck => S::RequiresExternalComponent { component: "the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API" },
-        C::NetDnsRecords | C::NetDnsAuthoritative => S::NotImplemented,
-        C::NetIpamReservation | C::NetIpamDhcp => S::NotImplemented,
-        C::NetIpamProvider => S::UnsupportedByProvider { reason: "the appliance has no IPAM beyond its DHCP servers (net.ipam.dhcp)" },
-        C::NetSegmentRemote => S::UnsupportedByProvider { reason: "creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns" },
-        C::NetApplyRollback => S::NotImplemented,
-        C::NetObserve => S::Partial { detail: "`search_rule` and the alias read back what exists before a write; no comparison with the record yet (ADR-0059 F4)" },
-        C::NetVerifyDataplane => S::NotImplemented,
-        C::NetOwnershipMarker => S::Partial { detail: "every alias and rule carries a firewall category `delonix-owner:<token>`; one without it is refused, never adopted or deleted, and the commit refuses someone else's staged change — tested on the TLS mock, not yet measured against a live appliance (S6)" },
-        C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted
-        | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks
-        | C::NetNamespaceIsolation | C::NetL7Proxy | C::NetTunnelEgress | C::NetIpv6
-        | C::NetRateLimit | C::NetPacketCapture => S::UnsupportedByProvider { reason: "a feature of the engine's own SDN on the node; a perimeter appliance does not see it" },
-        C::FirewallPerWorkload | C::FirewallDefaultDeny | C::FirewallSourceFiltering
-        | C::FirewallEgressPolicy => S::UnsupportedByProvider { reason: "per-workload rules are the node's; a perimeter appliance answers net.gateway.* (ADR-0051)" },
-        C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
-        C::FirewallWorkloadPeer => S::UnsupportedByProvider { reason: "the appliance does not know the engine's namespaces; a peer is refused, never expanded into a CIDR snapshot (ADR-0059 D6)" },
-        C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
-        | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
-        | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold
-        | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
-        | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
-        | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone
-        | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
-        | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
-        | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
-        | C::ContainerImages | C::VmNetworkNat | C::VmNetworkBridge | C::VmNetworkSdn
-        | C::VmStaticIp | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs
-        | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas
-        | C::StoragePools | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph
-        | C::VmSnapshotDisk | C::VmSnapshotMemory | C::VmSnapshotRestore | C::VmSnapshotDelete
-        | C::VmSnapshotPersistent | C::VmBackupDisk | C::VmBackupQuiesced | C::VmBackupRestore
-        | C::ContainerBackupRestore | C::VmMigrationCold | C::VmMigrationLive | C::VmReplication
-        | C::VmHighAvailability | C::VmConsoleSerial | C::VmConsoleVnc | C::VmGuestAgent
-        | C::VmIpObserved | C::MetricsPrometheus | C::MetricsPerWorkloadNetwork | C::HostHealth
-        | C::HostCapacity | C::TransportVerified | C::CredentialInVault => {
-            S::UnsupportedByProvider { reason: "not a network capability" }
+            C::NetGatewayFilter | C::NetGatewayAlias | C::NetApplyStaged => {
+                S::Supported { evidence: LIVE }
+            }
+            C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder => S::NotImplemented,
+            C::NetGatewayMultiWan | C::NetGatewayVpn => S::NotImplemented,
+            C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
+            C::NetLbL4 | C::NetLbHealthCheck => S::RequiresExternalComponent {
+                component: "the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API",
+            },
+            C::NetDnsRecords | C::NetDnsAuthoritative => S::NotImplemented,
+            C::NetIpamReservation | C::NetIpamDhcp => S::NotImplemented,
+            C::NetIpamProvider => S::UnsupportedByProvider {
+                reason: "the appliance has no IPAM beyond its DHCP servers (net.ipam.dhcp)",
+            },
+            C::NetSegmentRemote => S::UnsupportedByProvider {
+                reason: "creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns",
+            },
+            C::NetApplyRollback => S::NotImplemented,
+            C::NetObserve => S::Partial {
+                detail: "`search_rule` and the alias read back what exists before a write; no comparison with the record yet (ADR-0059 F4)",
+            },
+            C::NetVerifyDataplane => S::NotImplemented,
+            C::NetOwnershipMarker => S::Partial {
+                detail: "every alias and rule carries a firewall category `delonix-owner:<token>`; one without it is refused, never adopted or deleted, and the commit refuses someone else's staged change — tested on the TLS mock, not yet measured against a live appliance (S6)",
+            },
+            C::NetBridge
+            | C::NetMacvlanIpvlan
+            | C::NetVlan
+            | C::NetOverlayVxlan
+            | C::NetOverlayEncrypted
+            | C::NetIpam
+            | C::NetStaticIp
+            | C::NetDns
+            | C::NetPublishPorts
+            | C::NetRoutesBetweenNetworks
+            | C::NetNamespaceIsolation
+            | C::NetL7Proxy
+            | C::NetTunnelEgress
+            | C::NetIpv6
+            | C::NetRateLimit
+            | C::NetPacketCapture => S::UnsupportedByProvider {
+                reason: "a feature of the engine's own SDN on the node; a perimeter appliance does not see it",
+            },
+            C::FirewallPerWorkload
+            | C::FirewallDefaultDeny
+            | C::FirewallSourceFiltering
+            | C::FirewallEgressPolicy => S::UnsupportedByProvider {
+                reason: "per-workload rules are the node's; a perimeter appliance answers net.gateway.* (ADR-0051)",
+            },
+            C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
+            C::FirewallWorkloadPeer => S::UnsupportedByProvider {
+                reason: "the appliance does not know the engine's namespaces; a peer is refused, never expanded into a CIDR snapshot (ADR-0059 D6)",
+            },
+            C::ProviderAvailability
+            | C::ResourceReadback
+            | C::Events
+            | C::AsyncOperations
+            | C::VmCreate
+            | C::VmStart
+            | C::VmStop
+            | C::VmDestroy
+            | C::VmRestart
+            | C::VmPause
+            | C::VmResume
+            | C::VmResumeSameIdentity
+            | C::VmClone
+            | C::VmTemplate
+            | C::VmResizeCold
+            | C::VmHotplug
+            | C::VmExtraDisks
+            | C::VmExtraNics
+            | C::VmDiskResize
+            | C::VmPciPassthrough
+            | C::VmTpm
+            | C::VmCpuModel
+            | C::VmCpuPinning
+            | C::VmHugepages
+            | C::VmCloudInit
+            | C::VmRestartPolicyNative
+            | C::VmNamespaceIsolation
+            | C::VmAntispoof
+            | C::VmRawDefinition
+            | C::SystemContainerLifecycle
+            | C::SystemContainerOciImage
+            | C::SystemContainerEntrypointEnv
+            | C::SystemContainerExec
+            | C::SystemContainerLogs
+            | C::SystemContainerExitStatus
+            | C::SystemContainerNetworkBridge
+            | C::SystemContainerUnprivileged
+            | C::SystemContainerSnapshot
+            | C::SystemContainerResize
+            | C::SystemContainerBackup
+            | C::SystemContainerClone
+            | C::SystemContainerFirewall
+            | C::ContainerLifecycle
+            | C::ContainerExec
+            | C::ContainerLogs
+            | C::ContainerHotReconfigure
+            | C::ContainerResourceLimits
+            | C::ContainerGpuCdi
+            | C::ContainerSeccompCustomProfile
+            | C::ContainerOomDetection
+            | C::PodSharedNetwork
+            | C::PodSharedIpcUts
+            | C::PodSharedPid
+            | C::ContainerImages
+            | C::VmNetworkNat
+            | C::VmNetworkBridge
+            | C::VmNetworkSdn
+            | C::VmStaticIp
+            | C::VolumeLocal
+            | C::VolumeBind
+            | C::VolumeNfs
+            | C::VolumeCifs
+            | C::VolumeWebdav
+            | C::VolumeQuota
+            | C::VolumeSnapshot
+            | C::VolumeProvisionNas
+            | C::StoragePools
+            | C::StorageLvmThin
+            | C::StorageZfsBtrfs
+            | C::StorageCeph
+            | C::VmSnapshotDisk
+            | C::VmSnapshotMemory
+            | C::VmSnapshotRestore
+            | C::VmSnapshotDelete
+            | C::VmSnapshotPersistent
+            | C::VmBackupDisk
+            | C::VmBackupQuiesced
+            | C::VmBackupRestore
+            | C::ContainerBackupRestore
+            | C::VmMigrationCold
+            | C::VmMigrationLive
+            | C::VmReplication
+            | C::VmHighAvailability
+            | C::VmConsoleSerial
+            | C::VmConsoleVnc
+            | C::VmGuestAgent
+            | C::VmIpObserved
+            | C::MetricsPrometheus
+            | C::MetricsPerWorkloadNetwork
+            | C::HostHealth
+            | C::HostCapacity
+            | C::TransportVerified
+            | C::CredentialInVault => S::UnsupportedByProvider {
+                reason: "not a network capability",
+            },
         }
-    }
     })
 }
 

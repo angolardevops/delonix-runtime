@@ -8046,6 +8046,10 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   sem destruir, medido), e o «não ficou volume» dos casos LXC lia `content=images`, onde o volume
   de um container (`rootdir`) nunca aparece. Uma verificação de ausência tem de conseguir ver a
   presença — prova-se primeiro que ela vê o recurso VIVO.
+  A firewall entra por `kind: NetworkPolicy` com `scope: systemcontainer`, pelo MESMO código do
+  `scope: vm` (`GuestFirewall`, uma implementação QEMU e uma LXC): posse por comentário, datacenter
+  recusado quando desligado, `firewall=1` no `net0`. Um container sem `net0` é recusado antes de
+  qualquer regra. `partial`, como as linhas `scope: vm`: nenhum pacote atravessou o container.
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
