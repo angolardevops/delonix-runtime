@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 25 crates.
+[README.md](README.md) para a arquitectura dos 26 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -7006,7 +7006,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (25 crates)
+## Arquitetura (26 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -7020,7 +7020,8 @@ antes de qualquer commit:
 | `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
-| `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
+| `delonix-vm` | a raiz de composição das VMs até à P5 (ADR-0044 P4b.4): semeia o registo do compute com os backends locais, monta o `VmEngine` por chamada (`JsonStore`, disco e seed locais, rede) e mantém as funções públicas como invólucros; ainda tem o backend Cloud Hypervisor (sai na P4b.4c) |
+| `delonix-provider-libvirt` | backend `VmBackend` libvirt/KVM (QEMU via `virsh`), com a sua declaração ADR-0050, a sonda do host, o backup a quente e o domínio sem registo. Saiu do `delonix-vm` na P4b.4b; depende só da fundação e dos contextos, e a raiz de composição semeia-o com `registration()` |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
 | `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |
 | `delonix-opnsense` | `GatewayProvider` remoto contra a API REST de UMA appliance OPNsense (ADR-0051). Fora do `delonix-sdn` pela mesma razão que o `delonix-proxmox` está fora do `delonix-vm` — um cliente HTTP não entra num crate de motor; registado pelo `-bin` (`cmd::gatewayproviders`), que é quem conhece o alvo |

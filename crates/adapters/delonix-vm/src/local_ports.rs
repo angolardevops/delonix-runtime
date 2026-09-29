@@ -38,20 +38,22 @@ impl VmBackends for RegistryBackends {
     }
 
     fn admit(&self, backend_id: &str, cfg: &VmConfig) -> delonix_model::Result<()> {
-        Ok(super::check_allow_mac_spoofing(cfg, backend_id)?)
+        Ok(delonix_provider_libvirt::check_allow_mac_spoofing(
+            cfg, backend_id,
+        )?)
     }
 
     /// Only libvirt keeps a VM after its record is gone: a domain an old `rm`
     /// left behind. The other local backend's VM is a process that dies with
     /// its record.
     fn unrecorded(&self, name: &str) -> Option<&'static str> {
-        super::libvirt_domain_uri(name).map(|_| "libvirt")
+        delonix_provider_libvirt::libvirt_domain_uri(name).map(|_| "libvirt")
     }
 
     fn stop_unrecorded(&self, name: &str) -> delonix_model::Result<bool> {
-        match super::libvirt_domain_uri(name) {
+        match delonix_provider_libvirt::libvirt_domain_uri(name) {
             Some(uri) => {
-                super::libvirt_poweroff(uri, name)?;
+                delonix_provider_libvirt::libvirt_poweroff(uri, name)?;
                 Ok(true)
             }
             None => Ok(false),
@@ -59,7 +61,7 @@ impl VmBackends for RegistryBackends {
     }
 
     fn remove_unrecorded(&self, name: &str) -> delonix_model::Result<()> {
-        Ok(super::libvirt_cleanup(name)?)
+        Ok(delonix_provider_libvirt::libvirt_cleanup(name)?)
     }
 }
 

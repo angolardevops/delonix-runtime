@@ -928,6 +928,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-scanner</code> → <code>delonix-oci</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-sdn</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
+<li><code>delonix-vm</code> → <code>delonix-provider-libvirt</code> — supprimée en <strong>P5</strong></li>
 <li><code>delonix-vm</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-volume</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
 </ul>
@@ -1140,6 +1141,7 @@ comprendre pourquoi.</p>
   end
   subgraph provider[&quot;Providers&quot;]
     delonix_opnsense[&quot;delonix-opnsense&quot;]
+    delonix_provider_libvirt[&quot;delonix-provider-libvirt&quot;]
     delonix_proxmox[&quot;delonix-proxmox&quot;]
     delonix_truenas[&quot;delonix-truenas&quot;]
   end
@@ -1216,6 +1218,9 @@ comprendre pourquoi.</p>
   delonix_opnsense --&gt; delonix_compute
   delonix_opnsense --&gt; delonix_model
   delonix_opnsense --&gt; delonix_sdn
+  delonix_provider_libvirt --&gt; delonix_compute
+  delonix_provider_libvirt --&gt; delonix_model
+  delonix_provider_libvirt --&gt; delonix_node
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
   delonix_proxmox --&gt; delonix_sdn
@@ -1253,6 +1258,7 @@ comprendre pourquoi.</p>
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
   delonix_vm --&gt; delonix_node
+  delonix_vm --&gt; delonix_provider_libvirt
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute
   delonix_volume --&gt; delonix_model
@@ -1272,6 +1278,7 @@ comprendre pourquoi.</p>
   class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
+  class delonix_provider_libvirt external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block

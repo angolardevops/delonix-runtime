@@ -979,6 +979,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-libvirt"
+version = "4.5.0"
+dependencies = [
+ "delonix-compute",
+ "delonix-model",
+ "delonix-node",
+ "libc",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "delonix-proxmox"
 version = "4.5.0"
 dependencies = [
@@ -1143,6 +1155,7 @@ dependencies = [
  "delonix-compute",
  "delonix-model",
  "delonix-node",
+ "delonix-provider-libvirt",
  "delonix-state",
  "libc",
  "tempfile",

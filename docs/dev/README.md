@@ -8,7 +8,7 @@ you only want to
 [user documentation site](https://angolardevops.github.io/delonix-runtime/) instead.
 
 <!-- dev-docs:begin crate-count -->
-The workspace has **25 crates** and ships **5 binaries** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`).
+The workspace has **26 crates** and ships **5 binaries** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`).
 <!-- dev-docs:end crate-count -->
 
 ## What the engine is — and what it is not

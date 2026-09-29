@@ -67,6 +67,7 @@ LAYERS = {
     "delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)
     "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
+    "delonix-provider-libvirt": PROVIDER,
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
     "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
     "delonix-cri": INTERFACE,
@@ -143,6 +144,13 @@ EXCEPTIONS = {
         "dataplane, by the same reasoning and the same exception as "
         "delonix-proxmox -> delonix-vm had (ADR-0051), which P4b.2 closed by "
         "moving VmBackend into the compute context; this one moves the same way",
+    ),
+    ("dep", "delonix-vm", "delonix-provider-libvirt"): (
+        "P5",
+        "delonix-vm is the VM composition root until the application layer exists: it "
+        "seeds the registry with the local backends and assembles the engine the bin and "
+        "three interfaces share, and no layer below INTERFACE may depend on a provider "
+        "(ADR-0044 P4b.4, docs/discovery/61, accepted 2026-09-29)",
     ),
     ("dep", "delonix-proxmox", "delonix-sdn"): (
         "P4",
