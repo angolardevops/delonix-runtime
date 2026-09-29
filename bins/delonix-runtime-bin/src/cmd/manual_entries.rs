@@ -2680,6 +2680,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["apply", "get", "vm snapshot"],
     },
     Entry {
+        path: "systemcontainer clone",
+        group: "Lifecycle",
+        examples: &[
+            ("a copy of a running container — the provider takes a temporary snapshot and deletes it", "delonix systemcontainer clone tools tools-copy"),
+            ("a copy of the container as it was at a snapshot", "delonix systemcontainer clone tools tools-old --from-snapshot before-upgrade"),
+        ],
+        see_also: &["systemcontainer snapshot create", "get", "apply"],
+    },
+    Entry {
         path: "systemcontainer snapshot",
         group: "Maintenance",
         examples: &[

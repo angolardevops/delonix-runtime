@@ -315,6 +315,23 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   CLI recusa — todo o backup agendado falhava; passa a `backup create`, e há teste que passa o
   argv pelo parser real.
 
+- **Clone: feito.** `delonix systemcontainer clone <nome> <novo> [--from-snapshot <s>]` faz uma
+  cópia completa no nó (`POST …/lxc/{vmid}/clone`, worker `vzclone`), regista-a com a imagem e os
+  campos declarados da origem, sem stack (um manifesto que a nomeie adopta-a), e arranca-a se a
+  origem estava a correr. Lido no `PVE/API2/LXC.pm`: um full clone de um container A CORRER só é
+  aceite a partir de um snapshot, por isso o provider tira um temporário e apaga-o sempre (medido:
+  nenhum fica na origem); o nó dá à cópia um MAC novo. Capacidade `system-container.clone`.
+  **O template fica de fora, de propósito**: um template não arranca, e um container gerido por
+  manifesto que deixa de poder correr é um recurso que o Kind não consegue convergir. Entra se
+  aparecer uma necessidade com nome (linked clones a partir de uma imagem-base no nó).
+  **Dois defeitos que só a re-corrida apanhou**: (1) o `destroy` tratava QUALQUER erro do
+  `GET …/config` como «já não existe» — medido: um pedido que falhou antes de chegar ao nó fez o
+  `destroy` responder sucesso sem destruir, e o container ficou no nó. Só o «does not exist» do nó
+  conta agora como ausência (`lxc_exists`), e um erro de transporte propaga-se; (2) o
+  `list_images` lê `content=images`, e o volume de um container é `rootdir` — as asserções «não
+  ficou volume» dos cinco casos LXC ao vivo eram vazias. Leem agora `rootdir`
+  (`list_ct_volumes`), e os cinco passaram assim (572 s).
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes

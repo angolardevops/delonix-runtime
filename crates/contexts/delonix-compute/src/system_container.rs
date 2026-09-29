@@ -184,6 +184,16 @@ pub trait SystemContainerProvider: Provider {
     ) -> Result<Vec<(String, u64)>>;
     /// Deletes one archive of this container; another container's is refused.
     fn delete_backup(&self, dir: &Path, h: &SystemContainerHandle, archive: &str) -> Result<()>;
+    /// A full copy of the container under `new_name`, created stopped. From a
+    /// running container the copy is taken from `snapshot`, or from a
+    /// temporary one the provider takes and deletes when none is named.
+    fn clone_as(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        new_name: &str,
+        snapshot: Option<&str>,
+    ) -> Result<SystemContainerHandle>;
     /// Puts the container back from one of its own archives, and leaves it in
     /// the state it was in before the call. Answers the settings the provider
     /// did not put back (each as `key: value`), empty when it restored all.

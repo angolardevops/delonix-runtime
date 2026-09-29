@@ -452,7 +452,7 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Declarative microVMs: create, ls, start, stop, pause/unpause, destroy, console, ssh, apply, snapshot (create/ls/rm/restore), migrate.
    * - ``systemcontainer``
      - One-off operations on a system container (``kind: SystemContainer``, ADR-0058):
-       ``snapshot create|ls|rm|restore``
+       ``snapshot create|ls|rm|restore``, ``clone``; ``backup create systemcontainer`` archives on the provider
    * - ``workload``
      - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
    * - ``image``

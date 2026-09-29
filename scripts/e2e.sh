@@ -4098,6 +4098,9 @@ check "o resize de um system container é declarado supported no proxmox" ok bas
 check "backup restore de um arquivo de container de sistema sem dono registado diz 4" 4 adr54_bare backup restore "local:backup/vzdump-lxc-999-2026_01_01-00_00_00.tar.zst" --force
 check "backup create systemcontainer de um nome não registado diz 4" 4 adr54_bare backup create systemcontainer "sc-$PFX-nada"
 check "backup create systemcontainer --quiesce é recusado (é só para VMs)" fail adr54_bare backup create systemcontainer "sc-$PFX-nada" --quiesce
+check "systemcontainer clone de um nome não registado diz 4" 4 adr54_bare systemcontainer clone "sc-$PFX-nada" "sc-$PFX-copia"
+check "o clone de um system container é declarado supported no proxmox" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.clone' | grep -q 'supported'"
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################

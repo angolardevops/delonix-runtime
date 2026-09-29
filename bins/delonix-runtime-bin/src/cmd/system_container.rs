@@ -668,6 +668,20 @@ pub enum SystemContainerCmd {
         #[command(subcommand)]
         action: SnapshotCmd,
     },
+    /// A full copy of a system container under a new name, registered here.
+    ///
+    /// The copy starts when the source was running; it belongs to no stack
+    /// until a manifest naming it takes it over.
+    Clone {
+        /// The system container to copy.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+        /// The name of the copy.
+        new_name: String,
+        /// Copy from this snapshot instead of from the container as it is now.
+        #[arg(long)]
+        from_snapshot: Option<String>,
+    },
 }
 
 /// The same four verbs, in the same order, as `vm snapshot` and `volume
@@ -721,7 +735,14 @@ fn record(name: &str) -> Result<SystemContainerRecord> {
 }
 
 pub fn run(cmd: SystemContainerCmd) -> Result<()> {
-    let SystemContainerCmd::Snapshot { action } = cmd;
+    let action = match cmd {
+        SystemContainerCmd::Snapshot { action } => action,
+        SystemContainerCmd::Clone {
+            name,
+            new_name,
+            from_snapshot,
+        } => return cmd_clone(&name, &new_name, from_snapshot.as_deref()),
+    };
     match action {
         SnapshotCmd::Create { name, snapshot } => {
             let rec = record(&name)?;
@@ -875,8 +896,40 @@ pub(crate) fn backup_restore(name: &str, archive: &str) -> Result<Vec<String>> {
 }
 
 /// Whether the provider reads the container as running.
-pub(crate) fn is_running(name: &str) -> Result<bool> {
-    let rec = record(name)?;
+/// `systemcontainer clone`: copies `name` as `new_name` on the provider,
+/// registers the copy with the source's image and declared fields, and starts
+/// it when the source was running.
+fn cmd_clone(name: &str, new_name: &str, from_snapshot: Option<&str>) -> Result<()> {
+    let s = store()?;
+    let src = record(name)?;
+    if s.load(new_name).is_ok() {
+        return Err(Error::Conflict(format!("system container: {new_name}")));
+    }
+    let provider = resolve_provider()?;
+    let was_running = is_running(name)?;
+    let h = provider.clone_as(&ledger_dir(name), &handle_of(&src), new_name, from_snapshot)?;
+    let dir = ledger_dir(new_name);
+    std::fs::create_dir_all(&dir)?;
+    let mut rec = src.clone();
+    rec.name = new_name.to_string();
+    rec.locator = h.locator.clone();
+    rec.network_state = String::new();
+    rec.labels.clear();
+    rec.annotations.clear();
+    s.save(new_name, &rec)?;
+    if was_running {
+        let port = record_port_spec(&rec)?;
+        let obs = provider.start(&dir, &h, &port)?;
+        rec.network_state = network_words(&obs.network);
+        s.save(new_name, &rec)?;
+    }
+    println!("{new_name}");
+    Ok(())
+}
+
+/// The port spec a registered container is read back and started with: the
+/// record's image and declared fields, the rest at their defaults.
+fn record_port_spec(rec: &SystemContainerRecord) -> Result<SystemContainerSpec> {
     let spec = SystemContainerSpecDoc {
         image: rec.image.clone(),
         entrypoint: rec.entrypoint.clone(),
@@ -887,7 +940,17 @@ pub(crate) fn is_running(name: &str) -> Result<bool> {
         rootfs: rec.rootfs_gib,
         network: rec.network.clone(),
     };
-    let port = port_spec(name, &spec, PathBuf::new(), rec.manifest_digest.clone())?;
+    port_spec(
+        &rec.name,
+        &spec,
+        PathBuf::new(),
+        rec.manifest_digest.clone(),
+    )
+}
+
+pub(crate) fn is_running(name: &str) -> Result<bool> {
+    let rec = record(name)?;
+    let port = record_port_spec(&rec)?;
     Ok(resolve_provider()?
         .observe(&ledger_dir(name), &handle_of(&rec), &port)?
         .running)

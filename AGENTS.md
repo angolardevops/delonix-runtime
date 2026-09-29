@@ -8040,6 +8040,12 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   `lxc.init.cwd`; só o `root@pam` as escreve), e o restore nomeia cada uma. E o timer do
   `backup schedule` corria uma forma que a CLI já não aceitava — **um teste que fixa um argv
   tem de o passar pelo parser**, senão fixa o defeito.
+  O clone (`systemcontainer clone`) é sempre full; de um container a correr, via um snapshot
+  temporário que o provider apaga. **E duas asserções que não provavam nada**: o `destroy` lia
+  qualquer erro do `config` como «já não existe» (um erro de transporte fez-lhe devolver sucesso
+  sem destruir, medido), e o «não ficou volume» dos casos LXC lia `content=images`, onde o volume
+  de um container (`rootdir`) nunca aparece. Uma verificação de ausência tem de conseguir ver a
+  presença — prova-se primeiro que ela vê o recurso VIVO.
 - **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.

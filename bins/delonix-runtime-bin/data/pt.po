@@ -14652,3 +14652,30 @@ msgstr "Um container de sistema num provider remoto (`kind: SystemContainer`): o
 msgid "  (dry run: nothing restored)"
 msgstr "  (simulação: nada foi reposto)"
 
+# systemcontainer clone (plano 63, fatia 5)
+msgid "A full copy of a system container under a new name, registered here"
+msgstr "Uma cópia completa de um container de sistema com um nome novo, registada aqui"
+
+msgid ""
+"A full copy of a system container under a new name, registered here.\n"
+"\n"
+"The copy starts when the source was running; it belongs to no stack until a manifest naming it takes it over."
+msgstr ""
+"Uma cópia completa de um container de sistema com um nome novo, registada aqui.\n"
+"\n"
+"A cópia arranca quando a origem estava a correr; não pertence a nenhum stack até um manifesto que a nomeie a adoptar."
+
+msgid "The system container to copy"
+msgstr "O container de sistema a copiar"
+
+msgid "The name of the copy"
+msgstr "O nome da cópia"
+
+msgid "Copy from this snapshot instead of from the container as it is now"
+msgstr "Copiar a partir deste snapshot em vez do container tal como está agora"
+
+msgid "a copy of a running container — the provider takes a temporary snapshot and deletes it"
+msgstr "uma cópia de um container a correr — o provider tira um snapshot temporário e apaga-o"
+
+msgid "a copy of the container as it was at a snapshot"
+msgstr "uma cópia do container tal como estava num snapshot"

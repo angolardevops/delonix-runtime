@@ -4745,11 +4745,14 @@ fn a_system_container_runs_its_lifecycle_through_the_node() {
     assert_eq!(client.lxc_status(vmid).unwrap(), "stopped");
     provider.destroy(dir.path(), &h).expect("destroy");
     assert!(
-        client.lxc_config(vmid).is_err(),
+        matches!(
+            client.lxc_config(vmid),
+            Err(delonix_proxmox::Error::NodeNotFound(_))
+        ),
         "the container is still there"
     );
     let left: Vec<_> = client
-        .list_images(&rootfs, vmid)
+        .list_ct_volumes(&rootfs, vmid)
         .expect("list")
         .into_iter()
         .collect();
@@ -4896,7 +4899,7 @@ fn a_system_containers_snapshot_is_rolled_back_and_deleted() {
     assert_eq!(gone.number(), 4503, "{gone}");
 
     provider.destroy(dir.path(), &h).expect("destroy");
-    let left = client.list_images(&rootfs, vmid).expect("list");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
     assert!(left.is_empty(), "a volume was left behind: {left:?}");
     let recs = delonix_proxmox::Ledger::at(dir.path()).records();
     for action in ["ct-snapshot", "ct-rollback", "ct-delete-snapshot"] {
@@ -4990,7 +4993,7 @@ fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
 
     provider.stop(dir.path(), &h).expect("stop");
     provider.destroy(dir.path(), &h).expect("destroy");
-    let left = client.list_images(&rootfs, vmid).expect("list");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
     assert!(left.is_empty(), "a volume was left behind: {left:?}");
     let recs = delonix_proxmox::Ledger::at(dir.path()).records();
     let grow = recs
@@ -4999,6 +5002,118 @@ fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
         .find(|r| r.action == "resize")
         .unwrap_or_else(|| panic!("no resize in the ledger: {recs:?}"));
     assert_eq!(grow.state, delonix_proxmox::TaskState::Ok, "{grow:?}");
+}
+
+/// Plan 63 slice 5, clone: a RUNNING container is copied in full under a new
+/// name — the node refuses a full copy of a running container without a
+/// snapshot, so the provider takes a temporary one and deletes it. The copy
+/// is created stopped with the source's configuration, the source keeps
+/// running, and a name the node cannot take is refused before any request.
+#[test]
+fn a_running_system_container_is_cloned_from_a_temporary_snapshot() {
+    use delonix_compute::system_container::{SystemContainerProvider, SystemContainerSpec};
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxcln{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: None,
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    provider.start(dir.path(), &h, &spec).expect("start");
+    let bad = provider
+        .clone_as(dir.path(), &h, "not a name", None)
+        .unwrap_err();
+    assert_eq!(bad.number(), 1540, "{bad}");
+
+    let copy_name = format!("{}c", spec.name);
+    let copy = provider
+        .clone_as(dir.path(), &h, &copy_name, None)
+        .expect("clone");
+    let copy_vmid: u32 = copy.locator.rsplit(':').next().unwrap().parse().unwrap();
+    assert_ne!(copy_vmid, vmid);
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "running",
+        "the source keeps running"
+    );
+    assert_eq!(
+        client.lxc_status(copy_vmid).unwrap(),
+        "stopped",
+        "the copy is created stopped"
+    );
+    assert!(
+        provider.snapshots(dir.path(), &h).unwrap().is_empty(),
+        "the temporary snapshot was left on the source"
+    );
+    let src_cfg = provider.configuration(dir.path(), &h).unwrap().unwrap();
+    let copy_dir = tempfile::tempdir().expect("tempdir");
+    let copy_cfg = provider
+        .configuration(copy_dir.path(), &copy)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (
+            copy_cfg.memory_mib,
+            copy_cfg.cores,
+            copy_cfg.rootfs_gib,
+            &copy_cfg.entrypoint
+        ),
+        (
+            src_cfg.memory_mib,
+            src_cfg.cores,
+            src_cfg.rootfs_gib,
+            &src_cfg.entrypoint
+        )
+    );
+    let raw = client.lxc_config(copy_vmid).unwrap();
+    assert_eq!(
+        raw.get("hostname").and_then(|v| v.as_str()),
+        Some(copy_name.as_str())
+    );
+
+    provider
+        .destroy(copy_dir.path(), &copy)
+        .expect("destroy the copy");
+    let left = client.list_ct_volumes(&rootfs, copy_vmid).expect("list");
+    assert!(left.is_empty(), "the copy left a volume behind: {left:?}");
+
+    provider.stop(dir.path(), &h).expect("stop");
+    provider.destroy(dir.path(), &h).expect("destroy");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    for action in ["ct-snapshot", "ct-clone", "ct-delete-snapshot"] {
+        let r = recs
+            .iter()
+            .rev()
+            .find(|r| r.action == action)
+            .unwrap_or_else(|| panic!("no {action} in the ledger: {recs:?}"));
+        assert_eq!(r.state, delonix_proxmox::TaskState::Ok, "{r:?}");
+    }
 }
 
 /// Plan 63 slice 5, backup: an archive of a RUNNING container lands on the
@@ -5143,7 +5258,7 @@ fn a_system_containers_backup_is_restored_over_it_and_deleted() {
 
     provider.stop(dir.path(), &h).expect("stop");
     provider.destroy(dir.path(), &h).expect("destroy");
-    let left = client.list_images(&rootfs, vmid).expect("list");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
     assert!(left.is_empty(), "a volume was left behind: {left:?}");
     let recs = delonix_proxmox::Ledger::at(dir.path()).records();
     for action in ["backup", "ct-restore", "delete-backup"] {
