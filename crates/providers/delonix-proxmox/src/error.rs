@@ -103,6 +103,11 @@ pub enum Error {
     /// variable the node cannot hold unambiguously (ADR-0058).
     #[error("{0}")]
     InvalidSystemContainer(String),
+    /// A system container move refused before anything moved: running without
+    /// `restart`, volumes the target does not share without
+    /// `with_local_disks`, or a target the node's precheck does not allow.
+    #[error("{0}")]
+    SystemContainerMoveRefused(String),
     /// A local image to upload could not be read or is not an image.
     #[error("{0}")]
     ImageUnreadable(String),
@@ -285,6 +290,7 @@ impl Error {
             Error::TemplateNoSpace(_) => 6514,
             Error::ImageUnreadable(_) => 1539,
             Error::InvalidSystemContainer(_) => 1540,
+            Error::SystemContainerMoveRefused(_) => 5517,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,
@@ -332,7 +338,8 @@ impl From<Error> for Dx {
             Error::SnapshotTaken(text)
             | Error::NodeConflict(text)
             | Error::SdnLocked(text)
-            | Error::SdnPendingChanges(text) => Dx::Conflict(text),
+            | Error::SdnPendingChanges(text)
+            | Error::SystemContainerMoveRefused(text) => Dx::Conflict(text),
             Error::ClientBuild(text)
             | Error::NodeUnavailable(text)
             | Error::DatacenterFirewallDisabled(text)

@@ -31,6 +31,61 @@ use delonix_compute::vm_provider::{Provider, ProviderId};
 use std::path::Path;
 use std::sync::Arc;
 
+/// What the node's own container migrate precheck says about one target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CtMigratePrecheck {
+    pub target_allowed: bool,
+    /// The node's reason when it is not allowed, as it wrote it.
+    pub reason: Option<String>,
+}
+
+/// The precheck's answer for `target`: listed under `allowed-nodes`, or the
+/// reason under `not-allowed-nodes`. Pure.
+pub(crate) fn parse_ct_migrate_precheck(v: &serde_json::Value, target: &str) -> CtMigratePrecheck {
+    let allowed = v
+        .get("allowed-nodes")
+        .and_then(|a| a.as_array())
+        .is_some_and(|a| a.iter().any(|n| n.as_str() == Some(target)));
+    let reason = v
+        .get("not-allowed-nodes")
+        .and_then(|m| m.get(target))
+        .map(|r| match r {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        });
+    CtMigratePrecheck {
+        target_allowed: allowed,
+        reason,
+    }
+}
+
+/// The volumes a container's config names, as `(key, volid, storage)`:
+/// `rootfs` and every `mpN` whose source is a storage volume — a bind mount
+/// (a host path) belongs to no storage and is left out. Pure.
+pub(crate) fn ct_volumes(config: &serde_json::Value) -> Vec<(String, String, String)> {
+    let Some(map) = config.as_object() else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, String, String)> = map
+        .iter()
+        .filter(|(k, _)| {
+            k.as_str() == "rootfs"
+                || k.strip_prefix("mp")
+                    .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        })
+        .filter_map(|(k, v)| {
+            let volid = v.as_str()?.split(',').next()?.trim().to_string();
+            if volid.starts_with('/') {
+                return None;
+            }
+            let storage = volid.split_once(':')?.0.to_string();
+            Some((k.clone(), volid, storage))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 /// The provider id, as `provider ls` and a record show it.
 pub const ID: &str = "proxmox";
 
@@ -326,6 +381,76 @@ impl Client {
             },
             Some(&|| Ok(self.lxc_config(newid).is_ok())),
         )
+    }
+
+    /// `GET /nodes/{node}/lxc/{vmid}/migrate?target=`: the node's own
+    /// precheck. Unlike a VM's it says nothing about local volumes — only
+    /// whether `target` is allowed, and why not.
+    pub fn lxc_migrate_precheck(&self, vmid: u32, target: &str) -> Result<CtMigratePrecheck> {
+        crate::validate_node_name(target)?;
+        let path = format!(
+            "/nodes/{}/lxc/{vmid}/migrate?target={}",
+            self.node,
+            crate::urlencode(target)
+        );
+        let w: Wrapped<serde_json::Value> = parse(&self.get(&path)?, "container migrate precheck")?;
+        Ok(parse_ct_migrate_precheck(&w.data, target))
+    }
+
+    /// `POST /nodes/{node}/lxc/{vmid}/migrate`: moves the STOPPED container
+    /// `vmid` to `target`, copying volumes the target does not share (to
+    /// `target_storage` when given). Never with `online` (the node forks a
+    /// task that fails: «lxc live migration is currently not implemented»)
+    /// nor `restart` (the node's restart shuts the container down with
+    /// `--nokill` and aborts the move when its init ignores SIGTERM). The
+    /// probe is where the cluster lists the container.
+    pub fn lxc_migrate(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        target: &str,
+        target_storage: Option<&str>,
+    ) -> Result<()> {
+        crate::validate_node_name(target)?;
+        let mut form: Vec<(&str, &str)> = vec![("target", target)];
+        if let Some(st) = target_storage {
+            form.push(("target-storage", st));
+        }
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtMigrate,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/lxc/{vmid}/migrate", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| Ok(self.locate_ct(vmid)?.as_deref() == Some(target))),
+        )
+    }
+
+    /// Where the cluster lists container `vmid` (`GET /cluster/resources`,
+    /// the `lxc` entries): `Some(node)` for exactly one match.
+    pub fn locate_ct(&self, vmid: u32) -> Result<Option<String>> {
+        let body = self.get("/cluster/resources?type=vm")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "cluster resources")?;
+        Ok(crate::located_node_of(&w.data, vmid, "lxc"))
+    }
+
+    /// The storage ids the cluster marks `shared` (`GET /storage`).
+    pub fn shared_storages(&self) -> Result<Vec<String>> {
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&self.get("/storage")?, "storage")?;
+        Ok(w.data
+            .iter()
+            .filter(|s| s.get("shared").and_then(|v| v.as_u64()) == Some(1))
+            .filter_map(|s| {
+                s.get("storage")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect())
     }
 
     /// `GET /nodes/{node}/lxc/{vmid}/firewall/options`: the container's own
@@ -805,6 +930,29 @@ impl ProxmoxSystemContainerProvider {
         self.client.for_node(node)
     }
 
+    /// The node a container IS on, its id, and a client for that node. The
+    /// locator says where it was last seen; when the container is not there
+    /// the cluster is asked (`/cluster/resources`), so a move whose record was
+    /// never updated — a process that died between the node's move and the
+    /// record — is followed instead of read as gone, which would plan a
+    /// second container. Reads where a container is; never chooses where one
+    /// goes (the same rule as a VM's, ADR-0053 decision 3).
+    fn located(&self, locator: &str) -> Result<(String, u32, Client)> {
+        let (node, vmid) = parse_locator(locator)?;
+        let client = self.client_for(&node)?;
+        if client.lxc_exists(vmid)? {
+            return Ok((node, vmid, client));
+        }
+        match client.locate_ct(vmid)? {
+            Some(there) if there != node => {
+                tracing::info!(vmid, recorded = %node, node = %there, "proxmox: the container is on another node than its record says — following it");
+                let c = self.client_for(&there)?;
+                Ok((there, vmid, c))
+            }
+            _ => Ok((node, vmid, client)),
+        }
+    }
+
     fn refuse(spec: &SystemContainerSpec) -> Result<()> {
         if !spec.unprivileged {
             return Err(Error::InvalidSystemContainer(
@@ -949,8 +1097,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         spec: &SystemContainerSpec,
     ) -> delonix_model::Result<SystemContainerObservation> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         let warnings = client.lxc_start(&ledger, vmid)?;
@@ -958,8 +1105,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
     }
 
     fn stop(&self, dir: &Path, h: &SystemContainerHandle) -> delonix_model::Result<()> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         if client.lxc_status(vmid)? != "running" {
@@ -975,8 +1121,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
     }
 
     fn destroy(&self, dir: &Path, h: &SystemContainerHandle) -> delonix_model::Result<()> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         if !client.lxc_exists(vmid)? {
@@ -994,8 +1139,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         _dir: &Path,
         h: &SystemContainerHandle,
     ) -> delonix_model::Result<Option<SystemContainerConfig>> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         match client.lxc_config(vmid) {
             Ok(c) => Ok(Some(config_of(&c))),
             Err(Error::NodeNotFound(_)) => Ok(None),
@@ -1015,8 +1159,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
             )
             .into());
         }
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         let (memory, swap, cores) = (
             r.memory_mib.to_string(),
@@ -1050,8 +1193,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         spec: &SystemContainerSpec,
     ) -> delonix_model::Result<SystemContainerObservation> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         Ok(Self::observe_on(&client, vmid, spec, &[])?)
     }
 
@@ -1062,8 +1204,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         name: &str,
     ) -> delonix_model::Result<()> {
         crate::validate_snapshot_name(name)?;
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         Ok(client.lxc_snapshot(&ledger, vmid, name)?)
@@ -1074,8 +1215,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         _dir: &Path,
         h: &SystemContainerHandle,
     ) -> delonix_model::Result<Vec<String>> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         Ok(client.lxc_snapshots(vmid)?)
     }
 
@@ -1086,8 +1226,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         name: &str,
     ) -> delonix_model::Result<()> {
         crate::validate_snapshot_name(name)?;
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         Ok(client.lxc_delete_snapshot(&ledger, vmid, name)?)
@@ -1099,8 +1238,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         gib: u32,
     ) -> delonix_model::Result<()> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         let now = config_of(&client.lxc_config(vmid)?).rootfs_gib;
@@ -1134,8 +1272,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         stop: bool,
     ) -> delonix_model::Result<String> {
         crate::valid_storage_id_or_err(storage)?;
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         let before: Vec<String> = client
@@ -1164,8 +1301,8 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         storage: &str,
     ) -> delonix_model::Result<Vec<(String, u64)>> {
         crate::valid_storage_id_or_err(storage)?;
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let mut all = self.client_for(&node)?.list_backups(storage, vmid)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
+        let mut all = client.list_backups(storage, vmid)?;
         all.retain(|(v, _)| archive_vmid(v) == Some(vmid));
         all.sort();
         Ok(all)
@@ -1177,9 +1314,8 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         archive: &str,
     ) -> delonix_model::Result<()> {
-        let (node, vmid) = parse_locator(&h.locator)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let storage = own_archive(archive, vmid)?;
-        let client = self.client_for(&node)?;
         if !client
             .list_backups(storage, vmid)?
             .iter()
@@ -1207,8 +1343,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         if let Some(s) = snapshot {
             crate::validate_snapshot_name(s)?;
         }
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         // Read in PVE/API2/LXC.pm: a full copy of a RUNNING container is
@@ -1246,14 +1381,135 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         })
     }
 
+    /// Measured on PVE 9.2.2 before it was written: the node moves a STOPPED
+    /// container offline, copying a volume the target does not share in full
+    /// (4 GiB of a thin volume by `dd`); it refuses a running one without
+    /// `online`/`restart`; with `online` it forks a task that fails («lxc live
+    /// migration is currently not implemented»); and its `restart` shuts the
+    /// container down with `--nokill` and ABORTS after the deadline when the
+    /// init ignores SIGTERM, leaving it running on the source. So the
+    /// provider stops the container itself — shutdown, then stop, as
+    /// [`SystemContainerProvider::stop`] does — moves it offline, and starts it
+    /// on the target. Everything that would be refused is checked first:
+    /// nothing is stopped for a move that cannot happen.
+    fn move_to(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        target: &str,
+        opts: &delonix_compute::system_container::SystemContainerMoveOptions,
+    ) -> delonix_model::Result<SystemContainerHandle> {
+        crate::validate_node_name(target)?;
+        let target_storage = opts.target_storage.as_deref().map(str::trim);
+        if let Some(st) = target_storage {
+            crate::valid_storage_id_or_err(st)?;
+        }
+        let (source, vmid, client) = self.located(&h.locator)?;
+        if target == source {
+            return Err(Error::InvalidSystemContainer(format!(
+                "proxmox: system container '{}' (vmid {vmid}) is already on node '{source}'",
+                h.name
+            ))
+            .into());
+        }
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        let nodes = client.cluster_nodes()?;
+        match nodes.iter().find(|n| n.name == target) {
+            None => {
+                let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+                return Err(Error::InvalidSystemContainer(format!(
+                    "proxmox: node '{target}' is not a member of the cluster of '{}' (members: {})",
+                    h.name,
+                    names.join(", ")
+                ))
+                .into());
+            }
+            Some(n) if !n.online => {
+                return Err(Error::SystemContainerMoveRefused(format!(
+                    "proxmox: node '{target}' is offline: '{}' cannot move to it",
+                    h.name
+                ))
+                .into());
+            }
+            Some(_) => {}
+        }
+        let running = client.lxc_status(vmid)? == "running";
+        if running && !opts.restart {
+            return Err(Error::SystemContainerMoveRefused(format!(
+                "proxmox: system container '{}' is running and the node cannot move a running \
+                 container live: pass `--restart` to stop it, move it and start it on '{target}'",
+                h.name
+            ))
+            .into());
+        }
+        let pre = client.lxc_migrate_precheck(vmid, target)?;
+        if !pre.target_allowed {
+            return Err(Error::SystemContainerMoveRefused(format!(
+                "proxmox: the node's precheck does not allow '{}' on '{target}'{}",
+                h.name,
+                pre.reason.map(|r| format!(": {r}")).unwrap_or_default()
+            ))
+            .into());
+        }
+        let shared = client.shared_storages()?;
+        let local: Vec<String> = ct_volumes(&client.lxc_config(vmid)?)
+            .into_iter()
+            .filter(|(_, _, st)| !shared.contains(st))
+            .map(|(k, volid, _)| format!("{k}={volid}"))
+            .collect();
+        if !local.is_empty() && !opts.with_local_disks {
+            return Err(Error::SystemContainerMoveRefused(format!(
+                "proxmox: system container '{}' has volumes on storage node '{target}' does not \
+                 share ({}): a move copies them in full — ask for it with `--with-local-disks`, \
+                 or put them on a storage the cluster shares",
+                h.name,
+                local.join(", ")
+            ))
+            .into());
+        }
+        if running {
+            self.stop(dir, h)?;
+        }
+        if let Err(e) = client.lxc_migrate(&ledger, vmid, target, target_storage) {
+            // The container is still on the source: leave it as it was.
+            if running && client.locate_ct(vmid).ok().flatten().as_deref() == Some(&source) {
+                if let Err(start) = client.lxc_start(&ledger, vmid) {
+                    tracing::warn!(vmid, error = %start, "proxmox: the move failed and the container could not be started again on the source");
+                }
+            }
+            return Err(e.into());
+        }
+        // The proof is the node's: the cluster lists it on the target and its
+        // config is readable there.
+        if client.locate_ct(vmid)?.as_deref() != Some(target) {
+            return Err(Error::NodeConflict(format!(
+                "proxmox: the move of '{}' ended OK but the cluster does not list vmid {vmid} on '{target}'",
+                h.name
+            ))
+            .into());
+        }
+        let moved = self.client_for(target)?;
+        moved.lxc_config(vmid)?;
+        if running {
+            let warnings = moved.lxc_start(&ledger, vmid)?;
+            for w in warnings {
+                tracing::warn!(vmid, node = target, warning = %w, "proxmox: the moved container started with a warning");
+            }
+        }
+        Ok(SystemContainerHandle {
+            name: h.name.clone(),
+            locator: format!("proxmox:{target}:{vmid}"),
+        })
+    }
+
     fn apply_firewall(
         &self,
         dir: &Path,
         h: &SystemContainerHandle,
         policy: &delonix_compute::vm_firewall::Policy,
     ) -> delonix_model::Result<()> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let guest = crate::vm_firewall::LxcFirewall {
             client: &client,
             vmid,
@@ -1272,8 +1528,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         direction: delonix_compute::vm_firewall::Direction,
     ) -> delonix_model::Result<delonix_compute::vm_firewall::Policy> {
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let guest = crate::vm_firewall::LxcFirewall {
             client: &client,
             vmid,
@@ -1287,9 +1542,8 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         h: &SystemContainerHandle,
         archive: &str,
     ) -> delonix_model::Result<Vec<String>> {
-        let (node, vmid) = parse_locator(&h.locator)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let storage = own_archive(archive, vmid)?;
-        let client = self.client_for(&node)?;
         if !client
             .list_backups(storage, vmid)?
             .iter()
@@ -1330,8 +1584,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         name: &str,
     ) -> delonix_model::Result<()> {
         crate::validate_snapshot_name(name)?;
-        let (node, vmid) = parse_locator(&h.locator)?;
-        let client = self.client_for(&node)?;
+        let (_, vmid, client) = self.located(&h.locator)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
         // The node stops a running container to roll it back and leaves it
@@ -1513,5 +1766,52 @@ mod tests {
         assert_eq!(d.len(), 3, "{d:?}");
         assert!(d[0].starts_with("unprivileged"), "{d:?}");
         assert!(d[1].contains("/bin/sh"), "{d:?}");
+    }
+
+    /// The volumes a move would have to copy: `rootfs` and the `mpN` backed by
+    /// a storage, never a bind mount (a host path) nor another key.
+    #[test]
+    fn the_volumes_are_rootfs_and_storage_mount_points() {
+        let cfg = serde_json::json!({
+            "rootfs": "local-lvm:vm-100-disk-1,size=4G",
+            "mp0": "nfs-lab:100/vm-100-disk-2.raw,mp=/data,size=1G",
+            "mp1": "/srv/host,mp=/host",
+            "mpx": "local:iso/x.iso",
+            "hostname": "bak5",
+        });
+        assert_eq!(
+            ct_volumes(&cfg),
+            vec![
+                (
+                    "mp0".into(),
+                    "nfs-lab:100/vm-100-disk-2.raw".into(),
+                    "nfs-lab".into()
+                ),
+                (
+                    "rootfs".into(),
+                    "local-lvm:vm-100-disk-1".into(),
+                    "local-lvm".into()
+                ),
+            ]
+        );
+    }
+
+    /// The precheck's two answers, in the shapes PVE 9.2.2 returned.
+    #[test]
+    fn the_precheck_says_allowed_or_why_not() {
+        let ok =
+            serde_json::json!({"allowed-nodes": ["pve2"], "not-allowed-nodes": {}, "running": 1});
+        assert_eq!(
+            parse_ct_migrate_precheck(&ok, "pve2"),
+            CtMigratePrecheck {
+                target_allowed: true,
+                reason: None
+            }
+        );
+        let no = serde_json::json!({"allowed-nodes": [], "not-allowed-nodes": {"pve3": {"unavailable_storages": ["local-lvm"]}}});
+        let p = parse_ct_migrate_precheck(&no, "pve3");
+        assert!(!p.target_allowed);
+        assert!(p.reason.unwrap().contains("local-lvm"));
+        assert!(!parse_ct_migrate_precheck(&ok, "pve9").target_allowed);
     }
 }

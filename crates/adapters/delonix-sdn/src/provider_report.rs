@@ -258,6 +258,7 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 | C::SystemContainerBackup
                 | C::SystemContainerClone
                 | C::SystemContainerFirewall
+            | C::SystemContainerMove
                 | C::ContainerLifecycle
                 | C::ContainerExec
                 | C::ContainerLogs

@@ -5247,6 +5247,185 @@ fn a_running_system_container_is_cloned_from_a_temporary_snapshot() {
     }
 }
 
+/// Plan 63 slice 5, move: a container moves to another node of the cluster
+/// (`DELONIX_PROXMOX_TEST_MOVE_NODE`). The node cannot move a running
+/// container live, and its own restart move aborts when the init ignores
+/// SIGTERM — the test's init is a bare `sleep`, which does — so a running one
+/// is refused without `restart`, and with it the provider stops it, moves it
+/// offline and starts it on the target. A root volume on `local-lvm`, which
+/// the cluster does not share, is refused without `with_local_disks`; every
+/// refusal leaves the container where and as it was.
+#[test]
+fn a_system_container_moves_to_another_node_offline_and_by_restart() {
+    use delonix_compute::system_container::{
+        SystemContainerMoveOptions, SystemContainerProvider, SystemContainerSpec,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    let Ok(to) = std::env::var("DELONIX_PROXMOX_TEST_MOVE_NODE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let there = client.for_node(&to).expect("client for the target node");
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxmov{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: None,
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    let source = t.node.clone();
+    provider.start(dir.path(), &h, &spec).expect("start");
+    let here = |why: &str| {
+        assert_eq!(
+            client.locate_ct(vmid).unwrap().as_deref(),
+            Some(source.as_str()),
+            "{why}: the container left the source"
+        );
+        assert_eq!(client.lxc_status(vmid).unwrap(), "running", "{why}");
+    };
+
+    let full = SystemContainerMoveOptions {
+        restart: true,
+        with_local_disks: true,
+        target_storage: None,
+    };
+    let e = provider
+        .move_to(dir.path(), &h, &source, &full)
+        .unwrap_err();
+    assert_eq!(e.number(), 1540, "the node it is on: {e}");
+    let e = provider
+        .move_to(dir.path(), &h, "nosuchnode", &full)
+        .unwrap_err();
+    assert_eq!(e.number(), 1540, "a node outside the cluster: {e}");
+    let e = provider
+        .move_to(
+            dir.path(),
+            &h,
+            &to,
+            &SystemContainerMoveOptions {
+                restart: false,
+                ..full.clone()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(e.number(), 5517, "running without restart: {e}");
+    here("refused without restart");
+    let e = provider
+        .move_to(
+            dir.path(),
+            &h,
+            &to,
+            &SystemContainerMoveOptions {
+                with_local_disks: false,
+                ..full.clone()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(
+        e.number(),
+        5517,
+        "a local volume without with_local_disks: {e}"
+    );
+    assert!(
+        e.to_string().contains("rootfs="),
+        "the volume is named: {e}"
+    );
+    here("refused without with_local_disks");
+
+    let moved = provider
+        .move_to(dir.path(), &h, &to, &full)
+        .expect("move by restart");
+    assert_eq!(moved.locator, format!("proxmox:{to}:{vmid}"));
+    assert_eq!(
+        client.locate_ct(vmid).unwrap().as_deref(),
+        Some(to.as_str())
+    );
+    assert_eq!(
+        there.lxc_status(vmid).unwrap(),
+        "running",
+        "started on the target"
+    );
+    assert!(
+        client.list_ct_volumes(&rootfs, vmid).unwrap().is_empty(),
+        "the source kept a volume after the move"
+    );
+    // A record never updated after the move (a process that died between
+    // the node's move and the record) still names the source: the provider
+    // follows the container to where the cluster lists it instead of reading
+    // it as gone — which would plan a second container.
+    let stale = provider
+        .configuration(dir.path(), &h)
+        .expect("read through the stale locator");
+    assert!(
+        stale.is_some(),
+        "the stale locator read the container as gone"
+    );
+    assert!(
+        provider
+            .observe(dir.path(), &h, &spec)
+            .expect("observe through the stale locator")
+            .running,
+        "observed through the stale locator"
+    );
+
+    // Back, offline: a stopped container needs no restart.
+    provider
+        .stop(dir.path(), &moved)
+        .expect("stop on the target");
+    let back = provider
+        .move_to(
+            dir.path(),
+            &moved,
+            &source,
+            &SystemContainerMoveOptions {
+                restart: false,
+                ..full.clone()
+            },
+        )
+        .expect("move back offline");
+    assert_eq!(back.locator, format!("proxmox:{source}:{vmid}"));
+    assert_eq!(client.lxc_status(vmid).unwrap(), "stopped", "stays stopped");
+    assert!(
+        there.list_ct_volumes(&rootfs, vmid).unwrap().is_empty(),
+        "the target kept a volume after the move back"
+    );
+
+    provider.destroy(dir.path(), &back).expect("destroy");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    let migrations: Vec<_> = recs.iter().filter(|r| r.action == "ct-migrate").collect();
+    assert_eq!(migrations.len(), 2, "{recs:?}");
+    assert!(
+        migrations
+            .iter()
+            .all(|r| r.state == delonix_proxmox::TaskState::Ok),
+        "{migrations:?}"
+    );
+}
+
 /// Plan 63 slice 5, backup: an archive of a RUNNING container lands on the
 /// node's backup storage without stopping it, a restore puts the container
 /// back over itself and leaves it running, another container's archive is

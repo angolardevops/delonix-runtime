@@ -101,7 +101,8 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             | C::SystemContainerResize
             | C::SystemContainerBackup
             | C::SystemContainerClone
-            | C::SystemContainerFirewall => S::UnsupportedByProvider {
+            | C::SystemContainerFirewall
+            | C::SystemContainerMove => S::UnsupportedByProvider {
                 reason: "application containers run here; a system container, with VM-like semantics, is the Proxmox provider's (ADR-0058)",
             },
             C::ContainerLifecycle => S::Supported {

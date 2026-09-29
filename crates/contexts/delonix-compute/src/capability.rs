@@ -230,6 +230,9 @@ pub enum Capability {
     /// The container's own firewall on the provider, from a `NetworkPolicy`
     /// with `scope: systemcontainer` (catalog 1.3.0, plan 63 slice 5).
     SystemContainerFirewall,
+    /// The container moved to another node of the provider's cluster; a
+    /// running one only by stopping it (catalog 1.3.0, plan 63 slice 5).
+    SystemContainerMove,
 
     // --- network --------------------------------------------------------
     NetBridge,
@@ -427,6 +430,7 @@ impl Capability {
         Self::SystemContainerBackup,
         Self::SystemContainerClone,
         Self::SystemContainerFirewall,
+        Self::SystemContainerMove,
         Self::NetBridge,
         Self::NetMacvlanIpvlan,
         Self::NetVlan,
@@ -572,6 +576,7 @@ impl Capability {
             Self::SystemContainerBackup => "system-container.backup",
             Self::SystemContainerClone => "system-container.clone",
             Self::SystemContainerFirewall => "system-container.firewall",
+            Self::SystemContainerMove => "system-container.move",
             Self::NetBridge => "net.bridge",
             Self::NetMacvlanIpvlan => "net.macvlan-ipvlan",
             Self::NetVlan => "net.vlan",
@@ -717,7 +722,8 @@ impl Capability {
             | SystemContainerResize
             | SystemContainerBackup
             | SystemContainerClone
-            | SystemContainerFirewall => ProviderKind::Compute,
+            | SystemContainerFirewall
+            | SystemContainerMove => ProviderKind::Compute,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan
@@ -844,7 +850,8 @@ impl Capability {
             | SystemContainerResize
             | SystemContainerBackup
             | SystemContainerClone
-            | SystemContainerFirewall => Domain::SystemContainers,
+            | SystemContainerFirewall
+            | SystemContainerMove => Domain::SystemContainers,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan
