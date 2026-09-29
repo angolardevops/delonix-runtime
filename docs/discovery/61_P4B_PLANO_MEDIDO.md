@@ -153,3 +153,126 @@ houver sementeira nenhuma para transportar.
 de origem é do `delonix-vm`, fica como `impl`) e `From<delonix_state::Error>` (os dois tipos
 são agora de outros crates, logo passou a função `state_err`, chamada nos 14 sítios que
 faziam `?` sobre o `JsonStore`).
+
+## Adenda P4b.3 (2026-09-29) — o desenho, medido antes do código (proposta)
+
+**Base:** `origin/main` `0f851aab`. O plano acima disse que a P4b.3 «leva um addendum próprio
+antes do código». É este. Nada do que se segue foi escrito em Rust ainda.
+
+### O que se mediu
+
+A orquestração ocupa hoje as linhas **3905–5361** do `crates/adapters/delonix-vm/src/lib.rs`
+(1 457 linhas; o plano media 4225–5417 sobre `355aea8a` — cresceu com o `resize`, o
+`set_cloud_init`, o `move_to_node` e o `guest_info` do ADR-0053). As funções públicas são as
+que o `-bin`, o `delonix-linux`, a `mgmt` e o MCP chamam: `create`/`create_with`,
+`remove`/`remove_force`/`destroy`/`destroy_with`, `stop`, `pause`/`unpause`, `set_cloud_init`,
+`resize`, `move_to_node`, `guest_info`, `snapshot`/`restore`/`snapshots`/`delete_snapshot`,
+`backup_disk_live`, `apply_firewall`/`read_firewall`, `start`/`restart`/`status`/`list`.
+
+Os nós externos desse intervalo (`grep` sobre o intervalo, e as chamadas contadas sem comentários nem mensagens):
+
+| Nó | Sítios | Onde pertence |
+|---|---|---|
+| `store(base)` / `JsonStore` (`load`/`save`/`update`/`remove`/`list`) | 15 + 18 | o `StateRepository<Vm>` do D6, injectado |
+| `backend_for` / `select_backend_requiring` / `require_capabilities` / `resolve_required_capabilities` / `firmware_boot_preference` / `standing_backend_choice` | 18 + 6 | o registo — que **ficou no `delonix-vm`** na P4b.2 (ver a adenda anterior) |
+| `qemu-img` (overlay `create -b`, `info`) | 3 chamadas | um porto de disco local |
+| `cloudinit::generate_seed_iso` → `cloud-localds` | 1 | um porto de seed |
+| `virsh` (`domblklist`, `blockcommit`) + `libvirt_domain_uri`/`libvirt_cleanup`/`libvirt_poweroff` | 4 chamadas + 5 | **o backend libvirt**, não a orquestração |
+| `network()` (o `static` do `set_network`) | 1 | o porto `VmNetwork`, que já está no compute — passado, não global |
+| `vm_admission_check` → `/proc/meminfo` | 1 | uma pergunta ao host: `delonix-node` |
+| `std::fs` sobre o directório da própria VM (criar, apagar ficheiros da VM, `path_size`, o lock) | 13 | fica no use case: é o root de estado do próprio contexto, o que o `delonix-node` já faz hoje |
+
+E um facto sobre os contextos: **nenhum crate em `crates/contexts/` chama `Command::new`
+hoje** (`grep`: zero). O `qemu-img` e o `cloud-localds` não podem simplesmente descer com a
+orquestração.
+
+### Quatro achados que mudam a frase do plano
+
+1. **O `backup_disk_live` não é orquestração** (4880–5025, com o `blockcommit_argv`): é todo
+   `virsh domblklist` + `qemu-img` + `virsh blockcommit --pivot`, ou seja o mecanismo do
+   backend libvirt. Sobe um método ao porto — `VmBackend::backup_disk_live(vmdir, vm, dest,
+   quiesce)`, por omissão a recusa `unsupported_*` que os outros verbos já usam — e o use case
+   fica com `load` + despacho. Tal como o plano estava, este bloco iria parar ao contexto com
+   `virsh` dentro.
+2. **O «domínio libvirt sem registo» vive na orquestração** — `remove_inner` (limpa um domínio
+   órfão de um `rm` antigo) e `stop` (desliga-o em vez de responder «no such VM»). É
+   conhecimento do libvirt. Passa a uma pergunta ao conjunto de backends por nome, sem registo:
+   `stop_unrecorded(name) -> Result<bool>` e `remove_unrecorded(name) -> Result<bool>`, que só o
+   libvirt responde com `true`.
+3. **O registo continua no adapter** (o desvio da P4b.2), por isso um use case no compute não
+   pode chamar `backend_for`. A resolução do backend também é injectada — um porto `VmBackends`
+   que o `delonix-vm` implementa sobre o seu registo até à P4b.4, e que a composição passa a
+   implementar quando o registo descer.
+4. **O `StateRepository<T>` não é object-safe** (o `update<F>` é genérico). Os use cases são
+   genéricos sobre os portos, exactamente como o `resolve_run<I, S, D, H>` do `container run`
+   (`docs/discovery/54`), e não recebem `&dyn`.
+
+### Os portos (no `delonix_compute::ports`, ao lado do `VmNetwork`)
+
+```rust
+pub trait VmBackends {
+    fn for_vm(&self, vm: &Vm) -> Result<Box<dyn VmBackend>>;
+    /// A escolha do `create`: o nome pedido, o que o operador fixou, a auto-detecção
+    /// por capacidades e a preferência de firmware — a política inteira do registo.
+    fn select(&self, root: &Path, cfg: &VmConfig) -> Result<Box<dyn VmBackend>>;
+    fn manages_own_storage(&self, want: Option<&str>) -> bool;
+    fn stop_unrecorded(&self, name: &str) -> Result<bool>;
+    fn remove_unrecorded(&self, name: &str) -> Result<bool>;
+}
+pub trait LocalDiskImages {
+    /// O overlay qcow2 de uma VM sobre o disco base: `canonicalize`, formato do
+    /// backing lido do ficheiro (nunca da extensão), tamanho pedido ≥ o do base.
+    fn overlay(&self, vmdir: &Path, name: &str, base: &Path, size_gib: Option<u32>) -> Result<PathBuf>;
+}
+pub trait SeedBuilder {
+    fn seed(&self, vmdir: &Path, name: &str, intent: &CloudInitIntent) -> Result<PathBuf>;
+}
+```
+
+`LocalDiskImages` e `SeedBuilder` são dois portos e não um: o seed é cloud-init, não uma
+imagem de disco, e um provider com storage própria (o Proxmox, `manages_own_storage`) não usa
+nenhum dos dois. Na P4b.3 os três são implementados pelo próprio `delonix-vm` (é um adapter;
+o `Command` é legítimo lá). Na P4b.4 a implementação do disco e do seed muda para um adapter
+próprio — o `delonix-guestfs` que a ADR-0040 D2.3 já nomeia para o `qemu-img` —, e os dois
+providers locais recebem-na da composição: um provider não pode depender de um adapter, e
+duplicar o `qemu-img create` nos dois crates é a segunda cópia que o `mem_mib` já custou.
+
+A admissão de RAM parte-se em dois: a leitura do `/proc/meminfo` desce para o `delonix-node`
+(ao lado do `proc_starttime`, que o `adopt_pid_starttime` já usa), e o veredicto
+(`admission_verdict`, puro e já testado) vai com o use case.
+
+### O que não muda
+
+- **A superfície pública do `delonix-vm`**: os 46 símbolos do `-bin` e os quatro do
+  `delonix-linux`/`mgmt`/MCP continuam a resolver, agora como invólucros finos que abrem o
+  `JsonStore`, passam o registo, o disco, o seed e a rede, e chamam o use case.
+- **O formato em disco** de `Vm`/`VmBootSpec` e o ficheiro de lock por VM.
+- A excepção `("dep", "delonix-vm", "delonix-state")` fica até à P4b.4 (os invólucros ainda
+  abrem o `JsonStore`), mas os use cases deixam de depender do `delonix-state`.
+
+### Em duas fatias, cada uma com o seu portão
+
+- **P4b.3a — o conhecimento do backend sai da orquestração, ainda dentro do `delonix-vm`.**
+  `VmBackend::backup_disk_live` (o libvirt implementa, os outros recusam por nome), o
+  `stop_unrecorded`/`remove_unrecorded`, a leitura do `/proc/meminfo` no `delonix-node`, e os
+  portos declarados no compute com a implementação no `delonix-vm`. Nenhuma função muda de
+  crate. **Portão:** os testes do `delonix-vm` inalterados, a secção `vm` do `scripts/e2e.sh`
+  (o `backup create vm` de uma VM libvirt a correr com dois discos, o caso que a bateria de
+  2026-09-24 já cobre), e zero `virsh` no intervalo da orquestração.
+- **P4b.3b — os use cases descem para `delonix_compute::vm`**, genéricos sobre
+  `StateRepository<Vm>`/`VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`, com testes no
+  compute contra portos falsos (um repositório em memória, um backend que regista chamadas) —
+  o ganho que justifica o corte: hoje estes caminhos só se testam contra um root de estado
+  real. **Portão:** os 46 símbolos, a secção `vm` da bateria e o cenário de caos
+  `control_restart` sem regressão, e um contador novo no `arch_fitness.py` —
+  `context_spawns` (`Command::new` em `crates/contexts/`) com linha de base **0**, para o
+  contexto nunca ganhar o primeiro `Command` pelo caminho.
+
+### Provado vs não validado
+
+Provado, por `grep`/`sed` sobre `0f851aab`: o intervalo, os nós e as contagens da tabela; que
+o `backup_disk_live` e o tratamento do domínio órfão só chamam `virsh`/`libvirt_*`; que nenhum
+contexto chama `Command::new`; que o `delonix-compute` já depende do `delonix-node`; que o
+`StateRepository<T>` não é object-safe. Não validado: se o `select` cabe numa assinatura sem
+arrastar mais política do que a listada (a auto-detecção e o firmware medem-se ao cortar), e o
+custo real da P4b.3b — o entrançado só se mede ao desfazê-lo, como o plano já dizia.
