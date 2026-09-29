@@ -389,7 +389,7 @@ networkDefaults:
   seguem a versão do catálogo (`catalog_version` no JSON): uma entrada nova sobe
   o minor, renomear ou remover sobe o major. As colunas da tabela e a forma do
   JSON além desses campos podem ainda mudar.
-* **`cluster`, `vm`, `pod`, `workload`, `net`** —
+* **`cluster`, `vm`, `pod`, `workload`, `net`, `systemcontainer`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)
   > **`storage`/`sharevolume` deixaram de ser grupos** (#216, «fold

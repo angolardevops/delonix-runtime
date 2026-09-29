@@ -36,7 +36,7 @@ use serde::Serialize;
 
 /// Version of the catalog itself (not of the engine). See the module docs for
 /// what bumps which part.
-pub const CATALOG_VERSION: &str = "1.2.0";
+pub const CATALOG_VERSION: &str = "1.3.0";
 
 /// Which port a capability belongs to — the words the node contract's
 /// `ProviderInfo.kind` uses. `Gateway` (catalog 1.1.0, ADR-0059 D2) is a
@@ -215,6 +215,9 @@ pub enum Capability {
     SystemContainerNetworkBridge,
     /// Runs in a user namespace, never as the host's root.
     SystemContainerUnprivileged,
+    /// Snapshots of the root volume, listed, deleted and rolled back to
+    /// (catalog 1.3.0, plan 63 slice 5).
+    SystemContainerSnapshot,
 
     // --- network --------------------------------------------------------
     NetBridge,
@@ -407,6 +410,7 @@ impl Capability {
         Self::SystemContainerExitStatus,
         Self::SystemContainerNetworkBridge,
         Self::SystemContainerUnprivileged,
+        Self::SystemContainerSnapshot,
         Self::NetBridge,
         Self::NetMacvlanIpvlan,
         Self::NetVlan,
@@ -547,6 +551,7 @@ impl Capability {
             Self::SystemContainerExitStatus => "system-container.exit-status",
             Self::SystemContainerNetworkBridge => "system-container.network.bridge",
             Self::SystemContainerUnprivileged => "system-container.unprivileged",
+            Self::SystemContainerSnapshot => "system-container.snapshot",
             Self::NetBridge => "net.bridge",
             Self::NetMacvlanIpvlan => "net.macvlan-ipvlan",
             Self::NetVlan => "net.vlan",
@@ -687,7 +692,8 @@ impl Capability {
             | SystemContainerLogs
             | SystemContainerExitStatus
             | SystemContainerNetworkBridge
-            | SystemContainerUnprivileged => ProviderKind::Compute,
+            | SystemContainerUnprivileged
+            | SystemContainerSnapshot => ProviderKind::Compute,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan
@@ -809,7 +815,8 @@ impl Capability {
             | SystemContainerLogs
             | SystemContainerExitStatus
             | SystemContainerNetworkBridge
-            | SystemContainerUnprivileged => Domain::SystemContainers,
+            | SystemContainerUnprivileged
+            | SystemContainerSnapshot => Domain::SystemContainers,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan

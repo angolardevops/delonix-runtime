@@ -634,6 +634,96 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
 }
 
 /// `describe`: the record, and what the provider holds now.
+/// `delonix systemcontainer`: the one-off operations a manifest cannot say
+/// (plan 63 slice 5; the owner revised decision D3 so they have a home). What
+/// a manifest CAN say stays in `kind: SystemContainer`.
+#[derive(clap::Subcommand)]
+pub enum SystemContainerCmd {
+    /// Snapshots of a system container's root volume.
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotCmd,
+    },
+}
+
+/// The same four verbs, in the same order, as `vm snapshot` and `volume
+/// snapshot`.
+#[derive(clap::Subcommand)]
+pub enum SnapshotCmd {
+    /// Take a named snapshot of the root volume (a container has no memory
+    /// state to keep).
+    Create {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+        /// Snapshot name.
+        snapshot: String,
+    },
+    /// List the container's snapshots.
+    Ls {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+    },
+    /// Delete a snapshot.
+    Rm {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+        /// Snapshot name (see `systemcontainer snapshot ls`).
+        snapshot: String,
+    },
+    /// Roll the container back to a snapshot. A running container comes
+    /// back running, a stopped one stays stopped.
+    Restore {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::system_containers))]
+        name: String,
+        /// Snapshot name to roll back to.
+        snapshot: String,
+    },
+}
+
+/// The registered names, for completion.
+pub(crate) fn registered_names() -> Vec<String> {
+    let Ok(s) = store() else {
+        return Vec::new();
+    };
+    s.list()
+        .map(|v| v.into_iter().map(|r| r.name).collect())
+        .unwrap_or_default()
+}
+
+fn record(name: &str) -> Result<SystemContainerRecord> {
+    store()?
+        .load(name)
+        .map_err(|_| Error::NotFound(format!("system container: {name}")))
+}
+
+pub fn run(cmd: SystemContainerCmd) -> Result<()> {
+    let SystemContainerCmd::Snapshot { action } = cmd;
+    match action {
+        SnapshotCmd::Create { name, snapshot } => {
+            let rec = record(&name)?;
+            resolve_provider()?.snapshot(&ledger_dir(&name), &handle_of(&rec), &snapshot)?;
+            println!("{snapshot}");
+        }
+        SnapshotCmd::Ls { name } => {
+            let rec = record(&name)?;
+            for s in resolve_provider()?.snapshots(&ledger_dir(&name), &handle_of(&rec))? {
+                println!("{s}");
+            }
+        }
+        SnapshotCmd::Rm { name, snapshot } => {
+            let rec = record(&name)?;
+            resolve_provider()?.delete_snapshot(&ledger_dir(&name), &handle_of(&rec), &snapshot)?;
+            println!("{snapshot}");
+        }
+        SnapshotCmd::Restore { name, snapshot } => {
+            let rec = record(&name)?;
+            resolve_provider()?.restore(&ledger_dir(&name), &handle_of(&rec), &snapshot)?;
+            println!("{name}");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     let s = store()?;
     for name in names {

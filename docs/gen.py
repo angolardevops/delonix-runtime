@@ -194,6 +194,7 @@ SOURCE_FILES = {
     "image": "image.rs",
     "build": "build.rs",
     "vm": "vm.rs",
+    "systemcontainer": "system_container.rs",
     "volume": "volume.rs",
     "network": "network.rs",
     "stack": "stack.rs",
@@ -1497,6 +1498,19 @@ por razões diferentes: o número do CRI vive num documento mantido à mão (pro
 trabalho de conformidade nenhum, logo a contagem honesta é zero.""",
         "subs": {},
     },
+    "systemcontainer": {
+        "title": "delonix systemcontainer",
+        "tagline": "As operações pontuais de um container de sistema: snapshots.",
+        "intro": """Um container de sistema (<code>kind: SystemContainer</code>, ADR-0058) é criado, mudado e
+apagado por manifesto. Este grupo tem o que um manifesto não consegue dizer: <code>snapshot
+create|ls|rm|restore</code>, os mesmos quatro verbos do <code>vm snapshot</code>. Um snapshot é só do
+volume raiz — um container não tem estado de memória a guardar. Um <code>restore</code> deixa o
+container como estava antes: a correr se estava a correr (o nó pára-o para o rollback e o motor
+espera que volte a responder), parado se estava parado. O que o rollback mudou aparece no
+<code>plan</code> seguinte como deriva face ao manifesto. <strong>Não estável</strong> — ver
+<code>docs/cli-stability.md</code>.""",
+        "subs": {},
+    },
     "provider": {
         "title": "delonix provider",
         "tagline": "O que cada provider consegue fazer — medido neste host, contra um catálogo com versão.",
@@ -2025,6 +2039,18 @@ key list, <strong>measured</strong> one key at a time against <code>docker compo
 different reasons: the CRI number lives in a hand-maintained document (produced by running
 <code>critest</code> on a node) that nothing here can derive, and OCI has zero conformance work in
 this repository, so the honest row count is zero.""",
+    },
+    "systemcontainer": {
+        "title": "delonix systemcontainer",
+        "tagline": "The one-off operations of a system container: snapshots.",
+        "intro": """A system container (<code>kind: SystemContainer</code>, ADR-0058) is created, changed and
+deleted by manifest. This group holds what a manifest cannot say: <code>snapshot
+create|ls|rm|restore</code>, the same four verbs as <code>vm snapshot</code>. A snapshot is of the root
+volume only — a container has no memory state to keep. A <code>restore</code> leaves the container as
+it was before: running if it was running (the node stops it for the rollback and the engine waits for
+it to answer again), stopped if it was stopped. What the rollback changed shows in the next
+<code>plan</code> as drift from the manifest. <strong>Not stable</strong> — see
+<code>docs/cli-stability.md</code>.""",
     },
     "provider": {
         "title": "delonix provider",

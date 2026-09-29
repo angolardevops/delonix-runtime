@@ -14556,3 +14556,62 @@ msgstr "não lido: {err}"
 
 msgid "systemcontainer/{name}: `{field}` is refused — a system container is always unprivileged and without nesting; privilege on a remote node is a decision of its own (ADR-0058)"
 msgstr "systemcontainer/{name}: `{field}` é recusado — um container de sistema é sempre sem privilégio e sem nesting; privilégio num nó remoto é uma decisão própria (ADR-0058)"
+
+# systemcontainer (plan 63 slice 5)
+msgid "System containers on a remote provider: snapshots and other one-off operations"
+msgstr "Containers de sistema num provider remoto: snapshots e outras operações pontuais"
+
+msgid ""
+"System containers on a remote provider: snapshots and other one-off operations.\n"
+"\n"
+"Create, change and delete one with `kind: SystemContainer`; this group holds what a manifest cannot say."
+msgstr ""
+"Containers de sistema num provider remoto: snapshots e outras operações pontuais.\n"
+"\n"
+"Criar, mudar e apagar um faz-se com `kind: SystemContainer`; este grupo tem o que um manifesto não consegue dizer."
+
+msgid "a checkpoint before changing a system container, then back to it"
+msgstr "um ponto de restauro antes de mudar um container de sistema, e depois voltar a ele"
+
+msgid "which checkpoints it has"
+msgstr "que pontos de restauro tem"
+
+msgid "a checkpoint of the root volume — a container has no memory state to keep"
+msgstr "um ponto de restauro do volume raiz — um container não tem estado de memória a guardar"
+
+msgid "back to it: a running container comes back running"
+msgstr "voltar a ele: um container a correr volta a correr"
+
+msgid "take one; a name already used answers 5, never a second snapshot"
+msgstr "tirar um; um nome já usado responde 5, nunca um segundo snapshot"
+
+msgid "the snapshot names, as the node lists them"
+msgstr "os nomes dos snapshots, como o nó os lista"
+
+msgid "delete one; a name the container does not have answers 4"
+msgstr "apagar um; um nome que o container não tem responde 4"
+
+msgid "roll back; the next `plan` shows what the rollback changed as drift from the manifest"
+msgstr "repor; o `plan` seguinte mostra o que o rollback mudou como deriva face ao manifesto"
+
+msgid "Snapshots of a system container's root volume"
+msgstr "Snapshots do volume raiz de um container de sistema"
+
+msgid "Take a named snapshot of the root volume (a container has no memory state to keep)"
+msgstr "Tira um snapshot com nome do volume raiz (um container não tem estado de memória a guardar)"
+
+msgid "List the container's snapshots"
+msgstr "Lista os snapshots do container"
+
+msgid "Delete a snapshot"
+msgstr "Apaga um snapshot"
+
+msgid "Roll the container back to a snapshot. A running container comes back running, a stopped one stays stopped"
+msgstr "Repõe o container num snapshot. Um container a correr volta a correr, um parado fica parado"
+
+msgid "Snapshot name (see `systemcontainer snapshot ls`)"
+msgstr "Nome do snapshot (ver `systemcontainer snapshot ls`)"
+
+msgid "Snapshot name to roll back to"
+msgstr "Nome do snapshot para onde voltar"
+

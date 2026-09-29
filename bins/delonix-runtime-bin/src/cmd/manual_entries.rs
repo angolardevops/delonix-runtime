@@ -2671,6 +2671,56 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm apply", "image vm build", "vm create", "stack init"],
     },
     Entry {
+        path: "systemcontainer",
+        group: "Workloads",
+        examples: &[
+            ("a checkpoint before changing a system container, then back to it", "delonix systemcontainer snapshot create tools before-upgrade"),
+            ("which checkpoints it has", "delonix systemcontainer snapshot ls tools"),
+        ],
+        see_also: &["apply", "get", "vm snapshot"],
+    },
+    Entry {
+        path: "systemcontainer snapshot",
+        group: "Maintenance",
+        examples: &[
+            ("a checkpoint of the root volume — a container has no memory state to keep", "delonix systemcontainer snapshot create tools before-upgrade"),
+            ("back to it: a running container comes back running", "delonix systemcontainer snapshot restore tools before-upgrade"),
+        ],
+        see_also: &["systemcontainer", "vm snapshot", "volume snapshot"],
+    },
+    Entry {
+        path: "systemcontainer snapshot create",
+        group: "Lifecycle",
+        examples: &[
+            ("take one; a name already used answers 5, never a second snapshot", "delonix systemcontainer snapshot create tools before-upgrade"),
+        ],
+        see_also: &["systemcontainer snapshot ls", "systemcontainer snapshot restore", "systemcontainer snapshot rm"],
+    },
+    Entry {
+        path: "systemcontainer snapshot ls",
+        group: "Inspect",
+        examples: &[
+            ("the snapshot names, as the node lists them", "delonix systemcontainer snapshot ls tools"),
+        ],
+        see_also: &["systemcontainer snapshot create", "systemcontainer snapshot rm"],
+    },
+    Entry {
+        path: "systemcontainer snapshot rm",
+        group: "Lifecycle",
+        examples: &[
+            ("delete one; a name the container does not have answers 4", "delonix systemcontainer snapshot rm tools before-upgrade"),
+        ],
+        see_also: &["systemcontainer snapshot ls"],
+    },
+    Entry {
+        path: "systemcontainer snapshot restore",
+        group: "Lifecycle",
+        examples: &[
+            ("roll back; the next `plan` shows what the rollback changed as drift from the manifest", "delonix systemcontainer snapshot restore tools before-upgrade"),
+        ],
+        see_also: &["systemcontainer snapshot ls", "plan", "drift"],
+    },
+    Entry {
         path: "vm snapshot",
         group: "Maintenance",
         examples: &[

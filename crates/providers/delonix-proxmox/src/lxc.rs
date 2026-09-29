@@ -158,11 +158,138 @@ impl Client {
         let w: Wrapped<serde_json::Value> = parse(&body, "container interfaces")?;
         Ok(w.data)
     }
+
+    /// Waits until the container reads `running`, within the client's task
+    /// timeout. A rollback with `start` ends its task before the node answers
+    /// for the container again: measured on PVE 9.2.2, `status/current` hung
+    /// for about 40 s right after it, and pveproxy answered HTTP 596 to a
+    /// client that waited. A failed read here is «not yet», not an answer;
+    /// only the deadline is.
+    pub fn lxc_wait_running(&self, vmid: u32) -> Result<()> {
+        let deadline = std::time::Instant::now() + self.task_timeout;
+        loop {
+            let last = match self.lxc_status(vmid) {
+                Ok(s) if s == "running" => return Ok(()),
+                Ok(s) => format!("status {s}"),
+                Err(e) => e.to_string(),
+            };
+            if std::time::Instant::now() >= deadline {
+                return Err(Error::TaskTimeout(format!(
+                    "proxmox: container {vmid} did not read running within {} s after the \
+                     rollback (last: {last})",
+                    self.task_timeout.as_secs()
+                )));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+
+    /// `GET …/lxc/{vmid}/snapshot`: the snapshot names, without the API's
+    /// `current` pseudo-entry (the live state, not a snapshot anybody took).
+    pub fn lxc_snapshots(&self, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!("/nodes/{}/lxc/{vmid}/snapshot", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "container snapshots")?;
+        Ok(snapshot_names(&w.data))
+    }
+
+    /// `POST …/lxc/{vmid}/snapshot`. A name already taken is a CONFLICT,
+    /// asked first: the node says so only inside a failed task.
+    pub fn lxc_snapshot(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
+        if self.lxc_snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(taken_ct_snapshot(vmid, name));
+        }
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtSnapshot,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/lxc/{vmid}/snapshot", self.node),
+                    &[("snapname", name)],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.lxc_snapshots(vmid)?.iter().any(|s| s == name))),
+        )
+        .map_err(|e| {
+            if e.to_string().contains("already") {
+                taken_ct_snapshot(vmid, name)
+            } else {
+                e
+            }
+        })
+    }
+
+    /// `POST …/lxc/{vmid}/snapshot/{snapname}/rollback`. The node stops a
+    /// running container to roll it back and leaves it stopped unless
+    /// `start` is sent; `start` says whether to send it. A name the
+    /// container does not have is NOT FOUND.
+    pub fn lxc_rollback(&self, ledger: &Ledger, vmid: u32, name: &str, start: bool) -> Result<()> {
+        if !self.lxc_snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(Error::SnapshotNotFound(format!(
+                "snapshot of Proxmox container {vmid}: {name}"
+            )));
+        }
+        let form: &[(&str, &str)] = if start { &[("start", "1")] } else { &[] };
+        let snapname = name;
+        // No probe: nothing a read shows tells «rolled back» from «not».
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtRollback,
+            || {
+                self.post_form(
+                    &format!(
+                        "/nodes/{}/lxc/{vmid}/snapshot/{snapname}/rollback",
+                        self.node
+                    ),
+                    form,
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// `DELETE …/lxc/{vmid}/snapshot/{snapname}`; a name the container does
+    /// not have is NOT FOUND.
+    pub fn lxc_delete_snapshot(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
+        if !self.lxc_snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(Error::SnapshotNotFound(format!(
+                "snapshot of Proxmox container {vmid}: {name}"
+            )));
+        }
+        let snapname = name;
+        let path = format!("/nodes/{}/lxc/{vmid}/snapshot/{snapname}", self.node);
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtDeleteSnapshot,
+            || self.delete(&path),
+            Some(&|| Ok(!self.lxc_snapshots(vmid)?.iter().any(|s| s == name))),
+        )
+    }
 }
 
 /// The node's `entrypoint` line for `args`. The node splits it on spaces, so
 /// an argument holding whitespace (or a control character) is refused: it
 /// would run as something else than written.
+/// The names of a snapshot listing, without the `current` pseudo-entry.
+pub(crate) fn snapshot_names(list: &[serde_json::Value]) -> Vec<String> {
+    list.iter()
+        .filter_map(|s| s.get("name").and_then(|n| n.as_str()))
+        .filter(|n| *n != "current")
+        .map(str::to_string)
+        .collect()
+}
+
+/// A snapshot name the container already has — `Conflict` (exit 5).
+fn taken_ct_snapshot(vmid: u32, name: &str) -> Error {
+    Error::SnapshotTaken(format!(
+        "Proxmox container {vmid} already has a snapshot named '{name}'"
+    ))
+}
+
 pub(crate) fn entrypoint_line(args: &[String]) -> Result<String> {
     for a in args {
         if a.is_empty() || a.chars().any(|c| c.is_whitespace() || c.is_control()) {
@@ -593,6 +720,65 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         let (node, vmid) = parse_locator(&h.locator)?;
         let client = self.client_for(&node)?;
         Ok(Self::observe_on(&client, vmid, spec, &[])?)
+    }
+
+    fn snapshot(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        name: &str,
+    ) -> delonix_model::Result<()> {
+        crate::validate_snapshot_name(name)?;
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        Ok(client.lxc_snapshot(&ledger, vmid, name)?)
+    }
+
+    fn snapshots(
+        &self,
+        _dir: &Path,
+        h: &SystemContainerHandle,
+    ) -> delonix_model::Result<Vec<String>> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        Ok(client.lxc_snapshots(vmid)?)
+    }
+
+    fn delete_snapshot(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        name: &str,
+    ) -> delonix_model::Result<()> {
+        crate::validate_snapshot_name(name)?;
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        Ok(client.lxc_delete_snapshot(&ledger, vmid, name)?)
+    }
+
+    fn restore(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        name: &str,
+    ) -> delonix_model::Result<()> {
+        crate::validate_snapshot_name(name)?;
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        // The node stops a running container to roll it back and leaves it
+        // stopped; `start` brings it back to where it was.
+        let was_running = client.lxc_status(vmid)? == "running";
+        client.lxc_rollback(&ledger, vmid, name, was_running)?;
+        if was_running {
+            client.lxc_wait_running(vmid)?;
+        }
+        Ok(())
     }
 }
 

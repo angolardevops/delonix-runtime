@@ -142,6 +142,15 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::vm::VmCmd,
     },
+    /// System containers on a remote provider: snapshots and other one-off operations.
+    ///
+    /// Create, change and delete one with `kind: SystemContainer`; this group
+    /// holds what a manifest cannot say.
+    #[command(name = "systemcontainer")]
+    Systemcontainer {
+        #[command(subcommand)]
+        action: cmd::system_container::SystemContainerCmd,
+    },
     /// Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002).
     ///
     /// Creation stays declarative — see `kind: Workload` (`stack apply`).
@@ -584,6 +593,7 @@ fn run() -> Result<()> {
         Cmd::Image { action } => cmd::image::run(action),
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
+        Cmd::Systemcontainer { action } => cmd::system_container::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),
         Cmd::Volume { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
@@ -1231,6 +1241,7 @@ mod cli_stability_classification_tests {
         "serve",
         "stack",
         "system",
+        "systemcontainer",
         "version",
         "vm",
         "volume",

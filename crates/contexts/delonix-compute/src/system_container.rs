@@ -149,4 +149,14 @@ pub trait SystemContainerProvider: Provider {
         h: &SystemContainerHandle,
         r: SystemContainerResources,
     ) -> Result<()>;
+    /// Takes a snapshot of the root volume. A name already taken is a
+    /// conflict, not a failure.
+    fn snapshot(&self, dir: &Path, h: &SystemContainerHandle, name: &str) -> Result<()>;
+    /// The snapshot names, oldest first as the provider lists them.
+    fn snapshots(&self, dir: &Path, h: &SystemContainerHandle) -> Result<Vec<String>>;
+    /// Deletes a snapshot; a name the container does not have is not found.
+    fn delete_snapshot(&self, dir: &Path, h: &SystemContainerHandle, name: &str) -> Result<()>;
+    /// Rolls the container back to a snapshot and leaves it in the state it
+    /// was in before the call: running if it was running, stopped if not.
+    fn restore(&self, dir: &Path, h: &SystemContainerHandle, name: &str) -> Result<()>;
 }

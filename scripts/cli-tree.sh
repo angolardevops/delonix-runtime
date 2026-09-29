@@ -91,6 +91,9 @@ classify() {
       else if (c ~ /^container /)                                 cls = "="
       else if (c ~ /^vm (start|stop|restart|console|ssh)$/)       cls = "="
       else if (c ~ /^vm snapshot /)                               cls = "="
+      # `systemcontainer` (plan 63 slice 5, D3 revised) is new surface with no
+      # rename behind it — born at its destination.
+      else if (c ~ /^systemcontainer /)                           cls = "="
       else if (c ~ /^image (pull|push|build|scan|verify|convert|import|export|tag|login|logout)$/) cls = "="
       else if (c == "pod logs" || c == "cluster load")            cls = "="
       # `cluster stop/start/destroy`: nascem já com o ciclo de vida completo

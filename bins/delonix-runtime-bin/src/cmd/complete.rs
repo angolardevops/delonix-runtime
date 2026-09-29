@@ -101,6 +101,11 @@ pub fn vms() -> Vec<CompletionCandidate> {
     )
 }
 
+/// Registered system containers (`kind: SystemContainer`).
+pub fn system_containers() -> Vec<CompletionCandidate> {
+    cands(super::system_container::registered_names())
+}
+
 /// Kind-mode clusters — derived from the nodes' label, which is the source of truth
 /// (there is no separate "cluster" record; see `cmd::kindmode::list`).
 pub fn clusters() -> Vec<CompletionCandidate> {

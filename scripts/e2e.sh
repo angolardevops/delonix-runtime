@@ -4085,6 +4085,12 @@ check "... e não fica registo para trás" ok bash -c \
   "$adr54_fns; ! adr54_bare get systemcontainers 2>/dev/null | grep -q 'sc-$PFX'"
 check "o exec de um system container é declarado unsupported-by-provider" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.exec' | grep -q 'unsupported-by-provider'"
+# Fatia 5 (snapshots): o grupo `systemcontainer` lê o registo antes de ir ao nó,
+# por isso um nome não registado responde 4 sem provider nenhum configurado.
+check "systemcontainer snapshot ls de um nome não registado diz 4" 4 adr54_bare systemcontainer snapshot ls "sc-$PFX-nada"
+check "systemcontainer snapshot create de um nome não registado diz 4" 4 adr54_bare systemcontainer snapshot create "sc-$PFX-nada" s1
+check "o snapshot de um system container é declarado supported no proxmox" ok bash -c \
+  "'$BIN' provider describe proxmox | grep 'system-container.snapshot' | grep -q 'supported'"
 
 section "api-resources: o registo que os outros verbos leem"
 ########################################
