@@ -49,10 +49,12 @@ This section keeps only the parts that shape the *structure* below:
   and the Kubernetes CRI are reached through a trait, never through `if provider == …` spread
   across the code. Today's ports: `VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`,
   re-exported by `delonix-vm`, which still holds the backend registry), the VM provider port
-  (`VmProvider` in `vm_provider.rs`, ADR-0044), the compute ports in
+  (`VmProvider` in `vm_provider.rs`, ADR-0044), the system-container port
+  (`SystemContainerProvider` in `system_container.rs`, ADR-0058), the compute ports in
   `crates/contexts/delonix-compute/src/ports.rs` and `launch.rs` (`ImageStore`,
   `StorageProvider`, `DeviceResolver`, `RunHost`, `NetworkProvider`, `VmNetwork`,
-  `WorkloadRuntime`), and the two remote network ports in `delonix-sdn`: `GatewayProvider`
+  `WorkloadRuntime`, and `VmBackends`, `LocalDiskImages`, `SeedBuilder` for the VM use cases),
+  and the two remote network ports in `delonix-sdn`: `GatewayProvider`
   (`src/gateway.rs`, ADR-0051) and `NetworkZoneProvider` (`src/network_zone.rs`, ADR-0049).
   What each provider can do is answered against one versioned capability catalog
   (`crates/contexts/delonix-compute/src/capability.rs`, ADR-0050; `delonix provider ls`). An OpenStack backend is designed
@@ -80,7 +82,7 @@ These are not conventions; `scripts/arch_fitness.py` enforces the structural hal
 | A crate must live in the directory of its layer | `LAYER_DIR`, `misplaced` |
 | A consumer's name anywhere under `crates/`, `bins/`, `proto/` (comments included) fails | `CONSUMER_NAMES`, `consumer_mentions` |
 | Dependency versions live only in the root `[workspace.dependencies]` | `inline_versions` |
-| Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, `println!` in libraries, process-environment writes, adapters importing the shared `Error` as their own | the ratchet patterns (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, …), baseline in `scripts/arch_baseline.json` |
+| Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, `println!` in libraries, process-environment writes, adapters importing the shared `Error` as their own, a context crate running an external program (`Command::new` under `crates/contexts/`, baseline 0) | the ratchet patterns (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, `CONTEXT_SPAWNS`, …), baseline in `scripts/arch_baseline.json` |
 
 <!-- dev-docs:begin ratchets -->
 `scripts/arch_fitness.py` keeps **6 debt ratchets** (baseline in `scripts/arch_baseline.json`):
@@ -503,8 +505,17 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   (`vm_backend.rs`, `vm_error.rs`, `vm_firewall.rs`); `delonix-vm` re-exports every name, and
   `delonix-proxmox` now depends on `delonix-compute` instead of `delonix-vm`: it hands the
   composition root a `BackendRegistration` (`registration()`), and
-  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` registers it. The registry itself stays in
-  `delonix-vm` until P4b.4 (`docs/discovery/61_P4B_PLANO_MEDIDO.md`). The remaining exceptions in
+  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` registers it. **#596** (P4b.3a) took the
+  backend knowledge out of the VM orchestration, behind three ports declared in
+  `crates/contexts/delonix-compute/src/ports.rs` — `VmBackends` (the registry as the use cases
+  see it), `LocalDiskImages` (the `qemu-img` overlay), `SeedBuilder` (the `cloud-localds` seed) —
+  implemented in `crates/adapters/delonix-vm/src/local_ports.rs`; the live disk backup became
+  `VmBackend::backup_disk_live`. **#597** (P4b.3b) moved the use cases themselves into
+  `crates/contexts/delonix-compute/src/vm.rs` as methods of `VmEngine`, generic over a
+  `StateRepository<Vm>` and those ports; `delonix-vm` assembles an engine per call over its
+  `JsonStore` and keeps its public functions as wrappers, so no caller changed. The registry,
+  the two local backends and the `delonix-vm` → `delonix-state` exception stay in the adapter
+  until P4b.4 (`docs/discovery/61_P4B_PLANO_MEDIDO.md`). The remaining exceptions in
   the table above name the phase that removes each.
 - **P5 has started.** `delonix-node-api` (#525, ADR-0050 D5) serves the node contract on a unix
   socket, as gRPC and HTTP/JSON from the same `.proto` files; today only
@@ -565,20 +576,22 @@ below has every edge).
 > outlined region: the context crate · solid arrow: a call through the named port.
 
 `container run` is the reference path: the context decides through ports, and the binary chooses
-which adapter answers each port.
+which adapter answers each port. The VM use cases follow the same shape one step removed:
+`delonix-vm` builds a `VmEngine` per call and hands it its own implementations of the VM ports.
 
 ```mermaid
 flowchart LR
   CMD["delonix binary<br/><small>cmd_run and run(): composition root</small>"]
   subgraph CX["delonix-compute — context"]
     UC["use cases<br/><small>resolve_run, build_record, wire_network, launch::start</small>"]
+    VE["VM use cases<br/><small>vm::VmEngine</small>"]
   end
   HI["HostImages<br/><small>delonix-oci</small>"]
   HV["HostVolumes<br/><small>delonix-volume</small>"]
   HD["HostDevices, HostRuntime<br/><small>delonix-linux</small>"]
   HW["HostWorkload<br/><small>delonix-linux</small>"]
   HN["HostNetwork<br/><small>delonix-sdn</small>"]
-  VM["delonix-vm<br/><small>VmBackend registry</small>"]
+  VM["delonix-vm<br/><small>registry, local backends, local_ports</small>"]
   HVN["HostVmNetwork<br/><small>delonix-sdn</small>"]
   CMD -->|"calls with the adapters"| UC
   UC -->|"ImageStore"| HI
@@ -586,9 +599,11 @@ flowchart LR
   UC -->|"DeviceResolver, RunHost"| HD
   UC -->|"NetworkProvider"| HN
   UC -->|"WorkloadRuntime"| HW
-  CMD -->|"set_network, register_backend"| VM
-  VM -->|"VmNetwork"| HVN
-  class CMD,UC,HI,HV,HD,HW,HN,VM,HVN block
+  CMD -->|"set_network, register_backend, create_with…"| VM
+  VM -->|"builds per call"| VE
+  VE -->|"VmBackends, LocalDiskImages, SeedBuilder"| VM
+  VE -->|"VmNetwork"| HVN
+  class CMD,UC,VE,HI,HV,HD,HW,HN,VM,HVN block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -597,7 +612,9 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 
 Ports: `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`,
-`DeviceResolver`, `RunHost`, `VmNetwork`, `NetworkProvider`) and `launch.rs` (`WorkloadRuntime`).
+`DeviceResolver`, `RunHost`, `VmNetwork`, `NetworkProvider`, `VmBackends`, `LocalDiskImages`,
+`SeedBuilder`) and `launch.rs` (`WorkloadRuntime`). The VM use cases: `vm.rs` (`VmEngine`); their
+adapter side: `crates/adapters/delonix-vm/src/local_ports.rs` and `engine` in `src/lib.rs`.
 Implementations: `delonix-oci/src/run_images.rs`, `delonix-volume/src/lib.rs`,
 `delonix-linux/src/{cdi,run_host,workload}.rs`, `delonix-sdn/src/{run_network,vm_network}.rs`.
 Wiring: `bins/delonix-runtime-bin/src/cmd/container.rs::cmd_run` and
@@ -1042,8 +1059,11 @@ sequenceDiagram
 > **Note — adapters still reach the state files directly.** `delonix-linux`, `delonix-vm`,
 > `delonix-sdn`, `delonix-oci` and `delonix-volume` depend on `delonix-state` as declared
 > exceptions. The `StateRepository` port that removes them exists since #420
-> (`delonix-model/src/ports.rs`, ADR-0044 D6), and so far only `delonix-linux` goes through it for
-> part of its lifecycle; the other four still open the stores directly until their P4 slice lands.
+> (`delonix-model/src/ports.rs`, ADR-0044 D6). `delonix-linux` goes through it for part of its
+> lifecycle, and the VM use cases in `delonix-compute` only see a `StateRepository<Vm>` — but
+> `delonix-vm` still opens the `JsonStore` it hands them (and writes the libvirt XML and the
+> default-backend file itself), so its exception stays until P4b.4. The other three still open
+> the stores directly until their P4 slice lands.
 
 > **Note — `macvlan`/`ipvlan` are declared, not realized.** `network create` records them and
 > reports `Realized=False` with reason `DriverNotImplemented`
@@ -1073,7 +1093,8 @@ sequenceDiagram
 | Process creation, namespaces, rootfs, seccomp, cgroups | `delonix-linux/src/lib.rs` (`spawn`, `container_init`, `setup_rootfs`, `setup_cgroup`), `supervise.rs`, `launch_spec.rs` |
 | Rootless networking | `delonix-sdn/src/infra.rs` (`ensure_up`, `control_main`, `attach_container`, `publish_port`, `ingress_table_ruleset`, `fw_chain_body`), `pin_userns.rs`, `ipam.rs` |
 | Images | `delonix-oci/src/{registry,cas,image,overlay,build}.rs` |
-| VMs | `delonix-compute/src/vm_backend.rs` (`VmBackend`), `delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`), `cloudinit.rs`; `cmd/vm.rs`, `cmd/vmimage.rs`, `cmd/vmbackends.rs` |
+| VMs | `delonix-compute/src/vm.rs` (`VmEngine`, the use cases), `vm_backend.rs` (`VmBackend`), `ports.rs` (`VmBackends`, `LocalDiskImages`, `SeedBuilder`); `delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `select_for_create`, `engine`), `local_ports.rs`, `cloudinit.rs`; `cmd/vm.rs`, `cmd/vmimage.rs`, `cmd/vmbackends.rs` |
+| System containers on a remote node | `delonix-compute/src/system_container.rs` (`SystemContainerProvider`); `delonix-proxmox/src/lxc.rs`; `cmd/system_container.rs` |
 | Declarative apply | `delonix-stack/src/{kinds,reconcile}.rs`; `cmd/stack.rs`, `cmd/manifest.rs` |
 | Records, errors, persisted state | `delonix-compute/src/record.rs` (`Container`, `Vm`), `delonix-model/src/{records,error,exitcode}.rs`, `delonix-state/src/{store,secret}.rs` |
 | CRI | `delonix-cri/src/lib.rs::serve_blocking`, `runtime_svc.rs`, `runtime_svc/lifecycle.rs` |

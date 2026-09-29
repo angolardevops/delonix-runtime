@@ -311,7 +311,9 @@ provider should be a new implementation, not a new branch everywhere.
 interfaces and binaries, and the directory is the layer (`crates/foundation/`, `crates/contexts/`,
 `crates/adapters/`, `crates/providers/`, `crates/interfaces/`, `bins/`). The allowed direction is
 written once, in `ALLOWED` in `scripts/arch_fitness.py`, and CI enforces it. Ports are traits in
-`crates/contexts/delonix-compute/src/ports.rs` and `VmBackend` in `delonix-vm`; ADR-0008
+`crates/contexts/delonix-compute/src/ports.rs` and `VmBackend` in `vm_backend.rs` of the same
+crate; the VM use cases that call them are `VmEngine` in `vm.rs`, and `delonix-vm` implements the
+ports for this node. ADR-0008
 (**Accepted**) made VM backends registrable, which is how a remote Proxmox node became one more
 backend.
 

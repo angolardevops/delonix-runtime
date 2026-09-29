@@ -354,7 +354,8 @@ already exist.
 | Registry client, CAS, layers, overlay, image build | `delonix-oci` (adapter) | ADR-0040 D2.3 |
 | SBOM / CVE | `delonix-scanner` (adapter) | ADR-0040 D2.3 |
 | Tracing, OpenTelemetry, Prometheus registry setup | `delonix-telemetry` (adapter) | ADR-0040 D2.3 |
-| A local VM backend (Cloud Hypervisor, libvirt) | `delonix-vm` (adapter) | ADR-0008 |
+| What a VM operation decides (create, stop, start, status, remove, day-2 verbs) | `delonix-compute` (context): `vm.rs` (`VmEngine`), reaching the backends, the disk and the seed only through `VmBackends`/`LocalDiskImages`/`SeedBuilder`; no `Command::new` in a context (`context_spawns`, baseline 0) | ADR-0044 P4b.3 (#596, #597) |
+| A local VM backend (Cloud Hypervisor, libvirt), and this node's implementations of the VM ports | `delonix-vm` (adapter): `lib.rs`, `local_ports.rs` | ADR-0008; ADR-0044 P4b.3 |
 | A remote or pluggable provider (hypervisor API, NAS API) | a provider crate in `crates/providers/`. **Write an ADR first** | ADR-0008, ADR-0009; [Contribution workflow](contributing-workflow.md#when-to-write-an-adr) |
 | A CRI RPC | `delonix-cri` (interface) | AGENTS.md |
 | The local management API, `/metrics` | `delonix-mgmt` (interface) | ADR-0010 |

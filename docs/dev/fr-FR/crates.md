@@ -39,7 +39,7 @@ Deux conventions que vous rencontrerez partout :
 ## Tableau de référence
 
 <!-- dev-docs:begin crates-table -->
-| Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |
+| Crate | Couche | Chemin | Binaires | Dépend de (crates du moteur) | Utilisé par |
 |---|---|---|---|---|---|
 | `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-node`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-sdn`, `delonix-vm` |

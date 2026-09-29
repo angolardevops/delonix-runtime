@@ -166,7 +166,9 @@ recorded backend and an unknown name is an **error** (it used to fall back to CH
 
 ### Selection precedence for a new VM
 
-From `delonix_vm::create_with` and `resolve_vm_defaults` (`cmd/vm.rs`), first match wins:
+From `resolve_vm_defaults` (`cmd/vm.rs`) and `select_for_create`
+(`crates/adapters/delonix-vm/src/lib.rs`, which the VM use case reaches through
+`VmBackends::select`), first match wins:
 
 1. `--backend` (or `backend:` in the manifest).
 2. The image's `HYPERVISOR` (recorded by a VMfile build), when `--disk` names a local image.
@@ -316,7 +318,8 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 ```
 
-What happens (`cmd/vm.rs` → `delonix_vm::create_with`):
+What happens (`cmd/vm.rs` → `delonix_vm::create_with`, a wrapper that builds a
+`delonix_compute::vm::VmEngine` over this node's ports and calls its `create_with`):
 
 1. **Node policy** is enforced before any image is resolved (`policy::enforce`).
 2. **Disk resolution** (`resolve_image_ref`): `--url-img` wins (downloaded, cached, verified against
@@ -330,8 +333,10 @@ What happens (`cmd/vm.rs` → `delonix_vm::create_with`):
 5. **Backend** chosen (section 2); an admission check refuses when the host lacks RAM;
    `--namespace` other than `default` is refused on libvirt (the VM lives on `virbr0`, outside the
    Delonix SDN).
-6. **Overlay**: `<root>/vms/<name>.qcow2`, a thin qcow2 over the base (`prepare_local_overlay`);
-   `--disk-size <GiB>` grows it and cannot be smaller than the base.
+6. **Overlay**: `<root>/vms/<name>.qcow2`, a thin qcow2 over the base (the `LocalDiskImages`
+   port, implemented by `QemuImgDisks` → `prepare_local_overlay` in
+   `crates/adapters/delonix-vm/src/local_ports.rs`; skipped for a backend that manages its own
+   storage); `--disk-size <GiB>` grows it and cannot be smaller than the base.
 7. **Boot**: the backend's `boot`. `create` is idempotent: an existing, running VM is returned as is.
 
 The published images set no password on any account (see `--root-password` above), so pass
@@ -467,7 +472,9 @@ dry-run without `--apply`). This is the one deliberate exception to rootless in 
 | Area | Path |
 |---|---|
 | Port | `crates/contexts/delonix-compute/src/vm_backend.rs` |
-| Registry, CH and libvirt backends, `create_with`, snapshots, firmware lookup | `crates/adapters/delonix-vm/src/lib.rs` |
+| VM use cases (`VmEngine`: create, stop, start, status, list, remove, snapshots, day-2 verbs) and their ports (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) | `crates/contexts/delonix-compute/src/vm.rs`, `ports.rs` |
+| Registry, CH and libvirt backends, backend selection, firmware lookup, the public wrappers (`create_with`, `stop`, …) | `crates/adapters/delonix-vm/src/lib.rs` |
+| The adapter's implementations of the VM ports (`RegistryBackends`, `QemuImgDisks`, `CloudLocaldsSeed`) | `crates/adapters/delonix-vm/src/local_ports.rs` |
 | NoCloud seed generation | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Proxmox backend | `crates/providers/delonix-proxmox/` |
 | `vm` CLI, `kind: VirtualMachine`, `vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |
@@ -503,6 +510,10 @@ Read [ADR-0008](../adr/0008-proxmox-vm-backend.md) first; it is the template. In
   parser/scaffold tests in `cmd/vmfile.rs`. Run `cargo test -p delonix-vm` and
   `cargo test -p delonix-runtime-bin vmfile` (see [Clone, build and test](build-and-test.md) for `protoc` and the
   target directory).
+- **Use-case tests against fake ports** — the orchestration (`VmEngine`) is tested in
+  `delonix-compute` (`vm::tests`) with an in-memory store, a backend that records its calls and a
+  fake disk and seed, so a change to what `create`, `stop` or `status` decides needs no
+  hypervisor: `cargo test -p delonix-compute vm::`.
 - **`scripts/e2e.sh`** — the `vm` sections run without a hypervisor (listing, refusals) and, when
   available, exercise snapshots across stop/start on libvirt (needs `virsh`, `qemu-img` and a usable
   `qemu:///system`) and on Cloud Hypervisor. It isolates both state roots by default; the CH section

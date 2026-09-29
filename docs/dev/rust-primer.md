@@ -167,6 +167,29 @@ The decision behind this shape is [ADR-0008](../adr/0008-proxmox-vm-backend.md).
 `VmNetwork` port, held in a `OnceLock<Box<dyn VmNetwork>>` near the top of
 `crates/adapters/delonix-vm/src/lib.rs`).
 
+Not every port is a trait object. The VM use cases take their ports as **generic parameters**:
+
+```rust
+// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine<'a, R, B, D, S> {
+    pub root: &'a Path,
+    pub repo: R,       // R: StateRepository<Vm>
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option<&'a dyn VmNetwork>,
+}
+```
+
+The reason is a rule of trait objects: a trait with a generic method is not *dyn-compatible*
+(object-safe), and `StateRepository<T>` has one (`update<F>`, in
+`crates/foundation/delonix-model/src/ports.rs`). So the engine is generic, like
+`resolve_run<I, S, D, H>` for `container run`, and each caller picks the concrete types:
+`delonix-vm` builds `VmEngine<JsonStore<Vm>, RegistryBackends, QemuImgDisks, CloudLocaldsSeed>` in
+`engine` (`crates/adapters/delonix-vm/src/lib.rs`), and the tests in `vm::tests` build one over an
+in-memory store and recording fakes. The price of generics is a copy of the code per combination
+(monomorphization); the gain is that no port has to be reshaped to fit `dyn`.
+
 **Read more:** The Rust Book —
 [Traits](https://doc.rust-lang.org/book/ch10-02-traits.html),
 [Trait objects](https://doc.rust-lang.org/book/ch18-02-trait-objects.html),

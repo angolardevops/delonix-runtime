@@ -147,17 +147,27 @@ FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itse
 
 The baseline is empty, so any entry at all is a new leak. The two other messages
 (`more of a known leak`, `fixed or reduced … — lower the baseline`) only appear if debt is ever
-recorded again. Reproduce locally with a fresh directory of your own, and list what is there
+recorded again.
+
+The same job runs the gate a second time on `/tmp` itself: a test that binds a Unix socket needs a
+short path (`sun_path` is 108 bytes) and puts it there, where the `TMPDIR` census never looks.
+`/tmp` on a runner is not empty, so it is listed just before `cargo test` and only what is new
+afterwards is judged (`--before`), against the same empty baseline. Both censuses also run when a
+test **failed** — that is exactly when a cleanup on a test's last line never runs — so a red test
+can come with a leak report of its own. Reproduce locally with a fresh directory of your own, and list what is there
 instead of judging it — a leak can depend on the host (a test that returns early when a tool is
 missing):
 
 ```bash
-mkdir -p "$PWD/target/test-tmp" && TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
 python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
 ```
 
 The fix is in the test, not in the baseline: hold the directory in a `tempfile::TempDir`, so the
-removal also runs on an early `return` and on a failed assert — see
+removal also runs on an early `return` and on a failed assert — for a socket,
+`tempfile::tempdir_in("/tmp")` rather than a literal `/tmp` path with the pid — see
 [Coding conventions](coding-conventions.md) (*A test removes its temporary directory on every exit*).
 
 ## A shared or stale build cache

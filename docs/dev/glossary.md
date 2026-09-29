@@ -185,7 +185,8 @@ hit the classic `mount(2)` option-length limit. See:
 
 **Port (hexagonal)** — A trait that a use case needs and that an adapter or provider implements, so
 the domain never names a concrete mechanism. Examples: `VmBackend`, and the compute ports
-`ImageStore`, `StorageProvider`, `NetworkProvider`, `WorkloadRuntime`. See:
+`ImageStore`, `StorageProvider`, `NetworkProvider`, `WorkloadRuntime`, and `VmBackends`,
+`LocalDiskImages`, `SeedBuilder` for the VM use cases. See:
 `crates/contexts/delonix-compute/src/ports.rs`, `launch.rs`,
 [Traits as ports](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
 
@@ -256,6 +257,15 @@ waits for the container, records its true exit status (and an `OOMKilled` reason
 re-exec a fresh `delonix` first. See: `crates/adapters/delonix-linux/src/supervise.rs::run_supervised`,
 `crates/adapters/delonix-linux/src/lib.rs::wait_and_record`.
 
+**System container** — A whole userland run as one unit on a remote provider (today an LXC container
+on a Proxmox VE node), declared as `kind: SystemContainer`. It is **not** a `kind: Container`: the
+provider offers no `exec`, logs or exit status and the engine's dataplane does not reach it, so it
+has semantics closer to a VM (snapshots, backups, clone, move between nodes). The engine pulls the
+image itself; the node runs it; a change made on the node by hand is drift. Always unprivileged. See:
+`crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider`,
+`crates/providers/delonix-proxmox/src/lxc.rs`, `bins/delonix-runtime-bin/src/cmd/system_container.rs`,
+[ADR-0058](../adr/0058-proxmox-lxc-is-not-a-container-provider.md).
+
 **userns (user namespace)** — The Linux namespace that maps user ids, giving a process root
 privileges only over objects its namespace owns. It is the foundation of rootless operation, and on
 recent Ubuntu it can be blocked by AppArmor for binaries outside the expected paths. See:
@@ -276,6 +286,13 @@ the registration before building anything, so a remote backend only connects whe
 `crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend`,
 `crates/adapters/delonix-vm/src/lib.rs::register_backend`, `select_backend`,
 [Traits as ports](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
+
+**VmEngine** — The VM use cases (create, stop, start, status, list, remove and the day-2 verbs) as
+methods of one struct in the compute context, generic over the ports it is handed: a
+`StateRepository<Vm>`, `VmBackends`, `LocalDiskImages`, `SeedBuilder` and the optional
+`VmNetwork`. It never opens a store, runs a command or names a backend; `delonix-vm` builds one per
+call over its own implementations and keeps its public functions as wrappers (ADR-0044 P4b.3). See:
+`crates/contexts/delonix-compute/src/vm.rs::VmEngine`, `crates/adapters/delonix-vm/src/local_ports.rs`.
 
 **Workload** — Two related things. `kind: Workload` is a sugar Kind with `spec.type:
 container|pod|vm|microvm` that lowers to the matching Kind at load time

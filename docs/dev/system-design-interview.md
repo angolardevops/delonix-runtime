@@ -405,6 +405,12 @@ sequenceDiagram
   only when configured). A registration carries a factory closure and an `auto_selectable` flag,
   so auto-detection never constructs — and therefore never authenticates — a remote backend.
   Registering does no I/O.
+- **Use cases apart from mechanism.** What `create`, `stop` or `status` decides lives in the
+  compute context as `VmEngine`, which is handed a record store and three ports (`VmBackends`,
+  `LocalDiskImages`, `SeedBuilder`) and never runs a program itself; the adapter answers those ports
+  with its registry, `qemu-img` and `cloud-localds`. The orchestration is therefore testable
+  against fakes, and a hypervisor-specific rule (the libvirt anti-spoof opt-out, a domain left
+  without a record) has to be a port answer rather than an `if` in the use case (ADR-0044 P4b.3).
 - **Networking a VM.** Cloud Hypervisor runs inside the pin's netns and gets a `tap` on a network
   bridge through the `VmNetwork` port, which the SDN implements (`HostVmNetwork`); `delonix-vm`
   does not depend on `delonix-sdn`. Because the DHCP server is the engine's own and deterministic,
@@ -418,10 +424,12 @@ sequenceDiagram
   backend may realize it natively.
 
 **Where it lives in the code:** `crates/contexts/delonix-compute/src/vm_backend.rs` (`VmBackend`,
-`BackendRegistration`); `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
+`BackendRegistration`); `crates/contexts/delonix-compute/src/vm.rs` (`VmEngine`);
+`crates/adapters/delonix-vm/src/local_ports.rs` (`RegistryBackends`, `QemuImgDisks`,
+`CloudLocaldsSeed`); `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `select_for_create`, `auto_detect`,
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`); `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`);
-`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`);
+`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`, `VmBackends`, `LocalDiskImages`, `SeedBuilder`);
 `crates/adapters/delonix-sdn/src/vm_network.rs` (`HostVmNetwork`);
 `crates/adapters/delonix-sdn/src/infra.rs` (`sdn_reachable`, `dhcp_lease_ip`);
 `crates/providers/delonix-proxmox/src/lib.rs` (`ProxmoxBackend`);
