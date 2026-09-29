@@ -1,6 +1,6 @@
 # ADR-0060: Cache a registry token on disk only when it was issued anonymously
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-29, by the owner) — implemented; see «Implementation»
 - **Date:** 2026-09-29
 - **Deciders:** Walter Angolar
 - **Relates to:** the image performance series (#518–#538, #605; its section in AGENTS.md
@@ -111,3 +111,46 @@ for. Two hosts never share an entry, and neither do two repositories on one host
 3. A test that an expired or corrupt entry is a miss.
 4. The measurement repeated with the implementation: a warm `image pull alpine:3.20` twice in a
    row, isolated root, comparing the second pull with and without the cache.
+
+## Implementation
+
+`delonix-oci::token_cache` (the store) and `registry::Client` (the use).
+
+- **Where the cache is used.** The `Client` carries a cache root only on the five read paths:
+  container pull, VM artifact pull (to memory and to a file), `ls-remote` and the remote
+  describe. The root is set only when `auth::lookup` finds no credentials for the host
+  (`anonymous_cache`). Push paths and `registry_client`, which signing uses to push, never
+  get one.
+- **The key.** It is the read scope the client asks for (`repository:<repo>:pull`). A token is
+  stored only when the registry's challenge named exactly that scope, so every stored entry is
+  one a later read looks up.
+- **One deviation from D3, on purpose.** The expiry is `now + expires_in` counted from when the
+  response arrived, not from the response's `issued_at`. Reading `issued_at` needs an RFC 3339
+  parser this crate does not have, and the 30 s margin covers the difference: the token
+  service's clock skew plus the response time. When the token is a JWT, its `exp` still bounds
+  the entry.
+- **A refused cached token is removed even when nothing replaces it.** When the challenge names
+  another scope, the fresh token is not stored; without the removal, the refused entry would be
+  sent and refused by every later command.
+- **`system snapshot` leaves `auth/tokens/` out** (`Skip::Cache`); `auth.json` still travels.
+
+**Tests** (each fails with its rule removed, checked by mutation):
+- `with_credentials_the_cache_is_neither_read_nor_written` — a valid token is placed in the
+  cache, and a client with credentials still starts without it. This is the check D1 requires.
+- `a_refused_cached_token_is_dropped_and_the_command_still_succeeds`.
+- `a_refused_cached_token_is_dropped_even_when_nothing_replaces_it`.
+- `an_anonymous_token_is_reused_by_the_next_command` — one token request and one `401` across
+  two commands.
+- The store's own tests: expiry, corrupt entry, pruning, modes.
+
+**Measured with the implementation** (2026-09-29, isolated root, load ~2, `image pull
+alpine:3.20` warm, the same binary, `auth/tokens/` removed before each "without" run, 5 rounds):
+
+| | time |
+|---|---|
+| without a cached token | 1.50–1.64 s |
+| with a cached token | **0.94–0.99 s** |
+
+About 0.55 s saved per command, less than the ~1 s upper bound from `curl`, as the Context
+expected: the engine already reused its connection to the registry between the `401` and the
+manifest. On disk: `auth/tokens/` is `0700` and each entry is `0600`.
