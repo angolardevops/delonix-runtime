@@ -979,6 +979,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-cloud-hypervisor"
+version = "4.5.0"
+dependencies = [
+ "delonix-compute",
+ "delonix-model",
+ "delonix-node",
+ "libc",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "delonix-provider-libvirt"
 version = "4.5.0"
 dependencies = [
@@ -1155,6 +1167,7 @@ dependencies = [
  "delonix-compute",
  "delonix-model",
  "delonix-node",
+ "delonix-provider-cloud-hypervisor",
  "delonix-provider-libvirt",
  "delonix-state",
  "libc",

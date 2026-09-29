@@ -446,6 +446,7 @@ Excepções declaradas (cada uma nomeia a fase do ADR-0040 que a remove):
 - `delonix-proxmox` → `delonix-sdn` — removida na **P4**
 - `delonix-scanner` → `delonix-oci` — removida na **P4**
 - `delonix-sdn` → `delonix-state` — removida na **P4**
+- `delonix-vm` → `delonix-provider-cloud-hypervisor` — removida na **P5**
 - `delonix-vm` → `delonix-provider-libvirt` — removida na **P5**
 - `delonix-vm` → `delonix-state` — removida na **P4**
 - `delonix-volume` → `delonix-state` — removida na **P4**
@@ -669,6 +670,7 @@ flowchart TB
   end
   subgraph provider["Providers"]
     delonix_opnsense["delonix-opnsense"]
+    delonix_provider_cloud_hypervisor["delonix-provider-cloud-hypervisor"]
     delonix_provider_libvirt["delonix-provider-libvirt"]
     delonix_proxmox["delonix-proxmox"]
     delonix_truenas["delonix-truenas"]
@@ -746,6 +748,9 @@ flowchart TB
   delonix_opnsense --> delonix_compute
   delonix_opnsense --> delonix_model
   delonix_opnsense --> delonix_sdn
+  delonix_provider_cloud_hypervisor --> delonix_compute
+  delonix_provider_cloud_hypervisor --> delonix_model
+  delonix_provider_cloud_hypervisor --> delonix_node
   delonix_provider_libvirt --> delonix_compute
   delonix_provider_libvirt --> delonix_model
   delonix_provider_libvirt --> delonix_node
@@ -786,6 +791,7 @@ flowchart TB
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_model
   delonix_vm --> delonix_node
+  delonix_vm --> delonix_provider_cloud_hypervisor
   delonix_vm --> delonix_provider_libvirt
   delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
@@ -806,6 +812,7 @@ flowchart TB
   class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
+  class delonix_provider_cloud_hypervisor external
   class delonix_provider_libvirt external
   class delonix_proxmox external
   class delonix_runtime_bin engine
