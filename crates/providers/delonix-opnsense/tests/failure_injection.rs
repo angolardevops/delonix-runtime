@@ -18,9 +18,9 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
+use delonix_networking::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayRule};
+use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use delonix_opnsense::{Auth, Client, Error, Staging, Target, MAX_RESPONSE_BYTES};
-use delonix_sdn::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayRule};
-use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 
 // ===========================================================================
 // The mock appliance
@@ -1121,7 +1121,7 @@ fn a_category_still_in_use_is_surfaced_not_forced() {
 
 #[test]
 fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
-    use delonix_sdn::gateway::GatewayProvider;
+    use delonix_networking::gateway::GatewayProvider;
     let appliance = MockAppliance::start(script(&[
         (
             "POST",

@@ -480,3 +480,25 @@ resolves through `networkDefaults` yet — that is F2.
 without the file the row is `NotConfigured`; `defaultProvider: opnsense`, `networkDefaults.nat`
 and a secret file others can read each exit 1 with the reason; `--kind firewall` is refused
 naming the five kinds.
+
+## Addendum 2026-09-30 — F2a: the crate and the move, nothing else
+
+F2 is split. **F2a** is the move D7 names, in the shape `VmBackend` left `delonix-vm` for the
+compute context (ADR-0044 P4b.2), and it changes no behaviour:
+
+- **`crates/contexts/delonix-networking`**, a context depending only on `delonix-model`.
+  It holds `gateway` (`GatewayProvider`, its registry, the `native` provider), `network_zone`
+  (`NetworkZoneProvider`, its registry) and `ownership` (the owner marks), moved from
+  `delonix-sdn` with their tests. `delonix-sdn` re-exports the three modules under their old
+  paths, so the CLI and `delonix-node-api` do not change a line.
+- **The eight failures those modules raise move with them** (`DX-1341`, `1342`, `1344`–`1346`,
+  `5340`–`5342`), each with the same text, class and number, so the CLI prints and exits as
+  before. The DX-C380 block of D5 is a later slice.
+- **`delonix-opnsense` and `delonix-proxmox` depend on the context**, not on the native
+  dataplane. The two exceptions `("dep", "delonix-opnsense", "delonix-sdn")` and
+  `("dep", "delonix-proxmox", "delonix-sdn")` are deleted: `arch_fitness.py` now sees 28 crates
+  and 9 exceptions. This is also the network half of ADR-0044's P4c row.
+
+**What F2 still owes**, unchanged from its row: the ports without default bodies, `native`
+removed, `SegmentProvider` in place of `NetworkZoneProvider`, the per-role registries with D3's
+resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope with the DX-C380 block.

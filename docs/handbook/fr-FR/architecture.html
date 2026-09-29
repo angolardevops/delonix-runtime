@@ -924,8 +924,6 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <li><code>delonix-linux</code> → <code>delonix-state</code> — supprimée en <strong>P4a</strong></li>
 <li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — supprimée en <strong>P5</strong></li>
 <li><code>delonix-oci</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
-<li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — supprimée en <strong>P4</strong></li>
-<li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-scanner</code> → <code>delonix-oci</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-sdn</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-vm</code> → <code>delonix-provider-cloud-hypervisor</code> — supprimée en <strong>P5</strong></li>
@@ -1126,6 +1124,7 @@ comprendre pourquoi.</p>
   end
   subgraph context[&quot;Contexts&quot;]
     delonix_compute[&quot;delonix-compute&quot;]
+    delonix_networking[&quot;delonix-networking&quot;]
     delonix_node[&quot;delonix-node&quot;]
     delonix_security_runtime[&quot;delonix-security-runtime&quot;]
     delonix_stack[&quot;delonix-stack&quot;]
@@ -1200,6 +1199,7 @@ comprendre pourquoi.</p>
   delonix_mgmt_bin --&gt; delonix_mgmt
   delonix_mgmt_bin --&gt; delonix_node
   delonix_mgmt_bin --&gt; delonix_telemetry
+  delonix_networking --&gt; delonix_model
   delonix_node --&gt; delonix_model
   delonix_node_api --&gt; delonix_compute
   delonix_node_api --&gt; delonix_linux
@@ -1219,7 +1219,7 @@ comprendre pourquoi.</p>
   delonix_oci --&gt; delonix_state
   delonix_opnsense --&gt; delonix_compute
   delonix_opnsense --&gt; delonix_model
-  delonix_opnsense --&gt; delonix_sdn
+  delonix_opnsense --&gt; delonix_networking
   delonix_provider_cloud_hypervisor --&gt; delonix_compute
   delonix_provider_cloud_hypervisor --&gt; delonix_model
   delonix_provider_cloud_hypervisor --&gt; delonix_node
@@ -1228,11 +1228,12 @@ comprendre pourquoi.</p>
   delonix_provider_libvirt --&gt; delonix_node
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
-  delonix_proxmox --&gt; delonix_sdn
+  delonix_proxmox --&gt; delonix_networking
   delonix_runtime_bin --&gt; delonix_compute
   delonix_runtime_bin --&gt; delonix_linux
   delonix_runtime_bin --&gt; delonix_mgmt
   delonix_runtime_bin --&gt; delonix_model
+  delonix_runtime_bin --&gt; delonix_networking
   delonix_runtime_bin --&gt; delonix_node
   delonix_runtime_bin --&gt; delonix_oci
   delonix_runtime_bin --&gt; delonix_opnsense
@@ -1251,6 +1252,7 @@ comprendre pourquoi.</p>
   delonix_sdn --&gt; delonix_compute
   delonix_sdn --&gt; delonix_model
   delonix_sdn --&gt; delonix_net_rules
+  delonix_sdn --&gt; delonix_networking
   delonix_sdn --&gt; delonix_node
   delonix_sdn --&gt; delonix_state
   delonix_security_runtime --&gt; delonix_model
@@ -1279,6 +1281,7 @@ comprendre pourquoi.</p>
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_networking block
   class delonix_node block
   class delonix_node_api iface
   class delonix_node_api_bin engine

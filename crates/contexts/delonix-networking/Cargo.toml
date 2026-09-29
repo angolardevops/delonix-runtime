@@ -1,0 +1,12 @@
+[package]
+name = "delonix-networking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-model = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

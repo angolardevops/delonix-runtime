@@ -6594,7 +6594,7 @@ pub fn registration(
 }
 
 /// Registers this Proxmox target's cluster-native SDN as a
-/// `delonix_sdn::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
+/// `delonix_networking::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
 /// SEPARATE registration from [`registration`]'s `VmBackend` one, with its
 /// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
 /// sharing one across two registries would tie an unrelated port's lifetime
@@ -6618,8 +6618,8 @@ pub fn register_network_zone_provider(
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_sdn::network_zone::register_network_zone_provider(
-        delonix_sdn::network_zone::NetworkZoneProviderRegistration {
+    delonix_networking::network_zone::register_network_zone_provider(
+        delonix_networking::network_zone::NetworkZoneProviderRegistration {
             id: NETWORK_ZONE_PROVIDER_ID,
             aliases: &["pve"],
             new: Box::new(move || {
@@ -6632,7 +6632,7 @@ pub fn register_network_zone_provider(
                     // must not stay "down" for the rest of the process.
                     let c = std::sync::Arc::new(
                         Client::connect_with(&target, opts.clone())
-                            .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
+                            .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
                     );
                     *slot = Some(c.clone());
                     c
@@ -6641,7 +6641,9 @@ pub fn register_network_zone_provider(
                     client,
                     Ledger::at(&ledger_dir),
                 ))
-                    as Box<dyn delonix_sdn::network_zone::NetworkZoneProvider>)
+                    as Box<
+                        dyn delonix_networking::network_zone::NetworkZoneProvider,
+                    >)
             }),
         },
     )

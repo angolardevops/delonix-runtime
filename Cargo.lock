@@ -883,6 +883,14 @@ name = "delonix-net-rules"
 version = "4.5.0"
 
 [[package]]
+name = "delonix-networking"
+version = "4.5.0"
+dependencies = [
+ "delonix-model",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "delonix-node"
 version = "4.5.0"
 dependencies = [
@@ -967,7 +975,7 @@ version = "4.5.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
- "delonix-sdn",
+ "delonix-networking",
  "rcgen",
  "reqwest 0.12.28",
  "rustls",
@@ -1008,7 +1016,7 @@ version = "4.5.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
- "delonix-sdn",
+ "delonix-networking",
  "rcgen",
  "reqwest 0.12.28",
  "rustls",
@@ -1033,6 +1041,7 @@ dependencies = [
  "delonix-linux",
  "delonix-mgmt",
  "delonix-model",
+ "delonix-networking",
  "delonix-node",
  "delonix-oci",
  "delonix-opnsense",
@@ -1089,6 +1098,7 @@ dependencies = [
  "delonix-compute",
  "delonix-model",
  "delonix-net-rules",
+ "delonix-networking",
  "delonix-node",
  "delonix-state",
  "libc",

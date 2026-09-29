@@ -57,6 +57,7 @@ LAYERS = {
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
     "delonix-compute": CONTEXT,
+    "delonix-networking": CONTEXT,  # ADR-0059 D7: the network role ports and their registries
     "delonix-node": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
@@ -140,13 +141,6 @@ EXCEPTIONS = {
         "P4",
         "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
     ),
-    ("dep", "delonix-opnsense", "delonix-sdn"): (
-        "P4",
-        "the GatewayProvider port lives in the same crate as the native nftables "
-        "dataplane, by the same reasoning and the same exception as "
-        "delonix-proxmox -> delonix-vm had (ADR-0051), which P4b.2 closed by "
-        "moving VmBackend into the compute context; this one moves the same way",
-    ),
     ("dep", "delonix-vm", "delonix-provider-cloud-hypervisor"): (
         "P5",
         "delonix-vm is the VM composition root until the application layer exists: it "
@@ -160,12 +154,6 @@ EXCEPTIONS = {
         "seeds the registry with the local backends and assembles the engine the bin and "
         "three interfaces share, and no layer below INTERFACE may depend on a provider "
         "(ADR-0044 P4b.4, docs/discovery/61, accepted 2026-09-29)",
-    ),
-    ("dep", "delonix-proxmox", "delonix-sdn"): (
-        "P4",
-        "the NetworkZoneProvider port (ADR-0049 addendum) lives in delonix-sdn "
-        "for the same reason GatewayProvider does (ADR-0051): mirrors the "
-        "VmBackend precedent exactly, and moves the same week P4 moves that one",
     ),
     ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",

@@ -53,7 +53,7 @@
 //! risks the exact trap this module doc exists to avoid.
 //! [`Client::ensure_alias`]/[`Client::ensure_rule`] never update an
 //! existing alias/rule found under the same identity: one of this engine's
-//! that still matches is [`delonix_sdn::gateway::EnsureOutcome::AlreadyPresent`],
+//! that still matches is [`delonix_networking::gateway::EnsureOutcome::AlreadyPresent`],
 //! one that was edited on the appliance is [`Error::Drifted`].
 //!
 //! # Ownership (audit 62, §6 P1)
@@ -83,8 +83,8 @@ mod error;
 pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
 
-use delonix_sdn::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
-use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
+use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -154,8 +154,8 @@ fn alias_write(alias: &GatewayAlias) -> AliasWrite {
     AliasWrite {
         name: alias.name.clone(),
         kind: match alias.kind {
-            delonix_sdn::gateway::AliasKind::Host => "host",
-            delonix_sdn::gateway::AliasKind::Network => "network",
+            delonix_networking::gateway::AliasKind::Host => "host",
+            delonix_networking::gateway::AliasKind::Network => "network",
         },
         content: alias.content.join("\n"),
         description: alias.description.clone(),
@@ -310,7 +310,7 @@ impl Client {
             .iter()
             .filter_map(|r| {
                 let name = str_field(r, "name");
-                delonix_sdn::ownership::token_of_label(&name)?;
+                delonix_networking::ownership::token_of_label(&name)?;
                 Some((r.get("uuid")?.as_str()?.to_string(), name))
             })
             .collect())
@@ -1208,8 +1208,8 @@ pub const ID: &str = "opnsense";
 /// "down" for the rest of the process.
 pub fn register_with(target: Target) -> delonix_model::Result<()> {
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_sdn::gateway::register_gateway_provider(
-        delonix_sdn::gateway::GatewayProviderRegistration {
+    delonix_networking::gateway::register_gateway_provider(
+        delonix_networking::gateway::GatewayProviderRegistration {
             id: ID,
             aliases: &[],
             new: Box::new(move || {
@@ -1220,7 +1220,7 @@ pub fn register_with(target: Target) -> delonix_model::Result<()> {
                 }
                 let c = std::sync::Arc::new(
                     Client::connect(&target)
-                        .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
+                        .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
                 );
                 *slot = Some(c.clone());
                 Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)

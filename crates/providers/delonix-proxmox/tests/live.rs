@@ -5597,10 +5597,10 @@ fn a_system_containers_backup_is_restored_over_it_and_deleted() {
 /// leaving that change pending and not applied.
 #[test]
 fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change() {
-    use delonix_sdn::network_zone::{
+    use delonix_networking::network_zone::{
         EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
     };
-    use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
+    use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 
     let Some(t) = target() else {
         return;

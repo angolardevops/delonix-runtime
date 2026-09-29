@@ -42,12 +42,12 @@ pub mod bpf;
 pub mod cni;
 pub mod discover;
 mod flock;
-pub mod gateway;
 pub mod gc;
+/// The role ports and owner marks moved to the networking context (ADR-0059
+/// F2a); re-exported under their old paths so no caller changes.
+pub use delonix_networking::{gateway, network_zone, ownership};
 pub mod infra;
 pub mod ipam;
-pub mod network_zone;
-pub mod ownership;
 mod pin_userns;
 pub mod provider_report;
 pub mod run_network;
