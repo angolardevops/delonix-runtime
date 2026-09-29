@@ -12,43 +12,14 @@
 //! declaration can be rendered against an assumed-complete host (the published
 //! matrix) and against this machine (`delonix provider ls`).
 
+// The libvirt half moved to its provider crate (ADR-0044 P4b.4b); re-exported
+// so the bin and the node API keep reading both reports from here.
+pub use delonix_provider_libvirt::{libvirt_report, LibvirtHost};
+
 use delonix_compute::capability::{
     Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
     ProviderReport,
 };
-
-/// What the libvirt backend needs from the host, each probed separately so the
-/// message names the missing piece instead of a generic "not available".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LibvirtHost {
-    pub virsh: bool,
-    pub qemu: bool,
-    pub kvm: bool,
-    /// `qemu:///system` answers — needed for `nat`/`bridge` (an observed IP).
-    pub system_uri: bool,
-}
-
-impl LibvirtHost {
-    /// Everything present: the declaration as published, host-independent.
-    pub const ASSUMED: LibvirtHost = LibvirtHost {
-        virsh: true,
-        qemu: true,
-        kvm: true,
-        system_uri: true,
-    };
-
-    /// Reads this machine. Costs three `which` and one `virsh uri` round trip;
-    /// never creates anything.
-    pub fn probe() -> LibvirtHost {
-        let virsh = super::binary_in_path("virsh");
-        LibvirtHost {
-            virsh,
-            qemu: super::binary_in_path("qemu-system-x86_64"),
-            kvm: std::path::Path::new("/dev/kvm").exists(),
-            system_uri: virsh && super::system_libvirt_usable(),
-        }
-    }
-}
 
 /// What the Cloud Hypervisor backend needs from the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,290 +58,6 @@ fn health(available: bool, reason: &'static str, message: String) -> ProviderHea
         reason,
         message,
     }
-}
-
-/// The libvirt backend's report against `host`.
-pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
-    let available = host.virsh && host.qemu;
-    let (reason, message) = if !host.virsh {
-        (
-            "VirshMissing",
-            "virsh is not installed (libvirt-clients)".to_string(),
-        )
-    } else if !host.qemu {
-        (
-            "QemuMissing",
-            "qemu-system-x86_64 is not installed".to_string(),
-        )
-    } else if !host.kvm {
-        (
-            "NoKvm",
-            "/dev/kvm is absent: guests would run without acceleration".to_string(),
-        )
-    } else if !host.system_uri {
-        (
-            "SessionOnly",
-            "qemu:///system does not answer (join the `libvirt` group): only user-mode networking, no observed IP".to_string(),
-        )
-    } else {
-        ("Ok", String::new())
-    };
-    // The system connection is what most of the network-facing rows need; a
-    // session-only host keeps the lifecycle and loses the observed address.
-    let bin = |s: S| s.on_host(available, "virsh + qemu-system-x86_64 not both installed");
-    // Narrowed AFTER `bin`: a host without virsh has no system connection
-    // either, whatever the probe struct says — `probe()` derives one from the
-    // other, but the declaration must not depend on that coupling.
-    let sys = |s: S| bin(s).on_host(host.system_uri, "needs qemu:///system (libvirt group)");
-    ProviderReport::build(
-        "libvirt",
-        ProviderKind::Compute,
-        available,
-        health(available, reason, message),
-        |c| {
-            match c {
-            C::ProviderAvailability => bin(S::Partial {
-                detail: "`available()` checks the two binaries; `provider ls` additionally probes qemu:///system",
-            }),
-            C::ResourceReadback => bin(S::Supported {
-                evidence: "check:o vm ls diz Paused (não Stopped)",
-            }),
-            C::Events => S::NotImplemented,
-            C::AsyncOperations => S::NotImplemented,
-            C::VmCreate => bin(S::Supported {
-                evidence: "e2e:vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)",
-            }),
-            C::VmStart => bin(S::Supported {
-                evidence: "check:vm start",
-            }),
-            C::VmStop => bin(S::Supported {
-                evidence: "check:vm stop",
-            }),
-            C::VmDestroy => bin(S::Partial {
-                detail: "`vm destroy` undefines the domain, releases the DHCP reservation and removes the overlay; the battery tears down without a named check",
-            }),
-            C::VmRestart => bin(S::Partial {
-                detail: "stop-then-start, always a real reboot; no battery check names it",
-            }),
-            C::VmPause => bin(S::Supported {
-                evidence: "check:vm pause",
-            }),
-            C::VmResume => bin(S::Supported {
-                evidence: "check:vm unpause",
-            }),
-            C::VmResumeSameIdentity => bin(S::Supported {
-                evidence: "check:vm start depois do stop de uma VM pausada",
-            }),
-            C::VmClone => S::NotImplemented,
-            C::VmTemplate => S::NotImplemented,
-            C::VmResizeCold => bin(S::Supported {
-                evidence: "check:o domínio arranca com 2 vCPU",
-            }),
-            C::VmHotplug => S::NotImplemented,
-            C::VmExtraDisks => bin(S::Partial {
-                detail: "`extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery",
-            }),
-            C::VmExtraNics => bin(S::Partial {
-                detail: "`extraNics` (network/bridge/user) reach the domain XML; never booted in the battery",
-            }),
-            C::VmDiskResize => S::NotImplemented,
-            C::VmPciPassthrough => bin(S::Partial {
-                detail: "`<hostdev>` per validated PCI address; no IOMMU host in the battery",
-            }),
-            C::VmTpm => bin(S::Partial {
-                detail: "`<tpm model='tpm-crb'>` emulator; swtpm presence is not probed",
-            }),
-            C::VmCpuModel => bin(S::Partial {
-                detail: "`cpuModel`/`cpuTopology` in the XML, default host-passthrough; not booted in the battery",
-            }),
-            C::VmCpuPinning => bin(S::Partial {
-                detail: "`<cputune>` quota + `<vcpupin>`; unit-tested XML, dropped on qemu:///session",
-            }),
-            C::VmHugepages => bin(S::Partial {
-                detail: "`<memoryBacking><hugepages/>`; the host's hugepage pool is not probed",
-            }),
-            C::VmCloudInit => bin(S::Partial {
-                detail: "NoCloud seed on a virtio disk (#435); the battery never logs into a guest",
-            }),
-            C::VmRestartPolicyNative => bin(S::Partial {
-                detail: "`on_crash=restart` for always/on-failure; unit-tested, no guest crashed on purpose",
-            }),
-            C::VmNamespaceIsolation => S::UnsupportedByProvider {
-                reason: "a libvirt VM lives on virbr0 in the host netns, a different L2 the engine does not program; `--namespace` is refused by name",
-            },
-            C::VmAntispoof => sys(S::Supported {
-                evidence: "test:crates/adapters/delonix-vm/src/lib.rs::antispoof_live_defines_and_survives_the_domain",
-            }),
-            C::VmRawDefinition => bin(S::Partial {
-                detail: "`libvirtXml`/`libvirtXmlOverlay` are UNVALIDATED, trusted manifests only, local CLI only — never reachable from the node contract (ADR-0050)",
-            }),
-            C::SystemContainerLifecycle
-            | C::SystemContainerOciImage
-            | C::SystemContainerEntrypointEnv
-            | C::SystemContainerExec
-            | C::SystemContainerLogs
-            | C::SystemContainerExitStatus
-            | C::SystemContainerNetworkBridge
-            | C::SystemContainerUnprivileged
-            | C::SystemContainerSnapshot
-            | C::SystemContainerResize
-            | C::SystemContainerBackup
-            | C::SystemContainerClone
-            | C::SystemContainerFirewall
-            | C::SystemContainerMove => S::UnsupportedByProvider {
-                reason: "a VM provider; a system container is the Proxmox provider's (ADR-0058)",
-            },
-            C::ContainerLifecycle
-            | C::ContainerExec
-            | C::ContainerLogs
-            | C::ContainerHotReconfigure
-            | C::ContainerResourceLimits
-            | C::ContainerGpuCdi
-            | C::ContainerSeccompCustomProfile
-            | C::ContainerOomDetection
-            | C::PodSharedNetwork
-            | C::PodSharedIpcUts
-            | C::PodSharedPid
-            | C::ContainerImages
-            | C::ContainerBackupRestore => S::UnsupportedByProvider {
-                reason: "a VM provider; containers are the Linux provider's",
-            },
-            C::VmNetworkNat => sys(S::Supported {
-                evidence: "e2e:vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)",
-            }),
-            C::VmNetworkBridge => sys(S::Partial {
-                detail: "`netMode: bridge` enslaves the NIC to a host bridge; validated live for ADR-0046 phase 2, no battery check",
-            }),
-            C::VmNetworkSdn => S::UnsupportedByProvider {
-                reason: "the NIC is on virbr0 (host netns), not on the engine's SDN; `vm bridge` (root, experimental) is the only path across",
-            },
-            C::VmStaticIp => sys(S::Partial {
-                detail: "`--ip` reserves a DHCP host entry (`net-update`), released on destroy; argv unit-tested, no battery",
-            }),
-            C::StoragePools => S::NotImplemented,
-            C::VmSnapshotDisk => bin(S::Supported {
-                evidence: "check:snapshot create com a VM parada",
-            }),
-            C::VmSnapshotMemory => bin(S::Supported {
-                evidence: "check:vm snapshot create",
-            }),
-            C::VmSnapshotRestore => bin(S::Supported {
-                evidence: "check:vm snapshot restore depois do start",
-            }),
-            C::VmSnapshotDelete => bin(S::Supported {
-                evidence: "check:vm snapshot rm",
-            }),
-            C::VmSnapshotPersistent => bin(S::Supported {
-                evidence: "check:o libvirt volta a conhecer o snapshot",
-            }),
-            C::VmBackupDisk => bin(S::Partial {
-                detail: "`backup create vm` takes a live external snapshot and block-commits it back; the battery backs up a container, not a VM",
-            }),
-            C::VmBackupQuiesced => bin(S::Partial {
-                detail: "`--quiesce` asks the guest agent to freeze; whether the guest has one is not probed",
-            }),
-            C::VmBackupRestore => bin(S::Partial {
-                detail: "`backup restore` re-imports the disk; battery covers the container kind only",
-            }),
-            C::VmMigrationCold => bin(S::Partial {
-                detail: "`vm migrate`: stop, flatten, copy over SSH, import, start; no battery",
-            }),
-            C::VmMigrationLive => S::UnsupportedByProvider {
-                reason: "ADR-0031: needs shared VM storage or a privileged libvirt daemon listening on the network; neither is a default of this engine",
-            },
-            C::VmReplication => S::RequiresExternalComponent {
-                component: "shared or replicated VM storage outside the engine (ADR-0031)",
-            },
-            C::VmHighAvailability => S::RequiresExternalComponent {
-                component: "a cluster manager with quorum and fencing; a single libvirt host has none",
-            },
-            C::VmConsoleSerial => bin(S::Partial {
-                detail: "`vm console` runs `virsh console --force`; interactive, no battery",
-            }),
-            C::VmConsoleVnc => bin(S::Partial {
-                detail: "`vm vnc` reads `vncdisplay` of a `--vnc` domain; no battery",
-            }),
-            C::VmGuestAgent => S::NotImplemented,
-            C::VmIpObserved => sys(S::Partial {
-                detail: "DHCP lease with a lease floor, then `domifaddr`; pure test only, the battery does not read the IP",
-            }),
-            C::MetricsPrometheus => S::Partial {
-                detail: "`delonix_vms_running/total` only; no per-domain stats",
-            },
-            C::MetricsPerWorkloadNetwork => S::NotImplemented,
-            C::HostHealth => S::Supported {
-                evidence: "check:system info",
-            },
-            C::HostCapacity => S::NotImplemented,
-            C::TransportVerified => S::Partial {
-                detail: "local URIs only (qemu:///system|session); a remote libvirt URI is never built",
-            },
-            C::CredentialInVault => S::UnsupportedByProvider {
-                reason: "no credential exists: access is membership of the `libvirt` group",
-            },
-            C::NetBridge
-            | C::NetMacvlanIpvlan
-            | C::NetVlan
-            | C::NetOverlayVxlan
-            | C::NetOverlayEncrypted
-            | C::NetIpam
-            | C::NetStaticIp
-            | C::NetDns
-            | C::NetPublishPorts
-            | C::NetRoutesBetweenNetworks
-            | C::NetNamespaceIsolation
-            | C::NetTunnelEgress
-            | C::NetRateLimit
-            | C::NetPacketCapture
-            | C::NetL7Proxy
-            | C::NetIpv6
-            | C::VolumeLocal
-            | C::VolumeBind
-            | C::VolumeNfs
-            | C::VolumeCifs
-            | C::VolumeWebdav
-            | C::VolumeQuota
-            | C::VolumeSnapshot
-            | C::VolumeProvisionNas
-            | C::StorageLvmThin
-            | C::StorageZfsBtrfs
-            | C::StorageCeph
-            | C::FirewallPerWorkload
-            | C::FirewallDefaultDeny
-            | C::FirewallSourceFiltering
-            | C::FirewallEgressPolicy
-            | C::NetGatewayFilter
-            | C::NetGatewayAlias
-            | C::NetGatewayUpdateInPlace
-            | C::NetGatewayRuleOrder
-            | C::NetGatewayMultiWan
-            | C::NetGatewayVpn
-            | C::NetNatSnat
-            | C::NetNatDnat
-            | C::NetNatOneToOne
-            | C::NetNatNpt
-            | C::NetLbL4
-            | C::NetLbHealthCheck
-            | C::NetDnsRecords
-            | C::NetDnsAuthoritative
-            | C::NetIpamProvider
-            | C::NetIpamReservation
-            | C::NetIpamDhcp
-            | C::NetSegmentRemote
-            | C::NetApplyStaged
-            | C::NetApplyRollback
-            | C::NetObserve
-            | C::NetVerifyDataplane
-            | C::NetOwnershipMarker
-            | C::FirewallStateless
-            | C::FirewallLogging
-            | C::FirewallIcmpType
-            | C::FirewallWorkloadPeer => S::UnsupportedByProvider {
-                reason: "not a compute capability: answered by the network/storage provider",
-            },
-        }
-        },
-    )
 }
 
 /// The Cloud Hypervisor backend's report against `host`.
@@ -678,41 +365,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_session_only_host_keeps_the_lifecycle_and_loses_the_observed_address() {
-        let host = LibvirtHost {
-            system_uri: false,
-            ..LibvirtHost::ASSUMED
+    fn cloud_hypervisor_without_firmware_is_available_but_cannot_boot() {
+        let host = CloudHypervisorHost {
+            firmware: false,
+            ..CloudHypervisorHost::ASSUMED
         };
-        let r = libvirt_report(&host);
-        assert!(r.available);
-        assert_eq!(r.health.reason, "SessionOnly");
-        let by = |c: C| {
-            r.capabilities
-                .iter()
-                .find(|x| x.capability == c)
-                .unwrap()
-                .state
-                .clone()
-        };
-        assert_eq!(by(C::VmStart).label(), "supported");
-        assert_eq!(by(C::VmNetworkNat).label(), "unavailable-on-host");
-        // A declared "no" stays a "no" whatever the host looks like.
-        assert_eq!(by(C::VmMigrationLive).label(), "unsupported-by-provider");
-    }
-
-    #[test]
-    fn without_virsh_nothing_that_needs_it_reads_as_supported() {
-        let host = LibvirtHost {
-            virsh: false,
-            ..LibvirtHost::ASSUMED
-        };
-        let r = libvirt_report(&host);
-        assert!(!r.available);
-        assert_eq!(r.health.reason, "VirshMissing");
-        assert!(r
+        let r = cloud_hypervisor_report(&host);
+        assert!(r.available, "the binary is there: selectable");
+        assert_eq!(r.health.reason, "FirmwareMissing");
+        let start = r
             .capabilities
             .iter()
-            .all(|c| { c.state.label() != "supported" || c.capability == C::HostHealth }));
+            .find(|x| x.capability == C::VmStart)
+            .unwrap();
+        assert_eq!(start.state.label(), "unavailable-on-host");
     }
 
     #[test]
@@ -728,22 +394,5 @@ mod tests {
                 .len(),
             n
         );
-    }
-
-    #[test]
-    fn cloud_hypervisor_without_firmware_is_available_but_cannot_boot() {
-        let host = CloudHypervisorHost {
-            firmware: false,
-            ..CloudHypervisorHost::ASSUMED
-        };
-        let r = cloud_hypervisor_report(&host);
-        assert!(r.available, "the binary is there: selectable");
-        assert_eq!(r.health.reason, "FirmwareMissing");
-        let start = r
-            .capabilities
-            .iter()
-            .find(|x| x.capability == C::VmStart)
-            .unwrap();
-        assert_eq!(start.state.label(), "unavailable-on-host");
     }
 }
