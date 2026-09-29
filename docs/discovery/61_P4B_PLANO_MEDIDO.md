@@ -318,3 +318,36 @@ do `scripts/e2e.sh`: com a VM a correr, o arquivo é criado, a VM continua `runn
 pivoted»). **Medido:** as secções de VM da bateria contra o binário desta árvore deram 101
 PASS, 0 FAIL, com os quatro checks novos entre eles. A linha do catálogo não foi promovida:
 isso é decisão da ADR-0050, com um check de restauro ao lado.
+
+## Adenda P4b.3b (2026-09-29) — os use cases desceram para o contexto
+
+**Feito.** A orquestração saiu do `delonix-vm` para `delonix_compute::vm` (1 612 linhas com os
+testes novos): métodos de um `VmEngine<'a, R, B, D, S>` que recebe o root, o
+`StateRepository<Vm>`, os três portos e a rede, genérico sobre eles como o `resolve_run` do
+`container run`. Desceram com ela as funções puras que ela usava (`valid_vm_name`,
+`vm_namespace_of`, a admissão de RAM, `resolve_required_capabilities`,
+`adopt_pid_starttime`/`argv_is_vmm_for`, `boot_spec_of`/`config_from`) e o `Destroyed`. O
+`delonix-vm` passou de 9 249 para 8 331 linhas: monta o engine por chamada (`engine(base)`: o
+`JsonStore`, o `RegistryBackends`, o `QemuImgDisks`, o `CloudLocaldsSeed` e a rede registada) e
+mantém as 24 funções públicas como invólucros de uma linha. Nenhum chamador do `-bin`, do
+`delonix-linux`, da `mgmt` ou do MCP mudou; os testes do `delonix-vm` continuam a chegar às
+funções puras pelos nomes de sempre (importadas de volta só para testes).
+
+- **O que a P4b.3a deixou passar:** o `check_allow_mac_spoofing` é conhecimento do libvirt (o
+  nome do backend e o filtro anti-spoof) e o `create_with` chamava-o. Passou a
+  `VmBackends::admit(backend_id, cfg)`, implementado no `delonix-vm` pela função de sempre —
+  mesmo texto, mesmo código.
+- **O `into_root()` sobre o erro do store** deu lugar a `e.is_not_found()` (ADR-0043 D4): o erro
+  que chega pelo porto é o partilhado, e é a classe que se pergunta, não a variante.
+- **O contexto não corre programas:** o `arch_fitness.py` ganhou o contador `context_spawns`
+  (`Command::new` em `crates/contexts/`), com linha de base **0**. Verificado: um `Command::new`
+  temporário no compute faz o portão chumbar com «new debt entered».
+- **Testes contra portos falsos** (`vm::tests`, 6): um repositório em memória, um backend que
+  regista chamadas, disco e seed falsos — overlay e seed numa VM local e nenhum dos dois num
+  backend com storage própria, um nome inválido que não chega a porto nenhum, o `stop` de um
+  nome sem registo a perguntar aos backends (4501 quando nenhum o tem), o `status` a reconciliar
+  uma VM que o backend parou, e o `stop` a registar `Stopped`. Retirar a guarda
+  `!own_storage` do seed faz chumbar o teste respectivo (verificado).
+
+**Fica para a P4b.4:** a excepção `("dep", "delonix-vm", "delonix-state")` (o `engine(base)`
+ainda abre o `JsonStore`), o registo, e os dois backends locais, que saem para os seus crates.

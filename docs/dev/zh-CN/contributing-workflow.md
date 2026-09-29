@@ -123,13 +123,14 @@ crate 里的测试还会检查命令的 help 是否有葡萄牙语条目 —— 
   而不是用一个能转换成它的、crate 自己的错误类型）。目前的清单是生成出来的：
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` 维护 **5 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：
+`scripts/arch_fitness.py` 维护 **6 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
 - `raw_error_variant_matches`
+- `context_spawns`
 <!-- dev-docs:end ratchets -->
 语义和语言棘轮一样（`--list`、`--update`）。
 

@@ -142,6 +142,10 @@ pub trait VmBackends {
     fn require(&self, backend_id: &str, required: &[crate::capability::Capability]) -> Result<()>;
     /// Whether `backend_id` declares `cap` supported in its report.
     fn declares(&self, backend_id: &str, cap: crate::capability::Capability) -> bool;
+    /// The refusals a backend makes of a config before anything is built — an
+    /// option that backend cannot honour, refused by name instead of accepted
+    /// and ignored (today: `allow_mac_spoofing` off a libvirt NIC with a tap).
+    fn admit(&self, backend_id: &str, cfg: &crate::vm_backend::VmConfig) -> Result<()>;
     /// The backend that holds a VM named `name` which no record describes —
     /// left behind by an old `rm` — if any.
     fn unrecorded(&self, name: &str) -> Option<&'static str>;

@@ -3,5 +3,6 @@
   "library_prints": 89,
   "env_writes": 23,
   "shared_error_imports": 3,
-  "raw_error_variant_matches": 0
+  "raw_error_variant_matches": 0,
+  "context_spawns": 0
 }
