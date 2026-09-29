@@ -45,6 +45,7 @@ pub fn run_spec<'h>(
         log_cri: c.log_cri,
         run_uid: c.run_uid,
         run_gid: c.run_gid,
+        replaces_record: l.replaces_record,
     }
 }
 
@@ -87,6 +88,7 @@ mod tests {
             pod_infra_pid: None,
             apparmor: None,
             log_path: None,
+            replaces_record: false,
         }
     }
 

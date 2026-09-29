@@ -5376,6 +5376,12 @@ pub struct RunSpec<'a> {
     /// Needed for images that refuse root (e.g. Elasticsearch).
     pub run_uid: Option<u32>,
     pub run_gid: Option<u32>,
+    /// The container's record already exists and this start replaces its
+    /// incarnation (`start`, `restart`). A record that is gone by the time the
+    /// new process is published was REMOVED while it started (`rm -f`), and the
+    /// start is refused instead of recreating it — see `publish_incarnation`.
+    /// `false` for a `run`, whose first publish creates the record.
+    pub replaces_record: bool,
 }
 
 /// Creates and starts a container (without its own network) — the Phase 1 signature.
@@ -5395,6 +5401,7 @@ pub fn create(
             userns: container.userns, // honors the userns (needed in rootless)
             ..Default::default()
         },
+        false,
     )
 }
 
@@ -5416,6 +5423,7 @@ pub fn create_networked(
             on_started: Some(on_started),
             ..Default::default()
         },
+        false,
     )
 }
 
@@ -5435,7 +5443,21 @@ pub fn create_with(
     rootfs: &str,
     spec: &RunSpec<'_>,
 ) -> Result<Status> {
-    spawn(store, container, rootfs, spec)
+    spawn(store, container, rootfs, spec, spec.replaces_record)
+}
+
+/// [`create_with`] for a start that replaces the incarnation of a record that
+/// exists — whatever `spec.replaces_record` says. It is how a supervisor's
+/// policy restart starts: the spec is the one of its FIRST start, which may
+/// have been a `run`, and a record removed while the restart ran must not be
+/// recreated by it.
+pub fn restart_with(
+    store: &Store,
+    container: &mut Container,
+    rootfs: &str,
+    spec: &RunSpec<'_>,
+) -> Result<Status> {
+    spawn(store, container, rootfs, spec, true)
 }
 
 /// Writes a file INSIDE the rootfs, refusing to follow a symlink planted by the
@@ -5772,6 +5794,7 @@ fn spawn(
     container: &mut Container,
     rootfs: &str,
     spec: &RunSpec<'_>,
+    replaces_record: bool,
 ) -> Result<Status> {
     // `--hostname` (CRI `PodSandboxConfig.hostname`) overrides the container's
     // name in the UTS namespace and in `/etc/hostname`+`/etc/hosts`; without it,
@@ -6474,10 +6497,16 @@ fn spawn(
     // Under the record's lock, never a bare `save` — see `publish_incarnation`.
     // A publish that is refused leaves a running process that no record names,
     // which is exactly the leak it exists to prevent: take it down. The cgroup
-    // stays, because the leaf is keyed by the id and may be the live rival's.
-    if let Err(e) = publish_incarnation(store, container) {
-        let _ = kill(pid, Signal::SIGKILL);
-        let _ = waitpid(pid, None);
+    // stays when another incarnation may be live — the leaf is keyed by the id,
+    // and may be the rival's — and goes with the process when the record was
+    // removed: then there is no one else, and `rm -f` has already run.
+    if let Err(e) = publish_incarnation(store, container, replaces_record) {
+        if e.number() == PUBLISH_REMOVED {
+            discard_child(container, pid);
+        } else {
+            let _ = kill(pid, Signal::SIGKILL);
+            let _ = waitpid(pid, None);
+        }
         container.pid = None;
         container.pid_starttime = None;
         return Err(e);
@@ -6540,8 +6569,17 @@ fn spawn(
 /// the record. The loser gets [`Error::AlreadyRunning`], and its caller kills
 /// what it started.
 ///
-/// A record that does not exist is a first publish (a `run`), and is created.
-fn publish_incarnation(store: &Store, c: &Container) -> Result<()> {
+/// A record that does not exist is a first publish (a `run`), and is created —
+/// unless this start REPLACES a record (`replaces_record`: `start`, a policy
+/// restart). Then its absence means it was removed while the start ran, and
+/// recreating it was the rest of the leak: `rm -f` had found the record with no
+/// pid yet, removed it, and purged the container's directory; the start then
+/// published over the removal a record of a process running on a purged tree,
+/// after the caller's `ps -aq` had already been walked. It is refused instead
+/// ([`PUBLISH_REMOVED`], «no such container»), and the process goes with it.
+/// The other half is `rm -f`'s: [`remove_waiting`] removes the record under the
+/// same lock, so one of the two always sees the other.
+fn publish_incarnation(store: &Store, c: &Container, replaces_record: bool) -> Result<()> {
     let pid = c.pid.unwrap_or(0);
     let mut rival = None;
     let published = store.update(&c.id, |cur| {
@@ -6554,6 +6592,13 @@ fn publish_incarnation(store: &Store, c: &Container) -> Result<()> {
     });
     match published {
         Ok(_) => {}
+        Err(delonix_state::Error::NoSuchContainer(_)) if replaces_record => {
+            return Err(delonix_state::Error::NoSuchContainer(format!(
+                "{} was removed while it was starting; the process it started was stopped",
+                c.short_id()
+            ))
+            .into());
+        }
         Err(delonix_state::Error::NoSuchContainer(_)) => store.save(c)?,
         Err(e) => return Err(e.into()),
     }
@@ -6566,6 +6611,10 @@ fn publish_incarnation(store: &Store, c: &Container) -> Result<()> {
         None => Ok(()),
     }
 }
+
+/// The dictionary number of a start refused because its record was removed
+/// while it ran (`delonix_state::Error::NoSuchContainer`, «no such container»).
+const PUBLISH_REMOVED: u16 = 4101;
 
 /// Whether writing the incarnation (`pid`, `starttime`) over the record `cur`
 /// would drop ANOTHER live incarnation from it — the process that nothing would
@@ -8742,31 +8791,60 @@ fn remove_waiting(
     signal: Signal,
     exit_ticks: u64,
 ) -> Result<()> {
-    if let Some(pid) = container.pid {
-        let st = container.pid_starttime;
-        if safe_to_signal(pid, st) {
-            if !force {
-                return Err(Error::AlreadyRunning(format!(
-                    "container {} is running (use --force)",
-                    container.short_id()
-                )));
-            }
-            let _ = kill(Pid::from_raw(pid), signal);
-            if !wait_until_gone(pid, st, exit_ticks) {
-                return Err(Error::StillExiting(format!(
-                    "container {}: {signal} sent, but pid {pid} is still exiting after {}s{} — \
-                     the container is kept; run `rm -f` again once it is gone",
-                    container.short_id(),
-                    exit_ticks / 10,
-                    exit_blocker(pid)
-                )));
+    // The record is removed under its lock, and only if it names no live
+    // process ([`StateRepository::remove_unless`]). `container` was read before
+    // the signal and the wait; a `start` in flight can publish its incarnation in
+    // that interval, and removing the record then — what a bare `remove` did —
+    // left the new process running with nothing naming it. When that happened,
+    // the incarnation it names is the next one to stop. A few rounds, because
+    // each one stops a start that had already begun: a new one cannot begin
+    // once the record is gone (`publish_incarnation` refuses it).
+    let mut cur = container.clone();
+    for _ in 0..REMOVE_ROUNDS {
+        if let Some(pid) = cur.pid {
+            let st = cur.pid_starttime;
+            if safe_to_signal(pid, st) {
+                if !force {
+                    return Err(Error::AlreadyRunning(format!(
+                        "container {} is running (use --force)",
+                        cur.short_id()
+                    )));
+                }
+                let _ = kill(Pid::from_raw(pid), signal);
+                if !wait_until_gone(pid, st, exit_ticks) {
+                    return Err(Error::StillExiting(format!(
+                        "container {}: {signal} sent, but pid {pid} is still exiting after {}s{} — \
+                         the container is kept; run `rm -f` again once it is gone",
+                        cur.short_id(),
+                        exit_ticks / 10,
+                        exit_blocker(pid)
+                    )));
+                }
             }
         }
+        // «Still running» as the wait above measures it: a zombie is gone.
+        // `is_live` counts one as alive, and the process just killed is a zombie
+        // until its supervisor reaps it — measured: the removal kept finding it.
+        let running = |r: &Container| r.pid.is_some_and(|p| !process_gone(p, r.pid_starttime));
+        match store.remove_unless(&cur.id, running)? {
+            None => {
+                remove_container_cgroup(&cur);
+                return Ok(());
+            }
+            Some(newer) => cur = newer,
+        }
     }
-    remove_container_cgroup(container);
-    store.remove(&container.id)?;
-    Ok(())
+    Err(Error::AlreadyRunning(format!(
+        "container {} was started again {REMOVE_ROUNDS} times while it was being removed — \
+         the container is kept",
+        cur.short_id()
+    )))
 }
+
+/// How many incarnations one `rm -f` stops before it gives up — see
+/// [`remove_waiting`]. Each round is a start that was already past its checks
+/// when the removal began; one is the realistic case.
+const REMOVE_ROUNDS: usize = 3;
 
 #[cfg(test)]
 mod record_exit_tests {
@@ -10748,7 +10826,7 @@ mod publish_tests {
             fresh.status = Status::Running;
             fresh.pid = Some(4242);
             fresh.pid_starttime = Some(9);
-            publish_incarnation(&s.store, &fresh).unwrap();
+            publish_incarnation(&s.store, &fresh, true).unwrap();
             old.join().unwrap();
         });
 
@@ -10777,7 +10855,7 @@ mod publish_tests {
         let mut second = live.clone();
         second.pid = Some(4242);
         second.pid_starttime = Some(9);
-        let e = publish_incarnation(&s.store, &second).unwrap_err();
+        let e = publish_incarnation(&s.store, &second, true).unwrap_err();
         assert!(matches!(e, Error::AlreadyRunning(_)), "{e}");
 
         let rec = s.store.load(&live.id).unwrap();
@@ -10813,7 +10891,102 @@ mod publish_tests {
         let mut c = member();
         c.status = Status::Running;
         c.pid = Some(4242);
-        publish_incarnation(&s.store, &c).unwrap();
+        publish_incarnation(&s.store, &c, false).unwrap();
         assert_eq!(s.store.load(&c.id).unwrap().pid, Some(4242));
+    }
+
+    /// **A start does not bring back a record `rm -f` removed while it ran.**
+    ///
+    /// `rm -f` of a container whose `start` is in flight finds the record with no
+    /// pid yet, removes it and purges the container's directory. The start then
+    /// published anyway — a bare `save`, recreating a record of a process that
+    /// runs on a purged tree, after whoever removed it had moved on (the chaos
+    /// teardown walks `ps -aq` once). A start that replaces a record now refuses
+    /// to recreate it; only a `run` creates one.
+    #[test]
+    fn a_restart_does_not_recreate_a_removed_record() {
+        let s = Scratch::new();
+        let mut c = member();
+        c.status = Status::Running;
+        c.pid = Some(4242);
+        c.pid_starttime = Some(9);
+        let e = publish_incarnation(&s.store, &c, true).unwrap_err();
+        assert_eq!(e.number(), super::PUBLISH_REMOVED, "{e}");
+        assert!(
+            e.to_string().contains("removed while it was starting"),
+            "{e}"
+        );
+        assert!(s.store.load(&c.id).is_err(), "the removed record came back");
+    }
+
+    /// **`rm -f` stops the incarnation a start published while it waited.**
+    ///
+    /// The other half of the same race. `rm -f` decides on the record it read
+    /// first — here with no pid, a start still in flight — and the start then
+    /// publishes its process before the removal. A bare `remove` deleted the
+    /// record and left that process running with nothing naming it; under the
+    /// record's lock the removal sees it, stops it, and only then removes.
+    #[test]
+    fn rm_stops_an_incarnation_published_after_it_read_the_record() {
+        let s = Scratch::new();
+        let mut stopped = member();
+        stopped.status = Status::Stopped;
+        s.store.save(&stopped).unwrap();
+        // What `rm -f` read: no pid.
+        let read_by_rm = s.store.load(&stopped.id).unwrap();
+
+        // The start publishes its process after that read.
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let pid = child.id() as i32;
+        let mut fresh = stopped.clone();
+        fresh.status = Status::Running;
+        fresh.pid = Some(pid);
+        fresh.pid_starttime = delonix_node::proc_starttime(pid);
+        publish_incarnation(&s.store, &fresh, true).unwrap();
+
+        let r = super::remove_waiting(
+            &s.store,
+            &read_by_rm,
+            true,
+            nix::sys::signal::Signal::SIGKILL,
+            super::KILL_EXIT_WAIT_TICKS,
+        );
+        let gone = super::process_gone(pid, fresh.pid_starttime);
+        let _ = child.kill();
+        let _ = child.wait();
+        r.expect("rm -f");
+        assert!(gone, "rm -f removed the record and left pid {pid} running");
+        assert!(s.store.load(&stopped.id).is_err(), "the record is removed");
+    }
+
+    /// Without `--force`, the incarnation that appeared is a running container:
+    /// refused, the record kept, nothing signalled.
+    #[test]
+    fn rm_without_force_refuses_an_incarnation_published_after_its_read() {
+        let s = Scratch::new();
+        let mut stopped = member();
+        stopped.status = Status::Stopped;
+        s.store.save(&stopped).unwrap();
+        let read_by_rm = s.store.load(&stopped.id).unwrap();
+        let me = std::process::id() as i32;
+        let mut fresh = stopped.clone();
+        fresh.status = Status::Running;
+        fresh.pid = Some(me);
+        fresh.pid_starttime = delonix_node::proc_starttime(me);
+        publish_incarnation(&s.store, &fresh, true).unwrap();
+
+        let e = super::remove_waiting(
+            &s.store,
+            &read_by_rm,
+            false,
+            nix::sys::signal::Signal::SIGKILL,
+            super::KILL_EXIT_WAIT_TICKS,
+        )
+        .unwrap_err();
+        assert!(matches!(e, Error::AlreadyRunning(_)), "{e}");
+        assert_eq!(s.store.load(&stopped.id).unwrap().pid, Some(me));
     }
 }

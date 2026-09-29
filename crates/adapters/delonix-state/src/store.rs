@@ -468,6 +468,28 @@ impl Store {
         fs::remove_file(p)?;
         Ok(())
     }
+
+    /// Removes a container's record unless `keep` says otherwise, deciding on the
+    /// record re-read UNDER its lock — the lock [`Store::update`] and every
+    /// publish of an incarnation take. Returns `None` once removed, or the record
+    /// as found when `keep` kept it.
+    ///
+    /// `rm -f` decides on a record it read before signalling and waiting; a
+    /// `start` can publish a new incarnation in that interval, and a bare
+    /// [`Store::remove`] then deletes the record of a process that is running.
+    pub fn remove_unless<F>(&self, id: &str, keep: F) -> Result<Option<Container>>
+    where
+        F: FnOnce(&Container) -> bool,
+    {
+        let id = self.load(id)?.id;
+        let _lock = FileLock::acquire(&self.lock_path(&id))?;
+        let cur = self.load(&id)?;
+        if keep(&cur) {
+            return Ok(Some(cur));
+        }
+        self.remove(&id)?;
+        Ok(None)
+    }
 }
 
 /// `Store` already IS a `Container`-only record store — this just gives the rest of
@@ -501,6 +523,13 @@ impl delonix_model::ports::StateRepository<Container> for Store {
 
     fn remove(&self, id: &str) -> delonix_model::Result<()> {
         Store::remove(self, id).map_err(Into::into)
+    }
+
+    fn remove_unless<F>(&self, id: &str, keep: F) -> delonix_model::Result<Option<Container>>
+    where
+        F: FnOnce(&Container) -> bool,
+    {
+        Store::remove_unless(self, id, keep).map_err(Into::into)
     }
 }
 
