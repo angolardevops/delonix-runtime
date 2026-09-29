@@ -826,6 +826,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>校验一个证书是由内部 CA 签发的节点的方式，用它代替 <code>DELONIX_PROXMOX_INSECURE_TLS</code>。</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_BACKUP_STORAGE</code></td>
+<td><code>cmd/<wbr>system_container.<wbr>rs:backup_storage</code></td>
+<td>当 <code>--to</code>/<code>--from</code> 为 <code>.</code> 时，系统容器的备份写入或读取的节点存储。</td>
+<td>一个带 <code>backup</code> 内容类型的存储 id；未设置或为空即 <code>local</code>。</td>
+<td>备份不在 <code>local</code> 上的节点（NFS 存储、PBS）。</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code>（读取一次，作为 <code>ClientOptions::<wbr>trace_routes</code> 交给客户端；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的常量 <code>TRACE_ROUTES_ENV</code> 点名了它）以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a>（实机测试组，它的一次运行被提交为 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>）</td>
 <td>把每一次请求的 <code>METHOD /path</code> 追加到这个文件里——覆盖率矩阵（ADR-0049）的分子。</td>

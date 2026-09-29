@@ -5001,6 +5001,169 @@ fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
     assert_eq!(grow.state, delonix_proxmox::TaskState::Ok, "{grow:?}");
 }
 
+/// Plan 63 slice 5, backup: an archive of a RUNNING container lands on the
+/// node's backup storage without stopping it, a restore puts the container
+/// back over itself and leaves it running, another container's archive is
+/// refused before any request, and a delete removes only this archive.
+#[test]
+fn a_system_containers_backup_is_restored_over_it_and_deleted() {
+    use delonix_compute::system_container::{
+        SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxbak{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: None,
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    provider.start(dir.path(), &h, &spec).expect("start");
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_BACKUP_STORAGE").unwrap_or_else(|_| "local".into());
+    assert!(provider
+        .backups(dir.path(), &h, &storage)
+        .unwrap()
+        .is_empty());
+    let archive = provider
+        .backup(dir.path(), &h, &storage, false)
+        .expect("backup");
+    assert!(
+        archive.starts_with(&format!("{storage}:backup/vzdump-lxc-{vmid}-")),
+        "{archive}"
+    );
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "running",
+        "a snapshot backup does not stop it"
+    );
+    let listed = provider.backups(dir.path(), &h, &storage).unwrap();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].0, archive);
+    assert!(listed[0].1 > 0, "an archive with no bytes");
+
+    provider
+        .resize(
+            dir.path(),
+            &h,
+            SystemContainerResources {
+                memory_mib: 384,
+                swap_mib: 0,
+                cores: 1,
+            },
+        )
+        .expect("resize");
+    let before_raw = client.lxc_config(vmid).unwrap();
+    let dropped = provider
+        .restore_backup(dir.path(), &h, &archive)
+        .expect("restore");
+    // By an API token the node drops the raw lxc.* keys (root@pam only); the
+    // provider names each one it had before and not after.
+    let had: Vec<String> = before_raw
+        .get("lxc")
+        .and_then(|l| l.as_array())
+        .map(|l| {
+            l.iter()
+                .filter_map(|kv| Some(format!("{}: {}", kv[0].as_str()?, kv[1].as_str()?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let after_raw = client.lxc_config(vmid).unwrap();
+    let kept = after_raw
+        .get("lxc")
+        .and_then(|l| l.as_array())
+        .map(|l| l.len())
+        .unwrap_or(0);
+    assert_eq!(
+        dropped.len() + kept,
+        had.len(),
+        "dropped {dropped:?}, had {had:?}"
+    );
+    for d in &dropped {
+        assert!(had.contains(d), "{d} was never there");
+    }
+    let cfg = provider.configuration(dir.path(), &h).unwrap().unwrap();
+    assert_eq!(
+        cfg.memory_mib, 256,
+        "the restore put the archived config back"
+    );
+    assert_eq!(
+        cfg.entrypoint,
+        vec!["/bin/sleep", "3600"],
+        "the entrypoint came back with it"
+    );
+    assert_eq!(
+        client.lxc_status(vmid).unwrap(),
+        "running",
+        "running before, running after"
+    );
+
+    let other = format!(
+        "{storage}:backup/vzdump-lxc-{}-2026_01_01-00_00_00.tar.zst",
+        vmid + 1
+    );
+    let refused = provider.restore_backup(dir.path(), &h, &other).unwrap_err();
+    assert_eq!(refused.number(), 1540, "{refused}");
+    let missing = format!("{storage}:backup/vzdump-lxc-{vmid}-2026_01_01-00_00_00.tar.zst");
+    let e = provider
+        .delete_backup(dir.path(), &h, &missing)
+        .unwrap_err();
+    assert_eq!(e.number(), 4504, "{e}");
+
+    provider
+        .delete_backup(dir.path(), &h, &archive)
+        .expect("delete backup");
+    assert!(provider
+        .backups(dir.path(), &h, &storage)
+        .unwrap()
+        .is_empty());
+
+    provider.stop(dir.path(), &h).expect("stop");
+    provider.destroy(dir.path(), &h).expect("destroy");
+    let left = client.list_images(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    for action in ["backup", "ct-restore", "delete-backup"] {
+        let r = recs
+            .iter()
+            .rev()
+            .find(|r| r.action == action)
+            .unwrap_or_else(|| panic!("no {action} in the ledger: {recs:?}"));
+        // The restore warns when it drops the raw lxc.* keys, and that is a
+        // finished task, not a failed one.
+        assert!(
+            matches!(
+                r.state,
+                delonix_proxmox::TaskState::Ok | delonix_proxmox::TaskState::OkWithWarnings { .. }
+            ),
+            "{r:?}"
+        );
+    }
+}
+
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
 /// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused

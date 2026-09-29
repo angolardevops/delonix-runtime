@@ -221,6 +221,9 @@ pub enum Capability {
     /// Memory, swap and cores changed on a running container, and the root
     /// volume grown, without recreating it (catalog 1.3.0, plan 63 slice 5).
     SystemContainerResize,
+    /// An archive of the container taken on the provider's storage, listed,
+    /// deleted and restored over the container (catalog 1.3.0, plan 63 slice 5).
+    SystemContainerBackup,
 
     // --- network --------------------------------------------------------
     NetBridge,
@@ -415,6 +418,7 @@ impl Capability {
         Self::SystemContainerUnprivileged,
         Self::SystemContainerSnapshot,
         Self::SystemContainerResize,
+        Self::SystemContainerBackup,
         Self::NetBridge,
         Self::NetMacvlanIpvlan,
         Self::NetVlan,
@@ -557,6 +561,7 @@ impl Capability {
             Self::SystemContainerUnprivileged => "system-container.unprivileged",
             Self::SystemContainerSnapshot => "system-container.snapshot",
             Self::SystemContainerResize => "system-container.resize",
+            Self::SystemContainerBackup => "system-container.backup",
             Self::NetBridge => "net.bridge",
             Self::NetMacvlanIpvlan => "net.macvlan-ipvlan",
             Self::NetVlan => "net.vlan",
@@ -699,7 +704,8 @@ impl Capability {
             | SystemContainerNetworkBridge
             | SystemContainerUnprivileged
             | SystemContainerSnapshot
-            | SystemContainerResize => ProviderKind::Compute,
+            | SystemContainerResize
+            | SystemContainerBackup => ProviderKind::Compute,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan
@@ -823,7 +829,8 @@ impl Capability {
             | SystemContainerNetworkBridge
             | SystemContainerUnprivileged
             | SystemContainerSnapshot
-            | SystemContainerResize => Domain::SystemContainers,
+            | SystemContainerResize
+            | SystemContainerBackup => Domain::SystemContainers,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan

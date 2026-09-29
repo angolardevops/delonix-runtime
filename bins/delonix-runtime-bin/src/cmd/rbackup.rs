@@ -71,6 +71,9 @@ pub enum Kind {
     Pod,
     Vm,
     Stack,
+    /// A system container on a remote provider (`kind: SystemContainer`): the
+    /// archive is taken and kept on the provider's storage, not in a file here.
+    Systemcontainer,
 }
 
 impl Kind {
@@ -80,6 +83,7 @@ impl Kind {
             Kind::Pod => "pod",
             Kind::Vm => "vm",
             Kind::Stack => "stack",
+            Kind::Systemcontainer => "systemcontainer",
         }
     }
 }
@@ -953,6 +957,10 @@ fn run_archive(a: SubjectArgs, calendar: Option<String>) -> Result<()> {
     }
     let keep = a.keep.unwrap_or(7);
 
+    if a.kind == Kind::Systemcontainer {
+        return run_system_container_archive(a, keep, calendar);
+    }
+
     let root = state_root();
     let dir = Dest::parse(&a.to).resolve(&root)?;
     let out = dir.join(archive_name(a.kind, &a.name, now()));
@@ -995,6 +1003,7 @@ fn run_archive(a: SubjectArgs, calendar: Option<String>) -> Result<()> {
         Kind::Pod | Kind::Stack => {
             write_group_archive(&root, a.kind, &a.name, &out, tmp.path(), a.stop)?
         }
+        Kind::Systemcontainer => return Err(provider_archive_only()),
     };
 
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
@@ -1037,9 +1046,126 @@ fn run_archive(a: SubjectArgs, calendar: Option<String>) -> Result<()> {
     }
 
     if let Some(cal) = calendar {
-        install_timer(a.kind, &a.name, &cal, &dir, keep)?;
+        install_timer(a.kind, &a.name, &cal, &dir.to_string_lossy(), keep)?;
     }
     Ok(())
+}
+
+/// `backup create|schedule systemcontainer <name>`: the archive is taken on the
+/// provider's storage (`--to` names it; `.` is the configured default), and
+/// retention counts the archives there.
+fn run_system_container_archive(
+    a: SubjectArgs,
+    keep: usize,
+    calendar: Option<String>,
+) -> Result<()> {
+    use super::system_container as sc;
+    if a.quiesce {
+        return Err(Error::Invalid(
+            po::t("backup: --quiesce is for VMs; a system container is archived from a snapshot of its volume")
+                .to_string(),
+        ));
+    }
+    let storage = sc::backup_storage(&a.to);
+    if a.dry_run {
+        let locator = sc::locator_of(&a.name)?;
+        println!(
+            "{}",
+            po::tf(
+                "would archive system container {name} ({locator}) to storage {storage}\n  keeping the newest {keep}",
+                &[
+                    ("name", &a.name),
+                    ("locator", &locator),
+                    ("storage", &storage),
+                    ("keep", &keep.to_string()),
+                ],
+            )
+        );
+        return Ok(());
+    }
+    let archive = sc::backup_create(&a.name, &storage, a.stop)?;
+    println!("{archive}");
+    for gone in sc::backup_prune(&a.name, &storage, keep)? {
+        println!(
+            "{}",
+            po::tf(
+                "  removed (over --keep {keep}): {path}",
+                &[("keep", &keep.to_string()), ("path", &gone)],
+            )
+        );
+    }
+    if let Some(cal) = calendar {
+        install_timer(Kind::Systemcontainer, &a.name, &cal, &storage, keep)?;
+    }
+    Ok(())
+}
+
+/// `backup ls --kind systemcontainer`: the archives on the provider's storage
+/// (`--from`, `.` for the configured default), for one container or all.
+fn list_system_container_archives(a: &ListArgs) -> Result<()> {
+    let storage = super::system_container::backup_storage(&a.from);
+    let rows = super::system_container::backup_list(a.name.as_deref(), &storage)?;
+    let mut t = super::output::Table::new(&["CONTAINER", "ARCHIVE", "SIZE"]);
+    for (name, archive, bytes) in rows {
+        t.row(vec![name, archive, super::output::fmt_size(bytes)]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// `backup restore <archive>` of a node archive: refused while the container
+/// runs unless `--force`, which stops it for the restore and starts it again.
+fn restore_system_container(a: &RestoreArgs) -> Result<()> {
+    use super::system_container as sc;
+    if !sc::is_node_archive(&a.archive) {
+        return Err(Error::Invalid(po::tf(
+            "restore: '{archive}' is not a provider archive (<storage>:backup/vzdump-lxc-…); see `delonix backup ls --kind systemcontainer`",
+            &[("archive", &a.archive)],
+        )));
+    }
+    let name = sc::backup_owner(&a.archive)?;
+    println!(
+        "{}",
+        po::tf(
+            "{path}\n  systemcontainer {name}",
+            &[("path", &a.archive), ("name", &name)]
+        )
+    );
+    if a.dry_run {
+        println!("{}", po::t("  (dry run: nothing restored)"));
+        return Ok(());
+    }
+    if sc::is_running(&name)? && !a.force {
+        return Err(Error::Invalid(po::tf(
+            "restore: system container '{name}' is running — pass --force to stop it, restore, and start it again",
+            &[("name", &name)],
+        )));
+    }
+    let dropped = sc::backup_restore(&name, &a.archive)?;
+    for d in &dropped {
+        eprintln!(
+            "{}",
+            po::tf(
+                "warning: the provider did not put back {setting} (only root@pam may write it)",
+                &[("setting", d)]
+            )
+        );
+    }
+    println!(
+        "{}",
+        po::tf("restored systemcontainer {name}", &[("name", &name)])
+    );
+    Ok(())
+}
+
+/// A system container is archived on its provider by
+/// `run_system_container_archive`, never into a file here; reaching a local
+/// path with one is a routing error, said as one.
+fn provider_archive_only() -> Error {
+    Error::Invalid(
+        po::t("backup: a system container is archived on its provider, not into a file")
+            .to_string(),
+    )
 }
 
 /// One line saying what a `--dry-run` would archive, plus the volume names.
@@ -1061,6 +1187,7 @@ fn describe_subject(root: &Path, kind: Kind, name: &str) -> Result<(String, Vec<
                 Vec::new(),
             ))
         }
+        Kind::Systemcontainer => Err(provider_archive_only()),
         Kind::Pod | Kind::Stack => {
             let members = group_members(root, kind, name)?;
             let (_i, store) = super::util::open_stores()?;
@@ -1187,32 +1314,39 @@ fn write_group_archive(
 /// be absolute**. A scheduled run does not inherit the caller's working
 /// directory, and a relative `--to` silently sent the archive to `$HOME` while
 /// the operator watched it appear in the directory they were standing in.
-fn timer_argv(exe: &Path, kind: Kind, name: &str, dir: &Path, keep: usize) -> Result<Vec<String>> {
-    if !exe.is_absolute() || !dir.is_absolute() {
+fn timer_argv(exe: &Path, kind: Kind, name: &str, to: &str, keep: usize) -> Result<Vec<String>> {
+    // A system container's `--to` names a storage on the provider, not a
+    // directory here, so only the other kinds need an absolute path.
+    let path_ok = kind == Kind::Systemcontainer || Path::new(to).is_absolute();
+    if !exe.is_absolute() || !path_ok {
         return Err(Error::Invalid(po::t(
             "backup: refusing to schedule with a relative path — a timer does not run from your \
              current directory, and the archive would land somewhere else",
         )
         .to_string()));
     }
+    // `backup create`, the verb the CLI answers to since the backup group
+    // split into verbs: the timer used to run `backup <kind> <name>`, which the
+    // CLI refuses («unrecognized subcommand»), so every scheduled run failed.
     Ok(vec![
         exe.to_string_lossy().into_owned(),
         "backup".into(),
+        "create".into(),
         kind.as_str().into(),
         name.into(),
         "--to".into(),
-        dir.to_string_lossy().into_owned(),
+        to.to_string(),
         "--keep".into(),
         keep.to_string(),
     ])
 }
 
 /// Installs (or replaces) the systemd user timer for this resource.
-fn install_timer(kind: Kind, name: &str, calendar: &str, dir: &Path, keep: usize) -> Result<()> {
+fn install_timer(kind: Kind, name: &str, calendar: &str, to: &str, keep: usize) -> Result<()> {
     let unit = unit_name(kind, name);
     let exe = std::env::current_exe()
         .map_err(|e| Error::Invalid(format!("backup: cannot find my own path: {e}")))?;
-    let argv = timer_argv(&exe, kind, name, dir, keep)?;
+    let argv = timer_argv(&exe, kind, name, to, keep)?;
 
     // Replace rather than stack: running the command twice must not leave two
     // timers taking the same backup at the same instant.
@@ -1294,6 +1428,9 @@ fn lingering_enabled() -> bool {
 /// It is also cheap: `backup.json` is the first entry written, so `read_meta`
 /// stops before the payload.
 fn cmd_list(a: ListArgs) -> Result<()> {
+    if a.kind == Some(Kind::Systemcontainer) {
+        return list_system_container_archives(&a);
+    }
     let root = state_root();
     let dir = Dest::parse(&a.from).resolve(&root)?;
 
@@ -1374,6 +1511,21 @@ fn cmd_list(a: ListArgs) -> Result<()> {
 
 /// What an archive holds, without unpacking it.
 fn cmd_inspect(a: InspectArgs) -> Result<()> {
+    if super::system_container::is_node_archive(&a.archive) {
+        let (name, bytes) = super::system_container::backup_describe(&a.archive)?;
+        println!(
+            "{}",
+            po::tf(
+                "{path}\n  systemcontainer {name}, {size} on the provider",
+                &[
+                    ("path", &a.archive),
+                    ("name", &name),
+                    ("size", &super::output::fmt_size(bytes)),
+                ],
+            )
+        );
+        return Ok(());
+    }
     let root = state_root();
     let path = resolve_archive(&a.archive, &a.from, &root)?;
     let (meta, _) = read_meta(&path)?;
@@ -1425,6 +1577,21 @@ fn cmd_inspect(a: InspectArgs) -> Result<()> {
 /// same directory would otherwise delete a file that has nothing to do with
 /// this engine.
 fn cmd_remove(a: RemoveArgs) -> Result<()> {
+    if super::system_container::is_node_archive(&a.archive) {
+        let name = super::system_container::backup_delete(&a.archive)?;
+        println!(
+            "{}",
+            po::tf(
+                "removed {path} ({kind} {name})",
+                &[
+                    ("path", &a.archive),
+                    ("kind", "systemcontainer"),
+                    ("name", &name)
+                ],
+            )
+        );
+        return Ok(());
+    }
     let root = state_root();
     let path = resolve_archive(&a.archive, &a.from, &root)?;
     let (meta, _) = read_meta(&path)?;
@@ -1449,6 +1616,10 @@ fn cmd_remove(a: RemoveArgs) -> Result<()> {
 }
 
 fn cmd_restore(a: RestoreArgs) -> Result<()> {
+    if a.kind == Some(Kind::Systemcontainer) || super::system_container::is_node_archive(&a.archive)
+    {
+        return restore_system_container(&a);
+    }
     let root = state_root();
     let path = resolve_archive(&a.archive, &a.from, &root)?;
     let (meta, _) = read_meta(&path)?;
@@ -1855,24 +2026,18 @@ mod tests {
         // while the operator watched the on-demand one appear in the directory
         // they were standing in. Both reported success.
         let exe = Path::new("/usr/local/bin/delonix");
-        let e = timer_argv(exe, Kind::Container, "db", Path::new("."), 2).unwrap_err();
+        let e = timer_argv(exe, Kind::Container, "db", ".", 2).unwrap_err();
         assert!(e.to_string().contains("relative"), "{e}");
-        assert!(timer_argv(exe, Kind::Container, "db", Path::new("backups"), 2).is_err());
-        assert!(timer_argv(
-            Path::new("delonix"),
-            Kind::Container,
-            "db",
-            Path::new("/b"),
-            2
-        )
-        .is_err());
+        assert!(timer_argv(exe, Kind::Container, "db", "backups", 2).is_err());
+        assert!(timer_argv(Path::new("delonix"), Kind::Container, "db", "/b", 2).is_err());
 
-        let argv = timer_argv(exe, Kind::Container, "db", Path::new("/srv/backups"), 3).unwrap();
+        let argv = timer_argv(exe, Kind::Container, "db", "/srv/backups", 3).unwrap();
         assert_eq!(
             argv,
             vec![
                 "/usr/local/bin/delonix",
                 "backup",
+                "create",
                 "container",
                 "db",
                 "--to",
@@ -1884,6 +2049,23 @@ mod tests {
         // `--keep` has to travel: without it every scheduled run would fall back
         // to the default and quietly keep a different number than was asked for.
         assert!(argv.contains(&"--keep".to_string()));
+    }
+
+    /// The timer runs the CLI with this argv, so the CLI has to accept it —
+    /// the old `backup <kind> <name>` compiled, passed the test above, and was
+    /// refused by the parser on every scheduled run.
+    #[test]
+    fn the_timer_argv_is_a_command_the_cli_accepts() {
+        use clap::Parser;
+        let exe = Path::new("/usr/local/bin/delonix");
+        for (kind, to) in [
+            (Kind::Container, "/srv/backups"),
+            (Kind::Vm, "/srv/backups"),
+            (Kind::Systemcontainer, "local"),
+        ] {
+            let argv = timer_argv(exe, kind, "db", to, 3).unwrap();
+            assert!(crate::Cli::try_parse_from(&argv).is_ok(), "{argv:?}");
+        }
     }
 
     #[test]

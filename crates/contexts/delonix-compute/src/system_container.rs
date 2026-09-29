@@ -165,4 +165,32 @@ pub trait SystemContainerProvider: Provider {
     /// Grows the root volume to `gib`, running or not, and reads the size
     /// back. Never shrinks: a smaller size than the current one is refused.
     fn grow_rootfs(&self, dir: &Path, h: &SystemContainerHandle, gib: u32) -> Result<()>;
+    /// Archives the container into `storage` on the provider, running or not,
+    /// and answers the new archive's id. `stop` takes it with the container
+    /// stopped for the length of the archive instead of from a snapshot.
+    fn backup(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        storage: &str,
+        stop: bool,
+    ) -> Result<String>;
+    /// The archives of this container that `storage` holds, as `(id, bytes)`.
+    fn backups(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        storage: &str,
+    ) -> Result<Vec<(String, u64)>>;
+    /// Deletes one archive of this container; another container's is refused.
+    fn delete_backup(&self, dir: &Path, h: &SystemContainerHandle, archive: &str) -> Result<()>;
+    /// Puts the container back from one of its own archives, and leaves it in
+    /// the state it was in before the call. Answers the settings the provider
+    /// did not put back (each as `key: value`), empty when it restored all.
+    fn restore_backup(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        archive: &str,
+    ) -> Result<Vec<String>>;
 }

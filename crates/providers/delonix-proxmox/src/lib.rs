@@ -447,6 +447,10 @@ enum TaskKind {
     /// `POST …/lxc/{vmid}/snapshot/{snapname}/rollback`.
     CtRollback,
     /// `DELETE …/lxc/{vmid}/snapshot/{snapname}`.
+    /// `POST /nodes/{node}/lxc` with `restore=1`: a container put back from a
+    /// `vzdump` archive, over the container of the same id (worker
+    /// `vzrestore`, read from `PVE/API2/LXC.pm`).
+    CtRestore,
     CtDeleteSnapshot,
     Clone,
     Start,
@@ -661,6 +665,7 @@ impl TaskKind {
             TaskKind::CtSnapshot => "ct-snapshot",
             TaskKind::CtRollback => "ct-rollback",
             TaskKind::CtDeleteSnapshot => "ct-delete-snapshot",
+            TaskKind::CtRestore => "ct-restore",
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
@@ -775,6 +780,7 @@ impl TaskKind {
             TaskKind::CtSnapshot => "vzsnapshot",
             TaskKind::CtRollback => "vzrollback",
             TaskKind::CtDeleteSnapshot => "vzdelsnapshot",
+            TaskKind::CtRestore => "vzrestore",
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
@@ -5674,11 +5680,22 @@ fn upload_timeout(size: u64) -> Duration {
 
 /// A Proxmox storage id as the node accepts one: a letter, then letters,
 /// digits, `-`, `_` or `.`, at most 63 characters. Pure.
-fn valid_storage_id(s: &str) -> bool {
+pub(crate) fn valid_storage_id(s: &str) -> bool {
     let mut chars = s.chars();
     s.len() <= 63
         && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// [`valid_storage_id`] as a refusal that names the value.
+pub(crate) fn valid_storage_id_or_err(s: &str) -> Result<()> {
+    if valid_storage_id(s) {
+        Ok(())
+    } else {
+        Err(Error::InvalidDiskSpec(format!(
+            "proxmox: '{s}' is not a storage id"
+        )))
+    }
 }
 
 /// The node a task runs on, out of its UPID (`UPID:<node>:…`), or `None` for
@@ -6678,7 +6695,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
         | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
         | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize
+        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup
         | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
@@ -6765,6 +6782,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::SystemContainerUnprivileged => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
         C::SystemContainerSnapshot => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_snapshot_is_rolled_back_and_deleted" },
         C::SystemContainerResize => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_root_volume_grows_live_and_never_shrinks" },
+        C::SystemContainerBackup => S::Partial { detail: "archive, list, delete and restore are proved live (a_system_containers_backup_is_restored_over_it_and_deleted); a restore by an API token drops the raw lxc.* keys the node wrote from the image (working directory, halt signal) — the node lets only root@pam write them back, and the restore names each one it dropped" },
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid

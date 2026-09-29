@@ -748,6 +748,151 @@ pub fn run(cmd: SystemContainerCmd) -> Result<()> {
     Ok(())
 }
 
+/// The provider storage a backup goes to or is read from. `.` — the backup
+/// group's default, which means «this directory» for the local kinds — means
+/// `DELONIX_PROXMOX_BACKUP_STORAGE`, else `local`.
+pub(crate) fn backup_storage(to: &str) -> String {
+    if to != "." {
+        return to.to_string();
+    }
+    std::env::var("DELONIX_PROXMOX_BACKUP_STORAGE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "local".into())
+}
+
+/// Whether `s` names an archive on a provider (`<storage>:backup/vzdump-lxc-…`)
+/// rather than a file here.
+pub(crate) fn is_node_archive(s: &str) -> bool {
+    s.split_once(':')
+        .is_some_and(|(_, rest)| rest.starts_with("backup/vzdump-lxc-"))
+}
+
+fn locator_vmid(locator: &str) -> Option<u32> {
+    locator.rsplit(':').next()?.parse().ok()
+}
+
+fn archive_vmid(archive: &str) -> Option<u32> {
+    archive
+        .rsplit('/')
+        .next()?
+        .strip_prefix("vzdump-lxc-")?
+        .split('-')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// The registered container an archive belongs to, by the container id its
+/// name carries.
+pub(crate) fn backup_owner(archive: &str) -> Result<String> {
+    let vmid = archive_vmid(archive).ok_or_else(|| {
+        Error::Invalid(po::tf(
+            "'{archive}' is not a system container archive",
+            &[("archive", archive)],
+        ))
+    })?;
+    store()?
+        .list()?
+        .into_iter()
+        .find(|r| locator_vmid(&r.locator) == Some(vmid))
+        .map(|r| r.name)
+        .ok_or_else(|| {
+            Error::NotFound(format!(
+                "system container for archive {archive} (container id {vmid} is not registered here)"
+            ))
+        })
+}
+
+pub(crate) fn locator_of(name: &str) -> Result<String> {
+    Ok(record(name)?.locator)
+}
+
+pub(crate) fn backup_create(name: &str, storage: &str, stop: bool) -> Result<String> {
+    let rec = record(name)?;
+    resolve_provider()?.backup(&ledger_dir(name), &handle_of(&rec), storage, stop)
+}
+
+/// Deletes the oldest archives of `name` on `storage` beyond `keep`; the
+/// archive names carry the date, so their order is the order they were taken.
+pub(crate) fn backup_prune(name: &str, storage: &str, keep: usize) -> Result<Vec<String>> {
+    let rec = record(name)?;
+    let p = resolve_provider()?;
+    let dir = ledger_dir(name);
+    let h = handle_of(&rec);
+    let all = p.backups(&dir, &h, storage)?;
+    let over = all.len().saturating_sub(keep);
+    let mut gone = Vec::new();
+    for (archive, _) in all.into_iter().take(over) {
+        p.delete_backup(&dir, &h, &archive)?;
+        gone.push(archive);
+    }
+    Ok(gone)
+}
+
+/// `(container, archive, bytes)` for one container, or for every registered one.
+pub(crate) fn backup_list(name: Option<&str>, storage: &str) -> Result<Vec<(String, String, u64)>> {
+    let recs = match name {
+        Some(n) => vec![record(n)?],
+        None => store()?.list()?,
+    };
+    if recs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let p = resolve_provider()?;
+    let mut out = Vec::new();
+    for rec in recs {
+        for (archive, bytes) in p.backups(&ledger_dir(&rec.name), &handle_of(&rec), storage)? {
+            out.push((rec.name.clone(), archive, bytes));
+        }
+    }
+    Ok(out)
+}
+
+/// The owner and size of one provider archive.
+pub(crate) fn backup_describe(archive: &str) -> Result<(String, u64)> {
+    let name = backup_owner(archive)?;
+    let storage = archive.split_once(':').map(|(s, _)| s).unwrap_or_default();
+    backup_list(Some(&name), storage)?
+        .into_iter()
+        .find(|(_, a, _)| a == archive)
+        .map(|(n, _, b)| (n, b))
+        .ok_or_else(|| Error::NotFound(format!("archive {archive}")))
+}
+
+pub(crate) fn backup_delete(archive: &str) -> Result<String> {
+    let name = backup_owner(archive)?;
+    let rec = record(&name)?;
+    resolve_provider()?.delete_backup(&ledger_dir(&name), &handle_of(&rec), archive)?;
+    Ok(name)
+}
+
+/// Restores `name` from `archive`; answers the settings the provider did not
+/// put back.
+pub(crate) fn backup_restore(name: &str, archive: &str) -> Result<Vec<String>> {
+    let rec = record(name)?;
+    resolve_provider()?.restore_backup(&ledger_dir(name), &handle_of(&rec), archive)
+}
+
+/// Whether the provider reads the container as running.
+pub(crate) fn is_running(name: &str) -> Result<bool> {
+    let rec = record(name)?;
+    let spec = SystemContainerSpecDoc {
+        image: rec.image.clone(),
+        entrypoint: rec.entrypoint.clone(),
+        env: rec.env.clone(),
+        memory: default_memory(),
+        swap: default_swap(),
+        cores: default_cores(),
+        rootfs: rec.rootfs_gib,
+        network: rec.network.clone(),
+    };
+    let port = port_spec(name, &spec, PathBuf::new(), rec.manifest_digest.clone())?;
+    Ok(resolve_provider()?
+        .observe(&ledger_dir(name), &handle_of(&rec), &port)?
+        .running)
+}
+
 pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     let s = store()?;
     for name in names {

@@ -14615,3 +14615,40 @@ msgstr "Nome do snapshot (ver `systemcontainer snapshot ls`)"
 msgid "Snapshot name to roll back to"
 msgstr "Nome do snapshot para onde voltar"
 
+# backup de systemcontainer (plano 63, fatia 5)
+msgid "backup: --quiesce is for VMs; a system container is archived from a snapshot of its volume"
+msgstr "backup: --quiesce é para VMs; um container de sistema é arquivado a partir de um snapshot do seu volume"
+
+msgid "would archive system container {name} ({locator}) to storage {storage}\n  keeping the newest {keep}"
+msgstr "arquivaria o container de sistema {name} ({locator}) no storage {storage}\n  a guardar os {keep} mais recentes"
+
+msgid "{path}\n  systemcontainer {name}, {size} on the provider"
+msgstr "{path}\n  systemcontainer {name}, {size} no provider"
+
+msgid "restore: '{archive}' is not a provider archive (<storage>:backup/vzdump-lxc-…); see `delonix backup ls --kind systemcontainer`"
+msgstr "restore: '{archive}' não é um arquivo de provider (<storage>:backup/vzdump-lxc-…); ver `delonix backup ls --kind systemcontainer`"
+
+msgid "{path}\n  systemcontainer {name}"
+msgstr "{path}\n  systemcontainer {name}"
+
+msgid "restore: system container '{name}' is running — pass --force to stop it, restore, and start it again"
+msgstr "restore: o container de sistema '{name}' está a correr — passa --force para o parar, repor e voltar a arrancar"
+
+msgid "warning: the provider did not put back {setting} (only root@pam may write it)"
+msgstr "aviso: o provider não repôs {setting} (só o root@pam o pode escrever)"
+
+msgid "restored systemcontainer {name}"
+msgstr "systemcontainer {name} reposto"
+
+msgid "backup: a system container is archived on its provider, not into a file"
+msgstr "backup: um container de sistema é arquivado no seu provider, não num ficheiro"
+
+msgid "'{archive}' is not a system container archive"
+msgstr "'{archive}' não é um arquivo de container de sistema"
+
+msgid "A system container on a remote provider (`kind: SystemContainer`): the archive is taken and kept on the provider's storage, not in a file here"
+msgstr "Um container de sistema num provider remoto (`kind: SystemContainer`): o arquivo é tirado e guardado no storage do provider, não num ficheiro aqui"
+
+msgid "  (dry run: nothing restored)"
+msgstr "  (simulação: nada foi reposto)"
+
