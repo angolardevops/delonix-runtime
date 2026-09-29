@@ -37,8 +37,26 @@ fn io_err(context: &'static str) -> impl Fn(std::io::Error) -> Error {
 ///
 /// We already run as root in a mapped userns (the parent used `newuidmap`), so a
 /// normal `remove_dir_all` is enough: inside this userns we own the subuids.
+///
+/// **A tree that someone is still writing into is retried, not reported.**
+/// `rm -f` of a container whose `start` is in flight purges its directory while
+/// the start's init creates the overlay's mount points under `merged/` and its
+/// log shim opens `log`: `remove_dir_all` meets a directory that was empty when
+/// listed and is not by the `rmdir`, and fails with `Directory not empty`. This
+/// child printed that on the caller's terminal — `rm -f` returned 0 over a line
+/// saying it had failed (measured 2026-09-29, 2 of 30 iterations of `rm -f`
+/// 0-40 ms after `start`), for a directory that was gone a moment later: the
+/// start that fails without a record removes what it left (#607). The writer's
+/// burst is short, so a few passes clear it; a tree that still resists is a real
+/// failure and is still reported — and the caller, which judges by whether the
+/// path is still there, warns with the remedy.
 pub fn rmtree(path: &Path) -> Result<()> {
-    std::fs::remove_dir_all(path).or_else(|e| {
+    retry_while_written(
+        || std::fs::remove_dir_all(path),
+        RMTREE_PASSES,
+        std::time::Duration::from_millis(50),
+    )
+    .or_else(|e| {
         // Already not existing is success — the goal is "not being there".
         if e.kind() == std::io::ErrorKind::NotFound {
             Ok(())
@@ -46,6 +64,29 @@ pub fn rmtree(path: &Path) -> Result<()> {
             Err(io_err("__rmtree")(e))
         }
     })
+}
+
+/// How many removal passes a tree gets while something keeps writing into it.
+const RMTREE_PASSES: u32 = 5;
+
+/// Runs `remove` up to `passes` times, `pause` apart, for as long as it fails
+/// with `Directory not empty` — a concurrent writer, not a permanent condition.
+/// Any other error, and the last `Directory not empty`, are returned as they are.
+fn retry_while_written(
+    mut remove: impl FnMut() -> std::io::Result<()>,
+    passes: u32,
+    pause: std::time::Duration,
+) -> std::io::Result<()> {
+    let mut left = passes.max(1);
+    loop {
+        match remove() {
+            Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty && left > 1 => {
+                left -= 1;
+                std::thread::sleep(pause);
+            }
+            other => return other,
+        }
+    }
 }
 
 /// `__duusage <path> <outfile>` — measures a tree from INSIDE the mapped userns
@@ -828,5 +869,65 @@ mod migrate_tests {
         let a = write(t.path(), "a/f", b"x", 0o644);
         assert!(!same_entry(&a, &t.path().join("nao/existe")));
         assert!(!same_entry(&t.path().join("nao/existe"), &a));
+    }
+}
+
+#[cfg(test)]
+mod rmtree_retry_tests {
+    use super::retry_while_written;
+    use std::io::{Error, ErrorKind};
+    use std::time::Duration;
+
+    /// A directory someone was still writing into is removed on a later pass,
+    /// and nothing is reported — the case `rm -f` during a `start` hit.
+    #[test]
+    fn a_tree_still_being_written_is_retried_until_it_goes() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(Error::from(ErrorKind::DirectoryNotEmpty))
+                } else {
+                    Ok(())
+                }
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(calls, 3);
+    }
+
+    /// A tree that keeps resisting is a real failure, reported after the last pass.
+    #[test]
+    fn a_tree_that_never_empties_is_still_reported() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                Err(Error::from(ErrorKind::DirectoryNotEmpty))
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert_eq!(r.unwrap_err().kind(), ErrorKind::DirectoryNotEmpty);
+        assert_eq!(calls, 5);
+    }
+
+    /// Any other error is not a writer racing us: reported at once, no retry.
+    #[test]
+    fn another_error_is_reported_at_once() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                Err(Error::from(ErrorKind::PermissionDenied))
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert_eq!(r.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        assert_eq!(calls, 1);
     }
 }
