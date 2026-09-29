@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
+<!-- translated-from: troubleshooting.md sha256:e6b6ffdfe6f14754379cb99db51d518a86130a8d88e7be7d69b42a9608f30fad -->
 # 排查问题
 
 **阅读前须知：** [准备你的环境](environment.md)（宿主机的那些陷阱）和[克隆、构建与测试](build-and-test.md#the-gates-ci-runs)（各个门禁，以及如何隔离引擎的状态）。
@@ -100,14 +100,18 @@ FAIL  docs/api/openapi.yaml is not the generated one — run `python3 scripts/co
 FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
 ```
 
-基线是空的，所以任何一条都是新的泄漏。另外两种消息（`more of a known leak`、`fixed or reduced … — lower the baseline`）只有在又一次记录下债务时才会出现。在本地复现时，用一个你自己的全新目录，并且列出里面的东西而不是去评判它——泄漏可能取决于宿主机（一个在缺少某个工具时提前返回的测试）：
+基线是空的，所以任何一条都是新的泄漏。另外两种消息（`more of a known leak`、`fixed or reduced … — lower the baseline`）只有在又一次记录下债务时才会出现。
+
+同一个 job 会在 `/tmp` 本身上再跑一次这个 gate：一个绑定 Unix socket 的测试需要一条短路径（`sun_path` 只有 108 字节），于是把 socket 放在那里，而 `TMPDIR` 的清点从来不会去看那里。runner 上的 `/tmp` 不是空的，所以会在 `cargo test` 之前一刻先把它列出来，事后只评判新出现的东西（`--before`），对照的是同一份空基线。两次清点在某个测试**失败**时也都会运行——恰恰是在那种时候，写在测试最后一行的清理永远不会执行——所以一个红色的测试可能会附带一份它自己的泄漏报告。在本地复现时，用一个你自己的全新目录，并且列出里面的东西而不是去评判它——泄漏可能取决于宿主机（一个在缺少某个工具时提前返回的测试）：
 
 ```bash
-mkdir -p "$PWD/target/test-tmp" && TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
 python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
 ```
 
-修法在测试里，而不在基线里：把目录放进一个 `tempfile::TempDir`，这样删除在提前 `return` 和断言失败时也会执行——见[编码约定](coding-conventions.md)（*测试在每一种退出方式下都要删除自己的临时目录*）。
+修法在测试里，而不在基线里：把目录放进一个 `tempfile::TempDir`，这样删除在提前 `return` 和断言失败时也会执行——对于 socket，用 `tempfile::tempdir_in("/tmp")`，而不是带着 pid 的字面 `/tmp` 路径——见[编码约定](coding-conventions.md)（*测试在每一种退出方式下都要删除自己的临时目录*）。
 
 ## 共享或过期的构建缓存
 

@@ -1,4 +1,4 @@
-<!-- translated-from: glossary.md sha256:d7eafa64fdd49da297f0db08240898eafeb97292834d5c229bc98cd4d97d7053 -->
+<!-- translated-from: glossary.md sha256:92c4e642171d5eba335314e4b3aa06168a922809f3a8b2cc71332697e036a2db -->
 # 术语表
 
 **阅读前须知：** 没有——这是一份参考资料。看别的页面时把它放在旁边随时查。
@@ -61,7 +61,7 @@
 
 **Overlay / lowerdir（覆盖层／下层目录）** —— overlayfs 会把只读的镜像层（那些 `lowerdir`）叠在每个容器自己的可写 `upper` 目录之下。Delonix 把每一个镜像层解包一次，放在 `layers/` 下面，那个镜像的每一个容器都共享它们；容器目录里放着 `upper/`、`work/`、`merged/`，以及一个列出各层的 `overlay-lowers` 文件。挂载是在容器自己的 user namespace 里、用新的 mount API 完成的，每一层调用一次 `lowerdir+`，这样有很多层的镜像就不会撞上经典 `mount(2)` 选项长度的上限。见：`crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay`，`crates/adapters/delonix-linux/src/lib.rs::mount_overlay_if_marked`，[ADR-0037](../../adr/0037-overlay-mount-new-api.md)。
 
-**端口（Port，六边形架构里的 port）** —— 一个用例（use case）需要的、由某个 adapter 或 provider 实现的 trait，这样领域代码就永远不用点名一个具体的机制。例子：`VmBackend`，以及 compute 层的端口 `ImageStore`、`StorageProvider`、`NetworkProvider`、`WorkloadRuntime`。见：`crates/contexts/delonix-compute/src/ports.rs`、`launch.rs`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
+**端口（Port，六边形架构里的 port）** —— 一个用例（use case）需要的、由某个 adapter 或 provider 实现的 trait，这样领域代码就永远不用点名一个具体的机制。例子：`VmBackend`，以及 compute 层的端口 `ImageStore`、`StorageProvider`、`NetworkProvider`、`WorkloadRuntime`，以及供 VM 用例使用的 `VmBackends`、`LocalDiskImages`、`SeedBuilder`。见：`crates/contexts/delonix-compute/src/ports.rs`、`launch.rs`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
 
 **Provider** —— `crates/providers/` 下的一个 crate，针对**一个远端管理 API**（目前是 Proxmox VE、OPNsense 和 TrueNAS）实现一个端口，自己带着 HTTP 客户端。一个新的 provider 是作为某个端口的实现进入的，注册在组合根（composition root）——绝不会是代码里的 `if provider == …`——而且需要一份 ADR。见：[Provider](crates.md#providers)，[ADR-0008](../../adr/0008-proxmox-vm-backend.md)，[ADR-0009](../../adr/0009-truenas-storage-provisioner.md)，[ADR-0051](../../adr/0051-opnsense-firewall-provider.md)。
 
@@ -83,11 +83,15 @@
 
 **Supervisor（监督进程）** —— `container run -d` fork 出来、作为容器真正父进程的那个进程：它会等待容器，记录它真实的退出状态（以及一个 `OOMKilled` 的原因），并应用 `--restart` 策略。因为它要 `fork`，所以必须从一个单线程的进程里启动；服务端会先重新执行一次干净的 `delonix`。见：`crates/adapters/delonix-linux/src/supervise.rs::run_supervised`，`crates/adapters/delonix-linux/src/lib.rs::wait_and_record`。
 
+**System container（系统容器）** —— 在一个远端 provider 上作为一个单元运行的完整用户空间（目前是 Proxmox VE 节点上的一个 LXC 容器），声明为 `kind: SystemContainer`。它**不是** `kind: Container`：provider 不提供 `exec`、日志或退出状态，引擎的数据平面也够不到它，所以它的语义更接近一台 VM（快照、备份、克隆、在节点之间迁移）。镜像由引擎自己拉取；由节点来运行它；在节点上手工做的改动就是漂移（drift）。始终是非特权的。见：`crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider`、`crates/providers/delonix-proxmox/src/lxc.rs`、`bins/delonix-runtime-bin/src/cmd/system_container.rs`，[ADR-0058](../../adr/0058-proxmox-lxc-is-not-a-container-provider.md)。
+
 **userns（user namespace，用户命名空间）** —— 映射用户 id 的 Linux namespace，让一个进程只对它自己 namespace 拥有的对象有 root 权限。它是 rootless 运行的基石，在较新的 Ubuntu 上，位于预期路径之外的二进制文件可能会被 AppArmor 挡住，不能用它。见：[Linux namespace](cloud-native-primer.md#41-linux-namespaces-and-rootless-operation)，[AppArmor](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary)，`namespaces(7)` 和 `user_namespaces(7)`。
 
 **Verdict map（判决映射表）** —— 一个从 key 映射到判决（`jump`、`accept`……）的 nftables map，让一个包只需要一次查找就能找到自己的规则，而不用每个工作负载一条规则地遍历过去。Delonix 用 `fwmap`（一个工作负载的地址 → 它的防火墙链）和 `netpair`（一对网桥 → 一条打开两个网络之间路由的豁免）。见：`crates/adapters/delonix-sdn/src/infra.rs::FWMAP`、`NETPAIR_MAP`。
 
 **VmBackend** —— 每一个 VM backend 都要实现的端口（`boot`、`stop`、`destroy`、`is_running`、`ip`、暂停和快照……）。它定义在计算上下文里，并由 `delonix-vm` 重新导出。Cloud Hypervisor 和 libvirt 是默认注册好的；一个远端 provider 会把一份注册信息交给组合根，由组合根去注册。注册本身不做任何 I/O，而且自动检测是在构建任何东西**之前**先按注册信息过滤，所以一个远端 backend 只有在被选中时才会去连接。见：`crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend`、`crates/adapters/delonix-vm/src/lib.rs::register_backend`、`select_backend`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
+
+**VmEngine** —— 作为计算上下文中一个结构体之方法的 VM 用例（create、stop、start、status、list、remove 以及 day-2 动词），对交给它的端口泛型化：一个 `StateRepository<Vm>`、`VmBackends`、`LocalDiskImages`、`SeedBuilder` 以及可选的 `VmNetwork`。它从不打开 store、从不运行命令、从不点名某个 backend；`delonix-vm` 每次调用都在自己的实现之上构建一个，并把自己的公开函数保留为包装器（ADR-0044 P4b.3）。见：`crates/contexts/delonix-compute/src/vm.rs::VmEngine`、`crates/adapters/delonix-vm/src/local_ports.rs`。
 
 **Workload（工作负载）** —— 两个相关的东西。`kind: Workload` 是一个糖衣 Kind，`spec.type: container|pod|vm|microvm`，在加载时会降级成对应的 Kind（[ADR-0001](../../adr/0001-workload-kind-schema.md)）。`delonix workload` 是把容器和 VM 放在一起列出、对它们操作的 day-2 命令组（`ls`、`describe`、`stop`、`rm`，[ADR-0002](../../adr/0002-compute-driver-trait.md)）。见：`crates/contexts/delonix-stack/src/kinds.rs::WORKLOAD_LOWERS_TO`，`bins/delonix-runtime-bin/src/cmd/workload.rs`。
 

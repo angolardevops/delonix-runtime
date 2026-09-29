@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:5e00934168ce8abaeb7e284855fff4df09522a9379b0b302800bcea4178b5543 -->
+<!-- translated-from: microvm-setup.md sha256:1bdc6dc5407aca36b67bfc85db87ae040be56261e156204a812ada36979bcc8a -->
 # Construire des microVMs
 
 **Avant de lire :** [Préparer votre environnement](environment.md), [Cloner, compiler et tester](build-and-test.md), la [section virtualisation du manuel de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), et la Partie 2 de [Delonixfile et VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
@@ -180,8 +180,9 @@ une **erreur** (auparavant, il retombait sur CH).
 
 ### Ordre de priorité de la sélection pour une nouvelle VM
 
-D'après `delonix_vm::create_with` et `resolve_vm_defaults` (`cmd/vm.rs`), la première
-correspondance l'emporte :
+D'après `resolve_vm_defaults` (`cmd/vm.rs`) et `select_for_create`
+(`crates/adapters/delonix-vm/src/lib.rs`, que le cas d'usage de VM atteint via
+`VmBackends::select`), la première correspondance l'emporte :
 
 1. `--backend` (ou `backend:` dans le manifeste).
 2. Le `HYPERVISOR` de l'image (enregistré par un build de VMfile), lorsque `--disk` désigne une
@@ -336,7 +337,8 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 ```
 
-Ce qui se passe (`cmd/vm.rs` → `delonix_vm::create_with`) :
+Ce qui se passe (`cmd/vm.rs` → `delonix_vm::create_with`, une enveloppe qui construit un
+`delonix_compute::vm::VmEngine` au-dessus des ports de ce nœud et appelle son `create_with`) :
 
 1. La **politique du nœud** est imposée avant la résolution de toute image (`policy::enforce`).
 2. **Résolution du disque** (`resolve_image_ref`) : `--url-img` l'emporte (téléchargé, mis en cache,
@@ -352,9 +354,10 @@ Ce qui se passe (`cmd/vm.rs` → `delonix_vm::create_with`) :
 5. **Backend** choisi (section 2) ; une vérification d'admission refuse lorsque l'hôte manque de
    RAM ; un `--namespace` autre que `default` est refusé sur libvirt (la VM vit sur `virbr0`, en
    dehors du SDN Delonix).
-6. **Overlay** : `<root>/vms/<name>.qcow2`, un qcow2 mince au-dessus de la base
-   (`prepare_local_overlay`) ; `--disk-size <GiB>` l'agrandit et ne peut pas être inférieur à la
-   base.
+6. **Overlay** : `<root>/vms/<name>.qcow2`, un qcow2 mince au-dessus de la base (le port
+   `LocalDiskImages`, implémenté par `QemuImgDisks` → `prepare_local_overlay` dans
+   `crates/adapters/delonix-vm/src/local_ports.rs` ; sauté pour un backend qui gère son propre
+   stockage) ; `--disk-size <GiB>` l'agrandit et ne peut pas être inférieur à la base.
 7. **Démarrage** : le `boot` du backend. `create` est idempotent : une VM existante et en cours
    d'exécution est renvoyée telle quelle.
 
@@ -493,7 +496,9 @@ délibérée au rootless dans le code VM (`cmd/vmbridge.rs`).
 | Domaine | Chemin |
 |---|---|
 | Port | `crates/contexts/delonix-compute/src/vm_backend.rs` |
-| Registre, backends CH et libvirt, `create_with`, snapshots, recherche du firmware | `crates/adapters/delonix-vm/src/lib.rs` |
+| Cas d'usage des VM (`VmEngine` : create, stop, start, status, list, remove, snapshots, verbes du jour 2) et leurs ports (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) | `crates/contexts/delonix-compute/src/vm.rs`, `ports.rs` |
+| Registre, backends CH et libvirt, sélection du backend, recherche du firmware, les enveloppes publiques (`create_with`, `stop`, …) | `crates/adapters/delonix-vm/src/lib.rs` |
+| Les implémentations des ports de VM par l'adapter (`RegistryBackends`, `QemuImgDisks`, `CloudLocaldsSeed`) | `crates/adapters/delonix-vm/src/local_ports.rs` |
 | Génération du seed NoCloud | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Backend Proxmox | `crates/providers/delonix-proxmox/` |
 | CLI `vm`, `kind: VirtualMachine`, `vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |
@@ -531,6 +536,10 @@ Lisez d'abord [ADR-0008](../../adr/0008-proxmox-vm-backend.md) ; c'est le modè
   tests du registre et de `auto_detect`, et les tests de parseur/scaffold dans `cmd/vmfile.rs`.
   Exécutez `cargo test -p delonix-vm` et `cargo test -p delonix-runtime-bin vmfile` (voir
   [Cloner, compiler et tester](build-and-test.md) pour `protoc` et le répertoire cible).
+- **Tests des cas d'usage contre de faux ports** — l'orchestration (`VmEngine`) est testée dans
+  `delonix-compute` (`vm::tests`) avec un store en mémoire, un backend qui enregistre ses appels et
+  un faux disque et un faux seed, si bien qu'un changement de ce que décide `create`, `stop` ou
+  `status` ne demande aucun hyperviseur : `cargo test -p delonix-compute vm::`.
 - **`scripts/e2e.sh`** — les sections `vm` s'exécutent sans hyperviseur (listage, refus) et, lorsque
   c'est disponible, exercent les snapshots à travers stop/start sur libvirt (nécessite `virsh`,
   `qemu-img` et un `qemu:///system` utilisable) et sur Cloud Hypervisor. Le script isole les deux

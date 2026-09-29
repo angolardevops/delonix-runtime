@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-primer.md sha256:a9064f13ecba90c0cc4992eccd73ec17bf783621b44ed9ce4319b3b07ee11793 -->
+<!-- translated-from: cloud-native-primer.md sha256:ff70ff4a081bb315c8edab09bc1ac0ce7ce154a7475fb3467a6b8c998f7f5d24 -->
 # 云原生入门
 
 **阅读之前：**[Linux 基础](linux-foundations.md)（命名空间、cgroups v2、文件描述符）和
@@ -77,9 +77,9 @@ Podman 的比较，只会出现在有助于解释某个设计选择的地方。
   创建叶子——见 `crates/adapters/delonix-linux/src/lib.rs` 中的 `user_service_base`
   和 `try_delegated_base`。`cgroup_limits_apply` 会在不启动任何容器的情况下，回答
   "限制会不会在这台主机上生效？"这个问题。
-- 关于中间那一层的设计决策是 [ADR-0015](../adr/0015-intermediate-cgroup-level.md)；
+- 关于中间那一层的设计决策是 [ADR-0015](../../adr/0015-intermediate-cgroup-level.md)；
   CRI 如何遵循 kubelet 的 cgroup 层级结构是
-  [ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md)，kubelet 给出的那个
+  [ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md)，kubelet 给出的那个
   父级由 `crates/contexts/delonix-compute/src/record.rs` 中的 `KubeCgroupParent::parse`
   校验。
 
@@ -115,7 +115,7 @@ profile 来限制一个进程的 Linux 安全模块。最后，运行时会把�
   `apply_masked_paths`、`apply_readonly_paths`、`mask_proc_paths`。
 - 节点级别的安全决策（策略、准入、事件、评分）是一个独立的纯 crate：
   `crates/contexts/delonix-security-runtime/src/admission.rs` 中的 `evaluate`
-  （[ADR-0026](../adr/0026-security-runtime-decision-crate.md)）。
+  （[ADR-0026](../../adr/0026-security-runtime-decision-crate.md)）。
 
 **延伸阅读：** [`capabilities(7)`](https://man7.org/linux/man-pages/man7/capabilities.7.html)、
 [kernel — Seccomp BPF](https://docs.kernel.org/userspace-api/seccomp_filter.html)、
@@ -154,8 +154,8 @@ copy-up 上去的可写 `upperdir`，以及一个 `workdir`。许多容器可以
 - Overlay 准备：`overlay.rs` 中的 `ImageStore::prepare_overlay` 写入一个
   `overlay-lowers` 标记（`LOWERS_FILE`）；挂载本身发生在容器自己的用户和挂载命名空间
   内部，在 `mount_overlay_if_marked`（`crates/adapters/delonix-linux/src/lib.rs`）中
-  完成，用的是新的挂载 API——见 [ADR-0016](../adr/0016-filesystem-under-the-state-root.md)
-  和 [ADR-0037](../adr/0037-overlay-mount-new-api.md)。
+  完成，用的是新的挂载 API——见 [ADR-0016](../../adr/0016-filesystem-under-the-state-root.md)
+  和 [ADR-0037](../../adr/0037-overlay-mount-new-api.md)。
 - 引擎自己运行容器，而不是把一个 OCI 运行时 bundle 交给 runc/crun。
 
 **延伸阅读：** [OCI image spec](https://github.com/opencontainers/image-spec)、
@@ -210,8 +210,8 @@ Linux 网络的构建模块：
   `attach_named_netns`。无根场景下是可选启用的（`enabled_conf` 会检查
   `DELONIX_CNI=1`）；root 的 CRI 路径使用节点自己的 CNI 链
   （`crates/interfaces/delonix-cri/src/runtime_svc.rs` 中的 `root_cni_readiness`）。
-- 拓扑决策：[ADR-0013](../adr/0013-network-topology.md)、
-  [ADR-0014](../adr/0014-runtime-dir-per-root.md)。
+- 拓扑决策：[ADR-0013](../../adr/0013-network-topology.md)、
+  [ADR-0014](../../adr/0014-runtime-dir-per-root.md)。
 
 **延伸阅读：** [`network_namespaces(7)`](https://man7.org/linux/man-pages/man7/network_namespaces.7.html)、
 [`veth(4)`](https://man7.org/linux/man-pages/man4/veth.4.html)、
@@ -275,7 +275,7 @@ ISO，里面存放着 `user-data`、`meta-data`，以及可选的 `network-confi
 - 这个端口是 `crates/contexts/delonix-compute/src/vm_backend.rs` 中的 `VmBackend`（由
   `delonix-vm` 重新导出），由 `crates/adapters/delonix-vm/src/lib.rs` 里的
   `CloudHypervisorBackend` 和 `LibvirtBackend`，以及 `crates/providers/delonix-proxmox`
-  中的 `ProxmoxBackend`（[ADR-0008](../adr/0008-proxmox-vm-backend.md)）实现。
+  中的 `ProxmoxBackend`（[ADR-0008](../../adr/0008-proxmox-vm-backend.md)）实现。
 - Cloud Hypervisor 固件的查找顺序：`DEFAULT_CH_FIRMWARES`（EDK2 的 `CLOUDHV.fd` 排在
   `hypervisor-fw` 之前）；VMM 的命令行在 `boot_ch` 中构建。
 - libvirt 的 domain XML：`libvirt_domain_xml`。
@@ -315,12 +315,12 @@ Kubernetes 让一种模型流行起来：用户以带类型的对象（`apiVersi
   保存在资源本身上，放在 `LAST_APPLIED` 注解（`delonix.io/last-applied`）下面——
   没有单独的状态文件。
 - 归属关系是资源上的一个标签；修订历史在 `revision.rs`
-  （[ADR-0019](../adr/0019-stack-revision-history.md)）里。
+  （[ADR-0019](../../adr/0019-stack-revision-history.md)）里。
 - 清单在 `bins/delonix-runtime-bin/src/cmd/manifest.rs` 中解析；`stack plan`/`apply`
   住在 `cmd/stack.rs` 里。
 - 后台没有运行任何控制器循环：协调只在一条命令运行时才发生（无守护进程）。提议中的
   pull 协调器保留了这个特性——它是一个调用同一个 apply 的 systemd 定时器，而不是
-  一个驻留进程（[ADR-0021](../adr/0021-gitops-pull-reconciler.md)，状态为*提议中*）。
+  一个驻留进程（[ADR-0021](../../adr/0021-gitops-pull-reconciler.md)，状态为*提议中*）。
 
 **延伸阅读：** [Kubernetes — Objects](https://kubernetes.io/docs/concepts/overview/working-with-objects/)、
 [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)、
@@ -345,7 +345,7 @@ collector。**Prometheus** 以一种文本暴露格式，从一个 HTTP `/metric
   `crates/interfaces/delonix-mgmt/src/lib.rs` 中提供 `/metrics` 服务。
 - MCP：`crates/interfaces/delonix-mcp`（构建在 [`rmcp`](https://docs.rs/rmcp) 之上，
   stdio 传输），二进制文件在 `bins/delonix-mcp-bin`。范围与限制：
-  [ADR-0025](../adr/0025-mcp-local-ai-control-surface.md)。
+  [ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md)。
 
 **延伸阅读：** [OpenTelemetry documentation](https://opentelemetry.io/docs/)、
 [OTLP specification](https://opentelemetry.io/docs/specs/otlp/)、

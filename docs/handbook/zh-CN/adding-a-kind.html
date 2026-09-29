@@ -216,7 +216,7 @@ th:first-child,td:first-child{white-space:nowrap}
 分支：描述这个 Kind 是什么的那张表、应用它的代码，以及让 <code>stack plan</code>/<code>apply</code> 能像对待
 其他 Kind 一样对待它的协调器接线。本页依序走一遍这个过程，全程以一个真实的 Kind ——
 <strong><code>Service</code></strong>（ADR-0032）—— 作为完整示例。它不是最新的 Kind（<code>IPPool</code>、<code>NetworkGateway</code>、
-<code>NetworkZone</code> 和 <code>RuntimePolicy</code> 都是在它之后出现的），但它是唯一一次性用到全部路径的
+<code>NetworkZone</code>、<code>RuntimePolicy</code> 和 <code>SystemContainer</code> 都是在它之后出现的），但它是唯一一次性用到全部路径的
 Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己的注册表。更新的那些 Kind 也走过
 同样的步骤；下面引用的每个文件都是从代码树里读到的，不是凭对旧结构的记忆写的。</p>
 <h2 id="the-one-table-a-kind-has-to-answer">一个 Kind 必须回答的这张唯一的表<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
@@ -414,6 +414,12 @@ Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己
 <code>service::apply_one</code> 已经会完整覆写这条记录，不需要重启 —— <code>Service</code> 身上没有什么是「冷」
 的。一个没被写进 <code>hot_fields</code> 的字段照样会出现在规划里；只不过它会强制走 <code>Action::Replace</code>
 （没有 <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> 就会被拒绝），而不是 <code>Action::Update</code>。</p>
+<p>有些字段只能<strong>单向</strong>实时收敛。系统容器的根卷可以在运行中的容器上扩大，但永远不能缩小，所以
+<code>SystemContainer.rootfs</code> 被列在 <code>grow_only_fields</code> 里，而不是 <code>hot_fields</code> 里：当两边都是
+数字、且新值不比旧值小时，<code>is_hot_change</code> 把一个只增长（grow-only）字段视为热字段，否则视为
+冷字段，因此缩小会规划出一次 <code>Replace</code>。如果你的 Kind 自己的 apply 也要判断某个改动是否需要
+重建，就去问同一个函数 —— <code>cmd/system_container.rs</code> 里的 <code>cold_changes</code> 就是这么做的 ——
+否则 <code>plan</code> 和 <code>apply</code> 会得出不一致的结论。</p>
 <p><code>cmd/stack.rs</code> 里有三个测试，让这张表对齐 <code>kinds.rs</code> 那张表，也让它们彼此对齐：</p>
 <ul>
 <li><strong><code>as_tres_listas_de_kinds_convergentes_concordam</code></strong> —— 每个标了 <code>converges: true</code> 的

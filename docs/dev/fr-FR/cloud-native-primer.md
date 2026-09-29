@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-primer.md sha256:a9064f13ecba90c0cc4992eccd73ec17bf783621b44ed9ce4319b3b07ee11793 -->
+<!-- translated-from: cloud-native-primer.md sha256:ff70ff4a081bb315c8edab09bc1ac0ce7ce154a7475fb3467a6b8c998f7f5d24 -->
 # Initiation au cloud native
 
 **Avant de lire :** [Fondations Linux](linux-foundations.md) (namespaces, cgroups v2, descripteurs de fichier) et [IaaS et cloud native](iaas-and-cloud-native.md) (de quoi le moteur est responsable).

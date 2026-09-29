@@ -1,4 +1,4 @@
-<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
+<!-- translated-from: rust-primer.md sha256:7df531761d748651535cf66218ca9ae3a61dd2cf269836df4a757ba7df96b431 -->
 # Initiation à Rust pour cette base de code
 
 **Avant de lire :** [Initiation au cloud native](cloud-native-primer.md), dont les exemples utilisent le vocabulaire, et des bases de Rust ([The Rust Programming Language](https://doc.rust-lang.org/book/), chapitres 1 à 10).
@@ -166,6 +166,31 @@ La décision derrière cette forme est l’[ADR-0008](../../adr/0008-proxmox-vm-
 motif « trait + implémentations + un seul endroit qui choisit » apparaît ailleurs (par exemple le
 port `VmNetwork`, conservé dans un `OnceLock<Box<dyn VmNetwork>>` près du début de
 `crates/adapters/delonix-vm/src/lib.rs`).
+
+Tous les ports ne sont pas des trait objects. Les cas d’usage des VM reçoivent leurs ports comme
+**paramètres génériques** :
+
+```rust
+// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine<'a, R, B, D, S> {
+    pub root: &'a Path,
+    pub repo: R,       // R: StateRepository<Vm>
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option<&'a dyn VmNetwork>,
+}
+```
+
+La raison est une règle des trait objects : un trait avec une méthode générique n’est pas
+*dyn-compatible* (object-safe), et `StateRepository<T>` en a une (`update<F>`, dans
+`crates/foundation/delonix-model/src/ports.rs`). L’engine est donc générique, comme
+`resolve_run<I, S, D, H>` pour `container run`, et chaque appelant choisit les types concrets :
+`delonix-vm` construit `VmEngine<JsonStore<Vm>, RegistryBackends, QemuImgDisks, CloudLocaldsSeed>`
+dans `engine` (`crates/adapters/delonix-vm/src/lib.rs`), et les tests de `vm::tests` en construisent
+un au-dessus d’un store en mémoire et de faux qui enregistrent leurs appels. Le prix des génériques
+est une copie du code par combinaison (monomorphisation) ; le gain est qu’aucun port n’a à être
+remodelé pour tenir dans `dyn`.
 
 **En savoir plus :** The Rust Book —
 [Traits](https://doc.rust-lang.org/book/ch10-02-traits.html),

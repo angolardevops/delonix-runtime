@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:521f8c297a328d828b08609f1c7800883ddc9f0b15dfe38970650e270ad31535 -->
+<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
 # Entretien de conception de système — le Delonix Engine
 
 **Avant de lire :** [Architecture](architecture.md) et [Les crates](crates.md) — cette page défend *pourquoi* la structure qu'elles décrivent a cette forme.
@@ -425,6 +425,13 @@ sequenceDiagram
   de la CLI uniquement lorsqu'il est configuré). Un enregistrement porte une closure de factory et un
   drapeau `auto_selectable`, de sorte que l'auto-détection ne construit jamais — et donc n'authentifie
   jamais — un backend distant. L'enregistrement ne fait aucune I/O.
+- **Les cas d'usage à part du mécanisme.** Ce que décide `create`, `stop` ou `status` vit dans le
+  context de compute sous la forme de `VmEngine`, à qui l'on remet un store d'enregistrements et
+  trois ports (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) et qui n'exécute jamais lui-même de
+  programme ; l'adapter répond à ces ports avec son registre, `qemu-img` et `cloud-localds`.
+  L'orchestration se teste donc contre des faux, et une règle propre à un hyperviseur (la
+  désactivation de l'anti-spoof de libvirt, un domaine laissé sans enregistrement) doit être une
+  réponse de port plutôt qu'un `if` dans le cas d'usage (ADR-0044 P4b.3).
 - **Le réseau d'une VM.** Cloud Hypervisor s'exécute dans le netns du pin et obtient un `tap` sur un
   bridge réseau à travers le port `VmNetwork`, que le SDN implémente (`HostVmNetwork`) ; `delonix-vm`
   ne dépend pas de `delonix-sdn`. Comme le serveur DHCP est celui du moteur et qu'il est
@@ -439,10 +446,12 @@ sequenceDiagram
   par **MAC**, et un backend distant peut la réaliser nativement.
 
 **Où cela se trouve dans le code :** `crates/contexts/delonix-compute/src/vm_backend.rs` (`VmBackend`,
-`BackendRegistration`) ; `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
+`BackendRegistration`) ; `crates/contexts/delonix-compute/src/vm.rs` (`VmEngine`) ;
+`crates/adapters/delonix-vm/src/local_ports.rs` (`RegistryBackends`, `QemuImgDisks`,
+`CloudLocaldsSeed`) ; `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `select_for_create`, `auto_detect`,
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`) ; `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`) ;
-`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`) ;
+`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`, `VmBackends`, `LocalDiskImages`, `SeedBuilder`) ;
 `crates/adapters/delonix-sdn/src/vm_network.rs` (`HostVmNetwork`) ;
 `crates/adapters/delonix-sdn/src/infra.rs` (`sdn_reachable`, `dhcp_lease_ip`) ;
 `crates/providers/delonix-proxmox/src/lib.rs` (`ProxmoxBackend`) ;
@@ -579,7 +588,7 @@ sequenceDiagram
 
 **Pourquoi ne pas ajouter un petit daemon pour les événements et les redémarrages ?**
 Parce que chaque processus résident est un domaine de défaillance et une surface d'attaque. Le
-journal d'événements est un fichier en ajout seul (`delonix_runtime_core::events`), les redémarrages
+journal d'événements est un fichier en ajout seul (`delonix_node::events`), les redémarrages
 appartiennent au superviseur de chaque container, et la persistance au démarrage est une unit systemd
 par charge de travail (`delonix system boot`). Un daemon exige son propre ADR démontrant ce que les
 alternatives n'ont pas pu faire — voir [ADR-0034](../../adr/0034-csi-daemon-conflict.md) pour un cas

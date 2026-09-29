@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
+<!-- translated-from: environment-variables.md sha256:637f36d1cd2cce6e51a14bc9fb3a48479d4632e9f6b91e8a65460f02dbdd1833 -->
 # 环境变量（`DELONIX_*`）
 
 **阅读前须知：** 《克隆、构建与测试》里的[隔离引擎的状态](build-and-test.md#isolating-the-engines-state)。
@@ -115,7 +115,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
 | `DELONIX_HYPERVISOR_FW` | `crates/adapters/delonix-vm/src/lib.rs:default_ch_firmware` | 当没有给出 `--firmware` 时，Cloud Hypervisor 启动用的固件。 | 一个文件路径，只在它存在时才用。否则用 `DEFAULT_CH_FIRMWARES` 里第一个存在的（EDK2 的 `CLOUDHV.fd` 排在 `hypervisor-fw` 前面）。 | 为什么 EDK2 的构建排在前面，见[构建 microVM](microvm-setup.md)。 |
-| `DELONIX_VM_RESERVE_MIB` | `crates/adapters/delonix-vm/src/lib.rs:vm_admission_check` | 为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 `MemAvailable`，就会被拒绝。 | 单位 MiB；默认 `2048`；一个解析不了的值会回退到 2048。 | 调低它有让宿主机 OOM-kill 东西的风险。 |
+| `DELONIX_VM_RESERVE_MIB` | `crates/contexts/delonix-compute/src/vm.rs:admission_check`（判定在 `admission_verdict` 中；`MemAvailable` 来自 `delonix_node::mem_available_mib`） | 为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 `MemAvailable`，就会被拒绝。 | 单位 MiB；默认 `2048`；一个解析不了的值会回退到 2048。 | 调低它有让宿主机 OOM-kill 东西的风险。 |
 | `DELONIX_VM_MEM_HARD_LIMIT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | libvirt domain 是否会在整个 QEMU 进程上得到一个 `<memtune><hard_limit>`。 | `off` → 没有硬性上限；其他任何值 → 有。 | |
 | `DELONIX_VM_MEM_OVERHEAD_PCT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | 硬性上限允许超出 guest 内存的余量。 | 百分比，接受范围 5–200；默认 `25`；至少 1 GiB 的余量。超出范围 → 25。 | |
 | `DELONIX_VM_CPU_QUOTA_CORES` | `crates/adapters/delonix-vm/src/lib.rs:cpu_quota_micros` | 一个 libvirt domain 的 CPU 上限（`<cputune><quota>`），以核心数为单位。 | 未设置 → vCPU 数 + 1（多出来那一核给 QEMU 的 emulator 和 IO 线程用）。一个正数 → 那么多核心。`off` → 没有上限。 | |

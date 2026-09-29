@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">参考</p>
-<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/environment-variables.html">阅读英文页面</a></span></div><h1 id="environment-variables-delonix_">环境变量（<code>DELONIX_*</code>）</h1>
+<h1 id="environment-variables-delonix_">环境变量（<code>DELONIX_*</code>）</h1>
 <p><strong>阅读前须知：</strong> 《克隆、构建与测试》里的<a href="build-and-test.html#isolating-the-engines-state">隔离引擎的状态</a>。</p>
 <p>这一页列出了引擎代码里出现的每一个 <code>DELONIX_*</code> 名字，说明它在哪里被读取、它改变了什么，以及你要不要设置它。它是一份参考资料：只读跟你现在在做的事情相关的那一节，不用读整页。读完之后，你就能隔离一次运行、打开你需要的诊断，并且在设置某个会降低安全边界的变量之前先认出它来。</p>
 <h2 id="how-to-read-this-page">如何阅读这一页<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
@@ -245,6 +245,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
+<td>节点 API 的 socket</td>
+<td><code>--addr</code> &gt; <code>DELONIX_NODE_API_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
+</tr>
+<tr>
 <td>Docker API 的 socket</td>
 <td><code>--addr</code> &gt; <code>DELONIX_DOCKER_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-docker.<wbr>sock</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
@@ -261,7 +266,7 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td>VM 的 backend</td>
-<td><code>--backend</code>（或镜像自带的 <code>HYPERVISOR</code>） &gt; <code>DELONIX_VM_BACKEND</code> &gt; providers 文件中的 <code>defaultProvider</code>（ADR-0054） &gt; <code>vm default-backend --set</code> &gt; 自动检测（仅在没有 providers 文件时）</td>
+<td><code>--backend</code>（或镜像自带的 <code>HYPERVISOR</code>） &gt; <code>DELONIX_VM_BACKEND</code> &gt; providers 文件中的 <code>defaultProvider</code>（ADR-0054；由 <code>vm default-backend --set</code> 写入） &gt; 旧的 <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; 自动检测。无法读取的 providers 文件会让这次选择失败，而不是落到下一项</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -354,7 +359,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td><code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mgmt</code> 和 <code>delonix-mcp</code> 的日志过滤器。</td>
+<td><code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code> 和 <code>delonix-mcp</code> 的日志过滤器。</td>
 <td>一个 <code>tracing</code> 过滤表达式（<code>debug</code>、<code>warn</code>、<code>delonix_sdn=debug</code>）。回退到 <code>RUST_LOG</code>，再回退到 <code>info</code>。</td>
 <td>日志写到 stderr；stdout 留给命令的输出。</td>
 </tr>
@@ -420,6 +425,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>本地管理 API（<code>delonix serve api</code>）的 socket。</td>
 <td><code>unix://&lt;path&gt;</code>。默认 <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-mgmt.<wbr>sock</code>。</td>
 <td><code>--addr</code> 优先。这个 API 仅限本地（调用方的 uid）。</td>
+</tr>
+<tr>
+<td><code>DELONIX_NODE_API_ADDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>；由 <code>cmd/serve.rs:run</code> 转发</td>
+<td>节点 API（<code>delonix serve node-api</code>，以 gRPC 和 HTTP/JSON 提供的 <code>delonix.node.v1</code> 契约）的 socket。</td>
+<td><code>unix://&lt;path&gt;</code>。默认 <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code>。</td>
+<td><code>--addr</code> 优先。仅限本地（调用方的 uid）。</td>
 </tr>
 <tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>
@@ -621,7 +633,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a>（判定在 <code>admission_verdict</code> 中；<code>MemAvailable</code> 来自 <code>delonix_node::<wbr>mem_available_mib</code>）</td>
 <td>为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 <code>MemAvailable</code>，就会被拒绝。</td>
 <td>单位 MiB；默认 <code>2048</code>；一个解析不了的值会回退到 2048。</td>
 <td>调低它有让宿主机 OOM-kill 东西的风险。</td>
@@ -946,6 +958,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>设置并行目录遍历用多少个 worker。</td>
 <td>一个正整数；<code>1</code> → 顺序遍历。未设置 → CPU 数量，有上限。</td>
 <td>并行遍历和顺序遍历给出<strong>相同</strong>的总量（用不同 worker 看到的硬链接测试过）；这个变量存在是为了在特定宿主机上证明这一点，也是当某个文件系统在并发 <code>readdir</code> 下表现异常时的逃生舱。</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code>（glibc）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>，由那些常驻的进程在启动时调用（网络的 pin 和 control、<code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code>、Docker API 切片、L7 ingress 代理）</td>
+<td>glibc 自己对 malloc arena 数量的上限。未设置时，这些进程会自己把它限制为 2，因为 glibc 的默认行为会为每个发生争用的线程保留一个 64 MiB 的堆。</td>
+<td>一个正整数；由 glibc 读取，而不是引擎。</td>
+<td>设置了它，引擎就不去碰它：运维者的值优先。</td>
 </tr>
 </tbody>
 </table></div>

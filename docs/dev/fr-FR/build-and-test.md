@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:a509235c85941dead7c564eb0fe69325be76ad29f67752755461f3637af80128 -->
+<!-- translated-from: build-and-test.md sha256:e3064f16c3cd8456faff94b7b2e482d8957a320e5a93071573df9e38ba594950 -->
 # Cloner, compiler et tester
 
 **Avant de lire :** [Préparer votre environnement](environment.md) : la toolchain épinglée, `protoc`, et un hôte qui passe ses vérifications.

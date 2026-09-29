@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Arquitectura</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/project-structure.html">Ler a página em inglês</a></span></div><h1 id="project-structure">Estrutura do projecto</h1>
+<h1 id="project-structure">Estrutura do projecto</h1>
 <p><strong>Antes de leres:</strong> <a href="build-and-test.html">Clonar, compilar e testar</a> — tens uma checkout que compila, e sabes que gates existem.</p>
 <p>Esta página é o mapa do repositório: o que é cada ficheiro e directório de topo, quem o muda e
 quando, e que partes são <strong>geradas</strong> e nunca devem ser editadas à mão. Lê-a depois de
@@ -253,7 +253,7 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
 │   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
@@ -447,7 +447,7 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Contextos delimitados com os casos de uso: Compute, com os registos <code>Container</code> e <code>Vm</code> (<code>delonix-compute</code>), os próprios helpers do nó — registo de eventos, verificações de host e processo, despacho de servidor (<code>delonix-node</code>) —, Stack — Kinds, reconciliador, revisões (<code>delonix-stack</code>) — e as decisões de segurança do nó (<code>delonix-security-runtime</code>).</td>
+<td>Contextos delimitados com os casos de uso: Compute, com os registos <code>Container</code> e <code>Vm</code>, o caso de uso <code>container run</code> e os casos de uso de VM (<code>delonix-compute</code>), os próprios helpers do nó — registo de eventos, verificações de host e processo, despacho de servidor (<code>delonix-node</code>) —, Stack — Kinds, reconciliador, revisões (<code>delonix-stack</code>) — e as decisões de segurança do nó (<code>delonix-security-runtime</code>).</td>
 <td>Funcionalidades que mudam o que o motor decide.</td>
 <td><a href="crates.html">Os crates</a></td>
 </tr>
@@ -459,7 +459,7 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>Sistemas remotos atrás de uma porta: um nó Proxmox VE como <code>VmBackend</code> (<code>delonix-proxmox</code>) e o provisionamento TrueNAS (<code>delonix-truenas</code>).</td>
+<td>Sistemas remotos atrás de uma porta: um nó Proxmox VE como <code>VmBackend</code> e como <code>SystemContainerProvider</code>, a sua firewall por convidado e a sua SDN (<code>delonix-proxmox</code>), um appliance OPNsense como <code>GatewayProvider</code> (<code>delonix-opnsense</code>), e o provisionamento TrueNAS (<code>delonix-truenas</code>).</td>
 <td>Mudanças a uma integração de provider; um provider novo entra aqui como implementação de uma porta.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
@@ -611,9 +611,9 @@ HTML (<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.htm
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>, o JSON Schema do manifesto, <strong>gerado</strong> a partir do código (ADR-0007).</td>
-<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> quando um tipo de manifesto muda.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
+<td><code>v1/delonix.json</code>, o JSON Schema do manifesto, <strong>gerado</strong> a partir do código (ADR-0007), e <code>v1/providers.json</code>, o JSON Schema do ficheiro de providers do nó (ADR-0054).</td>
+<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> quando um tipo de manifesto muda; <code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code> quando o ficheiro de providers muda.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0054-provider-configuration-file.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -630,7 +630,7 @@ HTML (<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.htm
 <tbody>
 <tr>
 <td><code>scripts/</code></td>
-<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>) com as suas linhas de base (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>), geradores (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), arneses (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), o instalador <code>install.sh</code>, builds de imagens de appliance em <code>appliances/</code>, e sondas de spike em <code>spikes/</code>.</td>
+<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>, <code>tmp_roots_gate.py</code>) com as suas linhas de base (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>, <code>tmp_roots_baseline.json</code>), geradores (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), arneses (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), o instalador <code>install.sh</code>, builds de imagens de appliance em <code>appliances/</code>, e sondas de spike em <code>spikes/</code>.</td>
 <td>Quem tiver uma mudança que mexa num ratchet (baixa a linha de base no mesmo commit); mantenedores para o resto.</td>
 <td><a href="build-and-test.html">Clonar, compilar e testar</a></td>
 </tr>
@@ -710,6 +710,18 @@ espera que a CI falhe se editares a saída à mão.</p>
 <td>job <code>test</code>, teste <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
 </tr>
 <tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
+<td><code>v1/providers.json</code></td>
+<td><code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code></td>
+<td>job <code>test</code>, teste <code>the_published_providers_schema_is_the_generated_one</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>providers_config.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/providers" target="_blank" rel="noopener"><code>docs/providers/</code></a></td>
+<td><code>capability-matrix.md</code></td>
+<td><code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code></td>
+<td>job <code>test</code>, teste <code>the_published_matrix_is_the_generated_one</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/provider.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>provider.<wbr>rs</code></a></td>
+</tr>
+<tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
 <td>toda página</td>
 <td><code>python3 docs/gen.py</code> (precisa de <code>cargo build --release -p delonix-runtime-bin</code>)</td>
@@ -747,9 +759,9 @@ espera que a CI falhe se editares a saída à mão.</p>
 </tr>
 <tr>
 <td><code>scripts/</code></td>
-<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code></td>
-<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code></td>
-<td>jobs <code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code></td>
+<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>tmp_roots_baseline.json</code></td>
+<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code>, <code>tmp_roots_gate.<wbr>py --dir &lt;dir&gt; --update</code></td>
+<td>jobs <code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code>; o job <code>test</code> para o <code>tmp_roots_gate.py</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>

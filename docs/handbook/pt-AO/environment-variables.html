@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Referência</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/environment-variables.html">Ler a página em inglês</a></span></div><h1 id="environment-variables-delonix_">Variáveis de ambiente (<code>DELONIX_*</code>)</h1>
+<h1 id="environment-variables-delonix_">Variáveis de ambiente (<code>DELONIX_*</code>)</h1>
 <p><strong>Antes de leres:</strong> <a href="build-and-test.html#isolating-the-engines-state">Isolar o estado do motor</a> em Clonar, construir e testar.</p>
 <p>Esta página lista todos os nomes <code>DELONIX_*</code> que aparecem no código do motor, com o sítio onde são
 lidos, o que mudam e se alguma vez os deves definir. É uma referência: lê a secção que corresponde
@@ -283,7 +283,7 @@ script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aq
 </tr>
 <tr>
 <td>Backend de VM</td>
-<td><code>--backend</code> (ou o <code>HYPERVISOR</code> da imagem) &gt; <code>DELONIX_VM_BACKEND</code> &gt; o <code>defaultProvider</code> do ficheiro de providers (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; auto-detecção (só sem ficheiro de providers)</td>
+<td><code>--backend</code> (ou o <code>HYPERVISOR</code> da imagem) &gt; <code>DELONIX_VM_BACKEND</code> &gt; o <code>defaultProvider</code> do ficheiro de providers (ADR-0054; o <code>vm default-backend --set</code> escreve-o) &gt; o legado <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; auto-detecção. Um ficheiro de providers que não se consegue ler faz a escolha falhar em vez de cair para o seguinte</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -385,7 +385,7 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Filtro de logs para <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> e <code>delonix-mcp</code>.</td>
+<td>Filtro de logs para <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> e <code>delonix-mcp</code>.</td>
 <td>Uma expressão de filtro do <code>tracing</code> (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Recorre a <code>RUST_LOG</code> e depois a <code>info</code>.</td>
 <td>Os logs vão para o stderr; o stdout fica reservado à saída dos comandos.</td>
 </tr>
@@ -664,7 +664,7 @@ até ele voltar a arrancar.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (o veredicto é o <code>admission_verdict</code>; o <code>MemAvailable</code> vem do <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Memória mantida livre para o host ao admitir uma VM: uma VM é recusada se a sua memória mais esta reserva exceder o <code>MemAvailable</code>.</td>
 <td>MiB; omissão <code>2048</code>; um valor que não se consegue interpretar recorre a 2048.</td>
 <td>Baixá-la arrisca que o host mate processos por OOM.</td>
@@ -996,6 +996,13 @@ definições de teste — ver <a href="#test-only">Só para testes</a>.</p>
 <td>Define quantos workers a varredura paralela de directórios usa.</td>
 <td>Um inteiro positivo; <code>1</code> → a varredura sequencial. Não definida → o número de CPUs, com tecto.</td>
 <td>As varreduras paralela e sequencial dão o MESMO total (testado com hardlinks vistos por workers diferentes); a variável existe para o provar num host dado, e como escapatória se um sistema de ficheiros se comportar mal sob <code>readdir</code> concorrente.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, chamada no arranque pelos processos que ficam de pé (o pin e o control da rede, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, a fatia da API Docker, o proxy de ingress L7)</td>
+<td>O tecto do próprio glibc para as arenas do malloc. Sem ela, esses processos põem o tecto em 2 eles mesmos, porque a omissão do glibc reserva um heap de 64 MiB por thread em contenção.</td>
+<td>Um inteiro positivo; lido pelo glibc, não pelo motor.</td>
+<td>Se a definires, o motor não lhe toca: o valor do operador ganha.</td>
 </tr>
 </tbody>
 </table></div>

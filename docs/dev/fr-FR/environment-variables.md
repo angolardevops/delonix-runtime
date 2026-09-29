@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
+<!-- translated-from: environment-variables.md sha256:637f36d1cd2cce6e51a14bc9fb3a48479d4632e9f6b91e8a65460f02dbdd1833 -->
 # Variables d’environnement (`DELONIX_*`)
 
 **Avant de lire :** [Isoler l'état du moteur](build-and-test.md#isolating-the-engines-state) dans Cloner, construire et tester.
@@ -142,7 +142,7 @@ existe déjà tant qu’il n’est pas redémarré.
 | Variable | Lu par | Rôle | Valeurs / défaut | Remarques |
 |---|---|---|---|---|
 | `DELONIX_HYPERVISOR_FW` | `crates/adapters/delonix-vm/src/lib.rs:default_ch_firmware` | Firmware que Cloud Hypervisor démarre lorsque `--firmware` n’est pas donné. | Un chemin de fichier, utilisé seulement s’il existe. Sinon le premier existant parmi `DEFAULT_CH_FIRMWARES` (EDK2 `CLOUDHV.fd` avant `hypervisor-fw`). | Voir [Construire des microVMs](microvm-setup.md) pour savoir pourquoi le build EDK2 passe en premier. |
-| `DELONIX_VM_RESERVE_MIB` | `crates/adapters/delonix-vm/src/lib.rs:vm_admission_check` | Mémoire gardée libre pour l’hôte lors de l’admission d’une VM : une VM est refusée si sa mémoire plus cette réserve dépasse `MemAvailable`. | MiB ; défaut `2048` ; une valeur non analysable se rabat sur 2048. | La baisser expose l’hôte à des OOM-kills. |
+| `DELONIX_VM_RESERVE_MIB` | `crates/contexts/delonix-compute/src/vm.rs:admission_check` (le verdict est `admission_verdict` ; `MemAvailable` vient de `delonix_node::mem_available_mib`) | Mémoire gardée libre pour l’hôte lors de l’admission d’une VM : une VM est refusée si sa mémoire plus cette réserve dépasse `MemAvailable`. | MiB ; défaut `2048` ; une valeur non analysable se rabat sur 2048. | La baisser expose l’hôte à des OOM-kills. |
 | `DELONIX_VM_MEM_HARD_LIMIT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | Si les domaines libvirt reçoivent un `<memtune><hard_limit>` sur l’ensemble du processus QEMU. | `off` → pas de limite stricte ; toute autre valeur → activée. | |
 | `DELONIX_VM_MEM_OVERHEAD_PCT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | Marge au-dessus de la mémoire de l’invité autorisée par la limite stricte. | Pourcentage, plage acceptée 5–200 ; défaut `25` ; au moins 1 GiB de marge. Hors plage → 25. | |
 | `DELONIX_VM_CPU_QUOTA_CORES` | `crates/adapters/delonix-vm/src/lib.rs:cpu_quota_micros` | Plafond CPU (`<cputune><quota>`) d’un domaine libvirt, en cœurs. | Non définie → vCPU + 1 (le cœur supplémentaire est pour l’émulateur et les threads d’E/S de QEMU). Un nombre positif → autant de cœurs. `off` → aucun plafond. | |

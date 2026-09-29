@@ -233,6 +233,14 @@ apply mudaria e não muda nada (<code>--detailed-exitcode</code> sai com 2 quand
 <code>delonix apply</code> faz convergir o manifesto; <code>--prune</code> remove também o que a stack possui e o manifesto
 já não declara, e nunca corre por omissão. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>,
 <a href="cloud-native-primer.html#48-declarative-reconciliation">Reconciliação declarativa</a>.</p>
+<p><strong>Catálogo de capacidades</strong> — A lista versionada das coisas que um operador pode pedir a um provider
+(um restart de VM, uma migração a quente, uma firewall por workload, …), e o denominador de qualquer
+afirmação «este provider cobre X». Cada provider responde a cada entrada com um de seis estados, e
+<code>supported</code> tem de citar a sua evidência (um teste, uma secção da bateria e2e, um cenário de caos ou
+um teste ao vivo), e um teste da CLI confirma que a referência citada existe. O <code>delonix provider ls</code>
+mede as respostas neste host; o <code>delonix provider matrix</code> imprime a vista declarada, publicada como
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/providers/capability-matrix.md" target="_blank" rel="noopener"><code>docs/providers/capability-matrix.md</code></a>. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/capability.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/capability.rs</code></a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener">ADR-0050</a>.</p>
 <p><strong>CAS (content-addressed storage)</strong> — A loja de blobs de imagens: cada blob vive em
 <code>blobs/sha256/&lt;hex&gt;</code> no state root, endereçado pelo seu digest, por isso conteúdo idêntico é guardado
 uma só vez. A integridade é verificada quando o conteúdo <strong>entra</strong> na loja, não quando é lido: um pull
@@ -261,7 +269,9 @@ que é como um sandbox de pod do CRI recebe a sua rede. Ver:
 <p><strong>Contract (node)</strong> — A API de um nó, definida em Protocol Buffers em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>
 (pacote <code>delonix.node.v1</code>), com um documento OpenAPI <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado a partir dela.
 O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> guarda a formatação, o lint, a compatibilidade com a última tag e o
-OpenAPI gerado. É um contrato publicado; nenhum servidor o implementa ainda. Ver:
+OpenAPI gerado. É um contrato publicado, servido em parte: o <code>delonix serve node-api</code>
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>) responde ao <code>NodeService.ListProviders</code>, e todos os outros RPCs
+respondem <code>UNIMPLEMENTED</code>. Ver:
 <a href="architecture.html#where-the-restructuring-stands">Em que ponto está a reestruturação</a>,
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
 <p><strong>Control process</strong> — A metade reiniciável da infra de rede rootless: o binário do motor arrancado
@@ -361,14 +371,23 @@ clássico. Ver: <a class="src" href="https://github.com/angolardevops/delonix-ru
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>.</p>
 <p><strong>Port (hexagonal)</strong> — Um trait de que um caso de uso precisa e que um adapter ou provider
 implementa, para que o domínio nunca nomeie um mecanismo concreto. Exemplos: <code>VmBackend</code>, e as portas
-de compute <code>ImageStore</code>, <code>StorageProvider</code>, <code>NetworkProvider</code>, <code>WorkloadRuntime</code>. Ver:
+de compute <code>ImageStore</code>, <code>StorageProvider</code>, <code>NetworkProvider</code>, <code>WorkloadRuntime</code>, e <code>VmBackends</code>,
+<code>LocalDiskImages</code>, <code>SeedBuilder</code> para os casos de uso de VM. Ver:
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, <code>launch.rs</code>,
 <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits como portas</a>.</p>
 <p><strong>Provider</strong> — Um crate em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> que implementa uma porta contra <strong>uma API de gestão
-remota</strong> (hoje Proxmox VE e TrueNAS), trazendo o seu próprio cliente HTTP. Um provider novo entra como
+remota</strong> (hoje Proxmox VE, OPNsense e TrueNAS), trazendo o seu próprio cliente HTTP. Um provider novo entra como
 implementação de uma porta, registado na raiz de composição — nunca como um <code>if provider == …</code> no
 código — e precisa de um ADR. Ver: <a href="crates.html#providers">Providers</a>,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>.</p>
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0051-opnsense-firewall-provider.md" target="_blank" rel="noopener">ADR-0051</a>.</p>
+<p><strong>Ficheiro de providers</strong> — <code>providers.yaml</code> (<code>apiVersion: config.delonix.io/v1</code>): um ficheiro por nó
+que diz que providers o nó tem, como o motor chega a cada um, e qual serve um pedido que não nomeia
+nenhum (<code>defaultProvider</code>). O primeiro ficheiro encontrado ganha e os ficheiros nunca se fundem
+(<code>DELONIX_PROVIDERS_CONFIG</code>, depois <code>$XDG_CONFIG_HOME/delonix/</code>, depois <code>/etc/delonix/</code>); uma chave
+desconhecida ou um segredo escrito no próprio ficheiro é recusado pelo nome. Ver:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/providers_config.rs</code></a>, <code>delonix provider config show|validate|schema</code>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener">ADR-0054</a>.</p>
 <p><strong>Ratchet</strong> — Um gate sobre um contador de dívida que falha quando o número <strong>sobe</strong> e também quando
 <strong>desce</strong> sem a linha de base registada ter sido baixada no mesmo commit, para que o progresso fique
 registado e nunca se perca. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (português no código) e os ratchets de dívida
@@ -416,6 +435,15 @@ política <code>--restart</code>. Como faz <code>fork</code>, tem de ser arranca
 os servidores re-executam primeiro um <code>delonix</code> novo. Ver:
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>,
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::wait_and_record</code></a>.</p>
+<p><strong>System container (container de sistema)</strong> — Um userland inteiro corrido como uma unidade num
+provider remoto (hoje um container LXC num nó Proxmox VE), declarado como <code>kind: SystemContainer</code>.
+<strong>Não</strong> é um <code>kind: Container</code>: o provider não oferece <code>exec</code>, logs nem estado de saída e o dataplane
+do motor não chega lá, por isso tem uma semântica mais próxima de uma VM (snapshots, backups, clone,
+mudança entre nós). O motor faz ele próprio o pull da imagem; o nó corre-a; uma mudança feita à mão
+no nó é deriva. Sempre sem privilégio. Ver:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/system_container.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lxc.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lxc.rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/system_container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/system_container.rs</code></a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0058-proxmox-lxc-is-not-a-container-provider.md" target="_blank" rel="noopener">ADR-0058</a>.</p>
 <p><strong>userns (user namespace)</strong> — O namespace Linux que mapeia ids de utilizador, dando a um processo
 privilégios de root só sobre os objectos que o seu namespace possui. É a base da operação rootless, e
 em Ubuntu recentes pode ser bloqueado pelo AppArmor para binários fora dos caminhos esperados. Ver:
@@ -428,12 +456,20 @@ Delonix usa o <code>fwmap</code> (endereço de um workload → a sua chain de fi
 bridges → uma isenção que abre uma rota entre duas redes). Ver:
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::FWMAP</code></a>, <code>NETPAIR_MAP</code>.</p>
 <p><strong>VmBackend</strong> — A porta que todo o backend de VM implementa (<code>boot</code>, <code>stop</code>, <code>destroy</code>, <code>is_running</code>,
-<code>ip</code>, pausa e snapshots, …). O Cloud Hypervisor e o libvirt estão registados por omissão; um provider
-remoto regista-se na raiz de composição. Registar não faz I/O, e a auto-detecção filtra pela
+<code>ip</code>, pausa e snapshots, …), definida no contexto de computação e reexportada pelo <code>delonix-vm</code>. O
+Cloud Hypervisor e o libvirt estão registados por omissão; um provider remoto entrega à raiz de
+composição um registo, que é ela quem regista. Registar não faz I/O, e a auto-detecção filtra pela
 registration antes de construir seja o que for, por isso um backend remoto só se liga quando é
-escolhido. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs::VmBackend</code></a>, <code>register_backend</code>,
-<code>select_backend</code>,
+escolhido. Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs::register_backend</code></a>, <code>select_backend</code>,
 <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits como portas</a>.</p>
+<p><strong>VmEngine</strong> — Os casos de uso de VM (create, stop, start, status, list, remove e os verbos de
+dia-2) como métodos de uma struct no contexto de computação, genérica sobre as portas que recebe:
+um <code>StateRepository&lt;Vm&gt;</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code> e o <code>VmNetwork</code> opcional.
+Nunca abre um store, corre um comando nem nomeia um backend; o <code>delonix-vm</code> constrói um por chamada
+sobre as suas próprias implementações e mantém as suas funções públicas como invólucros (ADR-0044
+P4b.3). Ver: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs::VmEngine</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>.</p>
 <p><strong>Workload</strong> — Duas coisas relacionadas. <code>kind: Workload</code> é um Kind de açúcar com <code>spec.type:
 container|pod|vm|microvm</code> que baixa para o Kind correspondente na altura do load
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0001-workload-kind-schema.md" target="_blank" rel="noopener">ADR-0001</a>). <code>delonix workload</code> é o grupo de comandos de

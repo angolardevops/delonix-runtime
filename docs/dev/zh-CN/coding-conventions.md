@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:17684e2bd319eed3fd3635fa9f0cf0c6bf13df67d1293ff7da3fba96e25e4bb7 -->
+<!-- translated-from: coding-conventions.md sha256:50b85758b88cf149781f761a5c92e9c36da32dde808de1be682545215de8f6cd -->
 # 编码规范
 
 **阅读前须知：** [Rust 入门](rust-primer.md)、[架构](architecture.md) 和 [crate 一览](crates.md) —— 下面的规则会按名称引用层（layer）、端口（port）和 crate。
@@ -186,7 +186,8 @@
 | registry 客户端、CAS、层（layer）、overlay、镜像构建 | `delonix-oci`（adapter） | ADR-0040 D2.3 |
 | SBOM / CVE | `delonix-scanner`（adapter） | ADR-0040 D2.3 |
 | Tracing、OpenTelemetry、Prometheus registry 的搭建 | `delonix-telemetry`（adapter） | ADR-0040 D2.3 |
-| 一个本地 VM 后端（Cloud Hypervisor、libvirt） | `delonix-vm`（adapter） | ADR-0008 |
+| 一次 VM 操作要决定的事情（create、stop、start、status、remove、day-2 动词） | `delonix-compute`（context）：`vm.rs`（`VmEngine`），只能通过 `VmBackends`/`LocalDiskImages`/`SeedBuilder` 去接触后端、磁盘和 seed；context 里不允许出现 `Command::new`（`context_spawns`，基线为 0） | ADR-0044 P4b.3（#596、#597） |
+| 一个本地 VM 后端（Cloud Hypervisor、libvirt），以及本节点对各个 VM 端口的实现 | `delonix-vm`（adapter）：`lib.rs`、`local_ports.rs` | ADR-0008；ADR-0044 P4b.3 |
 | 一个远程或可插拔的 provider（hypervisor 的 API、NAS 的 API） | `crates/providers/` 下的一个 provider crate。**先写一份 ADR** | ADR-0008、ADR-0009；[贡献流程](contributing-workflow.md#when-to-write-an-adr) |
 | 一个 CRI RPC | `delonix-cri`（interface） | AGENTS.md |
 | 本地管理 API、`/metrics` | `delonix-mgmt`（interface） | ADR-0010 |

@@ -1,4 +1,4 @@
-<!-- translated-from: releases-and-stability.md sha256:7d575f084b949f5b59b58dec29fb1ba7eb63904aa8514433ec4a2809e13a25e4 -->
+<!-- translated-from: releases-and-stability.md sha256:217f9f0bef9e28eb6783c3db4a9f733f4a40b85de7fc9ff0bb1577cf93a542e8 -->
 # Releases e estabilidade
 
 **Antes de leres:** [Fluxo de contribuição](contributing-workflow.md#version-alignment) (o gate de versão) e [Publicar a documentação](publishing-docs.md) (o que uma release regenera).

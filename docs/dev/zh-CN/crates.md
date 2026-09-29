@@ -1,4 +1,4 @@
-<!-- translated-from: crates.md sha256:02a670fe76c5758e314a6b3e1fa863a1636de585aa08a088f253e5a021a85f05 -->
+<!-- translated-from: crates.md sha256:c952168a8d193157afed44910bad62135d9e99905052a41a7323ed0cb25580c7 -->
 # 各个 crate
 
 **阅读之前：**[架构](architecture.md)，尤其是[层与允许的依赖方向](architecture.md#layers-and-the-allowed-direction)。
@@ -170,7 +170,8 @@ derive 宏）。
 归属、额外网络、磁盘和网卡），每个入口点都会转换成的运行规格
 （`RunOpts`），以及把 `container run` 这个用例表达为端口之上一系列纯步骤——
 预检、解析、构建记录、接线网络、启动。它同时持有 Pod 规格类型及其到
-`RunOpts` 的转换，还有工作负载的 IPv4 网段。这些记录是从被移除的
+`RunOpts` 的转换、工作负载的 IPv4 网段，以及——自 ADR-0044 P4b.3b（#597）起——
+虚拟机用例（`vm::VmEngine`：create、stop、start、status、list、remove 以及 day-2 动词）。这些记录是从被移除的
 `delonix-runtime-core`（#406）移过来的。它**不**负责派生进程、拉取镜像或
 配置网络；它调用适配器实现的 trait。
 
@@ -185,13 +186,14 @@ derive 宏）。
 | `run` | `resolve_run`（经由端口）与 `build_record`（纯函数） |
 | `network` | 网络阶段：`attach_custom_network`、`wire_network` |
 | `launch` | `Launch` 意图、`WorkloadRuntime` 端口、`start` 用例、重启策略 |
-| `ports` | `ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`NetworkProvider`、`VmNetwork` |
+| `ports` | `ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`NetworkProvider`、`VmNetwork`，以及虚拟机用例的三个端口：`VmBackends`（用例眼中的后端注册表）、`LocalDiskImages`（本地 overlay）、`SeedBuilder`（NoCloud seed） |
+| `vm` | 作为 `VmEngine<'a, R, B, D, S>` 方法的虚拟机用例，它接收状态根目录、一个 `StateRepository<Vm>`、上面那三个端口以及可选的 `VmNetwork`；还有它们用到的纯函数部分（`valid_vm_name`、`vm_namespace_of`、`admission_verdict`、`resolve_required_capabilities`、`boot_spec_of`/`config_from`、`adopt_pid_starttime`/`argv_is_vmm_for`） |
 | `pod` | Pod 规格类型，以及 `pod_to_run_opts`/`container_to_run_opts` |
 | `notice` | `Notice`，作为数据返回而不是直接打印出来的警告 |
 | `capability`、`capability_host` | 带版本的能力目录（ADR-0050）：`Capability`、`CapabilityState`、`ProviderReport`、`CATALOG_VERSION`；以及每个提供者报告都复用的那个「此工具是否在 `PATH` 上」探测 |
 | `vm_backend`、`vm_error`、`vm_firewall` | `VmBackend` 端口及 `VmConfig`、`BackendRegistration`/`BackendFactory`、虚拟机错误分组，以及按虚拟机的防火墙策略（ADR-0052）——由 ADR-0044 P4b.2 从 `delonix-vm` 移到这里，并在那边重新导出 |
 | `vm_provider` | ADR-0044 的虚拟机提供者端口：`VmSpec`、`Extensions`、`Provider`、`VmProvider` |
-| `system_container` | ADR-0058 的系统容器提供者端口（`SystemContainerSpec`、`SystemContainerProvider`）——系统容器不是 `Container` |
+| `system_container` | ADR-0058 的系统容器提供者端口（`SystemContainerSpec`、`SystemContainerProvider`：create、start、stop、destroy、observe、resize、快照、`grow_rootfs`、备份、`clone_as`、`move_to`、防火墙）——系统容器不是 `Container` |
 
 **主要公开 API**
 
@@ -210,9 +212,13 @@ derive 宏）。
 | `launch::WorkloadRuntime` | 把 `Launch` 变成一个进程的端口 | `crates/contexts/delonix-compute/src/launch.rs:WorkloadRuntime` |
 | `ports::NetworkProvider` | attach/publish/firewall/限速的端口 | `crates/contexts/delonix-compute/src/ports.rs:NetworkProvider` |
 | `ports::VmNetwork` | 无 root 网络上 VM tap 的端口 | `crates/contexts/delonix-compute/src/ports.rs:VmNetwork` |
+| `vm::VmEngine` | 建立在注入端口之上的虚拟机用例；从不打开 store、从不运行命令、从不点名某个后端 | `crates/contexts/delonix-compute/src/vm.rs:VmEngine` |
+| `vm::valid_vm_name` | 在引擎边界处校验名字（由 `delonix-vm` 重新导出） | `crates/contexts/delonix-compute/src/vm.rs:valid_vm_name` |
+| `ports::VmBackends`、`ports::LocalDiskImages`、`ports::SeedBuilder` | 虚拟机用例向后端注册表、向 `qemu-img`、向 `cloud-localds` 要求的东西 | `crates/contexts/delonix-compute/src/ports.rs` |
 
 **与……对话。** 只直接调用 `delonix-model` 和 `delonix-node`
-（记录用到的 `safe_to_signal`，测试里用到的 `generate_id`）。其余一切都
+（记录用到的 `safe_to_signal`，测试里用到的 `generate_id`；虚拟机用例用到的
+`proc_starttime` 和 `mem_available_mib`）。其余一切都
 经由它的端口到达，由各适配器实现：
 
 | 端口 | 由谁实现 |
@@ -224,6 +230,10 @@ derive 宏）。
 | `WorkloadRuntime` | `crates/adapters/delonix-linux/src/workload.rs:HostWorkload` |
 | `NetworkProvider` | `crates/adapters/delonix-sdn/src/run_network.rs:HostNetwork` |
 | `VmNetwork` | `crates/adapters/delonix-sdn/src/vm_network.rs:HostVmNetwork` |
+| `VmBackends` | `crates/adapters/delonix-vm/src/local_ports.rs:RegistryBackends`（建立在注册表之上，注册表在 P4b.4 之前留在 `delonix-vm` 里） |
+| `LocalDiskImages` | `crates/adapters/delonix-vm/src/local_ports.rs:QemuImgDisks` |
+| `SeedBuilder` | `crates/adapters/delonix-vm/src/local_ports.rs:CloudLocaldsSeed` |
+| `StateRepository<Vm>` | `delonix_state::JsonStore<Vm>`，由 `delonix-vm` 传入（`crates/adapters/delonix-vm/src/lib.rs` 中的 `engine`） |
 
 **值得留意的外部依赖。** `serde`、`schemars`（Cargo.toml 注释：规格类型的
 JSON Schema 就在其定义旁边推导出来，这样发布的 schema 就不会与类型本身
@@ -231,10 +241,12 @@ JSON Schema 就在其定义旁边推导出来，这样发布的 schema 就不会
 
 **测试。** 使用假端口实现（`network.rs`、`launch.rs`、`run.rs` 中的
 `FakeNet`、`FakeRuntime`、`Fake`）的内联单元测试——用例在没有内核的情况下
-也能测试。
+也能测试。`vm::tests` 对虚拟机用例做同样的事：一个内存中的 store、一个记录自己收到哪些
+调用的后端，以及一个假的磁盘和 seed。
 
 **从这里开始读。** `src/record.rs`（`Container` 和 `Vm` 结构体），然后是
-`src/ports.rs`，再是 `src/run.rs`，最后是 `src/launch.rs`。
+`src/ports.rs`，再是 `src/run.rs`，最后是 `src/launch.rs`。虚拟机的话，看 `src/vm.rs`
+（`VmEngine::create_with`）。
 
 **陷阱。**
 
@@ -261,6 +273,13 @@ JSON Schema 就在其定义旁边推导出来，这样发布的 schema 就不会
   前者。导入路径很重要。
 - `wire_network` 必须在 `launch::start` **之前**运行；它的模块文档
   记录了：否则一个受监督的 `-d` 启动会漏掉网络设置。
+- 用例对它们的端口是**泛型**的（`resolve_run<I, S, D, H>`、
+  `VmEngine<'a, R, B, D, S>`），而不是接收 `&dyn` 端口：`StateRepository<T>` 有一个泛型
+  方法（`update<F>`），所以它不能做成 trait 对象（`docs/discovery/61_P4B_PLANO_MEDIDO.md`，
+  P4b.3 附录）。
+- 上下文从不运行程序。`scripts/arch_fitness.py` 会统计 `crates/contexts/` 下的
+  `Command::new`（`context_spawns`，基线为 0）：虚拟机用例之所以能搬到这里，只是因为
+  `qemu-img` 和 `cloud-localds` 被放到了 `LocalDiskImages` 和 `SeedBuilder` 之后。
 
 ### `delonix-node`
 
@@ -276,7 +295,7 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 
 | 模块 | 职责 |
 |---|---|
-| `host`（私有，在 crate 根重新导出） | `now_unix`、`in_initial_userns`、`initial_uid_map`、`is_rootless`、`fmt_local_ts`、`is_alive`、`proc_starttime`、`safe_to_signal`、`generate_id`、`self_bin` |
+| `host`（私有，在 crate 根重新导出） | `now_unix`、`in_initial_userns`、`initial_uid_map`、`is_rootless`、`fmt_local_ts`、`is_alive`、`proc_starttime`、`safe_to_signal`、`generate_id`、`self_bin`、`mem_available_mib`（宿主机的 `MemAvailable`，为虚拟机准入检查而读取） |
 | `events` | 只追加写入的 `events.jsonl` 事件日志（`emit`、`read`、`read_from`、`size`） |
 | `dispatch` | `delonix` 启动的服务端二进制程序的版本检查与 CLI 定位（`DELONIX_DISPATCH_VERSION`、`DELONIX_BIN`） |
 | `peer_cred` | 从 `SO_PEERCRED` 取得 `peer_uid` |
@@ -335,6 +354,7 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 | `reconcile::plan` | 期望态 vs 实际态 → `Vec<Change>` | `crates/contexts/delonix-stack/src/reconcile.rs:plan` |
 | `reconcile::STACK_LABEL`、`LAST_APPLIED` | 所有权标签与三方 diff 注解 | `crates/contexts/delonix-stack/src/reconcile.rs` |
 | `reconcile::hot_fields_for` | 哪些字段的变更可以热应用 | `crates/contexts/delonix-stack/src/reconcile.rs:hot_fields_for` |
+| `reconcile::is_hot_change` | 某一个字段变更能否热收敛：热字段总是可以，只增长字段（目前是 `SystemContainer.rootfs`）只有在数值不缩小时才可以 | `crates/contexts/delonix-stack/src/reconcile.rs:is_hot_change` |
 | `revision::record`、`revision::list` | apply 历史 | `crates/contexts/delonix-stack/src/revision.rs` |
 
 **与……对话。** 只依赖 `delonix-model`。CLI 把 `kinds`、`reconcile` 和
@@ -351,7 +371,9 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 **陷阱。** 新增一个 Kind 不只是在 `kinds.rs` 里加一行：CLI 里还有
 按 Kind 各自的代码（`cmd/stack.rs` 里的 `desired_of`/`actual_of`、
 `converge_and_stamp`、`destroy_one`），以及各自带测试的 schema/补全表。
-改动这张表之后要跑一遍 `delonix-runtime-bin` 的完整测试套件。
+改动这张表之后要跑一遍 `delonix-runtime-bin` 的完整测试套件。一个由自己的 apply
+来判断某个改动是否需要重建的 Kind，必须去问 `is_hot_change`，就像
+`cmd/system_container.rs` 那样，这样 `plan` 和 `apply` 就永远不会得出不同的结论。
 
 ### `delonix-security-runtime`
 
@@ -620,19 +642,23 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 
 ### `delonix-vm`
 
-**用途。** 微虚拟机和虚拟机，位于 `VmBackend` trait（自 ADR-0044 P4b.2
-起定义在 `delonix-compute` 中，并在这里重新导出）与一个运行时**注册表**
-（backend registry）之后，该注册表在 P4b.4 之前留在这里。Cloud Hypervisor
-和 libvirt 是本地后端；远程后端由组合根（composition root）注册，所用的
-注册项由其提供者 crate 构建。它拥有虚拟机记录、
-启动与生命周期、快照、cloud-init 种子的生成，以及后端选择（显式指定、
-默认文件，或自动检测）。它不持有 HTTP 客户端或 provider 凭据。
+**用途。** 本节点上的微虚拟机和虚拟机：位于 `VmBackend` trait（自 ADR-0044 P4b.2
+起定义在 `delonix-compute` 中，并在这里重新导出）之后的两个本地后端（Cloud
+Hypervisor 和 libvirt）、运行时的后端**注册表**（backend registry，在 P4b.4 之前
+留在这里），以及后端选择（显式指定、默认文件，或自动检测）。远程后端由组合根
+（composition root）注册，所用的注册项由其提供者 crate 构建。自 P4b.3（#596、#597）
+起，虚拟机用例——create、stop、start、status、list、remove、快照以及其他 day-2
+动词——都位于 `delonix_compute::vm::VmEngine` 中；本 crate 实现它们调用的端口
+（`local_ports.rs`），每次调用都在自己的 `JsonStore<Vm>` 之上组装一个 engine，并把自己的
+公开函数（`create_with`、`stop`、`start`……）保留为一行的包装器，因此没有任何调用方需要
+改动。它不持有 HTTP 客户端或 provider 凭据。
 
 **关键模块**
 
 | 模块 | 职责 |
 |---|---|
-| `lib.rs` | `VmConfig`、`VmBackend`、注册表、`CloudHypervisorBackend`、`LibvirtBackend`、`create_with`、`start`/`stop`/`remove`、快照、`status`/`list` |
+| `lib.rs` | `VmConfig`/`VmBackend` 的重新导出、注册表（`BACKENDS`、`register_backend`、`select_backend`、`select_for_create`、`backend_for`）、`CloudHypervisorBackend`、`LibvirtBackend`、默认后端文件，以及建立在 `engine(base)` 之上的生命周期包装器 |
+| `local_ports` | 本适配器对虚拟机用例各端口的实现：`RegistryBackends`（`VmBackends`，建立在注册表之上）、`QemuImgDisks`（`LocalDiskImages`，qcow2 overlay）、`CloudLocaldsSeed`（`SeedBuilder`） |
 | `cloudinit` | `build_user_data`、`build_network_config`、`generate_seed_iso` |
 | `capabilities` | 每个本地后端针对能力目录声明的内容，以及把声明的「是」变成「本宿主机上没有」的宿主机探测 |
 | `provider` | ADR-0044 `VmProvider` 端口上的两个本地后端（`LocalVmProvider`） |
@@ -647,14 +673,15 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 | `provider_reports` | 每个已注册后端的能力报告，供 `provider ls` 使用 | `crates/adapters/delonix-vm/src/lib.rs:provider_reports` |
 | `set_network` | 每个进程注册一次 `VmNetwork` 端口 | `crates/adapters/delonix-vm/src/lib.rs:set_network` |
 | `VmConfig` | 要创建什么，重新导出 | `crates/contexts/delonix-compute/src/vm_backend.rs:VmConfig` |
-| `create_with`、`start`、`stop`、`remove`、`status`、`list` | 生命周期管理 | `crates/adapters/delonix-vm/src/lib.rs` |
-| `snapshot`、`restore`、`snapshots`、`delete_snapshot` | 检查点 | `crates/adapters/delonix-vm/src/lib.rs` |
-| `valid_vm_name` | 引擎边界处的名称校验 | `crates/adapters/delonix-vm/src/lib.rs:valid_vm_name` |
+| `create_with`、`start`、`stop`、`remove`、`status`、`list` | 生命周期管理：每一个都构建一个 `VmEngine`，并调用同名方法 | `crates/adapters/delonix-vm/src/lib.rs`；逻辑在 `crates/contexts/delonix-compute/src/vm.rs` |
+| `snapshot`、`restore`、`snapshots`、`delete_snapshot`、`backup_disk_live` | 检查点与在线磁盘备份，形态相同 | `crates/adapters/delonix-vm/src/lib.rs` |
+| `valid_vm_name` | 引擎边界处的名称校验，重新导出 | `crates/contexts/delonix-compute/src/vm.rs:valid_vm_name` |
 
 **与……对话。** `delonix-model`、`delonix-node`、`delonix-compute`
-（`Vm` 记录、`VmNetwork` 端口）、`delonix-net-rules`、`delonix-state`
+（`Vm` 记录、`VmEngine` 用例，以及它所实现或调用的端口）、`delonix-net-rules`、`delonix-state`
 （`JsonStore<Vm>`、`write_atomic`；ADR-0040 P4 中已声明并将被移除的分层
-例外）。宿主机工具：`cloud-hypervisor`（以及它在 unix 套接字上的 HTTP
+例外——engine 经由 `StateRepository<Vm>` 访问 store，但 `engine(base)` 仍然自己打开它传进去的
+那个 `JsonStore`）。宿主机工具：`cloud-hypervisor`（以及它在 unix 套接字上的 HTTP
 API，比如 `PUT /api/v1/vm.pause`）、`virsh`、`qemu-img`、`cloud-localds`、
 `sh`。网络只经由已注册的 `VmNetwork` 到达；CLI 在启动时注册
 `delonix_sdn::vm_network::HostVmNetwork`
@@ -662,10 +689,12 @@ API，比如 `PUT /api/v1/vm.pause`）、`virsh`、`qemu-img`、`cloud-localds`�
 
 **值得留意的外部依赖。** `libc`、`tracing`——刻意保持很少。
 
-**测试。** `lib.rs` 中的内联单元测试模块。
+**测试。** `lib.rs` 中的内联单元测试模块；用例本身在 `delonix-compute`（`vm::tests`）中
+针对假端口进行测试。
 
-**从这里开始读。** `src/lib.rs` 里的 `VmBackend` 和注册表，然后是
-`create_with`，再是某一个具体后端（`CloudHypervisorBackend`）。
+**从这里开始读。** `src/lib.rs` 里的注册表和 `src/local_ports.rs`，然后是
+`crates/contexts/delonix-compute/src/vm.rs` 中的 `VmEngine::create_with`，再是某一个具体后端
+（`CloudHypervisorBackend`）。
 
 **陷阱。**
 
@@ -676,6 +705,10 @@ API，比如 `PUT /api/v1/vm.pause`）、`virsh`、`qemu-img`、`cloud-localds`�
   需要解析输出的宿主机工具调用都要用它。
 - `stop` 和 `destroy` 是两个不同的 trait 方法：对于一个远程后端来说，
   destroy 还会连带删除磁盘。
+- 对虚拟机操作*做什么*的改动，放进 `delonix_compute::vm`；关于某一个 hypervisor 的知识
+  （一次 `virsh` 调用、只属于 libvirt 的 anti-spoof 退出选项、一个没有记录的遗留 domain）
+  放进后端，或放到 `VmBackends` 之后（`admit`、`unrecorded`、`stop_unrecorded`、
+  `remove_unrecorded`）。这里的包装器应当保持为一行。
 
 ### `delonix-volume`
 
@@ -875,10 +908,11 @@ provider crate 的 Cargo.toml 注释都这么说）。这并不是说「适配�
 
 ### `delonix-proxmox`
 
-**用途。** 一个通过 REST API 访问的 Proxmox VE 目标，位于引擎的三个端口
-之后：一个 `VmBackend`（虚拟机）、虚拟机所在节点的按虚拟机防火墙
-（ADR-0052），以及用于集群自身 SDN 的 `NetworkZoneProvider`（ADR-0049
-附录）。目标是一个显式指定的节点——没有清单目录，也不做调度——但每台
+**用途。** 一个通过 REST API 访问的 Proxmox VE 目标，位于引擎的四个端口
+之后：一个 `VmBackend`（虚拟机）、虚拟机或系统容器所在节点的按客户机防火墙
+（ADR-0052）、用于集群自身 SDN 的 `NetworkZoneProvider`（ADR-0049
+附录），以及用于节点 LXC 容器的 `SystemContainerProvider`（ADR-0058，
+`kind: SystemContainer`）。目标是一个显式指定的节点——没有清单目录，也不做调度——但每台
 虚拟机都按它实际运行所在的节点寻址，所以在集群内被迁移过的虚拟机仍然
 能被找到（ADR-0053）。它从不触碰本地磁盘（`manages_own_storage` 是
 `true`），也从不被自动检测选中（`auto_selectable` 是 `false`：回答
@@ -893,10 +927,10 @@ provider crate 的 Cargo.toml 注释都这么说）。这并不是说「适配�
 | `lib.rs` | `Target`、`Auth`、`Client`（所有虚拟机、磁盘、备份、guest agent 和上传调用）、任务 `Ledger`、`ProxmoxBackend`（`impl VmBackend`）、`registration`、`capability_report` |
 | `error` | 该 crate 的类型化错误，每个 HTTP 状态类别一个 |
 | `cluster` | 目标所在集群的只读视图（`provider describe proxmox --probe`） |
-| `vm_firewall` | 由节点自身防火墙来回答的按虚拟机防火墙端口 |
+| `vm_firewall` | 节点自身的按客户机防火墙：建立在 `GuestFirewall` 之上的同一个策略引擎，分别为虚拟机（`QemuFirewall`，`/qemu/{vmid}/firewall/…`）和系统容器（`LxcFirewall`，`/lxc/{vmid}/firewall/…`）实现 |
 | `sdn`、`sdn_routing`、`sdn_lock` | 集群自身的 SDN（zone、vnet、子网、控制器、fabric、DHCP、IP 预留、前缀列表、路由映射），以及被当作事务使用的全局 SDN 锁（`sdn_transaction`） |
 | `network_zone` | `ProxmoxNetworkZoneProvider`，`kind: NetworkZone` 背后的 `NetworkZoneProvider` 实现 |
-| `lxc` | `ProxmoxSystemContainerProvider`，节点上的系统容器（ADR-0058） |
+| `lxc` | `ProxmoxSystemContainerProvider`，节点上的系统容器（ADR-0058）：从按其清单 digest 暂存的模板创建、start/stop/destroy、在线 `resize` 与 `grow_rootfs`、快照、节点存储上的备份、完整的 `clone_as`、离线 `move_to` 到另一个节点，以及通过 `LxcFirewall` 的防火墙 |
 
 **主要公开 API**
 
@@ -905,6 +939,7 @@ provider crate 的 Cargo.toml 注释都这么说）。这并不是说「适配�
 | `Target`、`Auth`、`ClientOptions` | 节点端点、节点名、凭据、路由跟踪 | `crates/providers/delonix-proxmox/src/lib.rs` |
 | `Client` | API 客户端（`connect_with`、`wait_task`、`stage_import`、`stage_template`……） | `crates/providers/delonix-proxmox/src/lib.rs:Client` |
 | `ProxmoxBackend` | `VmBackend` 的实现 | `crates/providers/delonix-proxmox/src/lib.rs:ProxmoxBackend` |
+| `ProxmoxSystemContainerProvider` | `SystemContainerProvider` 的实现（`new(client, template_storage, rootfs_storage)`） | `crates/providers/delonix-proxmox/src/lxc.rs:ProxmoxSystemContainerProvider` |
 | `registration` | 组合根注册的 `BackendRegistration`；在该后端被选中之前不做任何 I/O | `crates/providers/delonix-proxmox/src/lib.rs:registration` |
 | `capability_report`、`network_capability_report` | 该提供者针对能力目录声明的内容（只声明，从不探测） | `crates/providers/delonix-proxmox/src/lib.rs` |
 
@@ -936,6 +971,13 @@ TLS 模拟节点运行（401/403/404/409/5xx、被截断的响应体、失败的
   （`<vmdir>/proxmox-tasks.json`），传输失败之后，客户端会去查找该任务
   或它的效果，而不是重发一个非幂等的写操作。有一个测试会读取该 crate
   的源码，一旦发现任务路径之外的写操作就会失败。
+- 系统容器按其记录中的定位符（`proxmox:<node>:<vmid>`）寻址，但每个操作都经由
+  `located`（`src/lxc.rs`）来解析它：当容器不在记录的节点上时，会去问集群
+  （`/cluster/resources`）它在哪里，这样一次记录从未被更新的迁移会被追踪到，而不会被当作
+  已消失——那样会规划出第二个容器。
+- 特权或嵌套的系统容器按设计会被拒绝（ADR-0058）：提供者的 `refuse` 和 CLI 的
+  `reject_privilege`（清单里的 `unprivileged`、`privileged`、`features`、`nesting`）回答
+  DX-1540，而不是创建一个非特权容器然后以 0 退出。
 
 ### `delonix-opnsense`
 
@@ -1258,6 +1300,7 @@ apply，还负责打印（借助 `po` 翻译目录）。隐藏的内部动词
 | `cmd/policy.rs` | 通过 `delonix-security-runtime` 实现节点运行时策略 |
 | `cmd/hosts.rs`、`cmd/hosts_file.rs` | `hosts sync`（不是一个稳定的命令分组）以及每个状态根目录下由本引擎托管的、对宿主机 `/etc/hosts` 的那一段——与 `HTTPRoute` 上的 `hosts: [host]` 共用（ADR-0046、ADR-0048 第二阶段）；重新计算的逻辑是 `cmd/ingress_proxy.rs` 里的 `desired_hosts`/`sync_hosts_now`，由 `rebuild()` 调用 |
 | `cmd/vmbackends.rs`、`cmd/gatewayproviders.rs`、`cmd/network_zone_providers.rs` | 注册已配置的远程提供者（Proxmox VE 作为虚拟机后端和 SDN zone 提供者，OPNsense 作为网关提供者） |
+| `cmd/system_container.rs` | `kind: SystemContainer` 与 `systemcontainer` 命令组（快照、`clone`、`move`）：组合根，把 Proxmox 配置变成一个 `SystemContainerProvider`，用引擎自己的 pull 拉取镜像，维护一个定位符注册表，并在每次规划时从节点读回容器实际是什么（ADR-0058） |
 | `cmd/provider.rs`、`cmd/providers_config.rs` | 针对能力目录的 `provider ls/describe/matrix`；节点的 `providers.yaml`（ADR-0054）：查找、解析、`provider config show/validate/schema` |
 | `cmd/output.rs`、`cmd/po.rs` | 表格/describe 输出、翻译目录 |
 

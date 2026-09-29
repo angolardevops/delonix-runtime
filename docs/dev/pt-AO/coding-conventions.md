@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:17684e2bd319eed3fd3635fa9f0cf0c6bf13df67d1293ff7da3fba96e25e4bb7 -->
+<!-- translated-from: coding-conventions.md sha256:50b85758b88cf149781f761a5c92e9c36da32dde808de1be682545215de8f6cd -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -361,7 +361,8 @@ crates que descrevem já existam.
 | Cliente de registo, CAS, layers, overlay, build de imagens | `delonix-oci` (adapter) | ADR-0040 D2.3 |
 | SBOM / CVE | `delonix-scanner` (adapter) | ADR-0040 D2.3 |
 | Tracing, OpenTelemetry, configuração do registo Prometheus | `delonix-telemetry` (adapter) | ADR-0040 D2.3 |
-| Um backend de VM local (Cloud Hypervisor, libvirt) | `delonix-vm` (adapter) | ADR-0008 |
+| O que uma operação de VM decide (create, stop, start, status, remove, verbos de dia-2) | `delonix-compute` (context): `vm.rs` (`VmEngine`), a chegar aos backends, ao disco e ao seed só através de `VmBackends`/`LocalDiskImages`/`SeedBuilder`; nenhum `Command::new` num context (`context_spawns`, linha de base 0) | ADR-0044 P4b.3 (#596, #597) |
+| Um backend de VM local (Cloud Hypervisor, libvirt), e as implementações das portas de VM deste nó | `delonix-vm` (adapter): `lib.rs`, `local_ports.rs` | ADR-0008; ADR-0044 P4b.3 |
 | Um provider remoto ou conectável (API de hypervisor, API de NAS) | um crate de provider em `crates/providers/`. **Escreve primeiro um ADR** | ADR-0008, ADR-0009; [Fluxo de contribuição](contributing-workflow.md#when-to-write-an-adr) |
 | Um RPC do CRI | `delonix-cri` (interface) | AGENTS.md |
 | A API de gestão local, `/metrics` | `delonix-mgmt` (interface) | ADR-0010 |

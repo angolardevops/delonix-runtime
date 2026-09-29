@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
+<!-- translated-from: troubleshooting.md sha256:e6b6ffdfe6f14754379cb99db51d518a86130a8d88e7be7d69b42a9608f30fad -->
 # Dépannage
 
 **À lire avant :** [Préparer votre environnement](environment.md) (pièges de l'hôte) et [Cloner, compiler et tester](build-and-test.md#the-gates-ci-runs) (les gates, et l'isolation de l'état du moteur).
@@ -157,18 +157,29 @@ FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itse
 
 La ligne de base est vide, donc la moindre entrée est une nouvelle fuite. Les deux autres messages
 (`more of a known leak`, `fixed or reduced … — lower the baseline`) n’apparaissent que si de la dette
-est de nouveau enregistrée. Reproduisez en local avec un répertoire neuf qui vous est propre, et
+est de nouveau enregistrée.
+
+Le même job exécute le gate une seconde fois sur `/tmp` lui-même : un test qui lie un socket Unix a
+besoin d’un chemin court (`sun_path` fait 108 octets) et le met là, où le recensement du `TMPDIR` ne
+regarde jamais. `/tmp` n’est pas vide sur un runner, il est donc listé juste avant `cargo test` et
+seul ce qui est nouveau ensuite est jugé (`--before`), contre la même ligne de base vide. Les deux
+recensements s’exécutent aussi quand un test a **échoué** — c’est précisément là qu’un nettoyage
+placé sur la dernière ligne d’un test ne s’exécute jamais — si bien qu’un test rouge peut venir avec
+son propre rapport de fuite. Reproduisez en local avec un répertoire neuf qui vous est propre, et
 listez ce qui s’y trouve au lieu de le juger — une fuite peut dépendre de l’hôte (un test qui
-retourne tôt quand un outil manque) :
+retourne tôt quand un outil manque) :
 
 ```bash
-mkdir -p "$PWD/target/test-tmp" && TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
 python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
 ```
 
 La correction est dans le test, pas dans la ligne de base : gardez le répertoire dans un
 `tempfile::TempDir`, pour que la suppression s’exécute aussi sur un `return` anticipé et sur un
-assert échoué — voir [Conventions de code](coding-conventions.md) (*Un test supprime son répertoire
+assert échoué — pour un socket,
+`tempfile::tempdir_in("/tmp")` plutôt qu’un chemin `/tmp` littéral avec le pid — voir [Conventions de code](coding-conventions.md) (*Un test supprime son répertoire
 temporaire à chaque sortie*).
 
 ## Un cache de build partagé ou obsolète

@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:5e00934168ce8abaeb7e284855fff4df09522a9379b0b302800bcea4178b5543 -->
+<!-- translated-from: microvm-setup.md sha256:1bdc6dc5407aca36b67bfc85db87ae040be56261e156204a812ada36979bcc8a -->
 # Construir microVMs
 
 **Antes de leres:** [Preparar o ambiente](environment.md), [Clonar, compilar e testar](build-and-test.md), a [secção de virtualização do Manual de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), e a Parte 2 de [Delonixfile e VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
@@ -171,8 +171,9 @@ resolve o backend registado, e um nome desconhecido é um **erro** (antes caía 
 
 ### Precedência de selecção para uma VM nova
 
-A partir de `delonix_vm::create_with` e `resolve_vm_defaults` (`cmd/vm.rs`), ganha a primeira que
-corresponder:
+A partir de `resolve_vm_defaults` (`cmd/vm.rs`) e `select_for_create`
+(`crates/adapters/delonix-vm/src/lib.rs`, a que o caso de uso de VM chega através de
+`VmBackends::select`), ganha a primeira que corresponder:
 
 1. `--backend` (ou `backend:` no manifesto).
 2. O `HYPERVISOR` da imagem (registado por um build de VMfile), quando `--disk` nomeia uma imagem
@@ -326,7 +327,8 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 ```
 
-O que acontece (`cmd/vm.rs` → `delonix_vm::create_with`):
+O que acontece (`cmd/vm.rs` → `delonix_vm::create_with`, um invólucro que constrói um
+`delonix_compute::vm::VmEngine` sobre as portas deste nó e chama o seu `create_with`):
 
 1. A **política do nó** é imposta antes de qualquer imagem ser resolvida (`policy::enforce`).
 2. **Resolução do disco** (`resolve_image_ref`): `--url-img` ganha (descarregado, em cache,
@@ -341,8 +343,10 @@ O que acontece (`cmd/vm.rs` → `delonix_vm::create_with`):
 5. **Backend** escolhido (secção 2); uma verificação de admissão recusa quando o host não tem RAM
    suficiente; um `--namespace` diferente de `default` é recusado em libvirt (a VM vive na `virbr0`,
    fora da SDN do Delonix).
-6. **Overlay**: `<root>/vms/<name>.qcow2`, um qcow2 fino sobre a base (`prepare_local_overlay`);
-   `--disk-size <GiB>` fá-lo crescer e não pode ser menor do que a base.
+6. **Overlay**: `<root>/vms/<name>.qcow2`, um qcow2 fino sobre a base (a porta
+   `LocalDiskImages`, implementada por `QemuImgDisks` → `prepare_local_overlay` em
+   `crates/adapters/delonix-vm/src/local_ports.rs`; saltado para um backend que gere o seu próprio
+   armazenamento); `--disk-size <GiB>` fá-lo crescer e não pode ser menor do que a base.
 7. **Boot**: o `boot` do backend. O `create` é idempotente: uma VM existente e a correr é devolvida
    tal como está.
 
@@ -480,7 +484,9 @@ dry-run sem `--apply`). É a única excepção deliberada ao rootless no código
 | Área | Caminho |
 |---|---|
 | Porta | `crates/contexts/delonix-compute/src/vm_backend.rs` |
-| Registo, backends CH e libvirt, `create_with`, snapshots, procura de firmware | `crates/adapters/delonix-vm/src/lib.rs` |
+| Casos de uso de VM (`VmEngine`: create, stop, start, status, list, remove, snapshots, verbos de dia-2) e as suas portas (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) | `crates/contexts/delonix-compute/src/vm.rs`, `ports.rs` |
+| Registo, backends CH e libvirt, escolha de backend, procura de firmware, os invólucros públicos (`create_with`, `stop`, …) | `crates/adapters/delonix-vm/src/lib.rs` |
+| As implementações, no adapter, das portas de VM (`RegistryBackends`, `QemuImgDisks`, `CloudLocaldsSeed`) | `crates/adapters/delonix-vm/src/local_ports.rs` |
 | Geração do seed NoCloud | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Backend Proxmox | `crates/providers/delonix-proxmox/` |
 | CLI `vm`, `kind: VirtualMachine`, `vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |
@@ -517,6 +523,10 @@ Lê primeiro o [ADR-0008](../../adr/0008-proxmox-vm-backend.md); é o modelo. Em
   registo e de `auto_detect`, e os testes de parser/scaffold em `cmd/vmfile.rs`. Corre
   `cargo test -p delonix-vm` e `cargo test -p delonix-runtime-bin vmfile` (ver
   [Clonar, compilar e testar](build-and-test.md) para o `protoc` e o directório de target).
+- **Testes de casos de uso contra portas falsas** — a orquestração (`VmEngine`) é testada no
+  `delonix-compute` (`vm::tests`) com um store em memória, um backend que regista as suas chamadas e
+  um disco e um seed falsos, por isso uma mudança ao que o `create`, o `stop` ou o `status` decidem
+  não precisa de hypervisor: `cargo test -p delonix-compute vm::`.
 - **`scripts/e2e.sh`** — as secções `vm` correm sem hypervisor (listagem, recusas) e, quando
   disponível, exercitam snapshots através de stop/start em libvirt (precisa de `virsh`, `qemu-img` e
   de um `qemu:///system` utilizável) e em Cloud Hypervisor. Isola os dois state roots por omissão; a

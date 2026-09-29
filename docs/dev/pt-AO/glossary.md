@@ -1,4 +1,4 @@
-<!-- translated-from: glossary.md sha256:d7eafa64fdd49da297f0db08240898eafeb97292834d5c229bc98cd4d97d7053 -->
+<!-- translated-from: glossary.md sha256:92c4e642171d5eba335314e4b3aa06168a922809f3a8b2cc71332697e036a2db -->
 # Glossário
 
 **Antes de leres:** nada — isto é uma referência. Mantém-na aberta ao lado de qualquer outra página.
@@ -192,7 +192,8 @@ clássico. Ver: `crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay`,
 
 **Port (hexagonal)** — Um trait de que um caso de uso precisa e que um adapter ou provider
 implementa, para que o domínio nunca nomeie um mecanismo concreto. Exemplos: `VmBackend`, e as portas
-de compute `ImageStore`, `StorageProvider`, `NetworkProvider`, `WorkloadRuntime`. Ver:
+de compute `ImageStore`, `StorageProvider`, `NetworkProvider`, `WorkloadRuntime`, e `VmBackends`,
+`LocalDiskImages`, `SeedBuilder` para os casos de uso de VM. Ver:
 `crates/contexts/delonix-compute/src/ports.rs`, `launch.rs`,
 [Traits como portas](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
 
@@ -266,6 +267,16 @@ os servidores re-executam primeiro um `delonix` novo. Ver:
 `crates/adapters/delonix-linux/src/supervise.rs::run_supervised`,
 `crates/adapters/delonix-linux/src/lib.rs::wait_and_record`.
 
+**System container (container de sistema)** — Um userland inteiro corrido como uma unidade num
+provider remoto (hoje um container LXC num nó Proxmox VE), declarado como `kind: SystemContainer`.
+**Não** é um `kind: Container`: o provider não oferece `exec`, logs nem estado de saída e o dataplane
+do motor não chega lá, por isso tem uma semântica mais próxima de uma VM (snapshots, backups, clone,
+mudança entre nós). O motor faz ele próprio o pull da imagem; o nó corre-a; uma mudança feita à mão
+no nó é deriva. Sempre sem privilégio. Ver:
+`crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider`,
+`crates/providers/delonix-proxmox/src/lxc.rs`, `bins/delonix-runtime-bin/src/cmd/system_container.rs`,
+[ADR-0058](../../adr/0058-proxmox-lxc-is-not-a-container-provider.md).
+
 **userns (user namespace)** — O namespace Linux que mapeia ids de utilizador, dando a um processo
 privilégios de root só sobre os objectos que o seu namespace possui. É a base da operação rootless, e
 em Ubuntu recentes pode ser bloqueado pelo AppArmor para binários fora dos caminhos esperados. Ver:
@@ -287,6 +298,14 @@ registration antes de construir seja o que for, por isso um backend remoto só s
 escolhido. Ver: `crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend`,
 `crates/adapters/delonix-vm/src/lib.rs::register_backend`, `select_backend`,
 [Traits como portas](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
+
+**VmEngine** — Os casos de uso de VM (create, stop, start, status, list, remove e os verbos de
+dia-2) como métodos de uma struct no contexto de computação, genérica sobre as portas que recebe:
+um `StateRepository<Vm>`, `VmBackends`, `LocalDiskImages`, `SeedBuilder` e o `VmNetwork` opcional.
+Nunca abre um store, corre um comando nem nomeia um backend; o `delonix-vm` constrói um por chamada
+sobre as suas próprias implementações e mantém as suas funções públicas como invólucros (ADR-0044
+P4b.3). Ver: `crates/contexts/delonix-compute/src/vm.rs::VmEngine`,
+`crates/adapters/delonix-vm/src/local_ports.rs`.
 
 **Workload** — Duas coisas relacionadas. `kind: Workload` é um Kind de açúcar com `spec.type:
 container|pod|vm|microvm` que baixa para o Kind correspondente na altura do load

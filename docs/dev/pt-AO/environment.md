@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
+<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
 # Preparar o teu ambiente
 
 **Antes de leres:** [Começa aqui](start-here.md#day-0-in-30-minutes) (Dia 0) e [Fundações de Linux](linux-foundations.md) — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.

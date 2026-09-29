@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Référence</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/environment-variables.html">Lire la page en anglais</a></span></div><h1 id="environment-variables-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
+<h1 id="environment-variables-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html#isolating-the-engines-state">Isoler l'état du moteur</a> dans Cloner, construire et tester.</p>
 <p>Cette page recense chaque nom <code>DELONIX_*</code> qui apparaît dans le code du moteur, avec l’endroit où il est lu,
 ce qu’il change, et s’il vous arrivera un jour de le définir. C’est une référence : lisez la section qui
@@ -281,7 +281,7 @@ script et dans <a href="build-and-test.html">Cloner, compiler et tester</a>, pas
 </tr>
 <tr>
 <td>Backend de VM</td>
-<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du fichier de providers (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; détection automatique (seulement sans fichier de providers)</td>
+<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du fichier de providers (ADR-0054 ; <code>vm default-backend --set</code> l’écrit) &gt; l’ancien <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; détection automatique. Un fichier de providers illisible fait échouer le choix au lieu de passer au suivant</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -382,7 +382,7 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Filtre des logs de <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> et <code>delonix-mcp</code>.</td>
+<td>Filtre des logs de <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> et <code>delonix-mcp</code>.</td>
 <td>Une expression de filtre <code>tracing</code> (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Se rabat sur <code>RUST_LOG</code>, puis <code>info</code>.</td>
 <td>Les logs vont sur stderr ; stdout est réservé à la sortie des commandes.</td>
 </tr>
@@ -660,7 +660,7 @@ existe déjà tant qu’il n’est pas redémarré.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (le verdict est <code>admission_verdict</code> ; <code>MemAvailable</code> vient de <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Mémoire gardée libre pour l’hôte lors de l’admission d’une VM : une VM est refusée si sa mémoire plus cette réserve dépasse <code>MemAvailable</code>.</td>
 <td>MiB ; défaut <code>2048</code> ; une valeur non analysable se rabat sur 2048.</td>
 <td>La baisser expose l’hôte à des OOM-kills.</td>
@@ -992,6 +992,13 @@ sont des paramètres de test — voir <a href="#test-only">Tests uniquement</a>.
 <td>Définit combien de workers utilise le parcours de répertoire parallèle.</td>
 <td>Un entier positif ; <code>1</code> → le parcours séquentiel. Non définie → le nombre de CPU, plafonné.</td>
 <td>Les parcours parallèle et séquentiel donnent le MÊME total (testé avec des hardlinks vus par des workers différents) ; la variable existe pour le prouver sur un hôte donné, et comme échappatoire si un système de fichiers se comporte mal sous <code>readdir</code> concurrent.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, appelée au démarrage par les processus qui restent en vie (le pin et le control du réseau, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, la tranche d’API Docker, le proxy d’ingress L7)</td>
+<td>Le plafond propre à la glibc sur les arènes de malloc. Non définie, ces processus la plafonnent eux-mêmes à 2, car le défaut de la glibc réserve un tas de 64 MiB par thread en contention.</td>
+<td>Un entier positif ; lu par la glibc, pas par le moteur.</td>
+<td>Définissez-la et le moteur n’y touche pas : la valeur de l’opérateur l’emporte.</td>
 </tr>
 </tbody>
 </table></div>

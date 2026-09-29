@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
 # IaaS et cloud native — où s’inscrit le moteur
 
 **Avant de lire :** [Commencer ici](start-here.md#what-delonix-is-5-minutes) (les quatre phrases sur ce qu’est Delonix). Aucune connaissance du noyau ni de Rust n’est encore nécessaire.
@@ -329,7 +329,9 @@ providers, interfaces et binaires, et le répertoire est la couche (`crates/foun
 `crates/contexts/`, `crates/adapters/`, `crates/providers/`, `crates/interfaces/`, `bins/`). La
 direction autorisée est écrite une seule fois, dans `ALLOWED` de `scripts/arch_fitness.py`, et la
 CI l’impose. Les ports sont des traits dans `crates/contexts/delonix-compute/src/ports.rs` et
-`VmBackend` dans `delonix-vm` ; l’ADR-0008 (**Accepted**) a rendu les backends de VM
+`VmBackend` dans `vm_backend.rs` du même crate ; les cas d’usage des VM qui les appellent sont
+`VmEngine` dans `vm.rs`, et `delonix-vm` implémente les ports pour ce nœud. L’ADR-0008
+(**Accepted**) a rendu les backends de VM
 enregistrables, ce qui est ainsi qu’un nœud Proxmox distant est devenu un backend de plus.
 
 **Ce qu’il vous demande.** Un nouveau provider entre comme implémentation d’un port. Un nouveau

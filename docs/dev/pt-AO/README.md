@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:e9205b57d61260f2d44b7c78c60bc5ee9e79f9781fa0948ce1738e55a800ee77 -->
+<!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
 # Delonix Runtime — Manual do Contribuidor
 
 Este manual é para quem quer **mudar o motor**: clonaste o repositório hoje e queres enviar um

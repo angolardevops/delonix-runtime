@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
+<!-- translated-from: troubleshooting.md sha256:e6b6ffdfe6f14754379cb99db51d518a86130a8d88e7be7d69b42a9608f30fad -->
 # Diagnóstico de problemas
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md) (armadilhas do host) e [Clonar, compilar e testar](build-and-test.md#the-gates-ci-runs) (os gates, e isolar o estado do motor).
@@ -151,16 +151,27 @@ FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itse
 
 A linha de base está vazia, por isso qualquer entrada é uma fuga nova. As outras duas mensagens
 (`more of a known leak`, `fixed or reduced … — lower the baseline`) só aparecem se voltar a ser
-registada dívida. Reproduz localmente com um directório novo só teu, e lista o que lá está em vez de
-o julgar — uma fuga pode depender do host (um teste que retorna cedo quando falta uma ferramenta):
+registada dívida.
+
+O mesmo job corre o gate uma segunda vez sobre o próprio `/tmp`: um teste que faz bind de um socket
+Unix precisa de um caminho curto (o `sun_path` tem 108 bytes) e põe-no lá, onde o recenseamento do
+`TMPDIR` nunca olha. O `/tmp` de um runner não está vazio, por isso é listado mesmo antes do
+`cargo test` e só o que é novo depois disso é julgado (`--before`), contra a mesma linha de base
+vazia. Os dois recenseamentos correm também quando um teste **falhou** — é exactamente aí que uma
+limpeza na última linha de um teste nunca corre —, por isso um teste vermelho pode vir com um
+relatório de fuga próprio. Reproduz localmente com um directório novo só teu, e lista o que lá está
+em vez de o julgar — uma fuga pode depender do host (um teste que retorna cedo quando falta uma ferramenta):
 
 ```bash
-mkdir -p "$PWD/target/test-tmp" && TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
 python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
 ```
 
 A correcção está no teste, não na linha de base: guarda o directório num `tempfile::TempDir`, para
-que a remoção corra também num `return` antecipado e num assert falhado — vê
+que a remoção corra também num `return` antecipado e num assert falhado — para um socket,
+`tempfile::tempdir_in("/tmp")` em vez de um caminho `/tmp` literal com o pid — vê
 [Convenções de código](coding-conventions.md) (*Um teste remove a sua pasta temporária em todas
 as saídas*).
 

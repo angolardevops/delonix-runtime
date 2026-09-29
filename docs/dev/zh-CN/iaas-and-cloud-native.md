@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
 # IaaS 与云原生——引擎的定位
 
 **阅读之前：**[从这里开始](start-here.md#what-delonix-is-5-minutes)（关于 Delonix 是什么的四句话）。这里还不需要任何内核或 Rust 知识。
@@ -163,7 +163,7 @@ A、B 两步已交付，C 步随这个服务器开始）确定了这份 API 在�
 
 ### 它刻意不做的事
 
-权威规则是 [`AGENTS.md`](../../AGENTS.md) 顶部的 *«Identidade e fronteira do motor»* 一节：
+权威规则是 [`AGENTS.md`](../../../AGENTS.md) 顶部的 *«Identidade e fronteira do motor»* 一节：
 引擎**不认识任何消费者**——没有平台、控制平面、控制台或代理——也没有**租户、账户、方案、
 配额或计费**的概念。来自某个消费者的需求，只能以对任何客户端都说得通的通用引擎能力的形式进入。
 
@@ -290,7 +290,8 @@ adapters、providers、interfaces 和 binaries，目录本身就是这个层（`
 `crates/contexts/`、`crates/adapters/`、`crates/providers/`、`crates/interfaces/`、
 `bins/`）。允许的依赖方向只写在一个地方，即 `scripts/arch_fitness.py` 里的 `ALLOWED`，
 由 CI 强制执行。端口是 `crates/contexts/delonix-compute/src/ports.rs` 中的各个 trait，
-以及 `delonix-vm` 中的 `VmBackend`；ADR-0008（**已接受**）让 VM 后端变得可注册，
+以及同一个 crate 的 `vm_backend.rs` 中的 `VmBackend`；调用它们的 VM 用例是 `vm.rs` 中的
+`VmEngine`，而 `delonix-vm` 为本节点实现这些端口。ADR-0008（**已接受**）让 VM 后端变得可注册，
 这正是一个远程 Proxmox 节点得以成为又一个后端的方式。
 
 **它对你的要求。** 一个新的 provider，要以一个端口的实现的形式进入。一个新 crate

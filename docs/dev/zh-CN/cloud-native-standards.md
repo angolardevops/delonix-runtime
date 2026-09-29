@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-standards.md sha256:b42da13e7ba332edc815ba25d93934d6e2e59b6827868ca6f84561249d2e8d4c -->
+<!-- translated-from: cloud-native-standards.md sha256:f44ace1187e1f3e99b620e7efca82fb47e35f5889bfd9e831a924bf7ea7c4c24 -->
 # 云原生标准，逐层展开
 
 **阅读前须知：** [云原生入门](cloud-native-primer.md)（引擎如何使用每一种机制）和[架构](architecture.md)（下面点名的那些 crate）。这是一页参考资料：只读你会碰到的那一节标准。
@@ -107,7 +107,7 @@ graph TB
 
 - 没有针对 Delonix 跑过 runtime-spec 的合规套件。也没法跑：不存在一个消费 bundle 的入口
   点可以拿来跑它。
-- **没有实现 OCI 钩子。** [ADR-0033](../adr/0033-oci-runtime-hooks.md)（提议中）记录了
+- **没有实现 OCI 钩子。** [ADR-0033](../../adr/0033-oci-runtime-hooks.md)（提议中）记录了
   原因：没有具体的消费者，而且运行一个由容器 spec 点名的宿主机二进制文件，属于本项目已经
   拿一次 spike 挡在前面的那类安全问题。`delonix-linux` 里那个进程内的 `StartedHook` 闭包
   看起来相似，但它不是 OCI 那套协议。
@@ -141,7 +141,7 @@ graph TB
 - **层作为 overlay 的下层（lower）**：`ImageStore::prepare_overlay`（`src/overlay.rs`）
   在容器自己的 `merged/` 旁边写出一份 `overlay-lowers` 文件，容器自己的 init 会挂载它。
   层在容器之间是共享的，而不是被复制的（参见 `AGENTS.md` 里关于容器共享层的记录，以及关于
-  挂载 API 的 [ADR-0037](../adr/0037-overlay-mount-new-api.md)）。
+  挂载 API 的 [ADR-0037](../../adr/0037-overlay-mount-new-api.md)）。
 - **按魔数识别层的媒体类型**：`src/registry.rs` 里紧挨着 `DOCKER_MANIFEST_MEDIA_TYPE` 的
   那个辅助函数会检测 gzip、zstd 或纯 tar。
 - **写出 image layout**：`write_oci_archive`（`src/save.rs`），由 `delonix image save`
@@ -245,7 +245,7 @@ exec/attach/端口转发、统计信息）和一个 `ImageService`。kubelet 通
   `Cgroupfs`。它的文档注释记录了逼出这个答案的那次测量（2026-09-15，k8s
   1.36.4）：什么也不回答会让 kubelet 默认走 `systemd`，systemd 会从空的 pod slice 里
   丢掉 `cpuset`，然后 kubelet 就会陷入循环杀 pod。
-- **kubelet 的资源模型**：[ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md)。
+- **kubelet 的资源模型**：[ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md)。
   kubelet 的 `cgroup_parent` 由 `KubeCgroupParent::parse`
   （`crates/contexts/delonix-compute/src/record.rs`）校验，并在
   `crates/contexts/delonix-compute/src/run.rs` 里被消费；`delonix-linux` 有
@@ -261,7 +261,7 @@ exec/attach/端口转发、统计信息）和一个 `ImageService`。kubelet 通
 
 **合规状态／缺口。**
 
-- **用上游的 `critest` 测量过**（[docs/cri-conformance.md](../cri-conformance.md)）：
+- **用上游的 `critest` 测量过**（[docs/cri-conformance.md](../../cri-conformance.md)）：
   cri-tools `critest` **v1.36.0**，引擎 `delonix-cri` **v0.63.1**，rootless，
   **2026-08-25**：在跑过的 103 项规格里（套件总共 122 项），**79 通过、24 失败、19
   跳过**。那份文档里按领域列出的失败：AppArmor 按容器级别的 profile、挂载传播
@@ -363,16 +363,16 @@ Controller 插件。
   `HostVolumes` 实现了 compute 上下文（context）的 `StorageProvider` 端口
   （`crates/contexts/delonix-compute/src/ports.rs`）。
 - 网络存储（NFS、CIFS/SMB、WebDAV）以卷的形式挂载，以及一个针对 NAS API 的存储
-  配置器（[ADR-0009](../adr/0009-truenas-storage-provisioner.md)，crate
+  配置器（[ADR-0009](../../adr/0009-truenas-storage-provisioner.md)，crate
   `crates/providers/delonix-truenas`）。
 
 **合规状态／缺口。** 未实现，出于决策：
-[ADR-0034](../adr/0034-csi-daemon-conflict.md)（提议中）。一个 CSI Node 插件是一个
+[ADR-0034](../../adr/0034-csi-daemon-conflict.md)（提议中）。一个 CSI Node 插件是一个
 常驻服务，而引擎按设计是无守护进程（daemonless）的。这份 ADR 只有在一个具体需求明确点名
 CSI 这个协议、**并且**守护进程这个问题本身已经有一份被接受的 ADR 时，才会重新开启。它还
 记录了一条不需要在这里写任何代码的现实路径（针对同一台服务器的一个外部 NFS 配置器）。
 
-**从哪里开始读。** [ADR-0034](../adr/0034-csi-daemon-conflict.md) →
+**从哪里开始读。** [ADR-0034](../../adr/0034-csi-daemon-conflict.md) →
 `crates/adapters/delonix-volume/src/lib.rs` →
 `crates/contexts/delonix-compute/src/ports.rs` 里的 `StorageProvider`。
 
@@ -406,7 +406,7 @@ spec 的**消费者**，而绝不是一个驱动发现工具：
 
 - **钩子没有被执行。** 一个尽力而为（best-effort）的 `ldconfig -r <rootfs>` 取代了
   通常的 `createContainer` 钩子，一个声明了钩子的 spec 会产生一条可见的警告。这是
-  [ADR-0033](../adr/0033-oci-runtime-hooks.md) 唯一点名的代价。
+  [ADR-0033](../../adr/0033-oci-runtime-hooks.md) 唯一点名的代价。
 - 模块注释里记录了一次针对 `nvidia-ctk` 1.20.0（`cdiVersion` 0.7.0）的 spec 所做的
   测量：顶层的 `containerEdits` 携带了大多数设备节点和全部挂载点，所以只读取按设备
   的编辑会破坏 CUDA。这条注释没有写日期，这次也没有为本页重新测量。`AGENTS.md`
@@ -430,13 +430,13 @@ API 兼容。
 **一个实现必须做到什么**（引擎自己定的规则）：
 
 - 发布从代码生成出来的清单 schema，而不是手写的
-  （[ADR-0007](../adr/0007-generated-manifest-schema.md)）。
+  （[ADR-0007](../../adr/0007-generated-manifest-schema.md)）。
 - 用三方差异比对来规划（plan）、应用（apply）并检测漂移（drift），绝不悄悄忽略任何一个
   字段。
 - 在同一个本地套接字上，用 gRPC 和 HTTP/JSON 同时服务同一份节点契约，OpenAPI 文档从
   protobuf 生成
-  （[ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md)，
-  提议中；[ADR-0041](../adr/0041-node-local-contract-for-the-control-plane-agent.md)）。
+  （[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)，
+  提议中；[ADR-0041](../../adr/0041-node-local-contract-for-the-control-plane-agent.md)）。
 
 **Delonix 是怎么实现它的。**
 
@@ -612,7 +612,7 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
   simple-signing 载荷作为 `.sig` artifact；`verify_signature`（在
   `image pull --verify <key>` 和 `image verify` 背后）会检查签名，并检查载荷里
   点名的是不是那个镜像的摘要。虚拟机镜像用的是同一套机制
-  （[ADR-0017](../adr/0017-signing-vm-images.md)）。
+  （[ADR-0017](../../adr/0017-signing-vm-images.md)）。
 - **镜像扫描**：`crates/adapters/delonix-scanner/src/lib.rs`。`extract_sbom` 直接从
   CAS 里的层读取 `apk`/`dpkg` 的数据库（以及 Python 的依赖清单），不需要运行这个
   镜像；`advisories_from_osv` 摄入 OSV 的信息流。
@@ -673,8 +673,8 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。
   （virtio-fs 需要 `virtiofsd` 守护进程，而这个还没有接进来）。
 - `delonix-vm-base:fedora-42` 在 Cloud Hypervisor 的 EDK2 下启动不起来，包括厂商
   原始的那份镜像也一样（`AGENTS.md`，2026-08-12）；直接内核启动是可行的。
-- 实时迁移是一个 NO-GO（不予采纳）：[ADR-0031](../adr/0031-live-vm-migration-no-go.md)。
-- 已发布的虚拟机镜像只有 amd64：[ADR-0018](../adr/0018-vm-images-stay-amd64.md)。
+- 实时迁移是一个 NO-GO（不予采纳）：[ADR-0031](../../adr/0031-live-vm-migration-no-go.md)。
+- 已发布的虚拟机镜像只有 amd64：[ADR-0018](../../adr/0018-vm-images-stay-amd64.md)。
 
 **从哪里开始读。** `crates/adapters/delonix-vm/src/lib.rs` 里的
 `trait VmBackend` 和 `create_with` → `src/cloudinit.rs` →
@@ -716,7 +716,7 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。
 `cpu memory pids`，`Delegate=yes` 的 scope 也拿不到更多。补救办法是由 root 给
 `user@.service` 加一个 drop-in（`Delegate=cpu cpuset io memory pids`）。参见
 [准备你的环境](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced)
-和 [ADR-0015](../adr/0015-intermediate-cgroup-level.md)。
+和 [ADR-0015](../../adr/0015-intermediate-cgroup-level.md)。
 
 **从哪里开始读。** `crates/adapters/delonix-linux/src/lib.rs` 里的
 `cgroup_limits_apply` → `user_service_base` → `try_delegated_base` →
@@ -738,7 +738,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的*工具（t
 `delonix-mcp`，也就是 `delonix mcp serve`），建立在 `rmcp` crate 之上：
 
 - **只有 stdio**：作为 AI 客户端的一个前台子进程，stdin 关闭时它就退出。它不是一个
-  守护进程（[ADR-0025](../adr/0025-mcp-local-ai-control-surface.md)）。
+  守护进程（[ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md)）。
 - 工具的输入是有类型的、经过 schema 校验的；输出是 JSON 文本。工具带有一个风险等级
   （`src/risk.rs`），调用会被审计（`src/audit.rs`）。
 - 唯一的主体（principal）是本地 uid，与 `delonix-mgmt` 用的是同一条边界。
@@ -759,29 +759,29 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的*工具（t
 
 | 标准 | Delonix 组件 | 状态 | 证据 |
 |---|---|---|---|
-| OCI Runtime Spec | `delonix-linux`（原生机制）；通过 `build_runtime_spec` 实现的 `image export` bundle | 部分实现——能生产 bundle，但不是一个消费 bundle 的运行时；没有钩子 | 13.1，[ADR-0033](../adr/0033-oci-runtime-hooks.md) |
+| OCI Runtime Spec | `delonix-linux`（原生机制）；通过 `build_runtime_spec` 实现的 `image export` bundle | 部分实现——能生产 bundle，但不是一个消费 bundle 的运行时；没有钩子 | 13.1，[ADR-0033](../../adr/0033-oci-runtime-hooks.md) |
 | OCI Image Spec | `delonix-oci`（`cas`、`overlay`、`write_oci_archive`） | 部分实现——能读取 OCI 和 Docker 的 manifest；写出的是 Docker schema 2 的 manifest | 13.2，`src/registry.rs` |
 | OCI Distribution Spec | `delonix-oci::registry`（`verify_manifest_digest`、可恢复的 blob 下载、artifact） | 已实现（客户端）——标签列表没有分页；没有跑过合规测试 | 13.3 |
-| CRI（`runtime.v1`） | `delonix-cri` | 部分实现——critest v1.36.0：79/103 通过，引擎 v0.63.1，2026-08-25；kubelet 1.36.4 已于 2026-09-15 验证 | [cri-conformance.md](../cri-conformance.md)，[ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md) |
+| CRI（`runtime.v1`） | `delonix-cri` | 部分实现——critest v1.36.0：79/103 通过，引擎 v0.63.1，2026-08-25；kubelet 1.36.4 已于 2026-09-15 验证 | [cri-conformance.md](../../cri-conformance.md)，[ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md) |
 | CNI | `delonix-sdn::cni`；CRI root 模式，rootless 下按需启用 `DELONIX_CNI=1` | 部分实现——`ADD`/`DEL`；没有 `CHECK`/`GC`/`STATUS` 调用，没有 `runtimeConfig` | 13.5 |
-| CSI | 无（`kind: Volume`、`delonix-volume`、`delonix-truenas`） | 未实现——需要一个守护进程 | [ADR-0034](../adr/0034-csi-daemon-conflict.md) |
+| CSI | 无（`kind: Volume`、`delonix-volume`、`delonix-truenas`） | 未实现——需要一个守护进程 | [ADR-0034](../../adr/0034-csi-daemon-conflict.md) |
 | CDI | `delonix-linux::cdi`（`HostDevices`） | 部分实现——是消费者；钩子没有被执行 | 13.7 |
-| 引擎自有 Kind 与节点契约 | `delonix-stack`，`proto/delonix/node/v1` | 已实现（自有 API）——由 CI 把关 | [ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md)，`scripts/contract_gate.py` |
+| 引擎自有 Kind 与节点契约 | `delonix-stack`，`proto/delonix/node/v1` | 已实现（自有 API）——由 CI 把关 | [ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)，`scripts/contract_gate.py` |
 | Docker 引擎 API（事实标准） | `cmd/dockerapi.rs` | 部分实现——已发布的 `API_MATRIX` / `API_UNIMPLEMENTED` | `delonix serve docker-api --matrix` |
 | Compose Spec（事实标准） | `cmd/compose.rs` | 部分实现——允许列表机制，未知的键会被拒绝，没有 `include:` | 13.10 |
 | OpenTelemetry | `delonix-telemetry::telemetry` | 部分实现——只有 OTLP/HTTP 的 trace，没有 TLS | 13.11 |
 | Prometheus / OpenMetrics | `delonix-telemetry::metrics`，`delonix-cri` 和 `delonix-mgmt` 里的 `/metrics` | 已实现——没有记录跑过 `promtool` | 13.12 |
 | SPDX SBOM | `release.yml` 里的 `scripts/sbom.py` | 部分实现——只覆盖二进制文件的 Rust 依赖树；镜像扫描器不产出 SPDX | 13.13 |
-| 签名（与 cosign 兼容，minisign） | `delonix-oci::sign`；`release.yml` 里的 minisign | 部分实现——只有基于密钥的方式；没有无密钥签名，没有透明日志 | 13.13，[ADR-0017](../adr/0017-signing-vm-images.md) |
+| 签名（与 cosign 兼容，minisign） | `delonix-oci::sign`；`release.yml` 里的 minisign | 部分实现——只有基于密钥的方式；没有无密钥签名，没有透明日志 | 13.13，[ADR-0017](../../adr/0017-signing-vm-images.md) |
 | SLSA 来源证明 | `release.yml` 里的 `actions/attest-build-provenance` | 对发布二进制文件已实现 | 13.13 |
-| KVM / virtio / UEFI | `delonix-vm`（Cloud Hypervisor、libvirt） | 已实现——Cloud Hypervisor 上没有 virtio-9p；没有实时迁移 | 13.14，[ADR-0031](../adr/0031-live-vm-migration-no-go.md) |
+| KVM / virtio / UEFI | `delonix-vm`（Cloud Hypervisor、libvirt） | 已实现——Cloud Hypervisor 上没有 virtio-9p；没有实时迁移 | 13.14，[ADR-0031](../../adr/0031-live-vm-migration-no-go.md) |
 | cloud-init NoCloud | `delonix-vm::cloudinit` | 已实现 | 13.14 |
-| cgroup v2 + systemd 委派（Linux） | `delonix-linux` | 已实现——限制生效需要一个已委派的 scope | 13.15，[ADR-0015](../adr/0015-intermediate-cgroup-level.md) |
-| MCP（不是 CNCF 标准） | `delonix-mcp` | 部分实现——只有 stdio | [ADR-0025](../adr/0025-mcp-local-ai-control-surface.md) |
+| cgroup v2 + systemd 委派（Linux） | `delonix-linux` | 已实现——限制生效需要一个已委派的 scope | 13.15，[ADR-0015](../../adr/0015-intermediate-cgroup-level.md) |
+| MCP（不是 CNCF 标准） | `delonix-mcp` | 部分实现——只有 stdio | [ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md) |
 
 当你改动这些组件里的某一个时，在同一个 pull request 里更新它对应的表格行和它所在的那一节。
 如果你重新跑了一次合规测试套件，请把数字、日期和版本号一起换掉，并且先更新对应的源文档
-（关于 CRI 的是 [docs/cri-conformance.md](../cri-conformance.md)）。
+（关于 CRI 的是 [docs/cri-conformance.md](../../cri-conformance.md)）。
 
 ---
 

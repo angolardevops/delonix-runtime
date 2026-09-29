@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
+<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
 # 准备你的环境
 
 **阅读之前：**[从这里开始](start-here.md#day-0-in-30-minutes)（第 0 天）和 [Linux 基础](linux-foundations.md) —— 下面这些宿主机陷阱，都是用用户命名空间和 cgroup 委派的术语来解释的。
@@ -62,7 +62,7 @@ sudo dnf install protobuf-compiler
 | **cgroup v2**（统一层级） | 资源限制和统计都是写到 `/sys/fs/cgroup` 里的 | `stat -fc %T /sys/fs/cgroup` 会打印出 `cgroup2fs` |
 | **无特权 user 命名空间** | rootless 模型的基础：引擎只在自己的 user 命名空间*里面*才是「root」 | `unshare -r -n true` 能成功执行 |
 | **`/dev/net/tun`** | `slirp4netns`（rootless 网络）和 VM 的 tap 设备 | `test -e /dev/net/tun` |
-| 带新 mount API 和 `lowerdir+` 的 **overlayfs**（Linux **6.5** 或更新） | 容器的根文件系统是用 `fsopen`/`fsconfig`/`fsmount` 构建出来的 overlay 挂载，每一层调用一次 `lowerdir+` —— 见 [ADR-0037](../adr/0037-overlay-mount-new-api.md) | `uname -r` |
+| 带新 mount API 和 `lowerdir+` 的 **overlayfs**（Linux **6.5** 或更新） | 容器的根文件系统是用 `fsopen`/`fsconfig`/`fsmount` 构建出来的 overlay 挂载，每一层调用一次 `lowerdir+` —— 见 [ADR-0037](../../adr/0037-overlay-mount-new-api.md) | `uname -r` |
 | 已加载 **`br_netfilter`**，`net.bridge.bridge-nf-call-iptables=1` | 命名空间隔离是在 nftables 的 `forward` 链里强制执行的；没有这个模块，同一网桥上两个容器之间的流量就永远到不了它们，隔离会悄无声息地失效 | `delonix system doctor` |
 | **KVM**（`/dev/kvm`） | 只有 microVM 才需要 —— 见 [构建 microVM](microvm-setup.md) | `test -w /dev/kvm` |
 
@@ -74,7 +74,7 @@ sudo dnf install protobuf-compiler
 
 ## 宿主机软件包
 
-唯一的真相来源是 [`scripts/install.sh`](../../scripts/install.sh)，它同时也是官方安装
+唯一的真相来源是 [`scripts/install.sh`](../../../scripts/install.sh)，它同时也是官方安装
 脚本（作为发布资产发布出去）。它通过 `/etc/os-release` 检测包管理器，支持 **apt**（Debian、
 Ubuntu 及其衍生版）、**dnf**（Fedora、RHEL、CentOS Stream、Rocky、AlmaLinux）、**zypper**
 （openSUSE、SLES）和 **pacman**（Arch 及其衍生版）。安装脚本会为 **x86_64** 和 **aarch64**

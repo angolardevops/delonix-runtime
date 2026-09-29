@@ -369,9 +369,11 @@ hypervisors and storage the engine drives through its provider ports.</em></p>
   encrypted secret vault) and the image store in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a> (<code>cas.rs</code>).</li>
 <li><strong>Kernel</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> (process, namespaces, cgroups, mounts) and
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (bridges, nftables, DNS).</li>
-<li><strong>Hypervisors</strong> — the <code>VmBackend</code> trait in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
-<li><strong>Remote providers</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted and implemented)
-  and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009, Accepted). An OpenStack backend is only a
+<li><strong>Hypervisors</strong> — the <code>VmBackend</code> trait in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>,
+  implemented by the local backends in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
+<li><strong>Remote providers</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted and implemented),
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-opnsense" target="_blank" rel="noopener"><code>crates/providers/delonix-opnsense</code></a> (ADR-0051) and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009,
+  Accepted). An OpenStack backend is only a
   proposal (ADR-0039, Proposed, gated on a spike).</li>
 <li><strong>Registry</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>.</li>
 </ul>
@@ -397,11 +399,13 @@ and nothing in <code>crates/</code>, <code>bins/</code> or <code>proto/</code> i
 <li>exposes the <strong>same operations through several doors</strong>: the CLI, the node contract, the CRI and
   MCP.</li>
 </ul>
-<p>One caveat on the node contract, so you do not go looking for a server that is not there:
+<p>One caveat on the node contract, so you do not expect more of the server than it answers:
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> is marked <em>DRAFT contract for ADR-0040</em>. The contract, its
-generated <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> and its CI gate (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>) exist; no crate
-serves <code>NodeService</code> yet. ADR-0042 (<strong>Accepted</strong>, steps A and B delivered) fixes how that API is
-versioned and documented when the server lands.</p>
+generated <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> and its CI gate (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>) exist, and
+<code>delonix serve node-api</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>) serves it on a local socket — but
+only <code>NodeService.ListProviders</code> answers today; the other RPCs answer <code>UNIMPLEMENTED</code>. ADR-0042
+(<strong>Accepted</strong>; steps A and B delivered, step C started with this server) fixes how that API is
+versioned and documented as more of it is served.</p>
 <h3 id="what-it-deliberately-does-not-do">What it deliberately does not do<a class="hanchor" href="#what-it-deliberately-does-not-do" aria-label="#">#</a></h3>
 <p>The canonical rule is the section <em>«Identidade e fronteira do motor»</em> at the top of
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: the engine knows <strong>no consumer</strong> — no platforms, control planes,
@@ -550,7 +554,7 @@ command is not a platform capability.</p>
 <p><strong>In Delonix.</strong> The same operations are exposed by the CLI, the CRI (<code>delonix serve cri</code>,
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>), the local management socket (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>),
 the MCP server (<code>delonix mcp serve</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>) and the node contract
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, draft). The contract is the source of truth for both its gRPC and its
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, draft, served in part by <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>). The contract is the source of truth for both its gRPC and its
 HTTP/JSON encodings, and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it, never edited by hand
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>). ADR-0040 (<strong>Proposed</strong>) records today's gap honestly: several of
 these doors still re-run the CLI binary as a subprocess instead of calling a use case — a count
@@ -592,7 +596,9 @@ provider should be a new implementation, not a new branch everywhere.</p>
 interfaces and binaries, and the directory is the layer (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, <code>bins/</code>). The allowed direction is
 written once, in <code>ALLOWED</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, and CI enforces it. Ports are traits in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>VmBackend</code> in <code>delonix-vm</code>; ADR-0008
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>VmBackend</code> in <code>vm_backend.rs</code> of the same
+crate; the VM use cases that call them are <code>VmEngine</code> in <code>vm.rs</code>, and <code>delonix-vm</code> implements the
+ports for this node. ADR-0008
 (<strong>Accepted</strong>) made VM backends registrable, which is how a remote Proxmox node became one more
 backend.</p>
 <p><strong>What it asks of you.</strong> A new provider enters as an implementation of a port. A new crate enters

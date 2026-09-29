@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
 # IaaS e cloud native — onde o motor encaixa
 
 **Antes de leres:** [Começa aqui](start-here.md#what-delonix-is-5-minutes) (as quatro frases sobre o que é o Delonix). Ainda não precisas de conhecimento de kernel nem de Rust.
@@ -317,7 +317,8 @@ providers, interfaces e binários, e o directório é a camada (`crates/foundati
 `crates/contexts/`, `crates/adapters/`, `crates/providers/`, `crates/interfaces/`, `bins/`). A
 direcção permitida está escrita uma vez, em `ALLOWED` em `scripts/arch_fitness.py`, e a CI
 impõe-na. As portas são traits em `crates/contexts/delonix-compute/src/ports.rs` e `VmBackend` em
-`delonix-vm`; o ADR-0008 (**Accepted**) tornou os backends de VM registáveis, que é como um nó
+`vm_backend.rs` do mesmo crate; os casos de uso de VM que as chamam são o `VmEngine` em `vm.rs`, e
+o `delonix-vm` implementa as portas para este nó. O ADR-0008 (**Accepted**) tornou os backends de VM registáveis, que é como um nó
 Proxmox remoto se tornou mais um backend.
 
 **O que te pede.** Um provider novo entra como implementação de uma porta. Um crate novo entra na

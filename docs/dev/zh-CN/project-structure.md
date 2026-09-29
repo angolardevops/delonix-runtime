@@ -1,4 +1,4 @@
-<!-- translated-from: project-structure.md sha256:e94e23872043e472c030bf702308c67c04a07d77ccc04d6d6b315b34e2ad2a21 -->
+<!-- translated-from: project-structure.md sha256:72090abc93d3d1a938f4e0aaa8e4ac853968342a4dbc53305ba2aefbd49a4e87 -->
 # 项目结构
 
 **阅读之前：**[克隆、构建与测试](build-and-test.md) —— 你已经有一份能构建的 checkout，也知道
@@ -116,9 +116,9 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 |---|---|---|---|
 | `crates/` | 所有的库 crate，每层一个目录（ADR-0040）。`scripts/arch_fitness.py` 会让一个目录与其 `LAYERS` 表中声明的层不一致的 crate失败，也会让任何违反允许方向的依赖失败。 | 每一个引擎功能。 | [架构](architecture.md) |
 | `crates/foundation/` | 纯粹的基础层：只有数据的模型——错误、纯数据记录（`Status`、防火墙相关的记录）、secret 模型、生成的名称、退出码与 `DX_*` 类别（`delonix-model`），以及零依赖的网络规则（`delonix-net-rules`）。只依赖基础层本身。 | 新增一个共享类型或纯规则的改动。 | [各个 crate](crates.md) |
-| `crates/contexts/` | 带用例的限界上下文：Compute，带着 `Container` 和 `Vm` 记录（`delonix-compute`），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（`delonix-node`）——，Stack——Kind、协调器、revision（`delonix-stack`）——，以及节点的安全决策（`delonix-security-runtime`）。 | 改变引擎决策方式的功能。 | [各个 crate](crates.md) |
+| `crates/contexts/` | 带用例的限界上下文：Compute，带着 `Container` 和 `Vm` 记录、`container run` 用例和 VM 用例（`delonix-compute`），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（`delonix-node`）——，Stack——Kind、协调器、revision（`delonix-stack`）——，以及节点的安全决策（`delonix-security-runtime`）。 | 改变引擎决策方式的功能。 | [各个 crate](crates.md) |
 | `crates/adapters/` | 这个节点上的各种机制：Linux 命名空间/cgroup（`delonix-linux`）、OCI 镜像（`delonix-oci`）、网络与防火墙（`delonix-sdn`）、微虚拟机（`delonix-vm`）、卷（`delonix-volume`）、持久化状态与 secret 保险库（`delonix-state`）、漏洞扫描（`delonix-scanner`）、日志/指标/追踪（`delonix-telemetry`）。 | 触碰内核、磁盘或本地工具的功能。 | [各个 crate](crates.md)、[云原生入门](cloud-native-primer.md) |
-| `crates/providers/` | 端口背后的远程系统：一个 Proxmox VE 节点，作为 `VmBackend`，连同它的逐 VM 防火墙和它的 SDN（`delonix-proxmox`）；一台作为 `GatewayProvider` 的 OPNsense 设备（`delonix-opnsense`）；以及 TrueNAS 的资源制备（`delonix-truenas`）。 | 对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。 | `docs/adr/0008-proxmox-vm-backend.md` |
+| `crates/providers/` | 端口背后的远程系统：一个 Proxmox VE 节点，作为 `VmBackend` 和 `SystemContainerProvider`，连同它的逐客户机防火墙和它的 SDN（`delonix-proxmox`）；一台作为 `GatewayProvider` 的 OPNsense 设备（`delonix-opnsense`）；以及 TrueNAS 的资源制备（`delonix-truenas`）。 | 对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。 | `docs/adr/0008-proxmox-vm-backend.md` |
 | `crates/interfaces/` | 暴露引擎的服务器：Kubernetes CRI（`delonix-cri`，同时也提供 `delonix-cri` 这个二进制程序）、本地管理 API（`delonix-mgmt`）、节点契约服务器（`delonix-node-api`）以及 MCP 服务器（`delonix-mcp`）。 | 对这几种协议之一的改动。 | [云原生标准](cloud-native-standards.md) |
 | `bins/` | 二进制 crate。每一个只组合一个接口（由 `arch_fitness.py` 强制执行）。 | 每一个 CLI 可见的功能。 | [架构](architecture.md) |
 | `bins/delonix-runtime-bin/` | `delonix` CLI：`src/main.rs`、`src/cmd/` 下每个命令组一个模块、葡萄牙语消息目录 `data/pt.po`、`templates/` 下的 `init` 项目模板、`build.rs`，以及 `tests/architecture.rs`。 | 每一个带命令、flag 或消息的功能。 | [编码约定](coding-conventions.md) |

@@ -1,4 +1,4 @@
-<!-- translated-from: publishing-docs.md sha256:e7464ba7b5b1c113bb55466d80c2d833cf32878863e3e6f711e35fbc59b0b281 -->
+<!-- translated-from: publishing-docs.md sha256:cbfc23fbab090933245166f0c98f167e920b47b6c555e923325a501e70f85133 -->
 # Publicar a documentação
 
 **Antes de leres:** [Fluxo de contribuição](contributing-workflow.md), [Releases e estabilidade](releases-and-stability.md) (o que publicar uma release faz — a secção *O que acontece na altura da release* desta página é a sua metade de documentação) e a [tabela gerado vs escrito à mão](project-structure.md#generated-vs-hand-written) em Estrutura do projecto.
@@ -126,9 +126,14 @@ a documentação, ele:
 1. regenera o site do utilizador contra a build de release e **falha** se `docs/` diferir;
 2. publica a GitHub Release com `docs/releases/<tag>.md` como notas (ou notas geradas quando esse
    ficheiro não existe);
-3. faz checkout da `main`, corre `scripts/gen-releases.sh` (o apêndice `docs/RELEASES.md`) e
-   `scripts/dev_docs.py` (os factos do manual), e faz commit dos dois na `main` com `[skip ci]`
-   quando mudaram.
+3. faz checkout da `main`, corre `scripts/gen-releases.sh` (o apêndice `docs/RELEASES.md`),
+   `scripts/dev_docs.py` (os factos do manual) e `scripts/dev_docs_site.py` (o site do manual,
+   com `markdown` num virtualenv), e faz commit do que mudou na `main` com `[skip ci]`. Os
+   geradores correm em Python 3.12 (`actions/setup-python`, só a partir desse passo), porque o
+   próprio runner do job traz um Python sem `tomllib`. Se um gerador falha, o passo faz commit na
+   mesma do que foi regenerado e depois **falha**, a nomear o gerador — uma corrida de release
+   verde já não quer dizer que o manual foi regenerado a não ser que este passo também esteja
+   verde.
 
 A **narrativa** do manual não é regenerada pela CI. Depois de uma release ter sido publicada e
 validada, um passo de revisão corrido por um maintainer lê as mudanças entre a tag anterior e a

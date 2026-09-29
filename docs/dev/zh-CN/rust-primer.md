@@ -1,4 +1,4 @@
-<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
+<!-- translated-from: rust-primer.md sha256:7df531761d748651535cf66218ca9ae3a61dd2cf269836df4a757ba7df96b431 -->
 # 本代码库的 Rust 入门
 
 **阅读之前：** [云原生入门](cloud-native-primer.md)（示例用到其中的词汇），以及基础 Rust（[The Rust Programming Language](https://doc.rust-lang.org/book/) 第 1–10 章）。
@@ -127,7 +127,29 @@ static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>
   的 crate 只负责构建 `BackendRegistration`（`delonix_proxmox::registration`），由组合根把它交给
   `delonix_vm::register_backend`。
 
-这个设计背后的决定记在 [ADR-0008](../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在 `crates/adapters/delonix-vm/src/lib.rs` 靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
+这个设计背后的决定记在 [ADR-0008](../../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在 `crates/adapters/delonix-vm/src/lib.rs` 靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
+
+并不是每个端口都是 trait 对象。VM 用例把它们的端口当作**泛型参数**来接收：
+
+```rust
+// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine<'a, R, B, D, S> {
+    pub root: &'a Path,
+    pub repo: R,       // R: StateRepository<Vm>
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option<&'a dyn VmNetwork>,
+}
+```
+
+原因是 trait 对象的一条规则：带有泛型方法的 trait 不是 *dyn-compatible*（对象安全）的，而
+`StateRepository<T>` 恰好有一个（`update<F>`，在 `crates/foundation/delonix-model/src/ports.rs`
+里）。所以这个 engine 是泛型的，就像 `container run` 的 `resolve_run<I, S, D, H>` 一样，由每个
+调用方挑选具体类型：`delonix-vm` 在 `engine`（`crates/adapters/delonix-vm/src/lib.rs`）里构建
+`VmEngine<JsonStore<Vm>, RegistryBackends, QemuImgDisks, CloudLocaldsSeed>`，而 `vm::tests` 里的
+测试则在一个内存中的 store 和一些会记录调用的假实现之上构建一个。泛型的代价是每种组合都有一份
+代码副本（单态化，monomorphization）；好处是不必为了适配 `dyn` 而改造任何端口。
 
 **延伸阅读：** The Rust Book ——
 [Trait](https://doc.rust-lang.org/book/ch10-02-traits.html)，
@@ -189,7 +211,7 @@ let cloned = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32))
 
 `mount_overlay_if_marked` 通过 `rustix::mount::fsopen`，再对每一层调用一次
 `fsconfig_set_string(&fs, "lowerdir+", lower)`，来挂载一个容器的 overlay 根。经典的 `mount(2)` 把所有选项都打包进一个页大小的 `data` 字符串里，对于层数很多的镜像，内核会把它默默地截断。这个测量和这个决定都记在
-[ADR-0037](../adr/0037-overlay-mount-new-api.md) 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 `///` 注释，会解释促使它这么写的那次故障。
+[ADR-0037](../../adr/0037-overlay-mount-new-api.md) 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 `///` 注释，会解释促使它这么写的那次故障。
 
 **延伸阅读：** The Rust Book ——[Unsafe Rust](https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html)；
 [Rustonomicon](https://doc.rust-lang.org/nomicon/)（尤其是
@@ -227,7 +249,7 @@ pub cloud_init: Option<bool>,
 **自动生成的 schema。** Spec 类型会 derive `schemars::JsonSchema`（比如
 `crates/contexts/delonix-compute/src/pod.rs` 里的 `PodSpec`），
 `bins/delonix-runtime-bin/src/cmd/schema.rs` 会从它们生成出已发布的 JSON Schema
-（[ADR-0007](../adr/0007-generated-manifest-schema.md)）。留意那里的一句注释：schemars 遵守 `#[serde(rename)]`，但不遵守 `#[serde(alias)]`。
+（[ADR-0007](../../adr/0007-generated-manifest-schema.md)）。留意那里的一句注释：schemars 遵守 `#[serde(rename)]`，但不遵守 `#[serde(alias)]`。
 
 **延伸阅读：** [serde.rs](https://serde.rs/) ——
 [字段属性](https://serde.rs/field-attrs.html)（`default`、`skip_serializing_if`、`alias`）；
