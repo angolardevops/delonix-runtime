@@ -95,6 +95,24 @@ pub fn is_alive(pid: i32) -> bool {
     pid > 0 && unsafe { libc::kill(pid, 0) } == 0
 }
 
+/// The host's `MemAvailable` in MiB (from `/proc/meminfo`) — memory that can be
+/// given to new processes without swapping. `None` if unreadable.
+pub fn mem_available_mib() -> Option<u64> {
+    parse_mem_available_mib(&std::fs::read_to_string("/proc/meminfo").ok()?)
+}
+
+/// `MemAvailable` in MiB out of the text of `/proc/meminfo`. Pure.
+fn parse_mem_available_mib(meminfo: &str) -> Option<u64> {
+    let kib: u64 = meminfo
+        .lines()
+        .find_map(|l| l.strip_prefix("MemAvailable:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kib / 1024)
+}
+
 /// The process `starttime` (field 22 of `/proc/<pid>/stat`, jiffies since
 /// boot). Unique and stable for the process's lifetime — we use it to detect
 /// PID reuse.
@@ -159,4 +177,20 @@ pub fn self_bin() -> std::path::PathBuf {
         }
     }
     PathBuf::from("delonix")
+}
+
+#[cfg(test)]
+mod tests {
+    /// `MemAvailable` in kB becomes MiB; a text without the line is `None`,
+    /// which the VM admission reads as «cannot tell» and does not block on.
+    #[test]
+    fn mem_available_is_read_from_meminfo() {
+        let text = "MemTotal:       32000000 kB\nMemFree:  1000 kB\nMemAvailable:   20480000 kB\n";
+        assert_eq!(super::parse_mem_available_mib(text), Some(20000));
+        assert_eq!(super::parse_mem_available_mib("MemTotal: 1 kB\n"), None);
+        assert_eq!(
+            super::parse_mem_available_mib("MemAvailable: lots kB\n"),
+            None
+        );
+    }
 }

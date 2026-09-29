@@ -69,7 +69,16 @@ pub use delonix_compute::vm_backend::{
 pub mod capabilities;
 pub mod cloudinit;
 pub mod firewall;
+pub mod local_ports;
 pub mod provider;
+
+use delonix_compute::ports::{LocalDiskImages, SeedBuilder, VmBackends};
+use local_ports::{CloudLocaldsSeed, QemuImgDisks, RegistryBackends};
+
+/// The ports the orchestration below calls (see [`local_ports`]).
+const VM_BACKENDS: RegistryBackends = RegistryBackends;
+const DISKS: QemuImgDisks = QemuImgDisks;
+const SEED: CloudLocaldsSeed = CloudLocaldsSeed;
 
 // `VmVolume` — what connects `kind: Volume`/`kind: Storage` to a VM without the
 // user writing cloud-init or XML: the bin resolves the name → `source` (the
@@ -243,20 +252,6 @@ pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
 }
 
-/// The host's `MemAvailable` in MiB (from `/proc/meminfo`) — memory that can be
-/// given to new processes without swapping. `None` if unreadable.
-fn host_mem_available_mib() -> Option<u64> {
-    let s = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let kib: u64 = s
-        .lines()
-        .find_map(|l| l.strip_prefix("MemAvailable:"))?
-        .split_whitespace()
-        .next()?
-        .parse()
-        .ok()?;
-    Some(kib / 1024)
-}
-
 /// VM ADMISSION control: refuses to boot a VM if the requested memory does not
 /// fit in the host's `MemAvailable` minus a safety reserve. Unlike
 /// containers (with a budget in `delonix.slice`), a VM is a process
@@ -268,7 +263,7 @@ fn host_mem_available_mib() -> Option<u64> {
 fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
     admission_verdict(
         cfg,
-        host_mem_available_mib(),
+        delonix_node::mem_available_mib(),
         std::env::var("DELONIX_VM_RESERVE_MIB").ok().as_deref(),
     )
 }
@@ -1147,6 +1142,64 @@ pub fn clear_default_backend(base: &Path) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
     }
+}
+
+/// The backend a NEW VM gets — the policy [`VmBackends::select`] answers for
+/// this adapter's registry: the name `cfg` asks for, else the operator's
+/// standing choice, else volumes ⇒ libvirt and the firmware preference, then
+/// auto-detection among the backends that meet `required`.
+fn select_for_create(
+    base: &Path,
+    cfg: &VmConfig,
+    required: &[Capability],
+) -> Result<Box<dyn VmBackend>> {
+    // Volumes ⇒ libvirt: only it materializes virtio-9p (Cloud Hypervisor
+    // does not do 9p and would refuse in `boot`). The rule lives HERE (in the engine) and not
+    // only in the bin, so any consumer of the API inherits it. Without volumes,
+    // the normal auto-detection is kept.
+    //
+    // Cloud image (boot via FIRMWARE, without an explicit kernel) ⇒ prefer
+    // libvirt. Cloud Hypervisor's `rust-hypervisor-fw` does not load the
+    // initrd of Ubuntu cloud images (the initrd via EFI LoadFile2 is
+    // not implemented in the minimalist firmware) → the kernel boots but
+    // panics "Unable to mount root fs" (LABEL=cloudimg-rootfs
+    // does not resolve without the initrd's udev). libvirt (full UEFI/SeaBIOS)
+    // boots them. CH is left for DIRECT-KERNEL boot (k8s nodes with their own
+    // kernel), where it is the best. Only if libvirt exists; otherwise CH with
+    // a warning (better to try than to refuse).
+    //
+    // Precedence for "no opinion from the caller" (`cfg.backend` is
+    // `None`): `DELONIX_VM_BACKEND` (session-wide), then the
+    // persisted default (`set_default_backend`, machine-wide), then
+    // the capability heuristic below. Both env/persisted act exactly
+    // like an explicit `cfg.backend` — including bypassing the
+    // heuristic and its warning — because they ARE an explicit
+    // choice, just made once instead of per-command; a backend
+    // requested this way that can't actually boot the VM (e.g. the
+    // volumes/9p case above) still fails loud at boot, never silently.
+    let standing_choice = standing_backend_choice(base)?;
+    let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
+        Some(b) => Some(b.to_string()),
+        None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
+        None if cfg.kernel.is_none() => {
+            let available = LibvirtBackend.available();
+            let meets = available && require_capabilities("libvirt", required).is_ok();
+            match firmware_boot_preference(available, meets) {
+                FirmwareBootPreference::Libvirt => Some("libvirt".to_string()),
+                FirmwareBootPreference::AnyMeetingRequirements => None,
+                FirmwareBootPreference::CloudHypervisorFallback => {
+                    tracing::warn!(
+                        vm = %cfg.name,
+                        "booting a cloud image on Cloud Hypervisor (libvirt not found) — if it \
+                         panics on 'unable to mount root fs', install libvirt+qemu"
+                    );
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+    select_backend_requiring(want.as_deref(), required)
 }
 
 /// The backend that started an already-persisted VM (for liveness/stop).
@@ -3186,7 +3239,210 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
         .output();
 }
 
+/// The `blockcommit` that puts a VM back on its own disk after a live backup.
+///
+/// Pure, and separate, because of what the wrong version does: a bare
+/// `blockcommit --active --pivot` (no `--top`, no `--base`) commits the WHOLE
+/// backing chain and pivots the guest onto the BOTTOM of it — for every VM this
+/// engine creates, the shared golden image that every other VM uses as its
+/// backing file. It reports `Successfully pivoted`, the PID does not change, and
+/// the domain is now writing into an image other VMs read. Measured on a real
+/// VM, which is how it was found. Naming top and base merges only the temporary
+/// overlay, into this VM's own disk.
+fn blockcommit_argv(uri: &str, name: &str, dev: &str, top: &str, base: &str) -> Vec<String> {
+    [
+        "-c",
+        uri,
+        "blockcommit",
+        "--domain",
+        name,
+        "--path",
+        dev,
+        "--top",
+        top,
+        "--base",
+        base,
+        "--active",
+        "--pivot",
+        "--wait",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Copies a RUNNING VM's disk to `dest` without stopping it.
+///
+/// A VM that has to be stopped to be backed up is a VM nobody backs up, so this
+/// does the same thing every hypervisor-level backup tool does, using libvirt's
+/// own primitives:
+///
+/// 1. an **external snapshot** (`--disk-only --atomic`) redirects new writes to a
+///    temporary overlay and leaves the real disk read-only and quiet;
+/// 2. the now-quiet disk is copied; and
+/// 3. **`blockcommit --active --pivot`** merges what the guest wrote during the
+///    copy back into the real disk and puts the VM back on it.
+///
+/// The guest never pauses and its PID never changes.
+///
+/// **The temporary overlay is deleted only after the pivot succeeds.** Between
+/// steps 1 and 3 that file holds every write the guest has made, so removing it
+/// on the error path — the reflex, since it is "our" temp file — would destroy
+/// live data. If the pivot fails, the file stays and the error says where the VM
+/// is now running from.
+///
+/// `quiesce` asks the guest agent to flush and freeze its filesystems first,
+/// which upgrades the copy from crash-consistent to filesystem-consistent. It is
+/// opt-in because it FAILS on a guest without `qemu-guest-agent`, and failing a
+/// backup over a guest-side package that may not be installable is the wrong
+/// default.
+fn libvirt_backup_disk_live(name: &str, dest: &Path, quiesce: bool) -> Result<()> {
+    let uri = libvirt_domain_uri(name).ok_or_else(|| Error::VmNotFound(name.to_string()))?;
+
+    // The disk's TARGET (vda/sda), read from libvirt rather than assumed: it is
+    // what `snapshot-create-as` and `blockcommit` both address, and a wrong guess
+    // would act on a different disk of the same domain.
+    let blklist =
+        quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
+            Error::LiveBackupFailed(format!("live backup: cannot list the disks of {name}: {e}"))
+        })?;
+    let target = blklist
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            // type device target source
+            (f.len() >= 4 && f[0] == "file" && f[1] == "disk")
+                .then(|| (f[2].to_string(), f[3].to_string()))
+        })
+        .next()
+        .ok_or_else(|| {
+            Error::LiveBackupFailed(format!(
+                "live backup: {name} has no file-backed disk to copy"
+            ))
+        })?;
+    let (dev, source) = target;
+
+    let tmp = PathBuf::from(format!("{source}.delonix-backup-{}", std::process::id()));
+    let tmp_s = tmp.to_string_lossy().to_string();
+    let snapname = format!("delonix-backup-{}", std::process::id());
+    let diskspec = format!("{dev},file={tmp_s}");
+
+    // The overlay is created HERE and handed to libvirt with `--reuse-external`,
+    // instead of letting `snapshot-create-as` create it. Measured on Ubuntu: the
+    // per-domain AppArmor profile (virt-aa-helper) only whitelists paths already
+    // in the domain XML, so QEMU asked to create a brand-new file gets
+    // `Permission denied` — even though the file would be in the user's own
+    // directory and QEMU runs as that user. Pre-creating it makes the path known
+    // before QEMU is asked to open it.
+    let fmt = quiet("qemu-img", &["info", "--output=json", "--", &source])
+        .ok()
+        .and_then(|j| {
+            j.split("\"format\":").nth(1).map(|t| {
+                t.trim_start()
+                    .trim_start_matches('"')
+                    .split('"')
+                    .next()
+                    .unwrap_or("qcow2")
+                    .to_string()
+            })
+        })
+        .unwrap_or_else(|| "qcow2".to_string());
+    quiet(
+        "qemu-img",
+        &[
+            "create", "-q", "-f", "qcow2", "-b", &source, "-F", &fmt, "--", &tmp_s,
+        ],
+    )
+    .map_err(|e| Error::LiveBackupFailed(format!("live backup: cannot stage the overlay: {e}")))?;
+
+    let mut args = vec![
+        "-c",
+        uri,
+        "snapshot-create-as",
+        "--domain",
+        name,
+        "--name",
+        &snapname,
+        "--disk-only",
+        "--atomic",
+        "--no-metadata",
+        "--reuse-external",
+        "--diskspec",
+        &diskspec,
+    ];
+    if quiesce {
+        args.push("--quiesce");
+    }
+    quiet("virsh", &args).map_err(|e| {
+        Error::LiveBackupFailed(format!(
+            "live backup: could not snapshot {name}: {e}{}",
+            if quiesce {
+                " (--quiesce needs qemu-guest-agent running INSIDE the guest)"
+            } else {
+                ""
+            }
+        ))
+    })?;
+
+    // From here on the guest writes to `tmp`, and `source` is quiet. Copy it, but
+    // do NOT return early on failure: the pivot has to happen either way, or the
+    // VM is left running on a temporary file.
+    let copied = std::fs::copy(&source, dest)
+        .map_err(|e| Error::LiveBackupFailed(format!("live backup: copying {source}: {e}")));
+
+    // `--top` and `--base` are NOT optional here, and leaving them out is a
+    // disaster that reports success. A bare `blockcommit --active --pivot`
+    // commits the WHOLE chain and pivots the guest onto the bottom of it — which
+    // for every VM this engine creates is the shared golden image that every
+    // other VM uses as its backing file. Measured on a real VM: `Successfully
+    // pivoted`, PID unchanged, and the domain now writing straight into
+    // `vm-images/delonix-vm-base_*.qcow2`. Naming top and base merges only the
+    // temporary overlay, back into this VM's own disk.
+    let args = blockcommit_argv(uri, name, &dev, &tmp_s, &source);
+    let pivot = quiet(
+        "virsh",
+        &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+    );
+
+    match pivot {
+        Ok(_) => {
+            // Do not take "pivoted" for an answer: ASK where the domain writes.
+            // This check is what turns the failure above from silent corruption
+            // into a refusal, and it costs one `domblklist`.
+            let now = quiet("virsh", &["-c", uri, "domblklist", "--", name]).unwrap_or_default();
+            if !now.contains(source.as_str()) {
+                return Err(Error::LiveBackupFailed(format!(
+                    "live backup: {name} pivoted onto the WRONG disk — it should be writing to \
+                     {source}. Stop it NOW (virsh -c {uri} destroy {name}) and check the chain \
+                     with qemu-img info before starting it again; its backing image may be \
+                     taking writes"
+                )));
+            }
+            // Only now is `tmp` genuinely spare.
+            let _ = std::fs::remove_file(&tmp);
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(dest); // the archive would be half a story
+            return Err(Error::LiveBackupFailed(format!(
+                "live backup: {name} could NOT be put back on its own disk ({e}). It is still \
+                 running, but writing to {tmp_s}, which must not be deleted. Recover with: \
+                 virsh -c {uri} blockcommit --domain {name} --path {dev} --active --pivot --wait"
+            )));
+        }
+    }
+    copied.map(|_| ())
+}
+
 impl VmBackend for LibvirtBackend {
+    fn backup_disk_live(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        dest: &Path,
+        quiesce: bool,
+    ) -> delonix_model::Result<()> {
+        Ok(libvirt_backup_disk_live(&vm.name, dest, quiesce)?)
+    }
     fn id(&self) -> &'static str {
         "libvirt"
     }
@@ -3928,63 +4184,6 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
 /// kernel ⇒ libvirt if available). Lives here (not just in the CLI) so every
 /// consumer of this API — `stack apply`/`cluster kubeadm` included — inherits
 /// it for free.
-/// Resolves `cfg.disk` on THIS filesystem and builds the VM's thin qcow2
-/// overlay from it. Extracted from `create_with` so a backend that owns its
-/// storage can skip the whole thing (`manages_own_storage`) instead of the
-/// engine doing local disk work for a hypervisor on another machine.
-fn prepare_local_overlay(
-    vmdir: &Path,
-    cfg: &VmConfig,
-    on: &dyn Fn(CreateStage),
-) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
-    let disk_path = std::fs::canonicalize(&cfg.disk).map_err(|e| {
-        Error::from(delonix_model::Error::not_found_or_io(e, || {
-            format!("VM image {}", cfg.disk)
-        }))
-    })?;
-    let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
-    if !overlay.exists() {
-        on(CreateStage::Disk);
-        let bf = disk_backing_format(&disk_path);
-        let mut argv: Vec<String> = vec![
-            "create".into(),
-            "-f".into(),
-            "qcow2".into(),
-            "-b".into(),
-            disk_path.to_string_lossy().into_owned(),
-            "-F".into(),
-            bf,
-            overlay.to_string_lossy().into_owned(),
-        ];
-        // Tamanho pedido para o nó. O `qemu-img create` aceita-o depois do
-        // ficheiro e o guest cresce a raiz no arranque (growpart do cloud-init,
-        // medido). Sem isto o overlay herda o tamanho da base — que é
-        // deliberadamente o PISO da golden.
-        if let Some(gib) = cfg.disk_size_gib {
-            let pedido = u64::from(gib) * 1024 * 1024 * 1024;
-            // Um overlay não pode ser menor que o seu backing file: o
-            // `qemu-img` aceita-o em algumas versões e o resultado é uma VM que
-            // arranca e corrompe o filesystem. Recusar por nome e com os dois
-            // números é a diferença entre um erro e um mistério.
-            if let Some(base_bytes) = disk_virtual_size_bytes(&disk_path) {
-                if pedido < base_bytes {
-                    return Err(Error::DiskTooSmall(format!(
-                        "--disk-size {gib}G é menor que a imagem base ({} GiB): um overlay qcow2 \
-                         não encolhe o seu backing file",
-                        base_bytes / (1024 * 1024 * 1024)
-                    )));
-                }
-            }
-            argv.push(format!("{gib}G"));
-        }
-        run_quiet(
-            "qemu-img",
-            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
-        )?;
-    }
-    Ok((disk_path, overlay))
-}
-
 pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Result<Vm> {
     if !valid_vm_name(&cfg.name) {
         return Err(Error::InvalidName(format!(
@@ -4015,65 +4214,17 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
         Some(ex) => {
             // Resolved ONCE. It used to be built twice, which is free for a
             // local backend and a second authentication for a remote one.
-            let b = backend_for(ex)?;
+            let b = VM_BACKENDS.for_vm(ex)?;
             // A requirement holds on a restart too: the backend is the record's,
             // and if it cannot do what the caller now requires the answer is
             // the same refusal, not a VM that came back without it.
-            require_capabilities(b.id(), &required)?;
+            VM_BACKENDS.require(b.id(), &required)?;
             if b.is_running(ex) {
                 return Ok(ex.clone()); // already running — idempotent
             }
             b
         }
-        None => {
-            // Volumes ⇒ libvirt: only it materializes virtio-9p (Cloud Hypervisor
-            // does not do 9p and would refuse in `boot`). The rule lives HERE (in the engine) and not
-            // only in the bin, so any consumer of the API inherits it. Without volumes,
-            // the normal auto-detection is kept.
-            //
-            // Cloud image (boot via FIRMWARE, without an explicit kernel) ⇒ prefer
-            // libvirt. Cloud Hypervisor's `rust-hypervisor-fw` does not load the
-            // initrd of Ubuntu cloud images (the initrd via EFI LoadFile2 is
-            // not implemented in the minimalist firmware) → the kernel boots but
-            // panics "Unable to mount root fs" (LABEL=cloudimg-rootfs
-            // does not resolve without the initrd's udev). libvirt (full UEFI/SeaBIOS)
-            // boots them. CH is left for DIRECT-KERNEL boot (k8s nodes with their own
-            // kernel), where it is the best. Only if libvirt exists; otherwise CH with
-            // a warning (better to try than to refuse).
-            //
-            // Precedence for "no opinion from the caller" (`cfg.backend` is
-            // `None`): `DELONIX_VM_BACKEND` (session-wide), then the
-            // persisted default (`set_default_backend`, machine-wide), then
-            // the capability heuristic below. Both env/persisted act exactly
-            // like an explicit `cfg.backend` — including bypassing the
-            // heuristic and its warning — because they ARE an explicit
-            // choice, just made once instead of per-command; a backend
-            // requested this way that can't actually boot the VM (e.g. the
-            // volumes/9p case above) still fails loud at boot, never silently.
-            let standing_choice = standing_backend_choice(base)?;
-            let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
-                Some(b) => Some(b.to_string()),
-                None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
-                None if cfg.kernel.is_none() => {
-                    let available = LibvirtBackend.available();
-                    let meets = available && require_capabilities("libvirt", &required).is_ok();
-                    match firmware_boot_preference(available, meets) {
-                        FirmwareBootPreference::Libvirt => Some("libvirt".to_string()),
-                        FirmwareBootPreference::AnyMeetingRequirements => None,
-                        FirmwareBootPreference::CloudHypervisorFallback => {
-                            eprintln!(
-                                "warning: booting a cloud image on Cloud Hypervisor \
-(libvirt not found) — if it panics on 'unable to mount root fs', install \
-libvirt+qemu"
-                            );
-                            None
-                        }
-                    }
-                }
-                None => None,
-            };
-            select_backend_requiring(want.as_deref(), &required)?
-        }
+        None => VM_BACKENDS.select(base, cfg, &required)?,
     };
 
     // Admission: refuses to boot if there is no RAM on the host (anti-overcommit).
@@ -4110,7 +4261,7 @@ libvirt+qemu"
             std::path::PathBuf::from(&cfg.disk),
         )
     } else {
-        prepare_local_overlay(&vmdir, cfg, on)?
+        DISKS.overlay(&vmdir, &cfg.name, &cfg.disk, cfg.disk_size_gib, on)?
     };
 
     // REALIZE the cloud-init intent, for the backends that need it realized as a
@@ -4130,15 +4281,7 @@ libvirt+qemu"
     // ISO nobody reads, on a drive that changes the guest's device list.
     let realized;
     let cfg = if cfg.seed.is_none() && cfg.cloud_init != Some(false) && !own_storage {
-        let iso = cloudinit::generate_seed_iso(
-            base,
-            &cfg.name,
-            cfg.hostname.as_deref(),
-            cfg.ci_user.as_deref(),
-            &cfg.ssh_keys,
-            None,
-            &cfg.volumes,
-        )?;
+        let iso = SEED.seed(base, cfg)?;
         realized = VmConfig {
             seed: Some(iso.to_string_lossy().into_owned()),
             ..cfg.clone()
@@ -4243,7 +4386,7 @@ libvirt+qemu"
 /// comes first so a VM without a policy never costs a report.
 pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bool {
     matches!(policy, Some("always") | Some("on-failure"))
-        && !backend_declares(backend_id, Capability::VmRestartPolicyNative)
+        && !VM_BACKENDS.declares(backend_id, Capability::VmRestartPolicyNative)
 }
 
 /// Removes a VM: stops the VMM (via its backend), and deletes overlay/state.
@@ -4342,7 +4485,7 @@ fn remove_inner(
             // the local backends (the default), and deliberately not for a
             // remote one, whose disk lives on the node.
             on(DestroyStage::Provider(&vm.backend));
-            let backend = backend_for(&vm);
+            let backend = VM_BACKENDS.for_vm(&vm).map_err(Error::from);
             provider_released = backend
                 .as_ref()
                 .ok()
@@ -4359,13 +4502,13 @@ fn remove_inner(
         Err(_) => {
             // No record: there may be an orphaned libvirt domain with this name —
             // clean it up, and the ingress tap for safety.
-            let orphan = libvirt_domain_uri(name).is_some();
-            if orphan {
-                on(DestroyStage::Provider("libvirt"));
+            let orphan = VM_BACKENDS.unrecorded(name);
+            if let Some(held_by) = orphan {
+                on(DestroyStage::Provider(held_by));
             }
-            if let Err(e) = libvirt_cleanup(name) {
+            if let Err(e) = VM_BACKENDS.remove_unrecorded(name) {
                 if !force {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
             // No record, so no address to trust — the tap goes, the firewall
@@ -4376,7 +4519,7 @@ fn remove_inner(
             if let Ok(net) = network() {
                 net.detach_tap(name, None);
             }
-            orphan
+            orphan.is_some()
         }
     };
     // CHECK BEFORE DELETING. This block used to run BEFORE the `existed` test,
@@ -4497,14 +4640,15 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
         // `rm`): power it off anyway — the intent is unambiguous and answering
         // "no such VM" for a VM that libvirt lists would be a lie.
         Err(e) if e.is_not_found() => {
-            return match libvirt_domain_uri(name) {
-                Some(uri) => libvirt_poweroff(uri, name),
-                None => Err(Error::VmNotFound(name.to_string())),
+            return if VM_BACKENDS.stop_unrecorded(name)? {
+                Ok(())
+            } else {
+                Err(Error::VmNotFound(name.to_string()))
             };
         }
         Err(e) => return Err(state_err(e)),
     };
-    let backend = backend_for(&vm)?;
+    let backend = VM_BACKENDS.for_vm(&vm)?;
     // BEFORE the stop, and its failure aborts the stop: on libvirt the stop
     // undefines the domain, and the undefine deletes the snapshot metadata.
     // `remove` deliberately does NOT come through here — there the whole
@@ -4544,7 +4688,7 @@ pub fn pause(base: &Path, name: &str) -> Result<()> {
             vm.status
         )));
     }
-    backend_for(&vm)?.pause(&vmdir, &vm)?;
+    VM_BACKENDS.for_vm(&vm)?.pause(&vmdir, &vm)?;
     vm.status = Status::Paused;
     st.save(name, &vm).map_err(state_err)
 }
@@ -4561,7 +4705,7 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
             vm.status
         )));
     }
-    backend_for(&vm)?.unpause(&vmdir, &vm)?;
+    VM_BACKENDS.for_vm(&vm)?.unpause(&vmdir, &vm)?;
     vm.status = Status::Running;
     st.save(name, &vm).map_err(state_err)
 }
@@ -4652,7 +4796,9 @@ pub fn set_cloud_init(
             .map(|k| k.into_iter().map(|s| s.trim().to_string()).collect())
             .unwrap_or_else(|| vm.boot.ssh_keys.clone()),
     };
-    backend_for(&vm)?.update_cloud_init(&vmdir, &vm, &intent)?;
+    VM_BACKENDS
+        .for_vm(&vm)?
+        .update_cloud_init(&vmdir, &vm, &intent)?;
     vm.boot.hostname = intent.hostname;
     vm.boot.ci_user = intent.ci_user;
     vm.boot.ssh_keys = intent.ssh_keys;
@@ -4702,7 +4848,9 @@ pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>)
     }
     let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
     let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
-    backend_for(&vm)?.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
+    VM_BACKENDS
+        .for_vm(&vm)?
+        .resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
     vm.vcpus = target_vcpus;
     if let Some(m) = memory {
         vm.memory = m.trim().to_string();
@@ -4754,7 +4902,9 @@ pub fn move_to_node(base: &Path, name: &str, target: &str, opts: &MoveOptions) -
     if let Some(why) = move_power_refusal(&vm.status, live) {
         return Err(Error::MoveRefused(format!("VM '{name}' {why}")));
     }
-    let handle = backend_for(&vm)?.move_to_node(&vmdir, &vm, target, opts)?;
+    let handle = VM_BACKENDS
+        .for_vm(&vm)?
+        .move_to_node(&vmdir, &vm, target, opts)?;
     vm.api_socket = handle;
     st.save(name, &vm).map_err(state_err)?;
     Ok(vm)
@@ -4769,7 +4919,7 @@ pub fn guest_info(base: &Path, name: &str) -> Result<Option<GuestInfo>> {
     if vm.status != Status::Running {
         return Ok(None);
     }
-    Ok(backend_for(&vm)?.guest_info(&vm)?)
+    Ok(VM_BACKENDS.for_vm(&vm)?.guest_info(&vm)?)
 }
 
 /// Why a move of a VM in `status` is refused for `live`, or `None`. Pure.
@@ -4800,7 +4950,7 @@ pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    Ok(backend_for(&vm)?.snapshot(&vmdir, &vm, snap)?)
+    Ok(VM_BACKENDS.for_vm(&vm)?.snapshot(&vmdir, &vm, snap)?)
 }
 
 /// Reverts VM `name` to the named snapshot (see [`VmBackend::restore`]).
@@ -4812,7 +4962,7 @@ pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.restore(&vmdir, &vm, snap)?;
+    VM_BACKENDS.for_vm(&vm)?.restore(&vmdir, &vm, snap)?;
     // A revert changes what the VM IS: a checkpoint taken running brings a
     // stopped VM back up, one taken offline puts a running VM down. `status` is
     // the reconciler this engine already has, under the store lock — calling it
@@ -4820,212 +4970,19 @@ pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     status(base, name).map(|_| ())
 }
 
-/// The `blockcommit` that puts a VM back on its own disk after a live backup.
-///
-/// Pure, and separate, because of what the wrong version does: a bare
-/// `blockcommit --active --pivot` (no `--top`, no `--base`) commits the WHOLE
-/// backing chain and pivots the guest onto the BOTTOM of it — for every VM this
-/// engine creates, the shared golden image that every other VM uses as its
-/// backing file. It reports `Successfully pivoted`, the PID does not change, and
-/// the domain is now writing into an image other VMs read. Measured on a real
-/// VM, which is how it was found. Naming top and base merges only the temporary
-/// overlay, into this VM's own disk.
-fn blockcommit_argv(uri: &str, name: &str, dev: &str, top: &str, base: &str) -> Vec<String> {
-    [
-        "-c",
-        uri,
-        "blockcommit",
-        "--domain",
-        name,
-        "--path",
-        dev,
-        "--top",
-        top,
-        "--base",
-        base,
-        "--active",
-        "--pivot",
-        "--wait",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
-}
-
-/// Copies a RUNNING VM's disk to `dest` without stopping it.
-///
-/// A VM that has to be stopped to be backed up is a VM nobody backs up, so this
-/// does the same thing every hypervisor-level backup tool does, using libvirt's
-/// own primitives:
-///
-/// 1. an **external snapshot** (`--disk-only --atomic`) redirects new writes to a
-///    temporary overlay and leaves the real disk read-only and quiet;
-/// 2. the now-quiet disk is copied; and
-/// 3. **`blockcommit --active --pivot`** merges what the guest wrote during the
-///    copy back into the real disk and puts the VM back on it.
-///
-/// The guest never pauses and its PID never changes.
-///
-/// **The temporary overlay is deleted only after the pivot succeeds.** Between
-/// steps 1 and 3 that file holds every write the guest has made, so removing it
-/// on the error path — the reflex, since it is "our" temp file — would destroy
-/// live data. If the pivot fails, the file stays and the error says where the VM
-/// is now running from.
-///
-/// `quiesce` asks the guest agent to flush and freeze its filesystems first,
-/// which upgrades the copy from crash-consistent to filesystem-consistent. It is
-/// opt-in because it FAILS on a guest without `qemu-guest-agent`, and failing a
-/// backup over a guest-side package that may not be installable is the wrong
-/// default.
+/// Copies a RUNNING VM's disk to `dest` without stopping it (see
+/// [`VmBackend::backup_disk_live`]); a backend that cannot refuses by name.
 pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> Result<()> {
     let vm = load_vm(base, name)?;
-    if vm.backend != "libvirt" {
-        return Err(Error::LiveBackupNeedsLibvirt(format!(
-            "live disk backup needs the libvirt backend (this VM runs on {}); stop it first, or \
-             use `delonix vm snapshot create {name} <label>`",
-            vm.backend
-        )));
-    }
-    let uri = libvirt_domain_uri(name).ok_or_else(|| Error::VmNotFound(name.to_string()))?;
-
-    // The disk's TARGET (vda/sda), read from libvirt rather than assumed: it is
-    // what `snapshot-create-as` and `blockcommit` both address, and a wrong guess
-    // would act on a different disk of the same domain.
-    let blklist =
-        quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
-            Error::LiveBackupFailed(format!("live backup: cannot list the disks of {name}: {e}"))
-        })?;
-    let target = blklist
-        .lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split_whitespace().collect();
-            // type device target source
-            (f.len() >= 4 && f[0] == "file" && f[1] == "disk")
-                .then(|| (f[2].to_string(), f[3].to_string()))
-        })
-        .next()
-        .ok_or_else(|| {
-            Error::LiveBackupFailed(format!(
-                "live backup: {name} has no file-backed disk to copy"
-            ))
-        })?;
-    let (dev, source) = target;
-
-    let tmp = PathBuf::from(format!("{source}.delonix-backup-{}", std::process::id()));
-    let tmp_s = tmp.to_string_lossy().to_string();
-    let snapname = format!("delonix-backup-{}", std::process::id());
-    let diskspec = format!("{dev},file={tmp_s}");
-
-    // The overlay is created HERE and handed to libvirt with `--reuse-external`,
-    // instead of letting `snapshot-create-as` create it. Measured on Ubuntu: the
-    // per-domain AppArmor profile (virt-aa-helper) only whitelists paths already
-    // in the domain XML, so QEMU asked to create a brand-new file gets
-    // `Permission denied` — even though the file would be in the user's own
-    // directory and QEMU runs as that user. Pre-creating it makes the path known
-    // before QEMU is asked to open it.
-    let fmt = quiet("qemu-img", &["info", "--output=json", "--", &source])
-        .ok()
-        .and_then(|j| {
-            j.split("\"format\":").nth(1).map(|t| {
-                t.trim_start()
-                    .trim_start_matches('"')
-                    .split('"')
-                    .next()
-                    .unwrap_or("qcow2")
-                    .to_string()
-            })
-        })
-        .unwrap_or_else(|| "qcow2".to_string());
-    quiet(
-        "qemu-img",
-        &[
-            "create", "-q", "-f", "qcow2", "-b", &source, "-F", &fmt, "--", &tmp_s,
-        ],
-    )
-    .map_err(|e| Error::LiveBackupFailed(format!("live backup: cannot stage the overlay: {e}")))?;
-
-    let mut args = vec![
-        "-c",
-        uri,
-        "snapshot-create-as",
-        "--domain",
-        name,
-        "--name",
-        &snapname,
-        "--disk-only",
-        "--atomic",
-        "--no-metadata",
-        "--reuse-external",
-        "--diskspec",
-        &diskspec,
-    ];
-    if quiesce {
-        args.push("--quiesce");
-    }
-    quiet("virsh", &args).map_err(|e| {
-        Error::LiveBackupFailed(format!(
-            "live backup: could not snapshot {name}: {e}{}",
-            if quiesce {
-                " (--quiesce needs qemu-guest-agent running INSIDE the guest)"
-            } else {
-                ""
-            }
-        ))
-    })?;
-
-    // From here on the guest writes to `tmp`, and `source` is quiet. Copy it, but
-    // do NOT return early on failure: the pivot has to happen either way, or the
-    // VM is left running on a temporary file.
-    let copied = std::fs::copy(&source, dest)
-        .map_err(|e| Error::LiveBackupFailed(format!("live backup: copying {source}: {e}")));
-
-    // `--top` and `--base` are NOT optional here, and leaving them out is a
-    // disaster that reports success. A bare `blockcommit --active --pivot`
-    // commits the WHOLE chain and pivots the guest onto the bottom of it — which
-    // for every VM this engine creates is the shared golden image that every
-    // other VM uses as its backing file. Measured on a real VM: `Successfully
-    // pivoted`, PID unchanged, and the domain now writing straight into
-    // `vm-images/delonix-vm-base_*.qcow2`. Naming top and base merges only the
-    // temporary overlay, back into this VM's own disk.
-    let args = blockcommit_argv(uri, name, &dev, &tmp_s, &source);
-    let pivot = quiet(
-        "virsh",
-        &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-    );
-
-    match pivot {
-        Ok(_) => {
-            // Do not take "pivoted" for an answer: ASK where the domain writes.
-            // This check is what turns the failure above from silent corruption
-            // into a refusal, and it costs one `domblklist`.
-            let now = quiet("virsh", &["-c", uri, "domblklist", "--", name]).unwrap_or_default();
-            if !now.contains(source.as_str()) {
-                return Err(Error::LiveBackupFailed(format!(
-                    "live backup: {name} pivoted onto the WRONG disk — it should be writing to \
-                     {source}. Stop it NOW (virsh -c {uri} destroy {name}) and check the chain \
-                     with qemu-img info before starting it again; its backing image may be \
-                     taking writes"
-                )));
-            }
-            // Only now is `tmp` genuinely spare.
-            let _ = std::fs::remove_file(&tmp);
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(dest); // the archive would be half a story
-            return Err(Error::LiveBackupFailed(format!(
-                "live backup: {name} could NOT be put back on its own disk ({e}). It is still \
-                 running, but writing to {tmp_s}, which must not be deleted. Recover with: \
-                 virsh -c {uri} blockcommit --domain {name} --path {dev} --active --pivot --wait"
-            )));
-        }
-    }
-    copied.map(|_| ())
+    Ok(VM_BACKENDS
+        .for_vm(&vm)?
+        .backup_disk_live(&vms_dir(base), &vm, dest, quiesce)?)
 }
 
 /// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
-    Ok(backend_for(&vm)?.snapshots(&vms_dir(base), &vm)?)
+    Ok(VM_BACKENDS.for_vm(&vm)?.snapshots(&vms_dir(base), &vm)?)
 }
 
 /// Deletes VM `name`'s snapshot `snap` (see [`VmBackend::delete_snapshot`]).
@@ -5037,7 +4994,9 @@ pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    Ok(backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)?)
+    Ok(VM_BACKENDS
+        .for_vm(&vm)?
+        .delete_snapshot(&vmdir, &vm, snap)?)
 }
 
 /// Applies one direction of VM `name`'s own firewall (see
@@ -5045,7 +5004,9 @@ pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
 pub fn apply_firewall(base: &Path, name: &str, policy: &firewall::Policy) -> Result<()> {
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    Ok(backend_for(&vm)?.apply_firewall(&vmdir, &vm, policy)?)
+    Ok(VM_BACKENDS
+        .for_vm(&vm)?
+        .apply_firewall(&vmdir, &vm, policy)?)
 }
 
 /// Reads one direction of VM `name`'s own firewall back (see
@@ -5057,7 +5018,9 @@ pub fn read_firewall(
 ) -> Result<firewall::Policy> {
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    Ok(backend_for(&vm)?.read_firewall(&vmdir, &vm, direction)?)
+    Ok(VM_BACKENDS
+        .for_vm(&vm)?
+        .read_firewall(&vmdir, &vm, direction)?)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
@@ -5255,7 +5218,7 @@ pub fn restart(base: &Path, name: &str) -> Result<Vm> {
         delonix_model::Error::NotFound(n) => Error::VmNotFound(n),
         e => e.into(),
     })?;
-    if backend_for(&vm)?.is_running(&vm) {
+    if VM_BACKENDS.for_vm(&vm)?.is_running(&vm) {
         stop(base, name)?;
     }
     create(base, &config_from(&vm))
@@ -5281,7 +5244,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     // read-modify-write. `load()` above already read the record, so this costs
     // nothing extra.
     let named = st.load(name).map_err(state_err)?;
-    let backend = backend_for(&named)?;
+    let backend = VM_BACKENDS.for_vm(&named)?;
     st.update(name, |vm| {
         let old_ip = vm.ip.clone();
         let old_status = vm.status.clone();
@@ -5344,7 +5307,8 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
 /// a boot wait, and the useful default there is the one that does not go and
 /// probe an address nobody can vouch for.
 pub fn ip_is_predicted(vm: &Vm) -> bool {
-    backend_for(vm)
+    VM_BACKENDS
+        .for_vm(vm)
         .map(|b| b.ip_is_predicted())
         .unwrap_or(false)
 }
@@ -5823,6 +5787,33 @@ Format specific information:
             "sock".into(),
         );
         assert!(Nothing.disk_health(Path::new("/tmp"), &vm).is_ok());
+    }
+
+    /// A live disk backup is a backend's mechanism (P4b.3a): a backend that
+    /// cannot copy a disk under a running guest refuses by name, with the code
+    /// the orchestration used to answer with itself (DX-1514) — never touching
+    /// the destination.
+    #[test]
+    fn a_backend_without_a_live_backup_refuses_it_by_name() {
+        let vm = Vm::new(
+            "x".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            "n".into(),
+            "tap".into(),
+            "mac".into(),
+            "sock".into(),
+        );
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dest = dir.path().join("x.qcow2");
+        let e = CloudHypervisorBackend
+            .backup_disk_live(dir.path(), &vm, &dest, false)
+            .unwrap_err();
+        assert_eq!(e.number(), 1514, "{e}");
+        assert!(e.to_string().contains("cloud-hypervisor"), "{e}");
+        assert!(!dest.exists(), "the refusal wrote the destination");
     }
 
     /// REGRESSION: toda a ferramenta cujo OUTPUT este crate parseia tem de

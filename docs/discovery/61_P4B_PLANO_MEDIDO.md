@@ -276,3 +276,45 @@ contexto chama `Command::new`; que o `delonix-compute` já depende do `delonix-n
 `StateRepository<T>` não é object-safe. Não validado: se o `select` cabe numa assinatura sem
 arrastar mais política do que a listada (a auto-detecção e o firmware medem-se ao cortar), e o
 custo real da P4b.3b — o entrançado só se mede ao desfazê-lo, como o plano já dizia.
+
+## Adenda P4b.3a (2026-09-29) — o conhecimento de backend saiu da orquestração
+
+**Feito, tudo ainda dentro do `delonix-vm`.** A orquestração passou de 1 457 para 1 165 linhas
+e tem hoje **zero** `virsh`, `libvirt_domain_uri`/`libvirt_cleanup`/`libvirt_poweroff`,
+`qemu-img`, `cloudinit::` e `backend_for` — contados sobre o intervalo `valid_vm_name` →
+primeiro módulo de testes. Ficam as 15 chamadas a `store(base)`, que são da P4b.3b.
+
+- **`VmBackend::backup_disk_live`** no porto (compute), com a recusa por omissão que a
+  orquestração dava antes, com o mesmo texto e o mesmo DX-1514; o libvirt implementa-o com o
+  corpo de antes (`libvirt_backup_disk_live`, agora ao lado do `LibvirtBackend`).
+- **Os três portos** no `delonix_compute::ports` e a implementação no `delonix-vm`
+  (`local_ports.rs`: `RegistryBackends`, `QemuImgDisks`, `CloudLocaldsSeed`). A escolha do
+  backend de uma VM nova saiu do `create_with` para o `select_for_create`, junto do registo; o
+  `prepare_local_overlay` passou para dentro do `QemuImgDisks`.
+- **A leitura do `/proc/meminfo`** desceu para o `delonix-node` (`mem_available_mib`), e o
+  veredicto de admissão ficou com a orquestração.
+- **Um `eprintln!` a menos** numa biblioteca: o aviso de «cloud image em Cloud Hypervisor sem
+  libvirt» passou a `tracing::warn!` (ratchet `library_prints` 90 → 89).
+
+**Desvios ao esboço da adenda anterior, medidos ao cortar:**
+
+- O `VmBackends` precisou de mais duas perguntas ao registo: `require` (as capacidades exigidas,
+  que um `start` também verifica) e `declares` (a política de restart, o namespace e o
+  anti-spoof perguntam o relatório de um backend). O «domínio sem registo» ficou em três
+  métodos em vez de dois: `unrecorded(name) -> Option<&'static str>` diz QUE backend o tem (o
+  `rm` anuncia-o no progresso), e `stop_unrecorded`/`remove_unrecorded` agem.
+- O `LocalDiskImages::overlay` recebe o callback de progresso (o `CreateStage::Disk` só sai
+  quando o overlay é mesmo criado) e devolve `(base, overlay)`, porque o registo da VM guarda os
+  dois. O `SeedBuilder::seed` recebe o `VmConfig` inteiro: o seed lê o hostname, o utilizador,
+  as chaves e os volumes.
+
+**Uma correcção à adenda anterior.** Ela dizia que o portão desta fatia era «o `backup create
+vm` de uma VM libvirt a correr com dois discos, o caso que a bateria de 2026-09-24 já cobre».
+Não cobria: a linha `vm.backup-disk` do catálogo está `partial` precisamente porque a bateria
+só fazia o backup de um container. Esta fatia acrescenta o caso à secção de snapshots libvirt
+do `scripts/e2e.sh`: com a VM a correr, o arquivo é criado, a VM continua `running`, e o
+`domblklist` mostra-a a escrever no seu próprio overlay (nem no temporário, nem na imagem base
+— o defeito que um `blockcommit` sem `--top`/`--base` esconde atrás de «Successfully
+pivoted»). **Medido:** as secções de VM da bateria contra o binário desta árvore deram 101
+PASS, 0 FAIL, com os quatro checks novos entre eles. A linha do catálogo não foi promovida:
+isso é decisão da ADR-0050, com um check de restauro ao lado.

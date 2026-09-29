@@ -553,6 +553,27 @@ pub trait VmBackend {
         Ok(None)
     }
 
+    /// Copies a RUNNING VM's disk to `dest` without stopping it. The guest
+    /// never pauses; a backend redirects its writes while the disk is copied and
+    /// merges them back after (libvirt: an external snapshot, then
+    /// `blockcommit --pivot`). `quiesce` asks the guest agent to freeze its
+    /// filesystems first. Default: refused by name — a backend that cannot copy
+    /// a disk under a running guest says so, and the caller stops the VM first.
+    fn backup_disk_live(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        _dest: &Path,
+        _quiesce: bool,
+    ) -> delonix_model::Result<()> {
+        Err(Error::LiveBackupNeedsLibvirt(format!(
+            "live disk backup needs the libvirt backend (this VM runs on {}); stop it first, or \
+             use `delonix vm snapshot create {} <label>`",
+            self.id(),
+            vm.name
+        ))
+        .into())
+    }
     /// Takes a named snapshot of the VM. On libvirt this is a **system checkpoint**
     /// (`virsh snapshot-create-as`): for a running domain it captures memory + disk
     /// state; `restore` reverts to it. Default: unsupported — a backend that does not
