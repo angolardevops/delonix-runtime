@@ -138,6 +138,131 @@ for d in os.listdir("/proc"):
 EOF
 }
 
+# O que sobra do sandbox no host depois do teardown, com prazo: re-amostra o
+# `sandbox_pids` inteiro (não uma lista fixa — um processo nascido já durante o
+# teardown também conta) até o conjunto ficar vazio. Dois prazos:
+#
+#   - `$1` s (20 por omissão) para tudo;
+#   - depois disso, até `$2` s (120) SÓ enquanto cada processo que resta está
+#     comprovadamente a sair: zombie, `PF_EXITING` nas flags do `stat`, ou um
+#     supervisor cujos filhos estão todos nesse estado (o `netns run` em
+#     `do_wait` sobre o workload que despeja o overlay). Um processo vivo que
+#     não está a sair — uma fuga — chumba ao fim do primeiro prazo.
+#
+# Sai vazio (rc 0) se ficou limpo sem esperar; com uma linha `#` se esperou; e,
+# se sobrou algo, uma linha `#` e uma por processo com o que é preciso para o
+# diagnosticar — pid, ppid (e o `comm` do pai), estado, `wchan`, se está a sair,
+# `comm`, idade, o `DELONIX_ROOT`, o `cmdline` (vazio a meio da saída) e os
+# filhos (o workload não herda `DELONIX_ROOT`, é pelo supervisor que se chega a
+# ele) — com rc 1.
+#
+# Porque é que 5 s sobre uma lista fixa não chegavam: a 2026-09-29,
+# `control_restart` deu `FAIL sandbox-teardown — 2749065:S:delonix` uma vez e
+# passou nas três corridas seguintes com o mesmo binário; segundos depois o pid
+# já não existia. Na medição deste fix, com ~1,1 GB de `Dirty` no host, o
+# supervisor ficou 51 s em `do_wait` enquanto o workload (PID 1 da pidns) estava
+# em `D` em `wb_wait_for_completion`: é a saída descrita no AGENTS.md («um SIGKILL
+# entregue não é um processo morto»), não uma fuga.
+sandbox_leftover() {
+  SANDBOX="$SANDBOX" BASE="${1:-20}" CAP="${2:-120}" python3 - <<'EOF'
+import os, time
+want = os.environ["SANDBOX"].rstrip("/") + "/"
+base, cap = float(os.environ["BASE"]), float(os.environ["CAP"])
+hz = os.sysconf("SC_CLK_TCK")
+PF_EXITING = 0x4
+
+def read(path):
+    try:
+        return open(path, "rb").read().replace(b"\0", b" ").decode(errors="replace").strip()
+    except OSError:
+        return ""
+
+def root_of(pid):
+    try:
+        env = open(f"/proc/{pid}/environ", "rb").read().split(b"\0")
+    except OSError:
+        return None
+    for kv in env:
+        if kv.startswith(b"DELONIX_ROOT="):
+            v = kv[len(b"DELONIX_ROOT="):].decode(errors="replace")
+            return v if (v + "/").startswith(want) else None
+    return None
+
+def sample():
+    return {int(d): r for d in os.listdir("/proc") if d.isdigit()
+            for r in [root_of(d)] if r is not None}
+
+def stat(pid):
+    s = read(f"/proc/{pid}/stat")
+    # O `comm` pode ter espaços e parênteses: parte-se no ÚLTIMO «)».
+    return s[s.rfind(")") + 2:].split() if ")" in s else []
+
+def children(pid):
+    out = []
+    try:
+        for t in os.listdir(f"/proc/{pid}/task"):
+            out += [int(c) for c in read(f"/proc/{pid}/task/{t}/children").split()]
+    except OSError:
+        pass
+    return out
+
+def dying(pid):
+    f = stat(pid)
+    return not f or f[0] in "ZX" or bool(int(f[6]) & PF_EXITING)
+
+def exiting(pid):
+    """A sair, ou só à espera de filhos que estão todos a sair."""
+    if dying(pid):
+        return True
+    kids = children(pid)
+    return bool(kids) and all(dying(k) for k in kids)
+
+t0 = time.monotonic()
+seen, gone_at = set(), {}
+while True:
+    now = sample()
+    elapsed = time.monotonic() - t0
+    for p in seen - now.keys():
+        gone_at.setdefault(p, elapsed)
+    seen |= now.keys()
+    if not now:
+        break
+    if elapsed >= base and (elapsed >= cap or not all(exiting(p) for p in now)):
+        break
+    time.sleep(0.2)
+
+if not now:
+    if gone_at:
+        print(f"# limpo ao fim de {elapsed:.1f}s: {len(gone_at)} processo(s) saíram "
+              f"durante a espera (o último aos {max(gone_at.values()):.1f}s)")
+    raise SystemExit(0)
+
+uptime = float(read("/proc/uptime").split()[0] or 0)
+why = (f"tecto de {cap:g}s esgotado com processos ainda a sair" if elapsed >= cap
+       else f"prazo de {base:g}s esgotado com processos que NÃO estão a sair")
+print(f"# {why}: {len(now)} ficaram, {len(gone_at)} saíram durante a espera ({elapsed:.1f}s)")
+
+def line(pid, root=None, indent=""):
+    f = stat(pid)
+    if not f:
+        return f"{indent}pid={pid} saiu durante o relatório"
+    ppid, age = f[1], uptime - int(f[19]) / hz
+    s = (f"{indent}pid={pid} ppid={ppid}({read(f'/proc/{ppid}/comm') or '?'}) state={f[0]} "
+         f"wchan={read(f'/proc/{pid}/wchan') or '-'} a_sair={'sim' if dying(pid) else 'filhos' if exiting(pid) else 'não'} "
+         f"comm={read(f'/proc/{pid}/comm')} idade={age:.1f}s")
+    if root is not None:
+        s += f" DELONIX_ROOT={root}"
+    return s + f" cmdline=[{read(f'/proc/{pid}/cmdline')}]"
+
+for pid, root in sorted(now.items()):
+    print(line(pid, root))
+    for k in children(pid):
+        if k not in now:
+            print(line(k, indent="  └ filho "))
+raise SystemExit(1)
+EOF
+}
+
 # Os processos de um membro, lidos ANTES de o remover: o init do workload (o
 # pid registado — PID 1 da sua pid namespace), o supervisor que o reapa (o
 # `netns run`, pai dele) e os filhos desse supervisor (o log shim). O supervisor
@@ -1866,13 +1991,17 @@ done
 # viu (os workloads de cinco pods vivos com o sandbox já apagado), e nenhum
 # veredicto a registava. O workload em si não herda `DELONIX_ROOT`; o seu
 # supervisor sim, e só sai depois de o reapar — por isso é ele que o denuncia.
+# Espera pelas saídas em curso, re-amostrando: `DELONIX_CHAOS_TEARDOWN_WAIT` s
+# (20) para tudo, `DELONIX_CHAOS_TEARDOWN_CAP` s (120) para o que está
+# comprovadamente a sair — ver `sandbox_leftover`.
 if [ "$KEEP" -eq 0 ]; then
   teardown_quiet
-  leftover=$(procs_left "$(sandbox_pids | tr '\n' ' ')" 50)
-  if [ -n "$leftover" ]; then
-    bad "sandbox-teardown" "processos do sandbox continuam no host depois do teardown: $leftover"
-  else
+  if report=$(sandbox_leftover "${DELONIX_CHAOS_TEARDOWN_WAIT:-20}" "${DELONIX_CHAOS_TEARDOWN_CAP:-120}"); then
+    [ -n "$report" ] && log "$report"
     ok "sandbox-teardown (nenhum processo com DELONIX_ROOT em $SANDBOX ficou no host)"
+  else
+    printf '%s\n' "$report" | sed 's/^/    /'
+    bad "sandbox-teardown" "processos do sandbox continuam no host depois do teardown: $(printf '%s\n' "$report" | grep -o '^pid=[0-9]*' | cut -d= -f2 | tr '\n' ' ')"
   fi
 fi
 
