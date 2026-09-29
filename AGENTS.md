@@ -5588,7 +5588,16 @@ checklist para quem mexer aqui do que como lista de correcções:
   enquanto o que resta está comprovadamente a sair: zombie, `PF_EXITING` no `stat`, ou um
   supervisor cujos filhos estão todos a sair. Uma fuga (um processo vivo que não está a sair)
   continua a chumbar aos 20 s (provado com um `sleep 900` com `DELONIX_ROOT` no sandbox). Ao
-  chumbar imprime pid, ppid, estado, `wchan`, idade, `DELONIX_ROOT`, `cmdline` e os filhos;
+  chumbar imprime pid, ppid, estado, `wchan`, idade, `DELONIX_ROOT`, `cmdline` e os filhos.
+  **E o `teardown_quiet` descartava o DX-8101** (2026-09-29): o `rm -f` espera até 30 s pela
+  saída e, se o prazo esgotar, mantém o registo (#562), mas o harness ignorava o rc e fazia
+  `netns down` e `rm -rf` do sandbox por baixo do processo, levando o único registo de onde
+  um `rm -f` posterior o encontraria. Medido com o binário da árvore: um workload em `D`
+  (`sync_inodes_sb`, depois `wb_wait_for_completion`) mais de 4 min. Agora o sandbox só se
+  apaga quando o `container ps -aq` responde, com sucesso, vazio; até ao tecto de 120 s repete
+  o `rm -f`, e depois mantém o sandbox e a netns, chumba o veredicto com o erro do `rm -f`, e
+  o `setup` seguinte recusa arrancar por cima (`exit 2`). Os `rm -f … >/dev/null` dos
+  cenários continuam a ignorar o rc: é o teardown que apanha o que eles deixam;
 - **não aparecer numa varredura pela ordem errada não é estar certo** — a varredura dos
   SIGKILL feita no #563 procurava «`kill` e logo a limpeza» e deu como aberto o único sítio do
   `spawn` que tinha essa forma (o caminho sem userns, que só corre como root). Os outros quatro

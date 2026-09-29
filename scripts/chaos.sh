@@ -335,7 +335,9 @@ pod_cleanup() {
 }
 
 setup() {
-  teardown_quiet
+  # Uma corrida anterior cujos containers ainda saem não se apaga por baixo —
+  # e esta não arranca por cima dela.
+  teardown_quiet || { echo "chaos.sh: o sandbox da corrida anterior ainda tem containers — não arranco por cima." >&2; exit 2; }
   mkdir -p "$SANDBOX/root" "$SANDBOX/run"
   local real="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
   for d in images layers blobs; do [ -d "$real/$d" ] && ln -sfn "$real/$d" "$SANDBOX/root/$d"; done
@@ -343,9 +345,49 @@ setup() {
   dlx network create chaosnet >/dev/null 2>&1
 }
 
+# Desmonta o sandbox — mas só o APAGA quando o `container ps -aq` responde, com
+# sucesso, que não sobrou nenhum container. Devolve 0 se o sandbox saiu; 1 se o
+# manteve, com o motivo em `TEARDOWN_KEPT` (um container por linha, com o erro do
+# último `rm -f`).
+#
+# Porquê: o `rm -f` espera pela SAÍDA do processo até 30 s e, se o prazo
+# esgotar, devolve `DX-8101 container.still_exiting` e MANTÉM o registo (#562).
+# Esta função descartava o rc e seguia: `netns down` por baixo de um processo que
+# ainda despejava o overlay, e `rm -rf` do sandbox com o registo lá dentro — o
+# único sítio de onde um `rm -f` posterior o encontraria. Agora repete o `rm -f`
+# até ao tecto `DELONIX_CHAOS_TEARDOWN_CAP` (120 s, o mesmo do veredicto) e, se
+# algo ficar, deixa o sandbox e a netns de pé e diz porquê. Um `ps` que falha
+# também mantém: não saber não é estar limpo.
+TEARDOWN_KEPT=""
 teardown_quiet() {
   [ -d "$SANDBOX" ] || return 0
-  for c in $(dlx container ps -aq 2>/dev/null); do dlx container rm -f "$c" >/dev/null 2>&1; done
+  local cap=${DELONIX_CHAOS_TEARDOWN_CAP:-120} t0=$SECONDS ids c err
+  local -A last=()
+  TEARDOWN_KEPT=""
+  while :; do
+    if ! ids=$(dlx container ps -aq 2>"$SANDBOX/.teardown-ps.err"); then
+      TEARDOWN_KEPT="o \`container ps -aq\` falhou: $(head -c 300 "$SANDBOX/.teardown-ps.err")"
+      break
+    fi
+    [ -z "$ids" ] && break
+    if [ $((SECONDS - t0)) -ge "$cap" ]; then
+      for c in $ids; do
+        TEARDOWN_KEPT+="$(printf '%s' "${last[$c]:-$c: sem erro do rm -f}" | tr '\n' ' ' | head -c 300)"$'\n'
+      done
+      TEARDOWN_KEPT="ao fim de $((SECONDS - t0))s ainda no \`ps -a\`:"$'\n'"$TEARDOWN_KEPT"
+      break
+    fi
+    for c in $ids; do
+      err=$(dlx container rm -f "$c" 2>&1) || last[$c]=$err
+    done
+    sleep 1
+  done
+  if [ -n "$TEARDOWN_KEPT" ]; then
+    printf '\033[33mteardown\033[0m: sandbox MANTIDO em %s (sem netns down nem rm) — %s\n' \
+      "$SANDBOX" "$TEARDOWN_KEPT" >&2
+    printf '  quando saírem: scripts/chaos.sh --bin %s --clean\n' "$BIN" >&2
+    return 1
+  fi
   dlx net netns down >/dev/null 2>&1
   # O segundo root do `posse_cross_root` arruma-se sozinho no fim do cenário;
   # esta linha é para quando ele NÃO chega ao fim (--keep, um ^C, um timeout).
@@ -354,7 +396,9 @@ teardown_quiet() {
   dlx net httproute rm >/dev/null 2>&1
   [ -d "$SANDBOX/root2" ] && { dlx2 net httproute rm >/dev/null 2>&1; dlx2 net netns down >/dev/null 2>&1; }
   sleep 1
-  for d in images layers blobs; do rm -f "$SANDBOX/root/$d"; done   # symlinks only
+  # Só os symlinks para o store real; se o store real não existia, o motor criou
+  # directórios próprios, que o `rm -rf` a seguir leva (antes: `Is a directory`).
+  for d in images layers blobs; do [ -L "$SANDBOX/root/$d" ] && rm -f "$SANDBOX/root/$d"; done
   rm -rf "$SANDBOX"
 }
 
@@ -1948,7 +1992,7 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1; shift;;
     --max-load) MAXLOAD="$2"; shift 2;;
     --force) FORCE=1; shift;;
-    --clean) teardown_quiet; echo "sandbox limpo."; exit 0;;
+    --clean) teardown_quiet || exit 1; echo "sandbox limpo."; exit 0;;
     -h|--help) sed -n '2,60p' "$0"; exit 0;;
     *) SEL+=("$1"); shift;;
   esac
@@ -1994,8 +2038,9 @@ done
 # Espera pelas saídas em curso, re-amostrando: `DELONIX_CHAOS_TEARDOWN_WAIT` s
 # (20) para tudo, `DELONIX_CHAOS_TEARDOWN_CAP` s (120) para o que está
 # comprovadamente a sair — ver `sandbox_leftover`.
-if [ "$KEEP" -eq 0 ]; then
-  teardown_quiet
+if [ "$KEEP" -eq 0 ] && ! teardown_quiet; then
+  bad "sandbox-teardown" "containers do sandbox continuam no \`ps -a\` depois do teardown (sandbox mantido): $(printf '%s' "$TEARDOWN_KEPT" | tr '\n' ' ')"
+elif [ "$KEEP" -eq 0 ]; then
   if report=$(sandbox_leftover "${DELONIX_CHAOS_TEARDOWN_WAIT:-20}" "${DELONIX_CHAOS_TEARDOWN_CAP:-120}"); then
     [ -n "$report" ] && log "$report"
     ok "sandbox-teardown (nenhum processo com DELONIX_ROOT em $SANDBOX ficou no host)"
