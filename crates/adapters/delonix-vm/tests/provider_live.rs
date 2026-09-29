@@ -131,9 +131,11 @@ fn the_same_vmspec_converges_cloud_hypervisor_and_libvirt() {
     }
 
     // Removed on Drop, so an `expect` or `assert!` below does not leave it behind.
-    // `tempdir()` makes it 0700; 0755 keeps it readable by QEMU when the test runs
-    // as root and libvirt picks `qemu:///system`, where QEMU is another uid
-    // (`libvirt-qemu`). As a user it is `qemu:///session` and the mode is moot.
+    // `tempdir()` makes it 0700; 0755 keeps it readable by QEMU when QEMU is
+    // another uid. The spec sets no `net_mode`, so `create` picks `nat` — and so
+    // `qemu:///system` — whenever that connection is usable (the `libvirt` group),
+    // not only as root. Whether system QEMU then runs as `libvirt-qemu` (the
+    // distro default) or as the caller depends on the host's `qemu.conf`.
     let guard = tempfile::tempdir().expect("mkdir tmp root");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(guard.path(), std::fs::Permissions::from_mode(0o755))

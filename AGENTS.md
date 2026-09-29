@@ -5669,17 +5669,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   `grep` não via, por guardarem o `temp_dir()` numa variável: 197 no total). Das 9 que ficaram, 1
   ainda cria pasta: o teste ao vivo opt-in `delonix-vm/tests/provider_live.rs`, que entrega a pasta
   a um hipervisor que pode correr com outro uid (o `tempdir()` cria-a com `0700`) e que não se pode
-  validar sem esse hipervisor. Migrado a seguir, com `0755` na pasta (o QEMU de `qemu:///system`,
-  quando o teste corre como root, é outro uid): ao vivo em `qemu:///session` o libvirt fez o ciclo
-  completo antes e depois, sem deixar nada; com um `panic!` provocado depois de a pasta e o disco
-  existirem, antes ficava `dlx-p4-substitution-spike-<pid>`, depois nada. O caminho `qemu:///system`
-  (root) não foi corrido. (O do `delonix-proxmox` esperou que a sessão que tinha o ficheiro aberto
-  fundisse o #579.) As outras 8 não criam nada que se apague: caminhos que têm de faltar, caminhos
-  esperados que a produção calcula, código de produção e o arrendamento do `netdef_naming`. Numa
-  corrida verde a bateria deixava 0 antes e 0 depois (2419 testes, as mesmas listas); a diferença
-  está na falha: com um `panic!` provocado depois de a pasta existir (`store_roundtrip_and_resolve`,
-  `delonix-state`), a base deixa `dlx-sec-<pid>` e a migração não deixa nada, com rc=101 nas duas
-  (verificado);
+  validar sem esse hipervisor. Migrado a seguir (#587), com `0755` na pasta: ao vivo o libvirt fez o
+  ciclo completo antes e depois, e com um `panic!` provocado depois de a pasta e o disco existirem,
+  antes ficava `dlx-p4-substitution-spike-<pid>`, depois nada. O #587 disse que isso correu em
+  `qemu:///session` e que o `qemu:///system` ficava por correr — errado nas duas partes, ver «uma
+  lista vazia na ligação errada não é «não ficou nada»». (O do `delonix-proxmox` esperou que a
+  sessão que tinha o ficheiro aberto fundisse o #579.) As outras 8 não criam nada que se apague:
+  caminhos que têm de faltar, caminhos esperados que a produção calcula, código de produção e o
+  arrendamento do `netdef_naming`. Numa corrida verde a bateria deixava 0 antes e 0 depois (2419
+  testes, as mesmas listas); a diferença está na falha: com um `panic!` provocado depois de a pasta
+  existir (`store_roundtrip_and_resolve`, `delonix-state`), a base deixa `dlx-sec-<pid>` e a
+  migração não deixa nada, com rc=101 nas duas (verificado);
 - **duas cópias do mesmo repo não são dois builds** — a prova acima deu primeiro o resultado
   ERRADO: a cópia migrada também deixava `dlx-sec-<pid>`. O log não tinha `Compiling
   delonix-state`: o cargo tinha corrido o binário da BASE. As duas cópias vinham de `git archive`,
@@ -5729,6 +5729,23 @@ checklist para quem mexer aqui do que como lista de correcções:
   chama o `tmp_roots_gate.py` não correr depois de uma falha, ou se deixar de haver os dois
   recenseamentos — verificado com os `if:` retirados e com o `ci.yml` de antes do #585 (rc=1 nos
   dois);
+- **uma lista vazia na ligação errada não é «não ficou nada»** — o #587 recenseou os domínios de
+  `qemu:///session` antes e depois do teste ao vivo `provider_live.rs` e escreveu que nada ficava; o
+  teste nunca lá esteve. Sem `net_mode`, o `create` do libvirt usa `nat` sempre que
+  `system_libvirt_usable()` (o utilizador está no grupo `libvirt`), e portanto `qemu:///system`: li
+  o `libvirt_uri_for` sozinho, sem o chamador que lhe preenche o argumento. Medido a 2026-09-28 com
+  um `panic!` entre o `create` e o `destroy`: a `session` continuou vazia e o `system` ficou com
+  `dlx-p4spike-libvirt` PERSISTENTE e A CORRER, com o disco num `TempDir` já apagado (o QEMU ainda o
+  tinha aberto); removido à mão, depois de confirmar pelo disco que era dele. E o `0755` que o #587
+  justificou com «o QEMU do system é outro uid»: o QEMU do teste correu como o próprio utilizador
+  (medido no `ps` com a VM de pé) e o teste passa com a pasta a `0700` — o `qemu.conf` deste host
+  põe o QEMU do system com o uid de quem chama, embora um domínio alheio corra como `libvirt-qemu`.
+  O `0755` fica, porque é o que precisa um host com a omissão da distribuição. **Regra: um
+  recenseamento de recursos procura em TODOS os sítios onde o código os pode pôr (aqui, as duas
+  ligações do libvirt), e a escolha que se lê numa função confirma-se no chamador ou no processo
+  vivo (`ps`, `virsh -c qemu:///system list`).** Gate: nenhum ainda — o domínio que uma falha deixa
+  a correr continua por fechar, porque o `destroy` do teste só corre com o ciclo verde; o fecho é um
+  guarda `Drop` que o destrói na ligação onde ele está;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
