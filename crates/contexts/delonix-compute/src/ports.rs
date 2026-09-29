@@ -122,6 +122,61 @@ pub trait VmNetwork: Send + Sync {
     fn join_argv(&self) -> Option<Vec<String>>;
 }
 
+/// The VM backends a node has, as the VM use cases ask for them
+/// (`docs/discovery/61`, P4b.3). The registry that answers is the composition
+/// root's; until the local backends leave `delonix-vm` (P4b.4) that adapter
+/// implements it over its own table.
+pub trait VmBackends {
+    /// The backend a recorded VM runs on.
+    fn for_vm(&self, vm: &crate::Vm) -> Result<Box<dyn crate::vm_backend::VmBackend>>;
+    /// The backend a NEW VM gets: the one `cfg` names, else the operator's
+    /// standing choice under `root`, else the registry's own policy
+    /// (auto-detection, the firmware preference) — met against `required`.
+    fn select(
+        &self,
+        root: &std::path::Path,
+        cfg: &crate::vm_backend::VmConfig,
+        required: &[crate::capability::Capability],
+    ) -> Result<Box<dyn crate::vm_backend::VmBackend>>;
+    /// Refuses when `backend_id` does not do all of `required`.
+    fn require(&self, backend_id: &str, required: &[crate::capability::Capability]) -> Result<()>;
+    /// Whether `backend_id` declares `cap` supported in its report.
+    fn declares(&self, backend_id: &str, cap: crate::capability::Capability) -> bool;
+    /// The backend that holds a VM named `name` which no record describes —
+    /// left behind by an old `rm` — if any.
+    fn unrecorded(&self, name: &str) -> Option<&'static str>;
+    /// Powers off an unrecorded VM named `name`; `false` when there is none.
+    fn stop_unrecorded(&self, name: &str) -> Result<bool>;
+    /// Removes whatever a backend still holds for `name` without a record.
+    fn remove_unrecorded(&self, name: &str) -> Result<()>;
+}
+
+/// The local disk work a VM on THIS host needs before it boots: the thin
+/// overlay over its base image. A backend that owns its storage never calls it.
+pub trait LocalDiskImages {
+    /// Resolves `base` on this filesystem and builds `name`'s overlay in
+    /// `vmdir` when it does not exist yet (`on` hears `CreateStage::Disk` only
+    /// then), `size_gib` at least the base's. Answers `(base, overlay)`.
+    fn overlay(
+        &self,
+        vmdir: &std::path::Path,
+        name: &str,
+        base: &str,
+        size_gib: Option<u32>,
+        on: &dyn Fn(crate::vm_backend::CreateStage),
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf)>;
+}
+
+/// The cloud-init seed a local VM boots with: the realized form of `cfg`'s
+/// hostname, user, keys and volumes, as a file under `root`.
+pub trait SeedBuilder {
+    fn seed(
+        &self,
+        root: &std::path::Path,
+        cfg: &crate::vm_backend::VmConfig,
+    ) -> Result<std::path::PathBuf>;
+}
+
 /// The node's network: custom networks, published ports, per-container firewall
 /// and shaping, and the L7 proxy's routes. Its home is the networking context
 /// (ADR-0040); it lives here until that context exists.

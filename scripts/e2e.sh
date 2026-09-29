@@ -3080,6 +3080,18 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "virsh -c qemu:///system snapshot-list '$SVM' --name | grep -qx s1"
     check "vm snapshot restore depois do start" ok "$BIN" vm snapshot restore "$SVM" s1
 
+    # P4b.3a (ADR-0044, docs/discovery/61): o backup a quente passou a ser um
+    # método do backend libvirt. O rc não prova nada — um `blockcommit` sem
+    # --top/--base diz «Successfully pivoted» e deixa o domínio a escrever na
+    # imagem base partilhada. O que se lê é o domínio VIVO depois do backup.
+    BKDIR="$OUT/bk-$SVM"; mkdir -p "$BKDIR"
+    check "backup create vm de uma VM libvirt a correr" ok "$BIN" backup create vm "$SVM" --to "$BKDIR"
+    check "... o arquivo ficou no destino" ok bash -c "ls '$BKDIR'/vm-$SVM-*.tar.gz >/dev/null 2>&1"
+    check "... a VM continua a correr" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system domstate '$SVM')\" = running ]"
+    check "... e escreve no seu próprio overlay, não no temporário nem na base" ok bash -c \
+      "virsh -c qemu:///system domblklist '$SVM' | awk '\$1==\"vda\"{print \$2}' | grep -qx '$SROOT/vms/$SVM.qcow2'"
+
     # BUG REAL, reproduzido 2026-09-15: `vm pause` devolvia 0 e o libvirt dizia
     # `paused`, mas o `vm ls` seguinte reportava `Stopped` — só `running`
     # contava como vivo, e a guarda do Paused está no ramo «vivo». O rc do
