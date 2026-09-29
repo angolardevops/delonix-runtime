@@ -3223,6 +3223,13 @@ fn a_system_container_whose_dhcp_failed_runs_with_the_network_not_ready() {
         CT_CONFIG,
         ok_data(r#"{"entrypoint":"/bin/sleep 3600","env":"DLX_TEST=one","unprivileged":1}"#),
     ));
+    // The start resolves the container first: it is on the node its
+    // locator names (`located`), so no cluster read follows.
+    steps.push((
+        "GET",
+        CT_CONFIG,
+        ok_data(r#"{"entrypoint":"/bin/sleep 3600","env":"DLX_TEST=one","unprivileged":1}"#),
+    ));
     steps.push((
         "POST",
         "/nodes/pve/lxc/100/status/start",

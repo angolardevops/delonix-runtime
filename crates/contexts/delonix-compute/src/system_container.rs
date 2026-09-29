@@ -63,6 +63,20 @@ pub struct SystemContainerNet {
     pub dhcp: bool,
 }
 
+/// How [`SystemContainerProvider::move_to`] may move a container.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SystemContainerMoveOptions {
+    /// A running container is stopped, moved and started on the target. The
+    /// provider has no live move for a container, so without it a running
+    /// container is refused.
+    pub restart: bool,
+    /// Volumes on a storage the target does not share are copied in full.
+    pub with_local_disks: bool,
+    /// The target's storage the copied volumes land on; the source's own
+    /// storage id when unset.
+    pub target_storage: Option<String>,
+}
+
 /// What a provider hands back from `create`: enough to address the container
 /// again. `locator` is the provider's own form (`proxmox:<node>:<vmid>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +207,18 @@ pub trait SystemContainerProvider: Provider {
         h: &SystemContainerHandle,
         new_name: &str,
         snapshot: Option<&str>,
+    ) -> Result<SystemContainerHandle>;
+    /// Moves the container to another node of the provider's cluster and
+    /// answers its handle there. A running container is refused unless
+    /// `opts.restart` — then it is stopped, moved and started on the target;
+    /// volumes the target does not share are refused unless
+    /// `opts.with_local_disks`, because the provider would copy them in full.
+    fn move_to(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        target_node: &str,
+        opts: &SystemContainerMoveOptions,
     ) -> Result<SystemContainerHandle>;
     /// Replaces this engine's rules and default verdict for one direction of
     /// the container's own firewall on the provider (`scope: systemcontainer`),

@@ -453,6 +453,9 @@ enum TaskKind {
     /// `POST /nodes/{node}/lxc/{vmid}/clone`: a full copy of a container
     /// under a new id (worker `vzclone`, read from `PVE/API2/LXC.pm`).
     CtClone,
+    /// `POST /nodes/{node}/lxc/{vmid}/migrate`: a container moved to another
+    /// node, offline (worker `vzmigrate`, read from `PVE/API2/LXC.pm`).
+    CtMigrate,
     CtRestore,
     CtDeleteSnapshot,
     Clone,
@@ -670,6 +673,7 @@ impl TaskKind {
             TaskKind::CtDeleteSnapshot => "ct-delete-snapshot",
             TaskKind::CtRestore => "ct-restore",
             TaskKind::CtClone => "ct-clone",
+            TaskKind::CtMigrate => "ct-migrate",
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
@@ -786,6 +790,7 @@ impl TaskKind {
             TaskKind::CtDeleteSnapshot => "vzdelsnapshot",
             TaskKind::CtRestore => "vzrestore",
             TaskKind::CtClone => "vzclone",
+            TaskKind::CtMigrate => "vzmigrate",
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
@@ -5355,9 +5360,20 @@ fn create_form(
 /// The one node `/cluster/resources?type=vm` lists QEMU VM `vmid` on, or
 /// `None` for zero or more than one match. Pure.
 fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
+    located_node_of(entries, vmid, "qemu")
+}
+
+/// [`located_node`] for one resource `kind` of `/cluster/resources`
+/// (`qemu` or `lxc`): a VM and a container may share an id on no cluster, but
+/// the entry type is what says which one was found. Pure.
+pub(crate) fn located_node_of(
+    entries: &[serde_json::Value],
+    vmid: u32,
+    kind: &str,
+) -> Option<String> {
     let nodes: Vec<&str> = entries
         .iter()
-        .filter(|e| e.get("type").and_then(|t| t.as_str()).unwrap_or("qemu") == "qemu")
+        .filter(|e| e.get("type").and_then(|t| t.as_str()).unwrap_or("qemu") == kind)
         .filter(|e| e.get("vmid").and_then(|v| v.as_u64()) == Some(u64::from(vmid)))
         .filter_map(|e| e.get("node").and_then(|n| n.as_str()))
         .collect();
@@ -6783,6 +6799,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             | C::SystemContainerBackup
             | C::SystemContainerClone
             | C::SystemContainerFirewall
+            | C::SystemContainerMove
             | C::ContainerLifecycle
             | C::ContainerExec
             | C::ContainerLogs
@@ -6986,6 +7003,9 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             },
             C::SystemContainerClone => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_system_container_is_cloned_from_a_temporary_snapshot",
+            },
+            C::SystemContainerMove => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_moves_to_another_node_offline_and_by_restart",
             },
             C::SystemContainerFirewall => S::Partial {
                 detail: "a `scope: systemcontainer` policy is applied, read back in order and re-applied without doubling (a_system_containers_firewall_is_applied_and_reads_back), with the datacenter switch refused when off, never turned on; no packet crossed the container in a test, the same limit the scope: vm rows carry",

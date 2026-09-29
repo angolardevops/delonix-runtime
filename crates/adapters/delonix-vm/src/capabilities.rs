@@ -216,7 +216,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             | C::SystemContainerResize
             | C::SystemContainerBackup
             | C::SystemContainerClone
-            | C::SystemContainerFirewall => S::UnsupportedByProvider {
+            | C::SystemContainerFirewall
+            | C::SystemContainerMove => S::UnsupportedByProvider {
                 reason: "a VM provider; a system container is the Proxmox provider's (ADR-0058)",
             },
             C::ContainerLifecycle
@@ -494,7 +495,8 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             | C::SystemContainerResize
             | C::SystemContainerBackup
             | C::SystemContainerClone
-            | C::SystemContainerFirewall => S::UnsupportedByProvider {
+            | C::SystemContainerFirewall
+            | C::SystemContainerMove => S::UnsupportedByProvider {
                 reason: "a VM provider; a system container is the Proxmox provider's (ADR-0058)",
             },
             C::ContainerLifecycle

@@ -346,6 +346,40 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   As escritas de firewall respondem em linha (sem UPID), por isso não deixam registo no livro de
   tarefas.
 
+- **Migração: feita.** `delonix systemcontainer move <nome> --node <n> [--restart]
+  [--with-local-disks] [--target-storage <s>]` move o container para outro nó do cluster e só
+  depois de o nó o provar (o `/cluster/resources` lista-o no destino, a config lê-se lá) muda o
+  localizador do registo; o `stack plan` seguinte continua limpo. Capacidade
+  `system-container.move`, código DX-5517 para as recusas. **Medido no lab (`pve` → `pve2`) antes
+  de escrever**, e é o que decidiu o desenho:
+  - um container PARADO migra offline e o nó copia por inteiro um volume que o destino não partilha
+    (4 GiB de um volume thin por `dd`, 1m16s) — daí a recusa sem `--with-local-disks`, como no
+    `vm move`; o `GET …/migrate` do LXC, ao contrário do das VMs, não diz nada sobre volumes locais,
+    por isso o provider lê-os do `rootfs`/`mpN` e compara com o `shared` do `/storage`;
+  - um container A CORRER é recusado pelo nó sem `online`/`restart`; com `online=1` a API aceita e a
+    tarefa falha («lxc live migration is currently not implemented»);
+  - o `restart=1` do próprio nó desliga com `--nokill` e **aborta ao fim do prazo quando o init
+    ignora o SIGTERM** (um `sleep`), deixando o container a correr na origem — e o `pvesh` sai com 0.
+    Por isso o provider não o usa: pára o container ele próprio (shutdown, depois stop), migra
+    offline e arranca-o no destino. Uma migração que falha com o container ainda na origem volta a
+    arrancá-lo lá.
+  Caso ao vivo `a_system_container_moves_to_another_node_offline_and_by_restart` (212 s): as quatro
+  recusas deixam o container onde e como estava, a ida por reinício e a volta offline não deixam
+  volume em nenhum dos nós.
+  **Achado a validar pela CLI**: uma sessão que morreu depois de o nó ter movido o container e
+  antes de o registo mudar deixou o localizador a apontar para o nó antigo. Sem mais nada, o
+  `configuration` lia «não existe» e o Kind planeava um `Create` — um segundo container. O
+  provider passou a resolver cada operação por `located`: se o container não está no nó
+  registado, pergunta ao `/cluster/resources` onde está e segue-o (a regra do ADR-0053 D3 para as
+  VMs). Provado com a sobra real (plano `=`, move recusado por «already on node», volta a mover) e
+  no caso ao vivo, com o handle antigo a ler o container a correr no destino. O registo em si não é
+  corrigido pela leitura: só o `move` seguinte o actualiza.
+  **Storage partilhado, medido depois pela CLI** (o `nfs-lab` do lab com `rootdir` acrescentado
+  só para a medição, e reposto a `images` no fim): um rootfs em `nfs-lab` é aceite sem
+  `--with-local-disks`; o log do `vzmigrate` diz «volume … is on shared storage 'nfs-lab'» e a
+  tarefa acaba em 16 s, sem cópia. O `move --restart` inteiro demorou 102 s — o grosso é o
+  prazo do `shutdown` que o `sleep` do init ignora, antes do `stop`.
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes
