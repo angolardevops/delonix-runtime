@@ -5004,6 +5004,137 @@ fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
     assert_eq!(grow.state, delonix_proxmox::TaskState::Ok, "{grow:?}");
 }
 
+/// Plan 63 slice 5, firewall: a `scope: systemcontainer` policy lands on the
+/// container's own firewall on the node — the NIC switch (`firewall=1` on
+/// `net0`) and the container's `enable` turned on, the rules in order with the
+/// default verdict last — reads back as it was written, and a second apply
+/// leaves the same rules, not twice as many. A container with no network has
+/// nothing to filter and is refused before any rule is written.
+#[test]
+fn a_system_containers_firewall_is_applied_and_reads_back() {
+    use delonix_compute::system_container::{SystemContainerProvider, SystemContainerSpec};
+    use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    init_log();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let provider =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec = SystemContainerSpec {
+        name: format!("dlxfw{}", std::process::id() % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: Some(delonix_compute::system_container::SystemContainerNet {
+            bridge: std::env::var("DELONIX_PROXMOX_TEST_BRIDGE").unwrap_or_else(|_| "vmbr0".into()),
+            vlan: None,
+            dhcp: true,
+        }),
+        unprivileged: true,
+    };
+    let h = provider.create(dir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    provider.start(dir.path(), &h, &spec).expect("start");
+    let policy = Policy {
+        direction: Direction::In,
+        default_allow: false,
+        rules: vec![
+            Rule {
+                allow: true,
+                proto: Proto::Tcp,
+                port: Some("22".into()),
+                peer: Some("10.0.0.0/8".into()),
+            },
+            Rule {
+                allow: false,
+                proto: Proto::Udp,
+                port: Some("53".into()),
+                peer: None,
+            },
+        ],
+    };
+    provider
+        .apply_firewall(dir.path(), &h, &policy)
+        .expect("apply");
+    let back = provider
+        .read_firewall(dir.path(), &h, Direction::In)
+        .expect("read");
+    assert_eq!(
+        back, policy,
+        "the policy reads back as it was written, in order"
+    );
+    let opts = client.lxc_firewall_options(vmid).unwrap();
+    assert_eq!(
+        opts.get("enable").and_then(|v| v.as_u64()),
+        Some(1),
+        "{opts}"
+    );
+    let raw = client.lxc_config(vmid).unwrap();
+    let net0 = raw.get("net0").and_then(|v| v.as_str()).unwrap_or_default();
+    assert!(net0.split(',').any(|p| p == "firewall=1"), "{net0}");
+    let managed = client.lxc_firewall_rules(vmid).unwrap().len();
+    provider
+        .apply_firewall(dir.path(), &h, &policy)
+        .expect("apply again");
+    assert_eq!(
+        client.lxc_firewall_rules(vmid).unwrap().len(),
+        managed,
+        "a second apply doubled the rules"
+    );
+
+    let mut bare_spec = spec.clone();
+    bare_spec.name = format!("{}n", spec.name);
+    bare_spec.network = None;
+    let bare_dir = tempfile::tempdir().expect("tempdir");
+    let bare = provider
+        .create(bare_dir.path(), &bare_spec)
+        .expect("create bare");
+    let e = provider
+        .apply_firewall(bare_dir.path(), &bare, &policy)
+        .unwrap_err();
+    assert_eq!(e.number(), 1540, "{e}");
+    let bare_vmid: u32 = bare.locator.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(
+        client.lxc_firewall_rules(bare_vmid).unwrap().is_empty(),
+        "rules written on a container with no network"
+    );
+    provider
+        .destroy(bare_dir.path(), &bare)
+        .expect("destroy bare");
+    assert!(client
+        .list_ct_volumes(&rootfs, bare_vmid)
+        .unwrap()
+        .is_empty());
+
+    provider.stop(dir.path(), &h).expect("stop");
+    provider.destroy(dir.path(), &h).expect("destroy");
+    let left = client.list_ct_volumes(&rootfs, vmid).expect("list");
+    assert!(left.is_empty(), "a volume was left behind: {left:?}");
+    let recs = delonix_proxmox::Ledger::at(dir.path()).records();
+    // The firewall writes answer inline (no UPID), so they leave nothing in
+    // the ledger; what must hold there is that no task was left unfinished.
+    assert!(
+        recs.iter()
+            .all(|r| !matches!(r.state, delonix_proxmox::TaskState::Submitted)),
+        "{recs:?}"
+    );
+}
+
 /// Plan 63 slice 5, clone: a RUNNING container is copied in full under a new
 /// name — the node refuses a full copy of a running container without a
 /// snapshot, so the provider takes a temporary one and deletes it. The copy

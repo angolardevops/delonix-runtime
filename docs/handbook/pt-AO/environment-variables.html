@@ -1242,6 +1242,13 @@ variável quando o programa corre.</p>
 <td>Sem ela, a metade do controlador desse teste é saltada; o resto continua a correr.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
+<td>A bridge do nó onde o container de sistema do teste de firewall é ligado: a firewall precisa de um <code>net0</code> onde pôr <code>firewall=1</code>.</td>
+<td>Uma bridge que exista no nó.</td>
+<td><code>vmbr0</code>.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
 <td>Uma VM existente, com o QEMU guest agent a correr, cujo IP o teste lê.</td>

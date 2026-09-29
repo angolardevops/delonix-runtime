@@ -62,42 +62,179 @@ pub fn report(host: &StorageHost) -> ProviderReport {
         },
         |c| {
             match c {
-        C::VolumeLocal => S::Supported { evidence: "e2e:volumes: ciclo de vida" },
-        C::VolumeBind => S::Supported { evidence: "check:update: mount visível DENTRO do container" },
-        C::VolumeNfs => share(S::Partial { detail: "read and written from a container against a real NAS in-session; the battery has no NFS server" }, host.mount_nfs, "mount.nfs"),
-        C::VolumeCifs => share(S::Partial { detail: "same mount path as nfs with `mount -t cifs`; no battery server" }, host.mount_cifs, "mount.cifs"),
-        C::VolumeWebdav => share(S::Partial { detail: "`mount -t davfs`; no battery server" }, host.mount_davfs, "mount.davfs"),
-        C::VolumeQuota => S::Supported { evidence: "check:volume create --parent" },
-        C::VolumeSnapshot => S::Supported { evidence: "check:snapshot create" },
-        C::VolumeProvisionNas => S::RequiresExternalComponent { component: "a TrueNAS SCALE 25.x API (`spec.provision.truenas`, ADR-0009); `scen_truenas_destroy` skips without one" },
-        C::StorageLvmThin => S::NotImplemented,
-        C::StorageZfsBtrfs => S::NotImplemented,
-        C::StorageCeph => S::RequiresExternalComponent { component: "a Ceph cluster and an RBD/CephFS driver the engine does not ship" },
-        C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
-        | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
-        | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold
-        | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
-        | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
-        | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone
-        | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
-        | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
-        | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
-        | C::ContainerImages | C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan
-        | C::NetOverlayEncrypted | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts
-        | C::NetRoutesBetweenNetworks | C::NetNamespaceIsolation | C::NetL7Proxy | C::NetTunnelEgress
-        | C::NetIpv6 | C::NetRateLimit | C::NetPacketCapture | C::VmNetworkNat | C::VmNetworkBridge
-        | C::VmNetworkSdn | C::VmStaticIp | C::StoragePools | C::VmSnapshotDisk | C::VmSnapshotMemory
-        | C::VmSnapshotRestore | C::VmSnapshotDelete | C::VmSnapshotPersistent | C::VmBackupDisk
-        | C::VmBackupQuiesced | C::VmBackupRestore | C::ContainerBackupRestore | C::VmMigrationCold
-        | C::VmMigrationLive | C::VmReplication | C::VmHighAvailability | C::FirewallPerWorkload
-        | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy | C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder | C::NetGatewayMultiWan | C::NetGatewayVpn | C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt | C::NetLbL4 | C::NetLbHealthCheck | C::NetDnsRecords | C::NetDnsAuthoritative | C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp | C::NetSegmentRemote | C::NetApplyStaged | C::NetApplyRollback | C::NetObserve | C::NetVerifyDataplane | C::NetOwnershipMarker | C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType | C::FirewallWorkloadPeer
-        | C::VmConsoleSerial | C::VmConsoleVnc | C::VmGuestAgent | C::VmIpObserved
-        | C::MetricsPrometheus | C::MetricsPerWorkloadNetwork | C::HostHealth | C::HostCapacity
-        | C::TransportVerified | C::CredentialInVault => {
-            S::UnsupportedByProvider { reason: "not a storage capability" }
+            C::VolumeLocal => S::Supported {
+                evidence: "e2e:volumes: ciclo de vida",
+            },
+            C::VolumeBind => S::Supported {
+                evidence: "check:update: mount visível DENTRO do container",
+            },
+            C::VolumeNfs => share(
+                S::Partial {
+                    detail: "read and written from a container against a real NAS in-session; the battery has no NFS server",
+                },
+                host.mount_nfs,
+                "mount.nfs",
+            ),
+            C::VolumeCifs => share(
+                S::Partial {
+                    detail: "same mount path as nfs with `mount -t cifs`; no battery server",
+                },
+                host.mount_cifs,
+                "mount.cifs",
+            ),
+            C::VolumeWebdav => share(
+                S::Partial {
+                    detail: "`mount -t davfs`; no battery server",
+                },
+                host.mount_davfs,
+                "mount.davfs",
+            ),
+            C::VolumeQuota => S::Supported {
+                evidence: "check:volume create --parent",
+            },
+            C::VolumeSnapshot => S::Supported {
+                evidence: "check:snapshot create",
+            },
+            C::VolumeProvisionNas => S::RequiresExternalComponent {
+                component: "a TrueNAS SCALE 25.x API (`spec.provision.truenas`, ADR-0009); `scen_truenas_destroy` skips without one",
+            },
+            C::StorageLvmThin => S::NotImplemented,
+            C::StorageZfsBtrfs => S::NotImplemented,
+            C::StorageCeph => S::RequiresExternalComponent {
+                component: "a Ceph cluster and an RBD/CephFS driver the engine does not ship",
+            },
+            C::ProviderAvailability
+            | C::ResourceReadback
+            | C::Events
+            | C::AsyncOperations
+            | C::VmCreate
+            | C::VmStart
+            | C::VmStop
+            | C::VmDestroy
+            | C::VmRestart
+            | C::VmPause
+            | C::VmResume
+            | C::VmResumeSameIdentity
+            | C::VmClone
+            | C::VmTemplate
+            | C::VmResizeCold
+            | C::VmHotplug
+            | C::VmExtraDisks
+            | C::VmExtraNics
+            | C::VmDiskResize
+            | C::VmPciPassthrough
+            | C::VmTpm
+            | C::VmCpuModel
+            | C::VmCpuPinning
+            | C::VmHugepages
+            | C::VmCloudInit
+            | C::VmRestartPolicyNative
+            | C::VmNamespaceIsolation
+            | C::VmAntispoof
+            | C::VmRawDefinition
+            | C::SystemContainerLifecycle
+            | C::SystemContainerOciImage
+            | C::SystemContainerEntrypointEnv
+            | C::SystemContainerExec
+            | C::SystemContainerLogs
+            | C::SystemContainerExitStatus
+            | C::SystemContainerNetworkBridge
+            | C::SystemContainerUnprivileged
+            | C::SystemContainerSnapshot
+            | C::SystemContainerResize
+            | C::SystemContainerBackup
+            | C::SystemContainerClone
+            | C::SystemContainerFirewall
+            | C::ContainerLifecycle
+            | C::ContainerExec
+            | C::ContainerLogs
+            | C::ContainerHotReconfigure
+            | C::ContainerResourceLimits
+            | C::ContainerGpuCdi
+            | C::ContainerSeccompCustomProfile
+            | C::ContainerOomDetection
+            | C::PodSharedNetwork
+            | C::PodSharedIpcUts
+            | C::PodSharedPid
+            | C::ContainerImages
+            | C::NetBridge
+            | C::NetMacvlanIpvlan
+            | C::NetVlan
+            | C::NetOverlayVxlan
+            | C::NetOverlayEncrypted
+            | C::NetIpam
+            | C::NetStaticIp
+            | C::NetDns
+            | C::NetPublishPorts
+            | C::NetRoutesBetweenNetworks
+            | C::NetNamespaceIsolation
+            | C::NetL7Proxy
+            | C::NetTunnelEgress
+            | C::NetIpv6
+            | C::NetRateLimit
+            | C::NetPacketCapture
+            | C::VmNetworkNat
+            | C::VmNetworkBridge
+            | C::VmNetworkSdn
+            | C::VmStaticIp
+            | C::StoragePools
+            | C::VmSnapshotDisk
+            | C::VmSnapshotMemory
+            | C::VmSnapshotRestore
+            | C::VmSnapshotDelete
+            | C::VmSnapshotPersistent
+            | C::VmBackupDisk
+            | C::VmBackupQuiesced
+            | C::VmBackupRestore
+            | C::ContainerBackupRestore
+            | C::VmMigrationCold
+            | C::VmMigrationLive
+            | C::VmReplication
+            | C::VmHighAvailability
+            | C::FirewallPerWorkload
+            | C::FirewallDefaultDeny
+            | C::FirewallSourceFiltering
+            | C::FirewallEgressPolicy
+            | C::NetGatewayFilter
+            | C::NetGatewayAlias
+            | C::NetGatewayUpdateInPlace
+            | C::NetGatewayRuleOrder
+            | C::NetGatewayMultiWan
+            | C::NetGatewayVpn
+            | C::NetNatSnat
+            | C::NetNatDnat
+            | C::NetNatOneToOne
+            | C::NetNatNpt
+            | C::NetLbL4
+            | C::NetLbHealthCheck
+            | C::NetDnsRecords
+            | C::NetDnsAuthoritative
+            | C::NetIpamProvider
+            | C::NetIpamReservation
+            | C::NetIpamDhcp
+            | C::NetSegmentRemote
+            | C::NetApplyStaged
+            | C::NetApplyRollback
+            | C::NetObserve
+            | C::NetVerifyDataplane
+            | C::NetOwnershipMarker
+            | C::FirewallStateless
+            | C::FirewallLogging
+            | C::FirewallIcmpType
+            | C::FirewallWorkloadPeer
+            | C::VmConsoleSerial
+            | C::VmConsoleVnc
+            | C::VmGuestAgent
+            | C::VmIpObserved
+            | C::MetricsPrometheus
+            | C::MetricsPerWorkloadNetwork
+            | C::HostHealth
+            | C::HostCapacity
+            | C::TransportVerified
+            | C::CredentialInVault => S::UnsupportedByProvider {
+                reason: "not a storage capability",
+            },
         }
-    }
         },
     )
 }

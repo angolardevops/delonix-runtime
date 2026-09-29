@@ -232,6 +232,7 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_PROXMOX_TEST_OCI_ARCHIVE` | `crates/providers/delonix-proxmox/tests/live.rs` | 由引擎写出（`write_oci_media_archive`）、带 OCI 媒体类型的镜像归档，ADR-0058 实机用例用它创建一个系统容器。它被上传到的存储必须包含 `vztmpl`。 | 未设置：该用例跳过。 | |
 | `DELONIX_PROXMOX_TEST_SHARED_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 集群所有节点共享的存储（NFS、Ceph RBD），移动用例把 VM 的磁盘放在这里——位于本地存储上的磁盘会被拒绝，而不是被复制。 | 未设置：两个移动用例会跳过。 | |
 | `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` | `crates/providers/delonix-proxmox/tests/live.rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node` | 节点能够访问到这台机器的地址：测试会启动一个桩 HTTP 服务器，把 `http://<addr>:<port>/…` 作为一个 IPAM 控制器和一个 DNS 控制器的 URL 交给节点，因为节点会通过调用它们来验证两者。 | 一个节点能路由到的 IP（一个 libvirt-NAT 实验节点用 `192.168.122.1`）。 | 没有它，那个测试里控制器那一半会被跳过；其余部分照常运行。 |
+| `DELONIX_PROXMOX_TEST_BRIDGE` | `crates/providers/delonix-proxmox/tests/live.rs:a_system_containers_firewall_is_applied_and_reads_back` | 防火墙测试的系统容器所接入的节点网桥：防火墙需要一个 `net0` 来设置 `firewall=1`。 | 节点上存在的网桥。 | `vmbr0`。 |
 | `DELONIX_PROXMOX_TEST_AGENT_VMID` | `crates/providers/delonix-proxmox/tests/live.rs:o_ip_vem_do_agente_de_um_convidado_a_serio` | 一个已经存在、跑着 QEMU guest agent 的 VM，测试会读取它的 IP。 | 一个 VM id。 | 未设置时跳过，即使 URL 已经设置了也一样。 |
 | `DELONIX_TRUENAS_TEST_URL` | `crates/providers/delonix-truenas/tests/live.rs:target` | 用来跑实机配置器测试的 TrueNAS 设备。 | `https://<host>`。 | 启用这些测试。它们会创建并销毁 `<pool>/dlxlive-<pid>`。 |
 | `DELONIX_TRUENAS_TEST_POOL` | `crates/providers/delonix-truenas/tests/live.rs:target` | 测试数据集用的池。 | 默认 `tank`。 | |

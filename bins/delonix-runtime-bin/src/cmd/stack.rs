@@ -2245,7 +2245,7 @@ fn converge_and_stamp(
                     return Err(delonix_model::Error::Invalid(format!(
                         "{other}/{}: no live update path",
                         c.name
-                    )))
+                    )));
                 }
             }
         }
@@ -2650,24 +2650,46 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
         .unwrap_or_default();
 
-    validate_graph_with(
+    validate_graph_full(
         docs,
         &existing_networks,
         &existing_volumes,
         &existing_containers,
         &existing_secrets,
+        &super::system_container::registered_names(),
     )
 }
 
 /// PURE core of `validate_graph`: receives what already exists on the machine as
 /// explicit lists (instead of reading the stores), so the tests are
 /// deterministic and do not depend on the real state of the dev machine.
+#[cfg(test)]
 fn validate_graph_with(
     docs: &[manifest::ManifestDoc],
     existing_networks: &[String],
     existing_volumes: &[String],
     existing_containers: &[String],
     existing_secrets: &[String],
+) -> Vec<String> {
+    validate_graph_full(
+        docs,
+        existing_networks,
+        existing_volumes,
+        existing_containers,
+        existing_secrets,
+        &[],
+    )
+}
+
+/// [`validate_graph_with`] with the registered system containers too: the
+/// targets a `scope: systemcontainer` policy may name.
+fn validate_graph_full(
+    docs: &[manifest::ManifestDoc],
+    existing_networks: &[String],
+    existing_volumes: &[String],
+    existing_containers: &[String],
+    existing_secrets: &[String],
+    existing_system_containers: &[String],
 ) -> Vec<String> {
     use std::collections::HashSet;
 
@@ -2695,6 +2717,8 @@ fn validate_graph_with(
     // «containers/VMs».
     let mut containers = declared(&[k::CONTAINER, k::POD, k::VM]);
     let mut secrets = declared(&[k::SECRET]);
+    let mut system_containers = declared(&[k::SYSTEM_CONTAINER]);
+    system_containers.extend(existing_system_containers.iter().cloned());
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());
     containers.extend(existing_containers.iter().cloned());
@@ -2922,10 +2946,10 @@ fn validate_graph_with(
                         ));
                     }
                 }
-                if !matches!(scope, "container" | "network" | "vm") {
+                if !matches!(scope, "container" | "network" | "vm" | "systemcontainer") {
                     // Message consistent with the apply (which also rejects the scope).
                     issues.push(super::po::tf(
-                        "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm)",
+                        "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm|systemcontainer)",
                         &[("kind", &doc.kind), ("name", name), ("scope", scope)],
                     ));
                 } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
@@ -2934,6 +2958,13 @@ fn validate_graph_with(
                         if !networks.contains(target) {
                             issues.push(super::po::tf(
                                 "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network",
+                                &[("kind", &doc.kind), ("name", name), ("target", target)],
+                            ));
+                        }
+                    } else if scope == "systemcontainer" {
+                        if !system_containers.contains(target) {
+                            issues.push(super::po::tf(
+                                "{kind} '{name}' (scope systemcontainer) → target '{target}' is not a declared or registered SystemContainer",
                                 &[("kind", &doc.kind), ("name", name), ("target", target)],
                             ));
                         }
@@ -3283,6 +3314,33 @@ mod tests {
         validate_graph_with(&docs(yaml), &[], &[], &[], &[])
     }
 
+    /// A `scope: systemcontainer` policy names a system container, declared in
+    /// the manifest or registered; a Container of that name is not one.
+    #[test]
+    fn a_systemcontainer_scope_names_a_system_container() {
+        let yaml = r#"
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: {name: tools}
+spec: {image: alpine:3.20}
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: {name: p1}
+spec: {target: tools, direction: ingress, scope: systemcontainer}
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: {name: p2}
+spec: {target: other, direction: ingress, scope: systemcontainer}
+"#;
+        let issues = validate_graph_full(&docs(yaml), &[], &[], &["other".into()], &[], &[]);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("'other'"), "{issues:?}");
+        let issues = validate_graph_full(&docs(yaml), &[], &[], &[], &[], &["other".into()]);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
     /// The Stack groups added from the Kind table are checked against each other
     /// the way top-level documents are: validation runs on the EXPANDED list, so
     /// a reference from one group to another is resolved wherever it is written.
@@ -3496,7 +3554,9 @@ spec: { direction: egress, target: fantasma }
     #[test]
     fn firewallpolicy_direction_e_scope_incompativel_apanhados_no_validate() {
         // invalid direction.
-        let i = check("apiVersion: delonix.io/v1\nkind: NetworkPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
+        let i = check(
+            "apiVersion: delonix.io/v1\nkind: NetworkPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n",
+        );
         assert!(
             i.iter().any(|s| s.contains("direction is required")),
             "{i:?}"

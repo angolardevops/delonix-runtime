@@ -1189,6 +1189,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>没有它，那个测试里控制器那一半会被跳过；其余部分照常运行。</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
+<td>防火墙测试的系统容器所接入的节点网桥：防火墙需要一个 <code>net0</code> 来设置 <code>firewall=1</code>。</td>
+<td>节点上存在的网桥。</td>
+<td><code>vmbr0</code>。</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
 <td>一个已经存在、跑着 QEMU guest agent 的 VM，测试会读取它的 IP。</td>
