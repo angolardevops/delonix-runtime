@@ -82,7 +82,7 @@ Chaque ligne du tableau est un primitif enseigné pas à pas dans [Fondations Li
 | Porte | Encodage | Qui l'utilise |
 |---|---|---|
 | CLI `delonix` | argv, classes de sortie stables | opérateurs, scripts |
-| Contrat de nœud `delonix.node.v1` | gRPC **et** HTTP/JSON sur la **même** socket unix locale | tout client local (conception ; pas encore servi) |
+| Contrat de nœud `delonix.node.v1` | gRPC **et** HTTP/JSON sur la **même** socket unix locale | tout client local (servi en partie : seulement `ListProviders`, par `delonix-node-api`) |
 | CRI `runtime.v1` | gRPC sur une socket unix | le kubelet |
 | MCP | JSON-RPC sur stdio | un client d'IA local, une session par processus |
 
@@ -304,20 +304,31 @@ la politique par container coûte la même chose quel que soit le nombre de cont
 ```text
 forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 ```
 
-`fwcont` a deux règles ; les règles de chaque container vivent dans sa propre chaîne, atteinte via la
-verdict map `fwmap` indexée par IP. Le trafic **entre** réseaux est rejeté par paire, sauf si une
+Les règles de chaque container vivent dans sa propre chaîne, atteinte via la verdict map `fwmap`
+indexée par IP — une fois par **source** (`fwout`) et une fois par **destination** (`fwcont`). Ce sont
+deux base chains à dessein : un `accept` dans une chaîne atteinte par saut ne termine que la base chain
+qui a sauté, alors qu'un `drop` est définitif partout, donc la politique d'egress de la source décide
+d'abord et celle d'ingress de la destination décide encore ensuite. Avec une seule base chain portant
+les deux recherches, l'`accept` de la destination terminait le parcours et l'`egress deny` de la source
+ne s'exécutait jamais (`fw_dispatch_chains` dans `infra.rs` ; une table construite par un holder plus
+ancien est migrée sur place par `fw_dispatch_migration_script`). Le trafic **entre** réseaux est rejeté par paire, sauf si une
 `NetworkRoute` place la paire dans `@netpair` — une route dit que le paquet *peut* traverser, et la
 chaîne par container décide encore s'il est *autorisé*.
 
 **L'isolation par namespace** vit dans la chaîne de chaque container : les membres de
 `@dlxns<hash>` (même namespace) sont acceptés, et les **nouvelles** connexions depuis toute autre
 adresse de container (`@dlxall`) sont rejetées ; les réponses passent toujours, car le rejet ne
-correspond qu'à `ct state new`. Une politique d'ingress explicite remplace ce comportement par
-défaut. L'IPv6 dans le SDN est refusé par défaut (`table ip6` avec `policy drop`), car toutes les
+correspond qu'à `ct state new`. Ce rejet est un garde-fou qu'aucune règle
+entrante ne retire : les règles explicites sont émises avant lui, donc un `deny` n'ouvre jamais rien
+et un `allow` explicite (par exemple un `kind: Dependency`) admet toujours le seul pair qu'il nomme
+(`fw_chain_body` dans `infra.rs`). Une spec de pare-feu contenant une règle invalide est refusée en
+entier, et une isolation par namespace qui ne s'applique pas refuse `run`, `start` et `pod create` et
+défait l'attach, au lieu d'avertir. L'IPv6 dans le SDN est refusé par défaut (`table ip6` avec `policy drop`), car toutes les
 règles ci-dessus sont IPv4.
 
 > **Légende** — les participants sont des processus ; les flèches pleines sont des appels, des lignes de socket, des forks ou des clones (l'étiquette précise lequel) ; les flèches en pointillés sont des réponses ou des octets renvoyés ; une auto-flèche est un travail interne à ce processus ; les notes marquent un état ou une attente.
@@ -427,8 +438,8 @@ sequenceDiagram
   locaux la réalisent sous forme d'une ISO NoCloud dont le `network-config` associe la NIC principale
   par **MAC**, et un backend distant peut la réaliser nativement.
 
-**Où cela se trouve dans le code :** `crates/adapters/delonix-vm/src/lib.rs` (`VmBackend`,
-`BackendRegistration`, `builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
+**Où cela se trouve dans le code :** `crates/contexts/delonix-compute/src/vm_backend.rs` (`VmBackend`,
+`BackendRegistration`) ; `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`) ; `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`) ;
 `crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`) ;

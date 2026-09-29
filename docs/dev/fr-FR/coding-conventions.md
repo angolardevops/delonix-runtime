@@ -164,7 +164,8 @@ commentaire `// why` à côté, comme pour toute autre exception (voir [§10](#1
   `ImageRegistry`, `ImageStore`, … Ceux qui existent aujourd'hui sont dans
   `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`, `DeviceResolver`,
   `RunHost`, `VmNetwork`, `NetworkProvider`) et `.../launch.rs` (`WorkloadRuntime`). L'ancien
-  `VmBackend` de `crates/adapters/delonix-vm/src/lib.rs` doit devenir `VmProvider` en P4.
+  `VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`) coexiste avec le `VmProvider` de
+  l'ADR-0044 (`vm_provider.rs`) pendant que la P4 y fait passer les backends.
 - **Les implémentations hôte d'un port s'appellent `Host<Thing>`.** **Convention (observée)** :
   `delonix-linux/src/workload.rs:HostWorkload` (implémente `WorkloadRuntime`),
   `delonix-sdn/src/run_network.rs:HostNetwork` (implémente `NetworkProvider`),
@@ -420,7 +421,7 @@ Proposed, même si les crates qu'ils décrivent existent déjà.
 - **La connaissance propre à un backend vit dans le backend.** Par exemple,
   `VmBackend::ip_is_predicted()` indique si l'IP d'une VM a été prédite, au lieu que le site d'appel
   vérifie `backend.contains("cloud-hypervisor")`. **Décidé** : ADR-0008, cité dans le commentaire de
-  documentation de `crates/adapters/delonix-vm/src/lib.rs`.
+  documentation de `crates/contexts/delonix-compute/src/vm_backend.rs`.
 - **Un adaptateur ne dépend pas d'un autre adaptateur.** Ce dont il a besoin d'une autre préoccupation
   lui arrive sous forme de hook ou de port, câblé par la racine de composition. **Imposé (gate)** :
   `ALLOWED` (adapter → foundation, context). **Convention (observée)** : le commentaire de

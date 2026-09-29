@@ -442,7 +442,9 @@ a API do Kubernetes.
   convergência e o teardown de cada Kind). Reconciliador: `src/reconcile.rs`.
 - Schema publicado: `docs/schema/v1/delonix.json`.
 - Contrato de nó: `proto/delonix/node/v1/*.proto`, com `docs/api/openapi.yaml` gerado e verificado
-  por `scripts/contract_gate.py`.
+  por `scripts/contract_gate.py`. Servido em parte pelo `delonix serve node-api`
+  (`crates/interfaces/delonix-node-api`): `NodeService.ListProviders` em gRPC e como
+  `GET /v1/providers`; os outros RPCs respondem `UNIMPLEMENTED`.
 
 **Estado de conformidade / lacunas.** Garantido por gates de CI (o teste do schema,
 `contract_gate.py`), não por uma suite externa. Vê [Arquitectura](architecture.md) e

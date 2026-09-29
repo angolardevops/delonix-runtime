@@ -447,7 +447,9 @@ compatibilité avec l'API Kubernetes.
   démontage de chaque Kind). Réconciliateur : `src/reconcile.rs`.
 - Schéma publié : `docs/schema/v1/delonix.json`.
 - Contrat de nœud : `proto/delonix/node/v1/*.proto`, avec `docs/api/openapi.yaml` généré et vérifié par
-  `scripts/contract_gate.py`.
+  `scripts/contract_gate.py`. Servi en partie par `delonix serve node-api`
+  (`crates/interfaces/delonix-node-api`) : `NodeService.ListProviders` en gRPC et sous la forme
+  `GET /v1/providers` ; les autres RPC répondent `UNIMPLEMENTED`.
 
 **État de conformité / lacunes.** Contrôlé par la CI (le test du schéma, `contract_gate.py`), et non
 par une suite externe. Voir [Architecture](architecture.md) et

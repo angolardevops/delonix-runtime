@@ -403,8 +403,9 @@ rien à hériter, et le code refuse de deviner).
 
 `vm create` applique les valeurs par défaut enregistrées uniquement là où l'appelant n'a pas décidé :
 les options `--vcpus`/`--memory` l'emportent sur `VCPUS`/`MEMORY` ; pour le backend, `--backend` >
-le `HYPERVISOR` de l'image > `DELONIX_VM_BACKEND` > `vm default-backend` > auto-détection
-(`resolve_vm_defaults` dans `cmd/vm.rs`, et `delonix_vm::create_with`).
+le `HYPERVISOR` de l'image > `DELONIX_VM_BACKEND` > le `defaultProvider` du nœud (fichier des
+providers, que `vm default-backend --set` écrit) > l'ancien défaut par racine > auto-détection
+(`resolve_vm_defaults` dans `cmd/vm.rs`, et `delonix_vm::standing_backend_choice`).
 
 **Hors ligne par défaut, et pourquoi.** Un `RUN` qui accède à Internet produit une image différente
 selon le moment où il s'est exécuté. `--network` est opt-in, car la chose la plus courante que veut

@@ -25,8 +25,9 @@ issue 之前，先读一读 [已知的宿主机陷阱](#known-host-traps) 这一
 
 ### `protoc`（构建必需）
 
-`crates/interfaces/delonix-cri/build.rs` 用 `tonic-build`/`prost` 编译 Kubernetes CRI
-的 protobuf，这需要 `PATH` 上有 Protocol Buffers 编译器。`delonix` 这个二进制程序依赖
+`crates/interfaces/delonix-cri/build.rs` 编译 Kubernetes CRI 的 protobuf，
+`crates/interfaces/delonix-node-api/build.rs` 编译 `proto/delonix/node/v1` 里的节点契约，两者都用
+`tonic-build`/`prost`，这需要 `PATH` 上有 Protocol Buffers 编译器。`delonix` 这个二进制程序依赖
 `delonix-cri`，所以**如果没有它，一次普通的 `cargo build --workspace` 就会失败**：
 
 ```bash
@@ -173,7 +174,8 @@ bash scripts/install.sh --no-binary
 
 资源限制只有在你用来运行引擎的那个 shell 本身位于一个**受委派**的 cgroup 里时，才能
 到达内核。这是 cgroup v2 的规则，不是 Delonix 的限制 —— rootless 的 Podman 也有同样的
-要求。没有委派的情况下，引擎会做两种不同的事，取决于用的是哪个 flag：
+要求。缺少某个 flag 所需的控制器时，`container run` 会拒绝执行，而不是不受限制地运行；
+根据 flag 的不同，有两种探测：
 
 - `-m`/`--memory`、`-c`/`--cpus` 和 `--cpu-weight`：`container run` 会在创建任何东西之前就
   **拒绝**执行，报出一个点名修法的错误，退出码是 **69**（`Error::Unavailable`，

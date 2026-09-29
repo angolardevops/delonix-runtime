@@ -42,8 +42,8 @@
 在这里是正常的中间状态。
 
 ```bash
-git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # cuts the version
-gh workflow run release.yml -f tag=v4.4.0                 # publishes it
+git tag -a v4.5.0 -m "v4.5.0" && git push origin v4.5.0   # cuts the version
+gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 ```
 
 一个 `guard` 任务会先运行，只花几秒钟：它会拒绝一个形状不是 `vX.Y.Z` 的 `tag`、一个在远端
@@ -51,11 +51,11 @@ gh workflow run release.yml -f tag=v4.4.0                 # publishes it
 名字，所以一个未经检查的 `tag: main` 本会发布出一个叫"main"的发布。只有到这一步之后，才会
 在同一个任务里：
 
-1. 构建 `delonix`、`delonix-cri`、`delonix-mcp` 和 `delonix-mgmt` 两次——一次是通用
+1. 构建 `delonix`、`delonix-cri`、`delonix-mcp`、`delonix-mgmt` 和 `delonix-node-api` 两次——一次是通用
    x86-64，一次带上 `-C target-cpu=x86-64-v3`（AVX2/BMI2/FMA）——特意选在 `ubuntu-22.04`
    上构建，好让 glibc 基线版本（2.35）与 RHEL 9 和 Debian 12 保持兼容，而不只是与最新的
    Ubuntu 兼容。`scripts/install.sh` 会在宿主机 CPU 支持时自动选用 `-v3` 版本的构建。一个
-   独立的 `build-arm64` 任务会在一台 aarch64 运行器上原生构建同样这四个二进制文件（每个
+   独立的 `build-arm64` 任务会在一台 aarch64 运行器上原生构建同样这五个二进制文件（每个
    组件一个，没有 `-v3` 变体），以 `<name>-aarch64-linux` 的形式发布，并放进同一份
    `SHA256SUMS` 里。`install.sh` 会在一台 aarch64 宿主机上安装它们（#447）。这个任务只在
    发布时运行，所以它第一次执行就是 v4.2.0 那次发布本身；CI 会在每个 PR 上通过 `test
@@ -114,8 +114,13 @@ gh workflow run release.yml -f tag=v4.4.0                 # publishes it
   （`compute.delonix.io/v1alpha1` 等）成为规范写法之后依然能被加载。这是实践中分量最重的
   那条承诺——它保护的是人们提交进 git、在 PR 里评审的那些内容，而不只是敲在命令提示符里的
   那些字符。
+- 节点的 **providers 文件**（`providers.yaml`，`apiVersion: config.delonix.io/v1`，ADR-0054）
+  享有与清单 schema 相同的承诺：一个键绝不会被移除或挪作他用，新键永远是可选的，而
+  `apiVersion` 只会随一个 `v2` 改变，并且 `v2` 发布时 `v1` 依然会被读取。它的 schema 由引擎
+  读取的类型生成（`delonix provider config schema`，发布为 `docs/schema/v1/providers.json`，
+  有一个测试会在已发布的副本不是生成结果时失败）。
 
-**不稳定——可以在任何版本里改变：** `serve cri`/`serve api`/`serve docker-api`（本地管理
+**不稳定——可以在任何版本里改变：** `serve cri`/`serve api`/`serve node-api`/`serve docker-api`（本地管理
 API 尤其没有已发布的契约，明确不是拿来做自动化的对象——见[各个 crate § `delonix-mgmt`](crates.md#delonix-mgmt)
 以及 ADR-0040/0041）；`cluster`/`vm`/`pod`/`workload`/`net` 这些命令式（imperative）
 接口（它们的清单 **schema**，如果存在的话，上面已经覆盖到了——不稳定的只是围绕它的那些

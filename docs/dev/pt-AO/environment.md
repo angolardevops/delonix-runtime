@@ -25,7 +25,8 @@ Instala o [`rustup`](https://rustup.rs/) e deixa-o apanhar o canal fixado; não 
 
 ### `protoc` (necessário para compilar)
 
-O `crates/interfaces/delonix-cri/build.rs` compila o protobuf do CRI do Kubernetes com
+O `crates/interfaces/delonix-cri/build.rs` compila o protobuf do CRI do Kubernetes, e o
+`crates/interfaces/delonix-node-api/build.rs` o contrato de nó em `proto/delonix/node/v1`, ambos com
 `tonic-build`/`prost`, que precisa do compilador de Protocol Buffers no `PATH`. O binário `delonix`
 depende do `delonix-cri`, por isso **um simples `cargo build --workspace` falha sem ele**:
 
@@ -177,7 +178,8 @@ Opções, da menos para a mais invasiva:
 
 Os limites de recursos só chegam ao kernel se a shell a partir da qual corres o motor estiver num
 cgroup **delegado**. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless
-tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, conforme a flag:
+tem o mesmo requisito. Sem o controlador de que uma flag precisa, o `container run` recusa em vez de
+correr sem limite; há duas sondas, conforme a flag:
 
 - `-m`/`--memory`, `-c`/`--cpus` e `--cpu-weight`: o `container run` **recusa** antes de criar
   seja o que for, com um erro que diz como corrigir, e sai com **69** (`Error::Unavailable`, a

@@ -52,11 +52,12 @@
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, MCP server
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
+│   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
+│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -117,11 +118,12 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 | `crates/foundation/` | 纯粹的基础层：只有数据的模型——错误、纯数据记录（`Status`、防火墙相关的记录）、secret 模型、生成的名称、退出码与 `DX_*` 类别（`delonix-model`），以及零依赖的网络规则（`delonix-net-rules`）。只依赖基础层本身。 | 新增一个共享类型或纯规则的改动。 | [各个 crate](crates.md) |
 | `crates/contexts/` | 带用例的限界上下文：Compute，带着 `Container` 和 `Vm` 记录（`delonix-compute`），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（`delonix-node`）——，Stack——Kind、协调器、revision（`delonix-stack`）——，以及节点的安全决策（`delonix-security-runtime`）。 | 改变引擎决策方式的功能。 | [各个 crate](crates.md) |
 | `crates/adapters/` | 这个节点上的各种机制：Linux 命名空间/cgroup（`delonix-linux`）、OCI 镜像（`delonix-oci`）、网络与防火墙（`delonix-sdn`）、微虚拟机（`delonix-vm`）、卷（`delonix-volume`）、持久化状态与 secret 保险库（`delonix-state`）、漏洞扫描（`delonix-scanner`）、日志/指标/追踪（`delonix-telemetry`）。 | 触碰内核、磁盘或本地工具的功能。 | [各个 crate](crates.md)、[云原生入门](cloud-native-primer.md) |
-| `crates/providers/` | 端口背后的远程系统：作为 `VmBackend` 的一个 Proxmox VE 节点（`delonix-proxmox`），以及 TrueNAS 的资源制备（`delonix-truenas`）。 | 对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。 | `docs/adr/0008-proxmox-vm-backend.md` |
-| `crates/interfaces/` | 暴露引擎的服务器：Kubernetes CRI（`delonix-cri`，同时也提供 `delonix-cri` 这个二进制程序）、本地管理 API（`delonix-mgmt`）以及 MCP 服务器（`delonix-mcp`）。 | 对这几种协议之一的改动。 | [云原生标准](cloud-native-standards.md) |
+| `crates/providers/` | 端口背后的远程系统：一个 Proxmox VE 节点，作为 `VmBackend`，连同它的逐 VM 防火墙和它的 SDN（`delonix-proxmox`）；一台作为 `GatewayProvider` 的 OPNsense 设备（`delonix-opnsense`）；以及 TrueNAS 的资源制备（`delonix-truenas`）。 | 对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。 | `docs/adr/0008-proxmox-vm-backend.md` |
+| `crates/interfaces/` | 暴露引擎的服务器：Kubernetes CRI（`delonix-cri`，同时也提供 `delonix-cri` 这个二进制程序）、本地管理 API（`delonix-mgmt`）、节点契约服务器（`delonix-node-api`）以及 MCP 服务器（`delonix-mcp`）。 | 对这几种协议之一的改动。 | [云原生标准](cloud-native-standards.md) |
 | `bins/` | 二进制 crate。每一个只组合一个接口（由 `arch_fitness.py` 强制执行）。 | 每一个 CLI 可见的功能。 | [架构](architecture.md) |
 | `bins/delonix-runtime-bin/` | `delonix` CLI：`src/main.rs`、`src/cmd/` 下每个命令组一个模块、葡萄牙语消息目录 `data/pt.po`、`templates/` 下的 `init` 项目模板、`build.rs`，以及 `tests/architecture.rs`。 | 每一个带命令、flag 或消息的功能。 | [编码约定](coding-conventions.md) |
 | `bins/delonix-mgmt-bin/` | `delonix-mgmt` 二进制程序：一个覆盖在 `delonix-mgmt` 之上的很薄的 `main.rs`。 | 很少改动；逻辑活在接口层的那个 crate 里。 | [各个 crate](crates.md) |
+| `bins/delonix-node-api-bin/` | `delonix-node-api` 二进制程序：一个覆盖在 `delonix-node-api` 之上的很薄的 `main.rs`（在一个 unix 套接字上的节点契约，ADR-0040 P5）。 | 很少改动；逻辑活在接口层的那个 crate 里。 | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `bins/delonix-mcp-bin/` | `delonix-mcp` 二进制程序：一个覆盖在 `delonix-mcp` 之上的很薄的 `main.rs`。 | 很少改动；逻辑活在接口层的那个 crate 里。 | `docs/adr/0025-mcp-local-ai-control-surface.md` |
 | `proto/` | 节点契约 `delonix.node.v1`（`proto/delonix/node/v1/*.proto`），标记为 draft；是 gRPC 和 HTTP/JSON 以及 `docs/api/openapi.yaml` 的唯一真相来源。由 `scripts/contract_gate.py` 检查（格式、lint、破坏性变更、HTTP 映射、OpenAPI）。 | 契约变更，需要仔细评审——相对于上一个 tag 的破坏性变更会失败。 | `proto/README.md`、ADR-0040 |
 | `tests/` | 树外的兼容性检查，不是 cargo 测试：`tests/compat/cri-conformance.sh`（`critest` 套件）和 `tests/compat/docker_api_smoke.py`。Cargo 的集成测试活在每个 crate 自己的 `tests/` 里。 | 从事 CRI 或 Docker API 兼容性工作的人。 | `docs/cri-conformance.md`、[克隆、构建与测试](build-and-test.md) |
@@ -151,13 +153,13 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 | `docs/releases/` | 发布说明，每个发布一份 `v<version>.md`。一次发布提交必须自己新增一份（`version_gate.py`）。历史记录——不要重写过去的说明。 | 发布提交本身。 | [贡献流程](contributing-workflow.md) |
 | `docs/roadmap/` | 一个改进项目的可追溯性矩阵，其中每一个单元格都引用了一次测量，或者写着「未测量」。 | 维护者，随着条目被测量或关闭。 | — |
 | `docs/runtime/` | 带日期的运行时调查（现状、crate 依赖图、目标与现实的对比）。历史记录：里面的 crate 名称是后来重命名之前的。 | 不再更新；被[架构](architecture.md)和[各个 crate](crates.md)取代。 | [架构](architecture.md) |
-| `docs/schema/` | `v1/delonix.json`，清单的 JSON Schema，从代码**生成**（ADR-0007）。 | 一个清单类型变化时运行 `delonix manifest schema > docs/schema/v1/delonix.json`。 | `docs/adr/0007-generated-manifest-schema.md` |
+| `docs/schema/` | `v1/delonix.json`，清单的 JSON Schema，从代码**生成**（ADR-0007）；以及 `v1/providers.json`，节点 providers 文件的 JSON Schema（ADR-0054）。 | 一个清单类型变化时运行 `delonix manifest schema > docs/schema/v1/delonix.json`；providers 文件变化时运行 `delonix provider config schema > docs/schema/v1/providers.json`。 | `docs/adr/0007-generated-manifest-schema.md`、`docs/adr/0054-provider-configuration-file.md` |
 
 ## 工具、CI 与打包（scripts/、.github/、dist/、editors/、examples/、reports/、third_party/、.ai/）
 
 | 路径 | 是什么 | 谁在什么时候改它 | 延伸阅读 |
 |---|---|---|---|
-| `scripts/` | 各个门禁（`arch_fitness.py`、`lang_ratchet.py`、`contract_gate.py`、`version_gate.py`、`docs_cli_gate.py`、`cli-tree.sh`、`dev_docs.py`）及其基线（`arch_baseline.json`、`lang_baseline.json`、`cli_baseline.tsv`）、各个生成器（`dev_docs_site.py`、`gen-releases.sh`、`sbom.py`）、各个测试装置（`e2e.sh`、`chaos.sh`、`critest.sh`、`bench.sh`、`coverage.sh`）、安装脚本 `install.sh`、`appliances/` 下的一体机镜像构建，以及 `spikes/` 下的 spike 探针。 | 任何改动会移动一个棘轮（ratchet）的人（在同一个提交里降低基线）；其余情况由维护者负责。 | [克隆、构建与测试](build-and-test.md) |
+| `scripts/` | 各个门禁（`arch_fitness.py`、`lang_ratchet.py`、`contract_gate.py`、`version_gate.py`、`docs_cli_gate.py`、`cli-tree.sh`、`dev_docs.py`、`tmp_roots_gate.py`）及其基线（`arch_baseline.json`、`lang_baseline.json`、`cli_baseline.tsv`、`tmp_roots_baseline.json`）、各个生成器（`dev_docs_site.py`、`gen-releases.sh`、`sbom.py`）、各个测试装置（`e2e.sh`、`chaos.sh`、`critest.sh`、`bench.sh`、`coverage.sh`）、安装脚本 `install.sh`、`appliances/` 下的一体机镜像构建，以及 `spikes/` 下的 spike 探针。 | 任何改动会移动一个棘轮（ratchet）的人（在同一个提交里降低基线）；其余情况由维护者负责。 | [克隆、构建与测试](build-and-test.md) |
 | `.github/` | `workflows/ci.yml`（每次 push 和对 `main` 的 PR 都跑的所有门禁）、`chaos.yml`（混沌测试装置）、`release.yml`（手动触发，`gh workflow run release.yml -f tag=vX.Y.Z`）、`vm-image.yml` 和 `vm-appliances.yml`（手动的镜像发布），再加上 `CODEOWNERS`、issue 和 PR 模板，以及给 GitHub Copilot 用的一份指针文件。 | 维护者；新增一个门禁时，要在这里加，并在手册里记录下来。 | [克隆、构建与测试](build-and-test.md)、[发布文档](publishing-docs.md) |
 | `dist/` | `delonix-cri.service`，CRI 服务器用的 systemd unit（同时也嵌在二进制程序里）。 | 改动 `delonix-cri` 在 systemd 下如何运行的人。 | [云原生标准](cloud-native-standards.md) |
 | `editors/` | VMfile 语法高亮：`vim/`（ftdetect + syntax）和 `vscode/`（语言配置 + TextMate 语法）。 | 改动 VMfile 语法的人。 | [Delonixfile 与 VMfile](delonixfile-and-vmfile.md) |
@@ -176,13 +178,15 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 |---|---|---|---|
 | `docs/api/` | `openapi.yaml` | `python3 scripts/contract_gate.py --update` | `contract gate` 作业（`scripts/contract_gate.py`） |
 | `docs/schema/` | `v1/delonix.json` | `delonix manifest schema > docs/schema/v1/delonix.json` | `test` 作业，`bins/delonix-runtime-bin/src/cmd/schema.rs` 里的测试 `o_schema_publicado_esta_em_dia_com_o_codigo` |
+| `docs/schema/` | `v1/providers.json` | `delonix provider config schema > docs/schema/v1/providers.json` | `test` 作业，`bins/delonix-runtime-bin/src/cmd/providers_config.rs` 里的测试 `the_published_providers_schema_is_the_generated_one` |
+| `docs/providers/` | `capability-matrix.md` | `delonix provider matrix > docs/providers/capability-matrix.md` | `test` 作业，`bins/delonix-runtime-bin/src/cmd/provider.rs` 里的测试 `the_published_matrix_is_the_generated_one` |
 | `docs/comandos/` | 每一个页面 | `python3 docs/gen.py`（需要 `cargo build --release -p delonix-runtime-bin`） | `generated docs and valid examples` 作业，步骤「O site publicado tem de ser o gerado」（对 `docs/` 做 `git diff`） |
 | `docs/` | 顶层的 `*.html`、`.nojekyll` | `python3 docs/gen.py` | 同上面那一步 |
 | `docs/` | `RELEASES.md` | `bash scripts/gen-releases.sh` | CI 中没有：`release.yml` 在每次发布之后重新生成并提交它 |
 | `docs/dev/` | 只有 `dev-docs` 那些区域 | `python3 scripts/dev_docs.py` | `arch fitness` 作业，步骤 `python3 scripts/dev_docs.py --check`；也由 `release.yml` 刷新 |
 | `docs/proxmox/` | `matrix-9.2.2.md` | `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown > docs/proxmox/matrix-9.2.2.md` | `script tests` 作业，`scripts/test_proxmox_api_inventory.py`（`test_the_committed_matrix_is_up_to_date`） |
 | `docs/handbook/` | 每一个页面 | `python3 scripts/dev_docs_site.py` | `generated docs and valid examples` 作业，`python3 scripts/dev_docs_site.py --check`；也由 `release.yml` 刷新 |
-| `scripts/` | `cli_baseline.tsv`、`arch_baseline.json`、`lang_baseline.json` | `scripts/cli-tree.sh --update`、`arch_fitness.py --update`、`lang_ratchet.py --update` | `cli surface`（`cli-tree.sh --gate`）、`arch fitness`、`lang ratchet` 作业 |
+| `scripts/` | `cli_baseline.tsv`、`arch_baseline.json`、`lang_baseline.json`、`tmp_roots_baseline.json` | `scripts/cli-tree.sh --update`、`arch_fitness.py --update`、`lang_ratchet.py --update`、`tmp_roots_gate.py --dir <dir> --update` | `cli surface`（`cli-tree.sh --gate`）、`arch fitness`、`lang ratchet` 作业；`tmp_roots_gate.py` 由 `test` 作业检查 |
 | `Cargo.lock` | 锁文件本身 | `cargo` | 每一个 cargo 作业都用 `--locked` 构建 |
 
 完全没有被提交的：manpage（`delonix man --dir`，CI 中用 `groff` 检查）和 `target/`。

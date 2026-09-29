@@ -31,6 +31,15 @@ apply mudaria e não muda nada (`--detailed-exitcode` sai com 2 quando há alter
 já não declara, e nunca corre por omissão. Ver: `crates/contexts/delonix-stack/src/reconcile.rs::plan`,
 [Reconciliação declarativa](cloud-native-primer.md#48-declarative-reconciliation).
 
+**Catálogo de capacidades** — A lista versionada das coisas que um operador pode pedir a um provider
+(um restart de VM, uma migração a quente, uma firewall por workload, …), e o denominador de qualquer
+afirmação «este provider cobre X». Cada provider responde a cada entrada com um de seis estados, e
+`supported` tem de citar a sua evidência (um teste, uma secção da bateria e2e, um cenário de caos ou
+um teste ao vivo), e um teste da CLI confirma que a referência citada existe. O `delonix provider ls`
+mede as respostas neste host; o `delonix provider matrix` imprime a vista declarada, publicada como
+`docs/providers/capability-matrix.md`. Ver: `crates/contexts/delonix-compute/src/capability.rs`,
+[ADR-0050](../../adr/0050-libvirt-linux-providers-capability-catalog.md).
+
 **CAS (content-addressed storage)** — A loja de blobs de imagens: cada blob vive em
 `blobs/sha256/<hex>` no state root, endereçado pelo seu digest, por isso conteúdo idêntico é guardado
 uma só vez. A integridade é verificada quando o conteúdo **entra** na loja, não quando é lido: um pull
@@ -63,7 +72,9 @@ que é como um sandbox de pod do CRI recebe a sua rede. Ver:
 **Contract (node)** — A API de um nó, definida em Protocol Buffers em `proto/delonix/node/v1/`
 (pacote `delonix.node.v1`), com um documento OpenAPI `docs/api/openapi.yaml` gerado a partir dela.
 O `scripts/contract_gate.py` guarda a formatação, o lint, a compatibilidade com a última tag e o
-OpenAPI gerado. É um contrato publicado; nenhum servidor o implementa ainda. Ver:
+OpenAPI gerado. É um contrato publicado, servido em parte: o `delonix serve node-api`
+(`crates/interfaces/delonix-node-api`) responde ao `NodeService.ListProviders`, e todos os outros RPCs
+respondem `UNIMPLEMENTED`. Ver:
 [Em que ponto está a reestruturação](architecture.md#where-the-restructuring-stands),
 [ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md).
 
@@ -186,10 +197,19 @@ de compute `ImageStore`, `StorageProvider`, `NetworkProvider`, `WorkloadRuntime`
 [Traits como portas](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
 
 **Provider** — Um crate em `crates/providers/` que implementa uma porta contra **uma API de gestão
-remota** (hoje Proxmox VE e TrueNAS), trazendo o seu próprio cliente HTTP. Um provider novo entra como
+remota** (hoje Proxmox VE, OPNsense e TrueNAS), trazendo o seu próprio cliente HTTP. Um provider novo entra como
 implementação de uma porta, registado na raiz de composição — nunca como um `if provider == …` no
 código — e precisa de um ADR. Ver: [Providers](crates.md#providers),
-[ADR-0008](../../adr/0008-proxmox-vm-backend.md), [ADR-0009](../../adr/0009-truenas-storage-provisioner.md).
+[ADR-0008](../../adr/0008-proxmox-vm-backend.md), [ADR-0009](../../adr/0009-truenas-storage-provisioner.md),
+[ADR-0051](../../adr/0051-opnsense-firewall-provider.md).
+
+**Ficheiro de providers** — `providers.yaml` (`apiVersion: config.delonix.io/v1`): um ficheiro por nó
+que diz que providers o nó tem, como o motor chega a cada um, e qual serve um pedido que não nomeia
+nenhum (`defaultProvider`). O primeiro ficheiro encontrado ganha e os ficheiros nunca se fundem
+(`DELONIX_PROVIDERS_CONFIG`, depois `$XDG_CONFIG_HOME/delonix/`, depois `/etc/delonix/`); uma chave
+desconhecida ou um segredo escrito no próprio ficheiro é recusado pelo nome. Ver:
+`bins/delonix-runtime-bin/src/cmd/providers_config.rs`, `delonix provider config show|validate|schema`,
+[ADR-0054](../../adr/0054-provider-configuration-file.md).
 
 **Ratchet** — Um gate sobre um contador de dívida que falha quando o número **sobe** e também quando
 **desce** sem a linha de base registada ter sido baixada no mesmo commit, para que o progresso fique
@@ -260,11 +280,12 @@ bridges → uma isenção que abre uma rota entre duas redes). Ver:
 `crates/adapters/delonix-sdn/src/infra.rs::FWMAP`, `NETPAIR_MAP`.
 
 **VmBackend** — A porta que todo o backend de VM implementa (`boot`, `stop`, `destroy`, `is_running`,
-`ip`, pausa e snapshots, …). O Cloud Hypervisor e o libvirt estão registados por omissão; um provider
-remoto regista-se na raiz de composição. Registar não faz I/O, e a auto-detecção filtra pela
+`ip`, pausa e snapshots, …), definida no contexto de computação e reexportada pelo `delonix-vm`. O
+Cloud Hypervisor e o libvirt estão registados por omissão; um provider remoto entrega à raiz de
+composição um registo, que é ela quem regista. Registar não faz I/O, e a auto-detecção filtra pela
 registration antes de construir seja o que for, por isso um backend remoto só se liga quando é
-escolhido. Ver: `crates/adapters/delonix-vm/src/lib.rs::VmBackend`, `register_backend`,
-`select_backend`,
+escolhido. Ver: `crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend`,
+`crates/adapters/delonix-vm/src/lib.rs::register_backend`, `select_backend`,
 [Traits como portas](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry).
 
 **Workload** — Duas coisas relacionadas. `kind: Workload` é um Kind de açúcar com `spec.type:

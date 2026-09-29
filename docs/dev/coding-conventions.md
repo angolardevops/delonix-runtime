@@ -160,7 +160,8 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   `ImageRegistry`, `ImageStore`, … The ones that exist today are in
   `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`, `DeviceResolver`,
   `RunHost`, `VmNetwork`, `NetworkProvider`) and `.../launch.rs` (`WorkloadRuntime`). The older
-  `VmBackend` in `crates/adapters/delonix-vm/src/lib.rs` is due to become `VmProvider` in P4.
+  `VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`) coexists with the ADR-0044
+  `VmProvider` (`vm_provider.rs`) while P4 moves the backends onto it.
 - **Host implementations of a port are called `Host<Thing>`.** **Convention (observed)**:
   `delonix-linux/src/workload.rs:HostWorkload` (implements `WorkloadRuntime`),
   `delonix-sdn/src/run_network.rs:HostNetwork` (implements `NetworkProvider`),
@@ -408,7 +409,7 @@ already exist.
 - **Backend-specific knowledge lives on the backend.** For example,
   `VmBackend::ip_is_predicted()` answers whether a VM's IP was predicted, instead of the call site
   checking `backend.contains("cloud-hypervisor")`. **Decided**: ADR-0008, quoted in the doc comment
-  in `crates/adapters/delonix-vm/src/lib.rs`.
+  in `crates/contexts/delonix-compute/src/vm_backend.rs`.
 - **An adapter does not depend on another adapter.** What it needs from another concern comes in
   as a hook or a port, wired by the composition root. **Enforced (gate)**: `ALLOWED` (adapter →
   foundation, context). **Convention (observed)**: the doc comment of

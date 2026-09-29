@@ -82,7 +82,7 @@ python3 scripts/dev_docs.py --check    # exit 1 when docs/dev is stale (CI job `
 
 ## 发布时会发生什么
 
-发布工作流（`.github/workflows/release.yml`）只在有人要求时才运行（`gh workflow run release.yml -f tag=v4.4.0`）——单单推送一个标签什么都不会发生。就文档而言，它会：
+发布工作流（`.github/workflows/release.yml`）只在有人要求时才运行（`gh workflow run release.yml -f tag=v4.5.0`）——单单推送一个标签什么都不会发生。就文档而言，它会：
 
 1. 针对发布构建重新生成用户站点，如果 `docs/` 有差异就**失败**；
 2. 以 `docs/releases/<tag>.md` 作为正文发布 GitHub Release（如果该文件不存在，就用生成的说明）；

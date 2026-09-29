@@ -383,8 +383,9 @@ cloud-init 文件、产出物和一份 README。
 
 `vm create` 只会在调用者没有自己决定的地方应用记录下来的默认值：`--vcpus`/`--memory`
 参数优先于 `VCPUS`/`MEMORY`；对后端来说，`--backend` > 镜像自己的 `HYPERVISOR` >
-`DELONIX_VM_BACKEND` > `vm default-backend` > 自动检测（`cmd/vm.rs` 里的
-`resolve_vm_defaults`，以及 `delonix_vm::create_with`）。
+`DELONIX_VM_BACKEND` > 节点的 `defaultProvider`（providers 文件，由 `vm default-backend --set`
+写入） > 旧的按根目录保存的默认值 > 自动检测（`cmd/vm.rs` 里的 `resolve_vm_defaults`，以及
+`delonix_vm::standing_backend_choice`）。
 
 **默认离线，以及为什么。** 一条能联网的 `RUN`，会因为运行的时间不同而产出不同的镜像。
 `--network` 是可选加入的，因为一个 VMfile 最常见的诉求就是装一个软件包。带上

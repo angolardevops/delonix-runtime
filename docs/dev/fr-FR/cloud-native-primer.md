@@ -212,8 +212,9 @@ JSON depuis `/etc/cni/net.d`. Les runtimes Kubernetes l’utilisent pour le rés
 - Sortie et redirection de ports : `slirp_attach` et `slirp_add_hostfwd` dans
   `crates/adapters/delonix-sdn/src/lib.rs` (qui démarrent `slirp4netns`) ; la publication à
   l’intérieur du holder dans `publish_port`/`do_publish` (`infra.rs`).
-- Pare-feu : `table ip dlxing` avec les base chains `fwguard`, `fwdeny`, `fwcont` et la verdict map
-  `fwmap` (`FWMAP`), générée dans `infra.rs` (`do_firewall`, `apply_firewall_all`, `ns_set_join`
+- Pare-feu : `table ip dlxing` avec les base chains `fwguard`, `fwdeny`, `fwout` (par source) et
+  `fwcont` (par destination), qui consultent toutes deux la verdict map `fwmap` (`FWMAP`), générée
+  dans `infra.rs` (`fw_dispatch_chains`, `do_firewall`, `apply_firewall_all`, `ns_set_join`
   pour les sets d’isolement de namespace).
 - DNS interne (nom standard `<name>.<namespace>.svc.delonix.internal`, l’ancien
   `<name>.<namespace>.delonix.internal` répond toujours ; `service_fqdn`, `parse_internal_name`) :
@@ -291,8 +292,9 @@ est un petit ISO étiqueté `cidata` contenant `user-data`, `meta-data` et éven
 
 **Dans Delonix**
 
-- Le port est `VmBackend` dans `crates/adapters/delonix-vm/src/lib.rs`, implémenté par
-  `CloudHypervisorBackend` et `LibvirtBackend` là, et par `ProxmoxBackend` dans
+- Le port est `VmBackend` dans `crates/contexts/delonix-compute/src/vm_backend.rs` (réexporté par
+  `delonix-vm`), implémenté par `CloudHypervisorBackend` et `LibvirtBackend` dans
+  `crates/adapters/delonix-vm/src/lib.rs`, et par `ProxmoxBackend` dans
   `crates/providers/delonix-proxmox` ([ADR-0008](../../adr/0008-proxmox-vm-backend.md)).
 - Ordre de recherche du firmware Cloud Hypervisor : `DEFAULT_CH_FIRMWARES` (EDK2 `CLOUDHV.fd`
   avant `hypervisor-fw`) ; la ligne de commande du VMM est construite dans `boot_ch`.

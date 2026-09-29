@@ -445,7 +445,9 @@ API 兼容。
   `src/reconcile.rs`。
 - 发布的 schema：`docs/schema/v1/delonix.json`。
 - 节点契约：`proto/delonix/node/v1/*.proto`，`docs/api/openapi.yaml` 是生成出来的,
-  由 `scripts/contract_gate.py` 检查。
+  由 `scripts/contract_gate.py` 检查。它由 `delonix serve node-api`（`crates/interfaces/delonix-node-api`）
+  部分地提供服务：`NodeService.ListProviders` 以 gRPC 和 `GET /v1/providers` 的形式提供；其余 RPC
+  都回答 `UNIMPLEMENTED`。
 
 **合规状态／缺口。** 由 CI 把关（schema 测试、`contract_gate.py`），而不是靠一个外部
 套件。参见[架构](architecture.md)和[系统设计](system-design-interview.md)。

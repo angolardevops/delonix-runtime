@@ -47,8 +47,8 @@ tag qui arrive sur le remote par accident (`git push --tags`, `push.followTags=t
 un binaire devant tout le monde. Ici, un tag sans release est un état intermédiaire normal.
 
 ```bash
-git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # coupe la version
-gh workflow run release.yml -f tag=v4.4.0                 # la publie
+git tag -a v4.5.0 -m "v4.5.0" && git push origin v4.5.0   # coupe la version
+gh workflow run release.yml -f tag=v4.5.0                 # la publie
 ```
 
 Un job `guard` s'exécute d'abord et coûte quelques secondes : il refuse un `tag` qui n'a pas la
@@ -56,12 +56,12 @@ forme `vX.Y.Z`, un qui n'existe pas sur le remote, et un qui a déjà une releas
 choisit le commit à construire et donne son nom à la release, donc un `tag: main` non vérifié
 aurait publié une release appelée « main ». Ensuite seulement, en un seul job :
 
-1. Construit `delonix`, `delonix-cri`, `delonix-mcp` et `delonix-mgmt` deux fois — une fois
+1. Construit `delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt` et `delonix-node-api` deux fois — une fois
    générique x86-64, une fois avec `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — spécifiquement sur
    `ubuntu-22.04`, afin que la base glibc (2.35) reste compatible avec RHEL 9 et Debian 12, pas
    seulement avec le dernier Ubuntu. `scripts/install.sh` choisit automatiquement le build `-v3`
    quand le CPU de l'hôte le prend en charge.
-   Un job `build-arm64` distinct construit nativement les quatre mêmes binaires sur un runner aarch64 (un par
+   Un job `build-arm64` distinct construit nativement les cinq mêmes binaires sur un runner aarch64 (un par
    composant, sans variante `-v3`), et ils sont publiés sous le nom `<name>-aarch64-linux` avec le même
    `SHA256SUMS`. `install.sh` les installe sur un hôte aarch64 (#447). Le job ne s'exécute qu'au moment de la release, donc sa
    première exécution a été la release v4.2.0 elle-même ; la CI exécute la suite de tests nativement sur arm64
@@ -129,8 +129,14 @@ du projet plutôt que comme une note interne au `0.x`.
   (`compute.delonix.io/v1alpha1`, …) sont devenus canoniques. C'est la promesse qui compte le
   plus en pratique — elle protège ce que les gens mettent dans git et relisent dans une PR, pas
   seulement ce qu'ils tapent à une invite.
+- Le **fichier des providers** du nœud (`providers.yaml`, `apiVersion: config.delonix.io/v1`,
+  ADR-0054) porte la même promesse que le schéma du manifeste : une clé n'est jamais retirée ni
+  réaffectée, une nouvelle clé est toujours optionnelle, et l'`apiVersion` ne change qu'avec un
+  `v2` publié pendant que le `v1` est encore lu. Le schéma est généré à partir des types que le
+  moteur lit (`delonix provider config schema`, publié sous `docs/schema/v1/providers.json`, avec
+  un test qui échoue lorsque la copie publiée n'est pas celle générée).
 
-**Pas stable — peut changer à n'importe quelle version :** `serve cri`/`serve api`/`serve
+**Pas stable — peut changer à n'importe quelle version :** `serve cri`/`serve api`/`serve node-api`/`serve
 docker-api` (l'API de gestion locale en particulier n'a aucun contrat publié et n'est
 explicitement pas quelque chose contre quoi automatiser — voir [Les crates §
 `delonix-mgmt`](crates.md#delonix-mgmt) et les ADR-0040/0041) ; les surfaces impératives

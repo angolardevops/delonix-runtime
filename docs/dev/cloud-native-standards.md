@@ -437,7 +437,9 @@ Kubernetes API compatibility.
   convergence, teardown). Reconciler: `src/reconcile.rs`.
 - Published schema: `docs/schema/v1/delonix.json`.
 - Node contract: `proto/delonix/node/v1/*.proto`, with `docs/api/openapi.yaml` generated and
-  checked by `scripts/contract_gate.py`.
+  checked by `scripts/contract_gate.py`. Served in part by `delonix serve node-api`
+  (`crates/interfaces/delonix-node-api`): `NodeService.ListProviders` as gRPC and as
+  `GET /v1/providers`; the other RPCs answer `UNIMPLEMENTED`.
 
 **Conformance status / gaps.** Gated by CI (the schema test, `contract_gate.py`), not by an
 external suite. See [Architecture](architecture.md) and [System design](system-design-interview.md).

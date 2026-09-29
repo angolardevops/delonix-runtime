@@ -90,7 +90,7 @@ Rust by Example ——[定义一个错误类型](https://doc.rust-lang.org/rust-
 
 ## 3.3 作为端口的 trait：`VmBackend` 与后端注册表
 
-引擎通过 **trait**（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 `crates/adapters/delonix-vm/src/lib.rs` 里的 `VmBackend`：
+引擎通过 **trait**（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 `crates/contexts/delonix-compute/src/vm_backend.rs` 里的 `VmBackend`（它是从 `delonix-vm` 挪过去的，`delonix-vm` 会重新导出它，这样一个 provider crate 不必依赖某个适配器就能实现它）：
 
 ```rust
 pub trait VmBackend {
@@ -104,16 +104,17 @@ pub trait VmBackend {
 }
 ```
 
-实现有：同一个文件里的 `CloudHypervisorBackend` 和 `LibvirtBackend`，以及
+实现有：`crates/adapters/delonix-vm/src/lib.rs` 里的 `CloudHypervisorBackend` 和 `LibvirtBackend`，以及
 `crates/providers/delonix-proxmox/src/lib.rs` 里的 `ProxmoxBackend`。trait 里带有**默认实现体**的方法（比如 `auto_selectable`）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。
 
 后端是在运行时挑选出来的，所以它们被当作 **trait 对象**来处理，也就是
 `Box<dyn VmBackend>`。它们是通过一个工厂（factory）注册表创建出来的：
 
 ```rust
-// crates/adapters/delonix-vm/src/lib.rs
+// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>> =
     std::sync::OnceLock::new();
 ```
@@ -122,9 +123,11 @@ static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>
 - 之所以要求 `Send + Sync`，是因为这张表是一个进程范围的 `static`；这个约束限制的是闭包，而不是 `VmBackend` 这个 trait 本身。
 - `OnceLock` 惰性地初始化这张表（`builtin_backends()` 会播种两个本地后端），
   `RwLock` 让 `register_backend` 可以在启动时再加一个第三方后端。二进制程序在
-  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs`（`register_configured`）里就是这么做的。
+  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs`（`register_configured`）里就是这么做的：provider
+  的 crate 只负责构建 `BackendRegistration`（`delonix_proxmox::registration`），由组合根把它交给
+  `delonix_vm::register_backend`。
 
-这个设计背后的决定记在 [ADR-0008](../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在同一个文件靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
+这个设计背后的决定记在 [ADR-0008](../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在 `crates/adapters/delonix-vm/src/lib.rs` 靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
 
 **延伸阅读：** The Rust Book ——
 [Trait](https://doc.rust-lang.org/book/ch10-02-traits.html)，

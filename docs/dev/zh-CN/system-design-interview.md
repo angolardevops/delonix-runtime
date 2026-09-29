@@ -73,7 +73,7 @@
 | 门 | 编码 | 谁使用它 |
 |---|---|---|
 | CLI `delonix` | argv，稳定的退出类别 | 操作者、脚本 |
-| 节点契约 `delonix.node.v1` | 在**同一个**本地 unix socket 上同时提供 gRPC **与** HTTP/JSON | 任何本地客户端（已设计；尚未提供服务） |
+| 节点契约 `delonix.node.v1` | 在**同一个**本地 unix socket 上同时提供 gRPC **与** HTTP/JSON | 任何本地客户端（部分提供服务：仅 `ListProviders`，由 `delonix-node-api` 提供） |
 | CRI `runtime.v1` | 在一个 unix socket 上的 gRPC | kubelet |
 | MCP | 基于 stdio 的 JSON-RPC | 一个本地 AI 客户端，每个进程一个会话 |
 
@@ -279,18 +279,26 @@ netns 内部加一条 DNAT 规则（在控制 socket 上执行 `publish …`）�
 ```text
 forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 ```
 
-`fwcont` 只有两条规则；每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 `fwmap`
-verdict map 到达。网络**之间**的流量是按（网络）对丢弃的，除非某个 `NetworkRoute` 把这一对
+每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 `fwmap` verdict map 到达——一次按
+**源地址**（`fwout`），一次按**目的地址**（`fwcont`）。刻意做成两条 base chain：被跳转到的 chain
+里的 `accept` 只结束发起跳转的那条 base chain，而 `drop` 在任何地方都是终结性的，所以源端的
+egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决定。如果只有一条 base chain 同时做两次
+查找，目的端的 `accept` 会结束整个遍历，源端的 `egress deny` 永远不会执行（`infra.rs` 里的
+`fw_dispatch_chains`；由旧版 holder 建出来的表会由 `fw_dispatch_migration_script` 就地迁移）。网络**之间**的流量是按（网络）对丢弃的，除非某个 `NetworkRoute` 把这一对
 放进了 `@netpair`——一条路由说的是这个包*可以*跨越，而每个容器自己的 chain 仍然决定它是否
 *被允许*。
 
 **按命名空间隔离**存在于每个容器自己的 chain 里：`@dlxns<hash>`（同一命名空间）的成员被
 接受，来自任何其他容器地址（`@dlxall`）的**新**连接则被丢弃；回复仍然能通过，因为这条 drop
-规则只匹配 `ct state new`。一条显式的 ingress 策略会替换掉这个默认值。SDN 中的 IPv6 默认被
+规则只匹配 `ct state new`。这条 drop 是一道任何入站规则都拿不掉的护栏：显式规则被放在它之前，所以一条 `deny` 永远不会打开
+任何东西，而一条显式的 `allow`（例如一个 `kind: Dependency`）仍然只放行它点名的那一个对端
+（`infra.rs` 里的 `fw_chain_body`）。一份含有无效规则的防火墙 spec 会被整体拒绝；命名空间隔离
+没能生效时，`run`、`start` 和 `pod create` 会被拒绝并撤销 attach，而不只是发出警告。SDN 中的 IPv6 默认被
 拒绝（`table ip6`，`policy drop`），因为以上所有规则都是 IPv4 的。
 
 > **图例** —— 参与者是各个进程；实线箭头是调用、socket 连线、fork 或 clone（标签会说明具体是
@@ -393,8 +401,8 @@ sequenceDiagram
   一个 NoCloud ISO，其 `network-config` 按 **MAC** 地址匹配主网卡，而一个远程后端则可以
   原生地实现它。
 
-**它在代码中的位置：** `crates/adapters/delonix-vm/src/lib.rs`（`VmBackend`、
-`BackendRegistration`、`builtin_backends`、`register_backend`、`select_backend`、
+**它在代码中的位置：** `crates/contexts/delonix-compute/src/vm_backend.rs`（`VmBackend`、
+`BackendRegistration`）；`crates/adapters/delonix-vm/src/lib.rs`（`builtin_backends`、`register_backend`、`select_backend`、
 `auto_detect`、`backend_for`、`CloudHypervisorBackend`、`LibvirtBackend`、`launch_vmm`、
 `DEFAULT_CH_FIRMWARES`、`set_network`）；`crates/adapters/delonix-vm/src/cloudinit.rs`
 （`generate_seed_iso`）；`crates/contexts/delonix-compute/src/ports.rs`（`VmNetwork`）；

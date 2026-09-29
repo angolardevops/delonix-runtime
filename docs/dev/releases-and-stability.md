@@ -44,8 +44,8 @@ reaches the remote by accident (`git push --tags`, `push.followTags=true`) can n
 binary in front of the world. A tag with no release is a normal intermediate state here.
 
 ```bash
-git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # cuts the version
-gh workflow run release.yml -f tag=v4.4.0                 # publishes it
+git tag -a v4.5.0 -m "v4.5.0" && git push origin v4.5.0   # cuts the version
+gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 ```
 
 A `guard` job runs first and costs seconds: it refuses a `tag` that is not shaped `vX.Y.Z`, one
@@ -53,11 +53,11 @@ that does not exist on the remote, and one that already has a release — the in
 to build and names the release, so an unchecked `tag: main` would have published a release called
 "main". Only then, in one job:
 
-1. Builds `delonix`, `delonix-cri`, `delonix-mcp` and `delonix-mgmt` twice — once generic
+1. Builds `delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt` and `delonix-node-api` twice — once generic
    x86-64, once with `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — on `ubuntu-22.04` specifically,
    so the glibc baseline (2.35) stays compatible with RHEL 9 and Debian 12, not just the newest
    Ubuntu. `scripts/install.sh` picks the `-v3` build automatically when the host CPU supports it.
-   A separate `build-arm64` job builds the same four binaries natively on an aarch64 runner (one
+   A separate `build-arm64` job builds the same five binaries natively on an aarch64 runner (one
    per component, no `-v3` variant), and they are published as `<name>-aarch64-linux` under the same
    `SHA256SUMS`. `install.sh` installs them on an aarch64 host (#447). The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
@@ -117,8 +117,14 @@ and, as of v1.0.0, reads as the project's real semver promise rather than a with
   even after the per-domain groups (`compute.delonix.io/v1alpha1`, …) became canonical. This is
   the promise that matters most in practice — it protects what people put in git and review in a
   PR, not just what they type at a prompt.
+- The node's **providers file** (`providers.yaml`, `apiVersion: config.delonix.io/v1`, ADR-0054)
+  carries the same promise as the manifest schema: a key is never removed or repurposed, a new key
+  is always optional, and the `apiVersion` only changes with a `v2` that ships while `v1` is still
+  read. The schema is generated from the types the engine reads (`delonix provider config schema`,
+  published as `docs/schema/v1/providers.json`, with a test that fails when the published copy is
+  not the generated one).
 
-**Not stable — can change in any version:** `serve cri`/`serve api`/`serve docker-api` (the local
+**Not stable — can change in any version:** `serve cri`/`serve api`/`serve node-api`/`serve docker-api` (the local
 management API in particular has no published contract and is explicitly not something to
 automate against — see [The crates § `delonix-mgmt`](crates.md#delonix-mgmt) and ADR-0040/0041);
 the `cluster`/`vm`/`pod`/`workload`/`net` imperative surfaces (their manifest **schema**, where one

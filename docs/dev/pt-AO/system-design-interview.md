@@ -85,7 +85,7 @@ as duas políticas do host estão em
 | Porta de entrada | Codificação | Quem a usa |
 |---|---|---|
 | CLI `delonix` | argv, classes de saída estáveis | operadores, scripts |
-| Contrato de nó `delonix.node.v1` | gRPC **e** HTTP/JSON no **mesmo** socket unix local | qualquer cliente local (desenho; ainda não servido) |
+| Contrato de nó `delonix.node.v1` | gRPC **e** HTTP/JSON no **mesmo** socket unix local | qualquer cliente local (servido em parte: só `ListProviders`, pelo `delonix-node-api`) |
 | CRI `runtime.v1` | gRPC num socket unix | o kubelet |
 | MCP | JSON-RPC sobre stdio | um cliente de IA local, uma sessão por processo |
 
@@ -299,19 +299,30 @@ política por container custe o mesmo seja qual for o número de containers:
 ```text
 forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 ```
 
-O `fwcont` tem duas regras; as regras de cada container vivem na sua própria chain, alcançada através
-do verdict map `fwmap` chaveado por IP. O tráfego **entre** redes é descartado par a par, a menos que
+As regras de cada container vivem na sua própria chain, alcançada através do verdict map `fwmap`
+chaveado por IP — uma vez pela **origem** (`fwout`) e outra pelo **destino** (`fwcont`). São duas base
+chains de propósito: um `accept` dentro de uma chain saltada só termina a base chain que saltou, ao
+passo que um `drop` é final em todo o lado, por isso a política de egress da origem decide primeiro e
+a de ingress do destino continua a decidir depois. Com uma só base chain com as duas consultas, o
+`accept` do destino terminava a travessia e o `egress deny` da origem nunca corria
+(`fw_dispatch_chains` em `infra.rs`; uma tabela construída por um holder mais antigo é migrada no
+lugar por `fw_dispatch_migration_script`). O tráfego **entre** redes é descartado par a par, a menos que
 uma `NetworkRoute` ponha o par em `@netpair` — uma rota diz que o pacote *pode* atravessar, e a chain
 por container continua a decidir se é *permitido*.
 
 O **isolamento por namespace** vive na chain de cada container: os membros de `@dlxns<hash>` (mesmo
 namespace) são aceites, e as ligações **novas** vindas de qualquer outro endereço de container
 (`@dlxall`) são descartadas; as respostas continuam a fluir porque o drop só casa com `ct state new`.
-Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
+Esse drop é um guardrail que nenhuma regra de entrada retira: as regras explícitas são emitidas antes
+dele, por isso um `deny` nunca abre nada e um `allow` explícito (por exemplo um `kind: Dependency`)
+continua a admitir o único par que nomeia (`fw_chain_body` em `infra.rs`). Uma spec de firewall com
+uma regra inválida é recusada inteira, e um isolamento por namespace que não se aplica recusa o
+`run`, o `start` e o `pod create` e desfaz o attach, em vez de avisar. O IPv6 na SDN é recusado por omissão
 (`table ip6` com `policy drop`), porque todas as regras acima são IPv4.
 
 > **Legenda** — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
@@ -421,8 +432,8 @@ sequenceDiagram
   locais realizam-na como um ISO NoCloud cujo `network-config` identifica a NIC primária pelo **MAC**,
   e um backend remoto pode realizá-la de forma nativa.
 
-**Onde vive no código:** `crates/adapters/delonix-vm/src/lib.rs` (`VmBackend`,
-`BackendRegistration`, `builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
+**Onde vive no código:** `crates/contexts/delonix-compute/src/vm_backend.rs` (`VmBackend`,
+`BackendRegistration`); `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`); `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`);
 `crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`);

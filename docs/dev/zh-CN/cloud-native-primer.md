@@ -195,8 +195,9 @@ Linux 网络的构建模块：
 - 出站与端口转发：`crates/adapters/delonix-sdn/src/lib.rs` 中的 `slirp_attach` 和
   `slirp_add_hostfwd`（它们会 spawn `slirp4netns`）；holder 内部的发布在
   `publish_port`/`do_publish`（`infra.rs`）中。
-- 防火墙：`table ip dlxing`，带有基础链 `fwguard`、`fwdeny`、`fwcont`，以及 `fwmap`
-  裁决 map（`FWMAP`），在 `infra.rs` 中生成（`do_firewall`、`apply_firewall_all`，
+- 防火墙：`table ip dlxing`，带有基础链 `fwguard`、`fwdeny`、`fwout`（按源地址）和
+  `fwcont`（按目的地址），后两者都查同一个 `fwmap` 裁决 map（`FWMAP`），在 `infra.rs` 中生成
+  （`fw_dispatch_chains`、`do_firewall`、`apply_firewall_all`，
   用于命名空间隔离集合的 `ns_set_join`）。
 - 内部 DNS（标准名字 `<name>.<namespace>.svc.delonix.internal`，较旧的
   `<name>.<namespace>.delonix.internal` 依然能应答；`service_fqdn`、
@@ -271,8 +272,9 @@ ISO，里面存放着 `user-data`、`meta-data`，以及可选的 `network-confi
 
 **在 Delonix 中**
 
-- 这个端口是 `crates/adapters/delonix-vm/src/lib.rs` 中的 `VmBackend`，由同一文件里
-  的 `CloudHypervisorBackend` 和 `LibvirtBackend`，以及 `crates/providers/delonix-proxmox`
+- 这个端口是 `crates/contexts/delonix-compute/src/vm_backend.rs` 中的 `VmBackend`（由
+  `delonix-vm` 重新导出），由 `crates/adapters/delonix-vm/src/lib.rs` 里的
+  `CloudHypervisorBackend` 和 `LibvirtBackend`，以及 `crates/providers/delonix-proxmox`
   中的 `ProxmoxBackend`（[ADR-0008](../adr/0008-proxmox-vm-backend.md)）实现。
 - Cloud Hypervisor 固件的查找顺序：`DEFAULT_CH_FIRMWARES`（EDK2 的 `CLOUDHV.fd` 排在
   `hypervisor-fw` 之前）；VMM 的命令行在 `boot_ch` 中构建。

@@ -121,7 +121,7 @@ résultat avec elle.
 ## Ce qui se passe au moment de la release
 
 Le workflow de release (`.github/workflows/release.yml`) s'exécute quand on le demande
-(`gh workflow run release.yml -f tag=v4.4.0`) — un tag poussé seul ne fait rien. Pour la
+(`gh workflow run release.yml -f tag=v4.5.0`) — un tag poussé seul ne fait rien. Pour la
 documentation, il :
 
 1. régénère le site utilisateur contre le build de release et **échoue** si `docs/` diffère ;

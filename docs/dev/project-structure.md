@@ -50,7 +50,7 @@ Start at the root and follow the dependencies inward:
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
 │   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
@@ -116,7 +116,7 @@ The crate list, each crate's layer and who depends on whom are generated facts i
 | `crates/foundation/` | Pure foundation: the data-only model — errors, plain-data records (`Status`, the firewall records), the secret model, generated names, exit-code and `DX_*` classes (`delonix-model`), and zero-dependency network rules (`delonix-net-rules`). Depends only on the foundation. | Changes that add a shared type or pure rule. | [The crates](crates.md) |
 | `crates/contexts/` | Bounded contexts with the use cases: Compute, with the `Container` and `Vm` records (`delonix-compute`), the node's own helpers — event log, host and process checks, server dispatch (`delonix-node`) —, Stack — Kinds, reconciler, revisions (`delonix-stack`) — and the node's security decisions (`delonix-security-runtime`). | Features that change what the engine decides. | [The crates](crates.md) |
 | `crates/adapters/` | Mechanisms on this node: Linux namespaces/cgroups (`delonix-linux`), OCI images (`delonix-oci`), networking and firewall (`delonix-sdn`), microVMs (`delonix-vm`), volumes (`delonix-volume`), persisted state and the secret vault (`delonix-state`), vulnerability scanning (`delonix-scanner`), logging/metrics/tracing (`delonix-telemetry`). | Features that touch the kernel, disk or a local tool. | [The crates](crates.md), [Cloud native primer](cloud-native-primer.md) |
-| `crates/providers/` | Remote systems behind a port: a Proxmox VE node as a `VmBackend` (`delonix-proxmox`) and TrueNAS provisioning (`delonix-truenas`). | Changes to a provider integration; a new provider enters here as a port implementation. | `docs/adr/0008-proxmox-vm-backend.md` |
+| `crates/providers/` | Remote systems behind a port: a Proxmox VE node as a `VmBackend`, its own per-VM firewall and SDN (`delonix-proxmox`), an OPNsense appliance as a `GatewayProvider` (`delonix-opnsense`), and TrueNAS provisioning (`delonix-truenas`). | Changes to a provider integration; a new provider enters here as a port implementation. | `docs/adr/0008-proxmox-vm-backend.md` |
 | `crates/interfaces/` | Servers that expose the engine: the Kubernetes CRI (`delonix-cri`, which also ships the `delonix-cri` binary), the local management API (`delonix-mgmt`), the node contract server (`delonix-node-api`) and the MCP server (`delonix-mcp`). | Changes to one of those protocols. | [Cloud native standards](cloud-native-standards.md) |
 | `bins/` | Binary crates. Each composes one interface (enforced by `arch_fitness.py`). | Every CLI-visible feature. | [Architecture](architecture.md) |
 | `bins/delonix-runtime-bin/` | The `delonix` CLI: `src/main.rs`, one module per command group in `src/cmd/`, the Portuguese message catalogue `data/pt.po`, the `init` project templates in `templates/`, `build.rs`, and `tests/architecture.rs`. | Every feature with a command, flag or message. | [Coding conventions](coding-conventions.md) |
@@ -151,7 +151,7 @@ The crate list, each crate's layer and who depends on whom are generated facts i
 | `docs/releases/` | Release notes, one `v<version>.md` per release. A release commit must add its own (`version_gate.py`). Historical — do not rewrite past notes. | The release commit. | [Contribution workflow](contributing-workflow.md) |
 | `docs/roadmap/` | Traceability matrix of an improvement programme, where every cell cites a measurement or says "not measured". | Maintainers, as items are measured or closed. | — |
 | `docs/runtime/` | Dated discovery of the runtime (current state, crate dependency map, target-vs-reality). Historical: crate names in it predate later renames. | Not updated; superseded by [Architecture](architecture.md) and [The crates](crates.md). | [Architecture](architecture.md) |
-| `docs/schema/` | `v1/delonix.json`, the manifest JSON Schema, **generated** from the code (ADR-0007). | `delonix manifest schema > docs/schema/v1/delonix.json` when a manifest type changes. | `docs/adr/0007-generated-manifest-schema.md` |
+| `docs/schema/` | `v1/delonix.json`, the manifest JSON Schema, **generated** from the code (ADR-0007), and `v1/providers.json`, the JSON Schema of the node's providers file (ADR-0054). | `delonix manifest schema > docs/schema/v1/delonix.json` when a manifest type changes; `delonix provider config schema > docs/schema/v1/providers.json` when the providers file changes. | `docs/adr/0007-generated-manifest-schema.md`, `docs/adr/0054-provider-configuration-file.md` |
 
 ## Tooling, CI and packaging (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)
 
@@ -176,13 +176,15 @@ expect CI to fail if you edit the output by hand.
 |---|---|---|---|
 | `docs/api/` | `openapi.yaml` | `python3 scripts/contract_gate.py --update` | `contract gate` job (`scripts/contract_gate.py`) |
 | `docs/schema/` | `v1/delonix.json` | `delonix manifest schema > docs/schema/v1/delonix.json` | `test` job, test `o_schema_publicado_esta_em_dia_com_o_codigo` in `bins/delonix-runtime-bin/src/cmd/schema.rs` |
+| `docs/schema/` | `v1/providers.json` | `delonix provider config schema > docs/schema/v1/providers.json` | `test` job, test `the_published_providers_schema_is_the_generated_one` in `bins/delonix-runtime-bin/src/cmd/providers_config.rs` |
+| `docs/providers/` | `capability-matrix.md` | `delonix provider matrix > docs/providers/capability-matrix.md` | `test` job, test `the_published_matrix_is_the_generated_one` in `bins/delonix-runtime-bin/src/cmd/provider.rs` |
 | `docs/comandos/` | every page | `python3 docs/gen.py` (needs `cargo build --release -p delonix-runtime-bin`) | `generated docs and valid examples` job, step "O site publicado tem de ser o gerado" (`git diff` on `docs/`) |
 | `docs/` | top-level `*.html`, `.nojekyll` | `python3 docs/gen.py` | same step as above |
 | `docs/` | `RELEASES.md` | `bash scripts/gen-releases.sh` | none in CI: `release.yml` regenerates and commits it after each release |
 | `docs/dev/` | the `dev-docs` regions only | `python3 scripts/dev_docs.py` | `arch fitness` job, step `python3 scripts/dev_docs.py --check`; also refreshed by `release.yml` |
 | `docs/proxmox/` | `matrix-9.2.2.md` | `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown > docs/proxmox/matrix-9.2.2.md` | `script tests` job, `scripts/test_proxmox_api_inventory.py` (`test_the_committed_matrix_is_up_to_date`) |
 | `docs/handbook/` | every page | `python3 scripts/dev_docs_site.py` | `generated docs and valid examples` job, `python3 scripts/dev_docs_site.py --check`; also refreshed by `release.yml` |
-| `scripts/` | `cli_baseline.tsv`, `arch_baseline.json`, `lang_baseline.json` | `scripts/cli-tree.sh --update`, `arch_fitness.py --update`, `lang_ratchet.py --update` | `cli surface` (`cli-tree.sh --gate`), `arch fitness`, `lang ratchet` jobs |
+| `scripts/` | `cli_baseline.tsv`, `arch_baseline.json`, `lang_baseline.json`, `tmp_roots_baseline.json` | `scripts/cli-tree.sh --update`, `arch_fitness.py --update`, `lang_ratchet.py --update`, `tmp_roots_gate.py --dir <dir> --update` | `cli surface` (`cli-tree.sh --gate`), `arch fitness`, `lang ratchet` jobs; the `test` job for `tmp_roots_gate.py` |
 | `Cargo.lock` | the lock file | `cargo` | every cargo job builds with `--locked` |
 
 Not committed at all: the manpages (`delonix man --dir`, checked with `groff` in CI) and `target/`.

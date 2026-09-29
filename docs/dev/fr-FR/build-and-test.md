@@ -37,8 +37,9 @@ Le workspace fournit ces binaires, à partir de ces paquets :
 | `delonix-cri` | `delonix-cri` | `target/<profile>/delonix-cri` |
 | `delonix-mcp` | `delonix-mcp-bin` | `target/<profile>/delonix-mcp` |
 | `delonix-mgmt` | `delonix-mgmt-bin` | `target/<profile>/delonix-mgmt` |
+| `delonix-node-api` | `delonix-node-api-bin` | `target/<profile>/delonix-node-api` |
 
-Le workflow de release compile exactement ces quatre paquets. Si vous définissez `CARGO_TARGET_DIR`, les binaires
+Le workflow de release compile exactement ces cinq paquets. Si vous définissez `CARGO_TARGET_DIR`, les binaires
 y atterrissent au lieu de `target/`.
 
 Deux remarques pratiques :
@@ -67,8 +68,8 @@ est donc le seul moyen de distinguer votre build de celui publié.
 
 ### Comment `delonix` trouve ses binaires serveur
 
-`delonix serve cri`, `delonix serve api` et `delonix mcp` ne contiennent pas les serveurs : ils font un `exec` de
-`delonix-cri`, `delonix-mgmt` et `delonix-mcp` (`exec_server` dans
+`delonix serve cri`, `delonix serve api`, `delonix serve node-api` et `delonix mcp` ne contiennent pas les serveurs : ils font un `exec` de
+`delonix-cri`, `delonix-mgmt`, `delonix-node-api` et `delonix-mcp` (`exec_server` dans
 `bins/delonix-runtime-bin/src/cmd/serve.rs`). La recherche est la suivante :
 
 1. le fichier de ce nom **à côté du `delonix` en cours d’exécution** ;
@@ -78,7 +79,7 @@ est donc le seul moyen de distinguer votre build de celui publié.
 autre release refuse de démarrer. Il se passe aussi lui-même dans `DELONIX_BIN`, afin que le serveur rappelle
 la même CLI. Un serveur démarré directement (par exemple par une unité) trouve la CLI via
 `DELONIX_BIN`, puis un `delonix` situé à côté de lui-même, puis le `PATH` (`cli_bin` dans
-`crates/contexts/delonix-node/src/dispatch.rs`). **Gardez ensemble les quatre binaires d’un même build** ;
+`crates/contexts/delonix-node/src/dispatch.rs`). **Gardez ensemble les cinq binaires d’un même build** ;
 un mélange de votre build et d’une release est refusé, ou exécute du code que vous n’aviez pas l’intention de tester.
 
 `delonix cluster kubeadm` et `delonix image vm build` cherchent `delonix-cri` dans leur propre ordre
@@ -86,10 +87,11 @@ un mélange de votre build et d’une release est refusé, ou exécute du code q
 `delonix`, puis un `cargo build --release -p delonix-cri` si le répertoire courant se trouve dans un
 checkout des sources, et seulement ensuite un téléchargement de l’asset publié.
 
-Compilez les quatre avant de les installer :
+Compilez les cinq avant de les installer :
 
 ```bash
-cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 ```
 
 ### Option A — l’exécuter depuis le worktree (le plus sûr)
@@ -110,7 +112,7 @@ a besoin de son propre profil AppArmor (voir
 ```bash
 install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix && delonix --version
 ```
@@ -146,7 +148,7 @@ delonix man --dir ~/.local/share/man
 
 ```bash
 sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 ```
 
 **Uniquement sur une machine où aucun workload Delonix n’est en service.** Le binaire installé n’est pas qu’une
@@ -219,7 +221,8 @@ volumes que la release. Exportez d’abord `DELONIX_ROOT` et `DELONIX_NET_RUNTIM
 Il n’existe pas de flag de désinstallation dans `install.sh`. Supprimez ce que vous avez copié :
 
 ```bash
-rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 ```
@@ -295,6 +298,7 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | une commande `delonix …` citée dans la documentation actuelle n’existe pas dans l’arbre du binaire |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | n’importe quel avertissement |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | n’importe quel test échoue |
+| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | les tests laissent dans leur répertoire temporaire quelque chose qui n’est pas la dette connue de `scripts/tmp_roots_baseline.json` — une nouvelle fuite, davantage d’une fuite connue, ou moins d’une fuite sans abaisser la ligne de base (`--update`). La ligne de base est ce que laisse le runner hébergé, et une fuite peut dépendre de l’hôte (un test qui retournait tôt quand `qemu-img` manquait sautait son nettoyage). La ligne de base est vide depuis que la dette a été payée : un test garde son répertoire temporaire dans une garde qui le supprime au `Drop` (`tempfile::TempDir`), si bien que la suppression s’exécute aussi sur un `return` anticipé et sur un assert échoué ; comparez donc une exécution locale avec `--list` |
 | `deny` | `cargo deny check advisories licenses sources` | un avis RUSTSEC, une licence ou une source non autorisée (`deny.toml`) |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | le site commité n’est pas ce que le générateur produit à partir de ce binaire |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` et `./target/release/delonix stack validate -f examples/<file>.yaml` | un exemple publié utilise une forme dépréciée ou a des références non résolues |

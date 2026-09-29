@@ -16,8 +16,9 @@
 | `FAIL <tag> is published but this commit does not contain it` | `scripts/version_gate.py` | [你的分支比最新的 tag 还旧](#the-version-gate-refuses-your-branch) |
 | `FAIL Cargo.toml says X, above Y, and docs/releases/vX.md does not exist` | `scripts/version_gate.py` | [升了版本号却没有对应的发布提交](#the-version-gate-refuses-your-branch) |
 | `FAIL  buf format` / `buf lint` / `buf breaking against …` / `has no google.api.http mapping` / `openapi.yaml is not the generated one` | `scripts/contract_gate.py` | [节点契约门禁](#the-node-contract-gate) |
+| `FAIL  new leak: <name> (N left) — a test no longer cleans up after itself` | `scripts/tmp_roots_gate.py` | [测试在临时目录里留下了东西](#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy) |
 | `unshare()` 失败，`EPERM` | AppArmor + user namespace | [准备你的环境 § AppArmor](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary) |
-| `-m`/`--cpus`/`--cpu-weight` 被拒绝，退出码 `69` | cgroup 委派 | [准备你的环境 § cgroup 委派](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
+| `-m`/`--cpus`/`--cpu-weight`，或 `--cpuset`/`--io-weight`/`--device-*`，被拒绝，退出码 `69` | cgroup 委派（第二组需要 `cpuset`/`io` 控制器） | [准备你的环境 § cgroup 委派](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
 | `path must be shorter than SUN_LEN` | `DELONIX_NET_RUNTIME_DIR` 太长 | [克隆、构建与测试 § 隔离引擎的状态](build-and-test.md#isolating-the-engines-state) |
 | 某个门禁针对一份你根本没写过的 diff 失败了，或者一次构建结束得快得可疑 | 一个共享或过期的 `CARGO_TARGET_DIR` | [共享或过期的构建缓存](#a-shared-or-stale-build-cache) |
 | 二进制返回的是旧版本，或者一个根本不存在的命令 | `PATH` 上有一个过期的 `delonix` | [准备你的环境 § 过期的 PATH](environment.md#a-stale-delonix-on-your-path) |
@@ -90,6 +91,23 @@ FAIL  docs/api/openapi.yaml is not the generated one — run `python3 scripts/co
 ```
 
 它需要 `PATH` 上有 `protoc`、`buf`（钉在 v1.73.0）和 `protoc-gen-openapi`（钉在 v0.7.1），还需要拉取到 git 的 tag——缺工具会失败在更常见的 "command not found" 上，但缺 tag 会让 `buf breaking` 那项检查打印出 `ok`，同时明确说明目前还没有可比较的基线，而不是悄悄跳过这项检查。对 `proto/delonix/node/v1` 的一次真正的破坏性改动，需要先有一份 ADR，就像对任何一个稳定节点契约的改动一样——见[贡献流程 § 什么时候要写 ADR](contributing-workflow.md#when-to-write-an-adr)。如果实际改变的只是生成器的输出（一个新字段、一个新 RPC），`python3 scripts/contract_gate.py --update` 会重新生成 `docs/api/openapi.yaml`；把它和 `.proto` 的改动放进同一个提交里一起提交。
+
+### 测试在临时目录里留下了东西（`tmp_roots_gate.py`）
+
+`test` 作业在运行 `cargo test --workspace` 时，把 `TMPDIR` 指向一个专属于它的空目录，然后拿里面剩下的东西去和 `scripts/tmp_roots_baseline.json` 对比。名字会被规范化（每一串数字都变成 `N`），所以同一个泄漏在每次运行里都叫同一个名字：
+
+```
+FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+```
+
+基线是空的，所以任何一条都是新的泄漏。另外两种消息（`more of a known leak`、`fixed or reduced … — lower the baseline`）只有在又一次记录下债务时才会出现。在本地复现时，用一个你自己的全新目录，并且列出里面的东西而不是去评判它——泄漏可能取决于宿主机（一个在缺少某个工具时提前返回的测试）：
+
+```bash
+mkdir -p "$PWD/target/test-tmp" && TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+```
+
+修法在测试里，而不在基线里：把目录放进一个 `tempfile::TempDir`，这样删除在提前 `return` 和断言失败时也会执行——见[编码约定](coding-conventions.md)（*测试在每一种退出方式下都要删除自己的临时目录*）。
 
 ## 共享或过期的构建缓存
 

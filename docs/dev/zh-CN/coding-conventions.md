@@ -87,7 +87,7 @@
 
 ### 3.3 类型、trait、函数、常量
 
-- **端口以能力命名，而不是以技术命名。** **提议中（ADR，尚未决定）**：ADR-0040 D3 列出了这些端口：`WorkloadRuntime`、`SandboxProvider`、`VmProvider`、`NetworkProvider`、`StorageProvider`、`ImageRegistry`、`ImageStore`……今天已经存在的那些在 `crates/contexts/delonix-compute/src/ports.rs`（`ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`VmNetwork`、`NetworkProvider`）和 `.../launch.rs`（`WorkloadRuntime`）里。较老的 `VmBackend`（在 `crates/adapters/delonix-vm/src/lib.rs`）会在 P4 阶段改名为 `VmProvider`。
+- **端口以能力命名，而不是以技术命名。** **提议中（ADR，尚未决定）**：ADR-0040 D3 列出了这些端口：`WorkloadRuntime`、`SandboxProvider`、`VmProvider`、`NetworkProvider`、`StorageProvider`、`ImageRegistry`、`ImageStore`……今天已经存在的那些在 `crates/contexts/delonix-compute/src/ports.rs`（`ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`VmNetwork`、`NetworkProvider`）和 `.../launch.rs`（`WorkloadRuntime`）里。较老的 `VmBackend`（在 `crates/contexts/delonix-compute/src/vm_backend.rs`）与 ADR-0044 的 `VmProvider`（`vm_provider.rs`）并存，直到 P4 把各个后端迁移到后者上。
 - **一个端口的宿主机实现叫 `Host<Thing>`。** **惯例（观察所得）**：`delonix-linux/src/workload.rs:HostWorkload`（实现 `WorkloadRuntime`）、`delonix-sdn/src/run_network.rs:HostNetwork`（实现 `NetworkProvider`）、`delonix-oci/src/run_images.rs:HostImages`、`delonix-volume/src/lib.rs:HostVolumes`、`delonix-linux/src/cdi.rs:HostDevices`。
 - **纯粹的决策函数**是动词或疑问句的形式：`resolve_*`、`parse_*`、`valid_*`、`is_*`、`*_plan`。**惯例（观察所得）**：`cmd/vm.rs:resolve_vm_defaults`、`delonix-oci/src/registry.rs:parse_content_range`、`cmd/stack.rs:is_pending`、`delonix-net-rules/src/lib.rs:bridge_name`。
 - **常量**用 `SCREAMING_SNAKE_CASE`（**强制（门禁）**，clippy 的 `-D warnings` 下的 rustc lint）。**Kind 的名字也一律是常量，从不用重复的字符串字面量**（**已决定**：AGENTS.md § "Os Kinds ganham grupos e nomes definitivos"；这些常量在 `crates/contexts/delonix-stack/src/kinds.rs` 里：`pub const VM: &str = "VirtualMachine";`）。
@@ -221,7 +221,7 @@
 ### 5.1 端口与适配器
 
 - **一个新后端要实现一个端口。它绝不能在别的什么地方写成一个 `if provider == …`。** **已决定**：AGENTS.md § "Identidade e fronteira do motor"（"Um provider novo entra como implementação de uma porta, nunca como um `if provider == …`"）。ADR-0040 D3 规则 3（"No string matching on provider names outside the composition root"）重申了这一点，目前仍是**提议中**。D3 计划为此写一个 fitness test，但**它在 `arch_fitness.py` 里还不存在**，所以现在靠评审来执行这条规则。
-- **和某个具体后端相关的知识要放在那个后端里。** 例如，`VmBackend::ip_is_predicted()` 会回答一台 VM 的 IP 是不是靠预测得到的，而不是让调用点去检查 `backend.contains("cloud-hypervisor")`。**已决定**：ADR-0008，被引用在 `crates/adapters/delonix-vm/src/lib.rs` 的 doc comment 里。
+- **和某个具体后端相关的知识要放在那个后端里。** 例如，`VmBackend::ip_is_predicted()` 会回答一台 VM 的 IP 是不是靠预测得到的，而不是让调用点去检查 `backend.contains("cloud-hypervisor")`。**已决定**：ADR-0008，被引用在 `crates/contexts/delonix-compute/src/vm_backend.rs` 的 doc comment 里。
 - **一个适配器不依赖另一个适配器。** 它需要的、属于另一个关注点的东西，要以 hook 或端口的形式进来，由组合根来接线。**强制（门禁）**：`ALLOWED`（adapter → foundation、context）。**惯例（观察所得）**：`delonix-linux/src/workload.rs:HostWorkload` 的 doc comment 就是这样解释它的 `addresses`/`attach_slirp` 这两个 hook 的。
 
   ```rust

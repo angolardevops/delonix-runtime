@@ -147,10 +147,12 @@ também recusa logo à partida quando `<root>/vms/<name>.sock` não cabe em `sun
 
 ### A porta e o registo
 
-O `VmBackend` (`crates/adapters/delonix-vm/src/lib.rs`) é a porta que cada hypervisor implementa:
+O `VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`, reexportado pelo `delonix-vm`) é a porta que cada hypervisor implementa:
 `id`, `available`, `boot`, `is_running`, `ip`, `stop`, mais métodos com implementação por omissão
 (`destroy`, `pause`, `unpause`, `resume`, `snapshot`/`restore`/`snapshots`/`delete_snapshot`,
-`preserve_snapshots`, `ip_is_predicted`, `manages_own_storage`, `auto_selectable`, `disk_health`).
+`preserve_snapshots`, `ip_is_predicted`, `manages_own_storage`, `auto_selectable`, `disk_health`, e os
+mais recentes `current_handle`, `resize_cold`, `guest_info`, `move_to_node`, `update_cloud_init`,
+`apply_firewall`/`read_firewall`).
 Um default que não pode ser honrado **falha fechado** com uma mensagem, nunca é um no-op silencioso.
 
 Os backends vivem num registo (`BACKENDS`), não num `match`:
@@ -176,9 +178,16 @@ corresponder:
 2. O `HYPERVISOR` da imagem (registado por um build de VMfile), quando `--disk` nomeia uma imagem
    local.
 3. `DELONIX_VM_BACKEND` (para toda a sessão).
-4. `delonix vm default-backend --set <backend>` (para toda a máquina, guardado em
-   `<DELONIX_ROOT>/vm-default-backend`).
-5. Heurística de capacidade: `volumes` presentes ⇒ `libvirt` (só o libvirt faz virtio-9p); uma cloud
+4. O `defaultProvider` do ficheiro de providers do nó (`providers.yaml`, ADR-0054), que o
+   `delonix vm default-backend --set <backend>` escreve. O ficheiro procura-se em
+   `DELONIX_PROVIDERS_CONFIG`, senão `$XDG_CONFIG_HOME/delonix/providers.yaml` (ou `~/.config/…`),
+   senão `/etc/delonix/providers.yaml`; o primeiro ganha. Um ficheiro que não se consegue ler faz
+   falhar um pedido de VM sem `--backend` em vez de adivinhar, e um default que este processo não
+   consegue servir (`proxmox` sem o seu alvo) falha a nomeá-lo em vez de cair para um hypervisor
+   local.
+5. O default legado por raiz `<DELONIX_ROOT>/vm-default-backend`, de antes do ficheiro de providers;
+   o `vm default-backend` diz quando a resposta vem dele, e o `--set` move-o para o ficheiro.
+6. Heurística de capacidade: `volumes` presentes ⇒ `libvirt` (só o libvirt faz virtio-9p); uma cloud
    image sem `--kernel` ⇒ `libvirt` **se o libvirt estiver disponível**; caso contrário
    auto-detecção — o primeiro backend registado auto-seleccionável que esteja instalado (CH, depois
    libvirt).
@@ -190,23 +199,36 @@ Por isso, num host com os dois hypervisors, um `vm create` simples de uma cloud 
 $ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+error[DX-1503] invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 ```
+
+O `delonix provider config validate` verifica o ficheiro e aquilo para que ele aponta (um ficheiro de
+token legível só pelo dono, uma CA que existe) sem contactar nada, e o
+`delonix provider config schema` imprime o seu JSON Schema.
 
 ### Proxmox VE (remoto)
 
 O `bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured` regista o backend Proxmox
-no arranque quando configurado através do ambiente (uma má configuração é um aviso, nunca fatal para
-comandos sem relação):
+no arranque quando configurado — por uma entrada `type: proxmox` no ficheiro de providers, ou pelo
+ambiente abaixo (uma má configuração é um aviso, nunca fatal para comandos sem relação). A lista
+completa das variáveis `DELONIX_PROXMOX_*`, incluindo as credenciais em ficheiro
+(`DELONIX_PROXMOX_TOKEN_FILE`, `DELONIX_PROXMOX_PASSWORD_FILE`) e os storages para onde uma imagem
+local é enviada (`DELONIX_PROXMOX_IMPORT_STORAGE`, `DELONIX_PROXMOX_DISK_STORAGE`), está em
+[Variáveis de ambiente § Proxmox VE](environment-variables.md#proxmox-ve):
 
 | Variável | Significado |
 |---|---|
 | `DELONIX_PROXMOX_URL` | URL base da API, p. ex. `https://pve.example:8006`. Não definida = backend não registado. |
-| `DELONIX_PROXMOX_NODE` | Obrigatória. O único nó a que este backend se dirige (tal como `GET /nodes` o nomeia). |
+| `DELONIX_PROXMOX_NODE` | Obrigatória. O nó através do qual este backend se liga (tal como `GET /nodes` o nomeia); cada VM é depois endereçada no nó do cluster onde de facto corre (ADR-0053). |
 | `DELONIX_PROXMOX_SECRET` | Credencial preferida: nome de um `kind: Secret` com `tokenId`+`tokenSecret` (ou `username`+`password`). |
 | `DELONIX_PROXMOX_TOKEN_ID` + `DELONIX_PROXMOX_TOKEN` | API token a partir do ambiente. |
 | `DELONIX_PROXMOX_USER` + `DELONIX_PROXMOX_PASSWORD` | Login por password (ticket, reautenticado num 401). |
@@ -216,7 +238,8 @@ comandos sem relação):
 
 Sem configuração, `--backend proxmox` responde que o backend «não está disponível nesta build» e diz
 o que definir (*corrido*). O backend é dono do seu armazenamento (`manages_own_storage`), por isso
-não é feito nenhum overlay local nem seed NoCloud; `--hostname`/`--ssh-key` vão para o cloud-init do
+não é feito nenhum overlay local nem seed NoCloud; um `--disk` que nomeia uma imagem do store do
+motor é enviado para o storage de importação do nó e a VM é criada a partir dela (ADR-0057); `--hostname`/`--ssh-key` vão para o cloud-init do
 nó, e `--user-data` é recusado. Desenho e limites: [ADR-0008](../../adr/0008-proxmox-vm-backend.md).
 Um backend OpenStack está **só proposto** ([ADR-0039](../../adr/0039-openstack-vm-backend.md)); não
 há código para ele.
@@ -456,7 +479,8 @@ dry-run sem `--apply`). É a única excepção deliberada ao rootless no código
 
 | Área | Caminho |
 |---|---|
-| Porta, registo, backends CH e libvirt, `create_with`, snapshots, procura de firmware | `crates/adapters/delonix-vm/src/lib.rs` |
+| Porta | `crates/contexts/delonix-compute/src/vm_backend.rs` |
+| Registo, backends CH e libvirt, `create_with`, snapshots, procura de firmware | `crates/adapters/delonix-vm/src/lib.rs` |
 | Geração do seed NoCloud | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Backend Proxmox | `crates/providers/delonix-proxmox/` |
 | CLI `vm`, `kind: VirtualMachine`, `vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |

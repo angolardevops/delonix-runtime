@@ -36,8 +36,9 @@ O workspace produz estes binários, a partir destes pacotes:
 | `delonix-cri` | `delonix-cri` | `target/<profile>/delonix-cri` |
 | `delonix-mcp` | `delonix-mcp-bin` | `target/<profile>/delonix-mcp` |
 | `delonix-mgmt` | `delonix-mgmt-bin` | `target/<profile>/delonix-mgmt` |
+| `delonix-node-api` | `delonix-node-api-bin` | `target/<profile>/delonix-node-api` |
 
-O workflow de release compila exactamente estes quatro pacotes. Se definires `CARGO_TARGET_DIR`, os
+O workflow de release compila exactamente estes cinco pacotes. Se definires `CARGO_TARGET_DIR`, os
 binários vão para lá em vez de `target/`.
 
 Duas notas práticas:
@@ -67,8 +68,9 @@ commit é a única forma de distinguir a tua build da publicada.
 
 ### Como o `delonix` encontra os seus binários de servidor
 
-`delonix serve cri`, `delonix serve api` e `delonix mcp` não contêm os servidores: fazem `exec` de
-`delonix-cri`, `delonix-mgmt` e `delonix-mcp` (`exec_server` em
+`delonix serve cri`, `delonix serve api`, `delonix serve node-api` e `delonix mcp` não contêm os
+servidores: fazem `exec` de `delonix-cri`, `delonix-mgmt`, `delonix-node-api` e `delonix-mcp`
+(`exec_server` em
 `bins/delonix-runtime-bin/src/cmd/serve.rs`). A procura é:
 
 1. o ficheiro com esse nome **ao lado do `delonix` em execução**;
@@ -78,7 +80,7 @@ O `delonix` passa ao servidor a sua própria versão em `DELONIX_DISPATCH_VERSIO
 outra release recusa-se a arrancar. Passa-se também a si próprio em `DELONIX_BIN`, para que o
 servidor volte a chamar a mesma CLI. Um servidor arrancado directamente (por exemplo por uma unit)
 encontra a CLI através de `DELONIX_BIN`, depois de um `delonix` ao seu lado, depois do `PATH`
-(`cli_bin` em `crates/contexts/delonix-node/src/dispatch.rs`). **Mantém juntos os quatro
+(`cli_bin` em `crates/contexts/delonix-node/src/dispatch.rs`). **Mantém juntos os cinco
 binários de uma mesma build**; uma mistura da tua build com uma release é recusada, ou corre código
 que não querias testar.
 
@@ -87,10 +89,11 @@ que não querias testar.
 do `delonix`, depois um `cargo build --release -p delonix-cri` se o directório actual estiver dentro
 de uma checkout do código-fonte, e só então um download do asset publicado.
 
-Compila os quatro antes de os instalares:
+Compila os cinco antes de os instalares:
 
 ```bash
-cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 ```
 
 ### Opção A — corrê-la a partir do worktree (a mais segura)
@@ -111,7 +114,7 @@ caminho precisa do seu próprio perfil AppArmor (ver
 ```bash
 install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix && delonix --version
 ```
@@ -150,7 +153,7 @@ delonix man --dir ~/.local/share/man
 
 ```bash
 sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 ```
 
 **Só numa máquina onde nenhum workload Delonix esteja em uso.** O binário instalado não é só um
@@ -227,7 +230,8 @@ build lê.
 Não há flag de desinstalação no `install.sh`. Remove o que copiaste:
 
 ```bash
-rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 ```
@@ -303,6 +307,7 @@ correspondem ao que tocaste antes de fazeres push; corre todos antes de pedires 
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | um comando `delonix …` citado na documentação actual não existe na árvore do binário |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | qualquer aviso |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | qualquer teste falha |
+| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | os testes deixam no seu directório temporário algo que não é a dívida conhecida em `scripts/tmp_roots_baseline.json` — uma fuga nova, mais de uma conhecida, ou menos de uma sem baixar a linha de base (`--update`). A linha de base é o que o runner alojado deixa, e uma fuga pode depender do host (um teste que retornava cedo quando faltava o `qemu-img` saltava a sua limpeza). A linha de base está vazia desde que a dívida foi paga: um teste guarda o seu directório temporário num guarda que o remove no `Drop` (`tempfile::TempDir`), de modo que a remoção corre também num `return` antecipado e num assert falhado; por isso compara uma corrida local com `--list` |
 | `deny` | `cargo deny check advisories licenses sources` | um aviso RUSTSEC, uma licença ou fonte não permitida (`deny.toml`) |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | o site em commit não é o que o gerador produz a partir deste binário |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` e `./target/release/delonix stack validate -f examples/<file>.yaml` | um exemplo publicado usa uma forma obsoleta ou tem referências por resolver |

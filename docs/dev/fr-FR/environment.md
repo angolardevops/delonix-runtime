@@ -25,7 +25,8 @@ par `stable`. La CI utilise exactement le même fichier (`rustup show` dans chaq
 
 ### `protoc` (requis pour compiler)
 
-`crates/interfaces/delonix-cri/build.rs` compile le protobuf du CRI de Kubernetes avec
+`crates/interfaces/delonix-cri/build.rs` compile le protobuf du CRI de Kubernetes, et
+`crates/interfaces/delonix-node-api/build.rs` le contrat de nœud de `proto/delonix/node/v1`, tous deux avec
 `tonic-build`/`prost`, qui a besoin du compilateur Protocol Buffers dans le `PATH`. Le binaire `delonix`
 dépend de `delonix-cri`, donc **un simple `cargo build --workspace` échoue sans lui** :
 
@@ -175,7 +176,8 @@ Options, de la moins à la plus invasive :
 
 Les limites de ressources n’atteignent le noyau que si le shell depuis lequel vous lancez le moteur se trouve dans un cgroup
 **délégué**. C’est une règle de cgroup v2, pas une limitation de Delonix — Podman rootless a la même
-exigence. Sans délégation, le moteur fait deux choses différentes, selon l’option :
+exigence. Sans le contrôleur dont une option a besoin, `container run` refuse au lieu de s’exécuter
+sans limite ; il y a deux sondes, selon l’option :
 
 - `-m`/`--memory`, `-c`/`--cpus` et `--cpu-weight` : `container run` **refuse** avant de créer
   quoi que ce soit, avec une erreur qui nomme le correctif, et sort avec **69** (`Error::Unavailable`, la classe

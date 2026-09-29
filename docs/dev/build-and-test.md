@@ -35,8 +35,9 @@ The workspace ships these binaries, from these packages:
 | `delonix-cri` | `delonix-cri` | `target/<profile>/delonix-cri` |
 | `delonix-mcp` | `delonix-mcp-bin` | `target/<profile>/delonix-mcp` |
 | `delonix-mgmt` | `delonix-mgmt-bin` | `target/<profile>/delonix-mgmt` |
+| `delonix-node-api` | `delonix-node-api-bin` | `target/<profile>/delonix-node-api` |
 
-The release workflow builds exactly these four packages. If you set `CARGO_TARGET_DIR`, binaries
+The release workflow builds exactly these five packages. If you set `CARGO_TARGET_DIR`, binaries
 land there instead of `target/`.
 
 Two practical notes:
@@ -65,8 +66,9 @@ is the only way to tell your build from the released one.
 
 ### How `delonix` finds its server binaries
 
-`delonix serve cri`, `delonix serve api` and `delonix mcp` do not contain the servers: they `exec`
-`delonix-cri`, `delonix-mgmt` and `delonix-mcp` (`exec_server` in
+`delonix serve cri`, `delonix serve api`, `delonix serve node-api` and `delonix mcp` do not contain
+the servers: they `exec` `delonix-cri`, `delonix-mgmt`, `delonix-node-api` and `delonix-mcp`
+(`exec_server` in
 `bins/delonix-runtime-bin/src/cmd/serve.rs`). The lookup is:
 
 1. the file of that name **next to the running `delonix`**;
@@ -76,7 +78,7 @@ is the only way to tell your build from the released one.
 different release refuses to start. It also passes itself in `DELONIX_BIN`, so the server calls back
 the same CLI. A server started directly (for example by a unit) finds the CLI through
 `DELONIX_BIN`, then a `delonix` next to itself, then `PATH` (`cli_bin` in
-`crates/contexts/delonix-node/src/dispatch.rs`). **Keep the four binaries of one build
+`crates/contexts/delonix-node/src/dispatch.rs`). **Keep the five binaries of one build
 together**; a mix of your build and a release is refused, or runs code you did not mean to test.
 
 `delonix cluster kubeadm` and `delonix image vm build` look for `delonix-cri` in their own order
@@ -84,10 +86,11 @@ together**; a mix of your build and a release is refused, or runs code you did n
 `delonix`, then a `cargo build --release -p delonix-cri` if the current directory is inside a
 source checkout, and only then a download of the released asset.
 
-Build the four before installing them:
+Build the five before installing them:
 
 ```bash
-cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 ```
 
 ### Option A — run it from the worktree (safest)
@@ -108,7 +111,7 @@ needs its own AppArmor profile (see
 ```bash
 install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix && delonix --version
 ```
@@ -144,7 +147,7 @@ delonix man --dir ~/.local/share/man
 
 ```bash
 sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 ```
 
 **Only on a machine where no Delonix workload is in use.** The installed binary is not just a
@@ -217,7 +220,8 @@ volumes as the release. Export `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR` firs
 There is no uninstall flag in `install.sh`. Remove what you copied:
 
 ```bash
-rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 ```

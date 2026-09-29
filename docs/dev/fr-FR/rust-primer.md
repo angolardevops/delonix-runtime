@@ -119,7 +119,9 @@ Rust by Example — [Defining an error type](https://doc.rust-lang.org/rust-by-e
 ## 3.3 Les traits comme ports : `VmBackend` et le registre de backends
 
 Le moteur parle aux providers à travers des **traits** (« ports »), et un provider est une implémentation
-de l’un d’eux. L’exemple le plus clair est `VmBackend` dans `crates/adapters/delonix-vm/src/lib.rs` :
+de l’un d’eux. L’exemple le plus clair est `VmBackend` dans `crates/contexts/delonix-compute/src/vm_backend.rs`
+(il y a été déplacé depuis `delonix-vm`, qui le réexporte, pour qu’un crate de provider puisse
+l’implémenter sans dépendre d’un adaptateur) :
 
 ```rust
 pub trait VmBackend {
@@ -133,8 +135,8 @@ pub trait VmBackend {
 }
 ```
 
-Implémentations : `CloudHypervisorBackend` et `LibvirtBackend` dans le même fichier, et
-`ProxmoxBackend` dans `crates/providers/delonix-proxmox/src/lib.rs`. Les méthodes ayant un **corps
+Implémentations : `CloudHypervisorBackend` et `LibvirtBackend` dans
+`crates/adapters/delonix-vm/src/lib.rs`, et `ProxmoxBackend` dans `crates/providers/delonix-proxmox/src/lib.rs`. Les méthodes ayant un **corps
 par défaut** dans le trait (par exemple `auto_selectable`) permettent à un nouveau backend d’hériter d’un comportement raisonnable
 et de ne redéfinir que ce qui diffère.
 
@@ -142,9 +144,10 @@ Les backends sont choisis à l’exécution, ils sont donc manipulés comme **ob
 Ils sont créés au moyen d’un registre de fabriques :
 
 ```rust
-// crates/adapters/delonix-vm/src/lib.rs
+// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>> =
     std::sync::OnceLock::new();
 ```
@@ -155,11 +158,14 @@ static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>
   la closure, pas sur le trait `VmBackend`.
 - `OnceLock` initialise la table paresseusement (`builtin_backends()` y place les deux backends locaux),
   et `RwLock` permet à `register_backend` d’en ajouter un troisième au démarrage. Le binaire le fait dans
-  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` (`register_configured`).
+  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` (`register_configured`) : le crate du provider
+  construit seulement le `BackendRegistration` (`delonix_proxmox::registration`), et la racine de
+  composition le remet à `delonix_vm::register_backend`.
 
 La décision derrière cette forme est l’[ADR-0008](../../adr/0008-proxmox-vm-backend.md). Le même
 motif « trait + implémentations + un seul endroit qui choisit » apparaît ailleurs (par exemple le
-port `VmNetwork`, conservé dans un `OnceLock<Box<dyn VmNetwork>>` près du début du même fichier).
+port `VmNetwork`, conservé dans un `OnceLock<Box<dyn VmNetwork>>` près du début de
+`crates/adapters/delonix-vm/src/lib.rs`).
 
 **En savoir plus :** The Rust Book —
 [Traits](https://doc.rust-lang.org/book/ch10-02-traits.html),

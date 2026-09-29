@@ -138,9 +138,11 @@ Où chaque élément vit dans le code :
   `crates/adapters/delonix-oci` (`cas.rs`).
 - **Noyau** — `crates/adapters/delonix-linux` (processus, namespaces, cgroups, montages) et
   `crates/adapters/delonix-sdn` (bridges, nftables, DNS).
-- **Hyperviseurs** — le trait `VmBackend` dans `crates/adapters/delonix-vm/src/lib.rs`.
-- **Providers distants** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted et implémenté)
-  et `crates/providers/delonix-truenas` (ADR-0009, Accepted). Un backend OpenStack n’est encore
+- **Hyperviseurs** — le trait `VmBackend` dans `crates/contexts/delonix-compute/src/vm_backend.rs`,
+  implémenté par les backends locaux de `crates/adapters/delonix-vm/src/lib.rs`.
+- **Providers distants** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted et implémenté),
+  `crates/providers/delonix-opnsense` (ADR-0051) et `crates/providers/delonix-truenas` (ADR-0009,
+  Accepted). Un backend OpenStack n’est encore
   qu’une proposition (ADR-0039, Proposed, conditionné à un spike).
 - **Registre** — `crates/adapters/delonix-oci/src/registry.rs`.
 
@@ -170,11 +172,13 @@ Delonix Runtime est la **couche d’exécution de nœud** du schéma ci-dessus. 
 - expose les **mêmes opérations à travers plusieurs portes** : la CLI, le contrat de nœud, le CRI
   et le MCP.
 
-Une réserve sur le contrat de nœud, pour que vous n’alliez pas chercher un serveur qui n’existe
-pas : `proto/delonix/node/v1/node.proto` est marqué *DRAFT contract for ADR-0040*. Le contrat, son
-`docs/api/openapi.yaml` généré et son gate de CI (`scripts/contract_gate.py`) existent ; aucun
-crate ne sert encore `NodeService`. L’ADR-0042 (**Accepted**, étapes A et B livrées) fixe la
-manière dont cette API sera versionnée et documentée quand le serveur arrivera.
+Une réserve sur le contrat de nœud, pour que vous n’attendiez pas du serveur plus qu’il ne
+répond : `proto/delonix/node/v1/node.proto` est marqué *DRAFT contract for ADR-0040*. Le contrat,
+son `docs/api/openapi.yaml` généré et son gate de CI (`scripts/contract_gate.py`) existent, et
+`delonix serve node-api` (`crates/interfaces/delonix-node-api`) le sert sur un socket local — mais
+seul `NodeService.ListProviders` répond aujourd’hui ; les autres RPC répondent `UNIMPLEMENTED`.
+L’ADR-0042 (**Accepted** ; étapes A et B livrées, étape C commencée avec ce serveur) fixe la
+manière dont cette API est versionnée et documentée à mesure qu’une plus grande partie en est servie.
 
 ### Ce qu’il ne fait délibérément pas
 
@@ -265,7 +269,7 @@ ou une commande n’est pas une capacité de plateforme.
 **Dans Delonix.** Les mêmes opérations sont exposées par la CLI, le CRI (`delonix serve cri`,
 `crates/interfaces/delonix-cri`), le socket de gestion local (`crates/interfaces/delonix-mgmt`), le
 serveur MCP (`delonix mcp serve`, `crates/interfaces/delonix-mcp`) et le contrat de nœud
-(`proto/delonix/node/v1/`, brouillon). Le contrat est la source de vérité pour ses deux encodages,
+(`proto/delonix/node/v1/`, brouillon, servi en partie par `crates/interfaces/delonix-node-api`). Le contrat est la source de vérité pour ses deux encodages,
 gRPC et HTTP/JSON, et `docs/api/openapi.yaml` en est généré, jamais édité à la main
 (`scripts/contract_gate.py`). L’ADR-0040 (**Proposed**) consigne honnêtement l’écart actuel :
 plusieurs de ces portes ré-exécutent encore le binaire de la CLI en sous-processus au lieu

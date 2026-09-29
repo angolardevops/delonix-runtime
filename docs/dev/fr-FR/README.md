@@ -17,7 +17,7 @@ Le workspace compte **25 crates** et livre **5 binaires** (`delonix`, `delonix-c
 Delonix Runtime est une abstraction d’exécution pour **un nœud** : il exécute des **containers et des microVM**
 et gère le réseau et le stockage dont ils ont besoin. Il est déclaratif (ses propres Kinds, regroupés par
 `apiVersion` — voir `delonix api-resources`), et il ne parle aux providers (le noyau Linux, libvirt,
-Cloud Hypervisor, Proxmox VE, le CRI de Kubernetes) qu’à travers des ports, jamais à travers
+Cloud Hypervisor, Proxmox VE, OPNsense, le CRI de Kubernetes) qu’à travers des ports, jamais à travers
 des branches `if provider == …` dispersées dans le code.
 
 Trois principes façonnent presque tous les commentaires de revue que vous recevrez :

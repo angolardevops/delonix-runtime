@@ -45,8 +45,9 @@ Always test the binary you built (`./target/debug/delonix`), not a `delonix` ins
 ## Before opening a PR
 
 CI runs more than build, clippy, fmt and test: a language ratchet, the architecture fitness gate,
-the node contract gate, the version gate, the CLI surface and documentation gates, `cargo-deny` and
-the generated site. Each one, with the command to run it locally, is listed in
+the node contract gate, the version gate, the CLI surface and documentation gates, `cargo-deny`,
+the generated site, and a check that the tests leave nothing behind in their temp dir
+(`scripts/tmp_roots_gate.py`). Each one, with the command to run it locally, is listed in
 [docs/dev/build-and-test.md](docs/dev/build-and-test.md#the-gates-ci-runs). Zero clippy
 warnings is enforced, not a suggestion. How to work (one worktree per task, version alignment,
 English-only code, when to write an ADR) is in

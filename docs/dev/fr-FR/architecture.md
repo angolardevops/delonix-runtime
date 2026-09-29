@@ -50,14 +50,19 @@ Cette section ne garde que les parties qui façonnent la *structure* ci-dessous 
 - **Les providers se trouvent derrière des ports.** Le noyau Linux, Cloud Hypervisor et libvirt,
   Proxmox VE et le CRI de Kubernetes sont atteints via un trait, jamais via un `if provider == …`
   dispersé dans le code. Les ports d’aujourd’hui : `VmBackend`
-  (`crates/adapters/delonix-vm/src/lib.rs`) et les ports de compute dans
-  `crates/contexts/delonix-compute/src/ports.rs` et `launch.rs` (`ImageStore`, `StorageProvider`,
-  `DeviceResolver`, `RunHost`, `NetworkProvider`, `VmNetwork`, `WorkloadRuntime`). Un backend
+  (`crates/contexts/delonix-compute/src/vm_backend.rs`, réexporté par `delonix-vm`, qui garde encore
+  le registre des backends), le port de provider de VM (`VmProvider` dans `vm_provider.rs`,
+  ADR-0044), les ports de compute dans `crates/contexts/delonix-compute/src/ports.rs` et `launch.rs`
+  (`ImageStore`, `StorageProvider`, `DeviceResolver`, `RunHost`, `NetworkProvider`, `VmNetwork`,
+  `WorkloadRuntime`), et les deux ports réseau distants de `delonix-sdn` : `GatewayProvider`
+  (`src/gateway.rs`, ADR-0051) et `NetworkZoneProvider` (`src/network_zone.rs`, ADR-0049). Ce que
+  chaque provider sait faire se mesure contre un unique catalogue de capacités versionné
+  (`crates/contexts/delonix-compute/src/capability.rs`, ADR-0050 ; `delonix provider ls`). Un backend
   OpenStack est conçu ([ADR-0039](../../adr/0039-openstack-vm-backend.md), *Proposed*) mais n’a pas
   encore de crate.
 - **Un seul ensemble d’opérations, plusieurs interfaces** — la CLI, le CRI, l’API de gestion
-  locale, le MCP et une tranche de l’API Docker Engine, avec le contrat de nœud comme API unique
-  visée (voir [ci-dessous](#one-set-of-operations-several-interfaces)) ; l’observabilité passe par
+  locale, le MCP et une tranche de l’API Docker Engine, avec le contrat de nœud (désormais servi en partie
+  par `delonix-node-api`) comme API unique visée (voir [ci-dessous](#one-set-of-operations-several-interfaces)) ; l’observabilité passe par
   `crates/adapters/delonix-telemetry`.
 - **Daemonless et rootless-first décident du modèle de processus** — ce qui doit persister
   appartient à systemd ou à un processus par workload avec un propriétaire clair (le superviseur
@@ -114,12 +119,12 @@ flowchart LR
   SYSD["systemd<br/><small>user or system manager</small>"]
   REG["OCI registries<br/><small>public or private</small>"]
   HV["local hypervisors<br/><small>Cloud Hypervisor, libvirt/QEMU</small>"]
-  RMT["remote management APIs<br/><small>one Proxmox VE node, TrueNAS SCALE</small>"]
+  RMT["remote management APIs<br/><small>a Proxmox VE node and its cluster, OPNsense, TrueNAS SCALE</small>"]
   SSH["remote hosts<br/><small>kubeadm cluster nodes</small>"]
   OBS["observability backends<br/><small>OTLP collector, Prometheus</small>"]
   OP -->|"argv, exit classes"| ENG
   KL -->|"CRI runtime.v1: gRPC on a unix socket"| ENG
-  LC -->|"HTTP+JSON on a unix socket, same uid"| ENG
+  LC -->|"HTTP+JSON or gRPC on a unix socket, same uid"| ENG
   AI -->|"MCP: JSON-RPC over stdio"| ENG
   ENG -->|"syscalls; ip, nft, nsenter"| KER
   ENG -->|"units, timers, transient scopes"| SYSD
@@ -145,19 +150,19 @@ Où se trouve chaque flèche dans le code :
 |---|---|
 | opérateur → moteur | `bins/delonix-runtime-bin/src/main.rs` (`main`, `run`) ; classes de sortie dans `crates/foundation/delonix-model/src/exitcode.rs` |
 | kubelet → moteur | `crates/interfaces/delonix-cri/src/lib.rs` (`serve_blocking`) |
-| programme local → moteur | `crates/interfaces/delonix-mgmt/src/lib.rs` (`serve_blocking`, le routeur `axum`) |
+| programme local → moteur | `crates/interfaces/delonix-mgmt/src/lib.rs` (`serve_blocking`, le routeur `axum`) ; `crates/interfaces/delonix-node-api/src/lib.rs` (`serve_blocking`, le contrat de nœud) |
 | client d’IA → moteur | `crates/interfaces/delonix-mcp/src/lib.rs` (`serve_stdio`) |
 | moteur → noyau | `crates/adapters/delonix-linux/src/lib.rs` (`spawn`, `container_init`) ; `crates/adapters/delonix-sdn/src/infra.rs` (sous-processus `ip`, `nft`, `nsenter`) |
 | moteur → systemd | scopes transitoires `busctl` dans `crates/adapters/delonix-linux/src/lib.rs` ; units de démarrage dans `bins/delonix-runtime-bin/src/cmd/boot.rs` |
 | moteur → registres | `crates/adapters/delonix-oci/src/registry.rs` (`resolve_or_pull`, `push_to_registry`) |
 | moteur → hyperviseurs | `crates/adapters/delonix-vm/src/lib.rs` (`CloudHypervisorBackend`, `LibvirtBackend`) |
-| moteur → API de gestion distantes | `crates/providers/delonix-proxmox/src/lib.rs`, `crates/providers/delonix-truenas/src/lib.rs` |
+| moteur → API de gestion distantes | `crates/providers/delonix-proxmox/src/lib.rs`, `crates/providers/delonix-opnsense/src/lib.rs`, `crates/providers/delonix-truenas/src/lib.rs` |
 | moteur → hôtes distants | `bins/delonix-runtime-bin/src/cmd/remote.rs` (`ssh`, `scp`), utilisé par `cmd/cluster.rs` |
 | moteur ↔ observabilité | `crates/adapters/delonix-telemetry/src/telemetry.rs` (OTLP), routes `/metrics` dans `delonix-mgmt` et `delonix-cri` |
 
 ## Niveau 2 — Containers : exécutables et processus
 
-Dans C4, un *container* est quelque chose qui s’exécute. Le build livre quatre exécutables (voir
+Dans C4, un *container* est quelque chose qui s’exécute. Le build livre cinq exécutables (voir
 le compte généré dans le [README du manuel](README.md)) ; plusieurs autres **processus**
 apparaissent par workload ou par nœud, chacun avec un propriétaire. Les trois figures ci-dessous
 découpent ce tableau par préoccupation : qui entre dans le moteur, ce que coûte un container en
@@ -176,8 +181,9 @@ processus, et l’infrastructure réseau rootless.
 | flèche pointillée | `exec` ou démarrage d’un processus |
 | région encadrée | frontière de processus |
 
-Quatre portes mènent au moteur, mais seul le processus `delonix` à usage unique crée jamais un
-container : les serveurs multithreads rappellent la CLI pour cela.
+Cinq portes mènent au moteur, mais seul le processus `delonix` à usage unique crée jamais un
+container : les serveurs multithreads rappellent la CLI pour cela. (`delonix-node-api` ne crée encore
+rien : son unique RPC servi, `ListProviders`, ne fait que lire.)
 
 ```mermaid
 flowchart LR
@@ -191,6 +197,7 @@ flowchart LR
       CRI["delonix-cri<br/><small>CRI server, long-lived</small>"]
       MGMT["delonix-mgmt<br/><small>management API, long-lived</small>"]
       MCP["delonix-mcp<br/><small>MCP server, one per session</small>"]
+      NAPI["delonix-node-api<br/><small>node contract, long-lived</small>"]
     end
     ST[("state root<br/><small>DELONIX_ROOT</small>")]
   end
@@ -198,12 +205,13 @@ flowchart LR
   KL -->|"gRPC, SO_PEERCRED"| CRI
   LC -->|"HTTP+JSON, SO_PEERCRED"| MGMT
   AI -->|"JSON-RPC over stdio"| MCP
-  CLI -.->|"exec: serve cri, serve api, mcp"| SRV
+  LC -->|"gRPC or HTTP/JSON, SO_PEERCRED"| NAPI
+  CLI -.->|"exec: serve cri, serve api, serve node-api, mcp"| SRV
   SRV -.->|"spawn: delonix __apirun, stop, rm, net netns attach"| CLI
   CLI -->|"records under flock"| ST
   SRV -->|"reads records"| ST
   class OP,KL,LC,AI person
-  class CLI,CRI,MGMT,MCP block
+  class CLI,CRI,MGMT,MCP,NAPI block
   class ST store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -343,6 +351,7 @@ dehors du holder, sur `virbr0` dans le network namespace de l’hôte.
 | `delonix-cri` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs` → `delonix_cri::serve_blocking` | un service (typiquement une unit systemd). `delonix serve cri` en fait `exec` (`cmd/serve.rs::exec_server`) |
 | `delonix-mgmt` | `bins/delonix-mgmt-bin/src/main.rs` → `delonix_mgmt::serve_blocking` | un service ; `delonix serve api` en fait `exec` |
 | `delonix-mcp` | `bins/delonix-mcp-bin/src/main.rs` → `delonix_mcp::serve_stdio` | une session de client d’IA (un processus enfant sur stdio) ; `delonix mcp` en fait `exec` |
+| `delonix-node-api` | `bins/delonix-node-api-bin/src/main.rs` → `delonix_node_api::serve_blocking` | un service ; `delonix serve node-api` en fait `exec` |
 | Tranche de l’API Docker | `cmd/serve.rs` → `cmd::dockerapi::run`, **à l’intérieur** du processus `delonix` | tant que `delonix serve docker-api` s’exécute |
 | superviseur | `delonix_linux::supervise::run_supervised`, choisi par `delonix_compute::launch::start` pour tout démarrage détaché que l’appelant peut fork | la vie du container ; c’est le vrai parent, il collecte donc le statut de sortie et applique le `--restart` |
 | init du container | `delonix_linux::spawn` → `clone` → `container_init` | le container |
@@ -369,7 +378,7 @@ plane — aucun câblage ne bouge) ; pin disparu (démonte et reconstruit).
 | API de gestion | HTTP+JSON sur un socket unix, même uid seulement | `delonix_mgmt::serve_blocking` (routes telles que `/v1/containers`, `/v1/volumes`, `/metrics`) | locale uniquement ([ADR-0010](../../adr/0010-remote-management-api.md) a rejeté une API distante) ; destinée à être remplacée par le contrat de nœud |
 | MCP | stdio | `delonix_mcp::serve_stdio` | locale, aucun locataire ([ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md)) |
 | Tranche de l’API Docker Engine | HTTP sur un socket unix | `cmd::dockerapi::run` | une tranche de compatibilité, à l’intérieur de `delonix` |
-| **Contrat de nœud** `delonix.node.v1` | gRPC **et** HTTP/JSON sur un seul socket unix | `proto/delonix/node/v1/` | **contrat seulement** — pas encore de serveur |
+| **Contrat de nœud** `delonix.node.v1` | gRPC **et** HTTP/JSON sur un seul socket unix, `0600` + `SO_PEERCRED` | `proto/delonix/node/v1/` ; servi par `delonix_node_api::serve_blocking` (`delonix serve node-api`) | **servi en partie** — seulement `NodeService.ListProviders` (aussi `GET /v1/providers`) ; les autres RPC de `NodeService` répondent `UNIMPLEMENTED` en nommant l’étape qui les apporte |
 
 Le contrat de nœud est l’API unique visée
 ([ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md) D4,
@@ -462,10 +471,9 @@ aujourd’hui :
 
 - **La P0 est terminée.** Chaque crate vit dans le répertoire de sa couche, les versions sont au
   niveau du workspace, et le gate de fitness s’exécute en CI.
-- **La P1 est terminée en tant que contrat, pas en tant que serveur.**
-  `proto/delonix/node/v1/*.proto` existe, le document OpenAPI `docs/api/openapi.yaml` en est
-  généré, et `scripts/contract_gate.py` protège les deux. **Rien ne sert encore le contrat** —
-  aucun crate ne référence `delonix.node.v1` (l’ADR-0042 D1 dit la même chose).
+- **La P1 est terminée en tant que contrat.** `proto/delonix/node/v1/*.proto` existe, le document
+  OpenAPI `docs/api/openapi.yaml` en est généré, et `scripts/contract_gate.py` protège les deux. Le
+  serveur est arrivé avec la P5 (ci-dessous).
 - **La P2 a commencé.** `delonix-model` (l’`Error` partagé et ses codes `DX_*`, les noms
   générés, les classes de sortie, le dictionnaire de codes numérotés, le modèle de secrets, et —
   depuis la #405 — les enregistrements uniquement-données `Status`, `ContainerFw`/`FwRule` avec
@@ -494,7 +502,7 @@ aujourd’hui :
   `delonix-state` (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`,
   `delonix-volume`) sont des exceptions déclarées jusqu’à ce que la P4 leur donne un port
   `StateRepository` (`scripts/arch_fitness.py`).
-- **La P4 est en cours ; les P5–P7 n’ont pas commencé.** L’ADR-0044 (accepté le 2026-09-24)
+- **La P4 et la P5 sont en cours ; les P6–P7 n’ont pas commencé.** L’ADR-0044 (accepté le 2026-09-24)
   décide comment la P4 se fait. Le **#420** a apporté le port `StateRepository<T>`
   (`crates/foundation/delonix-model/src/ports.rs`), que `delonix-linux` utilise déjà pour
   `wait_and_record`/`stop`/`persist_stop`/`remove` — d’où son exception `P4a` dans
@@ -503,8 +511,17 @@ aujourd’hui :
   `crates/contexts/delonix-compute/src/vm_provider.rs`, P4b tranche 1), et `delonix-vm`
   l’implémente pour les deux backends locaux (`LocalVmProvider`,
   `crates/adapters/delonix-vm/src/provider.rs`) en réutilisant son `create_with`/`stop`/`start`
-  existant ; déplacer chaque backend dans son propre crate de provider est la P4b tranche 2. Les
-  exceptions restantes dans le tableau ci-dessus nomment la phase qui supprime chacune.
+  existant. Le **#517** (P4b tranche 2) a déplacé le port `VmBackend` et ses types dans le context
+  de compute (`vm_backend.rs`, `vm_error.rs`, `vm_firewall.rs`) ; `delonix-vm` réexporte chaque nom,
+  et `delonix-proxmox` dépend désormais de `delonix-compute` au lieu de `delonix-vm` : il remet à
+  la racine de composition un `BackendRegistration` (`registration()`), que
+  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` enregistre. Le registre lui-même reste dans
+  `delonix-vm` jusqu’à la P4b.4 (`docs/discovery/61_P4B_PLANO_MEDIDO.md`). Les exceptions restantes
+  dans le tableau ci-dessus nomment la phase qui supprime chacune.
+- **La P5 a commencé.** `delonix-node-api` (#525, ADR-0050 D5) sert le contrat de nœud sur un socket
+  unix, en gRPC et en HTTP/JSON à partir des mêmes fichiers `.proto` ; aujourd’hui seul
+  `NodeService.ListProviders` répond. `scripts/arch_fitness.py` l’enregistre comme l’interface qui
+  remplace `delonix-mgmt`.
 
 ### Enregistrements, assistants de nœud et état persisté, après la #406
 
@@ -616,9 +633,13 @@ flowchart TB
   MG["delonix-mgmt<br/><small>HTTP router, dashstats</small>"]
   MC["delonix-mcp<br/><small>MCP tools, audit log</small>"]
   CX["contexts<br/><small>compute, stack, security-runtime</small>"]
-  AD["adapters and providers<br/><small>linux, oci, sdn, vm, volume, scanner, proxmox, truenas</small>"]
+  NB["delonix-node-api-bin<br/><small>executable delonix-node-api</small>"]
+  NA["delonix-node-api<br/><small>gRPC + HTTP/JSON of delonix.node.v1</small>"]
+  AD["adapters and providers<br/><small>linux, oci, sdn, vm, volume, scanner, proxmox, opnsense, truenas</small>"]
   ST["delonix-state<br/><small>Store, SecretStore</small>"]
   MB -->|"serve_blocking"| MG
+  NB -->|"serve_blocking"| NA
+  NA -->|"provider reports for ListProviders"| AD
   PB -->|"serve_stdio"| MC
   RB -->|"dashstats::collect for dashboard"| MG
   MC -->|"dashstats — declared exception until P5"| MG
@@ -630,7 +651,7 @@ flowchart TB
   MC -->|"reads VMs, volumes, networks"| AD
   CRI -->|"container records"| ST
   MG -->|"container records, secret count"| ST
-  class RB,MB,PB,CRI,MG,MC,CX,AD,ST block
+  class RB,MB,PB,NB,CRI,MG,MC,NA,CX,AD,ST block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -872,7 +893,7 @@ flowchart TB
    `qemu-img`, `virsh`, `cloud-localds` (`delonix-vm`), `busctl` pour les scopes transitoires
    systemd (`delonix-linux`), `ssh`/`scp` (`cmd/remote.rs`).
 6. **Le HTTP vers un système de gestion distant ne vit que dans les providers.**
-   `delonix-proxmox` et `delonix-truenas` dépendent de `reqwest` pour cela. Deux adapters
+   `delonix-proxmox`, `delonix-opnsense` et `delonix-truenas` dépendent de `reqwest` pour cela. Deux adapters
    parlent aussi HTTP, pour d’autres raisons : `delonix-oci` a son propre client de registre OCI
    (`src/registry.rs`, `reqwest` dans son `Cargo.toml`), et `delonix-telemetry` exporte OTLP sur
    HTTP. Aucun crate de context ne le fait.
@@ -1031,9 +1052,12 @@ sequenceDiagram
 
 ## Limitations connues
 
-> **Note — le contrat de nœud n’est pas servi.** `proto/delonix/node/v1` est protégé par un gate
-> et génère OpenAPI, mais aucun processus n’y répond. Les intégrations actuelles utilisent la
-> CLI, le CRI, l’API de gestion locale ou le MCP.
+> **Note — le contrat de nœud n’est servi qu’en partie.** `delonix-node-api` répond à
+> `NodeService.ListProviders` (gRPC, et `GET /v1/providers` en HTTP/JSON) ; tous les autres RPC de
+> `NodeService` répondent `UNIMPLEMENTED`, et les autres services du contrat ne sont pas enregistrés
+> sur le socket. La route HTTP est écrite à la main par RPC ; un transcodeur générique sur les
+> annotations `google.api.http` est la prochaine étape de l’ADR-0042. Les intégrations actuelles
+> utilisent la CLI, le CRI, l’API de gestion locale ou le MCP pour tout le reste.
 
 > **Note — les serveurs exécutent encore la CLI.** `delonix-cri`, `delonix-mgmt` et
 > `delonix-mcp` démarrent les workloads en ré-exécutant `delonix`. Cela maintient `clone` hors des
@@ -1076,12 +1100,13 @@ sequenceDiagram
 | Création de processus, namespaces, rootfs, seccomp, cgroups | `delonix-linux/src/lib.rs` (`spawn`, `container_init`, `setup_rootfs`, `setup_cgroup`), `supervise.rs`, `launch_spec.rs` |
 | Réseau rootless | `delonix-sdn/src/infra.rs` (`ensure_up`, `control_main`, `attach_container`, `publish_port`, `ingress_table_ruleset`, `fw_chain_body`), `pin_userns.rs`, `ipam.rs` |
 | Images | `delonix-oci/src/{registry,cas,image,overlay,build}.rs` |
-| VM | `delonix-vm/src/lib.rs` (`VmBackend`, `builtin_backends`, `register_backend`, `select_backend`), `cloudinit.rs` ; `cmd/vm.rs`, `cmd/vmimage.rs` |
+| VM | `delonix-compute/src/vm_backend.rs` (`VmBackend`), `delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`), `cloudinit.rs` ; `cmd/vm.rs`, `cmd/vmimage.rs`, `cmd/vmbackends.rs` |
 | Apply déclaratif | `delonix-stack/src/{kinds,reconcile}.rs` ; `cmd/stack.rs`, `cmd/manifest.rs` |
 | Enregistrements, erreurs, état persisté | `delonix-compute/src/record.rs` (`Container`, `Vm`), `delonix-model/src/{records,error,exitcode}.rs`, `delonix-state/src/{store,secret}.rs` |
 | CRI | `delonix-cri/src/lib.rs::serve_blocking`, `runtime_svc.rs`, `runtime_svc/lifecycle.rs` |
 | API de gestion / MCP | `delonix-mgmt/src/lib.rs`, `delonix-mcp/src/lib.rs` |
-| Contrat de nœud | `proto/delonix/node/v1/`, `scripts/contract_gate.py`, `docs/api/openapi.yaml` |
+| Contrat de nœud | `proto/delonix/node/v1/`, `scripts/contract_gate.py`, `docs/api/openapi.yaml` ; le serveur dans `delonix-node-api/src/{lib,service,providers}.rs` |
+| Providers et leurs capacités | `delonix-compute/src/capability.rs` (le catalogue), `cmd/provider.rs` (`provider ls/describe/matrix`), `cmd/providers_config.rs` (`providers.yaml`, ADR-0054) |
 | Règles d’architecture | `scripts/arch_fitness.py`, ADR-0040 |
 
 ---

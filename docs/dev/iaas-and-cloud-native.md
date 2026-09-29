@@ -129,9 +129,11 @@ Where each element lives in the code:
   encrypted secret vault) and the image store in `crates/adapters/delonix-oci` (`cas.rs`).
 - **Kernel** — `crates/adapters/delonix-linux` (process, namespaces, cgroups, mounts) and
   `crates/adapters/delonix-sdn` (bridges, nftables, DNS).
-- **Hypervisors** — the `VmBackend` trait in `crates/adapters/delonix-vm/src/lib.rs`.
-- **Remote providers** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted and implemented)
-  and `crates/providers/delonix-truenas` (ADR-0009, Accepted). An OpenStack backend is only a
+- **Hypervisors** — the `VmBackend` trait in `crates/contexts/delonix-compute/src/vm_backend.rs`,
+  implemented by the local backends in `crates/adapters/delonix-vm/src/lib.rs`.
+- **Remote providers** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted and implemented),
+  `crates/providers/delonix-opnsense` (ADR-0051) and `crates/providers/delonix-truenas` (ADR-0009,
+  Accepted). An OpenStack backend is only a
   proposal (ADR-0039, Proposed, gated on a spike).
 - **Registry** — `crates/adapters/delonix-oci/src/registry.rs`.
 
@@ -160,11 +162,13 @@ Delonix Runtime is the **node execution layer** of the picture above. On one nod
 - exposes the **same operations through several doors**: the CLI, the node contract, the CRI and
   MCP.
 
-One caveat on the node contract, so you do not go looking for a server that is not there:
+One caveat on the node contract, so you do not expect more of the server than it answers:
 `proto/delonix/node/v1/node.proto` is marked *DRAFT contract for ADR-0040*. The contract, its
-generated `docs/api/openapi.yaml` and its CI gate (`scripts/contract_gate.py`) exist; no crate
-serves `NodeService` yet. ADR-0042 (**Accepted**, steps A and B delivered) fixes how that API is
-versioned and documented when the server lands.
+generated `docs/api/openapi.yaml` and its CI gate (`scripts/contract_gate.py`) exist, and
+`delonix serve node-api` (`crates/interfaces/delonix-node-api`) serves it on a local socket — but
+only `NodeService.ListProviders` answers today; the other RPCs answer `UNIMPLEMENTED`. ADR-0042
+(**Accepted**; steps A and B delivered, step C started with this server) fixes how that API is
+versioned and documented as more of it is served.
 
 ### What it deliberately does not do
 
@@ -253,7 +257,7 @@ command is not a platform capability.
 **In Delonix.** The same operations are exposed by the CLI, the CRI (`delonix serve cri`,
 `crates/interfaces/delonix-cri`), the local management socket (`crates/interfaces/delonix-mgmt`),
 the MCP server (`delonix mcp serve`, `crates/interfaces/delonix-mcp`) and the node contract
-(`proto/delonix/node/v1/`, draft). The contract is the source of truth for both its gRPC and its
+(`proto/delonix/node/v1/`, draft, served in part by `crates/interfaces/delonix-node-api`). The contract is the source of truth for both its gRPC and its
 HTTP/JSON encodings, and `docs/api/openapi.yaml` is generated from it, never edited by hand
 (`scripts/contract_gate.py`). ADR-0040 (**Proposed**) records today's gap honestly: several of
 these doors still re-run the CLI binary as a subprocess instead of calling a use case — a count

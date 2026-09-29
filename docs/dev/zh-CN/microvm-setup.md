@@ -124,11 +124,12 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 
 ### 端口与注册表
 
-`VmBackend`（`crates/adapters/delonix-vm/src/lib.rs`）是每一个 hypervisor 都要实现的端口：
+`VmBackend`（`crates/contexts/delonix-compute/src/vm_backend.rs`，由 `delonix-vm` 重新导出）是每一个 hypervisor 都要实现的端口：
 `id`、`available`、`boot`、`is_running`、`ip`、`stop`，再加上一批有默认实现的方法
 （`destroy`、`pause`、`unpause`、`resume`、`snapshot`/`restore`/`snapshots`/`delete_snapshot`、
 `preserve_snapshots`、`ip_is_predicted`、`manages_own_storage`、`auto_selectable`、
-`disk_health`）。一个无法兑现的默认实现会带着一条消息 **fail closed**（失败即拒绝），
+`disk_health`，以及较新的 `current_handle`、`resize_cold`、`guest_info`、`move_to_node`、
+`update_cloud_init`、`apply_firewall`/`read_firewall`）。一个无法兑现的默认实现会带着一条消息 **fail closed**（失败即拒绝），
 而绝不会悄悄地什么都不做。
 
 各个后端存放在一个注册表（`BACKENDS`）里，而不是一个 `match` 里：
@@ -153,9 +154,15 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 2. 镜像自己的 `HYPERVISOR`（由一次 VMfile 构建记录下来），前提是 `--disk` 指向的是一个本地
    镜像。
 3. `DELONIX_VM_BACKEND`（整个会话范围）。
-4. `delonix vm default-backend --set <backend>`（整台机器范围，存放在
-   `<DELONIX_ROOT>/vm-default-backend`）。
-5. 能力启发式规则：有 `volumes` ⇒ `libvirt`（只有 libvirt 支持 virtio-9p）；一个没有
+4. 节点 providers 文件（`providers.yaml`，ADR-0054）里的 `defaultProvider`，由
+   `delonix vm default-backend --set <backend>` 写入。查找顺序是 `DELONIX_PROVIDERS_CONFIG`，
+   否则 `$XDG_CONFIG_HOME/delonix/providers.yaml`（或 `~/.config/…`），否则
+   `/etc/delonix/providers.yaml`；第一个找到的胜出。一个读不了的文件会让不带 `--backend` 的 VM
+   请求失败，而不是去猜；一个本进程无法提供的默认值（没有目标的 `proxmox`）会点名失败，而不是
+   退回到一个本地 hypervisor。
+5. 旧的按根目录保存的默认值 `<DELONIX_ROOT>/vm-default-backend`，来自 providers 文件出现之前；
+   `vm default-backend` 会说明答案何时来自它，而 `--set` 会把它挪进文件。
+6. 能力启发式规则：有 `volumes` ⇒ `libvirt`（只有 libvirt 支持 virtio-9p）；一个没有
    `--kernel` 的云镜像 ⇒ **如果 libvirt 可用**就选 `libvirt`；否则走自动检测——选中第一个
    已安装、且标记为可自动选取的已注册后端（先 CH，再 libvirt）。
 
@@ -167,22 +174,34 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 $ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+error[DX-1503] invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 ```
+
+`delonix provider config validate` 在不联系任何东西的前提下，检查这个文件以及它指向的东西（一个只有
+属主可读的 token 文件、一个确实存在的 CA）；`delonix provider config schema` 打印它的 JSON Schema。
 
 ### Proxmox VE（远程）
 
-当通过环境变量做了配置时，`bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured`
-会在启动时注册 Proxmox 后端（配置有误只是一条警告，绝不会让无关的命令因此失败）：
+当做了配置时——通过 providers 文件里的一个 `type: proxmox` 条目，或者通过下面的环境变量——
+`bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured` 会在启动时注册 Proxmox 后端
+（配置有误只是一条警告，绝不会让无关的命令因此失败）。`DELONIX_PROXMOX_*` 变量的完整列表，包括
+基于文件的凭据（`DELONIX_PROXMOX_TOKEN_FILE`、`DELONIX_PROXMOX_PASSWORD_FILE`）以及本地镜像
+上传到的存储（`DELONIX_PROXMOX_IMPORT_STORAGE`、`DELONIX_PROXMOX_DISK_STORAGE`），见
+[环境变量 § Proxmox VE](environment-variables.md#proxmox-ve)：
 
 | 变量 | 含义 |
 |---|---|
 | `DELONIX_PROXMOX_URL` | API 的基础 URL，例如 `https://pve.example:8006`。不设置 = 不注册这个后端。 |
-| `DELONIX_PROXMOX_NODE` | 必填。这个后端所对应的那唯一一个节点（就是 `GET /nodes` 里给它起的名字）。 |
+| `DELONIX_PROXMOX_NODE` | 必填。这个后端通过它连接的那个节点（就是 `GET /nodes` 里给它起的名字）；之后每台 VM 都在它实际运行所在的集群节点上被寻址（ADR-0053）。 |
 | `DELONIX_PROXMOX_SECRET` | 首选的凭据方式：一个带有 `tokenId`+`tokenSecret`（或 `username`+`password`）的 `kind: Secret` 的名字。 |
 | `DELONIX_PROXMOX_TOKEN_ID` + `DELONIX_PROXMOX_TOKEN` | 来自环境变量的 API token。 |
 | `DELONIX_PROXMOX_USER` + `DELONIX_PROXMOX_PASSWORD` | 密码登录（ticket 方式，在 401 时重新认证）。 |
@@ -192,7 +211,8 @@ default backend cleared (falls back to auto-detection)
 
 没有配置的情况下，`--backend proxmox` 会回答说这个后端"在这次构建里不可用"，并说明该
 设置什么（*已运行*）。这个后端拥有自己的存储（`manages_own_storage`），所以不会生成本地
-overlay 或 NoCloud seed；`--hostname`/`--ssh-key` 会被送到节点自己的 cloud-init 里，而
+overlay 或 NoCloud seed；一个指向引擎自己存储里某个镜像的 `--disk` 会被上传到节点的导入存储，
+并以它创建 VM（ADR-0057）；`--hostname`/`--ssh-key` 会被送到节点自己的 cloud-init 里，而
 `--user-data` 会被拒绝。设计与限制：[ADR-0008](../adr/0008-proxmox-vm-backend.md)。一个
 OpenStack 后端**仅仅是提议阶段**（[ADR-0039](../adr/0039-openstack-vm-backend.md)）；还没有
 任何代码。
@@ -429,7 +449,8 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 
 | 领域 | 路径 |
 |---|---|
-| 端口、注册表、CH 和 libvirt 后端、`create_with`、快照、固件查找 | `crates/adapters/delonix-vm/src/lib.rs` |
+| 端口 | `crates/contexts/delonix-compute/src/vm_backend.rs` |
+| 注册表、CH 和 libvirt 后端、`create_with`、快照、固件查找 | `crates/adapters/delonix-vm/src/lib.rs` |
 | NoCloud seed 的生成 | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Proxmox 后端 | `crates/providers/delonix-proxmox/` |
 | `vm` CLI、`kind: VirtualMachine`、`vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |

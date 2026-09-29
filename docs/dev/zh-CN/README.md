@@ -15,7 +15,7 @@ pull request。读完本页后，你会知道本手册的编排顺序，以及�
 Delonix Runtime 是**单个节点**上的执行抽象：它运行**容器和微虚拟机（microVM）**，
 并管理它们所需的网络和存储。它是声明式的（拥有自己的 Kind，按
 `apiVersion` 分组——见 `delonix api-resources`），并且只通过端口（port）与各 provider
-（Linux 内核、libvirt、Cloud Hypervisor、Proxmox VE、Kubernetes 的 CRI）通信，绝不会在代码中
+（Linux 内核、libvirt、Cloud Hypervisor、Proxmox VE、OPNsense、Kubernetes 的 CRI）通信，绝不会在代码中
 散布 `if provider == …` 这样的分支。
 
 几乎每一条你会收到的评审意见，都由以下三条原则塑造：
