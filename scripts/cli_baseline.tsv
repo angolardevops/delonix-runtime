@@ -199,6 +199,7 @@
 ~	system boot disable
 ~	system boot enable
 ~	system boot status
+=	systemcontainer clone
 =	systemcontainer snapshot create
 =	systemcontainer snapshot ls
 =	systemcontainer snapshot restore

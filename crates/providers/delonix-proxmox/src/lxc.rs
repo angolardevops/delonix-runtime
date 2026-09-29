@@ -50,6 +50,32 @@ impl Client {
         )
     }
 
+    /// Whether the node has container `vmid`. Only the node's own «does not
+    /// exist» answers `false`; any other failure is an error — a transport
+    /// error read as «gone» made a destroy report success over a container
+    /// it never reached (measured, plan 63 slice 5).
+    pub fn lxc_exists(&self, vmid: u32) -> Result<bool> {
+        match self.lxc_config(vmid) {
+            Ok(_) => Ok(true),
+            Err(Error::NodeNotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The volumes of container `vmid` on `storage`. A container's volumes
+    /// are `rootdir` content, not `images`, so the VM listing never sees them.
+    pub fn list_ct_volumes(&self, storage: &str, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=rootdir&vmid={vmid}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|b| Some(b.get("volid")?.as_str()?.to_string()))
+            .collect())
+    }
+
     /// `GET /nodes/{node}/lxc/{vmid}/config`.
     pub fn lxc_config(&self, vmid: u32) -> Result<serde_json::Value> {
         let body = self.get(&format!("/nodes/{}/lxc/{vmid}/config", self.node))?;
@@ -147,7 +173,7 @@ impl Client {
                     self.node
                 ))
             },
-            Some(&|| Ok(self.lxc_config(vmid).is_err())),
+            Some(&|| Ok(!self.lxc_exists(vmid)?)),
         )
     }
 
@@ -261,6 +287,44 @@ impl Client {
                 )
             },
             None,
+        )
+    }
+
+    /// `POST /nodes/{node}/lxc/{vmid}/clone`: a full copy of container `vmid`
+    /// as `newid`, its volumes on `storage`, named `hostname`. The node gives
+    /// the copy a new MAC and refuses a full copy of a running container
+    /// unless it is taken from `snapname`. The probe is the copy's config.
+    pub fn lxc_clone(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        newid: u32,
+        hostname: &str,
+        storage: &str,
+        snapname: Option<&str>,
+    ) -> Result<()> {
+        let new = newid.to_string();
+        let mut form: Vec<(&str, &str)> = vec![
+            ("newid", new.as_str()),
+            ("hostname", hostname),
+            ("full", "1"),
+            ("storage", storage),
+        ];
+        if let Some(s) = snapname {
+            form.push(("snapname", s));
+        }
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::CtClone,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/lxc/{vmid}/clone", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| Ok(self.lxc_config(newid).is_ok())),
         )
     }
 
@@ -806,7 +870,7 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         let client = self.client_for(&node)?;
         let ledger = Ledger::at(dir);
         client.settle_pending(&ledger, vmid)?;
-        if client.lxc_config(vmid).is_err() {
+        if !client.lxc_exists(vmid)? {
             return Ok(());
         }
         if client.lxc_status(vmid)? == "running" {
@@ -1016,6 +1080,61 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         }
         client.delete_backup(&Ledger::at(dir), vmid, storage, archive)?;
         Ok(())
+    }
+
+    fn clone_as(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        new_name: &str,
+        snapshot: Option<&str>,
+    ) -> delonix_model::Result<SystemContainerHandle> {
+        if !valid_hostname(new_name) {
+            return Err(Error::InvalidSystemContainer(format!(
+                "proxmox: '{new_name}' is not a usable container hostname"
+            ))
+            .into());
+        }
+        if let Some(s) = snapshot {
+            crate::validate_snapshot_name(s)?;
+        }
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        // Read in PVE/API2/LXC.pm: a full copy of a RUNNING container is
+        // refused unless it comes from a snapshot. Without one named, a
+        // temporary snapshot is taken and always deleted afterwards — the full
+        // copy does not depend on it.
+        let running = client.lxc_status(vmid)? == "running";
+        let temp = (running && snapshot.is_none()).then(|| {
+            format!(
+                "dlxclone{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+            )
+        });
+        if let Some(t) = &temp {
+            client.lxc_snapshot(&ledger, vmid, t)?;
+        }
+        let from = snapshot.or(temp.as_deref());
+        let cloned = client.next_vmid().and_then(|newid| {
+            client
+                .lxc_clone(&ledger, vmid, newid, new_name, &self.rootfs_storage, from)
+                .map(|()| newid)
+        });
+        if let Some(t) = &temp {
+            if let Err(e) = client.lxc_delete_snapshot(&ledger, vmid, t) {
+                tracing::warn!(vmid, snapshot = %t, error = %e, "proxmox: could not delete the temporary clone snapshot");
+            }
+        }
+        let newid = cloned?;
+        Ok(SystemContainerHandle {
+            name: new_name.to_string(),
+            locator: format!("proxmox:{}:{newid}", client.node),
+        })
     }
 
     fn restore_backup(

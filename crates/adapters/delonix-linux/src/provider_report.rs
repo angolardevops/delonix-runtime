@@ -83,7 +83,7 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
         C::ResourceReadback => S::Supported { evidence: "e2e:comandos de leitura (não destrutivos)" },
         C::Events => S::Partial { detail: "`system events` reads a persisted log the CLI writes on each action; no watch stream (`WatchEvents` unserved)" },
         C::AsyncOperations => S::NotImplemented,
-        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup => {
+        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone => {
             S::UnsupportedByProvider { reason: "application containers run here; a system container, with VM-like semantics, is the Proxmox provider's (ADR-0058)" }
         }
         C::ContainerLifecycle => S::Supported { evidence: "e2e:container: ciclo de vida + hot reconfig" },

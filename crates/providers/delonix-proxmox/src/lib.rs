@@ -450,6 +450,9 @@ enum TaskKind {
     /// `POST /nodes/{node}/lxc` with `restore=1`: a container put back from a
     /// `vzdump` archive, over the container of the same id (worker
     /// `vzrestore`, read from `PVE/API2/LXC.pm`).
+    /// `POST /nodes/{node}/lxc/{vmid}/clone`: a full copy of a container
+    /// under a new id (worker `vzclone`, read from `PVE/API2/LXC.pm`).
+    CtClone,
     CtRestore,
     CtDeleteSnapshot,
     Clone,
@@ -666,6 +669,7 @@ impl TaskKind {
             TaskKind::CtRollback => "ct-rollback",
             TaskKind::CtDeleteSnapshot => "ct-delete-snapshot",
             TaskKind::CtRestore => "ct-restore",
+            TaskKind::CtClone => "ct-clone",
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
@@ -781,6 +785,7 @@ impl TaskKind {
             TaskKind::CtRollback => "vzrollback",
             TaskKind::CtDeleteSnapshot => "vzdelsnapshot",
             TaskKind::CtRestore => "vzrestore",
+            TaskKind::CtClone => "vzclone",
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
@@ -6695,7 +6700,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
         | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
         | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup
+        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone
         | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
@@ -6783,6 +6788,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::SystemContainerSnapshot => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_snapshot_is_rolled_back_and_deleted" },
         C::SystemContainerResize => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_root_volume_grows_live_and_never_shrinks" },
         C::SystemContainerBackup => S::Partial { detail: "archive, list, delete and restore are proved live (a_system_containers_backup_is_restored_over_it_and_deleted); a restore by an API token drops the raw lxc.* keys the node wrote from the image (working directory, halt signal) — the node lets only root@pam write them back, and the restore names each one it dropped" },
+        C::SystemContainerClone => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_system_container_is_cloned_from_a_temporary_snapshot" },
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid

@@ -158,7 +158,7 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
         C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "a libvirt VM lives on virbr0 in the host netns, a different L2 the engine does not program; `--namespace` is refused by name" },
         C::VmAntispoof => sys(S::Supported { evidence: "test:crates/adapters/delonix-vm/src/lib.rs::antispoof_live_defines_and_survives_the_domain" }),
         C::VmRawDefinition => bin(S::Partial { detail: "`libvirtXml`/`libvirtXmlOverlay` are UNVALIDATED, trusted manifests only, local CLI only — never reachable from the node contract (ADR-0050)" }),
-        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup => {
+        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone => {
             S::UnsupportedByProvider { reason: "a VM provider; a system container is the Proxmox provider's (ADR-0058)" }
         }
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
@@ -266,7 +266,7 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
         C::VmNamespaceIsolation => bin(S::Supported { evidence: "chaos:scen_namespace_isolation" }),
         C::VmAntispoof => bin(S::Partial { detail: "the tap gets the same `iifname … ip saddr != <ip> drop` rule as a veth (auditoria #3); proven by rule inspection, not in the battery" }),
         C::VmRawDefinition => S::UnsupportedByProvider { reason: "no raw definition format exists for the CH command line" },
-        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup => {
+        C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize | C::SystemContainerBackup | C::SystemContainerClone => {
             S::UnsupportedByProvider { reason: "a VM provider; a system container is the Proxmox provider's (ADR-0058)" }
         }
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
