@@ -36,6 +36,10 @@ pub struct Launch {
     pub apparmor: Option<String>,
     /// Where the process's output goes, if anywhere.
     pub log_path: Option<String>,
+    /// The record already exists and this start replaces its incarnation — a
+    /// `start` of a stopped container, not a `run`. A record removed while the
+    /// start runs then stays removed, and the start is refused.
+    pub replaces_record: bool,
 }
 
 impl Launch {

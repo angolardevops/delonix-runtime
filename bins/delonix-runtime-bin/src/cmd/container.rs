@@ -2854,6 +2854,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         pod_infra_pid,
         apparmor: apparmor_profile,
         log_path: c.log_path.clone(),
+        replaces_record: false,
     };
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
@@ -4061,6 +4062,9 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         pod_infra_pid: None,
         apparmor: c.apparmor.clone(),
         log_path: Some(c.log_path.clone().unwrap_or(default_log)),
+        // `start` brings back a container whose record exists: an `rm -f` while
+        // it starts must not see it recreated (see `publish_incarnation`).
+        replaces_record: true,
     };
     let policy = c.restart_policy.clone().unwrap_or_default();
     if should_supervise(&policy, true, true) {

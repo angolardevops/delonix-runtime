@@ -99,7 +99,14 @@ pub fn run_supervised(
         let mut restarts: u32 = 0;
         let mut first = true;
         loop {
-            let started = crate::create_with(store, c, rootfs, spec);
+            // A policy restart replaces the incarnation of a record that exists,
+            // whatever the first start was: a record removed while it restarts
+            // stays removed (`rm -f` in the backoff window's last instant).
+            let started = if restarts == 0 {
+                crate::create_with(store, c, rootfs, spec)
+            } else {
+                crate::restart_with(store, c, rootfs, spec)
+            };
             // A restart the policy made is a start like any other, and `container
             // ls` counts starts from the event log. The loop used to record only
             // the `die` of each run, so `RESTARTS` said 0 for a container that had

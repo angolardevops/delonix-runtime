@@ -54,4 +54,28 @@ pub trait StateRepository<T> {
     /// existing behaviors disagree on this today, and callers already depend on
     /// which one they get.
     fn remove(&self, id: &str) -> Result<()>;
+
+    /// Removes the record named `id` unless `keep` says otherwise — the check and
+    /// the removal as ONE critical section, the same lock `update` takes. Returns
+    /// `None` once removed, or the record as found when `keep` kept it.
+    ///
+    /// What it closes: a removal that decided on a read taken BEFORE the lock
+    /// (`rm -f` reads the record, then signals, then waits) deletes whatever a
+    /// concurrent writer published in between — a new incarnation included, which
+    /// then runs with no record naming it.
+    ///
+    /// The default is the unlocked read-then-remove, for stores no second process
+    /// shares (and the in-memory fakes of the tests). A store that IS shared
+    /// between processes must override it; `Store` does.
+    fn remove_unless<F>(&self, id: &str, keep: F) -> Result<Option<T>>
+    where
+        F: FnOnce(&T) -> bool,
+    {
+        let cur = self.get(id)?;
+        if keep(&cur) {
+            return Ok(Some(cur));
+        }
+        self.remove(id)?;
+        Ok(None)
+    }
 }

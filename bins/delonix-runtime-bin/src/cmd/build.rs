@@ -724,6 +724,7 @@ fn work_launch(rootfs: &str) -> delonix_compute::launch::Launch {
         pod_infra_pid: None,
         apparmor: None,
         log_path: None,
+        replaces_record: false,
     }
 }
 
