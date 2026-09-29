@@ -286,6 +286,17 @@ entre nós (o LXC migra com reinício, não ao vivo; a medir antes de prometer).
   falhada conta como «ainda não». Pela CLI: um `restore` que desfaz uma mudança feita por `stack
   apply` aparece no `plan` seguinte como deriva (2), que é o honesto.
 
+- **O `rootfs` a crescer: feito.** O campo `rootfs` do Kind converge a quente quando cresce e
+  planeia um `Replace` quando encolhe: uma regra nova do reconciliador, os campos «só a crescer»
+  (`grow_only_fields`/`is_hot_change`), que o `apply` usa também, para o plano e o apply nunca
+  discordarem. O `actual` lê o tamanho no NÓ (`size=` do `rootfs`), por isso um disco aumentado à
+  mão é deriva. Porta `grow_rootfs`, rota `PUT …/lxc/{vmid}/resize` (worker `resize`, confirmado
+  pelo UPID) em `supported+tested` (14 rotas LXC); capacidade `system-container.resize`. Medido no
+  `pve`: um container A CORRER cresce de 1 para 2 GiB e continua a correr; encolher é recusado
+  antes de qualquer pedido (DX-1540). Pela CLI: crescer por manifesto converge (plano 0 depois);
+  um `pct resize` à mão para 3G aparece no `drift` e no plano; pedir menos do que o nó tem planeia
+  `-/+` e o `apply` recusa sem `--replace`, sem mexer em nada.
+
 ## Fatia 6 — Fecho
 
 - A matriz regenerada com o trace: as rotas usadas passam a `supported+tested`, e as restantes

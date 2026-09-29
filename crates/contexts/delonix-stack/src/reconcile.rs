@@ -256,8 +256,8 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // Measured on PVE 9.2.2 against a running container before being
         // declared: `memory` and `swap` land in its cgroup at once, `cores` in
         // its cpuset a few seconds later, and nothing is left pending. `image`,
-        // `entrypoint`, `env`, `rootfs` and `network` stay cold (ADR-0058,
-        // plan 63 slice 4).
+        // `entrypoint`, `env` and `network` stay cold (ADR-0058, plan 63
+        // slice 4). `rootfs` is grow-only, see `grow_only_fields`.
         k::SYSTEM_CONTAINER => &["memory", "swap", "cores"],
         k::NETWORK => &["peers"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
@@ -309,6 +309,38 @@ fn is_hot(kind: &str, field: &str) -> bool {
     hot_fields(kind).contains(&field)
 }
 
+/// Fields that converge live only when they GROW, per Kind: a number the
+/// provider can raise in place and never lower.
+///
+/// - `SystemContainer.rootfs`: the Proxmox node grows a container's root
+///   volume on a running container (`PUT …/resize`, measured on PVE 9.2.2)
+///   and refuses to shrink it. A smaller size is a recreate, so it plans as a
+///   `Replace` that `--replace` has to authorise, like any other cold field.
+fn grow_only_fields(kind: &str) -> &'static [&'static str] {
+    match kind {
+        k::SYSTEM_CONTAINER => &["rootfs"],
+        _ => &[],
+    }
+}
+
+/// Whether one field change converges live: a hot field always does, a
+/// grow-only field when both sides are numbers and it does not shrink.
+pub fn is_hot_change(kind: &str, field: &str, from: Option<&str>, to: Option<&str>) -> bool {
+    if is_hot(kind, field) {
+        return true;
+    }
+    if !grow_only_fields(kind).contains(&field) {
+        return false;
+    }
+    match (
+        from.and_then(|v| v.parse::<u64>().ok()),
+        to.and_then(|v| v.parse::<u64>().ok()),
+    ) {
+        (Some(f), Some(t)) => t >= f,
+        _ => false,
+    }
+}
+
 /// The hot table, for the per-Kind tests that have to assert their own half of
 /// the promise. Reading it is the only way a module can check that what it
 /// declares comparable is also something the executor can apply — and those
@@ -341,7 +373,7 @@ fn diff_fields(kind: &str, desired: &Desired, actual: &Actual) -> Vec<FieldDiff>
                 field: key.clone(),
                 from: a.cloned(),
                 to: Some(d.clone()),
-                hot: is_hot(kind, key),
+                hot: is_hot_change(kind, key, a.map(String::as_str), Some(d)),
             }),
             // Gone from the manifest. Revert it ONLY if we were the ones who
             // set it — otherwise it belongs to a human's `container update` or
@@ -538,6 +570,20 @@ mod tests {
             owner: owner.map(String::from),
             last_applied: None,
         }
+    }
+
+    /// A grow-only field converges live when it grows and plans a replace
+    /// when it shrinks, and nothing else of the Kind changes behaviour.
+    #[test]
+    fn a_grow_only_field_is_hot_growing_and_cold_shrinking() {
+        let sc = k::SYSTEM_CONTAINER;
+        assert!(is_hot_change(sc, "rootfs", Some("1"), Some("2")));
+        assert!(is_hot_change(sc, "rootfs", Some("2"), Some("2")));
+        assert!(!is_hot_change(sc, "rootfs", Some("2"), Some("1")));
+        assert!(!is_hot_change(sc, "rootfs", None, Some("2")));
+        assert!(is_hot_change(sc, "memory", Some("512"), Some("256")));
+        assert!(!is_hot_change(sc, "image", Some("a"), Some("b")));
+        assert!(!is_hot_change(k::VM, "rootfs", Some("1"), Some("2")));
     }
 
     #[test]

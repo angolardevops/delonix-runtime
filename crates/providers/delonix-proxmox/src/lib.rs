@@ -6678,7 +6678,7 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
         | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
         | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
-        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot
+        | C::SystemContainerLifecycle | C::SystemContainerOciImage | C::SystemContainerEntrypointEnv | C::SystemContainerExec | C::SystemContainerLogs | C::SystemContainerExitStatus | C::SystemContainerNetworkBridge | C::SystemContainerUnprivileged | C::SystemContainerSnapshot | C::SystemContainerResize
         | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
@@ -6764,6 +6764,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::SystemContainerNetworkBridge => S::Partial { detail: "`net0` on a bridge of the node, with an optional VLAN tag and DHCP; judged after the start by `GET …/interfaces`, and an address that never came is `NetworkReady=False` with the node's warning (live case); the engine's SDN, isolation, DNS and publish do not apply (ADR-0058 T7)" },
         C::SystemContainerUnprivileged => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_container_runs_its_lifecycle_through_the_node" },
         C::SystemContainerSnapshot => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_snapshot_is_rolled_back_and_deleted" },
+        C::SystemContainerResize => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_system_containers_root_volume_grows_live_and_never_shrinks" },
         C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
         | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
         | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid

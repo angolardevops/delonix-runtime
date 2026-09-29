@@ -184,6 +184,25 @@ impl Client {
         }
     }
 
+    /// `PUT …/lxc/{vmid}/resize` with `disk=rootfs`: grows the root volume
+    /// to `gib`. The node forks `resize` (the QEMU worker's name) and refuses
+    /// a shrink; the caller refuses it first, by name.
+    pub fn lxc_grow_rootfs(&self, ledger: &Ledger, vmid: u32, gib: u32) -> Result<()> {
+        let size = format!("{gib}G");
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Resize,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/lxc/{vmid}/resize", self.node),
+                    &[("disk", "rootfs"), ("size", size.as_str())],
+                )
+            },
+            Some(&|| Ok(config_of(&self.lxc_config(vmid)?).rootfs_gib >= gib)),
+        )
+    }
+
     /// `GET …/lxc/{vmid}/snapshot`: the snapshot names, without the API's
     /// `current` pseudo-entry (the live state, not a snapshot anybody took).
     pub fn lxc_snapshots(&self, vmid: u32) -> Result<Vec<String>> {
@@ -443,7 +462,30 @@ pub(crate) fn config_of(config: &serde_json::Value) -> SystemContainerConfig {
         cores: number("cores"),
         entrypoint,
         env,
+        rootfs_gib: config
+            .get("rootfs")
+            .and_then(|v| v.as_str())
+            .and_then(rootfs_size_gib)
+            .unwrap_or(0),
     }
+}
+
+/// The `size=` of a `rootfs` value (`local-lvm:vm-100-disk-0,size=2G`), in
+/// GiB. The node writes `G` for what the engine asks, and may write `M` or
+/// `T`; a size that is not a whole number of GiB answers `None`, never a
+/// rounded number that would read as drift or as none.
+pub(crate) fn rootfs_size_gib(value: &str) -> Option<u32> {
+    let size = value.split(',').find_map(|p| p.strip_prefix("size="))?;
+    let (digits, unit) = size.split_at(size.find(|c: char| !c.is_ascii_digit())?);
+    let n: u64 = digits.parse().ok()?;
+    let gib = match unit {
+        "T" => n.checked_mul(1024)?,
+        "G" => n,
+        "M" if n.is_multiple_of(1024) => n / 1024,
+        "K" if n.is_multiple_of(1024 * 1024) => n / (1024 * 1024),
+        _ => return None,
+    };
+    u32::try_from(gib).ok()
 }
 
 /// A [`SystemContainerProvider`] on one Proxmox node.
@@ -760,6 +802,39 @@ impl SystemContainerProvider for ProxmoxSystemContainerProvider {
         Ok(client.lxc_delete_snapshot(&ledger, vmid, name)?)
     }
 
+    fn grow_rootfs(
+        &self,
+        dir: &Path,
+        h: &SystemContainerHandle,
+        gib: u32,
+    ) -> delonix_model::Result<()> {
+        let (node, vmid) = parse_locator(&h.locator)?;
+        let client = self.client_for(&node)?;
+        let ledger = Ledger::at(dir);
+        client.settle_pending(&ledger, vmid)?;
+        let now = config_of(&client.lxc_config(vmid)?).rootfs_gib;
+        if gib < now {
+            return Err(Error::InvalidSystemContainer(format!(
+                "proxmox: container {vmid}'s root volume is {now} GiB and cannot shrink to {gib} \
+                 GiB — the node only grows it; a smaller one means recreating the container"
+            ))
+            .into());
+        }
+        if gib == now {
+            return Ok(());
+        }
+        client.lxc_grow_rootfs(&ledger, vmid, gib)?;
+        let kept = config_of(&client.lxc_config(vmid)?).rootfs_gib;
+        if kept != gib {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: container {vmid}'s root volume was grown to {gib} GiB and the node \
+                 reports {kept} GiB"
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
     fn restore(
         &self,
         dir: &Path,
@@ -874,6 +949,13 @@ mod tests {
                 ("EMPTY".to_string(), String::new()),
             ]
         );
+        assert_eq!(got.rootfs_gib, 0, "no rootfs in this config");
+        let sized = config_of(&serde_json::json!({"rootfs": "local-lvm:vm-100-disk-0,size=2G"}));
+        assert_eq!(sized.rootfs_gib, 2);
+        assert_eq!(rootfs_size_gib("local-lvm:vm-1-disk-0,size=3072M"), Some(3));
+        assert_eq!(rootfs_size_gib("local-lvm:vm-1-disk-0,size=1T"), Some(1024));
+        assert_eq!(rootfs_size_gib("local-lvm:vm-1-disk-0,size=1500M"), None);
+        assert_eq!(rootfs_size_gib("local-lvm:vm-1-disk-0"), None);
         // A container created without swap/cores/env keeps the node's defaults.
         let bare = config_of(&serde_json::json!({"memory": 256}));
         assert_eq!((bare.swap_mib, bare.cores), (0, 0));
