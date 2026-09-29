@@ -188,6 +188,10 @@ derive 宏）。
 | `ports` | `ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`NetworkProvider`、`VmNetwork` |
 | `pod` | Pod 规格类型，以及 `pod_to_run_opts`/`container_to_run_opts` |
 | `notice` | `Notice`，作为数据返回而不是直接打印出来的警告 |
+| `capability`、`capability_host` | 带版本的能力目录（ADR-0050）：`Capability`、`CapabilityState`、`ProviderReport`、`CATALOG_VERSION`；以及每个提供者报告都复用的那个「此工具是否在 `PATH` 上」探测 |
+| `vm_backend`、`vm_error`、`vm_firewall` | `VmBackend` 端口及 `VmConfig`、`BackendRegistration`/`BackendFactory`、虚拟机错误分组，以及按虚拟机的防火墙策略（ADR-0052）——由 ADR-0044 P4b.2 从 `delonix-vm` 移到这里，并在那边重新导出 |
+| `vm_provider` | ADR-0044 的虚拟机提供者端口：`VmSpec`、`Extensions`、`Provider`、`VmProvider` |
+| `system_container` | ADR-0058 的系统容器提供者端口（`SystemContainerSpec`、`SystemContainerProvider`）——系统容器不是 `Container` |
 
 **主要公开 API**
 
@@ -418,6 +422,8 @@ crate 文档中的一个文档测试。
 | `cdi` | CDI 设备规格的消费者（`HostDevices`） |
 | `run_host` | `HostRuntime`，`RunHost` 端口的实现 |
 | `regulate`、`resource_advice`、`workload_view` | 资源压力、宿主机建议、请求值与实际生效值的对照视图 |
+| `usage` | 工作负载累计计数器的一次采样（`cgroup_sample`、`process_sample`），读不到的内容在 `Unmeasured` 中点名说明，而不是报告为零——这就是 MCP 的 `workload.usage` 返回的东西 |
+| `provider_report` | Linux 提供者针对容器和 Pod 对能力目录的回答 |
 
 **主要公开 API**
 
@@ -502,6 +508,7 @@ systemd scope）、`apparmor_parser`、`ldconfig`、`nvidia-smi`。`-p` 用到
 | `build::parse_dockerfile` | Dockerfile/Delonixfile 语法 | `crates/adapters/delonix-oci/src/build.rs:parse_dockerfile` |
 | `Cas` | blob 存储 | `crates/adapters/delonix-oci/src/cas.rs:Cas` |
 | `verify_signature` | cosign 风格的验证 | `crates/adapters/delonix-oci/src/sign.rs:verify_signature` |
+| `write_oci_media_archive` | 使用 OCI 媒体类型的 OCI 布局归档（存储里的 blob 逐字节原样保留，只重写清单），Proxmox VE 节点接受这种归档；`image save` 仍使用 `write_oci_archive` | `crates/adapters/delonix-oci/src/save.rs:write_oci_media_archive` |
 
 **与……对话。** `delonix-model`——自身的错误会转换成它的 `Error`
 （`src/error.rs`，`impl From<Error> for delonix_model::Error`，ADR-0043）；
@@ -528,6 +535,10 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 - 容器启动所依据的根文件系统是共享层之上的一个 overlay，带一个标记
   文件；挂载动作本身发生在容器自己的 init 里
   （`delonix_linux::mount_overlay_if_marked`），而不是在这里。
+- blob 上传**会重试，但不会续传**：每次尝试都先发一个 `HEAD`（镜像仓库
+  已有的 blob 不会发送第二次），然后在一个 `PUT` 里从第 0 字节重新发送整个
+  blob。相比之下，拉取会用 `Range` 续传。被中断的上传会报告它进行到了哪里
+  （`connection lost with N of M bytes sent`，见 `registry.rs`）。
 
 ### `delonix-sdn`
 
@@ -536,7 +547,9 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 控制套接字，并拥有网桥、nftables 规则、DHCP 和内部 DNS；一个
 `slirp4netns` 把该命名空间桥接到宿主机。它还覆盖了在没有自定义网络时
 `-p` 所用的按容器 slirp 路径、IPAM、CNI 插件的执行、WireGuard overlay，
-以及可选的 eBPF 流量统计。它重新导出 `delonix-net-rules`。它不派生容器。
+以及可选的 eBPF 流量统计。它还定义了远程网络提供者的端口及其注册表
+（`GatewayProvider`、`NetworkZoneProvider`），以及这些提供者在自己创建的
+对象上盖的归属标记。它重新导出 `delonix-net-rules`。它不派生容器。
 
 **关键模块**
 
@@ -552,6 +565,11 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 | `bpf` | 可选的 eBPF 流量统计 |
 | `discover` | 从 `/proc/<pid>/net` 读取一个工作负载正在监听的端口 |
 | `pin_userns` | pin 自身的命名空间及 id 映射 |
+| `gateway` | `GatewayProvider` 端口及其注册表（ADR-0051），用于通过自身 API 访问的边界设备 |
+| `network_zone` | `NetworkZoneProvider` 端口及其注册表，用于集群自身的 SDN（ADR-0049 附录） |
+| `ownership` | `OwnerMark`：引擎在远程提供者上创建的对象如何被认作自己的——靠标记，而不是靠名字 |
+| `gc` | `find_strays`/`terminate`：状态根已不存在的网络基础设施（pin、control、slirp），供 `net netns gc` 使用 |
+| `provider_report` | 网络提供者对能力目录的回答 |
 
 **主要公开 API**
 
@@ -602,9 +620,11 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 
 ### `delonix-vm`
 
-**用途。** 微虚拟机和虚拟机，位于 `VmBackend` trait 与一个运行时
-**注册表**（backend registry）之后。Cloud Hypervisor 和 libvirt 是本地
-后端；一个远程后端从该 crate 之外把自己注册进去。它拥有虚拟机记录、
+**用途。** 微虚拟机和虚拟机，位于 `VmBackend` trait（自 ADR-0044 P4b.2
+起定义在 `delonix-compute` 中，并在这里重新导出）与一个运行时**注册表**
+（backend registry）之后，该注册表在 P4b.4 之前留在这里。Cloud Hypervisor
+和 libvirt 是本地后端；远程后端由组合根（composition root）注册，所用的
+注册项由其提供者 crate 构建。它拥有虚拟机记录、
 启动与生命周期、快照、cloud-init 种子的生成，以及后端选择（显式指定、
 默认文件，或自动检测）。它不持有 HTTP 客户端或 provider 凭据。
 
@@ -614,15 +634,19 @@ OCI 镜像类型）、`sha2`、`tar`、`flate2`、`zstd`、`base64`、`ring`
 |---|---|
 | `lib.rs` | `VmConfig`、`VmBackend`、注册表、`CloudHypervisorBackend`、`LibvirtBackend`、`create_with`、`start`/`stop`/`remove`、快照、`status`/`list` |
 | `cloudinit` | `build_user_data`、`build_network_config`、`generate_seed_iso` |
+| `capabilities` | 每个本地后端针对能力目录声明的内容，以及把声明的「是」变成「本宿主机上没有」的宿主机探测 |
+| `provider` | ADR-0044 `VmProvider` 端口上的两个本地后端（`LocalVmProvider`） |
+| `firewall` | 重新导出 `delonix_compute::vm_firewall` |
 
 **主要公开 API**
 
 | 项目 | 是什么 | 位置 |
 |---|---|---|
-| `VmBackend` | 后端端口（`boot`、`stop`、`destroy`、`resume`、`snapshot`、`ip`、`manages_own_storage`、`auto_selectable`……） | `crates/adapters/delonix-vm/src/lib.rs:VmBackend` |
-| `register_backend`、`BackendRegistration` | 通过工厂函数添加一个后端 | `crates/adapters/delonix-vm/src/lib.rs` |
+| `VmBackend` | 后端端口（`boot`、`stop`、`destroy`、`resume`、`snapshot`、`ip`、`manages_own_storage`、`auto_selectable`……），重新导出 | `crates/contexts/delonix-compute/src/vm_backend.rs:VmBackend` |
+| `register_backend` | 通过它的 `BackendRegistration` 添加一个后端 | `crates/adapters/delonix-vm/src/lib.rs:register_backend` |
+| `provider_reports` | 每个已注册后端的能力报告，供 `provider ls` 使用 | `crates/adapters/delonix-vm/src/lib.rs:provider_reports` |
 | `set_network` | 每个进程注册一次 `VmNetwork` 端口 | `crates/adapters/delonix-vm/src/lib.rs:set_network` |
-| `VmConfig` | 要创建什么 | `crates/adapters/delonix-vm/src/lib.rs:VmConfig` |
+| `VmConfig` | 要创建什么，重新导出 | `crates/contexts/delonix-compute/src/vm_backend.rs:VmConfig` |
 | `create_with`、`start`、`stop`、`remove`、`status`、`list` | 生命周期管理 | `crates/adapters/delonix-vm/src/lib.rs` |
 | `snapshot`、`restore`、`snapshots`、`delete_snapshot` | 检查点 | `crates/adapters/delonix-vm/src/lib.rs` |
 | `valid_vm_name` | 引擎边界处的名称校验 | `crates/adapters/delonix-vm/src/lib.rs:valid_vm_name` |
@@ -660,7 +684,8 @@ API，比如 `PUT /api/v1/vm.pause`）、`virsh`、`qemu-img`、`cloud-localds`�
 父卷之下的共享，以及快照。它实现了 compute 层的 `StorageProvider` 端口。
 它不创建 NAS 数据集（那是 `delonix-truenas` 的事）。
 
-**关键模块。** 单一的 `lib.rs`。
+**关键模块。** `lib.rs`，以及 `provider_report`（存储提供者对能力目录的
+回答）。
 
 **主要公开 API**
 
@@ -843,48 +868,121 @@ Rust 实现的 AEAD，不依赖 C，可在 musl/aarch64 上构建）。
 ## 提供者层（Providers）
 
 Provider 是与外部系统的管理 API 对话的后端。它们被放在适配器层之外，
-是为了让「与远程管理 API 对话」这件事不进入引擎的适配器层（两个 crate
-的 Cargo.toml 注释都这么说）。这并不是说「适配器里不能有 HTTP」：
+是为了让「与远程管理 API 对话」这件事不进入引擎的适配器层（每个
+provider crate 的 Cargo.toml 注释都这么说）。这并不是说「适配器里不能有 HTTP」：
 `delonix-oci` 就有自己的 OCI 镜像仓库客户端，`delonix-telemetry` 也是
 通过 HTTP 导出 OTLP。
 
 ### `delonix-proxmox`
 
-**用途。** 一个由**单个** Proxmox VE 节点的 REST API 支撑、且显式指定
-节点名的 `VmBackend`。没有清单目录，也不做节点选择。它从不触碰本地磁盘
-（`manages_own_storage` 是 `true`），也从不被自动检测选中
-（`auto_selectable` 是 `false`，因为回答「是否可用？」这个问题得付出一次
-网络往返的代价）。
+**用途。** 一个通过 REST API 访问的 Proxmox VE 目标，位于引擎的三个端口
+之后：一个 `VmBackend`（虚拟机）、虚拟机所在节点的按虚拟机防火墙
+（ADR-0052），以及用于集群自身 SDN 的 `NetworkZoneProvider`（ADR-0049
+附录）。目标是一个显式指定的节点——没有清单目录，也不做调度——但每台
+虚拟机都按它实际运行所在的节点寻址，所以在集群内被迁移过的虚拟机仍然
+能被找到（ADR-0053）。它从不触碰本地磁盘（`manages_own_storage` 是
+`true`），也从不被自动检测选中（`auto_selectable` 是 `false`：回答
+「是否可用？」这个问题得付出一次网络往返的代价）。它对 Proxmox API 的
+覆盖是一份测量出来的矩阵，而不是一句声明（ADR-0049，
+`docs/proxmox/matrix-9.2.2.md`）。
 
-**关键模块。** 单一的 `lib.rs`。
+**关键模块**
+
+| 模块 | 职责 |
+|---|---|
+| `lib.rs` | `Target`、`Auth`、`Client`（所有虚拟机、磁盘、备份、guest agent 和上传调用）、任务 `Ledger`、`ProxmoxBackend`（`impl VmBackend`）、`registration`、`capability_report` |
+| `error` | 该 crate 的类型化错误，每个 HTTP 状态类别一个 |
+| `cluster` | 目标所在集群的只读视图（`provider describe proxmox --probe`） |
+| `vm_firewall` | 由节点自身防火墙来回答的按虚拟机防火墙端口 |
+| `sdn`、`sdn_routing`、`sdn_lock` | 集群自身的 SDN（zone、vnet、子网、控制器、fabric、DHCP、IP 预留、前缀列表、路由映射），以及被当作事务使用的全局 SDN 锁（`sdn_transaction`） |
+| `network_zone` | `ProxmoxNetworkZoneProvider`，`kind: NetworkZone` 背后的 `NetworkZoneProvider` 实现 |
+| `lxc` | `ProxmoxSystemContainerProvider`，节点上的系统容器（ADR-0058） |
 
 **主要公开 API**
 
 | 项目 | 是什么 | 位置 |
 |---|---|---|
-| `Target`、`Auth` | 节点端点、节点名、凭据 | `crates/providers/delonix-proxmox/src/lib.rs` |
-| `Client` | API 客户端（`connect`、`create_vm`、`start`、`stop`、`destroy`、`snapshot`、`wait_task`……） | `crates/providers/delonix-proxmox/src/lib.rs:Client` |
+| `Target`、`Auth`、`ClientOptions` | 节点端点、节点名、凭据、路由跟踪 | `crates/providers/delonix-proxmox/src/lib.rs` |
+| `Client` | API 客户端（`connect_with`、`wait_task`、`stage_import`、`stage_template`……） | `crates/providers/delonix-proxmox/src/lib.rs:Client` |
 | `ProxmoxBackend` | `VmBackend` 的实现 | `crates/providers/delonix-proxmox/src/lib.rs:ProxmoxBackend` |
-| `register` | 把该后端注册到 `delonix-vm` 的注册表里 | `crates/providers/delonix-proxmox/src/lib.rs:register` |
+| `registration` | 组合根注册的 `BackendRegistration`；在该后端被选中之前不做任何 I/O | `crates/providers/delonix-proxmox/src/lib.rs:registration` |
+| `capability_report`、`network_capability_report` | 该提供者针对能力目录声明的内容（只声明，从不探测） | `crates/providers/delonix-proxmox/src/lib.rs` |
 
-**与……对话。** `delonix-vm`（该 trait 以及 `register_backend`；一个
-已声明的分层例外）、`delonix-compute`（`Vm` 记录）和 `delonix-model`。
-通过阻塞式的 `reqwest` 以 HTTPS 与节点通信。CLI 在启动时根据环境配置
-注册它（`bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured`）。
+**与……对话。** `delonix-compute`（`VmBackend` 端口、`Vm` 记录、能力
+目录）、`delonix-model`，以及为 `NetworkZoneProvider` 端口而依赖的
+`delonix-sdn`（`scripts/arch_fitness.py` 中一个已声明的分层例外）。通过
+阻塞式的 `reqwest` 以 HTTPS 与节点通信。CLI 在启动时根据 providers 文件
+或环境构建它的目标并注册
+（`bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured`）。
+
+**值得留意的外部依赖。** `reqwest`（阻塞式，rustls）、`serde`、
+`serde_json`、`sha2`（节点用来校验上传内容的校验和）。
+
+**测试。** 内联单元测试；`tests/failure_injection.rs` 让客户端对着一个
+TLS 模拟节点运行（401/403/404/409/5xx、被截断的响应体、失败的任务、
+超时）；`tests/live.rs` 会对一个真实节点跑测试，除非设置了
+`DELONIX_PROXMOX_TEST_URL`，否则会打印一行说明并跳过（见
+[环境变量](environment-variables.md)）。
+
+**从这里开始读。** `src/lib.rs` 里的 crate 文档，然后是
+`Client::wait_task` 和 `task_verdict`，再是 `impl VmBackend for ProxmoxBackend`。
+
+**陷阱。**
+
+- 大多数操作返回的是一个任务 id，而不是结果。一个已经完成的任务，无论
+  成功与否都会报告 `status: stopped`；真正的结论要看 `exitstatus`，而
+  `WARNINGS: <n>` 是带警告的成功，不是失败（`task_verdict`）。
+- 丢失的应答不等于丢失的请求：任务 id 会在等待之前写入该虚拟机的账本
+  （`<vmdir>/proxmox-tasks.json`），传输失败之后，客户端会去查找该任务
+  或它的效果，而不是重发一个非幂等的写操作。有一个测试会读取该 crate
+  的源码，一旦发现任务路径之外的写操作就会失败。
+
+### `delonix-opnsense`
+
+**用途。** 一个由 OPNsense 一体机自身 REST API 支撑的 `GatewayProvider`
+（ADR-0051）：用于节点出站和边界策略的防火墙别名与过滤规则，位于
+`kind: NetworkGateway` 之后。只有生成的 key/secret 对才能认证（GUI 账号
+会被一体机拒绝）。注册时不做任何 I/O；该提供者第一次被选中时才会联系
+一体机。
+
+**关键模块**
+
+| 模块 | 职责 |
+|---|---|
+| `lib.rs` | `Target`、`Auth`、`Client`（`ensure_alias`、`ensure_rule`、`commit`、`pending_changes`……）、`OpnsenseGatewayProvider`（`impl GatewayProvider`）、`register_with` |
+| `capabilities` | `capability_report`，只声明，从不探测 |
+| `error` | 该 crate 的类型化错误 |
+
+**与……对话。** `delonix-sdn`（`GatewayProvider` 端口及其注册表，一个
+已声明的分层例外）、`delonix-compute`（能力目录）、`delonix-model`。
+通过阻塞式的 `reqwest` 以 HTTPS 与一体机通信。CLI 根据 providers 文件
+或环境注册它（`bins/delonix-runtime-bin/src/cmd/gatewayproviders.rs`）。
 
 **值得留意的外部依赖。** `reqwest`（阻塞式，rustls）、`serde`、
 `serde_json`。
 
-**测试。** 内联单元测试；
-`crates/providers/delonix-proxmox/tests/live.rs` 会对一个真实节点跑测试，
-除非设置了 `DELONIX_PROXMOX_TEST_URL`，否则会打印一行说明并跳过。
+**测试。** 内联单元测试；`tests/failure_injection.rs` 针对一个 TLS 模拟
+一体机（302/401/403/404、在 HTTP 200 中返回的校验失败、被截断的响应体）；
+`tests/live.rs` 针对一台真实一体机，未配置时跳过。
 
-**从这里开始读。** `src/lib.rs` 里的 crate 文档，然后是
-`Client::wait_task`，再是 `impl VmBackend for ProxmoxBackend`。
+**从这里开始读。** `src/lib.rs` 里的 crate 文档（实机 spike 测量到了
+什么，以及归属规则），然后是 `Client::request`，再是
+`impl GatewayProvider`。
 
-**陷阱。** 大多数操作返回的是一个任务 id，而不是结果。一个已经完成的
-任务，无论成功与否都会报告 `status: stopped`；真正的结论要看
-`exitstatus`（`task_verdict`，crate 文档）。
+**陷阱。**
+
+- 校验失败会以 HTTP **200** 加上 `"result":"failed"` 返回；
+  `Client::request` 会检查每一个 2xx 响应体里有没有它。完全没有凭据时
+  会返回 `302`（重定向到 GUI 登录页），所以客户端从不跟随重定向。
+- 一个对象属于引擎，是靠它的标记，而不是它的名字：该 crate 创建的每个
+  别名和规则都带有防火墙类别 `delonix-owner:<token>`
+  （`delonix_sdn::ownership::OwnerMark`）。同名但没有标记的对象会被拒绝，
+  在一体机上被改过的我们自己的对象会被报告为漂移；当有别人的变更处于
+  暂存状态时，commit 会拒绝执行，因为一体机的 apply 会推送整份配置。
+- 失败穿过 `GatewayProvider` trait 时使用 `delonix_model::Error::from`，
+  从不使用 `into_root`，后者会剥掉字典编号：在 zone 提供者上测量到，一个
+  `DX-5340` 的拒绝到达时只剩一个光秃秃的 `5000`（见
+  `impl GatewayProvider for OpnsenseGatewayProvider` 上方的注释）。
 
 ### `delonix-truenas`
 
@@ -1036,6 +1134,61 @@ crate 文档写明：新的本地客户端应该接到 ADR-0040/0041 的节点�
 **陷阱。** 传给 CLI 的参数会被校验，拒绝以 `-` 开头的内容
 （`valid_arg`），否则一个 id 有可能被当成一个 flag 解析。
 
+### `delonix-node-api`
+
+**用途。** 在本地 unix 套接字上提供的节点契约 `delonix.node.v1`，由同一批
+`proto/` 文件同时以 gRPC 和 HTTP/JSON 提供（ADR-0040 D4、ADR-0042、
+ADR-0050 D5）。目前它回答 `NodeService.ListProviders`（以及
+`GET /v1/providers?kind=`），每个提供者一条 `ProviderInfo`，与
+`delonix provider ls -o json` 打印的相同；其他 `NodeService` RPC 回答
+`UNIMPLEMENTED`，并点明会带来它们的那一步；契约中的其他服务没有注册在
+该套接字上。套接字权限为 `0600`，每个连接都会用 `SO_PEERCRED` 与服务端
+的 uid 比对。
+
+**关键模块**
+
+| 模块 | 职责 |
+|---|---|
+| `lib.rs` | `serve_blocking`、生成的 `proto::v1`（prost/tonic 存根以及 pbjson 的 proto3 JSON） |
+| `service` | `NodeApi`（`impl NodeService`）、`list_providers`、`router`（JSON 路由和 gRPC 服务放在同一个 `axum` 路由器上） |
+| `providers` | `measured_reports`、`declared_reports`、`provider_info`：本节点的提供者，按契约承载它们的形式 |
+
+**主要公开 API**
+
+| 项目 | 是什么 | 位置 |
+|---|---|---|
+| `serve_blocking` | 运行服务端 | `crates/interfaces/delonix-node-api/src/lib.rs:serve_blocking` |
+| `router` | 两种传输共享的路由器，进程内测试直接使用它 | `crates/interfaces/delonix-node-api/src/service.rs:router` |
+
+**与……对话。** 为获取能力报告而依赖 `delonix-vm`、`delonix-proxmox`、
+`delonix-opnsense`、`delonix-linux`、`delonix-sdn` 和 `delonix-volume`；
+`delonix-compute`（能力目录）、`delonix-node`（`peer_cred`、malloc arena
+调优）、`delonix-model`。它不运行 CLI。
+
+**值得留意的外部依赖。** `tonic`、`prost`、`pbjson`/`pbjson-types`、
+`axum`、`hyper`、`tokio`；构建时用 `tonic-build` 和 `pbjson-build`（需要
+`protoc`）。
+
+**测试。** 内联单元测试，其中包括
+`the_declared_providers_are_the_published_matrix`（提供者列表必须与 CLI
+发布在 `docs/providers/capability-matrix.md` 中的那份一致）；
+`tests/grpc_list_providers.rs` 用生成的客户端通过 unix 套接字驱动真实的
+服务端，并经由同一个路由器驱动 HTTP/JSON 路由。
+
+**从这里开始读。** `src/lib.rs` 里的 crate 文档，然后是 `src/service.rs`
+（`router`、`list_providers`），再是 `src/providers.rs`。
+
+**陷阱。**
+
+- 提供者列表在这里被第二次组合，因为这个 crate 不能依赖 CLI 的
+  `cmd/provider.rs`；让两者保持一致的正是上面那个测试。只在一边新增的
+  提供者会让测试变红。
+- 未知路径对 HTTP 调用方返回带 `google.rpc.Status` 响应体的 404，对 gRPC
+  调用方返回 gRPC 的 `UNIMPLEMENTED`——绝不会是响应体为空的 200，而
+  tonic 自带的兜底对每条路径给出的恰恰是后者。
+- 目前每个 RPC 注解对应的 HTTP 路由是逐个手写的；下一步是基于
+  `google.api.http` 注解的通用转码器（ADR-0042）。
+
 ### `delonix-mcp`
 
 **用途。** 一个 Model Context Protocol 服务端：本地 AI 控制面。只走
@@ -1047,7 +1200,7 @@ stdio 传输；是某个客户端会话的子进程，绝不是守护进程。�
 
 | 模块 | 职责 |
 |---|---|
-| `lib.rs` | `DelonixMcp` 各工具（`runtime.info`、`resource.list`、`container.restart`……）、`serve_stdio`、`doctor_checks` |
+| `lib.rs` | `DelonixMcp` 各工具（`runtime.info`、`resource.list`、`container.restart`、`workload.usage`……）、`serve_stdio`、`doctor_checks` |
 | `risk` | 每个工具的风险等级 |
 | `audit` | 只追加写入的 `mcp/audit.log` |
 | `tasks` | 会话范围内的任务注册表 |
@@ -1104,7 +1257,8 @@ apply，还负责打印（借助 `po` 翻译目录）。隐藏的内部动词
 | `cmd/dockerapi.rs` | Docker Engine API 切片；`__apirun` 对应的 `run_from_spec_file` |
 | `cmd/policy.rs` | 通过 `delonix-security-runtime` 实现节点运行时策略 |
 | `cmd/hosts.rs`、`cmd/hosts_file.rs` | `hosts sync`（不是一个稳定的命令分组）以及每个状态根目录下由本引擎托管的、对宿主机 `/etc/hosts` 的那一段——与 `HTTPRoute` 上的 `hosts: [host]` 共用（ADR-0046、ADR-0048 第二阶段）；重新计算的逻辑是 `cmd/ingress_proxy.rs` 里的 `desired_hosts`/`sync_hosts_now`，由 `rebuild()` 调用 |
-| `cmd/vmbackends.rs` | 注册已配置的远程虚拟机后端 |
+| `cmd/vmbackends.rs`、`cmd/gatewayproviders.rs`、`cmd/network_zone_providers.rs` | 注册已配置的远程提供者（Proxmox VE 作为虚拟机后端和 SDN zone 提供者，OPNsense 作为网关提供者） |
+| `cmd/provider.rs`、`cmd/providers_config.rs` | 针对能力目录的 `provider ls/describe/matrix`；节点的 `providers.yaml`（ADR-0054）：查找、解析、`provider config show/validate/schema` |
 | `cmd/output.rs`、`cmd/po.rs` | 表格/describe 输出、翻译目录 |
 
 **主要公开 API。** 不是一个库。贡献者最先会遇到的入口点：
@@ -1142,6 +1296,12 @@ apply，还负责打印（借助 `po` 翻译目录）。隐藏的内部动词
   检查清单。
 - 引擎二进制程序的隐藏动词是在 `clap` 之前对原始 `argv` 做匹配的；
   重命名一个公开命令并不会一并重命名它们。
+- `main` 会先于其他一切安装一个 SIGPIPE 处理程序（`install_sigpipe_handler`）。
+  stdout 或 stderr 被关闭（`delonix image ls | head`）时，进程仍会像默认
+  处置那样安静地结束；任何其他的断开管道——比如一个关闭了上传套接字的
+  镜像仓库——会让写操作以 `EPIPE` 失败，于是调用方的重试和错误提示得以
+  执行，而不是进程以状态 141 无声无息地死掉。该处理程序作用于整个二进制
+  程序，所以内部管道上的 `EPIPE` 现在是代码会返回的一个错误。
 
 ### `delonix-mgmt-bin`（二进制程序 `delonix-mgmt`）
 
@@ -1156,6 +1316,20 @@ apply，还负责打印（借助 `po` 翻译目录）。隐藏的内部动词
 **测试。** 自身没有测试。
 
 **从这里开始读。** `bins/delonix-mgmt-bin/src/main.rs`。
+
+### `delonix-node-api-bin`（二进制程序 `delonix-node-api`）
+
+**用途。** 节点 API 的可执行文件。先于其他一切回答 `--version`，检查
+分发版本，读取 `--addr` / `DELONIX_NODE_API_ADDR`（默认
+`unix:///run/delonix-node.sock`），然后调用
+`delonix_node_api::serve_blocking`。
+
+**与……对话。** `delonix-node-api`、`delonix-node`（`dispatch`）、
+`delonix-telemetry`（`init`）。由 `delonix serve node-api` 运行。
+
+**测试。** 针对版本 flag 和地址优先级的内联单元测试。
+
+**从这里开始读。** `bins/delonix-node-api-bin/src/main.rs`。
 
 ### `delonix-mcp-bin`（二进制程序 `delonix-mcp`）
 
