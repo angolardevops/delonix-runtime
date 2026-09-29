@@ -1319,6 +1319,23 @@ pub fn resolve_required_capabilities(names: &[String]) -> Result<Vec<Capability>
     Ok(out)
 }
 
+/// Path of the UNIX socket of the serial console of a Cloud Hypervisor VM
+/// (`<base>/vms/<name>.console`). `delonix vm console` connects here.
+pub fn console_socket(base: &Path, name: &str) -> PathBuf {
+    base.join("vms").join(format!("{name}.console"))
+}
+
+/// Where a capture-mode VM's serial console is written (`<base>/vms/<name>.serial`).
+///
+/// THE formula, with one owner. It used to be spelled out separately in `boot_ch`
+/// and in a reader in another program, which is exactly how the two came to
+/// disagree: the interactive console moved the writer to a socket and the reader
+/// went on opening a file nobody wrote. Same discipline as `fw_rule_tail` — the
+/// writer and the reader share the format or they drift.
+pub fn serial_log_path(base: &Path, name: &str) -> PathBuf {
+    base.join("vms").join(format!("{name}.serial"))
+}
+
 #[cfg(test)]
 mod tests {
     //! The use cases against fake ports: before P4b.3b these paths could only

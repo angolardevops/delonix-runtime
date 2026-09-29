@@ -188,44 +188,7 @@ pub fn write_private_temp(prefix: &str, bytes: &[u8]) -> Result<PathBuf> {
 /// in the kubeconfig path and closed with `OpenOptions::mode`; the secret store
 /// had the same shape and had not been converted.
 pub fn write_atomic_mode(path: &Path, bytes: &[u8], mode: Option<u32>) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "state".to_string());
-    // Unique per WRITER (pid + sequence): a fixed temp name lets two processes —
-    // or two threads of the CRI server — interleave their bytes in the same
-    // temp, and then `rename` faithfully publishes the corruption.
-    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let tmp = dir.join(format!(".{stem}.{}.{seq}.tmp", std::process::id()));
-
-    let write = || -> Result<()> {
-        let mut opts = fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        if let Some(m) = mode {
-            opts.mode(m); // atomic at creation — never widen-then-narrow
-        }
-        let mut f = opts.open(&tmp)?;
-        f.write_all(bytes)?;
-        // THE ORDER IS THE POINT: the content must be durable BEFORE the
-        // directory entry that publishes it exists.
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, path)?;
-        // And the rename itself must be durable, or a crash can lose the entry
-        // even though the file's blocks are safely on disk.
-        if let Ok(d) = fs::File::open(dir) {
-            let _ = d.sync_all();
-        }
-        Ok(())
-    };
-    let r = write();
-    if r.is_err() {
-        let _ = fs::remove_file(&tmp); // never leave junk behind on failure
-    }
-    r
+    delonix_node::write_atomic_mode(path, bytes, mode).map_err(Error::from)
 }
 
 /// Sanitizes a key/id into a safe file name (`a-z0-9._-`,

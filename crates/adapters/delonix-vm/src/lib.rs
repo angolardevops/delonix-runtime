@@ -78,6 +78,7 @@ pub mod provider;
 use delonix_compute::ports::VmBackends;
 use delonix_compute::vm::vm_namespace_of;
 use delonix_compute::vm::VmEngine;
+pub use delonix_compute::vm::{console_socket, serial_log_path};
 pub use delonix_compute::vm::{valid_vm_name, Destroyed};
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
@@ -1239,23 +1240,6 @@ const DEFAULT_CH_FIRMWARES: [&str; 4] = [
     "/usr/local/share/delonix/hypervisor-fw",
     "/usr/share/delonix/hypervisor-fw",
 ];
-
-/// Path of the UNIX socket of the serial console of a Cloud Hypervisor VM
-/// (`<base>/vms/<name>.console`). `delonix vm console` connects here.
-pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
-    base.join("vms").join(format!("{name}.console"))
-}
-
-/// Where a capture-mode VM's serial console is written (`<base>/vms/<name>.serial`).
-///
-/// THE formula, with one owner. It used to be spelled out separately in `boot_ch`
-/// and in a reader in another program, which is exactly how the two came to
-/// disagree: the interactive console moved the writer to a socket and the reader
-/// went on opening a file nobody wrote. Same discipline as `fw_rule_tail` — the
-/// writer and the reader share the format or they drift.
-pub fn serial_log_path(base: &Path, name: &str) -> std::path::PathBuf {
-    base.join("vms").join(format!("{name}.serial"))
-}
 
 /// A minimal HTTP/1.1 `PUT` with no request body, used only for Cloud
 /// Hypervisor's `vm.pause`/`vm.resume` (which have no response body either —

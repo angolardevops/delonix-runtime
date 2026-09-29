@@ -4,12 +4,14 @@
 //! questions everything else asks.
 
 pub mod alloc_tuning;
+mod atomic;
 pub mod dispatch;
 pub mod events;
 mod host;
 pub mod peer_cred;
 pub mod virt;
 
+pub use atomic::write_atomic_mode;
 pub use host::{
     fmt_local_ts, generate_id, in_initial_userns, initial_uid_map, is_alive, is_rootless,
     mem_available_mib, now_unix, proc_starttime, safe_to_signal, self_bin,
