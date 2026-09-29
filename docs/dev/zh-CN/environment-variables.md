@@ -154,6 +154,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_PROXMOX_DISK_STORAGE` | `cmd/vmbackends.rs:register_proxmox_with` | 导入镜像的启动盘所在的存储（ADR-0057）。 | 一个存储 ID；默认 `local-lvm`。 | providers.yaml 中的 `storage.disk`。 |
 | `DELONIX_PROXMOX_VLAN` | `cmd/vmbackends.rs:parse_vlan` | 这个节点上 VM 网卡的默认 VLAN 标签。 | 1–4094。超出范围是一个**错误**，绝不会被悄悄丢弃。 | |
 | `DELONIX_PROXMOX_CA_FILE` | `cmd/vmbackends.rs:register_proxmox_with` | 除了系统根证书之外，额外为这个节点信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 校验一个证书是由内部 CA 签发的节点的方式，用它代替 `DELONIX_PROXMOX_INSECURE_TLS`。 |
+| `DELONIX_PROXMOX_BACKUP_STORAGE` | `cmd/system_container.rs:backup_storage` | 当 `--to`/`--from` 为 `.` 时，系统容器的备份写入或读取的节点存储。 | 一个带 `backup` 内容类型的存储 id；未设置或为空即 `local`。 | 备份不在 `local` 上的节点（NFS 存储、PBS）。 |
 | `DELONIX_PROXMOX_TRACE_ROUTES` | `cmd/vmbackends.rs:register_proxmox_with`（读取一次，作为 `ClientOptions::trace_routes` 交给客户端；`crates/providers/delonix-proxmox/src/lib.rs` 里的常量 `TRACE_ROUTES_ENV` 点名了它）以及 `crates/providers/delonix-proxmox/tests/live.rs:backend`（实机测试组，它的一次运行被提交为 `docs/proxmox/trace-9.2.2.routes`） | 把每一次请求的 `METHOD /path` 追加到这个文件里——覆盖率矩阵（ADR-0049）的分子。 | 一个文件的路径；空 = 关闭。 | 把它喂给 `scripts/proxmox_api_inventory.py --trace`，就能把路由标记为 `supported+tested`。 |
 
 ### OPNsense

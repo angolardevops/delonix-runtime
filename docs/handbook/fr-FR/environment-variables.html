@@ -869,6 +869,13 @@ commandes. Contexte : <a class="src" href="https://github.com/angolardevops/del
 <td>La façon de vérifier un nœud dont le certificat a été signé par une CA interne, au lieu de <code>DELONIX_PROXMOX_INSECURE_TLS</code>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_BACKUP_STORAGE</code></td>
+<td><code>cmd/<wbr>system_container.<wbr>rs:backup_storage</code></td>
+<td>Le stockage du nœud où va, ou d'où se lit, la sauvegarde d'un conteneur système quand <code>--to</code>/<code>--from</code> vaut <code>.</code>.</td>
+<td>Un id de stockage avec le contenu <code>backup</code> ; absent ou vide vaut <code>local</code>.</td>
+<td>Un nœud dont les sauvegardes vivent ailleurs que sur <code>local</code> (un stockage NFS, un PBS).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (lue une fois, transmise au client comme <code>ClientOptions::<wbr>trace_routes</code> ; la constante <code>TRACE_ROUTES_ENV</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> la nomme) et <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a> (la suite live, dont l’exécution est commitée sous <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>)</td>
 <td>Ajoute <code>METHOD /path</code> de chaque requête à ce fichier — le numérateur de la matrice de couverture (ADR-0049).</td>

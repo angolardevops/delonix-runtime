@@ -873,6 +873,13 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 <td>A forma de verificar um nó cujo certificado foi assinado por uma CA interna, em vez de <code>DELONIX_PROXMOX_INSECURE_TLS</code>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_BACKUP_STORAGE</code></td>
+<td><code>cmd/<wbr>system_container.<wbr>rs:backup_storage</code></td>
+<td>O storage do nó para onde vai, ou de onde se lê, o backup de um container de sistema quando <code>--to</code>/<code>--from</code> é <code>.</code>.</td>
+<td>Um id de storage com conteúdo <code>backup</code>; sem valor ou vazio é <code>local</code>.</td>
+<td>Um nó cujos backups vivem noutro sítio que não o <code>local</code> (um storage NFS, um PBS).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (lida uma vez, entregue ao cliente como <code>ClientOptions::<wbr>trace_routes</code>; a constante <code>TRACE_ROUTES_ENV</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> nomeia-a) e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a> (a suite ao vivo, cuja corrida está commitada como <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>)</td>
 <td>Acrescenta <code>METHOD /path</code> de cada pedido a este ficheiro — o numerador da matriz de cobertura (ADR-0049).</td>
