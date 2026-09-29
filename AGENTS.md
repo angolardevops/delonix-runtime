@@ -5578,7 +5578,17 @@ checklist para quem mexer aqui do que como lista de correcções:
     exactamente o caso a mostrar.
   O `sandbox-teardown` apanhou logo uma segunda classe de fuga, fora deste fix (um `container
   start <id>` vivo, em estado S, nascido do `netns down`/`netns up` do fim do
-  `pod_holder_respawn`); ficou em investigação à parte;
+  `pod_holder_respawn`); ficou em investigação à parte.
+  **E o próprio veredicto corria contra a saída** (2026-09-29): amostrava os pids uma vez e
+  esperava 5 s por eles, e o `control_restart` deu `FAIL sandbox-teardown — <pid>:S:delonix`
+  numa corrida e PASS nas três seguintes, com o pid já desaparecido segundos depois. Medido a
+  seguir: o supervisor fica em `do_wait` enquanto o workload está em `D`
+  (`wb_wait_for_completion`), 51 s com 1,1 GB `Dirty` no host e mais de 134 s com 3,5 GB. Agora o
+  `sandbox_leftover` re-amostra o conjunto inteiro, dá 20 s a tudo e prolonga até 120 s **só**
+  enquanto o que resta está comprovadamente a sair: zombie, `PF_EXITING` no `stat`, ou um
+  supervisor cujos filhos estão todos a sair. Uma fuga (um processo vivo que não está a sair)
+  continua a chumbar aos 20 s (provado com um `sleep 900` com `DELONIX_ROOT` no sandbox). Ao
+  chumbar imprime pid, ppid, estado, `wchan`, idade, `DELONIX_ROOT`, `cmdline` e os filhos;
 - **não aparecer numa varredura pela ordem errada não é estar certo** — a varredura dos
   SIGKILL feita no #563 procurava «`kill` e logo a limpeza» e deu como aberto o único sítio do
   `spawn` que tinha essa forma (o caminho sem userns, que só corre como root). Os outros quatro
