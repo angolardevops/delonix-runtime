@@ -314,6 +314,46 @@ fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_a
 }
 
 // ===========================================================================
+// Redaction (ADR-0059 D5; ADR-0049's grep-for-the-secret rule)
+// ===========================================================================
+
+/// An appliance, a proxy or an error page can echo what it was sent. Every
+/// error that carries the answer is rendered the two ways it leaves the
+/// engine — its message and its problem document — and grepped for the
+/// secret and for the Basic header value it travels in.
+#[test]
+fn no_rendered_error_carries_the_credential_the_answer_echoed() {
+    // base64("test-key:test-secret"), the Authorization: Basic value.
+    let basic = "dGVzdC1rZXk6dGVzdC1zZWNyZXQ=";
+    let echo = format!("authorization: Basic {basic}; secret=test-secret");
+    let cases = [
+        Reply::Json(500, format!(r#"{{"errorMessage":"{echo}"}}"#)),
+        Reply::Json(200, format!("not json: {echo}")),
+        Reply::Json(
+            200,
+            format!(r#"{{"result":"failed","validations":{{"alias.name":"{echo}"}}}}"#),
+        ),
+    ];
+    for reply in cases {
+        let appliance = MockAppliance::start(script(&[("GET", "core/firmware/status", reply)]));
+        let err = Client::connect(&target(&appliance)).unwrap_err();
+        let shown = err.to_string();
+        let doc = delonix_model::codes::problem(&delonix_model::Error::from(err), None).to_string();
+        for rendered in [&shown, &doc] {
+            assert!(
+                !rendered.contains("test-secret"),
+                "secret leaked: {rendered}"
+            );
+            assert!(!rendered.contains(basic), "basic header leaked: {rendered}");
+        }
+        assert!(
+            shown.contains("<redacted>"),
+            "the answer should still be shown: {shown}"
+        );
+    }
+}
+
+// ===========================================================================
 // Status classification (ADR-0051 Phase 0's own measurements)
 // ===========================================================================
 

@@ -1306,11 +1306,32 @@ impl Client {
         // Read errors used to be swallowed into an empty body, which then
         // failed to parse as "could not read the answer" — a truncated
         // connection reported as a malformed node. They are transport now.
-        let body = read_bounded(resp, path)?;
+        let body = self.redact(&read_bounded(resp, path)?);
         if !status.is_success() {
             return Err(classify_status(status, &self.base, path, &body));
         }
         Ok(body)
+    }
+
+    /// `text` without this client's credential: the token secret or the
+    /// password, and the ticket and CSRF token a password login holds. Every
+    /// answer passes here before it can reach an error message (ADR-0059 D5;
+    /// ADR-0049's rule that no rendered error carries the secret). The ticket
+    /// lock is only tried: a login in progress holds it, and a missing ticket
+    /// only means there is none to redact yet.
+    fn redact(&self, text: &str) -> String {
+        let mut secrets: Vec<String> = vec![match &self.auth {
+            Auth::ApiToken { secret, .. } => secret.clone(),
+            Auth::Password { password, .. } => password.clone(),
+        }];
+        if let Ok(guard) = self.ticket.try_read() {
+            if let Some(t) = guard.as_ref() {
+                secrets.push(t.ticket.clone());
+                secrets.push(t.csrf.clone());
+            }
+        }
+        let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        delonix_model::redact_known(text, &refs)
     }
 
     /// Sends an authenticated request, and **re-authenticates once on a 401**.

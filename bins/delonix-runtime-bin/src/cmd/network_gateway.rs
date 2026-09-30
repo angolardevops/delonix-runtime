@@ -169,7 +169,26 @@ fn resolve_provider(
         default: default.as_deref(),
         config: config.as_deref(),
     })
-    .map_err(Into::into)
+    .map_err(|e| {
+        let wanted = named.or(Some(recorded).filter(|r| !r.is_empty()));
+        Error::from(e).with_context(delonix_networking::resolve::context(
+            Role::Gateway,
+            wanted.or(default.as_deref()),
+            Some("resolve_provider"),
+        ))
+    })
+}
+
+/// Adds where a provider call failed to its error (ADR-0059 D5): the
+/// provider, the gateway role and the step.
+fn at<'a>(provider: &'a str, step: &'static str) -> impl FnOnce(Error) -> Error + 'a {
+    move |e| {
+        e.with_context(delonix_networking::resolve::context(
+            delonix_networking::resolve::Role::Gateway,
+            Some(provider),
+            Some(step),
+        ))
+    }
 }
 
 /// A comparable summary of one alias/rule list — sorted so two applies of an
@@ -321,14 +340,20 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     rec.rules = union_by(&rec.rules, &spec.rules, |r| r.description.as_str());
     s.save(&name, &rec)?;
 
-    provider.check_no_foreign_pending()?;
+    provider
+        .check_no_foreign_pending()
+        .map_err(at(provider_id, "check_no_foreign_pending"))?;
     for a in &aliases {
-        provider.ensure_alias(a, &owner)?;
+        provider
+            .ensure_alias(a, &owner)
+            .map_err(at(provider_id, "ensure_alias"))?;
     }
     for r in &spec.rules {
-        provider.ensure_rule(&to_rule(r), &owner)?;
+        provider
+            .ensure_rule(&to_rule(r), &owner)
+            .map_err(at(provider_id, "ensure_rule"))?;
     }
-    provider.commit()?;
+    provider.commit().map_err(at(provider_id, "commit"))?;
 
     rec.aliases = spec.aliases.clone();
     rec.rules = spec.rules.clone();
@@ -426,19 +451,27 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         return s.remove(name).map_err(Into::into);
     }
     let owner = OwnerMark::new(&rec.owner)?;
-    let (_, provider) = resolve_provider(None, &rec.provider)?;
-    provider.check_no_foreign_pending()?;
+    let (provider_id, provider) = resolve_provider(None, &rec.provider)?;
+    provider
+        .check_no_foreign_pending()
+        .map_err(at(provider_id, "check_no_foreign_pending"))?;
     for r in &rec.rules {
-        if let RemoveOutcome::NotOwned(who) = provider.remove_rule(&r.description, &owner)? {
+        if let RemoveOutcome::NotOwned(who) = provider
+            .remove_rule(&r.description, &owner)
+            .map_err(at(provider_id, "remove_rule"))?
+        {
             report_left(name, "rule", &r.description, &who.describe());
         }
     }
     for a in &rec.aliases {
-        if let RemoveOutcome::NotOwned(who) = provider.remove_alias(&a.name, &owner)? {
+        if let RemoveOutcome::NotOwned(who) = provider
+            .remove_alias(&a.name, &owner)
+            .map_err(at(provider_id, "remove_alias"))?
+        {
             report_left(name, "alias", &a.name, &who.describe());
         }
     }
-    provider.commit()?;
+    provider.commit().map_err(at(provider_id, "commit"))?;
     // The owner mark's own object (an OPNsense category) goes last; the
     // appliance refuses while anything still carries it, and that is said,
     // not forced.

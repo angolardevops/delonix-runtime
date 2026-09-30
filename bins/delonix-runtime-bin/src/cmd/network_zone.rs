@@ -125,7 +125,26 @@ fn resolve_provider(recorded: &str) -> Result<(&'static str, Box<dyn SegmentProv
         default: default.as_deref(),
         config: config.as_deref(),
     })
-    .map_err(Into::into)
+    .map_err(|e| {
+        let wanted = Some(recorded).filter(|r| !r.is_empty());
+        Error::from(e).with_context(delonix_networking::resolve::context(
+            Role::Segment,
+            wanted.or(default.as_deref()),
+            Some("resolve_provider"),
+        ))
+    })
+}
+
+/// Adds where a provider call failed to its error (ADR-0059 D5): the
+/// provider, the segment role and the step.
+fn at<'a>(provider: &'a str, step: &'static str) -> impl FnOnce(Error) -> Error + 'a {
+    move |e| {
+        e.with_context(delonix_networking::resolve::context(
+            delonix_networking::resolve::Role::Segment,
+            Some(provider),
+            Some(step),
+        ))
+    }
 }
 
 /// A comparable summary of the vnet list — sorted so two applies of an
@@ -218,7 +237,10 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let zone_owned = rec.zone_owned;
     let mut created_zone = false;
     provider.transaction(&mut || {
-        match provider.ensure_zone(&NetworkZoneSpec { name: name.clone() })? {
+        match provider
+            .ensure_zone(&NetworkZoneSpec { name: name.clone() })
+            .map_err(at(provider_id, "ensure_zone"))?
+        {
             EnsureOutcome::Created => created_zone = true,
             EnsureOutcome::AlreadyPresent if !zone_owned => {
                 return Err(delonix_networking::Error::RemoteObjectNotOwned(super::po::tf(
@@ -232,14 +254,16 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             EnsureOutcome::AlreadyPresent => {}
         }
         for v in &spec.vnets {
-            provider.ensure_vnet(
-                &VNetSpec {
-                    name: v.name.clone(),
-                    zone: name.clone(),
-                    alias: v.alias.clone(),
-                },
-                &owner,
-            )?;
+            provider
+                .ensure_vnet(
+                    &VNetSpec {
+                        name: v.name.clone(),
+                        zone: name.clone(),
+                        alias: v.alias.clone(),
+                    },
+                    &owner,
+                )
+                .map_err(at(provider_id, "ensure_vnet"))?;
         }
         Ok(())
     })?;
@@ -324,17 +348,22 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         return s.remove(name).map_err(Into::into);
     }
     let owner = OwnerMark::new(&rec.owner)?;
-    let (_, provider) = resolve_provider(&rec.provider)?;
+    let (provider_id, provider) = resolve_provider(&rec.provider)?;
     let mut left: Vec<(String, String, String)> = Vec::new();
     provider.transaction(&mut || {
         left.clear();
         for v in &rec.vnets {
-            if let RemoveOutcome::NotOwned(who) = provider.remove_vnet(&v.name, &owner)? {
+            if let RemoveOutcome::NotOwned(who) = provider
+                .remove_vnet(&v.name, &owner)
+                .map_err(at(provider_id, "remove_vnet"))?
+            {
                 left.push(("vnet".into(), v.name.clone(), who.describe()));
             }
         }
         if rec.zone_owned {
-            provider.remove_zone(name)?;
+            provider
+                .remove_zone(name)
+                .map_err(at(provider_id, "remove_zone"))?;
         } else {
             left.push((
                 "zone".into(),

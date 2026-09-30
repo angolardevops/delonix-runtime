@@ -5613,10 +5613,13 @@ def codes_page():
             raise SystemExit(f"explain codes --json falhou: {out.stderr}")
         return json.loads(out.stdout)
 
-    def table(entries, heads):
+    def table(entries, heads, anchors=False):
+        # `anchors` gives each row the id a problem document's `type` points
+        # at (the page URL plus `#DX-6381`, ADR-0059 D5). Only one of the two
+        # language tables carries them, so an id is never duplicated.
         rows = "".join(
-            "<tr>"
-            f"<td><code>{html.escape(e['code'])}</code></td>"
+            (f'<tr id="{html.escape(e["code"])}">' if anchors else "<tr>")
+            + f"<td><code>{html.escape(e['code'])}</code></td>"
             f"<td>{html.escape(e['class'])}</td>"
             f"<td>{html.escape(e['domain'])}</td>"
             f"<td>{e['exit']}</td>"
@@ -5660,7 +5663,7 @@ def codes_page():
 
     pt_live, pt_old = split(load("pt"))
     en_live, en_old = split(load("en"))
-    pt = table(pt_live, ["Código", "Classe", "Domínio", "Saída", "Mensagem, significado, o que fazer"])
+    pt = table(pt_live, ["Código", "Classe", "Domínio", "Saída", "Mensagem, significado, o que fazer"], anchors=True)
     en = table(en_live, ["Code", "Class", "Domain", "Exit", "Message, meaning, what to do"])
     retired_intro = bi(
         "div",

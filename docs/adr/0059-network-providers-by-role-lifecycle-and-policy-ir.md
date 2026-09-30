@@ -619,3 +619,39 @@ step past D5's own text, which kept DX-1345/1346 as configuration errors: they a
 
 **Still owed by F2, part 2b:** the envelope's context fields (`provider`, `role`, `step`,
 `cause` redacted, with ADR-0049's grep-for-the-secret test) on the CLI and the node API.
+
+## Addendum 2026-09-30 — F2d, part 2b: the envelope's context, and the redaction
+
+- **The context travels inside the error.** `delonix_model::ErrorContext` (`provider`, `role`,
+  `capability`, `step`, `plan_digest`, `cause`) rides on the `Error::Coded` carrier the number
+  already uses (ADR-0043 D4). `Error::with_context` adds it without touching the number, the
+  class, the message or the exit code; a field set closer to the failure wins over one added
+  further up, so a caller can add the role without overwriting the step the provider named.
+- **One problem document, built from the error**: `delonix_model::codes::problem(&e, instance)`
+  gives the RFC 9457 members (`type` points at the dictionary entry,
+  `codigos.html#DX-6381`; `title`, `status`, `detail`, `instance`) plus `code` (the `DX_*`
+  class), `dx`, `exit`, `reason` for a code of the network block, and the context fields that
+  are set. An unset field is left out. `Class::http_status` gives each class its HTTP word, the
+  ones the management API already used for the classes it mapped.
+- **The CLI prints the same fields** under the error line: `reason:`, `provider:`, `role:`,
+  `step:` (translated labels; the values stay as the machine reads them). The network Kinds add
+  the context: `resolve_provider` with the role and the provider the document, the record or
+  the default named, and every provider call with its step (`ensure_alias`, `commit`,
+  `ensure_vnet`, `remove_zone`…).
+- **Redaction lives in the provider, because only it holds the credential.** Both remote clients
+  read every answer in one place, and it now passes through `delonix_model::redact_known`
+  before it can reach an error: OPNsense removes the API secret and the Basic header value it
+  travels in (a proxy or an error page can echo it); Proxmox removes the token secret or the
+  password, and the ticket and CSRF token a password login holds. **This closed a real leak**:
+  each client put the answer's body into its error message as it came, and a node that echoed
+  the request put the secret on the operator's terminal. The ADR-0049 test pattern now guards
+  it: `no_rendered_error_carries_the_credential_the_answer_echoed`, in both crates, renders
+  every such error as its message and as its problem document and greps for each secret; with
+  the redaction removed it fails and prints the secret.
+- **Not in this slice**: the node API keeps the `google.rpc.Status` body the published OpenAPI
+  declares for its one route; moving it to problem+json changes the contract and is ADR-0042's
+  step D (and F6 brings the network RPCs that would carry the context). `cause` has no producer
+  yet: the provider's text is already in the message, redacted, and splitting it out is a
+  change to each client's error variants. `plan_digest` waits for F4.
+
+**F2 is closed** with this slice.

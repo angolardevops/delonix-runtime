@@ -365,6 +365,68 @@ fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_a
 }
 
 // ===========================================================================
+// Redaction (ADR-0059 D5; ADR-0049's grep-for-the-secret rule)
+// ===========================================================================
+
+/// A node, a proxy or an error page can echo what it was sent. Every error
+/// that carries the answer is rendered as its message and as its problem
+/// document, and grepped for the token secret, the password and the ticket.
+#[test]
+fn no_rendered_error_carries_the_credential_the_answer_echoed() {
+    let echo = "PVEAPIToken=root@pam!delonix=the-token-secret-value";
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(500, format!(r#"{{"data":null,"message":"{echo}"}}"#)),
+        ),
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(403, format!(r#"{{"data":null,"message":"{echo}"}}"#)),
+        ),
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(400, format!(r#"{{"data":null,"errors":{{"x":"{echo}"}}}}"#)),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    for _ in 0..3 {
+        let e = client.config(100).unwrap_err();
+        let shown = e.to_string();
+        let doc = delonix_model::codes::problem(&delonix_model::Error::from(e), None).to_string();
+        for rendered in [&shown, &doc] {
+            assert!(
+                !rendered.contains("the-token-secret-value"),
+                "secret leaked: {rendered}"
+            );
+        }
+        assert!(
+            shown.contains("<redacted>"),
+            "the answer should still be shown: {shown}"
+        );
+    }
+
+    // A password login: the password, the ticket and the CSRF token.
+    let echo = "password=the-password-value ticket=PVE:root@pam:TICKET-1 csrf=CSRF-1";
+    let node = MockNode::start(script(&[(
+        "GET",
+        CONFIG,
+        Reply::Json(500, format!(r#"{{"data":null,"message":"{echo}"}}"#)),
+    )]));
+    let client = Client::connect_with(&password_target(&node), fast()).unwrap();
+    let e = client.config(100).unwrap_err();
+    let shown = e.to_string();
+    let doc = delonix_model::codes::problem(&delonix_model::Error::from(e), None).to_string();
+    for rendered in [&shown, &doc] {
+        for secret in ["the-password-value", "PVE:root@pam:TICKET-1", "CSRF-1"] {
+            assert!(!rendered.contains(secret), "{secret} leaked: {rendered}");
+        }
+    }
+}
+
+// ===========================================================================
 // Status classes
 // ===========================================================================
 

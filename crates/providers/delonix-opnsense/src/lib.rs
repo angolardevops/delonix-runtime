@@ -282,7 +282,7 @@ impl Client {
                 "{method} {path}: HTTP 404 — no such route on this appliance/version"
             )));
         }
-        let text = read_bounded(resp, &format!("{method} {path}"))?;
+        let text = self.redact(&read_bounded(resp, &format!("{method} {path}"))?);
         if !status.is_success() {
             return Err(Error::HttpStatus(format!(
                 "{method} {path}: HTTP {status}: {}",
@@ -1113,6 +1113,41 @@ fn rule_drift(row: &Value, want: &GatewayRule) -> Vec<String> {
     out
 }
 
+impl Client {
+    /// `text` without this client's credential: the secret, and the Basic
+    /// header value it is sent in, which a proxy or an error page can echo.
+    /// Every answer passes here before it can reach an error message
+    /// (ADR-0059 D5; the grep-for-the-secret rule of ADR-0049).
+    fn redact(&self, text: &str) -> String {
+        let basic = base64_std(format!("{}:{}", self.auth.key, self.auth.secret).as_bytes());
+        delonix_model::redact_known(text, &[&self.auth.secret, &basic])
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), the encoding of an HTTP Basic
+/// credential. Only used to recognise one in an answer, so it lives here
+/// instead of adding a dependency.
+fn base64_std(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> shift) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// Reads at most [`MAX_RESPONSE_BYTES`]; one byte more is a refusal, never
 /// a silently cut body handed to a parser.
 fn read_bounded(resp: reqwest::blocking::Response, path: &str) -> Result<String> {
@@ -1306,5 +1341,24 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         self.client
             .commit(&self.staging)
             .map_err(delonix_model::Error::from)
+    }
+}
+
+#[cfg(test)]
+mod base64_tests {
+    /// The RFC 4648 §10 test vectors.
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        for (i, o) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(super::base64_std(i.as_bytes()), o, "{i}");
+        }
     }
 }

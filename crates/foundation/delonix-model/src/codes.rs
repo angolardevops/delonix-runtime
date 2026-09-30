@@ -10,7 +10,7 @@
 //! code — the CLI error line, `delonix explain`, the generated page, `-o json`, the
 //! node API — reads this one table.
 
-use crate::Error;
+use crate::{Error, ErrorContext};
 
 /// What the caller does next. The thousands digit of a code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,22 @@ impl Class {
             Class::PermissionDenied => x::NO_PERMISSION,
             Class::Timeout => x::TIMEOUT,
             Class::SystemFailure => x::GENERIC,
+        }
+    }
+
+    /// The HTTP status a failure of this class answers with in a problem
+    /// document (RFC 9457). The same words the local management API already
+    /// uses for the classes it maps, and the nearest HTTP word for the rest.
+    pub fn http_status(self) -> u16 {
+        match self {
+            Class::Success => 200,
+            Class::InvalidArgument | Class::Usage => 400,
+            Class::NotRunning | Class::Conflict => 409,
+            Class::NotFound => 404,
+            Class::Unavailable => 503,
+            Class::PermissionDenied => 403,
+            Class::Timeout => 504,
+            Class::SystemFailure => 500,
         }
     }
 
@@ -347,6 +363,51 @@ impl Reason {
 /// The D5 reason a number stands for, if it is one of the block.
 pub fn reason(number: u16) -> Option<Reason> {
     Reason::ALL.into_iter().find(|r| r.number() == number)
+}
+
+/// Where the dictionary is published; a problem document's `type` points at
+/// the entry for its code there.
+pub const DICTIONARY_URL: &str = "https://angolardevops.github.io/delonix-runtime/codigos.html";
+
+/// One failure as an RFC 9457 problem document, with the fields ADR-0059 D5
+/// adds: `code` (the `DX_*` class, as ADR-0042 names it), `dx` (the number),
+/// `exit`, `reason` for a code of the network reason block, and the context
+/// the failure carries. `instance` names the request or resource when the
+/// caller has one. A field with no value is left out, never filled.
+pub fn problem(e: &Error, instance: Option<&str>) -> serde_json::Value {
+    let number = e.number();
+    let class = e.class();
+    let entry = lookup(number);
+    let mut doc = serde_json::json!({
+        "type": format!("{DICTIONARY_URL}#{}", label(number)),
+        "title": entry.map(|c| c.message).unwrap_or(class.name()),
+        "status": class.http_status(),
+        "detail": e.to_string(),
+        "code": e.code(),
+        "dx": label(number),
+        "exit": entry.map(|c| c.exit).unwrap_or_else(|| class.exit_code()),
+    });
+    if let Some(i) = instance {
+        doc["instance"] = i.into();
+    }
+    if let Some(r) = reason(number) {
+        doc["reason"] = r.slug().into();
+    }
+    if let Some(c) = e.context() {
+        for (key, value) in [
+            ("provider", &c.provider),
+            ("role", &c.role),
+            ("capability", &c.capability),
+            ("step", &c.step),
+            ("planDigest", &c.plan_digest),
+            ("cause", &c.cause),
+        ] {
+            if let Some(v) = value {
+                doc[key] = v.as_str().into();
+            }
+        }
+    }
+    doc
 }
 
 macro_rules! code {
@@ -1491,6 +1552,48 @@ impl Error {
         Error::Coded {
             number,
             inner: Box::new(inner),
+            context: None,
+        }
+    }
+
+    /// The context the failure carries, if anyone gave it one (ADR-0059 D5).
+    pub fn context(&self) -> Option<&ErrorContext> {
+        match self {
+            Error::Coded {
+                context: Some(c), ..
+            } => Some(c),
+            Error::Coded { inner, .. } => inner.context(),
+            _ => None,
+        }
+    }
+
+    /// The same failure with context added. The number, the class, the
+    /// message and the exit code do not change; a field already set closer to
+    /// the failure wins over the one given here, so a caller further up can
+    /// add the role without overwriting the step the provider named.
+    pub fn with_context(self, add: ErrorContext) -> Error {
+        if add.is_empty() {
+            return self;
+        }
+        match self {
+            Error::Coded {
+                number,
+                inner,
+                context,
+            } => {
+                let mut merged = context.map(|c| *c).unwrap_or_default();
+                merged.fill_from(add);
+                Error::Coded {
+                    number,
+                    inner,
+                    context: Some(Box::new(merged)),
+                }
+            }
+            plain => Error::Coded {
+                number: plain.number(),
+                inner: Box::new(plain),
+                context: Some(Box::new(add)),
+            },
         }
     }
 
@@ -1712,6 +1815,77 @@ mod tests {
     #[should_panic(expected = "does not belong to the class")]
     fn a_number_from_another_class_is_refused() {
         let _ = Error::coded(1201, Error::NotFound("volume db".into()));
+    }
+
+    /// Context rides on the carrier and changes nothing else: same number,
+    /// class, message and exit code; the field set closer to the failure wins.
+    #[test]
+    fn context_travels_without_changing_the_failure() {
+        let plain = Error::coded(6381, Error::Unavailable("no provider 'x'".into()));
+        let with = Error::coded(6381, Error::Unavailable("no provider 'x'".into()))
+            .with_context(ErrorContext {
+                step: Some("ensure_alias".into()),
+                ..Default::default()
+            })
+            .with_context(ErrorContext {
+                role: Some("gateway".into()),
+                step: Some("apply".into()),
+                ..Default::default()
+            });
+        assert_eq!(with.number(), plain.number());
+        assert_eq!(with.to_string(), plain.to_string());
+        assert_eq!(with.class(), plain.class());
+        assert_eq!(crate::exitcode::for_error(&with), 69);
+        let c = with.context().expect("context");
+        assert_eq!(c.step.as_deref(), Some("ensure_alias"));
+        assert_eq!(c.role.as_deref(), Some("gateway"));
+        assert!(plain.context().is_none());
+        // A plain error gets its class number and keeps its message.
+        let bare = Error::Conflict("taken".into()).with_context(ErrorContext {
+            provider: Some("opnsense".into()),
+            ..Default::default()
+        });
+        assert_eq!(bare.number(), 5000);
+        assert_eq!(bare.to_string(), "conflict: taken");
+        // An empty context adds no carrier.
+        assert!(matches!(
+            Error::Conflict("x".into()).with_context(ErrorContext::default()),
+            Error::Conflict(_)
+        ));
+    }
+
+    /// The problem document has the RFC 9457 members, the D5 additions, and
+    /// nothing for a field nobody set.
+    #[test]
+    fn a_problem_document_carries_the_code_the_reason_and_the_context() {
+        let e = Error::coded(6381, Error::Unavailable("no provider 'x'".into())).with_context(
+            ErrorContext {
+                provider: Some("x".into()),
+                role: Some("gateway".into()),
+                ..Default::default()
+            },
+        );
+        let p = problem(&e, Some("networkgateways/edge"));
+        assert_eq!(p["type"], format!("{DICTIONARY_URL}#DX-6381"));
+        assert_eq!(p["status"], 503);
+        assert_eq!(p["dx"], "DX-6381");
+        assert_eq!(p["code"], "DX_UNAVAILABLE");
+        assert_eq!(p["exit"], 69);
+        assert_eq!(p["reason"], "unsupported_capability");
+        assert_eq!(p["provider"], "x");
+        assert_eq!(p["role"], "gateway");
+        assert_eq!(p["instance"], "networkgateways/edge");
+        assert!(p.get("step").is_none() && p.get("cause").is_none());
+        let plain = problem(&Error::NotFound("volume db".into()), None);
+        assert_eq!(plain["status"], 404);
+        assert!(plain.get("reason").is_none() && plain.get("instance").is_none());
+        for class in Class::ALL {
+            assert!(
+                (200..600).contains(&class.http_status()),
+                "{}",
+                class.name()
+            );
+        }
     }
 
     /// A retired number never comes back, and what replaced it is a live entry.
