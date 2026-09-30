@@ -92,6 +92,11 @@ enum Cmd {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]
         dir: Option<std::path::PathBuf>,
+        /// Project name (default: the directory's name). Lowercase letters, digits and
+        /// inner hyphens, because it becomes a container name, an image tag and a
+        /// package name.
+        #[arg(long)]
+        name: Option<String>,
         /// Force a template instead of the detected one (`stack init -t list` shows them).
         #[arg(short = 't', long)]
         template: Option<String>,
@@ -667,10 +672,11 @@ fn run() -> Result<()> {
         // `delonix --version` are byte-for-byte identical.
         Cmd::Init {
             dir,
+            name,
             template,
             template_version,
             force,
-        } => cmd::init::run(dir, template, template_version, force),
+        } => cmd::init::run(dir, name, template, template_version, force),
         Cmd::Version => {
             // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
             // and the binary clap names is `delonix`. Caught by diffing the two outputs —
