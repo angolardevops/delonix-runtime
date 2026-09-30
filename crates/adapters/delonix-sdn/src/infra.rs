@@ -4682,68 +4682,39 @@ pub fn validate_container_fw(fw: &delonix_model::records::ContainerFw) -> Result
             ));
         }
     }
-    Ok(())
+    // The same total translation the chain is built from: what the checks above let
+    // through and the IR or its nft lowering cannot hold is refused here too, so the
+    // host side refuses it before an older holder is asked (ADR-0059 F3b).
+    fw_chain_body("10.200.0.1", fw).map(|_| ())
 }
 
-pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> String {
-    let mut body = String::new();
-    if !fw.enabled {
-        return body; // empty chain = open (behavior prior to fw/namespace)
-    }
-    for r in &fw.rules {
-        // Defense against nft injection: an unsafe rule is never interpolated. The
-        // skip is NOT the policy — `validate_container_fw` refuses the whole spec
-        // before `do_firewall` gets here; this only keeps the generator safe on its own.
-        if !r.nft_safe() {
-            continue;
-        }
-        let self_dir = if r.dir == "out" { "saddr" } else { "daddr" };
-        let Some(tail) = fw_rule_tail(r) else {
-            continue;
-        };
-        body.push_str(&format!("\t\tip {self_dir} {ip} {tail}\n"));
-    }
-    // NAMESPACE isolation on INGRESS is a GUARDRAIL: it survives every explicit
-    // inbound rule. It used to be emitted only when there was NO explicit inbound
-    // policy ("a Dependency/Ingress is authoritative and replaces this"), and that
-    // made ANY `in` rule — a `deny tcp/22` included — switch the isolation off: the
-    // chain kept only that rule, and every other namespace reached every other port
-    // (NaaS S1 review, C1). An explicit `allow` still gets through, because the
-    // rules above are first-match terminal (that is how a `kind: Dependency` admits
-    // one peer of another namespace); what no rule can do any more is OPEN the rest.
-    //
-    // The `ct state new` exempts the return (established/related), and the `@dlxall`
-    // limits the drop to sources that ARE SDN workloads (gateway, DNS and the
-    // internet pass). `namespace_isolation_key`, not the raw `fw.namespace`: this is
-    // the side of the attach/chain pair that must agree with the wire token
-    // `attach_container`/`attach_extra_container`/`vmtap_line` compute — see that
-    // function's doc comment for the cross-tenant bypass this closes.
-    let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
-    let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
-    if has_explicit_in {
-        // The same namespace falls through to the explicit rules' default policy
-        // (an `ingress policy deny` still closes the container to its own
-        // namespace); only another namespace's NEW flows are cut here.
-        body.push_str(&format!(
-            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ip saddr != @{nsset} ct state new counter drop\n"
-        ));
-    } else {
-        body.push_str(&format!(
-            "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
-        ));
-        body.push_str(&format!(
-            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ct state new counter drop\n"
-        ));
-    }
-    // The default policy is reached only by NEW flows — the prologue already let
-    // established/related through. See `fw_chain_prologue` for why that matters.
-    if fw.policy_in == "deny" {
-        body.push_str(&format!("\t\tip daddr {ip} counter drop\n"));
-    }
-    if fw.policy_out == "deny" {
-        body.push_str(&format!("\t\tip saddr {ip} counter drop\n"));
-    }
-    body
+/// The rule lines of one address's part of a workload chain: the record parsed
+/// into the policy IR (a TOTAL parse — one rule it cannot hold refuses the set),
+/// then lowered to nft by [`crate::policy_nft::chain_body`] (ADR-0059 F3b).
+///
+/// The lines are the ones this function has always emitted, pinned in
+/// `policy_nft`'s tests (inbound and outbound rules are no longer interleaved in
+/// record order; the order within each direction, the one that decides, is kept):
+/// the user rules first (first match is
+/// terminal, which is how a `kind: Dependency` admits one peer of another
+/// namespace), then the namespace isolation GUARDRAIL that no rule removes (NaaS
+/// S1, C1), then each direction's default. A disabled record is the empty chain.
+///
+/// `namespace_isolation_key`, not the raw namespace, names the set: it is what the
+/// attach side (`attach_container`/`attach_extra_container`/`vmtap_line`) joins, and
+/// an empty namespace is `default` on both sides. It used to hash `""` here — a set
+/// nobody joins — for the one record shape (`namespace: ""`, never what serde
+/// produces) where the two disagreed.
+pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> Result<String> {
+    let refuse = |why: String| {
+        Error::FirewallJsonInvalid(format!(
+            "firewall refused, nothing was applied (the previous rules stay in force): {why}"
+        ))
+    };
+    let policy =
+        delonix_networking::policy::from_container_fw(fw).map_err(|e| refuse(e.to_string()))?;
+    crate::policy_nft::chain_body(ip, &policy, &|ns| dlxns_set(&namespace_isolation_key(ns)))
+        .map_err(|why| refuse(format!("{why} has no nft form in the holder chain")))
 }
 
 /// nft set with ALL the SDN container IPs (so namespace isolation
@@ -4988,8 +4959,9 @@ fn firewall_script(
     // every network it is attached to. The prologue (conntrack fast-path) is emitted
     // once for the whole chain — state belongs to the flow, not to an address.
     let body: String = std::iter::once(fw_chain_prologue(fw))
+        .map(Ok)
         .chain(ips.iter().map(|ip| fw_chain_body(ip, fw)))
-        .collect();
+        .collect::<Result<String>>()?;
     let mut script = String::new();
     // Idempotent re-declarations: they let a table created by an older holder grow
     // the map/chain instead of failing, and cost nothing when they already exist.
@@ -9468,7 +9440,7 @@ Inter-|   Receive                                                |  Transmit
             namespace: ns.to_string(),
             ..Default::default()
         };
-        let body = fw_chain_body("10.1.0.5", &fw);
+        let body = fw_chain_body("10.1.0.5", &fw).unwrap();
         assert!(body.contains(&format!("@{}", dlxns_set(token))));
     }
 
@@ -9535,7 +9507,7 @@ Inter-|   Receive                                                |  Transmit
             ],
             namespace: "default".into(),
         };
-        let body = fw_chain_body("10.200.0.5", &fw);
+        let body = fw_chain_body("10.200.0.5", &fw).unwrap();
         // in rule: daddr==ip, peer saddr==src, tcp dport 8080 accept
         assert!(
             body.contains(
@@ -9565,7 +9537,7 @@ Inter-|   Receive                                                |  Transmit
             enabled: false,
             ..fw
         };
-        assert!(fw_chain_body("10.200.0.5", &off).is_empty());
+        assert!(fw_chain_body("10.200.0.5", &off).unwrap().is_empty());
     }
 
     /// Regression: a rule with `proto: any` AND a port used to drop the port from the
@@ -9590,7 +9562,7 @@ Inter-|   Receive                                                |  Transmit
             rules: vec![rule("9999", "allow"), rule("100-200", "deny")],
             namespace: "default".into(),
         };
-        let body = fw_chain_body("10.200.0.5", &fw);
+        let body = fw_chain_body("10.200.0.5", &fw).unwrap();
         assert!(
             body.contains(
                 "ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 9999 counter accept"
@@ -9618,7 +9590,9 @@ Inter-|   Receive                                                |  Transmit
             namespace: "default".into(),
         };
         assert!(
-            fw_chain_body("10.200.0.5", &wide).contains("ip daddr 10.200.0.5 counter accept"),
+            fw_chain_body("10.200.0.5", &wide)
+                .unwrap()
+                .contains("ip daddr 10.200.0.5 counter accept"),
             "a portless `any` rule is still container-wide"
         );
     }
@@ -9631,7 +9605,7 @@ Inter-|   Receive                                                |  Transmit
             namespace: "web".into(),
             ..Default::default()
         };
-        let body = fw_chain_body("10.200.0.7", &fw);
+        let body = fw_chain_body("10.200.0.7", &fw).unwrap();
         let nsset = dlxns_set("web");
         // same-ns accept + cross-ns (container) NEW drop, com ct state new.
         assert!(
@@ -9722,7 +9696,7 @@ Inter-|   Receive                                                |  Transmit
             rules: vec![rule("deny", "22", ""), rule("allow", "5432", "10.201.0.9")],
             ..Default::default()
         };
-        let body = fw_chain_body("10.200.0.7", &fw);
+        let body = fw_chain_body("10.200.0.7", &fw).unwrap();
         let nsset = dlxns_set("teama");
         let guard = format!(
             "ip daddr 10.200.0.7 ip saddr @dlxall ip saddr != @{nsset} ct state new counter drop"
@@ -9767,7 +9741,7 @@ Inter-|   Receive                                                |  Transmit
         );
         assert!(head.contains("ct state invalid counter drop"), "{head}");
         // The fast-path has to come BEFORE the policy drops it exists to survive.
-        let full = format!("{head}{}", fw_chain_body("10.200.0.5", &fw));
+        let full = format!("{head}{}", fw_chain_body("10.200.0.5", &fw).unwrap());
         let accept = full.find("established,related").expect("prologue present");
         let deny = full
             .find("ip daddr 10.200.0.5 counter drop")
