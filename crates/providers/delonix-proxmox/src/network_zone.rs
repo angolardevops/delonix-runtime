@@ -1,4 +1,4 @@
-//! `NetworkZoneProvider` implementation for Proxmox VE's own SDN (Zones,
+//! `SegmentProvider` implementation for Proxmox VE's own SDN (Zones,
 //! VNets) — ADR-0049 addendum, closing the gap D3 names.
 //!
 //! Thin, on purpose: every real decision (staged-vs-applied, the id format,
@@ -7,13 +7,11 @@
 //! adapts that surface to the trait `delonix-sdn::network_zone` defines.
 
 use crate::{Client, Error, Ledger};
-use delonix_networking::network_zone::{
-    EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
-};
 use delonix_networking::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 
 /// The canonical id this provider registers under, and the only one
-/// [`crate::register_network_zone_provider`] uses (`"pve"` as an alias, the
+/// [`crate::register_segment_provider`] uses (`"pve"` as an alias, the
 /// same pair [`crate::registration`] registers the `VmBackend` under).
 pub const ID: &str = "proxmox";
 
@@ -22,14 +20,14 @@ pub const ID: &str = "proxmox";
 /// alias plus the owner mark must fit.
 const MAX_VNET_ALIAS: usize = 256;
 
-/// The [`NetworkZoneProvider`] this crate exists to provide: Proxmox's
+/// The [`SegmentProvider`] this crate exists to provide: Proxmox's
 /// cluster SDN, wrapped.
-pub struct ProxmoxNetworkZoneProvider {
+pub struct ProxmoxSegmentProvider {
     client: std::sync::Arc<Client>,
     ledger: Ledger,
 }
 
-impl ProxmoxNetworkZoneProvider {
+impl ProxmoxSegmentProvider {
     pub fn new(client: std::sync::Arc<Client>, ledger: Ledger) -> Self {
         Self { client, ledger }
     }
@@ -75,7 +73,7 @@ fn sdn_err(e: delonix_networking::Error) -> delonix_model::Error {
 // Failures cross the trait with their dictionary number
 // (`delonix_model::Error::from`), never `into_root`, which strips it: measured
 // live, a DX-5340 refusal from inside the SDN transaction arrived as 5000.
-impl NetworkZoneProvider for ProxmoxNetworkZoneProvider {
+impl SegmentProvider for ProxmoxSegmentProvider {
     fn id(&self) -> &'static str {
         ID
     }

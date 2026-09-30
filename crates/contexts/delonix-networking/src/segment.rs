@@ -23,11 +23,10 @@
 //! realizes it — the runtime's own configuration (which provider got
 //! registered, from environment variables read once at startup) decides,
 //! the same way a managed-service tenant never names Proxmox, libvirt or
-//! OPNsense. [`active_network_zone_provider`] resolves by COUNT, not by
-//! name: zero registered is a clear refusal naming what to configure, one
-//! is used, and more than one (unreachable today — nothing in this build
-//! registers a second) is refused rather than guessed, the same fail-closed
-//! answer this engine gives every ambiguity it will not resolve silently.
+//! OPNsense. Which registered provider answers is [`crate::resolve`]'s job
+//! (ADR-0059 D3): the provider on the zone's record, then
+//! `networkDefaults.segment`, then — only without a `providers.yaml` — the
+//! single registered one, the count rule a development node always had.
 
 use crate::error::Error;
 use crate::ownership::{OwnerMark, RemoveOutcome};
@@ -65,7 +64,7 @@ pub struct VNetSpec {
 }
 
 /// A backend that can realize cluster-native SDN zones and vnets.
-pub trait NetworkZoneProvider {
+pub trait SegmentProvider {
     /// Stable identifier, persisted in the registry record.
     fn id(&self) -> &'static str;
 
@@ -117,27 +116,27 @@ pub trait NetworkZoneProvider {
     ) -> delonix_model::Result<()>;
 }
 
-/// Builds a [`NetworkZoneProvider`], or reports why it could not.
+/// Builds a [`SegmentProvider`], or reports why it could not.
 ///
 /// `Send + Sync` because the table is process-wide. It constrains the
 /// CLOSURE, not the trait (same reasoning as `gateway::GatewayProviderFactory`).
-pub type NetworkZoneProviderFactory =
-    Box<dyn Fn() -> crate::error::Result<Box<dyn NetworkZoneProvider>> + Send + Sync>;
+pub type SegmentProviderFactory =
+    Box<dyn Fn() -> crate::error::Result<Box<dyn SegmentProvider>> + Send + Sync>;
 
 /// One provider this build knows about: its canonical id, the aliases
 /// accepted, and how to build one.
-pub struct NetworkZoneProviderRegistration {
+pub struct SegmentProviderRegistration {
     /// Canonical id. Must equal what the built provider's
-    /// [`NetworkZoneProvider::id`] returns.
+    /// [`SegmentProvider::id`] returns.
     pub id: &'static str,
     /// Extra spellings accepted; never repeats `id`.
     pub aliases: &'static [&'static str],
-    pub new: NetworkZoneProviderFactory,
+    pub new: SegmentProviderFactory,
 }
 
-impl std::fmt::Debug for NetworkZoneProviderRegistration {
+impl std::fmt::Debug for SegmentProviderRegistration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetworkZoneProviderRegistration")
+        f.debug_struct("SegmentProviderRegistration")
             .field("id", &self.id)
             .field("aliases", &self.aliases)
             .finish_non_exhaustive()
@@ -147,15 +146,15 @@ impl std::fmt::Debug for NetworkZoneProviderRegistration {
 /// Every registered provider. Starts EMPTY — no builtin, unlike
 /// `gateway::GATEWAY_PROVIDERS` (module doc comment above explains why).
 static NETWORK_ZONE_PROVIDERS: std::sync::OnceLock<
-    std::sync::RwLock<Vec<NetworkZoneProviderRegistration>>,
+    std::sync::RwLock<Vec<SegmentProviderRegistration>>,
 > = std::sync::OnceLock::new();
 
-fn network_zone_providers() -> &'static std::sync::RwLock<Vec<NetworkZoneProviderRegistration>> {
+fn segment_providers() -> &'static std::sync::RwLock<Vec<SegmentProviderRegistration>> {
     NETWORK_ZONE_PROVIDERS.get_or_init(|| std::sync::RwLock::new(Vec::new()))
 }
 
-fn with_network_zone_providers<T>(f: impl FnOnce(&[NetworkZoneProviderRegistration]) -> T) -> T {
-    let guard = network_zone_providers()
+fn with_segment_providers<T>(f: impl FnOnce(&[SegmentProviderRegistration]) -> T) -> T {
+    let guard = segment_providers()
         .read()
         .unwrap_or_else(|e| e.into_inner());
     f(&guard)
@@ -166,18 +165,16 @@ fn with_network_zone_providers<T>(f: impl FnOnce(&[NetworkZoneProviderRegistrati
 /// ends up with the last one rather than two that shadow each other.
 ///
 /// **Nothing here does I/O**: the factory is not called, so registering a
-/// node that is unreachable costs nothing until [`active_network_zone_provider`]
-/// actually selects it (same contract as `delonix_vm::register_backend`/
+/// node that is unreachable costs nothing until
+/// [`choose_segment_provider`] actually selects it (same contract as `delonix_vm::register_backend`/
 /// `gateway::register_gateway_provider`).
-pub fn register_network_zone_provider(
-    reg: NetworkZoneProviderRegistration,
-) -> crate::error::Result<()> {
+pub fn register_segment_provider(reg: SegmentProviderRegistration) -> crate::error::Result<()> {
     if reg.id.trim().is_empty() {
         return Err(Error::NetworkZoneProviderRegistrationRefused(
             "a network zone provider registration needs an id".into(),
         ));
     }
-    let mut guard = network_zone_providers()
+    let mut guard = segment_providers()
         .write()
         .unwrap_or_else(|e| e.into_inner());
     for name in std::iter::once(&reg.id).chain(reg.aliases.iter()) {
@@ -197,41 +194,34 @@ pub fn register_network_zone_provider(
     Ok(())
 }
 
-/// The single active provider, or a refusal naming why there is none.
+/// The provider that answers `want` (ADR-0059 D3, [`crate::resolve`]),
+/// with the id it resolved to — the caller records it, so the resource
+/// never moves when a default changes.
 ///
-/// **Resolved by COUNT, never by name** — `kind: NetworkZone` carries no
-/// provider field (module doc comment). Delegates to [`resolve_active`],
-/// which is pure and takes the registration list directly so it is testable
-/// without touching the process-wide static.
-pub fn active_network_zone_provider() -> crate::error::Result<Box<dyn NetworkZoneProvider>> {
-    with_network_zone_providers(resolve_active)
+/// Building happens only after the choice: resolving does no I/O.
+pub fn choose_segment_provider(
+    want: &crate::resolve::Wanted,
+) -> crate::error::Result<(&'static str, Box<dyn SegmentProvider>)> {
+    with_segment_providers(|regs| choose_in(regs, want))
 }
 
-fn resolve_active(
-    regs: &[NetworkZoneProviderRegistration],
-) -> crate::error::Result<Box<dyn NetworkZoneProvider>> {
-    match regs.len() {
-        0 => Err(Error::NoNetworkZoneProviderConfigured(
-            "kind: NetworkZone has no registered provider — configure DELONIX_PROXMOX_URL (the \
-             only one this build knows about) and its credential"
-                .into(),
-        )),
-        1 => (regs[0].new)(),
-        n => {
-            let ids: Vec<&str> = regs.iter().map(|r| r.id).collect();
-            Err(Error::AmbiguousNetworkZoneProvider(format!(
-                "kind: NetworkZone has {n} registered providers ({}) and no way to pick one — \
-                 this Kind does not support selecting a provider by name; unregister all but one",
-                ids.join(", ")
-            )))
-        }
-    }
+fn choose_in(
+    regs: &[SegmentProviderRegistration],
+    want: &crate::resolve::Wanted,
+) -> crate::error::Result<(&'static str, Box<dyn SegmentProvider>)> {
+    let cands: Vec<crate::resolve::Candidate> = regs.iter().map(|r| (r.id, r.aliases)).collect();
+    let id = crate::resolve::choose(&cands, want)?;
+    let reg = regs
+        .iter()
+        .find(|r| r.id == id)
+        .expect("choose returns a registered id");
+    Ok((id, (reg.new)()?))
 }
 
 /// The registered ids, in registration order — for `provider ls`-style
 /// listing and for an error that names what IS configured.
-pub fn network_zone_provider_ids() -> Vec<&'static str> {
-    with_network_zone_providers(|regs| regs.iter().map(|r| r.id).collect())
+pub fn segment_provider_ids() -> Vec<&'static str> {
+    with_segment_providers(|regs| regs.iter().map(|r| r.id).collect())
 }
 
 #[cfg(test)]
@@ -239,7 +229,7 @@ mod tests {
     use super::*;
 
     struct Fake(&'static str);
-    impl NetworkZoneProvider for Fake {
+    impl SegmentProvider for Fake {
         fn id(&self) -> &'static str {
             self.0
         }
@@ -270,26 +260,35 @@ mod tests {
         }
     }
 
-    fn fake(id: &'static str, aliases: &'static [&'static str]) -> NetworkZoneProviderRegistration {
-        NetworkZoneProviderRegistration {
+    fn fake(id: &'static str, aliases: &'static [&'static str]) -> SegmentProviderRegistration {
+        SegmentProviderRegistration {
             id,
             aliases,
-            new: Box::new(move || Ok(Box::new(Fake(id)) as Box<dyn NetworkZoneProvider>)),
+            new: Box::new(move || Ok(Box::new(Fake(id)) as Box<dyn SegmentProvider>)),
         }
     }
 
-    // `resolve_active` is pure and takes the list directly, so these three
-    // tests never touch the process-wide static — no race with any other
-    // test in this crate that registers something (unlike a test that
-    // asserted on `active_network_zone_provider()`'s real count would).
+    // `choose_in` takes the list directly, so these tests never touch the
+    // process-wide static — no race with any other test in this crate that
+    // registers something. The resolution rules themselves are
+    // `crate::resolve`'s tests; these check that the registry builds what
+    // the rule chose.
+
+    fn no_config() -> crate::resolve::Wanted<'static> {
+        crate::resolve::Wanted {
+            role: crate::resolve::Role::Segment,
+            named: None,
+            recorded: None,
+            default: None,
+            config: None,
+        }
+    }
 
     #[test]
     fn zero_registered_names_what_to_configure() {
-        // `Box<dyn NetworkZoneProvider>` is not `Debug`, so `unwrap_err()`
-        // (which requires the `Ok` side to be `Debug`) does not apply here —
-        // match instead, the same shape `gateway::tests` uses for the
-        // equivalent case.
-        match resolve_active(&[]) {
+        // `Box<dyn SegmentProvider>` is not `Debug`, so `unwrap_err()` does
+        // not apply — match instead.
+        match choose_in(&[], &no_config()) {
             Ok(_) => panic!("expected a refusal"),
             Err(err) => {
                 assert!(matches!(err, Error::NoNetworkZoneProviderConfigured(_)));
@@ -300,13 +299,24 @@ mod tests {
 
     #[test]
     fn one_registered_is_used() {
-        let p = resolve_active(&[fake("only-one", &[])]).unwrap();
-        assert_eq!(p.id(), "only-one");
+        let (id, p) = choose_in(&[fake("only-one", &[])], &no_config()).unwrap();
+        assert_eq!((id, p.id()), ("only-one", "only-one"));
     }
 
     #[test]
-    fn more_than_one_is_refused_and_names_both() {
-        match resolve_active(&[fake("a", &[]), fake("b", &[])]) {
+    fn two_registered_and_a_default_builds_the_one_it_names() {
+        let want = crate::resolve::Wanted {
+            default: Some("b"),
+            config: Some("/p.yaml"),
+            ..no_config()
+        };
+        let (id, p) = choose_in(&[fake("a", &[]), fake("b", &[])], &want).unwrap();
+        assert_eq!((id, p.id()), ("b", "b"));
+    }
+
+    #[test]
+    fn more_than_one_without_a_config_is_refused_and_names_both() {
+        match choose_in(&[fake("a", &[]), fake("b", &[])], &no_config()) {
             Ok(_) => panic!("expected a refusal"),
             Err(err) => {
                 assert!(matches!(err, Error::AmbiguousNetworkZoneProvider(_)));
@@ -322,8 +332,8 @@ mod tests {
     // interference between parallel test threads.
 
     #[test]
-    fn register_network_zone_provider_refuses_an_empty_id() {
-        let err = register_network_zone_provider(fake("", &[])).unwrap_err();
+    fn register_segment_provider_refuses_an_empty_id() {
+        let err = register_segment_provider(fake("", &[])).unwrap_err();
         assert!(matches!(
             err,
             Error::NetworkZoneProviderRegistrationRefused(_)
@@ -331,10 +341,9 @@ mod tests {
     }
 
     #[test]
-    fn register_network_zone_provider_refuses_a_name_clash() {
-        register_network_zone_provider(fake("zone-clash-a", &["zone-shared"])).expect("a");
-        let err =
-            register_network_zone_provider(fake("zone-clash-b", &["zone-shared"])).unwrap_err();
+    fn register_segment_provider_refuses_a_name_clash() {
+        register_segment_provider(fake("zone-clash-a", &["zone-shared"])).expect("a");
+        let err = register_segment_provider(fake("zone-clash-b", &["zone-shared"])).unwrap_err();
         assert!(matches!(
             err,
             Error::NetworkZoneProviderRegistrationRefused(_)
@@ -342,10 +351,10 @@ mod tests {
     }
 
     #[test]
-    fn register_network_zone_provider_is_idempotent_by_id() {
-        register_network_zone_provider(fake("zone-reconfigurable", &[])).expect("1st");
-        register_network_zone_provider(fake("zone-reconfigurable", &[])).expect("2nd replaces it");
-        let count = with_network_zone_providers(|regs| {
+    fn register_segment_provider_is_idempotent_by_id() {
+        register_segment_provider(fake("zone-reconfigurable", &[])).expect("1st");
+        register_segment_provider(fake("zone-reconfigurable", &[])).expect("2nd replaces it");
+        let count = with_segment_providers(|regs| {
             regs.iter()
                 .filter(|r| r.id == "zone-reconfigurable")
                 .count()
@@ -354,8 +363,8 @@ mod tests {
     }
 
     #[test]
-    fn network_zone_provider_ids_lists_what_is_registered() {
-        register_network_zone_provider(fake("zone-listed", &[])).expect("register");
-        assert!(network_zone_provider_ids().contains(&"zone-listed"));
+    fn segment_provider_ids_lists_what_is_registered() {
+        register_segment_provider(fake("zone-listed", &[])).expect("register");
+        assert!(segment_provider_ids().contains(&"zone-listed"));
     }
 }

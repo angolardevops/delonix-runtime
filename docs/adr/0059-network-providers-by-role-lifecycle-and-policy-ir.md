@@ -522,3 +522,38 @@ resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope with the D
 
 **Still owed by F2:** `SegmentProvider` in place of `NetworkZoneProvider`, the per-role
 registries with D3's resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope.
+
+## Addendum 2026-09-30 — F2c: `SegmentProvider`, and a provider chosen by name
+
+- **`NetworkZoneProvider` is `SegmentProvider`** (D1), in `delonix_networking::segment`; the
+  registry, its registration type and its functions follow the name. The three failures keep
+  their numbers (`DX-1344`–`1346`) and the dictionary now names the new trait.
+- **D3's resolution is one pure function, `delonix_networking::resolve::choose`**, shared by
+  both roles. Highest first: the document's `spec.provider` (NetworkGateway only), the record's
+  provider, `networkDefaults.<role>`, and only without a `providers.yaml` the single registered
+  provider. A name that resolves to nothing is an error at every step, never a fall-through:
+  - a document naming an unregistered provider: `DX-1348` (`network.provider_not_registered`);
+  - a record naming an unregistered provider: `DX-6304`, exit 69 — the resource never moves;
+  - a default naming an unregistered provider: `DX-6303`, exit 69;
+  - a `providers.yaml` without the role's default, or a gateway with none named and zero or
+    several registered: `DX-1347` (`network.no_provider_for_role`);
+  - with no `providers.yaml`, zero or several segment providers keep `DX-1345`/`DX-1346`.
+- **`NetworkZoneRecord` keeps `provider`**, written on the first apply; a record from before
+  the field has it empty and resolves through the default. `describe` shows it.
+- **`NetworkGateway.spec.provider` is optional.** The reconciler compares it only when the
+  document names one, so an unnamed gateway does not drift against its record.
+- **Resolution runs before the record is written**, so every refusal above leaves no record.
+
+**The exit criterion changed, by the owner's decision (2026-09-30).** The F2 row asks for a
+battery check with two segment providers registered and `networkDefaults.segment` naming one.
+The battery cannot build that: only Proxmox serves the segment role, and `providers.yaml`
+takes one entry per type while `name:` stays reserved (ADR-0054). So the choice between two
+providers is proven in-process, by `resolve::tests` and `segment::tests` with fake providers
+registered in the test; the battery proves with the real binary what it can build — a default
+naming an unregistered provider exits 69, for a zone and for an unnamed gateway, and a
+`providers.yaml` without the default turns the count rule off (exit 1), with no record left
+behind. Lifting ADR-0054's `name:` reservation would let the battery register two real
+providers; that is its own decision.
+
+**Still owed by F2:** every role port extending `Provider` (D1 rule 4: `capabilities()`,
+`health`), and the D5 envelope with the DX-C380 block.

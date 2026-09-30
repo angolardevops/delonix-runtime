@@ -56,12 +56,12 @@ use delonix_state::JsonStore;
 /// `spec` of `kind: NetworkGateway`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct NetworkGatewaySpec {
-    /// The registered `GatewayProvider` id (`opnsense`, or `native` — though
-    /// the native provider refuses every alias/rule operation by design,
-    /// ADR-0051 Phase 2, so naming it here always fails at apply time; the
-    /// engine does not special-case that away, since a manifest that names
-    /// the wrong provider deserves that exact error).
-    pub provider: String,
+    /// The registered `GatewayProvider` id (`opnsense`). Optional since
+    /// ADR-0059 F2c: without it the record's provider, then
+    /// `networkDefaults.gateway`, then — only without a `providers.yaml` —
+    /// the single registered gateway provider answers (D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     #[serde(default)]
     pub aliases: Vec<GatewayAliasSpec>,
     #[serde(default)]
@@ -156,21 +156,20 @@ fn to_rule(spec: &GatewayRuleSpec) -> GatewayRule {
 /// remote and [`remove_for_replace`] drops it locally.
 const LEGACY_NATIVE: &str = "native";
 
-fn resolve_provider(name: &str) -> Result<Box<dyn GatewayProvider>> {
-    delonix_sdn::gateway::gateway_provider_for(name)
-        .ok_or_else(|| {
-            let ids = delonix_sdn::gateway::gateway_provider_ids();
-            let known = if ids.is_empty() {
-                super::po::t("none").to_string()
-            } else {
-                ids.join(", ")
-            };
-            Error::Invalid(super::po::tf(
-                "no gateway provider named '{name}' is registered (known: {known})",
-                &[("name", name), ("known", &known)],
-            ))
-        })?
-        .map_err(Into::into)
+fn resolve_provider(
+    named: Option<&str>,
+    recorded: &str,
+) -> Result<(&'static str, Box<dyn GatewayProvider>)> {
+    use delonix_networking::resolve::{Role, Wanted};
+    let (default, config) = super::providers_config::network_default(Role::Gateway)?;
+    delonix_networking::gateway::choose_gateway_provider(&Wanted {
+        role: Role::Gateway,
+        named,
+        recorded: Some(recorded),
+        default: default.as_deref(),
+        config: config.as_deref(),
+    })
+    .map_err(Into::into)
 }
 
 /// A comparable summary of one alias/rule list — sorted so two applies of an
@@ -223,7 +222,11 @@ fn record_fields(rec: &NetworkGatewayRecord) -> BTreeMap<String, String> {
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkGatewaySpec = manifest::spec_of(doc)?;
     let mut fields = BTreeMap::new();
-    fields.insert("provider".into(), spec.provider.clone());
+    // Only a named provider is compared: without one, the provider is the
+    // record's, and the manifest has nothing to say about it (D3).
+    if let Some(p) = &spec.provider {
+        fields.insert("provider".into(), p.clone());
+    }
     fields.insert("aliases".into(), aliases_field(&spec.aliases));
     fields.insert("rules".into(), rules_field(&spec.rules));
     Ok(super::reconcile::Desired {
@@ -293,7 +296,6 @@ fn union_by<T: Clone>(old: &[T], new: &[T], key: impl Fn(&T) -> &str) -> Vec<T> 
 /// carry the mark, so an entry that was never created costs nothing.
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkGatewaySpec = manifest::spec_of(doc)?;
-    let provider = resolve_provider(&spec.provider)?;
     let aliases = spec
         .aliases
         .iter()
@@ -303,20 +305,18 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let name = doc.metadata.name.clone();
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
-    if !rec.provider.is_empty() && rec.provider != spec.provider {
+    let named = spec.provider.as_deref();
+    if let Some(new) = named.filter(|n| !rec.provider.is_empty() && *n != rec.provider) {
         return Err(Error::Conflict(super::po::tf(
             "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the \
              document (`--replace NetworkGateway/{name}`) to move it",
-            &[
-                ("name", &name),
-                ("old", &rec.provider),
-                ("new", &spec.provider),
-            ],
+            &[("name", &name), ("old", &rec.provider), ("new", new)],
         )));
     }
+    let (provider_id, provider) = resolve_provider(named, &rec.provider)?;
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
-    rec.provider = spec.provider.clone();
+    rec.provider = provider_id.to_string();
     rec.aliases = union_by(&rec.aliases, &spec.aliases, |a| a.name.as_str());
     rec.rules = union_by(&rec.rules, &spec.rules, |r| r.description.as_str());
     s.save(&name, &rec)?;
@@ -341,7 +341,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 ("name", &name),
                 ("aliases", &spec.aliases.len().to_string()),
                 ("rules", &spec.rules.len().to_string()),
-                ("provider", &spec.provider),
+                ("provider", provider_id),
             ],
         )
     );
@@ -426,7 +426,7 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         return s.remove(name).map_err(Into::into);
     }
     let owner = OwnerMark::new(&rec.owner)?;
-    let provider = resolve_provider(&rec.provider)?;
+    let (_, provider) = resolve_provider(None, &rec.provider)?;
     provider.check_no_foreign_pending()?;
     for r in &rec.rules {
         if let RemoveOutcome::NotOwned(who) = provider.remove_rule(&r.description, &owner)? {
@@ -620,8 +620,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_provider_names_what_is_known() {
-        let msg = match resolve_provider("this-does-not-exist-at-all") {
+    fn a_named_provider_nobody_registered_names_what_is_known() {
+        let msg = match resolve_provider(Some("this-does-not-exist-at-all"), "") {
             Ok(_) => panic!("expected an error"),
             Err(e) => e.to_string(),
         };

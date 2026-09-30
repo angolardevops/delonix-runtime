@@ -22,21 +22,32 @@ pub enum Error {
     #[error("{0}")]
     UnsupportedByGatewayProvider(String),
 
-    /// A [`crate::network_zone::NetworkZoneProvider`] registration refused —
+    /// A [`crate::segment::SegmentProvider`] registration refused —
     /// an empty id, or one whose id/alias already belongs to a different
     /// provider (ADR-0049 addendum, mirrors `GatewayProviderRegistrationRefused`).
     #[error("{0}")]
     NetworkZoneProviderRegistrationRefused(String),
 
     /// `kind: NetworkZone` was applied but nothing registered a
-    /// [`crate::network_zone::NetworkZoneProvider`].
+    /// [`crate::segment::SegmentProvider`].
     #[error("{0}")]
     NoNetworkZoneProviderConfigured(String),
 
-    /// More than one [`crate::network_zone::NetworkZoneProvider`] is
+    /// More than one [`crate::segment::SegmentProvider`] is
     /// registered — `kind: NetworkZone` has no field to disambiguate.
     #[error("{0}")]
     AmbiguousNetworkZoneProvider(String),
+
+    /// A document names a provider that is not registered for its role
+    /// (ADR-0059 D3).
+    #[error("{0}")]
+    ProviderNotRegistered(String),
+
+    /// Nothing names a provider for a role and nothing else decides: a
+    /// `providers.yaml` without `networkDefaults.<role>`, or a gateway with
+    /// no provider named and zero or several registered (ADR-0059 D3).
+    #[error("{0}")]
+    NoProviderForRole(String),
 
     // ---- conflict ----------------------------------------------------------
     /// An object with the identity a remote provider (OPNsense, the SDN of a
@@ -59,6 +70,17 @@ pub enum Error {
     #[error("{0}")]
     RemoteForeignPending(String),
 
+    // ---- unavailable -------------------------------------------------------
+    /// `networkDefaults.<role>` names a provider that is not registered for
+    /// that role: an error, never a fall-through (ADR-0059 D3).
+    #[error("{0}")]
+    DefaultProviderNotRegistered(String),
+
+    /// A resource's record names the provider that served it, and that
+    /// provider is not registered now. A recorded resource never moves.
+    #[error("{0}")]
+    RecordedProviderNotRegistered(String),
+
     /// A failure of the layers underneath, with its own class.
     #[error(transparent)]
     Engine(#[from] delonix_model::Error),
@@ -80,9 +102,13 @@ impl Error {
             Error::NetworkZoneProviderRegistrationRefused(_) => 1344,
             Error::NoNetworkZoneProviderConfigured(_) => 1345,
             Error::AmbiguousNetworkZoneProvider(_) => 1346,
+            Error::NoProviderForRole(_) => 1347,
+            Error::ProviderNotRegistered(_) => 1348,
             Error::RemoteObjectNotOwned(_) => 5340,
             Error::RemoteObjectDrifted(_) => 5341,
             Error::RemoteForeignPending(_) => 5342,
+            Error::DefaultProviderNotRegistered(_) => 6303,
+            Error::RecordedProviderNotRegistered(_) => 6304,
             Error::Engine(e) => e.number(),
         }
     }
@@ -101,6 +127,8 @@ impl From<Error> for Dx {
             Error::RemoteObjectNotOwned(text)
             | Error::RemoteObjectDrifted(text)
             | Error::RemoteForeignPending(text) => Dx::Conflict(text),
+            Error::DefaultProviderNotRegistered(text)
+            | Error::RecordedProviderNotRegistered(text) => Dx::Unavailable(text),
             Error::Engine(e) => return e,
             e => Dx::Invalid(e.to_string()),
         };
@@ -133,6 +161,10 @@ mod tests {
             Error::RemoteObjectNotOwned("alias 'x' on opnsense is not this engine's".into()),
             Error::RemoteObjectDrifted("rule 'x' on opnsense: source differs".into()),
             Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
+            Error::ProviderNotRegistered("no gateway provider named 'x' is registered".into()),
+            Error::NoProviderForRole("kind: NetworkZone names no segment provider".into()),
+            Error::DefaultProviderNotRegistered("networkDefaults.segment names 'x'".into()),
+            Error::RecordedProviderNotRegistered("this NetworkZone was created on 'x'".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
         ]
     }

@@ -1,6 +1,6 @@
 //! The engine's claim on an object it creates on a REMOTE provider — an
 //! OPNsense alias or rule ([`crate::gateway`]), a vnet in a Proxmox
-//! cluster's SDN ([`crate::network_zone`]).
+//! cluster's SDN ([`crate::segment`]).
 //!
 //! # Why a mark, and not the name
 //!

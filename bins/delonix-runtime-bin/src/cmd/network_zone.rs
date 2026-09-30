@@ -1,5 +1,5 @@
 //! `kind: NetworkZone` — declares a cluster-native SDN zone and the vnets
-//! inside it, realized by whichever `NetworkZoneProvider` the RUNTIME has
+//! inside it, realized by whichever `SegmentProvider` the RUNTIME has
 //! configured (ADR-0049 addendum, closing the gap D3 names).
 //!
 //! **No `provider` field, deliberately — unlike `kind: NetworkGateway`
@@ -7,7 +7,7 @@
 //! conversation): the Kind stays transparent to WHICH infrastructure
 //! realizes it. `cmd::network_zone_providers::register_configured` reads
 //! `DELONIX_PROXMOX_*` once at startup and registers what it finds;
-//! `delonix_sdn::network_zone::active_network_zone_provider` resolves by
+//! `delonix_sdn::segment::active_network_zone_provider` resolves by
 //! COUNT (zero/one/ambiguous), never by a name this document would have to
 //! carry. A tenant applying this manifest never learns it runs on Proxmox.
 //!
@@ -40,7 +40,7 @@
 //! nothing on the cluster and says so.
 //!
 //! **One transaction per apply and per teardown**
-//! ([`NetworkZoneProvider::transaction`]): refused up front when the cluster
+//! ([`SegmentProvider::transaction`]): refused up front when the cluster
 //! carries someone else's staged SDN changes, rolled back if any step fails,
 //! applied once when all succeed.
 //!
@@ -57,8 +57,8 @@ use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
-use delonix_sdn::network_zone::{EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec};
 use delonix_sdn::ownership::{OwnerMark, RemoveOutcome};
+use delonix_sdn::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 use delonix_state::JsonStore;
 
 /// `spec` of `kind: NetworkZone`.
@@ -101,14 +101,31 @@ struct NetworkZoneRecord {
     /// the mark). Only then does the teardown remove it.
     #[serde(default)]
     zone_owned: bool,
+    /// The segment provider that served this zone (ADR-0059 D3): the zone
+    /// stays on it when a default changes. Empty in a record from before
+    /// the field existed; resolution then falls to the default.
+    #[serde(default)]
+    provider: String,
 }
 
 fn store() -> Result<JsonStore<NetworkZoneRecord>> {
     JsonStore::open(state_root().join("network-zones")).map_err(Into::into)
 }
 
-fn resolve_provider() -> Result<Box<dyn NetworkZoneProvider>> {
-    delonix_sdn::network_zone::active_network_zone_provider().map_err(Into::into)
+/// The segment provider for a zone (ADR-0059 D3): the one on its record,
+/// then `networkDefaults.segment`, then — only without a `providers.yaml` —
+/// the single registered one.
+fn resolve_provider(recorded: &str) -> Result<(&'static str, Box<dyn SegmentProvider>)> {
+    use delonix_networking::resolve::{Role, Wanted};
+    let (default, config) = super::providers_config::network_default(Role::Segment)?;
+    delonix_networking::segment::choose_segment_provider(&Wanted {
+        role: Role::Segment,
+        named: None,
+        recorded: Some(recorded),
+        default: default.as_deref(),
+        config: config.as_deref(),
+    })
+    .map_err(Into::into)
 }
 
 /// A comparable summary of the vnet list — sorted so two applies of an
@@ -185,12 +202,13 @@ fn owner_mark(rec: &mut NetworkZoneRecord) -> Result<OwnerMark> {
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
-    let provider = resolve_provider()?;
 
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
+    let (provider_id, provider) = resolve_provider(&rec.provider)?;
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
+    rec.provider = provider_id.to_string();
     let mut vnets = rec.vnets.clone();
     vnets.retain(|o| !spec.vnets.iter().any(|n| n.name == o.name));
     vnets.extend(spec.vnets.iter().cloned());
@@ -306,7 +324,7 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         return s.remove(name).map_err(Into::into);
     }
     let owner = OwnerMark::new(&rec.owner)?;
-    let provider = resolve_provider()?;
+    let (_, provider) = resolve_provider(&rec.provider)?;
     let mut left: Vec<(String, String, String)> = Vec::new();
     provider.transaction(&mut || {
         left.clear();
@@ -414,6 +432,9 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
         let mut d = super::output::Describe::new();
         d.field("Name", &rec.name);
         d.field("Vnets", rec.vnets.len().to_string());
+        if !rec.provider.is_empty() {
+            d.field("Provider", &rec.provider);
+        }
         for v in &rec.vnets {
             d.field(
                 "  Vnet",
@@ -456,14 +477,16 @@ mod tests {
         // first (the registry is process-wide), this is a false negative to
         // skip rather than a flake to chase — the real guarantee (zero
         // registered -> named refusal) is proven without the shared static
-        // by `delonix_sdn::network_zone::tests::zero_registered_names_what_to_configure`.
-        if !delonix_sdn::network_zone::network_zone_provider_ids().is_empty() {
-            eprintln!("SKIP: a provider is already registered in this process");
+        // by `delonix_networking::segment::tests::zero_registered_names_what_to_configure`.
+        if !delonix_sdn::segment::segment_provider_ids().is_empty()
+            || matches!(super::super::providers_config::loaded(), Ok(Some(_)))
+        {
+            eprintln!("SKIP: a provider is registered, or a providers.yaml is in force");
             return;
         }
-        // `Box<dyn NetworkZoneProvider>` is not `Debug`, so `unwrap_err()`
+        // `Box<dyn SegmentProvider>` is not `Debug`, so `unwrap_err()`
         // does not apply — match instead.
-        match resolve_provider() {
+        match resolve_provider("") {
             Ok(_) => panic!("expected a refusal"),
             Err(e) => assert!(e.to_string().contains("DELONIX_PROXMOX_URL"), "{e}"),
         }

@@ -3979,6 +3979,37 @@ if [[ -z "${DELONIX_PROXMOX_URL:-}" ]]; then
   check "NetworkZone sem provider configurado recusa" fail "$BIN" apply -f "$RWORK/zone.yaml"
 fi
 
+# ADR-0059 D3: a resolução por nome. Só com NENHUM provider de rede registado,
+# para «não registado» ser verdade: o default que nomeia um provider que
+# ninguém registou é indisponível (69), nunca um salto para outro; e um
+# providers.yaml sem default desliga a regra da contagem (1). A escolha entre
+# DOIS providers registados prova-se no teste Rust `resolve::tests` — a
+# bateria não a constrói, porque só o Proxmox serve o papel de segmento e o
+# providers.yaml aceita uma entrada por tipo (adendo F2c do ADR-0059).
+if [[ -z "${DELONIX_PROXMOX_URL:-}" && -z "${DELONIX_OPNSENSE_URL:-}" ]]; then
+  printf 'apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  segment: proxmox\n  gateway: opnsense\n' \
+    > "$RWORK/providers-def.yaml"
+  printf 'apiVersion: config.delonix.io/v1\n' > "$RWORK/providers-nodef.yaml"
+  cat > "$RWORK/gw-unnamed.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: $GW-unnamed }
+spec:
+  aliases: [{ name: dlx_u$PFX, kind: host, content: ["10.99.0.1"] }]
+YAML
+  check "NetworkZone: um default que nomeia um provider não registado sai com 69" 69 \
+    env DELONIX_PROVIDERS_CONFIG="$RWORK/providers-def.yaml" "$BIN" apply -f "$RWORK/zone.yaml"
+  check "NetworkGateway sem provider nomeado: o default não registado também sai com 69" 69 \
+    env DELONIX_PROVIDERS_CONFIG="$RWORK/providers-def.yaml" "$BIN" apply -f "$RWORK/gw-unnamed.yaml"
+  check "um providers.yaml sem networkDefaults.segment desliga a regra da contagem" 1 \
+    env DELONIX_PROVIDERS_CONFIG="$RWORK/providers-nodef.yaml" "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... e nenhuma destas recusas deixou registo" ok bash -c \
+    "! '$BIN' get networkzones 2>/dev/null | grep -q '$ZN' && ! '$BIN' get networkgateways 2>/dev/null | grep -q '$GW-unnamed'"
+else
+  skip "NetworkZone: um default que nomeia um provider não registado sai com 69" \
+    "há um provider de rede configurado: «não registado» não se consegue construir aqui"
+fi
+
 # --- OPNsense ---------------------------------------------------------------
 if [[ -n "${DELONIX_OPNSENSE_URL:-}" && -n "${DELONIX_OPNSENSE_KEY:-}" && -n "${DELONIX_OPNSENSE_SECRET:-}" ]]; then
   opn() {  # opn <rota> [json] — a mão do operador, SEM a marca do motor

@@ -13058,8 +13058,8 @@ msgstr "Lê o corpo em bruto na mensagem; a API da appliance pode ter mudado de 
 msgid "network zone provider registration refused"
 msgstr "registo de provider de zona de rede recusado"
 
-msgid "A process tried to register a NetworkZoneProvider with an empty id, or one whose id/alias already belongs to a different provider."
-msgstr "Um processo tentou registar um NetworkZoneProvider com um id vazio, ou cujo id/alias já pertence a um provider diferente."
+msgid "A process tried to register a SegmentProvider with an empty id, or one whose id/alias already belongs to a different provider."
+msgstr "Um processo tentou registar um SegmentProvider com id vazio, ou com um id/alias que já pertence a outro provider."
 
 msgid "Fix the registration (an internal call error unless a third-party provider crate is involved)."
 msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido um crate de provider de terceiros)."
@@ -13067,8 +13067,8 @@ msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido
 msgid "no network zone provider configured"
 msgstr "nenhum provider de zona de rede configurado"
 
-msgid "`kind: NetworkZone` was applied but the runtime has no NetworkZoneProvider registered — it names no provider itself, on purpose, so the runtime's own configuration decides."
-msgstr "Foi aplicado um `kind: NetworkZone` mas o runtime não tem nenhum NetworkZoneProvider registado — o próprio Kind não nomeia provider nenhum, de propósito, para a configuração do runtime é que decide."
+msgid "`kind: NetworkZone` was applied, no providers.yaml is in force, and the runtime has no SegmentProvider registered — the Kind names no provider itself, on purpose, so the runtime's own configuration decides."
+msgstr "Foi aplicado um `kind: NetworkZone`, não há providers.yaml em vigor e o runtime não tem nenhum SegmentProvider registado — o Kind não nomeia provider nenhum, de propósito, para que decida a configuração do próprio runtime."
 
 msgid "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."
 msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhece) e a sua credencial."
@@ -13076,11 +13076,11 @@ msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhec
 msgid "ambiguous network zone provider"
 msgstr "provider de zona de rede ambíguo"
 
-msgid "More than one NetworkZoneProvider is registered and `kind: NetworkZone` has no field to pick one by name."
-msgstr "Está registado mais de um NetworkZoneProvider e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
+msgid "More than one SegmentProvider is registered, no providers.yaml is in force, and `kind: NetworkZone` has no field to pick one by name."
+msgstr "Está registado mais de um SegmentProvider, não há providers.yaml em vigor, e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
 
-msgid "Unregister all but one NetworkZoneProvider target."
-msgstr "Retira o registo de todos os alvos NetworkZoneProvider excepto um."
+msgid "Set networkDefaults.segment in a providers.yaml, or unregister all but one SegmentProvider target."
+msgstr "Define o networkDefaults.segment num providers.yaml, ou retira o registo de todos os alvos SegmentProvider excepto um."
 
 msgid "no such NetworkRoute"
 msgstr "não existe esse NetworkRoute"
@@ -14740,8 +14740,38 @@ msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm|
 msgid "{kind} '{name}' (scope systemcontainer) → target '{target}' is not a declared or registered SystemContainer"
 msgstr "{kind} '{name}' (scope systemcontainer) → o target '{target}' não é um SystemContainer declarado ou registado"
 
-msgid "no gateway provider named '{name}' is registered (known: {known})"
-msgstr "nenhum provider de gateway chamado '{name}' está registado (conhecidos: {known})"
+msgid "no provider answers this network role"
+msgstr "nenhum provider responde a este papel de rede"
 
-msgid "none"
-msgstr "nenhum"
+msgid "Nothing names a provider for the role: a providers.yaml is in force without networkDefaults.<role>, or a NetworkGateway names no provider while zero or several gateway providers are registered (ADR-0059 D3)."
+msgstr "Nada nomeia um provider para o papel: há um providers.yaml em vigor sem networkDefaults.<papel>, ou um NetworkGateway não nomeia provider e estão registados zero ou vários providers de gateway (ADR-0059 D3)."
+
+msgid "Set networkDefaults.<role> in providers.yaml, or name the provider in the document where the Kind has the field (NetworkGateway spec.provider)."
+msgstr "Define o networkDefaults.<papel> no providers.yaml, ou nomeia o provider no documento quando o Kind tem o campo (spec.provider do NetworkGateway)."
+
+msgid "the named network provider is not registered"
+msgstr "o provider de rede nomeado não está registado"
+
+msgid "A document names a provider that is not registered for its role (ADR-0059 D3)."
+msgstr "Um documento nomeia um provider que não está registado para o seu papel (ADR-0059 D3)."
+
+msgid "Name a registered provider (`delonix provider ls`), or configure the one named."
+msgstr "Nomeia um provider registado (`delonix provider ls`), ou configura o que foi nomeado."
+
+msgid "the network default names a provider that is not registered"
+msgstr "o default de rede nomeia um provider que não está registado"
+
+msgid "networkDefaults.<role> in providers.yaml names a provider that is not registered for that role. A default is never skipped to try another provider (ADR-0059 D3)."
+msgstr "O networkDefaults.<papel> do providers.yaml nomeia um provider que não está registado para esse papel. Um default nunca é saltado para se tentar outro provider (ADR-0059 D3)."
+
+msgid "Configure the provider the default names (its providers.yaml entry), or change the default to one `delonix provider ls` lists."
+msgstr "Configura o provider que o default nomeia (a sua entrada no providers.yaml), ou muda o default para um que o `delonix provider ls` liste."
+
+msgid "the provider that created this resource is not registered"
+msgstr "o provider que criou este recurso não está registado"
+
+msgid "The resource's record names the provider that served it, and that provider is not registered now. A recorded resource never moves to another provider when a default changes (ADR-0059 D3)."
+msgstr "O registo do recurso nomeia o provider que o serviu, e esse provider não está registado agora. Um recurso registado nunca muda de provider quando um default muda (ADR-0059 D3)."
+
+msgid "Configure that provider again, or remove the resource with a replace once it is."
+msgstr "Volta a configurar esse provider, ou remove o recurso com um replace quando estiver configurado."
