@@ -12,6 +12,7 @@
 mod error;
 pub mod gateway;
 pub mod ownership;
+pub mod policy;
 pub mod resolve;
 pub mod segment;
 

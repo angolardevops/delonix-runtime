@@ -318,7 +318,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     TEL[&quot;delonix-telemetry&lt;br&gt;observabilidade: logging estruturado, spans OpenTelemetry/OTLP&lt;br&gt;e o registo Prometheus partilhado (saiu do core na P3)&quot;]
     SCAN[&quot;delonix-scanner&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
     SEC[&quot;delonix-security-runtime&lt;br&gt;decisoes de seguranca do no: politica, admissao&lt;br&gt;unica (container E VM), evento, score, redaccao&lt;br&gt;(ADR-0026) — puro, sem sensores e sem inquilino&quot;]
-    RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
+    RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas, o PolicyIr (ADR-0059 D6); partilhado com o PaaS&quot;]
     CHV[&quot;delonix-provider-cloud-hypervisor&lt;br&gt;backend VmBackend Cloud Hypervisor (microVM por processo, api-socket)&lt;br&gt;(ADR-0044 P4b.4c) — saiu do delonix-vm, que o regista&quot;]
     LVIRT[&quot;delonix-provider-libvirt&lt;br&gt;backend VmBackend libvirt/KVM (QEMU via virsh)&lt;br&gt;(ADR-0044 P4b.4b) — saiu do delonix-vm, que o regista&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
@@ -395,6 +395,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     NET --&gt; NETCTX
     NETCTX --&gt; MODEL
     NETCTX --&gt; COMPUTE
+    NETCTX --&gt; RULES
     BIN --&gt; NETCTX
     STATECRATE --&gt; MODEL
     COMPUTE --&gt; NODECTX

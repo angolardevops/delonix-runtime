@@ -36,6 +36,8 @@
 //! API. O `parse_net_rate` é puro, e só espera por um tipo de erro que este
 //! crate possa devolver sem depender do delonix-model.
 
+pub mod policy;
+
 /// Parses an overlay peer entry: `<node_ip>` (flat VXLAN) OR
 /// `<node_ip>=<wg_pubkey>=<wg_ip>` (encrypted). Returns (node_ip, Option<(pubkey, wg_ip)>).
 pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {

@@ -655,3 +655,36 @@ step past D5's own text, which kept DX-1345/1346 as configuration errors: they a
   change to each client's error variants. `plan_digest` waits for F4.
 
 **F2 is closed** with this slice.
+
+## Addendum 2026-09-30 — F3a: the policy IR, its reference evaluator, and the golden table
+
+F3 is sliced by lowering: **F3a** the IR and its reference semantics (this addendum), **F3b** the
+nft lowering, **F3c** the Proxmox per-VM lowering, **F3d** the OPNsense lowering. Each later slice
+is checked against the same golden table.
+
+- **`delonix_net_rules::policy`** — `Policy` (direction, default, ordered rules), `Rule` (action,
+  proto, ports, icmp type, peer, stateful, log, origin, guardrail), `Peer` (`Any`, `Cidr`,
+  `Namespace`, `OtherNamespaces`, `Selector`), `Packet`, and **`evaluate`**, the reference verdict:
+  the return of an admitted flow passes when every rule is stateful; otherwise the first rule that
+  matches decides and the default decides the rest. `any` with a port matches TCP and UDP only.
+  Still zero dependencies. `OtherNamespaces` is a peer this ADR's list did not name: the namespace
+  guardrail cuts «a workload of any namespace but this one», which neither `Namespace` nor
+  `Selector` can say, and traffic from outside the engine's workloads never matches it.
+- **`delonix_networking::policy::from_container_fw`** — the total parse from the persisted
+  `ContainerFw` (no record migration). One rule the IR cannot hold refuses the whole set with
+  DX-1380 `invalid_intent`, naming the rule; nothing is skipped. It rebuilds the holder chain's
+  order: user rules, then the namespace guardrail (`Allow Namespace(ns)` only without an explicit
+  inbound intent, then `Deny OtherNamespaces(ns)`, both marked `guardrail`), then the defaults.
+- **`delonix_networking::policy::golden::cases()`** — the golden table, public so a lowering in
+  another crate runs the same cells: 24 cells of record × packet × verdict, covering the open
+  record, the S1 C1 case (one inbound deny keeps the isolation), a Dependency-style allow across
+  namespaces, the `any`+port widening case, first match, egress, and a bare host address.
+- **The verdicts were written from reading `fw_chain_body`, not measured against a kernel.** F3b
+  closes that: it renders the IR as nft, checks the ruleset with `nft --check`, and evaluates the
+  rendered rules over the same cells.
+- **Two differences from today's code, found by writing the parse and left as they are for now:**
+  a reversed port range (`90-80`) passes `validate_container_fw` (and would fail inside `nft`)
+  but is refused by the parse; and a disabled record gives an empty chain, so a namespaced
+  workload with `enabled: false` has no isolation guardrail. The IR reproduces that (two open
+  policies). ADR invariant 3 says the guardrail's absence is an error; making it one changes what
+  a disabled firewall means and is its own decision.
