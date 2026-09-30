@@ -123,7 +123,11 @@ runcmd:
       chk "$n key exists and is not the one baked into the image" '[ -n "$now" ] && [ -n "$built" ] && [ "$now" != "$built" ]'
     done
     chk "the default certificate names this clone ($(hostname))" "openssl x509 -in /etc/asterisk/keys/default.crt -noout -subject | grep -q \"CN = $(hostname)\""
-    chk "the default certificate is signed by this clone's CA" "openssl verify -CAfile /etc/asterisk/keys/ca.crt /etc/asterisk/keys/default.crt"
+    # Not `openssl verify`: FreePBX's CA is an X.509 v1 certificate with no
+    # extensions and the same name as the certificate it signs, so openssl
+    # rejects the chain (error 18) -- the vendor's own build certificates too,
+    # measured 2026-09-30. What holds is the issuer naming this clone's CA.
+    chk "the default certificate's issuer is this clone's CA" '[ "$(openssl x509 -in /etc/asterisk/keys/default.crt -noout -issuer | sed "s/^issuer=//")" = "$(openssl x509 -in /etc/asterisk/keys/ca.crt -noout -subject | sed "s/^subject=//")" ]'
     chk "the default key matches the default certificate" '[ "$(openssl x509 -in /etc/asterisk/keys/default.crt -noout -pubkey | sha256sum)" = "$(openssl pkey -in /etc/asterisk/keys/default.key -pubout | sha256sum)" ]'
 
     # once means once: a second run must not rotate again

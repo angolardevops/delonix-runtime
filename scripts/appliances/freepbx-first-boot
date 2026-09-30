@@ -59,9 +59,25 @@ echo "==> admin password set ($SRC)"
 # --- the AMI secret ---------------------------------------------------------
 # Into the settings table on stdin, like the admin password -- never argv,
 # where any local user reading `ps` would see it.
-printf "UPDATE freepbx_settings SET value='%s' WHERE keyword='AMPMGRPASS';\n" "$(rand 32)" | mysql asterisk
-fwconsole reload >/dev/null
+#
+# Order matters, measured on a clone (2026-09-30): `fwconsole reload` logs in
+# to the AMI with the secret from the DATABASE, while Asterisk still holds the
+# old one from manager.conf -- "Unable to connect to Asterisk Manager", and the
+# first boot died there. So the new secret goes to Asterisk first (manager.conf
+# + `manager reload`), and FreePBX regenerates the file afterwards with the
+# same value.
+AMI_NEW=$(rand 32)
+printf "UPDATE freepbx_settings SET value='%s' WHERE keyword='AMPMGRPASS';\n" "$AMI_NEW" | mysql asterisk
+[ "$(grep -c '^secret *= ' /etc/asterisk/manager.conf)" = 1 ] \
+  || { echo "!! manager.conf does not have exactly one secret line"; exit 1; }
+AMI_NEW=$AMI_NEW awk '/^secret *= / { print "secret = " ENVIRON["AMI_NEW"]; next } { print }' \
+  /etc/asterisk/manager.conf > /etc/asterisk/manager.conf.new
+chown --reference=/etc/asterisk/manager.conf /etc/asterisk/manager.conf.new
+chmod --reference=/etc/asterisk/manager.conf /etc/asterisk/manager.conf.new
+mv /etc/asterisk/manager.conf.new /etc/asterisk/manager.conf
+unset AMI_NEW
 asterisk -rx "manager reload" >/dev/null
+fwconsole reload >/dev/null
 echo "==> AMI secret regenerated and manager.conf rewritten"
 
 # --- keys and certificates --------------------------------------------------
@@ -76,12 +92,17 @@ K=/etc/asterisk/keys
 # certman's `--generate` reuses an existing CA, and the CA key is the shared
 # one: remove the CA first (removeCA also drops the self-signed certificates),
 # then let certman make a new CA and default certificate.
-php -r 'include "/etc/freepbx.conf"; \FreePBX::create()->Certman->removeCA();'
-fwconsole certificates --generate >/dev/null
+# Measured on a clone: this php run does remove the CA and the self-signed
+# certificates, then exits 151 with no output (from FreePBX's own shutdown).
+# So its effect is checked, not its exit status.
+php -r 'include "/etc/freepbx.conf"; \FreePBX::create()->Certman->removeCA();' || true
+[ ! -e "$K/ca.key" ] && [ ! -e "$K/default.key" ] \
+  || { echo "!! the build's CA or default certificate is still there"; exit 1; }
+fwconsole certificates --generate
 # The API module regenerates its key pair on install when the files are gone;
 # the OAuth encryption key is created on first use (not baked, removed anyway).
 rm -f "$K/api_oauth.key" "$K/api_oauth_public.key" "$K/oauth_encryption.key"
-fwconsole ma install api >/dev/null
+fwconsole ma install api
 [ -s "$K/api_oauth.key" ] || { echo "!! the API key was not regenerated"; exit 1; }
 make-ssl-cert generate-default-snakeoil --force-overwrite
 fwconsole chown >/dev/null 2>&1 || true
