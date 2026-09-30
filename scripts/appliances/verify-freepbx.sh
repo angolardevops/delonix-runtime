@@ -83,6 +83,7 @@ runcmd:
     for u in mariadb apache2 fail2ban; do chk "$u is active" "systemctl is-active --quiet $u"; done
     chk "Asterisk answers and is @AST_MAJOR@.x" "asterisk -rx 'core show version' | grep -Eq '^Asterisk @AST_MAJOR@\.'"
     chk "PJSIP is loaded" "asterisk -rx 'module show like res_pjsip.so' | grep -q Running"
+    chk "no commercial FreePBX module is enabled" "! fwconsole ma list 2>/dev/null | grep Commercial | grep -q Enabled"
     chk "the FreePBX apt key is still the pinned one" "gpg --show-keys --with-colons /etc/apt/trusted.gpg.d/freepbx.gpg | grep -q '^fpr:.*:@KEY_FPR@:'"
     for i in $(seq 1 30); do curl -s -o /dev/null -m 3 http://127.0.0.1/admin/config.php && break; sleep 2; done
     chk "the admin UI answers and says FreePBX" "curl -s -m 30 -L http://127.0.0.1/admin/config.php | grep -qi freepbx"

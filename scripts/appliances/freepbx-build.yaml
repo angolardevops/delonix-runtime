@@ -75,6 +75,23 @@ write_files:
       echo "@FREEPBX_INSTALLER_SHA256@  /root/sng_freepbx_debian_install.sh" | sha256sum -c - \
         || { echo "!! FreePBX installer checksum mismatch"; exit 1; }
 
+      # ONE patch to the vendor's script, applied after the checksum and
+      # checked to touch exactly one line. Measured on the first build
+      # (2026-09-30): with --opensourceonly the installer pipes every
+      # commercial module into `xargs fwconsole ma -f remove`, and the vendor's
+      # own `oracle_connector` fails its un-installation scripts -- under the
+      # installer's `set -e` that aborts the whole install. The line right
+      # after it already does `fwconsole ma -f remove firewall ... || true`;
+      # this gives the same tolerance to the line before, and the result is
+      # CHECKED below instead of trusted: no commercial module may be left
+      # enabled.
+      REMOVE_LINE='xargs -t -I {} fwconsole ma -f remove {} >> "$log"$'
+      [ "$(grep -cF 'xargs -t -I {} fwconsole ma -f remove {} >> "$log"' /root/sng_freepbx_debian_install.sh)" = 1 ] \
+        || { echo "!! the installer's commercial-module removal line is not where the patch expects it"; exit 1; }
+      sed -i "s#$REMOVE_LINE#& || true#" /root/sng_freepbx_debian_install.sh
+      [ "$(grep -cF 'fwconsole ma -f remove {} >> "$log" || true' /root/sng_freepbx_debian_install.sh)" = 1 ] \
+        || { echo "!! the installer patch did not apply"; exit 1; }
+
       # --opensourceonly: no commercial modules (and, with them, no sysadmin
       #   or Responsive Firewall -- fail2ban stays). --skipversion: the
       #   installer would otherwise fetch a newer copy of itself, which is the
@@ -105,6 +122,20 @@ write_files:
       FW_VER=$(fwconsole ma list 2>/dev/null | awk -F'|' '$2 ~ /^ *framework *$/ {gsub(/ /,"",$3); print $3; exit}')
       [ -n "$FW_VER" ] || { echo "!! could not read the FreePBX framework version"; exit 1; }
       mkdir -p /etc/delonix
+
+      # The other half of the patch above: whatever the vendor's removal left
+      # behind gets a second try, then a disable; an ENABLED commercial module
+      # fails the build.
+      commercial() { fwconsole ma list 2>/dev/null | awk -F'|' '/Commercial/ {gsub(/ /,"",$2); print $2}'; }
+      LEFT=$(commercial | tr '\n' ' ')
+      for m in $LEFT; do
+        echo "==> commercial module still present after the installer: $m"
+        fwconsole ma -f remove "$m" || fwconsole ma -f disable "$m" || true
+      done
+      ENABLED=$(fwconsole ma list 2>/dev/null | awk -F'|' '/Commercial/ && /Enabled/ {gsub(/ /,"",$2); print $2}' | tr '\n' ' ')
+      [ -z "${ENABLED// /}" ] || { echo "!! commercial modules still enabled: $ENABLED"; exit 1; }
+      LEFT_AFTER=$(commercial | tr '\n' ' ')
+      echo "==> commercial modules left (none enabled): ${LEFT_AFTER:-none}"
       fwconsole ma list > /etc/delonix/freepbx-modules.txt 2>&1 || true
 
       # The AMI secret and the admin login are rotated on each clone's first
@@ -121,6 +152,8 @@ write_files:
         echo "  \"apt_key_fingerprint\": \"@FREEPBX_KEY_FPR@\","
         echo "  \"debian_build\": \"@DEBIAN_BUILD@\","
         echo "  \"modules\": \"open-source only\","
+        echo "  \"commercial_modules_left_disabled\": \"${LEFT_AFTER% }\","
+        echo "  \"installer_patch\": \"commercial-module removal tolerates a failing module (oracle_connector)\","
         echo "  \"web_port\": 80,"
         echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
         echo "  \"image_revision\": @IMAGE_REV@"

@@ -131,7 +131,8 @@ if grep -aq "DELONIX-FREEPBX-BUILD-OK" "$LOG"; then
   echo "==> guest reported success"
 elif grep -aq "DELONIX-FREEPBX-BUILD-FAIL" "$LOG"; then
   echo "!! the build script failed inside the guest. Its own last lines:"
-  sed -n '/DELONIX-FREEPBX-BUILD-FAIL/,$p' "$LOG" | tr -d '\r' | head -60
+  # `head` closes the pipe early: 141 under pipefail, which would hide the exit 1.
+  { sed -n '/DELONIX-FREEPBX-BUILD-FAIL/,$p' "$LOG" | tr -d '\r' | head -60; } || true
   exit 1
 else
   echo "!! no marker on the console -- the guest never finished (timeout, panic," >&2
