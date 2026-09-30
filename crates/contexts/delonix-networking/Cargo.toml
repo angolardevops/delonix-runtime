@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
+# `PolicyIr` (ADR-0059 D6): the typed policy the firewall lowerings share.
+delonix-net-rules = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]

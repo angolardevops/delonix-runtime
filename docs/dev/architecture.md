@@ -722,6 +722,7 @@ flowchart TB
   delonix_mgmt_bin --> delonix_telemetry
   delonix_networking --> delonix_compute
   delonix_networking --> delonix_model
+  delonix_networking --> delonix_net_rules
   delonix_node --> delonix_model
   delonix_node_api --> delonix_compute
   delonix_node_api --> delonix_linux

@@ -52,6 +52,11 @@ pub enum Error {
     #[error("{0}")]
     NoProviderForRole(String),
 
+    /// A firewall set holds a rule the policy IR cannot represent
+    /// (ADR-0059 D6): the whole set is refused, never the rule skipped.
+    #[error("{0}")]
+    PolicyNotRepresentable(String),
+
     // ---- conflict ----------------------------------------------------------
     /// An object with the identity a remote provider (OPNsense, the SDN of a
     /// Proxmox cluster) was asked to ensure or remove already exists there
@@ -122,7 +127,8 @@ impl Error {
             | Error::Engine(_) => return None,
             Error::NoNetworkZoneProviderConfigured(_)
             | Error::AmbiguousNetworkZoneProvider(_)
-            | Error::NoProviderForRole(_) => Reason::InvalidIntent,
+            | Error::NoProviderForRole(_)
+            | Error::PolicyNotRepresentable(_) => Reason::InvalidIntent,
             Error::UnsupportedByGatewayProvider(_)
             | Error::ProviderNotRegistered(_)
             | Error::DefaultProviderNotRegistered(_)
@@ -185,6 +191,7 @@ mod tests {
             Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
             Error::ProviderNotRegistered("no gateway provider named 'x' is registered".into()),
             Error::NoProviderForRole("kind: NetworkZone names no segment provider".into()),
+            Error::PolicyNotRepresentable("firewall rule #1: peer '::1' is IPv6".into()),
             Error::DefaultProviderNotRegistered("networkDefaults.segment names 'x'".into()),
             Error::RecordedProviderNotRegistered("this NetworkZone was created on 'x'".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
