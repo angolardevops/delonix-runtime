@@ -151,10 +151,20 @@ fn to_rule(spec: &GatewayRuleSpec) -> GatewayRule {
     }
 }
 
+/// The provider id records written before ADR-0059 F2b may carry. That
+/// provider refused every alias and rule, so such a record owns nothing
+/// remote and [`remove_for_replace`] drops it locally.
+const LEGACY_NATIVE: &str = "native";
+
 fn resolve_provider(name: &str) -> Result<Box<dyn GatewayProvider>> {
     delonix_sdn::gateway::gateway_provider_for(name)
         .ok_or_else(|| {
-            let known = delonix_sdn::gateway::gateway_provider_ids().join(", ");
+            let ids = delonix_sdn::gateway::gateway_provider_ids();
+            let known = if ids.is_empty() {
+                super::po::t("none").to_string()
+            } else {
+                ids.join(", ")
+            };
             Error::Invalid(super::po::tf(
                 "no gateway provider named '{name}' is registered (known: {known})",
                 &[("name", name), ("known", &known)],
@@ -408,6 +418,13 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         }
         return s.remove(name).map_err(Into::into);
     }
+    if rec.provider == LEGACY_NATIVE {
+        // Written by a build that still registered the `native` provider
+        // (ADR-0059 F2b took it away). It refused every write, so nothing
+        // on any appliance can carry this record's mark: the record is all
+        // there is to remove.
+        return s.remove(name).map_err(Into::into);
+    }
     let owner = OwnerMark::new(&rec.owner)?;
     let provider = resolve_provider(&rec.provider)?;
     provider.check_no_foreign_pending()?;
@@ -609,6 +626,6 @@ mod tests {
             Err(e) => e.to_string(),
         };
         assert!(msg.contains("this-does-not-exist-at-all"), "{msg}");
-        assert!(msg.contains("native"), "{msg}");
+        assert!(msg.contains("known: "), "{msg}");
     }
 }

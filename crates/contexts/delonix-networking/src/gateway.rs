@@ -6,62 +6,33 @@
 //! `delonix_compute::ports::NetworkProvider::apply_firewall`, which is
 //! per-workload nftables rules and is always native: `FirewallPerWorkload`/
 //! `FirewallDefaultDeny`/`FirewallSourceFiltering`/`FirewallEgressPolicy`
-//! (ADR-0050) already answer that for free, rootless, with no extra VM, and
-//! nothing about talking to an external appliance's REST API improves on it.
-//! What an appliance at the perimeter is actually good for — NAT, multi-WAN
-//! failover, VPN termination — has no answerer today; this trait is where
-//! one goes.
+//! (ADR-0050) already answer that for free, rootless, with no extra VM.
+//! What an appliance at the perimeter is good for — NAT, multi-WAN
+//! failover, VPN termination — is what this port is for.
 //!
-//! # Why this mirrors `delonix-vm`'s `VmBackend`/`register_backend`
+//! # The registry mirrors `VmBackend`'s
 //!
-//! Method for method, on purpose: `BackendRegistration`'s shape (an id, a
-//! factory that may fail, an `auto_selectable` flag checked at registration
-//! time so auto-detection never has to do I/O) is the one mechanism this repo
-//! already trusts for "let a process that linked a provider's crate make it
-//! selectable without a plugin loader" (ADR-0008's own words: "a map
-//! populated at startup, not a plugin system"). Reinventing it here would
-//! just be a second copy to keep in sync.
+//! An id, a factory that may fail, registration that does no I/O (ADR-0008:
+//! "a map populated at startup, not a plugin system"). The port lives in the
+//! networking context since ADR-0059 F2a, in the shape `VmBackend` left
+//! `delonix-vm` for the compute context.
 //!
-//! It lives in THIS crate and not a new context crate for the same reason
-//! `VmBackend` currently lives in `delonix-vm` rather than `delonix-compute`:
-//! that move is P4's own unfinished migration (`delonix-proxmox → delonix-vm`
-//! is a named, phase-tagged exception in `scripts/arch_fitness.py`, not the
-//! target shape). `GatewayProvider` takes the same kind of exception when
-//! `delonix-opnsense` is built (Phase 2), and moves wherever `VmBackend`
-//! eventually moves, in the same commit shape — see ADR-0051.
+//! # No default bodies, and no builtin provider (ADR-0059 D1, F2b)
 //!
-//! # Phase 1 → Phase 2
+//! Every operation is required. A default that refuses let a provider
+//! compile while claiming, by existing, an operation it does not have; a
+//! default that answers `Ok(())` was worse. The one implementation,
+//! `crates/providers/delonix-opnsense`, has every method for real, against
+//! what ADR-0051 Phase 0 measured on an appliance.
 //!
-//! Phase 1 shipped the trait and the registry with **zero behavior
-//! change** — [`NATIVE_ID`] was the only registered provider, and it did
-//! nothing beyond answer [`GatewayProvider::available`]. It deliberately
-//! had no `ensure_rule`/`apply` method: designing OPNsense's operational
-//! shape before the live spike against a real appliance (ADR-0051, Phase 0)
-//! would have risked exactly the trap `delonix-proxmox`'s own module doc
-//! names for Proxmox tasks — treating a guess as a measurement.
-//!
-//! Phase 0 happened (2026-09-24, against a real OPNsense 26.1.2 appliance)
-//! and measured the write path, `apply()`'s semantics and the error shapes.
-//! This is Phase 2: [`GatewayProvider`] grows the operations Phase 0 makes
-//! safe to design — [`ensure_alias`](GatewayProvider::ensure_alias),
-//! [`ensure_rule`](GatewayProvider::ensure_rule) and
-//! [`commit`](GatewayProvider::commit) — with default implementations that
-//! REFUSE (never silently ignore, per this repo's own no-silent-failure
-//! rule). [`NativeGatewayProvider`] overrides only the two removals: it has
-//! no alias or rule concept to offer, so there is never one to remove
-//! (`Absent` is the truth, and a teardown must be able to finish), its
-//! masquerade/forward dataplane is unconditional, so
-//! [`GatewayProvider::commit`]'s default (a no-op `Ok`) is honest for it,
-//! while the two `ensure_*` default to a clear "not supported by this
-//! provider" instead of pretending to do nothing useful.
-//! `crates/providers/delonix-opnsense` (also Phase 2) is the first provider
-//! that overrides all five for real, against what Phase 0 measured.
+//! The `native` provider Phase 1 registered is gone: it refused every
+//! `ensure_*`, so a document naming it could never be applied, and the
+//! native masquerade/forward dataplane it stood for is unconditional and
+//! never needed a port. The registry starts empty; a gateway is chosen by
+//! the name of a provider something registered.
 
 use crate::error::{Error, Result};
 use crate::ownership::{OwnerMark, RemoveOutcome};
-
-/// The canonical id of the always-registered native provider.
-pub const NATIVE_ID: &str = "native";
 
 /// What kind of value [`GatewayAlias::content`] holds. Only the two shapes
 /// a v1 client needs (ADR-0051 Phase 0 measured `add_item`'s flat form for
@@ -137,7 +108,7 @@ pub trait GatewayProvider {
     /// `true` if this backend can be used right now.
     ///
     /// Never a network round trip — the same contract
-    /// [`delonix_vm::VmBackend::available`] documents for the same reason:
+    /// `VmBackend::available` documents for the same reason:
     /// a remote backend (OPNsense) answers this from what its registration
     /// already knows, not by connecting to the appliance.
     fn available(&self) -> bool;
@@ -145,68 +116,44 @@ pub trait GatewayProvider {
     /// Ensures an address alias exists, by name, OWNED by `owner`: one
     /// found under that name without the mark is refused
     /// (`RemoteObjectNotOwned`), one with the mark whose content differs is
-    /// refused too (`RemoteObjectDrifted`). Default: refuses — a provider
-    /// with no alias concept (the native one) has nothing honest to do here.
+    /// refused too (`RemoteObjectDrifted`).
     fn ensure_alias(
         &self,
         alias: &GatewayAlias,
         owner: &OwnerMark,
-    ) -> delonix_model::Result<EnsureOutcome> {
-        let _ = (alias, owner);
-        Err(unsupported(self.id(), "ensure_alias"))
-    }
+    ) -> delonix_model::Result<EnsureOutcome>;
 
     /// Removes an alias by name — only if `owner` owns it; anything else
     /// under that name is left alone and reported
-    /// ([`RemoveOutcome::NotOwned`]). Default: refuses, same reasoning as
-    /// [`ensure_alias`](Self::ensure_alias).
-    fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
-        let _ = (name, owner);
-        Err(unsupported(self.id(), "remove_alias"))
-    }
+    /// ([`RemoveOutcome::NotOwned`]).
+    fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome>;
 
     /// Ensures a perimeter filter rule exists, by description, owned by
     /// `owner` — the same refusals as [`ensure_alias`](Self::ensure_alias).
-    /// Default: refuses.
     fn ensure_rule(
         &self,
         rule: &GatewayRule,
         owner: &OwnerMark,
-    ) -> delonix_model::Result<EnsureOutcome> {
-        let _ = (rule, owner);
-        Err(unsupported(self.id(), "ensure_rule"))
-    }
+    ) -> delonix_model::Result<EnsureOutcome>;
 
     /// Removes the rules with this description that `owner` owns; one that
-    /// matches without the mark is left alone and reported. Default:
-    /// refuses.
+    /// matches without the mark is left alone and reported.
     fn remove_rule(
         &self,
         description: &str,
         owner: &OwnerMark,
-    ) -> delonix_model::Result<RemoveOutcome> {
-        let _ = (description, owner);
-        Err(unsupported(self.id(), "remove_rule"))
-    }
+    ) -> delonix_model::Result<RemoveOutcome>;
 
     /// Retires `owner` on the provider once a teardown removed everything it
-    /// marked — the label object an OPNsense owner mark lives in. Default:
-    /// `Absent` — a provider whose mark is not an object of its own has
-    /// nothing to retire.
-    fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
-        let _ = owner;
-        Ok(RemoveOutcome::Absent)
-    }
+    /// marked — the label object an OPNsense owner mark lives in.
+    fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome>;
 
     /// Refuses (`RemoteForeignPending`) when the provider already carries
     /// staged changes nobody applied — called BEFORE the first staged write,
     /// so a refusal leaves nothing of this engine's behind. The
     /// [`commit`](Self::commit) checks again, for what was staged in
-    /// between. Default: `Ok(())` — a provider with nothing staged, ever,
-    /// has nothing pending.
-    fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
-        Ok(())
-    }
+    /// between.
+    fn check_no_foreign_pending(&self) -> delonix_model::Result<()>;
 
     /// Activates whatever [`ensure_alias`](Self::ensure_alias)/
     /// [`ensure_rule`](Self::ensure_rule)/removal staged.
@@ -215,71 +162,19 @@ pub trait GatewayProvider {
     /// the whole `config.xml` — must refuse (`RemoteForeignPending`) when
     /// something staged is not what THIS value staged, before applying.
     ///
-    /// Default: `Ok(())` — a provider with no alias/rule concept has
-    /// nothing staged, ever, so there is nothing dishonest about this one
-    /// default being a no-op instead of a refusal (unlike the other four).
     /// OPNsense's own `commit` is synchronous (ADR-0051 Phase 0, measured:
     /// `firewall/filter/apply` returns in under a second with the reload's
     /// own stdout, never a task id to poll) — a provider that DOES have
     /// something to stage is expected to make this call itself, in this
     /// method, not return early and leave the caller polling.
-    fn commit(&self) -> delonix_model::Result<()> {
-        Ok(())
-    }
-}
-
-/// Fail-closed error for a provider that does not implement an operation —
-/// every default method above returns this. Mirrors
-/// `delonix_vm::unsupported_pause`/`unsupported_snapshot` exactly, down to
-/// returning the SHARED type directly rather than this crate's own
-/// `Result`: the trait's methods live on `delonix_model::Result`, the same
-/// reason `VmBackend`'s do.
-fn unsupported(provider: &str, op: &str) -> delonix_model::Error {
-    Error::UnsupportedByGatewayProvider(format!(
-        "{op} is not supported by the '{provider}' gateway provider"
-    ))
-    .into()
-}
-
-/// The native provider: the masquerade/forward dataplane every network
-/// already has, unconditionally. Registering nothing else leaves the engine
-/// exactly as it behaves today — this type is the reason Phase 1 is a
-/// zero-behavior-change scaffold rather than a new default.
-struct NativeGatewayProvider;
-
-impl GatewayProvider for NativeGatewayProvider {
-    fn id(&self) -> &'static str {
-        NATIVE_ID
-    }
-    fn available(&self) -> bool {
-        true
-    }
-    /// Nothing to remove, truthfully: the native provider has no alias to
-    /// have created. Refusing here instead would make the teardown of a
-    /// `kind: NetworkGateway` whose apply the native provider refused
-    /// impossible — its record is saved before the first remote write.
-    fn remove_alias(
-        &self,
-        _name: &str,
-        _owner: &OwnerMark,
-    ) -> delonix_model::Result<RemoveOutcome> {
-        Ok(RemoveOutcome::Absent)
-    }
-    /// Same as [`remove_alias`](Self::remove_alias): no rule ever exists here.
-    fn remove_rule(
-        &self,
-        _description: &str,
-        _owner: &OwnerMark,
-    ) -> delonix_model::Result<RemoveOutcome> {
-        Ok(RemoveOutcome::Absent)
-    }
+    fn commit(&self) -> delonix_model::Result<()>;
 }
 
 /// Builds a [`GatewayProvider`], or reports why it could not.
 ///
 /// `Send + Sync` because the table is process-wide. It constrains the
 /// CLOSURE, not the trait — a provider implementation is untouched by this
-/// (same reasoning as `delonix_vm::BackendFactory`).
+/// (same reasoning as the VM backend factory).
 pub type GatewayProviderFactory = Box<dyn Fn() -> Result<Box<dyn GatewayProvider>> + Send + Sync>;
 
 /// One provider this build knows about: its canonical id, the aliases
@@ -302,23 +197,15 @@ impl std::fmt::Debug for GatewayProviderRegistration {
     }
 }
 
-fn builtin_gateway_providers() -> Vec<GatewayProviderRegistration> {
-    vec![GatewayProviderRegistration {
-        id: NATIVE_ID,
-        aliases: &[],
-        new: Box::new(|| Ok(Box::new(NativeGatewayProvider))),
-    }]
-}
-
 /// Every registered provider. A map populated at startup, not a plugin
-/// system (same as `delonix_vm::BACKENDS`): nothing loads a `.so`, and the
+/// system (same as the VM backend registry): nothing loads a `.so`, and the
 /// only way in is [`register_gateway_provider`], called by a process that
 /// already linked the provider's crate.
 static GATEWAY_PROVIDERS: std::sync::OnceLock<std::sync::RwLock<Vec<GatewayProviderRegistration>>> =
     std::sync::OnceLock::new();
 
 fn gateway_providers() -> &'static std::sync::RwLock<Vec<GatewayProviderRegistration>> {
-    GATEWAY_PROVIDERS.get_or_init(|| std::sync::RwLock::new(builtin_gateway_providers()))
+    GATEWAY_PROVIDERS.get_or_init(|| std::sync::RwLock::new(Vec::new()))
 }
 
 fn with_gateway_providers<T>(f: impl FnOnce(&[GatewayProviderRegistration]) -> T) -> T {
@@ -334,7 +221,7 @@ fn with_gateway_providers<T>(f: impl FnOnce(&[GatewayProviderRegistration]) -> T
 ///
 /// **Nothing here does I/O**: the factory is not called, so registering a
 /// node that is unreachable costs nothing until someone actually selects it
-/// (same contract as `delonix_vm::register_backend`).
+/// (same contract as the VM backend registry).
 ///
 /// Refused, rather than accepted and left to surprise someone later: an id
 /// that is empty, or an id/alias that collides with a DIFFERENT provider
@@ -396,26 +283,41 @@ mod tests {
             fn available(&self) -> bool {
                 true
             }
+            fn ensure_alias(
+                &self,
+                _: &GatewayAlias,
+                _: &OwnerMark,
+            ) -> delonix_model::Result<EnsureOutcome> {
+                Ok(EnsureOutcome::Created)
+            }
+            fn remove_alias(&self, _: &str, _: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+                Ok(RemoveOutcome::Absent)
+            }
+            fn ensure_rule(
+                &self,
+                _: &GatewayRule,
+                _: &OwnerMark,
+            ) -> delonix_model::Result<EnsureOutcome> {
+                Ok(EnsureOutcome::Created)
+            }
+            fn remove_rule(&self, _: &str, _: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+                Ok(RemoveOutcome::Absent)
+            }
+            fn release_owner(&self, _: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+                Ok(RemoveOutcome::Absent)
+            }
+            fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn commit(&self) -> delonix_model::Result<()> {
+                Ok(())
+            }
         }
         GatewayProviderRegistration {
             id,
             aliases,
             new: Box::new(move || Ok(Box::new(Fake(id)))),
         }
-    }
-
-    #[test]
-    fn native_is_registered_by_default() {
-        // Not "the only one registered": another test in this suite may have
-        // added more to the process-wide list before this one runs. Only the
-        // essential claim is checked — that "native" is there and answers
-        // available().
-        assert!(gateway_provider_ids().contains(&NATIVE_ID));
-        let native = gateway_provider_for(NATIVE_ID)
-            .expect("native must resolve")
-            .expect("native never fails to build");
-        assert_eq!(native.id(), NATIVE_ID);
-        assert!(native.available());
     }
 
     #[test]
@@ -443,65 +345,16 @@ mod tests {
         assert_eq!(ids.len(), 1, "a reconfigured id does not leave two entries");
     }
 
+    /// ADR-0059 F2b: nothing is registered until something registers it;
+    /// the name `native` resolves to nothing.
+    #[test]
+    fn native_is_no_longer_a_provider() {
+        assert!(gateway_provider_for("native").is_none());
+        assert!(!gateway_provider_ids().contains(&"native"));
+    }
+
     #[test]
     fn gateway_provider_for_returns_none_for_an_unknown_name() {
         assert!(gateway_provider_for("this-does-not-exist-at-all").is_none());
-    }
-
-    fn sample_alias() -> GatewayAlias {
-        GatewayAlias {
-            name: "example".into(),
-            kind: AliasKind::Host,
-            content: vec!["10.0.0.1".into()],
-            description: "test".into(),
-        }
-    }
-
-    fn sample_rule() -> GatewayRule {
-        GatewayRule {
-            description: "test".into(),
-            source: "example".into(),
-            destination: "10.0.0.0/24".into(),
-            protocol: Some("TCP".into()),
-        }
-    }
-
-    #[test]
-    fn native_refuses_to_ensure_and_has_nothing_to_remove() {
-        let native = gateway_provider_for(NATIVE_ID)
-            .expect("native must resolve")
-            .expect("native never fails to build");
-        let owner = OwnerMark::new("dlx-0123456789abcdef").unwrap();
-        let err = native.ensure_alias(&sample_alias(), &owner).unwrap_err();
-        assert!(err.to_string().contains("ensure_alias"));
-        assert!(err.to_string().contains(NATIVE_ID));
-        assert!(native.ensure_rule(&sample_rule(), &owner).is_err());
-        // Removing is answered, not refused: nothing can exist to remove.
-        assert_eq!(
-            native.remove_alias("example", &owner).unwrap(),
-            RemoveOutcome::Absent
-        );
-        assert_eq!(
-            native.remove_rule("test", &owner).unwrap(),
-            RemoveOutcome::Absent
-        );
-        native
-            .check_no_foreign_pending()
-            .expect("nothing is ever staged on the native provider");
-    }
-
-    #[test]
-    fn native_commit_is_a_no_op_not_a_refusal() {
-        let native = gateway_provider_for(NATIVE_ID)
-            .expect("native must resolve")
-            .expect("native never fails to build");
-        native.commit().expect("nothing staged is not an error");
-    }
-
-    #[test]
-    fn unsupported_names_the_provider_and_the_operation() {
-        let e = super::unsupported("acme", "ensure_rule").to_string();
-        assert!(e.contains("ensure_rule"));
-        assert!(e.contains("acme"));
     }
 }

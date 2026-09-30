@@ -3945,14 +3945,28 @@ spec:
   provider: native
   aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"] }]
 YAML
-check "NetworkGateway no provider native recusa (não tem aliases nem regras)" fail \
+check "NetworkGateway num provider que ninguém registou recusa (o native saiu no F2b)" fail \
   "$BIN" apply -f "$RWORK/gw-native.yaml"
-# O registo é gravado ANTES da primeira escrita remota (write-ahead), por isso
-# um apply recusado deixa-o; o delete tem de o conseguir tirar.
+# O provider é resolvido ANTES de o registo ser gravado: um nome que ninguém
+# registou é recusado sem deixar registo, e o delete termina na mesma.
 check "delete de um NetworkGateway recusado termina" ok \
   "$BIN" delete networkgateways "$GW-native"
 check "... e o registo desaparece" ok bash -c \
   "! '$BIN' get networkgateways 2>/dev/null | grep -q '$GW-native'"
+# Um registo que um build anterior ao F2b deixou, a nomear o `native`: esse
+# provider recusava todas as escritas, logo nada remoto tem a marca dele, e o
+# delete tira o registo sem precisar de provider nenhum. Fabricado à mão, e só
+# num root isolado — num root partilhado seria escrever no estado real.
+if [[ "$E2E_ISOLATED" == "1" ]]; then
+  mkdir -p "$DELONIX_ROOT/network-gateways"
+  printf '{"name":"%s","provider":"native","aliases":[{"name":"dlx_%s","kind":"host","content":["10.99.0.1"]}],"owner":"dlx-0123456789abcdef"}\n' \
+    "$GW-legacy" "$PFX" > "$DELONIX_ROOT/network-gateways/$GW-legacy.json"
+  check "um registo antigo que nomeia o native apaga-se sem provider" ok \
+    "$BIN" delete networkgateways "$GW-legacy"
+  check "... e sai do disco" ok test ! -e "$DELONIX_ROOT/network-gateways/$GW-legacy.json"
+else
+  skip "um registo antigo que nomeia o native apaga-se sem provider" "exige um root isolado (E2E_SHARED_STATE=1)"
+fi
 
 cat > "$RWORK/zone.yaml" <<YAML
 apiVersion: networking.delonix.io/v1alpha1

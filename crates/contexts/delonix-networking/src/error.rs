@@ -15,8 +15,10 @@ pub enum Error {
     #[error("{0}")]
     GatewayProviderRegistrationRefused(String),
 
-    /// A [`crate::gateway::GatewayProvider`] operation the provider does not
-    /// implement — every default method (ADR-0051 Phase 2) returns this.
+    /// A gateway operation a provider does not implement. No provider raises
+    /// it since ADR-0059 F2b took the refusing default bodies away; the
+    /// variant and its number stay because `DX-1342` is published in the
+    /// dictionary until D5's DX-C380 block renumbers the envelope.
     #[error("{0}")]
     UnsupportedByGatewayProvider(String),
 
