@@ -688,3 +688,34 @@ is checked against the same golden table.
   workload with `enabled: false` has no isolation guardrail. The IR reproduces that (two open
   policies). ADR invariant 3 says the guardrail's absence is an error; making it one changes what
   a disabled firewall means and is its own decision.
+
+## Addendum 2026-09-30 — F3b: the nft lowering, and the holder chain built from it
+
+- **`delonix_sdn::policy_nft::chain_body`** renders a `TargetPolicy` as the lines of one address's
+  part of the workload chain. `infra::fw_chain_body` is now parse, then render: the holder chain is
+  built from the IR and nothing else. `validate_container_fw` runs the same translation last, so a
+  record the IR or the lowering refuses is refused on the host and in the holder, before `nft -f`,
+  with the previous ruleset kept.
+- **What the holder chain cannot hold is refused by name**: ICMP (`proto` or type), a selector or
+  namespace peer on a user rule, a logged rule, a stateless rule, an egress guardrail. None of them
+  can come from a `ContainerFw` today; the refusals exist so a later IR producer cannot reach the
+  chain with a meaning the text would drop.
+- **Three proofs, each verified to go red under a mutation**:
+  - the lines equal the old generator's, kept verbatim as a test oracle, for every golden record
+    and five shapes the table does not cover;
+  - an evaluator over the rendered TEXT (prologue plus body, every token parsed, an unknown token
+    fails the test) gives each of the 24 golden cells the reference verdict. Anchoring the egress
+    default on `daddr` turns it red;
+  - `nft --check` accepts every rendered chain (via `unshare -rn`; `counter acept` turns it red).
+    The hosted CI runner blocks unprivileged user namespaces, so there this check returns without
+    running; it ran here with nftables 1.0.9.
+- **Two differences from the old text, and neither changes a verdict.** (1) Inbound and outbound
+  rules are no longer interleaved in record order; each direction keeps its own order, which is the
+  one that decides — an inbound line anchors on `ip daddr <workload>`, an outbound one on
+  `ip saddr <workload>`, and a forwarded packet never carries the workload's address at both ends.
+  (2) A record with `namespace: ""` names the `default` set, as the attach side always did; the old
+  generator hashed `""`, a set no workload joins. Serde never produces that record.
+- **The reversed port range is now refused by `validate_container_fw`** (F3a's first open
+  difference), because validation goes through the parse. Measured before deciding: nft refuses
+  `90-80` itself («Range has zero or negative size»), so the only change is where and how clearly
+  the refusal is reported. The disabled-record guardrail (F3a's second difference) is unchanged.
