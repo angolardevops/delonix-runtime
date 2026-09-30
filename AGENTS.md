@@ -3051,6 +3051,53 @@ ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa 
 ainda estava a correr (o `run -d` devolve antes dela, de propósito). O que corrigiu foi contar
 os donos de TODOS os ficheiros um minuto depois, em vez de olhar para dois.
 
+## O template `odoo` não arrancava: o preflight de limites não via o cgroup2 numa rede própria (2026-09-30)
+
+Reportado como «`delonix init` falha a arrancar um projecto Odoo». Reproduzido com raiz e rede
+isoladas: `init -t odoo` gera bem, o `build` passa, e o `stack apply` pára no container com
+`-m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation` — numa sessão
+cujo `system setup` diz `limits: APPLY`. O Odoo é o único template com `network:`, e é isso que
+o separa dos outros dez.
+
+- **A causa é a 2.ª passagem do `--net <rede>`/`--pod`**: corre sob `ip netns exec`, que monta
+  um sysfs novo sobre `/sys` e deixa `/sys/fs/cgroup` com ZERO entradas (medido). O `spawn` já
+  sabia (`reveal_cgroup2_if_masked`, com o comentário «o que falta é visibilidade, não
+  permissão»); a sonda do preflight (`cgroup_limits_apply`, #307) e a irmã `leaf_controllers`
+  vieram depois e nunca destaparam. Com a válvula `DELONIX_ALLOW_UNENFORCED_LIMITS=1` o mesmo
+  container ficava com `memory.max`/`cpu.max` aplicados — logo a recusa era um falso negativo.
+  As duas sondas destapam agora antes de olhar (no-op onde o cgroup2 já se vê).
+- **Todos os checks de limites do `scripts/e2e.sh` usavam `--net none`**, por isso nenhum
+  passava pela 2.ª passagem. O gate novo corre `-m 64M --net <rede>` e lê o `memory.max` do
+  cgroup real; binário antigo rc=1 sem cgroup, corrigido rc=0 e `67108864`.
+- **A mensagem que o utilizador via escondia a causa**: `did not start inside the network
+  '211be9940c59' (exit Some(69))` — um hash de netns que não está em manifesto nenhum, um
+  `Option` em Debug, e o exit 69 do processo interior achatado em 1. O `netns_start_error`
+  nomeia a rede do utilizador e devolve a classe que a passagem interior decidiu.
+- **Odoo 20 passa a ser a omissão** (`template.meta` `version=20.0`; `odoo:20.0` existe no
+  Docker Hub). O Odoo 20 exige PostgreSQL ≥ 16 (`MIN_PG_VERSION` do `release.py`), que é o
+  `postgres:16` do manifesto. `without_demo = all` passou a `True`: desde o 19 a opção é
+  booleana e `all` só sobrevive como aviso «invalid boolean»; `True` quer dizer o mesmo no 18.
+- **`fastapi` é o nome do template que se chamava `python`** — sempre gerou um serviço FastAPI.
+  `python` continua a responder como alias silencioso (`TEMPLATE_ALIASES`, a regra dos Kinds
+  renomeados), e há teste a exigir que os dois produzem o mesmo projecto. A deteção do `init`
+  (`pyproject.toml`/`requirements.txt`) aponta para `fastapi`. Omissão `0.142` (a de antes,
+  `0.115`, tinha um ano). **O grupo de dev leva `httpx` E `httpx2`**, medido: o Starlette actual
+  deprecia `httpx` (aviso em cada `pytest`), e o Starlette de um `-v 0.116` não importa outra
+  coisa — só `httpx2` partia os testes de um projecto com `-v` antigo.
+- **Validado ao vivo**: Odoo 18 (o caso reportado) `stack apply` → `/web/health` `pass` e
+  `psql` do container Odoo ao `db` a responder PostgreSQL 16.15; FastAPI 0.142.2 e 0.116.2 com
+  `uv sync`, `ruff`, `pytest` e o servidor a responder `/api/v1/health/live`.
+- **Custo medido e NÃO mexido**: o build rootless do Odoo leva ~20 min neste host carregado. Cada
+  `COPY` (mesmo de um ficheiro) faz snapshot do rootfs inteiro para a cache de build
+  (`cp -a --reflink=auto`, e ext4 não tem reflink) — 2–4 min e ~2 GB por instrução numa imagem de
+  2 GB. É o compromisso já escrito no topo do `cmd/build.rs`; um formato de cache por diferença é
+  trabalho próprio.
+- **Armadilha do próprio investigador**: recompilar o binário enquanto um `build` corre faz o
+  `__buildtar` (que re-executa `current_exe()`) falhar sem mensagem — o `execv` de um ficheiro
+  substituído. A primeira reprodução «falhou» por isso. Para medir, copiar o binário para um
+  caminho estável e nunca o sobrescrever enquanto algo dele corre (o holder também o usa: `cp`
+  sobre ele dá `Text file busy`).
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

@@ -4177,6 +4177,16 @@ fn parse_mem_bytes(s: &str) -> u64 {
 /// `cluster create`), instead of letting each node re-exec repeat the same warning.
 pub fn cgroup_limits_apply() -> bool {
     if is_rootless() {
+        // **Uncover the cgroup2 first, as `setup_cgroup` does.** The 2nd pass of
+        // `--net <custom>`/`--pod` runs under `ip netns exec`, whose fresh sysfs
+        // leaves `/sys/fs/cgroup` EMPTY. Asked from there, this probe answered «no
+        // delegation» on a session that has it, and the `-m`/`--cpus` preflight
+        // refused the container (exit 69) — while the very same request, run with
+        // the escape hatch, got `memory.max`/`cpu.max` applied by `spawn`, which
+        // uncovers before it looks. Measured 2026-09-30: every container with a
+        // limit on a custom network was refused, the `odoo` template's stack among
+        // them. No-op wherever the cgroup2 is already visible.
+        reveal_cgroup2_if_masked();
         // BUG FIXED HERE: this only ever tested `delonix.slice`, the ROOT-mode
         // base. In rootless — the normal mode — `setup_cgroup_delegated` uses the
         // CURRENT cgroup instead, so the probe was answering about a path the
@@ -4605,6 +4615,9 @@ pub fn leaf_controllers() -> Vec<String> {
         .map(|t| parse_controller_list(&t))
         .unwrap_or_default();
     }
+    // Same blind spot as `cgroup_limits_apply`: under `ip netns exec` the
+    // cgroup2 is covered, and every controller would read as absent.
+    reveal_cgroup2_if_masked();
     let Some(cur) = current_cgroup_v2() else {
         return Vec::new();
     };

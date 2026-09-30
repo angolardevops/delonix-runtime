@@ -1981,6 +1981,25 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
     fi
     "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
   done
+  # O MESMO `-m` numa rede própria. Todos os checks de limites desta bateria
+  # corriam com `--net none`, e foi por aí que isto passou: a 2.ª passagem do
+  # `--net <rede>` corre sob `ip netns exec`, cujo sysfs novo tapa o cgroup2, e
+  # a sonda do preflight lia um `/sys/fs/cgroup` vazio como «sem delegação» —
+  # o container era RECUSADO (exit 69) numa sessão com delegação, enquanto o
+  # `spawn` (que destapa antes de olhar) aplicava o limite sem problema.
+  # Medido 2026-09-30 com o template `odoo`, o único com `network:`.
+  _ln="${PFX}limnet"; _lc="${PFX}limnetc"
+  "$BIN" container rm -f "$_lc" >/dev/null 2>&1 || true
+  if "$BIN" network create "$_ln" >/dev/null 2>&1; then
+    check "-m 64M numa rede própria arranca (não é recusado)" ok \
+      "$BIN" container run -d --name "$_lc" --net "$_ln" -m 64M "$IMG" sleep 60
+    check "-m 64M numa rede própria chega ao kernel como 67108864" ok \
+      bash -c "[ \"\$(_cg_of $_lc memory.max)\" = 67108864 ]" || true
+    "$BIN" container rm -f "$_lc" >/dev/null 2>&1 || true
+    "$BIN" network rm "$_ln" >/dev/null 2>&1 || true
+  else
+    skip "-m 64M numa rede própria" "network create falhou neste host"
+  fi
   # A outra metade: o que não se consegue ler é RECUSADO antes de criar seja o
   # que for. `64MB` e `99999999999T` estão aqui de propósito — o primeiro é a
   # grafia que toda a gente tenta, o segundo saturava para u64::MAX, que escrito

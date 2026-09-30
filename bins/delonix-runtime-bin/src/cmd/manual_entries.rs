@@ -1023,7 +1023,7 @@ pub static ENTRIES: &[Entry] = &[
             ("override the guess when the detection picked the broader rule", "delonix init -t go"),
             ("regenerate on top of files that already exist", "delonix init --force"),
             ("adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched", "delonix init ./my-existing-app"),
-            ("pick the template's version — an image tag for `odoo`", "delonix init -t odoo -v 18.0"),
+            ("pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)", "delonix init -t odoo -v 19.0"),
             ("...or a bare major/major.minor for `django`, pinned as `==X.Y.*`", "delonix init -t django -v 5.2 myapp"),
             ("...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`", "delonix init -t laravel -v 12.5 myapp"),
             ("...or a Go toolchain version — this template has no framework to pin", "delonix init -t go -v 1.22 myapp"),
@@ -2041,7 +2041,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("everything a manifest declares, in dependency order", "delonix stack apply -f delonix-manifest.yaml"),
             ("what would change, before anything changes", "delonix stack plan -f prod.yaml"),
-            ("a complete project, files already filled in", "delonix stack init -t python"),
+            ("a complete project, files already filled in", "delonix stack init -t fastapi"),
         ],
         see_also: &["container apply", "compose up", "cluster apply", "manifest schema"],
     },
@@ -2088,7 +2088,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "stack init",
         group: "Create",
         examples: &[
-            ("a complete Python project — Delonixfile, manifest and README, runnable without editing anything", "delonix stack init -t python"),
+            ("a complete FastAPI project — Delonixfile, manifest and README, runnable without editing anything", "delonix stack init -t fastapi"),
             ("which templates exist", "delonix stack init --template list"),
             ("scaffold into a directory of its own, with the name and image you want", "delonix stack init ./api --name api --image nginx:alpine"),
             ("generate, build and wait until it answers healthy", "delonix stack init -t go --up"),
