@@ -50,6 +50,17 @@ The build allows 60 minutes. What it pins, and checks before using:
 | The `deb.freepbx.org` apt key | fingerprint `991C357C8A359D0382BC6E87C4DFE68FCE6DE186` | after the installer, which fetches it over plain http |
 | Asterisk | major `22` | read from the running Asterisk; another major fails the build |
 
+**"Open-source only" is made true by this build, not by the vendor's flag.** Measured on
+2026-09-30: the installer's `--opensourceonly` leaves six ionCube-encoded commercial
+modules on disk (`cos`, `endpoint`, `oracle_connector`, `pms`, `restapps`, `sysadmin`) and
+encoded AGI scripts in `agi-bin`, and on the way it aborts twice — once when
+`oracle_connector` cannot uninstall, once when `fwconsole ma refreshsignatures` meets the
+encoded code. The build applies two one-line patches to the pinned installer (each checked
+to touch exactly one line) so it reaches its end, then removes every module whose
+`module.xml` says `Commercial`, plus `firewall` (which needs the commercial `sysadmin`), and
+the encoded AGI scripts. It then **fails** if any commercial module or any ionCube-encoded
+file is left, or if `fwconsole ma refreshsignatures` does not succeed.
+
 **What is NOT pinned:** the FreePBX modules. The vendor's installer runs
 `fwconsole ma upgradeall`, so two builds can carry different module versions. The
 list each build got is in `/etc/delonix/freepbx-modules.txt` inside the image.

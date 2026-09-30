@@ -75,22 +75,34 @@ write_files:
       echo "@FREEPBX_INSTALLER_SHA256@  /root/sng_freepbx_debian_install.sh" | sha256sum -c - \
         || { echo "!! FreePBX installer checksum mismatch"; exit 1; }
 
-      # ONE patch to the vendor's script, applied after the checksum and
-      # checked to touch exactly one line. Measured on the first build
-      # (2026-09-30): with --opensourceonly the installer pipes every
-      # commercial module into `xargs fwconsole ma -f remove`, and the vendor's
-      # own `oracle_connector` fails its un-installation scripts -- under the
-      # installer's `set -e` that aborts the whole install. The line right
-      # after it already does `fwconsole ma -f remove firewall ... || true`;
-      # this gives the same tolerance to the line before, and the result is
-      # CHECKED below instead of trusted: no commercial module may be left
-      # enabled.
-      REMOVE_LINE='xargs -t -I {} fwconsole ma -f remove {} >> "$log"$'
-      [ "$(grep -cF 'xargs -t -I {} fwconsole ma -f remove {} >> "$log"' /root/sng_freepbx_debian_install.sh)" = 1 ] \
-        || { echo "!! the installer's commercial-module removal line is not where the patch expects it"; exit 1; }
-      sed -i "s#$REMOVE_LINE#& || true#" /root/sng_freepbx_debian_install.sh
-      [ "$(grep -cF 'fwconsole ma -f remove {} >> "$log" || true' /root/sng_freepbx_debian_install.sh)" = 1 ] \
-        || { echo "!! the installer patch did not apply"; exit 1; }
+      # TWO one-line patches to the vendor's script, applied after the
+      # checksum, each checked to touch exactly one line. Both only let the
+      # installer reach its end; neither is trusted to have done the job --
+      # the cleanup after the installer does it, and PROVES it.
+      #
+      # Measured on the builds of 2026-09-30, with --opensourceonly:
+      #  1. the installer pipes every commercial module into
+      #     `xargs fwconsole ma -f remove`; `oracle_connector` fails its
+      #     un-installation scripts and `set -e` aborts the install. The very
+      #     next line already does `... remove firewall ... || true`.
+      #  2. later steps put six ionCube-encoded commercial modules back on disk
+      #     (cos endpoint oracle_connector pms restapps sysadmin), so the last
+      #     step, `fwconsole ma refreshsignatures`, dies on "the ionCube Loader
+      #     for PHP needs to be installed". The vendor wraps that call in
+      #     `set +e` to tolerate it -- and its own `trap ... ERR` fires first
+      #     and exits. `|| true` puts the call where the trap does not fire.
+      I=/root/sng_freepbx_debian_install.sh
+      patch_line() {  # patch_line <fixed text that must occur once> <sed expr> <fixed text after>
+        [ "$(grep -cF -- "$1" "$I")" = 1 ] || { echo "!! installer patch: '$1' is not there exactly once"; exit 1; }
+        sed -i "$2" "$I"
+        [ "$(grep -cF -- "$3" "$I")" = 1 ] || { echo "!! installer patch did not apply: $2"; exit 1; }
+      }
+      patch_line 'xargs -t -I {} fwconsole ma -f remove {} >> "$log"' \
+                 's#xargs -t -I {} fwconsole ma -f remove {} >> "$log"$#& || true#' \
+                 'fwconsole ma -f remove {} >> "$log" || true'
+      [ "$(grep -cx '    refresh_signatures' "$I")" = 1 ] || { echo "!! installer patch: the refresh_signatures call is not there exactly once"; exit 1; }
+      sed -i 's/^    refresh_signatures$/    refresh_signatures || true/' "$I"
+      [ "$(grep -cx '    refresh_signatures || true' "$I")" = 1 ] || { echo "!! installer patch did not apply: refresh_signatures"; exit 1; }
 
       # --opensourceonly: no commercial modules (and, with them, no sysadmin
       #   or Responsive Firewall -- fail2ban stays). --skipversion: the
@@ -123,19 +135,40 @@ write_files:
       [ -n "$FW_VER" ] || { echo "!! could not read the FreePBX framework version"; exit 1; }
       mkdir -p /etc/delonix
 
-      # The other half of the patch above: whatever the vendor's removal left
-      # behind gets a second try, then a disable; an ENABLED commercial module
-      # fails the build.
-      commercial() { fwconsole ma list 2>/dev/null | awk -F'|' '/Commercial/ {gsub(/ /,"",$2); print $2}'; }
-      LEFT=$(commercial | tr '\n' ' ')
-      for m in $LEFT; do
-        echo "==> commercial module still present after the installer: $m"
-        fwconsole ma -f remove "$m" || fwconsole ma -f disable "$m" || true
+      # ------------------------------------------------------------------
+      #  "Open-source only", made true here -- the installer's own
+      #  --opensourceonly leaves commercial, ionCube-encoded code behind (see
+      #  the patches above). Found by license in each module.xml, not by a
+      #  list written today; `firewall` goes too, as the vendor intends: it
+      #  requires /usr/lib/sysadmin/includes.php, which went with sysadmin17.
+      # ------------------------------------------------------------------
+      MODS=/var/www/html/admin/modules
+      COMMERCIAL=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | awk -F/ '{print $(NF-1)}' | tr '\n' ' ')
+      echo "==> commercial modules on disk after the installer: ${COMMERCIAL:-none}"
+      for m in $COMMERCIAL firewall; do
+        fwconsole ma -f remove "$m" >/dev/null 2>&1 || true
+        # An encoded module cannot run its own uninstaller without ionCube:
+        # take it out of the module table and off the disk.
+        if [ -d "$MODS/$m" ]; then
+          printf "DELETE FROM modules WHERE modulename='%s';\n" "$m" | mysql asterisk
+          rm -rf "${MODS:?}/$m"
+          echo "    removed by hand: $m"
+        fi
       done
-      ENABLED=$(fwconsole ma list 2>/dev/null | awk -F'|' '/Commercial/ && /Enabled/ {gsub(/ /,"",$2); print $2}' | tr '\n' ' ')
-      [ -z "${ENABLED// /}" ] || { echo "!! commercial modules still enabled: $ENABLED"; exit 1; }
-      LEFT_AFTER=$(commercial | tr '\n' ' ')
-      echo "==> commercial modules left (none enabled): ${LEFT_AFTER:-none}"
+      # Encoded AGI scripts the commercial modules left in agi-bin.
+      ENC_AGI=$(grep -lI 'ionCube Loader' /var/lib/asterisk/agi-bin/* 2>/dev/null | tr '\n' ' ')
+      [ -n "${ENC_AGI// /}" ] && { echo "==> removing encoded AGI scripts: $ENC_AGI"; rm -f $ENC_AGI; }
+      fwconsole chown >/dev/null 2>&1 || true
+      fwconsole reload
+
+      # The proofs, each of which fails the build.
+      LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ')
+      [ -z "${LEFT// /}" ] || { echo "!! commercial modules still on disk: $LEFT"; exit 1; }
+      ENC=$(grep -rlI 'ionCube Loader' /var/www/html /var/lib/asterisk 2>/dev/null | head -5 | tr '\n' ' ')
+      [ -z "${ENC// /}" ] || { echo "!! ionCube-encoded code still in the image: $ENC"; exit 1; }
+      # The step the vendor gave up on: module signatures must verify.
+      fwconsole ma refreshsignatures || { echo "!! fwconsole ma refreshsignatures failed after the cleanup"; exit 1; }
+      echo "==> no commercial or encoded code left; module signatures refreshed"
       fwconsole ma list > /etc/delonix/freepbx-modules.txt 2>&1 || true
 
       # The AMI secret and the admin login are rotated on each clone's first
@@ -152,8 +185,9 @@ write_files:
         echo "  \"apt_key_fingerprint\": \"@FREEPBX_KEY_FPR@\","
         echo "  \"debian_build\": \"@DEBIAN_BUILD@\","
         echo "  \"modules\": \"open-source only\","
-        echo "  \"commercial_modules_left_disabled\": \"${LEFT_AFTER% }\","
-        echo "  \"installer_patch\": \"commercial-module removal tolerates a failing module (oracle_connector)\","
+        echo "  \"commercial_modules_removed\": \"${COMMERCIAL% } firewall\","
+        echo "  \"encoded_agi_removed\": \"$(for f in $ENC_AGI; do basename "$f"; done | tr '\n' ' ' | sed 's/ $//')\","
+        echo "  \"installer_patches\": \"2 one-line (commercial removal, refresh_signatures): let it finish; the cleanup is ours and checked\","
         echo "  \"web_port\": 80,"
         echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
         echo "  \"image_revision\": @IMAGE_REV@"
