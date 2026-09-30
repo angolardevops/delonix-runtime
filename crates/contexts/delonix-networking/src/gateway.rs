@@ -2,7 +2,7 @@
 //! multi-WAN, perimeter filtering — reached by an appliance like OPNsense
 //! over its own API (ADR-0051).
 //!
-//! **Deliberately not the same thing as [`crate::infra::apply_firewall`]** /
+//! **Deliberately not the same thing as `delonix_sdn::infra::apply_firewall`** /
 //! `delonix_compute::ports::NetworkProvider::apply_firewall`, which is
 //! per-workload nftables rules and is always native: `FirewallPerWorkload`/
 //! `FirewallDefaultDeny`/`FirewallSourceFiltering`/`FirewallEgressPolicy`

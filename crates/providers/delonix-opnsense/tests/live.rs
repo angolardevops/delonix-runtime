@@ -25,9 +25,11 @@
 //! The appliance must start CLEAN — nothing staged and not applied — or the
 //! first pre-check refuses, which is the behaviour under test, not a flake.
 
+use delonix_networking::gateway::{
+    AliasKind, EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule,
+};
+use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use delonix_opnsense::{Auth, OpnsenseGatewayProvider, Target};
-use delonix_sdn::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
-use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 
 fn target() -> Option<Target> {
     Some(Target {

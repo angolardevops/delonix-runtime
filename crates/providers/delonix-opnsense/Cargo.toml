@@ -8,7 +8,8 @@ repository.workspace = true
 [dependencies]
 delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
-delonix-sdn = { workspace = true }
+# `GatewayProvider` and the owner marks: the networking context (ADR-0059 F2a).
+delonix-networking = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

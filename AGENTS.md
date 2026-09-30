@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 27 crates.
+[README.md](README.md) para a arquitectura dos 28 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -237,7 +237,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 
 ```
 crates/foundation/   delonix-model, delonix-net-rules
-crates/contexts/     delonix-stack, delonix-compute, delonix-node, delonix-security-runtime
+crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
@@ -7025,7 +7025,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (27 crates)
+## Arquitetura (28 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -7037,6 +7037,7 @@ antes de qualquer commit:
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API. Desde a P4b.3b do ADR-0044, também os use cases da VM (`vm::VmEngine`: create, stop, start, status, list, remove e os verbos de dia 2), genéricos sobre o `StateRepository<Vm>` e os portos `VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`; o `delonix-vm` monta o engine e mantém as funções públicas como invólucros. Desde a P4b.4a, também o registo de backends de VM (`vm_registry`: `seed`, `register_backend`, a auto-detecção, `backend_for`, o `mac_for`), semeado pela raiz de composição com os backends em que confia para responder `available()` localmente |
 | `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
+| `delonix-networking` | contexto Networking (`networking.delonix.io`, ADR-0059 D7): as portas de rede por papel (`GatewayProvider`, `NetworkZoneProvider`), os seus registos por nome e as marcas de posse dos objectos remotos. Saíram do `delonix-sdn` no F2a do ADR-0059, com a forma que o `VmBackend` teve na P4b.2; o `delonix-sdn` reexporta os três módulos, e o OPNsense e o Proxmox deixaram de depender do dataplane nativo |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | a raiz de composição das VMs até à P5 (ADR-0044 P4b.4): semeia o registo do compute com os backends locais, monta o `VmEngine` por chamada (`JsonStore`, disco e seed locais, rede) e mantém as funções públicas como invólucros. Desde a P4b.4c já não tem nenhum backend: os dois locais são crates de provider |

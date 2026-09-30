@@ -203,7 +203,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         match provider.ensure_zone(&NetworkZoneSpec { name: name.clone() })? {
             EnsureOutcome::Created => created_zone = true,
             EnsureOutcome::AlreadyPresent if !zone_owned => {
-                return Err(delonix_sdn::Error::RemoteObjectNotOwned(super::po::tf(
+                return Err(delonix_networking::Error::RemoteObjectNotOwned(super::po::tf(
                     "zone '{name}' already exists in the cluster's SDN and this engine did not \
                      create it — refusing to adopt it by name; pick another zone name, or \
                      remove the zone on the cluster if it is really stale",

@@ -7,8 +7,10 @@
 //! adapts that surface to the trait `delonix-sdn::network_zone` defines.
 
 use crate::{Client, Error, Ledger};
-use delonix_sdn::network_zone::{EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec};
-use delonix_sdn::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::network_zone::{
+    EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
+};
+use delonix_networking::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
 
 /// The canonical id this provider registers under, and the only one
 /// [`crate::register_network_zone_provider`] uses (`"pve"` as an alias, the
@@ -66,7 +68,7 @@ pub(crate) fn vnet_drift(row: &serde_json::Value, want: &VNetSpec) -> Vec<String
     out
 }
 
-fn sdn_err(e: delonix_sdn::Error) -> delonix_model::Error {
+fn sdn_err(e: delonix_networking::Error) -> delonix_model::Error {
     delonix_model::Error::from(e)
 }
 
@@ -132,22 +134,26 @@ impl NetworkZoneProvider for ProxmoxNetworkZoneProvider {
         {
             let found = owner.owner_of(row.get("alias").and_then(|v| v.as_str()).unwrap_or(""));
             if found != Owner::Ours {
-                return Err(sdn_err(delonix_sdn::Error::RemoteObjectNotOwned(format!(
-                    "vnet '{}' already exists in the cluster's SDN and is {} — refusing to \
+                return Err(sdn_err(delonix_networking::Error::RemoteObjectNotOwned(
+                    format!(
+                        "vnet '{}' already exists in the cluster's SDN and is {} — refusing to \
                      adopt it by name; pick another vnet name, or remove the one on the \
                      cluster if it is really stale",
-                    vnet.name,
-                    found.describe()
-                ))));
+                        vnet.name,
+                        found.describe()
+                    ),
+                )));
             }
             let drift = vnet_drift(row, vnet);
             if !drift.is_empty() {
-                return Err(sdn_err(delonix_sdn::Error::RemoteObjectDrifted(format!(
+                return Err(sdn_err(delonix_networking::Error::RemoteObjectDrifted(
+                    format!(
                     "vnet '{}' (this engine's) was changed on the cluster: {} — put it back, or \
                      replace the document so the engine recreates it",
                     vnet.name,
                     drift.join("; ")
-                ))));
+                ),
+                )));
             }
             return Ok(EnsureOutcome::AlreadyPresent);
         }

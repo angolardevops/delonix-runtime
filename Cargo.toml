@@ -22,6 +22,7 @@ members = [
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
     "crates/contexts/delonix-compute",
+    "crates/contexts/delonix-networking",
     "crates/contexts/delonix-node",
     "crates/adapters/delonix-telemetry",
     "bins/delonix-mcp-bin",
@@ -64,6 +65,7 @@ delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }
 delonix-compute = { path = "crates/contexts/delonix-compute" }
+delonix-networking = { path = "crates/contexts/delonix-networking" }
 delonix-node = { path = "crates/contexts/delonix-node" }
 
 serde = { version = "1", features = ["derive"] }

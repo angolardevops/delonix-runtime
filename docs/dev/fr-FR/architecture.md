@@ -446,8 +446,6 @@ Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :
 - `delonix-linux` → `delonix-state` — supprimée en **P4a**
 - `delonix-mcp` → `delonix-mgmt` — supprimée en **P5**
 - `delonix-oci` → `delonix-state` — supprimée en **P4**
-- `delonix-opnsense` → `delonix-sdn` — supprimée en **P4**
-- `delonix-proxmox` → `delonix-sdn` — supprimée en **P4**
 - `delonix-scanner` → `delonix-oci` — supprimée en **P4**
 - `delonix-sdn` → `delonix-state` — supprimée en **P4**
 - `delonix-vm` → `delonix-provider-cloud-hypervisor` — supprimée en **P5**
@@ -664,6 +662,7 @@ flowchart TB
   end
   subgraph context["Contexts"]
     delonix_compute["delonix-compute"]
+    delonix_networking["delonix-networking"]
     delonix_node["delonix-node"]
     delonix_security_runtime["delonix-security-runtime"]
     delonix_stack["delonix-stack"]
@@ -738,6 +737,7 @@ flowchart TB
   delonix_mgmt_bin --> delonix_mgmt
   delonix_mgmt_bin --> delonix_node
   delonix_mgmt_bin --> delonix_telemetry
+  delonix_networking --> delonix_model
   delonix_node --> delonix_model
   delonix_node_api --> delonix_compute
   delonix_node_api --> delonix_linux
@@ -757,7 +757,7 @@ flowchart TB
   delonix_oci --> delonix_state
   delonix_opnsense --> delonix_compute
   delonix_opnsense --> delonix_model
-  delonix_opnsense --> delonix_sdn
+  delonix_opnsense --> delonix_networking
   delonix_provider_cloud_hypervisor --> delonix_compute
   delonix_provider_cloud_hypervisor --> delonix_model
   delonix_provider_cloud_hypervisor --> delonix_node
@@ -766,11 +766,12 @@ flowchart TB
   delonix_provider_libvirt --> delonix_node
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
-  delonix_proxmox --> delonix_sdn
+  delonix_proxmox --> delonix_networking
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
+  delonix_runtime_bin --> delonix_networking
   delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_opnsense
@@ -789,6 +790,7 @@ flowchart TB
   delonix_sdn --> delonix_compute
   delonix_sdn --> delonix_model
   delonix_sdn --> delonix_net_rules
+  delonix_sdn --> delonix_networking
   delonix_sdn --> delonix_node
   delonix_sdn --> delonix_state
   delonix_security_runtime --> delonix_model
@@ -817,6 +819,7 @@ flowchart TB
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_networking block
   class delonix_node block
   class delonix_node_api iface
   class delonix_node_api_bin engine

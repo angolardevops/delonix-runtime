@@ -61,7 +61,7 @@ pub enum Error {
 
     /// An alias or rule under the requested name/description exists on the
     /// appliance without this engine's owner mark — someone else's. Refused
-    /// instead of adopted (`delonix_sdn::ownership`).
+    /// instead of adopted (`delonix_networking::ownership`).
     #[error("{0}")]
     NotOwned(String),
 
@@ -93,7 +93,7 @@ pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 impl Error {
     /// The dictionary number of this failure (ADR-0043). Exhaustive on
-    /// purpose, like `delonix_sdn::Error::number`'s: a variant added
+    /// purpose, like `delonix_networking::Error::number`'s: a variant added
     /// tomorrow stops the build here instead of being filed under a
     /// catch-all nobody ever revisits.
     pub fn number(&self) -> u16 {
