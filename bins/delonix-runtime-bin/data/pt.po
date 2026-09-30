@@ -14884,3 +14884,5 @@ msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede 
 
 msgid "networkgateway/{name}: the last run was {why} — resuming, with {n} staged change(s) of it adopted"
 msgstr "networkgateway/{name}: a última execução ficou {why} — a retomar, com {n} alteração(ões) preparada(s) por ela adoptada(s)"
+msgid "COPY {src}: the source is excluded by .dockerignore"
+msgstr "COPY {src}: a origem está excluída pelo .dockerignore"

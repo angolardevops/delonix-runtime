@@ -77,6 +77,7 @@ use delonix_linux as runtime;
 use delonix_model::{Error, Result};
 use delonix_node::generate_id;
 use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
+use delonix_oci::dockerignore::DockerIgnore;
 use delonix_oci::{Image, ImageStore};
 use delonix_state::Store;
 use sha2::{Digest, Sha256};
@@ -455,6 +456,10 @@ fn build_one_stage(
     // sandbox can't even exercise live, root mode simply never caches (always
     // executes for real, exactly as before caching existed).
     let use_cache = use_cache && rootless;
+    // What `COPY` from the context never sees, read once per stage. Only the
+    // context is filtered: a `COPY --from=<stage>` reads an image's rootfs,
+    // which no `.dockerignore` describes.
+    let ignore = DockerIgnore::load(context);
     let id = generate_id();
     all_ids.push(id.clone());
     let mut base = match resolve_stage_base(images, from, stages, &id, platform) {
@@ -521,11 +526,19 @@ fn build_one_stage(
                 } => {
                     let (hash_src_path, src_root, stage_rel) =
                         resolve_copy_source(context, stages, src, copy_from)?;
+                    let filter = copy_from.is_none().then_some(&ignore);
+                    if filter.is_some_and(|ig| ig.is_excluded(&stage_rel)) {
+                        return Err(Error::Invalid(super::po::tf(
+                            "COPY {src}: the source is excluded by .dockerignore",
+                            &[("src", src)],
+                        )));
+                    }
                     // Cache key includes the ACTUAL bytes being copied, not just
                     // the src/dst strings — a file whose content changed must
-                    // invalidate the cache from here on, same as Docker.
-                    let content_hash =
-                        hash_path_content(&hash_src_path).unwrap_or_else(|_| "unreadable".into());
+                    // invalidate the cache from here on, same as Docker. An
+                    // ignored file is not copied, so it does not move the key.
+                    let content_hash = hash_path_content(&hash_src_path, &stage_rel, filter)
+                        .unwrap_or_else(|_| "unreadable".into());
                     let new_hash = hash_link(
                         &chain_hash,
                         &format!("COPY:{stage_rel}:{dst}:{content_hash}"),
@@ -554,7 +567,7 @@ fn build_one_stage(
                         from,
                         rootless,
                     )?;
-                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir)?;
+                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir, filter)?;
                     if use_cache {
                         save_to_cache(&new_hash, &cur_rootfs);
                     }
@@ -1381,13 +1394,21 @@ fn hash_link(chain: &str, repr: &str) -> String {
 /// filenames) — deliberately hashes BYTES rather than mtime/size, so
 /// rewriting a file with identical content is still a cache hit, and any real
 /// content change always invalidates, regardless of timestamps.
-fn hash_path_content(path: &Path) -> Result<String> {
+/// `rel` is `path` relative to the build context; with `ignore`, entries the
+/// context's `.dockerignore` excludes are left out of the hash, exactly as
+/// they are left out of the copy.
+fn hash_path_content(path: &Path, rel: &str, ignore: Option<&DockerIgnore>) -> Result<String> {
     let mut h = Sha256::new();
-    hash_path_into(path, &mut h)?;
+    hash_path_into(path, rel, ignore, &mut h)?;
     Ok(format!("{:x}", h.finalize()))
 }
 
-fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
+fn hash_path_into(
+    path: &Path,
+    rel: &str,
+    ignore: Option<&DockerIgnore>,
+    h: &mut Sha256,
+) -> Result<()> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| {
         Error::Invalid(format!(
             "{}: {e}",
@@ -1418,9 +1439,17 @@ fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
             .collect();
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
+            let child = join_rel(rel, &e.file_name().to_string_lossy());
+            if ignored(
+                ignore,
+                &child,
+                e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            ) {
+                continue;
+            }
             h.update(e.file_name().to_string_lossy().as_bytes());
             h.update(b"\0");
-            hash_path_into(&e.path(), h)?;
+            hash_path_into(&e.path(), &child, ignore, h)?;
         }
     } else {
         let mut f = std::fs::File::open(path).map_err(|e| {
@@ -1621,6 +1650,7 @@ fn copy_into_rootfs(
     src: &str,
     dst: &str,
     workdir: &str,
+    ignore: Option<&DockerIgnore>,
 ) -> Result<()> {
     let canon_context = canonical_base(context)?;
     let canon_rootfs = canonical_base(Path::new(rootfs))?;
@@ -1639,7 +1669,14 @@ fn copy_into_rootfs(
     let mut dst_path = safe_join(Path::new(rootfs), abs_dst.trim_start_matches('/'))?;
     if src_path.is_dir() {
         let dst_path = confine_to(&canon_rootfs, &dst_path)?;
-        copy_dir_all(&src_path, &dst_path, &canon_context, &canon_rootfs)
+        copy_dir_all(
+            &src_path,
+            &dst_path,
+            &canon_context,
+            &canon_rootfs,
+            src,
+            ignore,
+        )
     } else {
         if dir_dest || dst_path.is_dir() {
             if let Some(name) = src_path.file_name() {
@@ -1662,7 +1699,33 @@ fn copy_into_rootfs(
     }
 }
 
-fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Path) -> Result<()> {
+/// Joins a context-relative path and a child name (`"."`/`""` is the root).
+fn join_rel(rel: &str, name: &str) -> String {
+    let base = rel.trim_end_matches('/');
+    if base.is_empty() || base == "." {
+        name.to_string()
+    } else {
+        format!("{base}/{name}")
+    }
+}
+
+/// Should the walk leave `rel` out? An excluded directory is still walked
+/// when some rule re-includes (`!`), since a file inside it may come back.
+fn ignored(ignore: Option<&DockerIgnore>, rel: &str, is_dir: bool) -> bool {
+    match ignore {
+        Some(ig) if ig.is_excluded(rel) => !(is_dir && ig.has_exceptions()),
+        _ => false,
+    }
+}
+
+fn copy_dir_all(
+    src: &Path,
+    dst: &Path,
+    canon_context: &Path,
+    canon_rootfs: &Path,
+    rel: &str,
+    ignore: Option<&DockerIgnore>,
+) -> Result<()> {
     std::fs::create_dir_all(dst)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
     for entry in
@@ -1672,13 +1735,24 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
         let ty = entry
             .file_type()
             .map_err(|e| Error::Invalid(e.to_string()))?;
+        let child = join_rel(rel, &entry.file_name().to_string_lossy());
+        if ignored(ignore, &child, ty.is_dir()) {
+            continue;
+        }
         // A NESTED entry can itself be a symlink escaping the tree, even though the
         // top-level src/dst of this COPY already passed `confine_to` — validate every
         // entry, not just the root.
         let entry_path = confine_to(canon_context, &entry.path())?;
         let target = confine_to(canon_rootfs, &dst.join(entry.file_name()))?;
         if ty.is_dir() {
-            copy_dir_all(&entry_path, &target, canon_context, canon_rootfs)?;
+            copy_dir_all(
+                &entry_path,
+                &target,
+                canon_context,
+                canon_rootfs,
+                &child,
+                ignore,
+            )?;
         } else {
             std::fs::copy(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
         }
@@ -2007,5 +2081,75 @@ mod progresso_tests {
         .expect("COPY abre passo");
         assert!(t.chars().count() <= 61, "cortado a 60 + reticências: {t}");
         assert!(t.ends_with('…'), "o corte tem de se ver: {t}");
+    }
+}
+
+#[cfg(test)]
+mod dockerignore_tests {
+    use super::{copy_into_rootfs, hash_path_content, DockerIgnore};
+    use std::fs;
+
+    /// A context with a secret, a dependency tree and the code, plus the
+    /// `.dockerignore` that names the first two.
+    fn context() -> tempfile::TempDir {
+        let ctx = tempfile::tempdir().unwrap();
+        let root = ctx.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(root.join("src/app.ts"), "export {}\n").unwrap();
+        fs::write(root.join(".env"), "TOKEN=secret\n").unwrap();
+        fs::write(root.join(".env.example"), "TOKEN=\n").unwrap();
+        fs::write(root.join("node_modules/pkg/index.js"), "x\n").unwrap();
+        fs::write(root.join(".dockerignore"), "node_modules\n.env\n").unwrap();
+        ctx
+    }
+
+    /// `COPY . .` used to take the whole context into the layer, `.env`
+    /// included, whatever the `.dockerignore` next to it said.
+    #[test]
+    fn copy_of_the_context_leaves_out_what_dockerignore_names() {
+        let ctx = context();
+        let rootfs = tempfile::tempdir().unwrap();
+        let ig = DockerIgnore::load(ctx.path());
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs.path().to_str().unwrap(),
+            ".",
+            "/app/",
+            "/",
+            Some(&ig),
+        )
+        .unwrap();
+        let app = rootfs.path().join("app");
+        assert!(app.join("src/app.ts").exists());
+        assert!(app.join(".env.example").exists());
+        assert!(!app.join(".env").exists(), "the secret reached the layer");
+        assert!(!app.join("node_modules").exists());
+        // Without a filter (`COPY --from`), nothing is left out.
+        let rootfs2 = tempfile::tempdir().unwrap();
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs2.path().to_str().unwrap(),
+            ".",
+            "/app/",
+            "/",
+            None,
+        )
+        .unwrap();
+        assert!(rootfs2.path().join("app/.env").exists());
+    }
+
+    /// An ignored file is never copied, so editing it must not invalidate the
+    /// build cache — and editing a copied one still must.
+    #[test]
+    fn an_ignored_file_does_not_move_the_cache_key() {
+        let ctx = context();
+        let ig = DockerIgnore::load(ctx.path());
+        let key = || hash_path_content(ctx.path(), ".", Some(&ig)).unwrap();
+        let before = key();
+        fs::write(ctx.path().join(".env"), "TOKEN=rotated\n").unwrap();
+        assert_eq!(before, key());
+        fs::write(ctx.path().join("src/app.ts"), "export const x = 1\n").unwrap();
+        assert_ne!(before, key());
     }
 }

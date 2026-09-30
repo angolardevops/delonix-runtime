@@ -356,11 +356,26 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                         n + 1
                     )));
                 }
-                stages.last_mut().unwrap().steps.push(Step::Copy {
-                    src: parts[0].to_string(),
-                    dst: parts[parts.len() - 1].to_string(),
-                    from: from_stage,
-                });
+                // Every source is copied, not just the first: `COPY a b dst/`
+                // used to drop `b` without a word. Docker requires the
+                // destination of a multi-source COPY to be a directory spelled
+                // with a trailing `/`; without it, where the second file would
+                // land is ambiguous, so it is refused the same way.
+                let dst = parts[parts.len() - 1];
+                let srcs = &parts[..parts.len() - 1];
+                if srcs.len() > 1 && !dst.ends_with('/') {
+                    return Err(Error::Dockerfile(format!(
+                        "line {}: {instr} with more than one source needs a destination directory ending in '/' (got '{dst}')",
+                        n + 1
+                    )));
+                }
+                for src in srcs {
+                    stages.last_mut().unwrap().steps.push(Step::Copy {
+                        src: src.to_string(),
+                        dst: dst.to_string(),
+                        from: from_stage.clone(),
+                    });
+                }
             }
             // --- Delonix extensions (apply to the final image) ---
             "SCAN" => {
@@ -1004,6 +1019,29 @@ mod tests {
             &[],
         )
         .unwrap()
+    }
+
+    /// Every source of a `COPY` is copied. The parser used to keep the first
+    /// and the last word, so `COPY package.json pnpm-lock.yaml ./` built an
+    /// image without the lockfile and said nothing.
+    #[test]
+    fn a_multi_source_copy_copies_every_source() {
+        let df = parse_dockerfile("FROM alpine:3.20\nCOPY a.json b.lock ./\n").unwrap();
+        let copies: Vec<(&str, &str)> = df
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Copy { src, dst, .. } => Some((src.as_str(), dst.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(copies, vec![("a.json", "./"), ("b.lock", "./")]);
+        let e = parse_dockerfile("FROM alpine:3.20\nCOPY a b dest\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("ending in '/'"), "{e}");
+        // One source keeps its old meaning: `dest` may be a file name.
+        assert!(parse_dockerfile("FROM alpine:3.20\nCOPY a dest\n").is_ok());
     }
 
     #[test]
