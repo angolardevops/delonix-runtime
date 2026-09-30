@@ -719,3 +719,28 @@ is checked against the same golden table.
   difference), because validation goes through the parse. Measured before deciding: nft refuses
   `90-80` itself («Range has zero or negative size»), so the only change is where and how clearly
   the refusal is reported. The disabled-record guardrail (F3a's second difference) is unchanged.
+
+## Addendum 2026-09-30 — F3c: the per-VM firewall is a lowering of the IR
+
+- **`delonix_compute::vm_firewall::Policy::from_ir`** lowers one direction of the IR to the policy
+  a VM backend receives (`VmBackend::apply_firewall`). It refuses, by name and naming the rule: a
+  namespace, other-namespaces or selector peer; an engine guardrail; ICMP (by protocol or type); a
+  logged rule; a stateless rule. A single-host prefix is sent as the bare address, the form the
+  node lists back. Per D6, `vm_firewall::Rule` is now a lowering output; the port's signature is
+  unchanged.
+- **The production path goes through it.** A `NetworkPolicy` with `scope: vm` is built by the
+  CLI as IR, using the same `delonix_networking::policy::rule_of` a container's record uses, and
+  only then lowered. The shape checks and messages the document already had stay in front.
+- **Proof**: a node evaluator runs over the `NodeRule`s that `vm_firewall::apply` posts. It
+  models the connection-tracking accept the node puts at the head of a guest chain, the rules in
+  position order, then the guest policy. It gives each of the 24 golden cells the reference
+  evaluator's verdict for the same IR, with the engine's namespace guardrails removed (a VM on a
+  node is not on the SDN they name, and `from_ir` refuses them, which the test also checks).
+  Two mutations were each caught: `any` plus a port expanded to TCP only, and an inverted default.
+- **Two changes to what a `scope: vm` document is sent**: a reversed range (`90-80`) is now
+  refused, as it is for a container; and a prefix with host bits (`10.0.0.5/24`) is sent as the
+  network it names (`10.0.0.0/24`). The second changes the comparison key once, so a VM policy
+  applied by an earlier binary with such a prefix plans one update, and the next apply converges it.
+- **Not validated against a live node in this slice**: the node evaluator follows how the
+  per-VM firewall is documented to work and ADR-0052's live case, which read the compiled
+  `tap<vmid>i0-IN` chain once. No packet crossed a VM in a test.

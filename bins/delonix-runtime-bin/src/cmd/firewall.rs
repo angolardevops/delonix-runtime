@@ -1875,8 +1875,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// A `scope: vm` document as the engine's VM firewall policy (ADR-0052).
-/// Pure: validates everything before anything is sent.
+/// A `scope: vm` document as the engine's VM firewall policy (ADR-0052), built
+/// as policy IR and lowered by `Policy::from_ir` (ADR-0059 F3c). Pure:
+/// validates everything before anything is sent.
 ///
 /// `fromWorkload`/`toWorkload` are REFUSED here, not resolved: they resolve to
 /// an address on this engine's SDN, and a VM filtered by its node's firewall
@@ -1890,7 +1891,8 @@ fn vm_policy(
     spec: &FwDocSpec,
     dir: &str,
 ) -> Result<delonix_vm::firewall::Policy> {
-    use delonix_vm::firewall::{Direction, Policy, Proto, Rule};
+    use delonix_net_rules::policy as ir;
+    use delonix_vm::firewall::{Policy, Proto};
     if !spec.allow_cidrs.is_empty() || !spec.fqdn_allowlist.is_empty() || spec.rate_limit.is_some()
     {
         return Err(Error::Invalid(super::po::tf(
@@ -1932,22 +1934,34 @@ fn vm_policy(
                 "{kind}/{name}: action must be allow|deny"
             )));
         }
-        rules.push(Rule {
-            allow: action == "allow",
-            proto,
-            port: Some(r.port.clone()).filter(|p| p != "*"),
-            peer: Some(peer).filter(|p| !p.is_empty() && p != "0.0.0.0/0"),
-        });
+        // Through the policy IR's own parse (ADR-0059 F3c): a port, a protocol
+        // and a peer mean here exactly what they mean for a container's record.
+        let stored = delonix_model::records::FwRule {
+            dir: dir.to_string(),
+            proto: proto.as_str().to_string(),
+            port: r.port.clone(),
+            src: peer,
+            action: action.to_string(),
+            ..Default::default()
+        };
+        let rule = delonix_networking::policy::rule_of(&stored)
+            .map_err(|why| Error::Invalid(format!("{kind}/{name}: {why}")))?;
+        rules.push(rule);
     }
-    Ok(Policy {
+    let policy = ir::Policy {
         direction: if dir == "in" {
-            Direction::In
+            ir::Direction::Ingress
         } else {
-            Direction::Out
+            ir::Direction::Egress
         },
-        default_allow: default == "allow",
+        default: if default == "allow" {
+            ir::Action::Allow
+        } else {
+            ir::Action::Deny
+        },
         rules,
-    })
+    };
+    Policy::from_ir(&policy).map_err(|why| Error::Invalid(format!("{kind}/{name}: {why}")))
 }
 
 /// Applies a `scope: network` `Egress` — per-network egress policy + CIDR/
@@ -2134,6 +2148,23 @@ mod tests {
         assert!(vm_policy("NetworkPolicy", "p", &net, "out").is_err());
         let proto = vm_spec("scope: vm\ntarget: web\nrules:\n- {proto: icmp, port: '*'}\n");
         assert!(vm_policy("NetworkPolicy", "p", &proto, "in").is_err());
+    }
+
+    /// A `scope: vm` rule goes through the policy IR's parse (ADR-0059 F3c):
+    /// a reversed range is refused as it is for a container, and a prefix with
+    /// host bits is sent as the network it names.
+    #[test]
+    fn a_scope_vm_policy_is_parsed_by_the_policy_ir() {
+        let reversed = vm_spec("scope: vm\ntarget: web\nrules:\n- {proto: tcp, port: '90-80'}\n");
+        let e = vm_policy("NetworkPolicy", "p", &reversed, "in").unwrap_err();
+        assert!(e.to_string().contains("90-80"), "{e}");
+        let host_bits =
+            vm_spec("scope: vm\ntarget: web\nrules:\n- {port: '22', from: 10.0.0.5/24}\n");
+        let p = vm_policy("NetworkPolicy", "p", &host_bits, "in").unwrap();
+        assert_eq!(p.rules[0].key(), "allow|any|22|10.0.0.0/24|");
+        let host = vm_spec("scope: vm\ntarget: web\nrules:\n- {port: '22', from: 10.0.0.5/32}\n");
+        let p = vm_policy("NetworkPolicy", "p", &host, "in").unwrap();
+        assert_eq!(p.rules[0].key(), "allow|any|22|10.0.0.5|");
     }
 
     /// The identity `get networkpolicies` prints and `describe`/`delete
