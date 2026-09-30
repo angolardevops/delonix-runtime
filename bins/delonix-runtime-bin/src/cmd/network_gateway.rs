@@ -148,6 +148,7 @@ fn to_rule(spec: &GatewayRuleSpec) -> GatewayRule {
         source: spec.source.clone(),
         destination: spec.destination.clone(),
         protocol: spec.protocol.clone(),
+        ..Default::default()
     }
 }
 

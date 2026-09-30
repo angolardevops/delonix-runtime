@@ -173,6 +173,16 @@ struct RuleWrite {
     destination_net: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     protocol: Option<String>,
+    /// `pass`/`block`, `log` `0`/`1`, `statetype` `keep`/`none`: the flat
+    /// form `add_rule` accepts and `search_rule` returns (measured on
+    /// 26.1.2_5, ADR-0059 F3d).
+    action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination_port: Option<String>,
+    log: &'static str,
+    statetype: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     categories: String,
 }
@@ -183,7 +193,21 @@ fn rule_write(rule: &GatewayRule) -> RuleWrite {
         source_net: rule.source.clone(),
         destination_net: rule.destination.clone(),
         protocol: rule.protocol.clone(),
+        action: rule.action.as_str(),
+        destination_port: rule.destination_port.clone(),
+        log: if rule.log { "1" } else { "0" },
+        statetype: statetype(rule),
+        sequence: rule.sequence.map(|n| n.to_string()),
         categories: String::new(),
+    }
+}
+
+/// The appliance's `statetype` for a rule: `keep`, its default, or `none`.
+fn statetype(rule: &GatewayRule) -> &'static str {
+    if rule.stateful {
+        "keep"
+    } else {
+        "none"
     }
 }
 
@@ -1115,6 +1139,50 @@ fn rule_drift(row: &Value, want: &GatewayRule) -> Vec<String> {
     let declared = want.protocol.as_deref().unwrap_or("any");
     if !have.eq_ignore_ascii_case(declared) {
         out.push(format!("protocol is '{have}', declared '{declared}'"));
+    }
+    // The fields ADR-0059 F3d added. A row the appliance wrote with its
+    // defaults reads `pass`, no port, `log 0`, `keep`: what a rule declared
+    // before the fields existed means, so it is not drift.
+    let action = str_field(row, "action");
+    let action = if action.is_empty() {
+        "pass".to_string()
+    } else {
+        action
+    };
+    if action != want.action.as_str() {
+        out.push(format!(
+            "action is '{action}', declared '{}'",
+            want.action.as_str()
+        ));
+    }
+    let port = str_field(row, "destination_port");
+    let declared = want.destination_port.as_deref().unwrap_or("");
+    if port != declared {
+        out.push(format!(
+            "destination_port is '{port}', declared '{declared}'"
+        ));
+    }
+    let log = str_field(row, "log") == "1";
+    if log != want.log {
+        out.push(format!("log is {log}, declared {}", want.log));
+    }
+    let state = str_field(row, "statetype");
+    let state = if state.is_empty() {
+        "keep".to_string()
+    } else {
+        state
+    };
+    if state != statetype(want) {
+        out.push(format!(
+            "statetype is '{state}', declared '{}'",
+            statetype(want)
+        ));
+    }
+    if let Some(seq) = want.sequence {
+        let have = str_field(row, "sequence");
+        if have != seq.to_string() {
+            out.push(format!("sequence is '{have}', declared '{seq}'"));
+        }
     }
     if str_field(row, "enabled") == "0" {
         out.push("it is disabled".to_string());

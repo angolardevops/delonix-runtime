@@ -427,6 +427,7 @@ fn a_validation_failure_at_http_200_is_typed_not_treated_as_success() {
                 source: "any".into(),
                 destination: "10.0.0.0/24".into(),
                 protocol: Some("BOGUS".into()),
+                ..Default::default()
             },
             &mark(),
             &Staging::default(),
@@ -451,6 +452,7 @@ fn a_result_failed_without_validations_is_http_status_not_a_silent_success() {
                 source: "any".into(),
                 destination: "10.0.0.0/24".into(),
                 protocol: None,
+                ..Default::default()
             },
             &mark(),
             &Staging::default(),
@@ -578,6 +580,7 @@ fn ensure_rule_creates_when_absent() {
         source: "adr0051spike".into(),
         destination: "10.0.0.0/24".into(),
         protocol: Some("TCP".into()),
+        ..Default::default()
     };
     let outcome = client
         .ensure_rule(&rule, &mark(), &Staging::default())
@@ -659,6 +662,7 @@ fn web_rule() -> GatewayRule {
         source: "10.1.0.0/24".into(),
         destination: "10.0.0.0/24".into(),
         protocol: Some("TCP".into()),
+        ..Default::default()
     }
 }
 
