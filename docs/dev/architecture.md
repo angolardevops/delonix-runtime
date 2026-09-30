@@ -756,6 +756,7 @@ flowchart TB
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
+  delonix_runtime_bin --> delonix_net_rules
   delonix_runtime_bin --> delonix_networking
   delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci

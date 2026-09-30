@@ -66,6 +66,71 @@ pub struct NetworkGatewaySpec {
     pub aliases: Vec<GatewayAliasSpec>,
     #[serde(default)]
     pub rules: Vec<GatewayRuleSpec>,
+    /// Policies for a target behind the gateway, in the same shape a
+    /// `NetworkPolicy` has, lowered to the appliance's filter rules through
+    /// the policy IR (ADR-0059 F3d/F3e).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<GatewayPolicySpec>,
+}
+
+/// One direction of the policy for one target (an alias name, a prefix or
+/// an address the appliance resolves). Each rule lands as
+/// `<name>#<n>` at `sequence + n - 1`, and the default verdict as
+/// `<name>#default` right after: pf loads filter rules in `sequence` order
+/// (measured on OPNsense 26.1.2_5), so the first match here is the
+/// appliance's.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayPolicySpec {
+    /// The prefix of every rule's identity on the appliance.
+    pub name: String,
+    pub target: String,
+    /// `ingress` (traffic to the target) or `egress` (traffic from it).
+    pub direction: String,
+    /// `allow` or `deny`; `deny` when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_policy: Option<String>,
+    /// The first rule's position among the appliance's filter rules.
+    pub sequence: u32,
+    #[serde(default)]
+    pub rules: Vec<GatewayPolicyRuleSpec>,
+}
+
+/// One rule of a [`GatewayPolicySpec`]: the `NetworkPolicy` rule shape, plus
+/// the two fields a perimeter appliance holds and the node's chain does not.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayPolicyRuleSpec {
+    /// `tcp`, `udp` or `any`; `any` when omitted. With a port, `any` is TCP
+    /// and UDP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto: Option<String>,
+    /// A port, an `n-m` range, or `*` (every port, the default).
+    #[serde(default = "every_port")]
+    pub port: String,
+    /// The other end of an `ingress` rule: an IPv4 address or prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// The other end of an `egress` rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// `allow` or `deny`; `allow` when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// Logs every match.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub log: bool,
+    /// `false` keeps no state for the matched flow; `true` when omitted.
+    #[serde(default = "stateful_default")]
+    pub stateful: bool,
+}
+
+fn every_port() -> String {
+    "*".to_string()
+}
+
+fn stateful_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -93,10 +158,11 @@ pub struct GatewayRuleSpec {
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
 /// spec uses).
-pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules"];
+pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules", "policies"];
 
 /// Fields the reconciler compares.
-pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] = &["provider", "aliases", "rules"];
+pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] =
+    &["provider", "aliases", "rules", "policies"];
 
 /// A registered record: what was last declared, plus the ownership fields
 /// every ownable Kind's own registry carries (mirrors `ServiceDef`).
@@ -108,6 +174,10 @@ struct NetworkGatewayRecord {
     aliases: Vec<GatewayAliasSpec>,
     #[serde(default)]
     rules: Vec<GatewayRuleSpec>,
+    /// The policies last declared: their rule identities are recomputed
+    /// from them on teardown.
+    #[serde(default)]
+    policies: Vec<GatewayPolicySpec>,
     #[serde(default)]
     labels: BTreeMap<String, String>,
     #[serde(default)]
@@ -150,6 +220,110 @@ fn to_rule(spec: &GatewayRuleSpec) -> GatewayRule {
         protocol: spec.protocol.clone(),
         ..Default::default()
     }
+}
+
+/// A policy as the appliance's filter rules: built as policy IR through the
+/// same parse a container's firewall record uses, then lowered by
+/// `gateway_rules`. Everything is validated before anything is sent.
+fn policy_rules(p: &GatewayPolicySpec) -> Result<Vec<GatewayRule>> {
+    use delonix_net_rules::policy as ir;
+    let invalid = |why: String| Error::Invalid(format!("policy '{}': {why}", p.name));
+    if p.name.is_empty()
+        || !p
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(invalid(
+            "a name is letters, digits, '.', '_' or '-' — it prefixes every rule's identity".into(),
+        ));
+    }
+    if p.target.trim().is_empty() {
+        return Err(invalid("target is empty".into()));
+    }
+    let (dir, direction) = match p.direction.as_str() {
+        "ingress" => ("in", ir::Direction::Ingress),
+        "egress" => ("out", ir::Direction::Egress),
+        other => {
+            return Err(invalid(format!(
+                "direction '{other}' is neither ingress nor egress"
+            )))
+        }
+    };
+    let default = match p.default_policy.as_deref().unwrap_or("deny") {
+        "allow" => ir::Action::Allow,
+        "deny" => ir::Action::Deny,
+        other => {
+            return Err(invalid(format!(
+                "defaultPolicy '{other}' is neither allow nor deny"
+            )))
+        }
+    };
+    let mut rules = Vec::with_capacity(p.rules.len());
+    for (i, r) in p.rules.iter().enumerate() {
+        let n = i + 1;
+        let (peer, wrong) = match direction {
+            ir::Direction::Ingress => (&r.from, &r.to),
+            ir::Direction::Egress => (&r.to, &r.from),
+        };
+        if wrong.is_some() {
+            return Err(invalid(format!(
+                "rule #{n}: an {} rule names its other end with `{}`",
+                p.direction,
+                if dir == "in" { "from" } else { "to" }
+            )));
+        }
+        let stored = delonix_model::records::FwRule {
+            dir: dir.to_string(),
+            proto: r.proto.clone().unwrap_or_else(|| "any".into()),
+            port: r.port.clone(),
+            src: peer.clone().unwrap_or_default(),
+            action: r.action.clone().unwrap_or_else(|| "allow".into()),
+            ..Default::default()
+        };
+        let mut rule = delonix_networking::policy::rule_of(&stored)
+            .map_err(|why| invalid(format!("rule #{n}: {why}")))?;
+        rule.log = r.log;
+        rule.stateful = r.stateful;
+        rules.push(rule);
+    }
+    let policy = ir::Policy {
+        direction,
+        default,
+        rules,
+    };
+    delonix_networking::policy::gateway_rules(&p.target, &policy, &p.name, p.sequence)
+        .map_err(Into::into)
+}
+
+/// Every policy's rules, and a refusal when two policies share a name or
+/// their positions overlap (two rules at one `sequence` leave pf's order to
+/// the appliance).
+fn all_policy_rules(policies: &[GatewayPolicySpec]) -> Result<Vec<GatewayRule>> {
+    let mut out = Vec::new();
+    let mut spans: Vec<(u32, u32, &str)> = Vec::new();
+    for p in policies {
+        if spans.iter().any(|(_, _, n)| *n == p.name) {
+            return Err(Error::Invalid(format!(
+                "two policies are named '{}' — the name is every rule's identity",
+                p.name
+            )));
+        }
+        let rules = policy_rules(p)?;
+        let last = p.sequence + rules.len() as u32 - 1;
+        if let Some((a, b, other)) = spans
+            .iter()
+            .find(|(a, b, _)| p.sequence <= *b && *a <= last)
+        {
+            return Err(Error::Invalid(format!(
+                "policy '{}' takes sequence {}-{last}, which overlaps policy '{other}' ({a}-{b})",
+                p.name, p.sequence
+            )));
+        }
+        spans.push((p.sequence, last, &p.name));
+        out.extend(rules);
+    }
+    Ok(out)
 }
 
 /// The provider id records written before ADR-0059 F2b may carry. That
@@ -229,11 +403,23 @@ fn rules_field(rules: &[GatewayRuleSpec]) -> String {
     items.join(";")
 }
 
+/// A policy list as one comparable string: the JSON of each policy, sorted
+/// by name, so the order a manifest lists them in is not drift.
+fn policies_field(policies: &[GatewayPolicySpec]) -> String {
+    let mut items: Vec<String> = policies
+        .iter()
+        .map(|p| serde_json::to_string(p).unwrap_or_default())
+        .collect();
+    items.sort();
+    items.join(";")
+}
+
 fn record_fields(rec: &NetworkGatewayRecord) -> BTreeMap<String, String> {
     let mut f = BTreeMap::new();
     f.insert("provider".into(), rec.provider.clone());
     f.insert("aliases".into(), aliases_field(&rec.aliases));
     f.insert("rules".into(), rules_field(&rec.rules));
+    f.insert("policies".into(), policies_field(&rec.policies));
     f
 }
 
@@ -249,6 +435,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     }
     fields.insert("aliases".into(), aliases_field(&spec.aliases));
     fields.insert("rules".into(), rules_field(&spec.rules));
+    fields.insert("policies".into(), policies_field(&spec.policies));
     Ok(super::reconcile::Desired {
         kind: k::NETWORK_GATEWAY.into(),
         name: doc.metadata.name.clone(),
@@ -321,6 +508,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         .iter()
         .map(to_alias)
         .collect::<Result<Vec<_>>>()?;
+    let policy_rules = all_policy_rules(&spec.policies)?;
 
     let name = doc.metadata.name.clone();
     let s = store()?;
@@ -339,6 +527,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     rec.provider = provider_id.to_string();
     rec.aliases = union_by(&rec.aliases, &spec.aliases, |a| a.name.as_str());
     rec.rules = union_by(&rec.rules, &spec.rules, |r| r.description.as_str());
+    rec.policies = union_by(&rec.policies, &spec.policies, |p| p.name.as_str());
     s.save(&name, &rec)?;
 
     provider
@@ -349,15 +538,21 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             .ensure_alias(a, &owner)
             .map_err(at(provider_id, "ensure_alias"))?;
     }
-    for r in &spec.rules {
+    for r in spec
+        .rules
+        .iter()
+        .map(to_rule)
+        .chain(policy_rules.iter().cloned())
+    {
         provider
-            .ensure_rule(&to_rule(r), &owner)
+            .ensure_rule(&r, &owner)
             .map_err(at(provider_id, "ensure_rule"))?;
     }
     provider.commit().map_err(at(provider_id, "commit"))?;
 
     rec.aliases = spec.aliases.clone();
     rec.rules = spec.rules.clone();
+    rec.policies = spec.policies.clone();
     s.save(&name, &rec)?;
     println!(
         "{}",
@@ -366,7 +561,10 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             &[
                 ("name", &name),
                 ("aliases", &spec.aliases.len().to_string()),
-                ("rules", &spec.rules.len().to_string()),
+                (
+                    "rules",
+                    &(spec.rules.len() + policy_rules.len()).to_string()
+                ),
                 ("provider", provider_id),
             ],
         )
@@ -452,16 +650,23 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         return s.remove(name).map_err(Into::into);
     }
     let owner = OwnerMark::new(&rec.owner)?;
+    // The policies' rule identities, recomputed from what the record last
+    // declared. A policy the record holds was lowered before it was saved,
+    // so lowering it again cannot fail short of a hand-edited record.
+    let mut descriptions: Vec<String> = rec.rules.iter().map(|r| r.description.clone()).collect();
+    for p in &rec.policies {
+        descriptions.extend(policy_rules(p)?.into_iter().map(|r| r.description));
+    }
     let (provider_id, provider) = resolve_provider(None, &rec.provider)?;
     provider
         .check_no_foreign_pending()
         .map_err(at(provider_id, "check_no_foreign_pending"))?;
-    for r in &rec.rules {
+    for d in &descriptions {
         if let RemoveOutcome::NotOwned(who) = provider
-            .remove_rule(&r.description, &owner)
+            .remove_rule(d, &owner)
             .map_err(at(provider_id, "remove_rule"))?
         {
-            report_left(name, "rule", &r.description, &who.describe());
+            report_left(name, "rule", d, &who.describe());
         }
     }
     for a in &rec.aliases {
@@ -603,6 +808,91 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn policy(yaml: &str) -> GatewayPolicySpec {
+        serde_yaml::from_str(yaml).expect("a policy")
+    }
+
+    #[test]
+    fn a_policy_lowers_through_the_ir_to_ordered_rules_and_a_default() {
+        use delonix_sdn::gateway::GatewayAction;
+        let p = policy(
+            "name: web-in\ntarget: delonix_web\ndirection: ingress\nsequence: 30000\nrules:\n\
+             - {proto: tcp, port: '22', from: 10.9.0.5/32, log: true}\n\
+             - {port: '8000-8080', action: deny, stateful: false}\n",
+        );
+        let rules = policy_rules(&p).unwrap();
+        let d: Vec<(&str, Option<u32>)> = rules
+            .iter()
+            .map(|r| (r.description.as_str(), r.sequence))
+            .collect();
+        assert_eq!(
+            d,
+            [
+                ("web-in#1", Some(30000)),
+                ("web-in#2", Some(30001)),
+                ("web-in#default", Some(30002))
+            ]
+        );
+        assert_eq!(
+            (rules[0].source.as_str(), rules[0].destination.as_str()),
+            ("10.9.0.5", "delonix_web")
+        );
+        assert!(rules[0].log && rules[0].stateful);
+        assert_eq!(rules[1].protocol.as_deref(), Some("TCP/UDP"));
+        assert_eq!(rules[1].action, GatewayAction::Block);
+        assert!(!rules[1].stateful);
+        assert_eq!(
+            rules[2].action,
+            GatewayAction::Block,
+            "deny when defaultPolicy is omitted"
+        );
+    }
+
+    #[test]
+    fn a_policy_is_refused_before_anything_is_sent() {
+        for (yaml, word) in [
+            ("name: p\ntarget: t\ndirection: sideways\nsequence: 1\n", "sideways"),
+            ("name: p\ntarget: t\ndirection: ingress\nsequence: 1\nrules:\n- {to: 10.0.0.0/8}\n", "`from`"),
+            ("name: p\ntarget: t\ndirection: egress\nsequence: 1\nrules:\n- {from: 10.0.0.0/8}\n", "`to`"),
+            ("name: p\ntarget: t\ndirection: ingress\nsequence: 1\nrules:\n- {proto: tcp, port: '90-80'}\n", "90-80"),
+            ("name: p\ntarget: t\ndirection: ingress\nsequence: 1\nrules:\n- {proto: icmp}\n", "icmp"),
+            ("name: 'a b'\ntarget: t\ndirection: ingress\nsequence: 1\n", "letters"),
+            ("name: p\ntarget: ''\ndirection: ingress\nsequence: 1\n", "target"),
+            ("name: p\ntarget: t\ndirection: ingress\ndefaultPolicy: maybe\nsequence: 1\n", "maybe"),
+        ] {
+            let e = policy_rules(&policy(yaml)).unwrap_err().to_string();
+            assert!(e.contains(word), "{yaml}: {e}");
+        }
+    }
+
+    #[test]
+    fn two_policies_may_not_share_a_name_or_a_position() {
+        let a = policy(
+            "name: a\ntarget: t\ndirection: ingress\nsequence: 100\nrules:\n- {port: '22'}\n",
+        );
+        let overlap = policy("name: b\ntarget: t\ndirection: ingress\nsequence: 101\n");
+        let e = all_policy_rules(&[a.clone(), overlap])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("overlaps policy 'a' (100-101)"), "{e}");
+        let e = all_policy_rules(&[a.clone(), a.clone()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("two policies are named 'a'"), "{e}");
+        let after = policy("name: b\ntarget: t\ndirection: ingress\nsequence: 102\n");
+        assert_eq!(all_policy_rules(&[a, after]).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn policies_field_is_order_independent() {
+        let a = policy("name: a\ntarget: t\ndirection: ingress\nsequence: 100\n");
+        let b = policy("name: b\ntarget: t\ndirection: egress\nsequence: 200\n");
+        assert_eq!(
+            policies_field(&[a.clone(), b.clone()]),
+            policies_field(&[b, a])
+        );
+    }
 
     #[test]
     fn aliases_field_is_order_independent() {

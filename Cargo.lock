@@ -1043,6 +1043,7 @@ dependencies = [
  "delonix-linux",
  "delonix-mgmt",
  "delonix-model",
+ "delonix-net-rules",
  "delonix-networking",
  "delonix-node",
  "delonix-oci",
