@@ -18,9 +18,10 @@ fn delonix() -> Command {
     cmd
 }
 
-/// A registry that opens every upload session and, on the blob PUT, reads
-/// `cut` bytes of the body and closes. What a registry that gives up on a
-/// slow upload does, seen from the client.
+/// A registry that opens every upload session and, on a blob upload (the
+/// whole-blob PUT, or a chunk's PATCH), reads `cut` bytes of the body and
+/// closes. What a registry that gives up on a slow upload does, seen from
+/// the client.
 fn serve_closing_registry(cut: usize) -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -46,7 +47,8 @@ fn serve_closing_registry(cut: usize) -> u16 {
                     .find_map(|l| l.strip_prefix("content-length:"))
                     .and_then(|v| v.trim().parse().ok())
                     .unwrap_or(0);
-                let is_blob_put = head.starts_with("put ") && head.contains("/uploads/");
+                let is_blob_put = (head.starts_with("put ") || head.starts_with("patch "))
+                    && head.contains("/uploads/");
                 let want = if is_blob_put && len > cut { cut } else { len };
                 let mut got = buf.len() - hend - 4;
                 while got < want {
