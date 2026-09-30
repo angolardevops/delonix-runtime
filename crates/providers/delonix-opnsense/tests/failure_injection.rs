@@ -84,7 +84,9 @@ fn stock(method: &str, path: &str) -> Reply {
         }
         // The running state of a clean appliance: nothing loaded in pf that
         // the config does not also say.
-        ("GET", "diagnostics/firewall/list_rule_ids") => Reply::Json(200, r#"{"items":[]}"#.into()),
+        ("GET", "diagnostics/firewall/pf_statistics/rules") => {
+            Reply::Json(200, r#"{"rules":{"filter rules":{}}}"#.into())
+        }
         ("GET", "firewall/alias_util/aliases") => {
             Reply::Json(200, r#"["bogons","__lan_network"]"#.into())
         }
@@ -867,16 +869,68 @@ fn a_foreign_rule_staged_and_not_applied_refuses_the_commit_before_any_apply() {
     assert_eq!(appliance.count("POST", "firewall/filter/apply"), 0);
 }
 
+/// `pf_statistics/rules` as the appliance answers it: one key per pf rule,
+/// labelled with the MVC rule's uuid.
+fn pf_rules(uuids: &[&str]) -> String {
+    let lines: serde_json::Map<String, serde_json::Value> = uuids
+        .iter()
+        .enumerate()
+        .map(|(i, u)| {
+            (
+                format!(
+                    "@{i} pass in quick on vtnet0 inet from any to any keep state label \"{u}\""
+                ),
+                serde_json::json!({ "evaluations": 0 }),
+            )
+        })
+        .collect();
+    serde_json::json!({ "rules": { "filter rules": lines } }).to_string()
+}
+
+/// Measured on OPNsense 26.1.2_5: `list_rule_ids` keeps listing a rule that
+/// was deleted and applied (its label cache is keyed by pf line number and
+/// never drops the lines past a shorter ruleset). The running set is read
+/// from `pf_statistics`, which runs `pfctl` on each call.
 #[test]
-fn a_foreign_deletion_not_applied_refuses_the_pre_check() {
-    // pf still runs a rule the config no longer has.
+fn the_running_rules_are_read_from_pf_not_from_the_label_cache() {
     let appliance = MockAppliance::start(script(&[(
         "GET",
         "diagnostics/firewall/list_rule_ids",
         Reply::Json(
             200,
-            format!(r#"{{"items":[{{"id":"{U2}","descr":"gone"}}]}}"#),
+            format!(r#"{{"items":[{{"id":"{U2}","descr":"stale"}}]}}"#),
         ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert!(client.pending_changes().unwrap().is_empty());
+    assert_eq!(
+        appliance.count("GET", "diagnostics/firewall/list_rule_ids"),
+        0
+    );
+}
+
+#[test]
+fn a_pf_answer_without_its_filter_rules_is_refused_not_read_as_empty() {
+    let appliance = MockAppliance::start(script(&[(
+        "GET",
+        "diagnostics/firewall/pf_statistics/rules",
+        Reply::Json(200, r#"{"rules":{}}"#.into()),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client.pending_changes().unwrap_err();
+    assert!(
+        err.to_string().contains("without its filter rules"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_foreign_deletion_not_applied_refuses_the_pre_check() {
+    // pf still runs a rule the config no longer has.
+    let appliance = MockAppliance::start(script(&[(
+        "GET",
+        "diagnostics/firewall/pf_statistics/rules",
+        Reply::Json(200, pf_rules(&[U2])),
     )]));
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client
@@ -996,8 +1050,8 @@ fn our_own_staged_rule_is_applied_and_proven_running_afterwards() {
         ),
         (
             "GET",
-            "diagnostics/firewall/list_rule_ids",
-            Reply::Json(200, r#"{"items":[]}"#.into()),
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[])),
         ),
         // after the apply: running.
         (
@@ -1007,11 +1061,8 @@ fn our_own_staged_rule_is_applied_and_proven_running_afterwards() {
         ),
         (
             "GET",
-            "diagnostics/firewall/list_rule_ids",
-            Reply::Json(
-                200,
-                format!(r#"{{"items":[{{"id":"{created}","descr":"allow web"}}]}}"#),
-            ),
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[created])),
         ),
     ]));
     let client = Client::connect(&target(&appliance)).unwrap();
