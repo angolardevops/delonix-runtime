@@ -769,3 +769,36 @@ What F3d adds:
   - `net.ownership-marker` becomes `supported`: its live test ran against this appliance.
 - **Not in this slice**: a manifest surface that declares a policy for a gateway. That is new
   schema, with a record and a teardown by rule count, and it is its own decision.
+
+## Addendum 2026-09-30 — F3e: `kind: NetworkGateway` declares policies
+
+- **`spec.policies`** declares one direction of one target's policy in the shape a
+  `NetworkPolicy` has. The target is an alias, a prefix or an address. The fields are:
+  - `name`, `target`, `direction` (`ingress` or `egress`), `defaultPolicy` (`deny` when omitted);
+  - `sequence`, the first rule's position;
+  - `rules`, each with `proto`, `port`, `from` or `to`, `action`, `log` and `stateful`.
+- **Lowering.** The rules are built as IR through `delonix_networking::policy::rule_of`, which is
+  now public: the same parse a container's record uses. `gateway_rules` then lowers the IR.
+- **Refused before anything is sent**:
+  - a direction that is neither `ingress` nor `egress`;
+  - a peer named on the wrong side (`from` on an egress rule, or `to` on an ingress rule);
+  - a reversed range;
+  - a name that cannot be an identity;
+  - two policies with one name;
+  - two policies whose positions overlap.
+- **The record keeps the policies last declared.** A teardown recomputes their rule identities
+  from it. The reconciler compares them: a change plans a Replace, as every `NetworkGateway`
+  change already does, since there is no update in place.
+- **Live, by the CLI, against the OPNsense 26.1.2_5 lab appliance.** The manifest had two
+  policies, one ingress with three rules and one egress with one rule. The run, with an isolated
+  root:
+  - `stack apply` put 6 rules on the appliance, and every field read back as declared;
+  - pf loaded the rules in `sequence` order, with `TCP/UDP` as two pf rules;
+  - `stack plan --detailed-exitcode` answered 0;
+  - a second `apply` was idempotent;
+  - `delete networkgateways` left no rule, no pf line and no owner category of its own.
+
+  The rules carry no interface, so they are floating (`in quick inet`), as every rule this client
+  wrote before.
+- **Catalog.** `net.gateway.rule-order`, `firewall.stateless` and `firewall.logging` become
+  `supported`. The manifest now reaches them, and the live provider test exercises them.

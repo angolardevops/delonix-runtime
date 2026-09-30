@@ -38,8 +38,8 @@ pub fn capability_report(configured: bool) -> ProviderReport {
                 S::Supported { evidence: LIVE }
             }
             C::NetGatewayUpdateInPlace => S::NotImplemented,
-            C::NetGatewayRuleOrder | C::FirewallStateless | C::FirewallLogging => S::Partial {
-                detail: "a rule's `sequence`, `statetype none` and `log` are sent by the client and read back from the appliance, in pf's order (ADR-0059 F3d, live-tested on 26.1.2_5); no field of `kind: NetworkGateway` reaches them yet",
+            C::NetGatewayRuleOrder | C::FirewallStateless | C::FirewallLogging => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields",
             },
             C::NetGatewayMultiWan | C::NetGatewayVpn => S::NotImplemented,
             C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
@@ -227,9 +227,12 @@ mod tests {
         assert_eq!(
             yes,
             [
+                "firewall.logging",
+                "firewall.stateless",
                 "net.apply.staged",
                 "net.gateway.alias",
                 "net.gateway.filter",
+                "net.gateway.rule-order",
                 "net.ownership-marker"
             ]
         );
