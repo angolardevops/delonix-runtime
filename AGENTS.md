@@ -3084,9 +3084,25 @@ o separa dos outros dez.
   `0.115`, tinha um ano). **O grupo de dev leva `httpx` E `httpx2`**, medido: o Starlette actual
   deprecia `httpx` (aviso em cada `pytest`), e o Starlette de um `-v 0.116` não importa outra
   coisa — só `httpx2` partia os testes de um projecto com `-v` antigo.
+- **O Odoo 20 escuta em `127.0.0.1` por omissão** (`http_interface`, `config.py` do 20.0; o 19
+  avisava «will change to 127.0.0.1 in 20.0»). Dentro de um container isso torna a porta
+  publicada inalcançável: o `--up` construiu, aplicou e desistiu do health — com o log a dizer
+  `HTTP service running on 127.0.0.1:8069`. Os dois `.conf` levam `http_interface = 0.0.0.0`
+  (a opção existe no 18 e no 19), com teste.
+- **O manifesto dev do Odoo nunca funcionou**: `./addons:/mnt/extra-addons` numa rede própria
+  dava `no such bind path ./addons`. A fonte relativa é canonicalizada contra o CWD, e a 2.ª
+  passagem não corre no CWD do utilizador — a mesma classe do `source_dir` do `kind: App`.
+  `anchor_relative_binds` ancora-as na 1.ª passagem, antes de escrever o spec do re-exec.
+- **O `--up` esperava 40 s pelo health**; medido com load ~30, o Odoo 20 em `dev_mode` levou
+  ~85 s do primeiro log ao HTTP. Passa a 120 s — é um tecto, uma app sã responde antes.
 - **Validado ao vivo**: Odoo 18 (o caso reportado) `stack apply` → `/web/health` `pass` e
-  `psql` do container Odoo ao `db` a responder PostgreSQL 16.15; FastAPI 0.142.2 e 0.116.2 com
-  `uv sync`, `ruff`, `pytest` e o servidor a responder `/api/v1/health/live`.
+  `psql` do container Odoo ao `db` a responder PostgreSQL 16.15; Odoo 20 (`odoo:20.0`, build
+  do template sem `-v`) pelo manifesto dev (bind-mounts incluídos) e com o `odoo.conf` de
+  produção → `HTTP service running on 0.0.0.0:8069`, health `pass`, e o mesmo `psql`; FastAPI
+  0.142.2 e 0.116.2 com `uv sync`, `ruff`, `pytest` e o servidor a responder
+  `/api/v1/health/live`. **Não re-corrido depois das correcções**: o `stack init -t odoo --up`
+  de ponta a ponta com a imagem reconstruída (o build leva ~45 min neste host); cada passo dele
+  foi provado à parte.
 - **Custo medido e NÃO mexido**: o build rootless do Odoo leva ~20 min neste host carregado. Cada
   `COPY` (mesmo de um ficheiro) faz snapshot do rootfs inteiro para a cache de build
   (`cp -a --reflink=auto`, e ext4 não tem reflink) — 2–4 min e ~2 GB por instrução numa imagem de
