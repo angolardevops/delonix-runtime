@@ -1,7 +1,7 @@
 #cloud-config
 # ===========================================================================
-#  The build seed for the FreePBX 17 image (FreePBX 17 + Asterisk on Debian
-#  12, open-source modules only). Consumed ONLY by build-freepbx.sh, inside
+#  The build seed for the FreePBX 17 image (stock FreePBX 17 + Asterisk on
+#  Debian 12). Consumed ONLY by build-freepbx.sh, inside
 #  QEMU, never by a deployed VM.
 # ===========================================================================
 # `@FREEPBX_INSTALLER_COMMIT@`/`@FREEPBX_INSTALLER_SHA256@`/`@FREEPBX_KEY_FPR@`/
@@ -44,48 +44,6 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
-  # "Open-source only", made true: run by the vendor installer itself (one
-  # hooked line, see build.sh), right before it refreshes signatures -- the
-  # installer's own --opensourceonly leaves commercial, ionCube-encoded code
-  # behind. Modules are found by the license in each module.xml, not by a list
-  # written today; `firewall` goes too, as the vendor intends: it requires
-  # /usr/lib/sysadmin/includes.php, which goes with sysadmin17.
-  - path: /root/delonix-strip-commercial.sh
-    permissions: "0700"
-    content: |
-      #!/bin/bash
-      set -euo pipefail
-      MODS=/var/www/html/admin/modules
-      COMMERCIAL=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | awk -F/ '{print $(NF-1)}' | tr '\n' ' ' || true)
-      echo "==> delonix strip: commercial modules on disk: ${COMMERCIAL:-none}"
-      for m in $COMMERCIAL firewall; do
-        fwconsole ma -f remove "$m" >/dev/null 2>&1 || true
-        # An encoded module cannot run its own uninstaller without ionCube:
-        # take it out of the module table and off the disk.
-        if [ -d "$MODS/$m" ]; then
-          printf "DELETE FROM modules WHERE modulename='%s';\n" "$m" | mysql asterisk
-          rm -rf "${MODS:?}/$m"
-          echo "    removed by hand: $m"
-        fi
-      done
-      # FreePBX keeps a signed tarball of every module in _cache and, measured
-      # 2026-09-30, reinstalls sysadmin and firewall from there as "missing
-      # dependencies" at the next refreshsignatures (cos -> sysadmin ->
-      # firewall). Nothing to reinstall from, nothing reinstalled.
-      for m in $COMMERCIAL firewall; do rm -f "$MODS/_cache/$m"-[0-9]*.tgz.gpg; done
-      # Encoded AGI scripts the commercial modules left in agi-bin -- in
-      # subdirectories too (agi-bin/areminder/).
-      ENC_AGI=$(grep -rlI 'ionCube Loader' /var/lib/asterisk/agi-bin 2>/dev/null | tr '\n' ' ' || true)
-      if [ -n "${ENC_AGI// /}" ]; then echo "==> delonix strip: encoded AGI scripts: $ENC_AGI"; rm -f $ENC_AGI; fi
-      LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ' || true)
-      [ -z "${LEFT// /}" ] || { echo "!! delonix strip: commercial modules still on disk: $LEFT"; exit 1; }
-      ENC=$(grep -rlI 'ionCube Loader' /var/www/html /var/lib/asterisk 2>/dev/null | head -5 | tr '\n' ' ' || true)
-      [ -z "${ENC// /}" ] || { echo "!! delonix strip: ionCube-encoded code still present: $ENC"; exit 1; }
-      fwconsole chown >/dev/null 2>&1 || true
-      fwconsole reload
-      mkdir -p /etc/delonix
-      printf 'COMMERCIAL=%q\nENC_AGI=%q\n' "$COMMERCIAL" "$ENC_AGI" > /etc/delonix/freepbx-stripped.env
-      echo "==> delonix strip: done"
   - path: /root/build.sh
     permissions: "0700"
     content: |
@@ -117,42 +75,17 @@ write_files:
       echo "@FREEPBX_INSTALLER_SHA256@  /root/sng_freepbx_debian_install.sh" | sha256sum -c - \
         || { echo "!! FreePBX installer checksum mismatch"; exit 1; }
 
-      # TWO one-line edits to the vendor's script, applied after the
-      # checksum, each checked to touch exactly one line.
-      #
-      # Measured on three builds of 2026-09-30, with --opensourceonly:
-      #  1. the installer pipes every commercial module into
-      #     `xargs fwconsole ma -f remove`; `oracle_connector` fails its
-      #     un-installation scripts and `set -e` aborts the install. The very
-      #     next line already does `... remove firewall ... || true`; this line
-      #     gets the same.
-      #  2. later steps put six ionCube-encoded commercial modules back on disk
-      #     (cos endpoint oracle_connector pms restapps sysadmin), and from
-      #     then on every `fwconsole` that loads them dies on "the ionCube
-      #     Loader for PHP needs to be installed" -- refreshsignatures, then
-      #     the post-install `fwconsole motd`. Tolerating each one would be
-      #     whack-a-mole, and would leave the encoded code in. Instead ONE
-      #     line, before the installer's "# Refresh signatures", runs
-      #     /root/delonix-strip-commercial.sh: from there on the installer
-      #     runs on open-source modules only, refreshsignatures included.
-      I=/root/sng_freepbx_debian_install.sh
-      patch_line() {  # patch_line <fixed text that must occur once> <sed expr> <fixed text after>
-        [ "$(grep -cF -- "$1" "$I")" = 1 ] || { echo "!! installer patch: '$1' is not there exactly once"; exit 1; }
-        sed -i "$2" "$I"
-        [ "$(grep -cF -- "$3" "$I")" = 1 ] || { echo "!! installer patch did not apply: $2"; exit 1; }
-      }
-      patch_line 'xargs -t -I {} fwconsole ma -f remove {} >> "$log"' \
-                 's#xargs -t -I {} fwconsole ma -f remove {} >> "$log"$#& || true#' \
-                 'fwconsole ma -f remove {} >> "$log" || true'
-      [ "$(grep -cx '# Refresh signatures' "$I")" = 1 ] || { echo "!! installer patch: '# Refresh signatures' is not there exactly once"; exit 1; }
-      sed -i 's|^# Refresh signatures$|/root/delonix-strip-commercial.sh\n&|' "$I"
-      [ "$(grep -cx '/root/delonix-strip-commercial.sh' "$I")" = 1 ] || { echo "!! installer patch did not apply: strip hook"; exit 1; }
-
-      # --opensourceonly: no commercial modules (and, with them, no sysadmin
-      #   or Responsive Firewall -- fail2ban stays). --skipversion: the
-      #   installer would otherwise fetch a newer copy of itself, which is the
-      #   pin undone.
-      if ! ASTVERSION=@ASTERISK_MAJOR@ bash /root/sng_freepbx_debian_install.sh --opensourceonly --skipversion; then
+      # The installer runs as the vendor ships it: no patches, and no
+      # --opensourceonly. That flag was measured on 2026-09-30 and is not
+      # reproducible at this commit: it aborts on oracle_connector's
+      # uninstaller, later steps put six ionCube-encoded commercial modules
+      # back, and even after removing them FreePBX re-downloaded sysadmin and
+      # firewall as "missing dependencies" (cos -> sysadmin -> firewall) at the
+      # next refreshsignatures. So this image is stock FreePBX 17, like any
+      # FreePBX install: the ionCube loader and the commercial modules are in
+      # it, unlicensed. --skipversion: the installer would otherwise fetch a
+      # newer copy of itself, which is the pin undone.
+      if ! ASTVERSION=@ASTERISK_MAJOR@ bash /root/sng_freepbx_debian_install.sh --skipversion; then
         echo "!! the FreePBX installer failed. Its own log:"
         tail -80 /var/log/pbx/freepbx17-install-*.log || true
         exit 1
@@ -179,21 +112,10 @@ write_files:
       [ -n "$FW_VER" ] || { echo "!! could not read the FreePBX framework version"; exit 1; }
       mkdir -p /etc/delonix
 
-      # ------------------------------------------------------------------
-      #  "Open-source only": the strip ran inside the installer (see the
-      #  hook above). Re-proved here, after the installer is done -- each
-      #  of these fails the build.
-      # ------------------------------------------------------------------
-      [ -s /etc/delonix/freepbx-stripped.env ] || { echo "!! the strip hook never ran"; exit 1; }
-      . /etc/delonix/freepbx-stripped.env
-      MODS=/var/www/html/admin/modules
-      LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ')
-      [ -z "${LEFT// /}" ] || { echo "!! commercial modules still on disk: $LEFT"; exit 1; }
-      ENC=$(grep -rlI 'ionCube Loader' /var/www/html /var/lib/asterisk 2>/dev/null | head -5 | tr '\n' ' ')
-      [ -z "${ENC// /}" ] || { echo "!! ionCube-encoded code still in the image: $ENC"; exit 1; }
-      # The step the vendor gave up on: module signatures must verify.
-      fwconsole ma refreshsignatures || { echo "!! fwconsole ma refreshsignatures failed after the cleanup"; exit 1; }
-      echo "==> no commercial or encoded code left; module signatures refreshed"
+      # Module signatures must verify -- the step the vendor lets fail
+      # silently into a background job.
+      fwconsole ma refreshsignatures || { echo "!! fwconsole ma refreshsignatures failed"; exit 1; }
+      echo "==> module signatures refreshed"
       fwconsole ma list > /etc/delonix/freepbx-modules.txt 2>&1 || true
 
       # The AMI secret and the admin login are rotated on each clone's first
@@ -209,10 +131,7 @@ write_files:
         echo "  \"installer_commit\": \"@FREEPBX_INSTALLER_COMMIT@\","
         echo "  \"apt_key_fingerprint\": \"@FREEPBX_KEY_FPR@\","
         echo "  \"debian_build\": \"@DEBIAN_BUILD@\","
-        echo "  \"modules\": \"open-source only\","
-        echo "  \"commercial_modules_removed\": \"${COMMERCIAL% } firewall\","
-        echo "  \"encoded_agi_removed\": \"$(for f in $ENC_AGI; do basename "$f"; done | tr '\n' ' ' | sed 's/ $//')\","
-        echo "  \"installer_patches\": \"2 one-line: commercial removal tolerates oracle_connector; a hook runs delonix-strip-commercial.sh before refreshsignatures\","
+        echo "  \"modules\": \"stock FreePBX 17: open-source and commercial (unlicensed); ionCube loader present\","
         echo "  \"web_port\": 80,"
         echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
         echo "  \"image_revision\": @IMAGE_REV@"
@@ -225,7 +144,7 @@ write_files:
 
       apt-get clean
       rm -rf /var/lib/apt/lists/*
-      rm -f /root/sng_freepbx_debian_install.sh /root/delonix-strip-commercial.sh
+      rm -f /root/sng_freepbx_debian_install.sh
 
       # No build identity in a golden image: hostname, machine-id, SSH host keys.
       echo localhost > /etc/hostname

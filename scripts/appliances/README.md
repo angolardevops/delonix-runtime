@@ -78,7 +78,7 @@ builds — the checksum is what makes that safe.
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
 | `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki + NetFlow stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8, goflow2 2.2.6 | `monitoring-zabbix7.0-grafana13.2.2-r4.qcow2` |
-| `build-freepbx.sh` | FreePBX 17 + Asterisk 22 (LTS), open-source modules, on Debian 12 | installer commit `b023b842`, Debian `20260923-2610` | `freepbx17-asterisk22-r1.qcow2` |
+| `build-freepbx.sh` | stock FreePBX 17 + Asterisk 22 (LTS) on Debian 12 | installer commit `b023b842`, Debian `20260923-2610` | `freepbx17-asterisk22-r1.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant

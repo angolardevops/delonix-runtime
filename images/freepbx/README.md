@@ -1,7 +1,8 @@
 # FreePBX 17 (PBX / IP telephony) — build a qcow2 image
 
-This folder builds FreePBX 17 with Asterisk 22 (LTS) and the open-source modules only,
-on Debian 12, with MariaDB and Apache as the vendor's installer sets them up.
+This folder builds **stock** FreePBX 17 with Asterisk 22 (LTS) on Debian 12, with MariaDB
+and Apache, exactly as the vendor's installer sets them up — commercial modules and the
+ionCube loader included, unlicensed (see *Why stock* below).
 
 It is **a cloud image with software installed**: it still runs cloud-init, so
 `vm create --ssh-key/--hostname/--user-data` work — and `--user-data` is also how the
@@ -50,19 +51,16 @@ The build allows 60 minutes. What it pins, and checks before using:
 | The `deb.freepbx.org` apt key | fingerprint `991C357C8A359D0382BC6E87C4DFE68FCE6DE186` | after the installer, which fetches it over plain http |
 | Asterisk | major `22` | read from the running Asterisk; another major fails the build |
 
-**"Open-source only" is made true by this build, not by the vendor's flag.** Measured on
-2026-09-30: the installer's `--opensourceonly` leaves six ionCube-encoded commercial
-modules on disk (`cos`, `endpoint`, `oracle_connector`, `pms`, `restapps`, `sysadmin`) and
-encoded AGI scripts in `agi-bin`, and on the way it aborts — first when `oracle_connector`
-cannot uninstall, then at every `fwconsole` that loads the encoded code (`refreshsignatures`,
-`motd`). The build makes two one-line edits to the pinned installer, each checked to touch
-exactly one line: the first tolerates the `oracle_connector` failure, as the vendor already
-does on the next line; the second is a hook, right before the installer refreshes
-signatures, that runs `delonix-strip-commercial.sh` — which removes every module whose
-`module.xml` says `Commercial`, plus `firewall` (it needs the commercial `sysadmin`), and the
-encoded AGI scripts. From there the installer finishes on open-source code only. The build
-then **fails** if any commercial module or any ionCube-encoded file is left, or if
-`fwconsole ma refreshsignatures` does not succeed.
+**Why stock, and not `--opensourceonly`.** The vendor's installer has an open-source-only
+mode. Measured on 2026-09-30 at the pinned commit, it cannot be made reproducible: it
+aborts when `oracle_connector` cannot uninstall; later steps put six ionCube-encoded
+commercial modules back (`cos`, `endpoint`, `oracle_connector`, `pms`, `restapps`,
+`sysadmin`); and even with those removed from disk, database and module cache, FreePBX
+re-downloaded `sysadmin` and `firewall` as "missing dependencies" (`cos → sysadmin →
+firewall`) at the next `refreshsignatures` — in one run of two. So the image is what every
+FreePBX install is: the commercial modules are present and **unlicensed**, and the ionCube
+loader that runs them is installed. The build requires `fwconsole ma refreshsignatures` to
+succeed, so module signatures verify.
 
 **What is NOT pinned:** the FreePBX modules. The vendor's installer runs
 `fwconsole ma upgradeall`, so two builds can carry different module versions. The
@@ -103,9 +101,9 @@ for a PBX that is not a courtesy.
 
 ## 6. What you still have to decide
 
-- **There is no host firewall from FreePBX.** `--opensourceonly` leaves out the
-  commercial modules, and the Responsive Firewall depends on one of them.
-  `fail2ban` is installed. Put the VM behind the network's own policy: SIP
+- **Do not count on FreePBX's own firewall.** The Responsive Firewall ships (it
+  needs the commercial `sysadmin`, present but unlicensed) and was **not** proved to
+  work here. `fail2ban` is installed. Put the VM behind the network's own policy: SIP
   (5060/udp, 5061/tcp) and the RTP range only from where calls come from, and the
   web UI (80) from nowhere public.
 - **The RTP range is FreePBX's default.** Publishing thousands of UDP ports is its

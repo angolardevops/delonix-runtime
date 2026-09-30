@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the FreePBX 17 image: FreePBX 17 + Asterisk 22 (LTS) on Debian 12, with
-# the open-source modules only, on top of a Debian 12 genericcloud image.
+# Build the FreePBX 17 image: stock FreePBX 17 + Asterisk 22 (LTS) on Debian 12,
+# on top of a Debian 12 genericcloud image.
 #
 #   build-freepbx.sh
 #
@@ -10,7 +10,8 @@
 # FreePBX has no release tarball: the vendor's supported path is its own
 # installer, `sng_freepbx_debian_install.sh`, which adds deb.freepbx.org and
 # installs Asterisk and FreePBX from it. That script is pinned by commit AND
-# by sha256 here, run with `--opensourceonly --skipversion`, and the apt key it
+# by sha256 here, run as the vendor ships it (`--skipversion` only; why not
+# `--opensourceonly` is in freepbx-build.yaml), and the apt key it
 # installs is checked against a pinned fingerprint afterwards -- the installer
 # fetches that key over plain http, so trusting it unchecked would trust
 # whoever answered that request.
