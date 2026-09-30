@@ -1,4 +1,12 @@
-.git/
+# Honoured by `delonix build` and `docker build` alike: nothing listed here
+# reaches the image.
+.git
+.github
+.gitlab-ci.yml
 .env
+.env.*
+!.env.example
 *.md
-server
+docs
+coverage.out
+/server

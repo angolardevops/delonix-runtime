@@ -1,18 +1,26 @@
-# Delonixfile — same grammar as a Dockerfile, with Delonix extensions.
-# Build with:  delonix build -t __NAME__:dev .
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
 #
-# Single-stage (`delonix build` is single-stage) — so the final image carries the
-# Go toolchain (~350 MB). For a slim prod image, multi-stage build to scratch/
-# distroless once delonix build supports it. The binary is static (CGO off).
-FROM golang:__TEMPLATE_VERSION__-alpine
-ENV CGO_ENABLED=0
-WORKDIR /app
-COPY go.mod ./
+# Two stages: the toolchain compiles a static binary, and only the binary
+# reaches the runtime image (a few MB instead of the ~300 MB toolchain).
+# go.mod and go.sum are copied first so the module download is cached until
+# they change. The build context is filtered by .dockerignore.
+FROM golang:__TEMPLATE_VERSION__-alpine AS build
+ENV CGO_ENABLED=0 GOFLAGS=-trimpath
+WORKDIR /src
+COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN go build -o /app/server ./cmd/__NAME__
+ARG VERSION=dev
+RUN go build -ldflags "-s -w -X main.version=${VERSION}" -o /out/server ./cmd/__NAME__
+
+FROM alpine:3.24
+# CA roots for the outbound webhook over https, and nothing else.
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/server /usr/local/bin/server
 EXPOSE __PORT__
-# Delonix extension: the runtime probes this to mark the container healthy.
+# The runtime probes liveness; readiness is for the load balancer.
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/api/v1/health/live || exit 1
-CMD ["/app/server"]
+STOPSIGNAL SIGTERM
+CMD ["/usr/local/bin/server"]
