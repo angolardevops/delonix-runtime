@@ -55,6 +55,9 @@ pre "the image carries no admin password file" $r
 AMI_BUILD_SHA=$(virt-cat -a "$OVL" /etc/delonix/freepbx-image.json 2>/dev/null | sed -n 's/.*"ami_build_secret_sha256": "\([0-9a-f]*\)".*/\1/p')
 [ -n "$AMI_BUILD_SHA" ] && r=ok || r=fail
 pre "the image records the hash of its build-time AMI secret" $r
+KEYS_BUILD=$(virt-cat -a "$OVL" /etc/delonix/freepbx-image.json 2>/dev/null | sed -n 's/.*"baked_keys_sha256": "\([^"]*\)".*/\1/p')
+[ -n "$KEYS_BUILD" ] && r=ok || r=fail
+pre "the image records the hashes of the private keys its install left" $r
 
 GIVEN_PASS=""
 if [ "$MODE" = given ]; then
@@ -112,6 +115,17 @@ runcmd:
     chk "the AMI (5038) listens on loopback only" "listens_lo_only 5038"
     chk "the database (3306) listens on loopback only" "listens_lo_only 3306"
 
+    # the private keys the install baked in: each present, none the build's
+    for k in ca=/etc/asterisk/keys/ca.key default=/etc/asterisk/keys/default.key api=/etc/asterisk/keys/api_oauth.key snakeoil=/etc/ssl/private/ssl-cert-snakeoil.key; do
+      n=${k%%=*}; f=${k#*=}
+      built=$(printf '%s\n' @KEYS_BUILD@ | tr ' ' '\n' | sed -n "s/^$n=//p")
+      now=$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)
+      chk "$n key exists and is not the one baked into the image" '[ -n "$now" ] && [ -n "$built" ] && [ "$now" != "$built" ]'
+    done
+    chk "the default certificate names this clone ($(hostname))" "openssl x509 -in /etc/asterisk/keys/default.crt -noout -subject | grep -q \"CN = $(hostname)\""
+    chk "the default certificate is signed by this clone's CA" "openssl verify -CAfile /etc/asterisk/keys/ca.crt /etc/asterisk/keys/default.crt"
+    chk "the default key matches the default certificate" '[ "$(openssl x509 -in /etc/asterisk/keys/default.crt -noout -pubkey | sha256sum)" = "$(openssl pkey -in /etc/asterisk/keys/default.key -pubout | sha256sum)" ]'
+
     # once means once: a second run must not rotate again
     H1=$(Q "SELECT password_sha1 FROM ampusers WHERE username='admin'")
     systemctl restart delonix-freepbx-first-boot.service >/dev/null 2>&1 || true
@@ -125,7 +139,8 @@ runcmd:
 SEED
 } > "$TMP/user-data"
 sed -i -e "s|@AST_MAJOR@|$AST_MAJOR|g" -e "s|@KEY_FPR@|$KEY_FPR|g" -e "s|@MODE@|$MODE|g" \
-       -e "s|@GIVEN_PASS@|$GIVEN_PASS|g" -e "s|@AMI_BUILD_SHA@|${AMI_BUILD_SHA:-none}|g" "$TMP/user-data"
+       -e "s|@GIVEN_PASS@|$GIVEN_PASS|g" -e "s|@AMI_BUILD_SHA@|${AMI_BUILD_SHA:-none}|g" \
+       -e "s|@KEYS_BUILD@|${KEYS_BUILD:-none}|g" "$TMP/user-data"
 printf 'instance-id: freepbx-verify-%s\nlocal-hostname: freepbx-verify\n' "$$" > "$TMP/meta-data"
 cloud-localds "$SEED" "$TMP/user-data" "$TMP/meta-data"
 

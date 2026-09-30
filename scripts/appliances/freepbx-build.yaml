@@ -33,7 +33,9 @@ write_files:
     content: |
       [Unit]
       Description=Delonix FreePBX: per-clone admin and AMI secrets
-      After=network-online.target mariadb.service freepbx.service
+      # After cloud-config: the given password (write_files) and the clone's
+      # hostname must be in place before this runs.
+      After=network-online.target mariadb.service freepbx.service cloud-config.service
       Wants=network-online.target
       ConditionPathExists=!/var/lib/delonix/freepbx-first-boot.done
 
@@ -121,6 +123,9 @@ write_files:
       # The AMI secret and the admin login are rotated on each clone's first
       # boot. Keep a hash of the build's AMI secret so verify-freepbx.sh can
       # prove the rotation happened -- the hash, never the secret.
+      # ...and of every private key the install left, for the same proof.
+      keysha() { [ -f "$1" ] && sha256sum "$1" | cut -d' ' -f1 || echo absent; }
+      KEYS_BUILD="ca=$(keysha /etc/asterisk/keys/ca.key) default=$(keysha /etc/asterisk/keys/default.key) api=$(keysha /etc/asterisk/keys/api_oauth.key) snakeoil=$(keysha /etc/ssl/private/ssl-cert-snakeoil.key)"
       AMI_BUILD_SHA=$(mysql -N asterisk -e "SELECT value FROM freepbx_settings WHERE keyword='AMPMGRPASS'" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)
       systemctl enable delonix-freepbx-first-boot.service
 
@@ -134,6 +139,7 @@ write_files:
         echo "  \"modules\": \"stock FreePBX 17: open-source and commercial (unlicensed); ionCube loader present\","
         echo "  \"web_port\": 80,"
         echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
+        echo "  \"baked_keys_sha256\": \"$KEYS_BUILD\","
         echo "  \"image_revision\": @IMAGE_REV@"
         echo "}"
       } > /etc/delonix/freepbx-image.json
