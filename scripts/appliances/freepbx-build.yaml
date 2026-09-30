@@ -68,8 +68,14 @@ write_files:
           echo "    removed by hand: $m"
         fi
       done
-      # Encoded AGI scripts the commercial modules left in agi-bin.
-      ENC_AGI=$(grep -lI 'ionCube Loader' /var/lib/asterisk/agi-bin/* 2>/dev/null | tr '\n' ' ' || true)
+      # FreePBX keeps a signed tarball of every module in _cache and, measured
+      # 2026-09-30, reinstalls sysadmin and firewall from there as "missing
+      # dependencies" at the next refreshsignatures (cos -> sysadmin ->
+      # firewall). Nothing to reinstall from, nothing reinstalled.
+      for m in $COMMERCIAL firewall; do rm -f "$MODS/_cache/$m"-[0-9]*.tgz.gpg; done
+      # Encoded AGI scripts the commercial modules left in agi-bin -- in
+      # subdirectories too (agi-bin/areminder/).
+      ENC_AGI=$(grep -rlI 'ionCube Loader' /var/lib/asterisk/agi-bin 2>/dev/null | tr '\n' ' ' || true)
       if [ -n "${ENC_AGI// /}" ]; then echo "==> delonix strip: encoded AGI scripts: $ENC_AGI"; rm -f $ENC_AGI; fi
       LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ' || true)
       [ -z "${LEFT// /}" ] || { echo "!! delonix strip: commercial modules still on disk: $LEFT"; exit 1; }
