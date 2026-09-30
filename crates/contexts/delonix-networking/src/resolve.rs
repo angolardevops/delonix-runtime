@@ -213,7 +213,7 @@ mod tests {
         assert!(matches!(e, Error::DefaultProviderNotRegistered(_)), "{e}");
         let root = delonix_model::Error::from(e);
         assert!(root.to_string().starts_with("unavailable: "), "{root}");
-        assert_eq!(root.number(), 6303);
+        assert_eq!(root.number(), 6381);
     }
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
         };
         let e = choose(TWO, &w).unwrap_err();
         assert!(matches!(e, Error::RecordedProviderNotRegistered(_)), "{e}");
-        assert_eq!(e.number(), 6304);
+        assert_eq!(e.number(), 6381);
     }
 
     #[test]
@@ -264,5 +264,10 @@ mod tests {
         let e = choose(&[], &w).unwrap_err();
         assert!(matches!(e, Error::ProviderNotRegistered(_)), "{e}");
         assert!(e.to_string().contains("known: none"), "{e}");
+        // D1 rule 2: the remedy is another provider, so it exits as
+        // unavailable (69), not as an invalid argument.
+        let root = delonix_model::Error::from(e);
+        assert_eq!(root.number(), 6381);
+        assert!(root.is_unavailable(), "{root}");
     }
 }

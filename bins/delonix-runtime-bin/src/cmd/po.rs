@@ -74,6 +74,7 @@ const ERROR_WRAPPERS: &[(&str, &str)] = &[
     ("conflict: ", ""),
     ("unavailable: ", ""),
     ("timed out: ", ""),
+    ("permission denied: ", ""),
 ];
 
 /// Variant for DYNAMIC strings — the clap help and the ERROR PRINTER of
@@ -302,6 +303,7 @@ mod tests {
             Error::Conflict("network 'app' already exists".into()),
             Error::Unavailable("'wg' is not available".into()),
             Error::Timeout("waiting for 2 resource(s)".into()),
+            Error::PermissionDenied("OPNsense refused the API key (401)".into()),
             Error::Io(std::io::Error::other("boom")),
             Error::Runtime {
                 context: "clone",
@@ -321,7 +323,8 @@ mod tests {
                 | Error::Registry(_)
                 | Error::Conflict(_)
                 | Error::Unavailable(_)
-                | Error::Timeout(_) => true,
+                | Error::Timeout(_)
+                | Error::PermissionDenied(_) => true,
                 Error::Io(_) | Error::Json(_) | Error::Runtime { .. } => false,
                 Error::Coded { .. } => unreachable!("root() looks through the carrier"),
             };

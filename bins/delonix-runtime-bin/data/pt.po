@@ -226,6 +226,9 @@ msgstr "indisponível: "
 msgid "timed out: "
 msgstr "esgotou o tempo: "
 
+msgid "permission denied: "
+msgstr "permissão recusada: "
+
 # ---- mensagens migradas do tr() inline -------------------------------------
 
 msgid "active connections (conntrack)"
@@ -14775,3 +14778,62 @@ msgstr "O registo do recurso nomeia o provider que o serviu, e esse provider nã
 
 msgid "Configure that provider again, or remove the resource with a replace once it is."
 msgstr "Volta a configurar esse provider, ou remove o recurso com um replace quando estiver configurado."
+
+# ADR-0059 D5: o bloco de reasons da rede (DX-C380…C399) e os códigos retirados
+
+msgid "the network intent cannot be served as written"
+msgstr "a intenção de rede não pode ser servida como está escrita"
+
+msgid "What a network document or providers.yaml asks for cannot be served as written: nothing names a provider for the role and nothing else decides (zero or several registered, or a providers.yaml without networkDefaults.<role>), or the provider rejected the fields sent (OPNsense answers with per-field validations). ADR-0059 D5 reason `invalid_intent`."
+msgstr "O que um documento de rede ou o providers.yaml pede não pode ser servido como está escrito: nada nomeia um provider para o papel e nada mais decide (zero ou vários registados, ou um providers.yaml sem networkDefaults.<papel>), ou o provider recusou os campos enviados (o OPNsense responde com validações campo a campo). Reason `invalid_intent` da D5 do ADR-0059."
+
+msgid "Read the message: name the provider (networkDefaults.<role> in providers.yaml, or spec.provider where the Kind has it), or fix the fields the provider listed."
+msgstr "Lê a mensagem: nomeia o provider (networkDefaults.<papel> no providers.yaml, ou spec.provider onde o Kind o tem), ou corrige os campos que o provider listou."
+
+msgid "the network provider holds something this engine will not overwrite"
+msgstr "o provider de rede tem algo que este motor não sobrescreve"
+
+msgid "The remote provider (an OPNsense appliance, a Proxmox cluster's SDN) has an object with the identity being ensured or removed and no owner mark of this engine (someone else's: never adopted by name, never deleted); or an object this engine created was edited there and no longer matches the manifest (there is no update in place); or it has staged changes that are not this engine's, and its commit applies everything staged at once. ADR-0059 D5 reason `provider_conflict`. The owner mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of a vnet alias (Proxmox)."
+msgstr "O provider remoto (um appliance OPNsense, o SDN de um cluster Proxmox) tem um objecto com a identidade que se quer garantir ou remover e sem a marca de dono deste motor (é de outra pessoa: nunca é adoptado pelo nome, nunca é apagado); ou um objecto que este motor criou foi editado lá e já não bate com o manifesto (não há actualização no lugar); ou tem alterações preparadas que não são deste motor, e o commit dele aplica tudo o que está preparado de uma vez. Reason `provider_conflict` da D5 do ADR-0059. A marca de dono é uma categoria de firewall chamada `delonix-owner:<token>` (OPNsense) ou `[delonix-owner:<token>]` no fim do alias de uma vnet (Proxmox)."
+
+msgid "Read which of the three the message names: rename the object or remove the stale one on the provider; put an edited object back as declared, or replace it (`delonix stack apply --replace <Kind>/<name>`); or have whoever staged the other changes apply or discard them. Then apply again."
+msgstr "Lê qual dos três a mensagem nomeia: muda o nome do objecto ou remove o antigo no provider; repõe o objecto editado como foi declarado, ou substitui-o (`delonix stack apply --replace <Kind>/<nome>`); ou pede a quem preparou as outras alterações que as aplique ou descarte. Depois aplica outra vez."
+
+msgid "no registered provider serves this network capability"
+msgstr "nenhum provider registado serve esta capacidade de rede"
+
+msgid "The provider that would serve the request is not registered for its role, or does not implement the operation: a document names one that is not registered, networkDefaults.<role> names one, or a resource's record names the provider that created it and that provider is not registered now. A default is never skipped to try another provider, and a recorded resource never moves (ADR-0059 D3). ADR-0059 D5 reason `unsupported_capability`: the remedy is another provider, not another argument."
+msgstr "O provider que serviria o pedido não está registado para o seu papel, ou não implementa a operação: um documento nomeia um que não está registado, o networkDefaults.<papel> nomeia um, ou o registo de um recurso nomeia o provider que o criou e esse provider já não está registado. Um default nunca é saltado para tentar outro provider, e um recurso registado nunca muda de provider (D3 do ADR-0059). Reason `unsupported_capability` da D5 do ADR-0059: o remédio é outro provider, não outro argumento."
+
+msgid "Configure the provider the message names (`delonix provider ls` lists what is registered), or name one that serves the role."
+msgstr "Configura o provider que a mensagem nomeia (`delonix provider ls` lista o que está registado), ou nomeia um que sirva o papel."
+
+msgid "the network provider could not be reached"
+msgstr "não foi possível chegar ao provider de rede"
+
+msgid "The request to the remote network provider (an OPNsense appliance) could not be sent or was not answered: connection refused, DNS, TLS, or a connection dropped mid-answer. When it dropped after a write was sent, whether the write landed is unknown; the next plan reads the provider again. ADR-0059 D5 reason `provider_unavailable`."
+msgstr "O pedido ao provider de rede remoto (um appliance OPNsense) não pôde ser enviado ou não teve resposta: ligação recusada, DNS, TLS, ou uma ligação cortada a meio da resposta. Quando cortou depois de uma escrita ter sido enviada, não se sabe se a escrita chegou; o plano seguinte volta a ler o provider. Reason `provider_unavailable` da D5 do ADR-0059."
+
+msgid "Check that the provider's url in providers.yaml answers from this host, then plan and apply again."
+msgstr "Confirma que o url do provider no providers.yaml responde a partir deste host, e depois volta a planear e a aplicar."
+
+msgid "the network provider refused the credential"
+msgstr "o provider de rede recusou a credencial"
+
+msgid "The remote network provider refused what it was sent: OPNsense answers 401 for a key/secret it does not accept, a 302 to its login page when no credential arrived at all, and 403 for a key without the privilege the route needs (ADR-0051 phase 0). ADR-0059 D5 reason `provider_auth_failed`."
+msgstr "O provider de rede remoto recusou o que recebeu: o OPNsense responde 401 a uma chave/segredo que não aceita, 302 para a página de login quando não chegou credencial nenhuma, e 403 a uma chave sem o privilégio que a rota pede (fase 0 do ADR-0051). Reason `provider_auth_failed` da D5 do ADR-0059."
+
+msgid "Check the key and secret files named in providers.yaml, and that the API user holds the firewall privileges on the appliance."
+msgstr "Verifica os ficheiros de chave e segredo que o providers.yaml nomeia, e que o utilizador da API tem os privilégios de firewall no appliance."
+
+msgid "Reason"
+msgstr "Motivo"
+
+msgid "Retired"
+msgstr "Retirado"
+
+msgid "replaced by {code}; last emitted by {release}"
+msgstr "substituído por {code}; emitido pela última vez na {release}"
+
+msgid "replaced by {code}; never in a release"
+msgstr "substituído por {code}; nunca saiu numa release"

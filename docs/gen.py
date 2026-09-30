@@ -5641,10 +5641,42 @@ def codes_page():
         "prints it on the error line — <code>error[DX-4501] no such VM: dev</code> — and "
         "<code>delonix explain DX-4501</code> says the rest. Decided in ADR-0043.</p>",
     )
-    pt = table(load("pt"), ["Código", "Classe", "Domínio", "Saída", "Mensagem, significado, o que fazer"])
-    en = table(load("en"), ["Code", "Class", "Domain", "Exit", "Message, meaning, what to do"])
+    def retired_table(entries, heads):
+        rows = "".join(
+            "<tr>"
+            f"<td><code>{html.escape(e['code'])}</code></td>"
+            f"<td><code>{html.escape(e['replaced_by'])}</code></td>"
+            f"<td>{html.escape(e['last_release'] or '—')}</td>"
+            f"<td><strong>{html.escape(e['message'])}</strong><br>{html.escape(e['meaning'])}</td>"
+            "</tr>"
+            for e in entries
+        )
+        th = "".join(f"<th>{h}</th>" for h in heads)
+        return f"<table><thead><tr>{th}</tr></thead><tbody>{rows}</tbody></table>"
+
+    def split(entries):
+        return ([e for e in entries if "replaced_by" not in e],
+                [e for e in entries if "replaced_by" in e])
+
+    pt_live, pt_old = split(load("pt"))
+    en_live, en_old = split(load("en"))
+    pt = table(pt_live, ["Código", "Classe", "Domínio", "Saída", "Mensagem, significado, o que fazer"])
+    en = table(en_live, ["Code", "Class", "Domain", "Exit", "Message, meaning, what to do"])
+    retired_intro = bi(
+        "div",
+        "<h2>Códigos retirados</h2><p>Um número nunca muda de significado nem é reutilizado. Quando "
+        "uma falha passa a ter outro número, o antigo fica aqui com o seu texto e o código que o "
+        "substituiu, e <code>delonix explain</code> continua a responder-lhe. A D5 do ADR-0059 juntou "
+        "as falhas dos providers de rede no bloco de reasons <code>DX-C380</code>…<code>DX-C399</code>.</p>",
+        "<h2>Retired codes</h2><p>A number never changes meaning and is never reused. When a failure "
+        "gets another number, the old one stays here with its text and the code that replaced it, and "
+        "<code>delonix explain</code> still answers it. ADR-0059 D5 folded the network provider failures "
+        "into the reason block <code>DX-C380</code>…<code>DX-C399</code>.</p>",
+    )
+    pt_old_t = retired_table(pt_old, ["Código", "Substituído por", "Última release", "Mensagem e significado"])
+    en_old_t = retired_table(en_old, ["Code", "Replaced by", "Last release", "Message and meaning"])
     page("codigos.html", "Dicionário de códigos", f"<h1>{bi('span', 'Dicionário de códigos', 'Code dictionary')}</h1>"
-         + intro + bi("div", pt, en))
+         + intro + bi("div", pt, en) + retired_intro + bi("div", pt_old_t, en_old_t))
 
 
 def kinds_page():

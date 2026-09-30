@@ -572,3 +572,50 @@ providers; that is its own decision.
 **Part 2, the D5 envelope and the DX-C380 block, is a separate change**: it renumbers published
 codes, which D5 asks the release notes to name, and it has to be reconciled with the four codes
 F2c introduced.
+
+## Addendum 2026-09-30 — F2d, part 2a: the DX-C380 block
+
+**The owner decided (2026-09-30) to renumber every published network failure that is a D5
+reason into the block**, and that the old DX-1348 exits 69 as D1 rule 2 says. That goes one
+step past D5's own text, which kept DX-1345/1346 as configuration errors: they are
+`invalid_intent` now, still class 1 and exit 1.
+
+- **Each reason owns one `NN`**, whatever its class: `delonix_model::codes::Reason`, in D5's
+  table order from `80` (`invalid_intent`) to `96` (`dependency_failed`), and
+  `Reason::number()` builds `DX-C3NN` from the reason's class. A test holds the block to the
+  reasons: an entry in `80`–`99` of the network domain that is no reason, or is in another
+  class, fails. A reason gets an entry when something raises it; the others keep their
+  number reserved and no entry yet.
+- **The mapping**, and the exit code each failure answers now:
+
+  | new | reason | replaces | exit |
+  |---|---|---|---|
+  | DX-1380 | `invalid_intent` | 1343, 1345, 1346, 1347 | 1 (unchanged) |
+  | DX-5389 | `provider_conflict` | 5340, 5341, 5342 | 5 (unchanged) |
+  | DX-6381 | `unsupported_capability` | 1342, 1348, 6303, 6304 | 69 (1342 and 1348 were 1) |
+  | DX-6383 | `provider_unavailable` | 9303 (OPNsense transport) | 69 (was 1) |
+  | DX-7385 | `provider_auth_failed` | 9305, 9306 (OPNsense 401/302/403) | 77 (was 1) |
+
+  The release notes must carry this table: a script that matched `DX-5340` or read exit 1 for
+  a refused OPNsense key sees a different answer.
+- **A number never changes meaning and is never reused**, so the old ones are not deleted:
+  `codes::RETIRED` keeps each with its published texts, the number that replaced it and the
+  last release that emitted it (`None` for 1347, 1348, 6303 and 6304, which only ever lived on
+  the main branch — retired anyway, so a later entry cannot take them). `delonix explain
+  DX-5340` still answers, with `Retired: replaced by DX-5389`; `explain codes --json` lists the
+  retired ones with `replaced_by`, and the generated `codigos.html` has a «Retired codes» table.
+  A test refuses a retired number or id back in the dictionary.
+- **Several variants share a reason, and the variant still says which.** `Error::reason()` in
+  `delonix-networking` and in `delonix-opnsense` is the exhaustive match; `number()` asks it
+  first. The tests that used the number to tell «not ours» from «someone else's staged
+  changes» now also match the variant or the message.
+- **`provider_auth_failed` needed a class-7 carrier.** The only one was `Error::Io` with
+  `PermissionDenied`, which prints «I/O error» for a refused API key; the model gained
+  `Error::PermissionDenied(String)` («permission denied: …», `DX_PERMISSION_DENIED`, exit 77).
+- **Left as they are**: the registration refusals (1341, 1344 — a programming error in the
+  process that registered, not a provider failure), OPNsense's 404, unclassified status,
+  oversized or unparseable body and unbuildable client (no D5 reason names them), DX-6301/6302,
+  and the Proxmox errors, which live in the VM domain.
+
+**Still owed by F2, part 2b:** the envelope's context fields (`provider`, `role`, `step`,
+`cause` redacted, with ADR-0049's grep-for-the-secret test) on the CLI and the node API.

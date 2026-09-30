@@ -647,7 +647,7 @@ fn a_hand_made_alias_with_the_same_name_is_refused_not_adopted() {
         .ensure_alias(&host_alias(), &mark(), &Staging::default())
         .unwrap_err();
     assert!(matches!(err, Error::NotOwned(_)), "{err}");
-    assert_eq!(err.number(), 5340);
+    assert_eq!(err.number(), 5389);
     assert_eq!(appliance.count("POST", "firewall/alias/add_item"), 0);
 }
 
@@ -716,7 +716,7 @@ fn an_owned_rule_edited_on_the_appliance_is_drift_not_present() {
         .ensure_rule(&web_rule(), &mark(), &Staging::default())
         .unwrap_err();
     assert!(matches!(err, Error::Drifted(_)), "{err}");
-    assert_eq!(err.number(), 5341);
+    assert_eq!(err.number(), 5389);
     assert!(
         err.to_string().contains("destination_net is 'any'"),
         "{err}"
@@ -821,7 +821,7 @@ fn a_foreign_rule_staged_and_not_applied_refuses_the_commit_before_any_apply() {
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client.commit(&Staging::default()).unwrap_err();
     assert!(matches!(err, Error::ForeignPending(_)), "{err}");
-    assert_eq!(err.number(), 5342);
+    assert_eq!(err.number(), 5389);
     assert!(err.to_string().contains(U1), "{err}");
     assert_eq!(appliance.count("POST", "firewall/alias/reconfigure"), 0);
     assert_eq!(appliance.count("POST", "firewall/filter/apply"), 0);
@@ -1135,8 +1135,12 @@ fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
         ),
     ]));
     let provider = delonix_opnsense::OpnsenseGatewayProvider::connect(&target(&appliance)).unwrap();
+    // One reason (provider_conflict, ADR-0059 D5) for both; the message still
+    // says which of the two it was.
     let e = provider.ensure_rule(&web_rule(), &mark()).unwrap_err();
-    assert_eq!(e.number(), 5340, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("refusing to adopt"), "{e}");
     let e = provider.check_no_foreign_pending().unwrap_err();
-    assert_eq!(e.number(), 5342, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("that are not this engine's"), "{e}");
 }

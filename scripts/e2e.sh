@@ -3945,8 +3945,18 @@ spec:
   provider: native
   aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"] }]
 YAML
-check "NetworkGateway num provider que ninguém registou recusa (o native saiu no F2b)" fail \
+# D1 regra 2 do ADR-0059: nomear um provider que ninguém registou pede OUTRO
+# provider, por isso sai como indisponível (69) com o reason da D5, e não 1.
+check "NetworkGateway num provider que ninguém registou recusa com 69 (o native saiu no F2b)" 69 \
   "$BIN" apply -f "$RWORK/gw-native.yaml"
+check "... e a linha de erro traz o código do reason unsupported_capability (DX-6381)" ok bash -c \
+  "'$BIN' apply -f '$RWORK/gw-native.yaml' 2>&1 | grep -q 'error\\[DX-6381\\]'"
+# Um número publicado nunca muda de significado: o que a D5 retirou continua a
+# ter resposta no explain, com o sucessor.
+check "explain de um código retirado (DX-5340) responde e nomeia o sucessor DX-5389" ok bash -c \
+  "'$BIN' explain DX-5340 | grep -q 'DX-5389'"
+check "explain DX-6381 diz o reason unsupported_capability" ok bash -c \
+  "'$BIN' explain DX-6381 | grep -q 'unsupported_capability'"
 # O provider é resolvido ANTES de o registo ser gravado: um nome que ninguém
 # registou é recusado sem deixar registo, e o delete termina na mesma.
 check "delete de um NetworkGateway recusado termina" ok \

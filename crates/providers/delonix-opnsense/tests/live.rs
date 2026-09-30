@@ -185,7 +185,8 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
     // Another record's mark finds the same names and must not own them.
     let stranger = fresh_mark();
     let err = GatewayProvider::ensure_alias(&provider, &alias, &stranger).unwrap_err();
-    assert_eq!(err.number(), 5340, "{err}");
+    assert_eq!(err.number(), 5389, "{err}");
+    assert!(err.to_string().contains("refusing to adopt"), "{err}");
     assert!(matches!(
         provider.remove_rule(&rule.description, &stranger).unwrap(),
         RemoveOutcome::NotOwned(Owner::Other(_))
@@ -244,11 +245,16 @@ fn a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_c
 
     // 2. Ours with that description: refused, not adopted.
     let err = provider.ensure_rule(&rule, &owner).unwrap_err();
-    assert_eq!(err.number(), 5340, "{err}");
+    assert_eq!(err.number(), 5389, "{err}");
+    assert!(err.to_string().contains("refusing to adopt"), "{err}");
 
     // 3. The commit sees the operator's unapplied rule and refuses.
     let err = provider.commit().unwrap_err();
-    assert_eq!(err.number(), 5342, "{err}");
+    assert_eq!(err.number(), 5389, "{err}");
+    assert!(
+        err.to_string().contains("that are not this engine's"),
+        "{err}"
+    );
     assert!(err.to_string().contains(&theirs), "{err}");
 
     // 4. A teardown of ours leaves theirs alone.
@@ -278,7 +284,11 @@ fn a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_c
         .expect("our rule is on the appliance");
     hand.disable_rule(&ours);
     let err = provider.ensure_rule(&rule, &owner).unwrap_err();
-    assert_eq!(err.number(), 5341, "{err}");
+    assert_eq!(err.number(), 5389, "{err}");
+    assert!(
+        err.to_string().contains("was changed on the appliance"),
+        "{err}"
+    );
     assert!(err.to_string().contains("disabled"), "{err}");
 
     // Clean up: our removal covers our own disabled-not-applied change.
