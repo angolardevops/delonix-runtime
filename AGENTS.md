@@ -8140,9 +8140,18 @@ se mediram sob carga dizem-no.
   `pull` sobre um repositório público, 300 s) mostrou que um token pedido SEM credenciais não
   expõe nada. Só esses são guardados (`auth/tokens/`, 0600), nunca com `image login` para o
   host nem num push. Pull a quente do `alpine:3.20`: 1,50–1,64 s → 0,94–0,99 s.
-- **U3 passo 2, retomar um upload a meio.** O ghcr aceita upload por partes (`PATCH` devolve
-  `range: 0-1048575`) mas o `GET` do estado do upload responde `303` para uma página web: o
-  cliente não consegue saber quanto o registo guardou depois de uma ligação cair.
+- **U3 passo 2, retomar um upload a meio — FEITO depois, sem o `GET` de estado.** Estava
+  recusado porque o `GET` do estado responde `303` no ghcr. Não é preciso: medido a 2026-09-30,
+  um `PATCH` cortado a meio não deixa bytes no ghcr, e repetir o bloco a partir do último `Range`
+  confirmado é aceite. Três factos que só a prova ao vivo deu, e cada um partia a primeira versão:
+  - **o ghcr aceita partes de no máximo 4 MiB** — com 16 MiB, cada `PATCH` levava `416` e o push
+    FALHAVA sempre. Um `416` no byte 0 corta agora a parte a meio;
+  - **o `registry:2` guarda parte do bloco cortado** e responde `404` ao `GET` e aos `PATCH`
+    seguintes, estes ANTES de ler o corpo (o cliente vê só uma ligação caída). Uma sessão assim,
+    ou uma retoma que não avança, é trocada por uma nova: nunca pior do que o `PUT` único;
+  - **partes custam ~13–17% no ghcr** (uma ida e volta por 4 MiB; 64 MiB: 30–34 s num `PUT`,
+    35–39 s em partes). Por isso o primeiro upload continua a ser um `PUT` único; só depois de uma
+    falha é que esse cliente passa a partes retomáveis.
 
 **Armadilhas de método desta série** (cada uma custou uma medição ou um PR):
 - **Um PR empilhado não corre CI** enquanto a base não é a `main`, e `gh pr merge --delete-branch`
