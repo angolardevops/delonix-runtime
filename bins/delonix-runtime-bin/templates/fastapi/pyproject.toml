@@ -1,11 +1,11 @@
 [project]
 name = "__NAME__"
 version = "0.1.0"
-description = "A FastAPI service scaffolded by `delonix init -t python -v __TEMPLATE_VERSION__`."
+description = "A FastAPI service scaffolded by `delonix init -t fastapi -v __TEMPLATE_VERSION__`."
 requires-python = ">=3.11"
 dependencies = [
     # `==X.Y.*`, not `>=X.Y`: a patch release lands with a plain `uv sync`, a
-    # minor/major upgrade needs a new `-v` (see `delonix init -t python -v`).
+    # minor/major upgrade needs a new `-v` (see `delonix init -t fastapi -v`).
     "fastapi==__TEMPLATE_VERSION__.*",
     "uvicorn[standard]>=0.32",
     "pydantic-settings>=2.6",
@@ -15,7 +15,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    # Both, on purpose: a current Starlette's TestClient deprecates `httpx` in
+    # favour of `httpx2` (a warning on every `pytest` run), and the Starlette
+    # an older `-v` resolves to cannot import anything BUT `httpx`.
     "httpx>=0.27",
+    "httpx2>=2.13",
     "ruff>=0.7",
 ]
 

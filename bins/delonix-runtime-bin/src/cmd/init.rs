@@ -85,7 +85,7 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, pkg_json: Option<&str>) -> Dete
         return Detection::tpl("node", "package.json");
     }
     if has("pyproject.toml") || has("requirements.txt") {
-        return Detection::tpl("python", "pyproject.toml/requirements.txt");
+        return Detection::tpl("fastapi", "pyproject.toml/requirements.txt");
     }
     if has("haproxy.cfg") {
         return Detection::tpl("haproxy", "haproxy.cfg");

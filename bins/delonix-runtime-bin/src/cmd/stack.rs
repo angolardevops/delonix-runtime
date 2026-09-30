@@ -88,7 +88,7 @@ pub enum StackCmd {
         /// Overwrites already existing files.
         #[arg(long)]
         force: bool,
-        /// Generates a complete PROJECT for a stack (e.g. `python`) with best practices,
+        /// Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices,
         /// instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,

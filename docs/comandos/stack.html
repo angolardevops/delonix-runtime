@@ -203,7 +203,7 @@ EXAMPLES:
   delonix stack plan -f prod.yaml
 
   # a complete project, files already filled in
-  delonix stack init -t python
+  delonix stack init -t fastapi
 
 SEE ALSO:
   delonix container apply · delonix compose up · delonix cluster apply ·
@@ -343,7 +343,7 @@ Options:
           Overwrites already existing files
 
   -t, --template &lt;TEMPLATE&gt;
-          Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
+          Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
 
   -v, --template-version &lt;TEMPLATE_VERSION&gt;
           Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template&#x27;s own README. Refused with a clear error on a template that has none
@@ -355,9 +355,9 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # a complete Python project — Delonixfile, manifest and README, runnable
+  # a complete FastAPI project — Delonixfile, manifest and README, runnable
   # without editing anything
-  delonix stack init -t python
+  delonix stack init -t fastapi
 
   # which templates exist
   delonix stack init --template list
@@ -391,7 +391,7 @@ project for a language/framework, with best practices (non-root multi-stage, hea
 dotfiles) and already delonix-native (Delonixfile + manifest). Without <code>--template</code>,
 <code>init</code> generates the generic scaffold. The <code>__NAME__</code>/<code>__MODULE__</code>
 tokens get replaced with the project name.</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><div class='cap lang-en'>COMPLETE stack project (FastAPI): code + Delonixfile + manifest + tests</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class='cap lang-pt'>Ver os templates disponíveis</div><div class='cap lang-en'>See the available templates</div><pre><code>delonix stack init --template list</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><div class='cap lang-en'>COMPLETE stack project (FastAPI): code + Delonixfile + manifest + tests</div><pre><code>delonix stack init myapi --template fastapi</code></pre></div><div class="ex"><div class='cap lang-pt'>Ver os templates disponíveis</div><div class='cap lang-en'>See the available templates</div><pre><code>delonix stack init --template list</code></pre></div>
 <h2 id='apply'><code>stack apply</code></h2>
 <p class='intro'>Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)</p>
 <div class='help'><pre><code>Usage: delonix stack apply [OPTIONS]
@@ -549,11 +549,11 @@ debaixo dos containers ainda ligados a ela. Só toca no que tem a label
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Gera um projecto COMPLETO já pronto (código + Delonixfile +
 manifesto) a partir de um template, e aplica-o.</p>
-<pre><code>delonix stack init minha-api --template python
+<pre><code>delonix stack init minha-api --template fastapi
 cd minha-api
 delonix stack apply</code></pre></div><div class='callout lang-en'><p>Generate a COMPLETE, ready-to-run project (code + Delonixfile +
 manifest) from a template, and apply it.</p>
-<pre><code>delonix stack init my-api --template python
+<pre><code>delonix stack init my-api --template fastapi
 cd my-api
 delonix stack apply</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>

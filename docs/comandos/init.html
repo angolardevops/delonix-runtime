@@ -215,8 +215,9 @@ EXAMPLES:
   # project&#x27;s own code is untouched
   delonix init ./my-existing-app
 
-  # pick the template&#x27;s version — an image tag for `odoo`
-  delonix init -t odoo -v 18.0
+  # pick the template&#x27;s version — an image tag for `odoo` (Odoo 20 when
+  # omitted)
+  delonix init -t odoo -v 19.0
 
   # ...or a bare major/major.minor for `django`, pinned as `==X.Y.*`
   delonix init -t django -v 5.2 myapp

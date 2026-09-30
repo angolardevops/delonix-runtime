@@ -1020,7 +1020,7 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -3706,12 +3706,46 @@ fn reexec_into_netns(
         if !opts.detach {
             propagate_exit_status(&Status::Failed(status.code().unwrap_or(1)));
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not start inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Name the network the user wrote (`--net myodoo-net`), not the netns id
+        // (a hash that appears nowhere in their manifest), and hand back the
+        // class the inner pass already decided.
+        let label = if opts.net.is_empty() || opts.pod.is_some() {
+            netns
+        } else {
+            opts.net.as_str()
+        };
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
+}
+
+/// The error of a `--net <custom>`/`--pod` start whose 2nd pass failed.
+///
+/// The 2nd pass is a separate process: it has already printed the real reason
+/// on stderr and exited with that reason's class (69 for a capability this host
+/// lacks, 4 for something missing…). This used to be one `Invalid` for every
+/// case, so the command exited 1 and the last line on screen read `(exit
+/// Some(69))` — measured on the `odoo` template, whose stack stopped there while
+/// the actual cause scrolled past one line above. The class maps back so a
+/// reconciler reading the exit code sees what the inner pass decided.
+fn netns_start_error(network: &str, code: Option<i32>) -> Error {
+    use delonix_model::exitcode as x;
+    let msg = super::po::tf(
+        "the container did not start inside network '{network}' — the reason is on the line above (exit {code})",
+        &[
+            ("network", network),
+            ("code", &code.map_or_else(|| "signal".to_string(), |c| c.to_string())),
+        ],
+    );
+    match code {
+        Some(x::NOT_FOUND) => Error::NotFound(msg),
+        Some(x::NOT_RUNNING) => Error::NotRunning(msg),
+        Some(x::CONFLICT) => Error::Conflict(msg),
+        Some(x::UNAVAILABLE) => Error::Unavailable(msg),
+        Some(x::NO_PERMISSION) => Error::PermissionDenied(msg),
+        Some(x::TIMEOUT) => Error::Timeout(msg),
+        _ => Error::Invalid(msg),
+    }
 }
 
 /// The 2nd re-exec pass (`delonix netns run <spec.json>`, hidden — not a public
@@ -6574,6 +6608,37 @@ mod runspec_single_builder_tests {
 
 #[cfg(test)]
 mod tests {
+    /// A failed 2nd pass keeps the class the inner process decided, names the
+    /// network the user wrote, and never prints a Rust `Option` at them.
+    #[test]
+    fn a_failed_netns_start_keeps_the_inner_class() {
+        use delonix_model::exitcode as x;
+        let e = super::netns_start_error("myodoo-net", Some(x::UNAVAILABLE));
+        assert_eq!(x::for_error(&e), x::UNAVAILABLE);
+        let text = e.to_string();
+        assert!(text.contains("'myodoo-net'"), "{text}");
+        assert!(!text.contains("Some("), "{text}");
+        for code in [
+            x::NOT_FOUND,
+            x::NOT_RUNNING,
+            x::CONFLICT,
+            x::NO_PERMISSION,
+            x::TIMEOUT,
+        ] {
+            assert_eq!(
+                x::for_error(&super::netns_start_error("n", Some(code))),
+                code
+            );
+        }
+        assert_eq!(
+            x::for_error(&super::netns_start_error("n", Some(42))),
+            x::GENERIC
+        );
+        assert!(super::netns_start_error("n", None)
+            .to_string()
+            .contains("exit signal"));
+    }
+
     /// `--env-file0`: byte-exact values (multi-line, `=` inside the value),
     /// before `-e` (which wins), and an entry without `KEY=` is refused rather
     /// than silently dropped.

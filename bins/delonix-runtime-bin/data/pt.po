@@ -1983,8 +1983,8 @@ msgstr "Segundos a esperar por cada VM ficar alcançável por SSH."
 msgid "Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot."
 msgstr "Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou `--once` para um snapshot de texto."
 
-msgid "Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generate a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, build the image, start it, and wait until it's healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -2187,8 +2187,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "Overwrites already existing files."
 msgstr "Substitui ficheiros já existentes."
 
-msgid "Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, builds the image, starts it and waits for it to become healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -3495,8 +3495,8 @@ msgstr "o container não arrancou (ver o erro acima)"
 msgid "ingress infra is down — no holder to enter"
 msgstr "infra de ingress em baixo — não há holder onde entrar"
 
-msgid "the container did not start inside the network '{netns}' (exit {code})"
-msgstr "o container não arrancou dentro da rede '{netns}' (exit {code})"
+msgid "the container did not start inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "o container não arrancou dentro da rede '{network}' — a razão está na linha acima (exit {code})"
 
 msgid "warning: firewall/isolation of '{name}' not reapplied on start: {e}"
 msgstr "aviso: firewall/isolamento de '{name}' não reaplicado no start: {e}"
@@ -6644,8 +6644,8 @@ msgstr "o que mudaria, antes de mudar seja o que for"
 msgid "a complete project, files already filled in"
 msgstr "um projecto completo, com os ficheiros já preenchidos"
 
-msgid "a complete Python project — Delonixfile, manifest and README, runnable without editing anything"
-msgstr "um projecto Python completo — Delonixfile, manifesto e README, executável sem editar nada"
+msgid "a complete FastAPI project — Delonixfile, manifest and README, runnable without editing anything"
+msgstr "um projecto FastAPI completo — Delonixfile, manifesto e README, executável sem editar nada"
 
 msgid "which templates exist"
 msgstr "que templates existem"
@@ -11028,8 +11028,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
 
-msgid "pick the template's version — an image tag for `odoo`"
-msgstr "escolhe a versão do template — uma tag de imagem para o `odoo`"
+msgid "pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)"
+msgstr "escolhe a versão do template — uma tag de imagem para o `odoo` (Odoo 20 quando omitida)"
 
 msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
 msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"

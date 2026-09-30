@@ -100,7 +100,7 @@ and drop `stringData` from the manifest.
 
 ## Production hardening already in `config/odoo.conf`
 
-`list_db = False`, `proxy_mode = True`, `without_demo = all`, per-worker
+`list_db = False`, `proxy_mode = True`, `without_demo = True`, per-worker
 memory/CPU/request limits, and logging to stdout — see the file itself for
 the reasoning behind each. `workers = 0` ships as the safe default for a
 small deployment; size it to `(2 * cpu_cores) + 1` once you outgrow it (and
