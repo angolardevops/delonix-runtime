@@ -61,56 +61,68 @@ if [ "$MODE" = given ]; then
   GIVEN_PASS=$(openssl rand -base64 24 | tr -d '/+=\n' | head -c 20)
 fi
 
-cat > "$TMP/user-data" <<EOF
-#cloud-config
-$( [ "$MODE" = given ] && printf 'write_files:\n  - path: /etc/delonix/freepbx-admin-password\n    permissions: "0600"\n    content: |\n      %s\n' "$GIVEN_PASS" )
+# The seed's checks are a LITERAL heredoc with @PLACEHOLDERS@ filled by sed
+# afterwards (as verify-glpi.sh does): no layer of shell escaping to get wrong.
+{
+  echo "#cloud-config"
+  if [ "$MODE" = given ]; then
+    printf 'write_files:\n  - path: /etc/delonix/freepbx-admin-password\n    permissions: "0600"\n    content: |\n      %s\n' "$GIVEN_PASS"
+  fi
+  cat <<'SEED'
 runcmd:
   - |
-    say() { echo "\$1" > /dev/console; }
-    ok()  { say "FREEPBX-VERIFY OK   \$1"; }
-    bad() { say "FREEPBX-VERIFY FAIL \$1"; }
-    chk() { if eval "\$2" >/dev/null 2>&1; then ok "\$1"; else bad "\$1"; fi; }
-    Q() { mysql -N asterisk -e "\$1"; }
-    listens_lo_only() { ! ss -ltnH | awk '{print \$4}' | grep ":\$1\\\$" | grep -Ev '^(127\\.0\\.0\\.1|\\[::1\\]):'; }
+    say() { echo "$1" > /dev/console; }
+    ok()  { say "FREEPBX-VERIFY OK   $1"; }
+    bad() { say "FREEPBX-VERIFY FAIL $1"; }
+    chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+    Q() { mysql -N asterisk -e "$1"; }
+    listens_lo_only() { ! ss -ltnH | awk '{print $4}' | grep ":$1\$" | grep -Ev '^(127\.0\.0\.1|\[::1\]):'; }
 
-    for i in \$(seq 1 150); do [ -f /var/lib/delonix/freepbx-first-boot.done ] && break; sleep 2; done
+    for i in $(seq 1 150); do [ -f /var/lib/delonix/freepbx-first-boot.done ] && break; sleep 2; done
     chk "the first-boot unit ran to the end" "[ -f /var/lib/delonix/freepbx-first-boot.done ]"
-    for u in mariadb apache2 fail2ban; do chk "\$u is active" "systemctl is-active --quiet \$u"; done
-    chk "Asterisk answers and is @AST_MAJOR@.x" "asterisk -rx 'core show version' | grep -Eq '^Asterisk @AST_MAJOR@\\.'"
+    for u in mariadb apache2 fail2ban; do chk "$u is active" "systemctl is-active --quiet $u"; done
+    chk "Asterisk answers and is @AST_MAJOR@.x" "asterisk -rx 'core show version' | grep -Eq '^Asterisk @AST_MAJOR@\.'"
     chk "PJSIP is loaded" "asterisk -rx 'module show like res_pjsip.so' | grep -q Running"
     chk "the FreePBX apt key is still the pinned one" "gpg --show-keys --with-colons /etc/apt/trusted.gpg.d/freepbx.gpg | grep -q '^fpr:.*:@KEY_FPR@:'"
-    for i in \$(seq 1 30); do curl -s -o /dev/null -m 3 http://127.0.0.1/admin/config.php && break; sleep 2; done
+    for i in $(seq 1 30); do curl -s -o /dev/null -m 3 http://127.0.0.1/admin/config.php && break; sleep 2; done
     chk "the admin UI answers and says FreePBX" "curl -s -m 30 -L http://127.0.0.1/admin/config.php | grep -qi freepbx"
 
     # the admin login: one row, the password from /root/freepbx-admin.txt
-    P=\$(sed -n 's/^password: //p' /root/freepbx-admin.txt 2>/dev/null)
-    chk "/root/freepbx-admin.txt exists and is 0600" "[ \"\$(stat -c %a /root/freepbx-admin.txt)\" = 600 ]"
-    chk "the admin password in it is at least 12 characters" "[ \${#P} -ge 12 ]"
-    chk "ampusers holds exactly one admin, with that password" "[ \"\$(Q \"SELECT COUNT(*) FROM ampusers WHERE username='admin' AND password_sha1=SHA1('\$P')\")\" = 1 ] && [ \"\$(Q \"SELECT COUNT(*) FROM ampusers\")\" = 1 ]"
+    P=$(sed -n 's/^password: //p' /root/freepbx-admin.txt 2>/dev/null)
+    PQ=$(printf '%s' "$P" | sed "s/'/''/g")
+    N_MATCH=$(Q "SELECT COUNT(*) FROM ampusers WHERE username='admin' AND password_sha1=SHA1('$PQ')")
+    N_ALL=$(Q "SELECT COUNT(*) FROM ampusers")
+    chk "/root/freepbx-admin.txt exists and is 0600" '[ "$(stat -c %a /root/freepbx-admin.txt)" = 600 ]'
+    chk "the admin password in it is at least 12 characters" '[ ${#P} -ge 12 ]'
+    chk "ampusers holds exactly one user, admin, with that password" '[ "$N_MATCH" = 1 ] && [ "$N_ALL" = 1 ]'
     chk "the given-password file was removed after use" "[ ! -e /etc/delonix/freepbx-admin-password ]"
     if [ "@MODE@" = given ]; then
-      chk "the password is the one given at creation" "[ \"\$P\" = '@GIVEN_PASS@' ]"
+      chk "the password is the one given at creation" '[ "$P" = "@GIVEN_PASS@" ]'
     else
       chk "the password was generated on first boot" "grep -q 'generated on first boot' /root/freepbx-admin.txt"
     fi
 
     # the AMI secret
-    AMI=\$(Q "SELECT value FROM freepbx_settings WHERE keyword='AMPMGRPASS'" | tr -d '[:space:]')
-    chk "the AMI secret is not the build's" "[ \"\$(printf %s \"\$AMI\" | sha256sum | cut -d' ' -f1)\" != @AMI_BUILD_SHA@ ]"
-    chk "manager.conf carries the rotated AMI secret" "grep -Eq \"^secret *= *\$AMI\\\$\" /etc/asterisk/manager.conf"
+    AMI=$(Q "SELECT value FROM freepbx_settings WHERE keyword='AMPMGRPASS'" | tr -d '[:space:]')
+    AMI_SHA=$(printf '%s' "$AMI" | sha256sum | cut -d' ' -f1)
+    MGR=$(sed -n 's/^secret *= *//p' /etc/asterisk/manager.conf | head -1 | tr -d '[:space:]')
+    chk "the AMI secret is not the build's" '[ -n "$AMI" ] && [ "$AMI_SHA" != @AMI_BUILD_SHA@ ]'
+    chk "manager.conf carries the rotated AMI secret" '[ -n "$MGR" ] && [ "$MGR" = "$AMI" ]'
     chk "the AMI (5038) listens on loopback only" "listens_lo_only 5038"
     chk "the database (3306) listens on loopback only" "listens_lo_only 3306"
 
     # once means once: a second run must not rotate again
-    H1=\$(Q "SELECT password_sha1 FROM ampusers WHERE username='admin'")
+    H1=$(Q "SELECT password_sha1 FROM ampusers WHERE username='admin'")
     systemctl restart delonix-freepbx-first-boot.service >/dev/null 2>&1 || true
     /usr/local/sbin/delonix-freepbx-first-boot >/dev/null 2>&1 || true
-    chk "a second first-boot run changes nothing" "[ \"\$(Q \"SELECT password_sha1 FROM ampusers WHERE username='admin'\")\" = \"\$H1\" ]"
+    H2=$(Q "SELECT password_sha1 FROM ampusers WHERE username='admin'")
+    chk "a second first-boot run changes nothing" '[ -n "$H1" ] && [ "$H2" = "$H1" ]'
     chk "sudoers drop-in gives delonix passwordless sudo" "grep -q 'delonix ALL=(ALL) NOPASSWD:ALL' /etc/sudoers.d/90-delonix"
 
     say "FREEPBX-VERIFY DONE"
     poweroff
-EOF
+SEED
+} > "$TMP/user-data"
 sed -i -e "s|@AST_MAJOR@|$AST_MAJOR|g" -e "s|@KEY_FPR@|$KEY_FPR|g" -e "s|@MODE@|$MODE|g" \
        -e "s|@GIVEN_PASS@|$GIVEN_PASS|g" -e "s|@AMI_BUILD_SHA@|${AMI_BUILD_SHA:-none}|g" "$TMP/user-data"
 printf 'instance-id: freepbx-verify-%s\nlocal-hostname: freepbx-verify\n' "$$" > "$TMP/meta-data"

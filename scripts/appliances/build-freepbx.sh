@@ -97,7 +97,8 @@ sed -e "s/@FREEPBX_INSTALLER_COMMIT@/$FREEPBX_INSTALLER_COMMIT/g" \
     "$HERE/freepbx-build.yaml" > "$TMP/user-data"
 # The first-boot unit travels inside the seed, indented under its write_files entry.
 sed 's/^/      /' "$HERE/freepbx-first-boot" > "$TMP/first-boot.indented"
-sed -i -e "/@FREEPBX_FIRST_BOOT@/{r $TMP/first-boot.indented" -e 'd}' "$TMP/user-data"
+# Anchored: the marker is also named in the seed's header comment.
+sed -i -e "/^@FREEPBX_FIRST_BOOT@$/{r $TMP/first-boot.indented" -e 'd}' "$TMP/user-data"
 cat > "$TMP/meta-data" <<META
 instance-id: delonix-freepbxbuild-$IMAGE_REV-$$
 local-hostname: freepbx-build
