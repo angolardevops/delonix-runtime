@@ -1,0 +1,66 @@
+#!/bin/bash
+# Per-clone secrets for the FreePBX image, once, on the clone's first boot.
+#
+# Every clone of a golden image shares whatever the build left in it. For a
+# PBX that is not a detail: an admin password or an AMI secret shared by every
+# clone -- and published, if it were a literal in this repository -- is how
+# PBXs on the internet get used for toll fraud. So nothing here is baked:
+#
+#   * the web admin login `admin` gets a password on first boot. If whoever
+#     created the VM wrote one to /etc/delonix/freepbx-admin-password (a
+#     cloud-init `write_files`, e.g. from a platform that derives it), that is
+#     used and the file is removed; otherwise a random one is generated. Either
+#     way it ends up in /root/freepbx-admin.txt (0600) and nowhere else.
+#   * the AMI secret (AMPMGRPASS) is regenerated, and FreePBX rewrites
+#     manager.conf with it.
+#
+# Runs from delonix-freepbx-first-boot.service; the stamp makes it once.
+set -euo pipefail
+exec > >(tee -a /var/log/delonix-freepbx-first-boot.log) 2>&1
+STAMP=/var/lib/delonix/freepbx-first-boot.done
+[ -f "$STAMP" ] && exit 0
+echo "=== delonix freepbx first boot: $(date -Is) ==="
+
+for i in $(seq 1 90); do
+  if mysql -N asterisk -e 'SELECT 1' >/dev/null 2>&1 && asterisk -rx "core show version" >/dev/null 2>&1; then
+    break
+  fi
+  [ "$i" -eq 90 ] && { echo "!! MariaDB/Asterisk never came up; nothing rotated"; exit 1; }
+  sleep 2
+done
+
+rand() { openssl rand -base64 36 | tr -d '/+=\n' | head -c "$1"; }
+
+# --- the web admin login ----------------------------------------------------
+GIVEN=/etc/delonix/freepbx-admin-password
+if [ -s "$GIVEN" ]; then
+  PASS=$(head -n1 "$GIVEN" | tr -d '\r\n')
+  SRC="given at creation"
+else
+  PASS=$(rand 24)
+  SRC="generated on first boot"
+fi
+[ "${#PASS}" -ge 12 ] || { echo "!! the admin password is shorter than 12 characters; refusing it"; exit 1; }
+# The password travels to MariaDB on stdin, never on a command line.
+{
+  printf "DELETE FROM ampusers WHERE username='admin';\n"
+  printf "INSERT INTO ampusers SET username='admin', password_sha1=SHA1('%s'), extension_low='', extension_high='', deptname='', sections='*';\n" \
+    "$(printf '%s' "$PASS" | sed "s/'/''/g")"
+} | mysql asterisk
+umask 077
+printf 'FreePBX web admin (%s)\nuser: admin\npassword: %s\n' "$SRC" "$PASS" > /root/freepbx-admin.txt
+rm -f "$GIVEN"
+unset PASS
+echo "==> admin password set ($SRC)"
+
+# --- the AMI secret ---------------------------------------------------------
+# Into the settings table on stdin, like the admin password -- never argv,
+# where any local user reading `ps` would see it.
+printf "UPDATE freepbx_settings SET value='%s' WHERE keyword='AMPMGRPASS';\n" "$(rand 32)" | mysql asterisk
+fwconsole reload >/dev/null
+asterisk -rx "manager reload" >/dev/null
+echo "==> AMI secret regenerated and manager.conf rewritten"
+
+mkdir -p "$(dirname "$STAMP")"
+date -Is > "$STAMP"
+echo "=== done ==="

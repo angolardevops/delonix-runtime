@@ -74,6 +74,7 @@ declare -A APP=(
   [carbonio]="6:50:1::carbonio"
   [glpi]="4:12:1::glpi"
   [wazuh]="6:30:1::wazuh"
+  [freepbx]="4:20:1::freepbx"
 )
 
 # ── result bookkeeping ─────────────────────────────────────────────────────
@@ -432,11 +433,11 @@ try: print("\n".join(sorted(str(r.get("name")) for r in json.load(sys.stdin))))
 except Exception: pass')
   local new; new=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)
   [ -n "$new" ] && ok "appliance $n: a new image was registered ($new)" || { bad "appliance $n: a new image was registered" "the store did not change"; return; }
-  local ci=no; case "$n" in openstack|monitoring|carbonio|glpi|wazuh) ci=yes;; esac
+  local ci=no; case "$n" in openstack|monitoring|carbonio|glpi|wazuh|freepbx) ci=yes;; esac
   check_record "$new" "$ci" "" "" ""
   [ -f "$(qcow2_of "$new")" ] && ok "appliance $n: the qcow2 is in the store" || bad "appliance $n: the qcow2 is in the store" "missing"
   case "$verifier" in
-    monitoring|carbonio|glpi|wazuh)
+    monitoring|carbonio|glpi|wazuh|freepbx)
       if "$REPO/scripts/appliances/verify-$verifier.sh" "$(qcow2_of "$new")" >"$VDIR/verify-$n.log" 2>&1; then ok "appliance $n: scripts/appliances/verify-$verifier.sh passed"
       else bad "appliance $n: verify-$verifier.sh" "see $VDIR/verify-$n.log — $(tail -1 "$VDIR/verify-$n.log" | cut -c1-160)"; fi ;;
     boot)
