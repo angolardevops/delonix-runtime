@@ -14837,3 +14837,25 @@ msgstr "substituído por {code}; emitido pela última vez na {release}"
 
 msgid "replaced by {code}; never in a release"
 msgstr "substituído por {code}; nunca saiu numa release"
+
+# ADR-0059 D5: o contexto de uma falha, por baixo da linha de erro
+msgid "reason: {value}"
+msgstr "motivo: {value}"
+
+msgid "provider"
+msgstr "provider"
+
+msgid "role"
+msgstr "papel"
+
+msgid "capability"
+msgstr "capacidade"
+
+msgid "step"
+msgstr "passo"
+
+msgid "plan digest"
+msgstr "digest do plano"
+
+msgid "cause"
+msgstr "causa"

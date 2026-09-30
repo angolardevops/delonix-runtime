@@ -148,6 +148,23 @@ pub fn choose(cands: &[Candidate], want: &Wanted) -> Result<&'static str> {
     }
 }
 
+/// The ADR-0059 D5 context of a provider call: which provider, in which role,
+/// at which step. The CLI and every other caller add it to the failure they
+/// return (`Error::with_context`), so the envelope says where it happened
+/// without the message having to.
+pub fn context(
+    role: Role,
+    provider: Option<&str>,
+    step: Option<&str>,
+) -> delonix_model::ErrorContext {
+    delonix_model::ErrorContext {
+        provider: provider.map(str::to_string),
+        role: Some(role.word().to_string()),
+        step: step.map(str::to_string),
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

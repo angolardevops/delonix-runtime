@@ -122,7 +122,57 @@ pub enum Error {
         number: u16,
         /// The class this failure belongs to, with its message.
         inner: Box<Error>,
+        /// Where it happened, when the raiser knew (ADR-0059 D5). `None` for
+        /// every failure that nobody gave a context to.
+        context: Option<Box<ErrorContext>>,
     },
+}
+
+/// The context of a failure, as ADR-0059 D5's envelope carries it next to the
+/// code: which provider, in which role, at which step of the operation, and
+/// the provider's own message. Every field is optional; an absent one is
+/// omitted from the envelope, never filled with a guess.
+///
+/// `cause` is the provider's message **redacted by the provider** that
+/// produced it — only the client that holds a credential knows which strings
+/// are secret, so nothing downstream can redact it later.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ErrorContext {
+    /// The provider id (`opnsense`, `proxmox`).
+    pub provider: Option<String>,
+    /// The network role the provider was serving (`segment`, `gateway`).
+    pub role: Option<String>,
+    /// The catalog capability that was asked for (`net.gateway.alias`).
+    pub capability: Option<String>,
+    /// The operation step that failed (`ensure_alias`, `commit`).
+    pub step: Option<String>,
+    /// The digest of the plan that was being applied (ADR-0059 F4).
+    pub plan_digest: Option<String>,
+    /// The provider's message, redacted.
+    pub cause: Option<String>,
+}
+
+impl ErrorContext {
+    /// True when no field is set.
+    pub fn is_empty(&self) -> bool {
+        *self == ErrorContext::default()
+    }
+
+    /// Fills every field of `self` that is empty from `other`: a context set
+    /// closer to the failure wins over one added further up.
+    pub(crate) fn fill_from(&mut self, other: ErrorContext) {
+        let fill = |mine: &mut Option<String>, theirs: Option<String>| {
+            if mine.is_none() {
+                *mine = theirs;
+            }
+        };
+        fill(&mut self.provider, other.provider);
+        fill(&mut self.role, other.role);
+        fill(&mut self.capability, other.capability);
+        fill(&mut self.step, other.step);
+        fill(&mut self.plan_digest, other.plan_digest);
+        fill(&mut self.cause, other.cause);
+    }
 }
 
 impl Error {
@@ -173,6 +223,23 @@ impl Error {
 
 /// Convenience alias.
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// `text` with every one of `secrets` replaced by `<redacted>`.
+///
+/// For a client that holds a credential and puts a remote answer into an
+/// error: only it knows which strings are secret, so it redacts before the
+/// text leaves (ADR-0059 D5, the `cause`; ADR-0049's rule that no rendered
+/// error carries the secret). A secret shorter than 4 bytes is skipped:
+/// replacing every `a` of a message makes it unreadable and hides nothing.
+pub fn redact_known(text: &str, secrets: &[&str]) -> String {
+    let mut out = text.to_string();
+    for s in secrets {
+        if s.len() >= 4 && out.contains(s) {
+            out = out.replace(s, "<redacted>");
+        }
+    }
+    out
+}
 
 impl Error {
     /// Maps a failed read of a record file WITHOUT lying about why.

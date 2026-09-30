@@ -3951,6 +3951,10 @@ check "NetworkGateway num provider que ninguém registou recusa com 69 (o native
   "$BIN" apply -f "$RWORK/gw-native.yaml"
 check "... e a linha de erro traz o código do reason unsupported_capability (DX-6381)" ok bash -c \
   "'$BIN' apply -f '$RWORK/gw-native.yaml' 2>&1 | grep -q 'error\\[DX-6381\\]'"
+# O envelope da D5 na CLI: o reason e o contexto (provider, papel, passo) vão
+# por baixo da linha de erro.
+check "... com o reason, o provider nomeado e o papel por baixo da linha de erro" ok bash -c \
+  "out=\$('$BIN' apply -f '$RWORK/gw-native.yaml' 2>&1); echo \"\$out\" | grep -q 'reason: unsupported_capability' && echo \"\$out\" | grep -q 'provider: native' && echo \"\$out\" | grep -q 'role: gateway'"
 # Um número publicado nunca muda de significado: o que a D5 retirou continua a
 # ter resposta no explain, com o sucessor.
 check "explain de um código retirado (DX-5340) responde e nomeia o sucessor DX-5389" ok bash -c \
