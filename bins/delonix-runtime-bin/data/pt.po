@@ -3048,8 +3048,8 @@ msgstr "  criado: {path}"
 msgid "`delonix {args}` failed:\n{stderr}"
 msgstr "`delonix {args}` falhou:\n{stderr}"
 
-msgid "the container started but did not become healthy in 40s — see `delonix container logs`"
-msgstr "o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`"
+msgid "the container started but did not become healthy in 120s — see `delonix container logs`"
+msgstr "o container arrancou mas não ficou saudável em 120s — vê `delonix container logs`"
 
 msgid "done. Now:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
 msgstr "pronto. Agora:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
@@ -3494,6 +3494,9 @@ msgstr "o container não arrancou (ver o erro acima)"
 
 msgid "ingress infra is down — no holder to enter"
 msgstr "infra de ingress em baixo — não há holder onde entrar"
+
+msgid "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "recurso de que o container precisa dentro da rede '{network}' — a razão está na linha acima (exit {code})"
 
 msgid "the container did not start inside network '{network}' — the reason is on the line above (exit {code})"
 msgstr "o container não arrancou dentro da rede '{network}' — a razão está na linha acima (exit {code})"

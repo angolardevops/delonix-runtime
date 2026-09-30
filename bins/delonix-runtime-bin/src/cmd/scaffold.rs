@@ -453,9 +453,14 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     }
 }
 
-/// Waits for `health` to answer 200 (up to ~40s).
+/// Waits for `health` to answer 200 (up to ~120s).
+///
+/// A ceiling, not a delay: a healthy app answers as soon as it is up. It was
+/// 40s, and measured on a loaded host (load ~30) Odoo 20 took ~85s from its
+/// first log line to serving HTTP — `--up` reported a failure on a stack that
+/// came up on its own a minute later.
 fn wait_health(port: &str, health: &str) -> Result<()> {
-    for _ in 0..80 {
+    for _ in 0..240 {
         if http_ok(port, health) {
             return Ok(());
         }
@@ -463,7 +468,7 @@ fn wait_health(port: &str, health: &str) -> Result<()> {
     }
     Err(Error::Invalid(
         super::po::t(
-            "the container started but did not become healthy in 40s — see `delonix container logs`",
+            "the container started but did not become healthy in 120s — see `delonix container logs`",
         )
         .into(),
     ))
@@ -1271,6 +1276,16 @@ mod tests {
             delonixfile.contains("FROM odoo:20.0"),
             "without -v the odoo template defaults to Odoo 20:\n{delonixfile}"
         );
+        // Odoo 20 listens on 127.0.0.1 unless told otherwise, which inside a
+        // container means the published port never answers. Both configs, the
+        // baked-in one and the one the dev manifest bind-mounts.
+        for conf in ["config/odoo.conf", "config/odoo-dev.conf"] {
+            let text = std::fs::read_to_string(dir.join(conf)).unwrap();
+            assert!(
+                text.lines().any(|l| l.trim() == "http_interface = 0.0.0.0"),
+                "{conf} must bind every interface:\n{text}"
+            );
+        }
     }
 
     /// `python` was the FastAPI template's old name. It keeps answering, and

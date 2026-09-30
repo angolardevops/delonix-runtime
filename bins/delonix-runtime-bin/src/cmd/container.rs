@@ -3658,7 +3658,16 @@ fn reexec_into_netns(
     // inside the netns, recursively. An explicit internal form doesn't depend on
     // who called it.
     let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
-    let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
+    // A relative bind source (`./addons:/mnt/extra-addons`) is resolved against
+    // the CWD, and the 2nd pass does not run in the caller's CWD: every relative
+    // bind on a custom network or pod failed with `no such bind path ./addons`.
+    // Measured with the `odoo` template's dev manifest, whose two bind mounts are
+    // the whole point of it. Anchored here, where the CWD is still the caller's.
+    let mut anchored = opts.clone();
+    if let Ok(cwd) = std::env::current_dir() {
+        anchored.volumes = anchor_relative_binds(&opts.volumes, &cwd);
+    }
+    let json = serde_json::to_string(&anchored).map_err(|e| Error::Invalid(e.to_string()))?;
     // BUG FOUND: `std::fs::write` creates the file at the ambient umask
     // (typically 0644, world-readable). `opts.env` carries the raw `-e
     // KEY=VALUE` pairs the user passed — commonly credentials — and for a
@@ -3719,6 +3728,22 @@ fn reexec_into_netns(
     Ok(())
 }
 
+/// Makes every relative bind source (`./x`, `../x`, `.`) absolute against
+/// `cwd`, leaving named volumes and absolute paths untouched. The same test
+/// `VolumeStore::resolve_spec` uses to tell a bind from a named volume: the
+/// source starts with `.` or `/`.
+fn anchor_relative_binds(specs: &[String], cwd: &std::path::Path) -> Vec<String> {
+    specs
+        .iter()
+        .map(|spec| match spec.split_once(':') {
+            Some((src, rest)) if src.starts_with('.') => {
+                format!("{}:{rest}", cwd.join(src).display())
+            }
+            _ => spec.clone(),
+        })
+        .collect()
+}
+
 /// The error of a `--net <custom>`/`--pod` start whose 2nd pass failed.
 ///
 /// The 2nd pass is a separate process: it has already printed the real reason
@@ -3738,7 +3763,11 @@ fn netns_start_error(network: &str, code: Option<i32>) -> Error {
         ],
     );
     match code {
-        Some(x::NOT_FOUND) => Error::NotFound(msg),
+        // `NotFound` prints as «no such {0}», so it gets a noun of its own.
+        Some(x::NOT_FOUND) => Error::NotFound(super::po::tf(
+            "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})",
+            &[("network", network), ("code", &x::NOT_FOUND.to_string())],
+        )),
         Some(x::NOT_RUNNING) => Error::NotRunning(msg),
         Some(x::CONFLICT) => Error::Conflict(msg),
         Some(x::UNAVAILABLE) => Error::Unavailable(msg),
@@ -6608,6 +6637,34 @@ mod runspec_single_builder_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Relative bind sources are anchored to the caller's CWD before the 2nd
+    /// pass (which runs elsewhere); named volumes and absolute paths are not
+    /// touched, and neither is the rest of the spec (`:ro`).
+    #[test]
+    fn relative_binds_are_anchored_before_the_reexec() {
+        let cwd = std::path::Path::new("/work/proj");
+        let got = super::anchor_relative_binds(
+            &[
+                "./addons:/mnt/extra-addons".into(),
+                "../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ],
+            cwd,
+        );
+        assert_eq!(
+            got,
+            vec![
+                "/work/proj/./addons:/mnt/extra-addons".to_string(),
+                "/work/proj/../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ]
+        );
+        let nf = super::netns_start_error("od20-net", Some(4)).to_string();
+        assert!(nf.starts_with("no such resource"), "{nf}");
+    }
+
     /// A failed 2nd pass keeps the class the inner process decided, names the
     /// network the user wrote, and never prints a Rust `Option` at them.
     #[test]
