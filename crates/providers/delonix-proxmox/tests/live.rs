@@ -5667,7 +5667,11 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
 
     // 3. Another record's mark: refused inside the transaction, rolled back.
     let e = apply(&stranger).unwrap_err();
-    assert_eq!(e.number(), 5340, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(
+        e.to_string().contains("refusing to adopt it by name"),
+        "{e}"
+    );
     assert!(
         client.sdn_pending_changes().unwrap().is_empty(),
         "the refusal left nothing staged"
@@ -5713,7 +5717,8 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
         })
         .expect("edit the vnet by hand");
     let e = apply(&owner).unwrap_err();
-    assert_eq!(e.number(), 5341, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("was changed on the cluster"), "{e}");
 
     // 6. Teardown by the owner: vnet then zone, one transaction.
     let mut removed = None;

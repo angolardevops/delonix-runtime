@@ -1,9 +1,11 @@
 //! The networking context's own failures: the provider registries and the
 //! ports that moved here from `delonix-sdn` (ADR-0059 F2a). Each variant
 //! keeps the text, the class and the dictionary number (ADR-0043) it had in
-//! `delonix-sdn`, so the CLI prints byte for byte what it printed and exits
-//! with the same code; the DX-C380 block of ADR-0059 D5 is a later slice.
+//! `delonix-sdn`, so the CLI prints byte for byte what it printed. The number
+//! is the reason's, from the network block of ADR-0059 D5 (`DX-C380`…
+//! `DX-C399`): several variants share a reason, and the message says which.
 
+use delonix_model::codes::Reason;
 use thiserror::Error;
 
 /// A failure of a network provider registry or of a remote object's ownership.
@@ -17,8 +19,8 @@ pub enum Error {
 
     /// A gateway operation a provider does not implement. No provider raises
     /// it since ADR-0059 F2b took the refusing default bodies away; the
-    /// variant and its number stay because `DX-1342` is published in the
-    /// dictionary until D5's DX-C380 block renumbers the envelope.
+    /// variant stays as the typed way to say `unsupported_capability` for a
+    /// gateway (D5), which replaced the published `DX-1342`.
     #[error("{0}")]
     UnsupportedByGatewayProvider(String),
 
@@ -39,7 +41,8 @@ pub enum Error {
     AmbiguousNetworkZoneProvider(String),
 
     /// A document names a provider that is not registered for its role
-    /// (ADR-0059 D3).
+    /// (ADR-0059 D3). D1 rule 2: the remedy is another provider, so it is
+    /// `unsupported_capability`, not an invalid argument.
     #[error("{0}")]
     ProviderNotRegistered(String),
 
@@ -70,7 +73,8 @@ pub enum Error {
     #[error("{0}")]
     RemoteForeignPending(String),
 
-    // ---- unavailable -------------------------------------------------------
+    // ---- unavailable (see also UnsupportedByGatewayProvider and
+    // ProviderNotRegistered above) ------------------------------------------
     /// `networkDefaults.<role>` names a provider that is not registered for
     /// that role: an error, never a fall-through (ADR-0059 D3).
     #[error("{0}")]
@@ -93,24 +97,40 @@ pub type Result<T> = std::result::Result<T, Error>;
 type Dx = delonix_model::Error;
 
 impl Error {
-    /// The dictionary number of this failure (ADR-0043). Exhaustive on
-    /// purpose: a variant added tomorrow stops the build here.
+    /// The dictionary number of this failure (ADR-0043): the D5 reason's
+    /// when it is one ([`Error::reason`], exhaustive on purpose: a variant
+    /// added tomorrow stops the build there), its own otherwise.
     pub fn number(&self) -> u16 {
+        if let Some(r) = self.reason() {
+            return r.number();
+        }
         match self {
             Error::GatewayProviderRegistrationRefused(_) => 1341,
-            Error::UnsupportedByGatewayProvider(_) => 1342,
             Error::NetworkZoneProviderRegistrationRefused(_) => 1344,
-            Error::NoNetworkZoneProviderConfigured(_) => 1345,
-            Error::AmbiguousNetworkZoneProvider(_) => 1346,
-            Error::NoProviderForRole(_) => 1347,
-            Error::ProviderNotRegistered(_) => 1348,
-            Error::RemoteObjectNotOwned(_) => 5340,
-            Error::RemoteObjectDrifted(_) => 5341,
-            Error::RemoteForeignPending(_) => 5342,
-            Error::DefaultProviderNotRegistered(_) => 6303,
-            Error::RecordedProviderNotRegistered(_) => 6304,
             Error::Engine(e) => e.number(),
+            _ => unreachable!("reason() answers every other variant"),
         }
+    }
+
+    /// The ADR-0059 D5 reason, for the failures that are one. A registration
+    /// refused is a programming error in the process that registered, not a
+    /// provider failure, and keeps its own number.
+    pub fn reason(&self) -> Option<Reason> {
+        Some(match self {
+            Error::GatewayProviderRegistrationRefused(_)
+            | Error::NetworkZoneProviderRegistrationRefused(_)
+            | Error::Engine(_) => return None,
+            Error::NoNetworkZoneProviderConfigured(_)
+            | Error::AmbiguousNetworkZoneProvider(_)
+            | Error::NoProviderForRole(_) => Reason::InvalidIntent,
+            Error::UnsupportedByGatewayProvider(_)
+            | Error::ProviderNotRegistered(_)
+            | Error::DefaultProviderNotRegistered(_)
+            | Error::RecordedProviderNotRegistered(_) => Reason::UnsupportedCapability,
+            Error::RemoteObjectNotOwned(_)
+            | Error::RemoteObjectDrifted(_)
+            | Error::RemoteForeignPending(_) => Reason::ProviderConflict,
+        })
     }
 
     /// The shared class this failure converts into, for a caller that needs a
@@ -127,7 +147,9 @@ impl From<Error> for Dx {
             Error::RemoteObjectNotOwned(text)
             | Error::RemoteObjectDrifted(text)
             | Error::RemoteForeignPending(text) => Dx::Conflict(text),
-            Error::DefaultProviderNotRegistered(text)
+            Error::UnsupportedByGatewayProvider(text)
+            | Error::ProviderNotRegistered(text)
+            | Error::DefaultProviderNotRegistered(text)
             | Error::RecordedProviderNotRegistered(text) => Dx::Unavailable(text),
             Error::Engine(e) => return e,
             e => Dx::Invalid(e.to_string()),
@@ -180,6 +202,19 @@ mod tests {
                 delonix_model::codes::lookup(number).is_some(),
                 "DX-{number:04} ({shown}) has no dictionary entry"
             );
+        }
+    }
+
+    /// A reason's class is the class the failure converts into, so the number,
+    /// the exit code and the reason never tell two stories (ADR-0059 D5).
+    #[test]
+    fn a_reason_converts_into_its_own_class() {
+        for e in every_variant() {
+            let Some(r) = e.reason() else { continue };
+            let shown = e.to_string();
+            let converted = delonix_model::Error::from(e);
+            assert_eq!(converted.class(), r.class(), "{shown}");
+            assert_eq!(converted.number(), r.number(), "{shown}");
         }
     }
 

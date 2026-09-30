@@ -100,6 +100,15 @@ pub enum Error {
     #[error("timed out: {0}")]
     Timeout(String),
 
+    /// A provider refused the credential or the privilege it was sent: an
+    /// API that answers 401, or 302 to a login page (OPNsense does both,
+    /// ADR-0051 phase 0), or 403 for a key without the right. Distinct from
+    /// [`Error::Io`] with `PermissionDenied`, which is the local
+    /// filesystem's EACCES: printing «I/O error» for a refused API key names
+    /// a cause that was never the problem (ADR-0059 D5).
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
+
     /// A failure with its own entry in the code dictionary (ADR-0043 D4).
     ///
     /// A crate's own error converts into the class it belongs to and wraps it
@@ -146,6 +155,7 @@ impl Error {
             Error::Conflict(_) => "DX_CONFLICT",
             Error::Unavailable(_) => "DX_UNAVAILABLE",
             Error::Timeout(_) => "DX_TIMEOUT",
+            Error::PermissionDenied(_) => "DX_PERMISSION_DENIED",
             Error::Invalid(_) => "DX_INVALID_ARGUMENT",
             Error::Registry(_) => "DX_REGISTRY",
             Error::Runtime { .. } => "DX_SYSCALL_FAILED",
