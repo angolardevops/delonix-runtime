@@ -14739,3 +14739,9 @@ msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm|
 
 msgid "{kind} '{name}' (scope systemcontainer) → target '{target}' is not a declared or registered SystemContainer"
 msgstr "{kind} '{name}' (scope systemcontainer) → o target '{target}' não é um SystemContainer declarado ou registado"
+
+msgid "no gateway provider named '{name}' is registered (known: {known})"
+msgstr "nenhum provider de gateway chamado '{name}' está registado (conhecidos: {known})"
+
+msgid "none"
+msgstr "nenhum"

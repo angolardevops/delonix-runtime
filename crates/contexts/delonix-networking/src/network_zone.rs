@@ -10,12 +10,11 @@
 //! the same reason: a process that linked a provider's crate should be able
 //! to make it selectable without a plugin loader.
 //!
-//! **No native implementation, unlike `GatewayProvider`'s
-//! `NativeGatewayProvider`.** This engine's own rootless SDN (`kind:
+//! **No native implementation.** This engine's own rootless SDN (`kind:
 //! Network`) has no zone concept at all — Zone→VNet is Proxmox's own
 //! two-tier model (`/cluster/sdn/*`), not a shape the native dataplane
 //! answers. The registry therefore holds ZERO or ONE provider, never a
-//! builtin.
+//! builtin (the gateway registry has had none either since ADR-0059 F2b).
 //!
 //! # Why `kind: NetworkZone` carries no provider field
 //!

@@ -502,3 +502,23 @@ compute context (ADR-0044 P4b.2), and it changes no behaviour:
 **What F2 still owes**, unchanged from its row: the ports without default bodies, `native`
 removed, `SegmentProvider` in place of `NetworkZoneProvider`, the per-role registries with D3's
 resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope with the DX-C380 block.
+
+## Addendum 2026-09-30 — F2b: `native` removed, and `GatewayProvider` without default bodies
+
+- **The seven `GatewayProvider` operations are required.** The four that refused by default,
+  and the three that answered `Ok`/`Absent` by default, are declarations now (D1). The one
+  implementation, `delonix-opnsense`, already had every method, so nothing else changes.
+  `NetworkZoneProvider` never had default bodies.
+- **The `native` gateway provider is gone, and the registry starts empty.** It refused every
+  `ensure_*`, so no document naming it could ever be applied. `provider: native` now resolves
+  to no provider and is refused before the record is written, as any unregistered name is.
+  The message says `known: none` rather than an empty list.
+- **A record left by an earlier build that names `native` is deleted without a provider.**
+  That provider refused every write, so nothing remote carries the record's mark. A battery
+  check writes such a record by hand in an isolated root and deletes it.
+- **`DX-1342` has no producer now** (`network.unsupported_by_gateway_provider`). The variant and
+  the number stay, because the dictionary is published (`delonix explain codes`), until D5's
+  DX-C380 block renumbers the envelope.
+
+**Still owed by F2:** `SegmentProvider` in place of `NetworkZoneProvider`, the per-role
+registries with D3's resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope.
