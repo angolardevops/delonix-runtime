@@ -1233,11 +1233,20 @@ pub fn register_with(target: Target) -> delonix_model::Result<()> {
 // Every failure crosses the trait with its dictionary number
 // (`delonix_model::Error::from`), never `into_root`, which strips the carrier:
 // measured live on the zone provider, a DX-5340 refusal arrived as a bare 5000.
-impl GatewayProvider for OpnsenseGatewayProvider {
-    fn id(&self) -> &'static str {
-        ID
+/// The skeleton every role port extends (ADR-0059 D1 rule 4). The report is
+/// the declared one — a remote appliance is never contacted to answer it —
+/// and this value exists only once its registration was configured.
+impl delonix_compute::vm_provider::Provider for OpnsenseGatewayProvider {
+    fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+        delonix_compute::vm_provider::ProviderId(ID)
     }
 
+    fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+        capability_report(true)
+    }
+}
+
+impl GatewayProvider for OpnsenseGatewayProvider {
     fn available(&self) -> bool {
         // Registered only once `Client::connect` has already proven the
         // credential (ADR-0008's own reasoning for a remote VmBackend):

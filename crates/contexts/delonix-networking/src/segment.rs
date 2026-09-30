@@ -64,10 +64,9 @@ pub struct VNetSpec {
 }
 
 /// A backend that can realize cluster-native SDN zones and vnets.
-pub trait SegmentProvider {
-    /// Stable identifier, persisted in the registry record.
-    fn id(&self) -> &'static str;
-
+/// Extends the provider skeleton (ADR-0059 D1 rule 4): `id`, `capabilities()`
+/// — the ADR-0050 report — and `health`.
+pub trait SegmentProvider: delonix_compute::vm_provider::Provider {
     /// `true` if this backend can be used right now. Never a network round
     /// trip — same contract as `gateway::GatewayProvider::available`.
     fn available(&self) -> bool;
@@ -229,10 +228,28 @@ mod tests {
     use super::*;
 
     struct Fake(&'static str);
-    impl SegmentProvider for Fake {
-        fn id(&self) -> &'static str {
-            self.0
+    impl delonix_compute::vm_provider::Provider for Fake {
+        fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+            delonix_compute::vm_provider::ProviderId(self.0)
         }
+        fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+            use delonix_compute::capability::{
+                CapabilityState, HealthStatus, ProviderHealth, ProviderKind, ProviderReport,
+            };
+            ProviderReport::build(
+                self.0,
+                ProviderKind::Network,
+                true,
+                ProviderHealth {
+                    status: HealthStatus::Healthy,
+                    reason: "Ok",
+                    message: String::new(),
+                },
+                |_| CapabilityState::NotImplemented,
+            )
+        }
+    }
+    impl SegmentProvider for Fake {
         fn available(&self) -> bool {
             true
         }
@@ -300,7 +317,7 @@ mod tests {
     #[test]
     fn one_registered_is_used() {
         let (id, p) = choose_in(&[fake("only-one", &[])], &no_config()).unwrap();
-        assert_eq!((id, p.id()), ("only-one", "only-one"));
+        assert_eq!((id, p.id().0), ("only-one", "only-one"));
     }
 
     #[test]
@@ -311,7 +328,7 @@ mod tests {
             ..no_config()
         };
         let (id, p) = choose_in(&[fake("a", &[]), fake("b", &[])], &want).unwrap();
-        assert_eq!((id, p.id()), ("b", "b"));
+        assert_eq!((id, p.id().0), ("b", "b"));
     }
 
     #[test]

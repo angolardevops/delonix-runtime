@@ -99,12 +99,9 @@ pub enum EnsureOutcome {
 }
 
 /// A backend that can enforce node-egress / perimeter gateway policy.
-pub trait GatewayProvider {
-    /// Stable identifier, persisted wherever a policy would eventually name
-    /// its provider. Must equal the `id` the registration that built this
-    /// value used.
-    fn id(&self) -> &'static str;
-
+/// Extends the provider skeleton (ADR-0059 D1 rule 4): `id`, `capabilities()`
+/// — the ADR-0050 report, declared for a remote appliance — and `health`.
+pub trait GatewayProvider: delonix_compute::vm_provider::Provider {
     /// `true` if this backend can be used right now.
     ///
     /// Never a network round trip — the same contract
@@ -181,7 +178,7 @@ pub type GatewayProviderFactory = Box<dyn Fn() -> Result<Box<dyn GatewayProvider
 /// accepted on input, and how to build one.
 pub struct GatewayProviderRegistration {
     /// Canonical id. Must equal what the built provider's
-    /// [`GatewayProvider::id`] returns.
+    /// [`Provider::id`](delonix_compute::vm_provider::Provider::id) returns.
     pub id: &'static str,
     /// Extra spellings accepted from a caller; never repeats `id`.
     pub aliases: &'static [&'static str],
@@ -295,10 +292,28 @@ mod tests {
 
     fn fake(id: &'static str, aliases: &'static [&'static str]) -> GatewayProviderRegistration {
         struct Fake(&'static str);
-        impl GatewayProvider for Fake {
-            fn id(&self) -> &'static str {
-                self.0
+        impl delonix_compute::vm_provider::Provider for Fake {
+            fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+                delonix_compute::vm_provider::ProviderId(self.0)
             }
+            fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+                use delonix_compute::capability::{
+                    CapabilityState, HealthStatus, ProviderHealth, ProviderKind, ProviderReport,
+                };
+                ProviderReport::build(
+                    self.0,
+                    ProviderKind::Gateway,
+                    true,
+                    ProviderHealth {
+                        status: HealthStatus::Healthy,
+                        reason: "Ok",
+                        message: String::new(),
+                    },
+                    |_| CapabilityState::NotImplemented,
+                )
+            }
+        }
+        impl GatewayProvider for Fake {
             fn available(&self) -> bool {
                 true
             }

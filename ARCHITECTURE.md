@@ -225,6 +225,7 @@ graph TB
     OPN --> NETCTX
     NET --> NETCTX
     NETCTX --> MODEL
+    NETCTX --> COMPUTE
     BIN --> NETCTX
     STATECRATE --> MODEL
     COMPUTE --> NODECTX

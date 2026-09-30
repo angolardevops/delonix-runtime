@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
 thiserror = { workspace = true }
 
