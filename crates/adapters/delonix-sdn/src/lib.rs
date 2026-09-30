@@ -45,7 +45,7 @@ mod flock;
 pub mod gc;
 /// The role ports and owner marks moved to the networking context (ADR-0059
 /// F2a); re-exported under their old paths so no caller changes.
-pub use delonix_networking::{gateway, network_zone, ownership};
+pub use delonix_networking::{gateway, ownership, segment};
 pub mod infra;
 pub mod ipam;
 mod pin_userns;

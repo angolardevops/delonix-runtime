@@ -61,7 +61,7 @@ pub use sdn_routing::{
     VnetFirewallOptions,
 };
 
-pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_ID};
+pub use network_zone::{ProxmoxSegmentProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -6594,7 +6594,7 @@ pub fn registration(
 }
 
 /// Registers this Proxmox target's cluster-native SDN as a
-/// `delonix_networking::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
+/// `delonix_networking::segment::SegmentProvider` (ADR-0049 addendum) — a
 /// SEPARATE registration from [`registration`]'s `VmBackend` one, with its
 /// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
 /// sharing one across two registries would tie an unrelated port's lifetime
@@ -6609,7 +6609,7 @@ pub fn registration(
 /// has no VM directory of its own (it is cluster-scoped, not VM-scoped —
 /// see `sdn.rs`'s own `SDN_VMID` sentinel), so the caller hands in the
 /// directory this provider's OWN registry uses instead.
-pub fn register_network_zone_provider(
+pub fn register_segment_provider(
     target: Target,
     opts: ClientOptions,
     ledger_dir: std::path::PathBuf,
@@ -6618,8 +6618,8 @@ pub fn register_network_zone_provider(
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_networking::network_zone::register_network_zone_provider(
-        delonix_networking::network_zone::NetworkZoneProviderRegistration {
+    delonix_networking::segment::register_segment_provider(
+        delonix_networking::segment::SegmentProviderRegistration {
             id: NETWORK_ZONE_PROVIDER_ID,
             aliases: &["pve"],
             new: Box::new(move || {
@@ -6637,13 +6637,10 @@ pub fn register_network_zone_provider(
                     *slot = Some(c.clone());
                     c
                 };
-                Ok(Box::new(ProxmoxNetworkZoneProvider::new(
-                    client,
-                    Ledger::at(&ledger_dir),
-                ))
-                    as Box<
-                        dyn delonix_networking::network_zone::NetworkZoneProvider,
-                    >)
+                Ok(
+                    Box::new(ProxmoxSegmentProvider::new(client, Ledger::at(&ledger_dir)))
+                        as Box<dyn delonix_networking::segment::SegmentProvider>,
+                )
             }),
         },
     )

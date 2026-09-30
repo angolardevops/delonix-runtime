@@ -5590,17 +5590,15 @@ fn a_system_containers_backup_is_restored_over_it_and_deleted() {
 }
 
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
-/// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
+/// `SegmentProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused
 /// and never deleted; a vnet edited on the cluster is drift; and someone
 /// else's staged change refuses the whole transaction before it writes,
 /// leaving that change pending and not applied.
 #[test]
 fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change() {
-    use delonix_networking::network_zone::{
-        EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
-    };
     use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 
     let Some(t) = target() else {
         return;
@@ -5615,7 +5613,7 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
         std::sync::Arc::new(delonix_proxmox::Client::connect_with(&t, opts).expect("connect"));
     let dir = tempfile::tempdir().expect("tempdir");
     let ledger = delonix_proxmox::Ledger::at(dir.path());
-    let provider = delonix_proxmox::ProxmoxNetworkZoneProvider::new(
+    let provider = delonix_proxmox::ProxmoxSegmentProvider::new(
         client.clone(),
         delonix_proxmox::Ledger::at(dir.path()),
     );

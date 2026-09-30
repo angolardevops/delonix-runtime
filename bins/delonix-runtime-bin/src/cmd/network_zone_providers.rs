@@ -2,7 +2,7 @@
 //! (ADR-0049 addendum) — reads the SAME `DELONIX_PROXMOX_*` configuration
 //! `cmd::vmbackends` already reads, because it is the SAME Proxmox target:
 //! one node, one credential, two ports (`VmBackend` and, now,
-//! `NetworkZoneProvider`). `kind: NetworkZone` itself never names a
+//! `SegmentProvider`). `kind: NetworkZone` itself never names a
 //! provider (deliberate — the runtime's own configuration decides which
 //! infrastructure realizes it, not the manifest), so this module is the
 //! ONLY place that connects a target to that Kind.
@@ -17,7 +17,7 @@ use super::util::state_root;
 use delonix_model::Result;
 
 /// Reads the process-wide Proxmox configuration and registers its SDN as a
-/// `NetworkZoneProvider`. Called once at startup, alongside
+/// `SegmentProvider`. Called once at startup, alongside
 /// `vmbackends::register_configured`.
 ///
 /// A misconfigured target is **reported and skipped**, not fatal: a typo in
@@ -52,7 +52,7 @@ fn register_proxmox_zone_provider_with(lookup: &dyn Fn(&str) -> Option<String>) 
     let Some((target, opts)) = super::vmbackends::proxmox_target_with(lookup)? else {
         return Ok(());
     };
-    delonix_proxmox::register_network_zone_provider(
+    delonix_proxmox::register_segment_provider(
         target,
         opts,
         // The cluster-wide `apply_sdn` reload has no VM directory of its

@@ -264,6 +264,25 @@ pub fn gateway_provider_for(name: &str) -> Option<Result<Box<dyn GatewayProvider
     })
 }
 
+/// The provider that answers `want` (ADR-0059 D3, [`crate::resolve`]),
+/// with the id it resolved to — the caller records it, so the resource
+/// never moves when a default changes. Resolving does no I/O; only the
+/// chosen provider is built.
+pub fn choose_gateway_provider(
+    want: &crate::resolve::Wanted,
+) -> Result<(&'static str, Box<dyn GatewayProvider>)> {
+    with_gateway_providers(|regs| {
+        let cands: Vec<crate::resolve::Candidate> =
+            regs.iter().map(|r| (r.id, r.aliases)).collect();
+        let id = crate::resolve::choose(&cands, want)?;
+        let reg = regs
+            .iter()
+            .find(|r| r.id == id)
+            .expect("choose returns a registered id");
+        Ok((id, (reg.new)()?))
+    })
+}
+
 /// The registered ids, in registration order — for an error that names what
 /// IS accepted, and for `provider ls`-style listing later.
 pub fn gateway_provider_ids() -> Vec<&'static str> {

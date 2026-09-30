@@ -377,6 +377,28 @@ pub fn loaded() -> &'static Result<Option<(PathBuf, ProviderConfig)>> {
     })
 }
 
+/// `networkDefaults.<role>` and the path of the `providers.yaml` it came
+/// from, for the resolution of a network Kind's provider (ADR-0059 D3). No
+/// file is `(None, None)`: the count rule stays on. A file that does not
+/// parse is an error here as everywhere else.
+pub fn network_default(
+    role: delonix_networking::resolve::Role,
+) -> Result<(Option<String>, Option<String>)> {
+    use delonix_networking::resolve::Role;
+    match loaded() {
+        Ok(None) => Ok((None, None)),
+        Ok(Some((path, cfg))) => {
+            let nd = cfg.network_defaults.as_ref();
+            let value = match role {
+                Role::Segment => nd.and_then(|n| n.segment.clone()),
+                Role::Gateway => nd.and_then(|n| n.gateway.clone()),
+            };
+            Ok((value, Some(path.display().to_string())))
+        }
+        Err(e) => Err(Error::Invalid(e.to_string())),
+    }
+}
+
 /// [`loaded`] without the cache, for a test.
 pub fn load_with(
     env: &dyn Fn(&str) -> Option<String>,

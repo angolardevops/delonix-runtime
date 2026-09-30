@@ -1335,8 +1335,11 @@
           "type": "array"
         },
         "provider": {
-          "description": "The registered `GatewayProvider` id (`opnsense`, or `native` — though\nthe native provider refuses every alias/rule operation by design,\nADR-0051 Phase 2, so naming it here always fails at apply time; the\nengine does not special-case that away, since a manifest that names\nthe wrong provider deserves that exact error).",
-          "type": "string"
+          "description": "The registered `GatewayProvider` id (`opnsense`). Optional since\nADR-0059 F2c: without it the record's provider, then\n`networkDefaults.gateway`, then — only without a `providers.yaml` —\nthe single registered gateway provider answers (D3).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "rules": {
           "default": [],
@@ -1346,9 +1349,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "provider"
-      ],
       "type": "object"
     },
     "NetworkRouteSpec": {
