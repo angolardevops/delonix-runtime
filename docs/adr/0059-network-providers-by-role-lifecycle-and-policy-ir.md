@@ -557,3 +557,18 @@ providers; that is its own decision.
 
 **Still owed by F2:** every role port extending `Provider` (D1 rule 4: `capabilities()`,
 `health`), and the D5 envelope with the DX-C380 block.
+
+## Addendum 2026-09-30 — F2d, part 1: the role ports extend `Provider`
+
+- **`GatewayProvider` and `SegmentProvider` extend `delonix_compute::vm_provider::Provider`**
+  (D1 rule 4): `id() -> ProviderId`, `capabilities() -> ProviderReport`, and `health`. The role
+  ports' own `id() -> &'static str` is gone, so there is one identity per provider.
+- **OPNsense answers with its declared report** (`capability_report(true)`), **Proxmox with its
+  declared network report** (`network_capability_report(true)`). Neither contacts anything to
+  answer, and the value exists only once its registration was configured.
+- **`delonix-networking` depends on `delonix-compute`**, the direction D7 allows (compute never
+  depends on networking); the C4 page shows the edge.
+
+**Part 2, the D5 envelope and the DX-C380 block, is a separate change**: it renumbers published
+codes, which D5 asks the release notes to name, and it has to be reconciled with the four codes
+F2c introduced.

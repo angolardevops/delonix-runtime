@@ -73,11 +73,20 @@ fn sdn_err(e: delonix_networking::Error) -> delonix_model::Error {
 // Failures cross the trait with their dictionary number
 // (`delonix_model::Error::from`), never `into_root`, which strips it: measured
 // live, a DX-5340 refusal from inside the SDN transaction arrived as 5000.
-impl SegmentProvider for ProxmoxSegmentProvider {
-    fn id(&self) -> &'static str {
-        ID
+/// The skeleton every role port extends (ADR-0059 D1 rule 4). The report is
+/// the declared network one: this value exists only once the node was
+/// configured, and answering never contacts it.
+impl delonix_compute::vm_provider::Provider for ProxmoxSegmentProvider {
+    fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+        delonix_compute::vm_provider::ProviderId(ID)
     }
 
+    fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+        crate::network_capability_report(true)
+    }
+}
+
+impl SegmentProvider for ProxmoxSegmentProvider {
     fn available(&self) -> bool {
         // Registered only once the client already exists (ADR-0008's own
         // reasoning for a remote VmBackend) — by the time this value

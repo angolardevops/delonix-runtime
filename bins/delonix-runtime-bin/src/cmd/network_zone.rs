@@ -256,7 +256,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             &[
                 ("name", &name),
                 ("vnets", &spec.vnets.len().to_string()),
-                ("provider", provider.id()),
+                ("provider", provider_id),
             ],
         )
     );
