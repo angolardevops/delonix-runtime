@@ -1228,7 +1228,7 @@ impl Client {
                 Err(e) => return Err(UploadFailure::Fatal(e)),
                 Ok(Err(e)) => {
                     return Err(UploadFailure::Retry(format!(
-                    "blob PATCH {digest} at byte {start}: {} ({start} of {size} bytes confirmed)",
+                    "blob PATCH {digest} at byte {start}: {} (connection lost with {start} of {size} bytes confirmed)",
                     transport_chain(&e)
                 )))
                 }
@@ -1277,7 +1277,7 @@ impl Client {
                     http_failure(resp)
                 )));
             }
-            if status != reqwest::StatusCode::ACCEPTED {
+            if !status.is_success() {
                 let msg = format!(
                     "blob PATCH {digest} at byte {start}: {}",
                     http_failure(resp)
