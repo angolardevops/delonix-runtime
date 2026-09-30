@@ -600,8 +600,18 @@ impl Client {
     /// * **aliases** — the configured `host`/`network` aliases against pf's
     ///   tables (`alias_util/aliases`, `pfctl -sT`) and, for an alias whose
     ///   entries are all literal addresses, the table's content
-    ///   (`alias_util/list/<name>`). A table left for an alias no longer
-    ///   configured is pending too.
+    ///   (`alias_util/list/<name>`).
+    ///
+    /// A pf table left for an alias no longer configured is **not** read as
+    /// pending. Measured on OPNsense 26.1.2_5: after an alias is deleted and
+    /// both `alias/reconfigure` and `filter/apply` answer, its table stays
+    /// loaded (with its old content) for as long as it was watched, because
+    /// the appliance's `update_tables.py` only drops an orphan table on a full
+    /// refresh that finds its file in `/var/db/aliastables`. Reading it as
+    /// pending made the engine's own deletion fail its commit and then refused
+    /// every later commit as a foreign change. What such a table could
+    /// hide is harmless: the appliance refuses to delete an alias a rule still
+    /// uses, and a deleted rule still loaded is caught by the rule check.
     ///
     /// What this does NOT see: an edit to a rule's match fields (source,
     /// destination, protocol…) that kept its uuid and its enabled state, and
@@ -668,10 +678,8 @@ impl Client {
                     .collect()
             })
             .unwrap_or_default();
-        let mut names = std::collections::BTreeSet::new();
         for row in &aliases {
             let name = str_field(row, "name");
-            names.insert(name.clone());
             let kind = str_field(row, "type");
             if kind != "host" && kind != "network" || str_field(row, "enabled") == "0" {
                 continue;
@@ -702,17 +710,6 @@ impl Client {
                     what: "content changed, not applied",
                 });
             }
-        }
-        for table in tables.difference(&names) {
-            if is_internal_table(table) {
-                continue;
-            }
-            out.push(PendingChange {
-                kind: "alias",
-                id: table.clone(),
-                label: String::new(),
-                what: "deleted, not applied",
-            });
         }
         Ok(out)
     }
@@ -1041,16 +1038,6 @@ fn literal_entries(content: &str) -> Option<std::collections::BTreeSet<String>> 
             ip.parse::<std::net::IpAddr>().is_ok()
         })
         .then(|| all.iter().map(|e| canonical_entry(e)).collect())
-}
-
-/// pf tables the appliance keeps without a configured alias of the same
-/// name: the per-interface `__<if>_network` tables and the built-in ones.
-fn is_internal_table(name: &str) -> bool {
-    name.starts_with("__")
-        || matches!(
-            name,
-            "bogons" | "bogonsv6" | "sshlockout" | "virusprot" | "webConfiguratorlockout"
-        )
 }
 
 /// How an owned alias differs from the declaration, field by field.

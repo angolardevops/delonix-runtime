@@ -917,6 +917,38 @@ fn a_foreign_alias_edit_not_applied_is_seen_through_the_pf_table() {
     assert_eq!(pending[0].what, "content changed, not applied");
 }
 
+/// Measured on OPNsense 26.1.2_5: a deleted alias's pf table stays loaded,
+/// with its old content, after `alias/reconfigure` and `filter/apply`. Reading
+/// it as pending failed the engine's own deletion and then every commit after.
+#[test]
+fn a_table_left_for_a_deleted_alias_is_not_pending() {
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(200, rows(&[])),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/aliases",
+            Reply::Json(
+                200,
+                r#"["bogons","delonix_opnsense_live_test","__lan_network"]"#.into(),
+            ),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/list/delonix_opnsense_live_test",
+            Reply::Json(200, rows(&[serde_json::json!({ "ip": "10.99.99.99" })])),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert!(client.pending_changes().unwrap().is_empty());
+    client
+        .check_no_foreign_pending(&Staging::default())
+        .expect("an orphan pf table is not a staged change");
+}
+
 #[test]
 fn a_host_alias_matches_its_table_when_pf_shows_a_bare_address() {
     let appliance = MockAppliance::start(script(&[
