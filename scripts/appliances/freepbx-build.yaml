@@ -44,6 +44,42 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  # "Open-source only", made true: run by the vendor installer itself (one
+  # hooked line, see build.sh), right before it refreshes signatures -- the
+  # installer's own --opensourceonly leaves commercial, ionCube-encoded code
+  # behind. Modules are found by the license in each module.xml, not by a list
+  # written today; `firewall` goes too, as the vendor intends: it requires
+  # /usr/lib/sysadmin/includes.php, which goes with sysadmin17.
+  - path: /root/delonix-strip-commercial.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      MODS=/var/www/html/admin/modules
+      COMMERCIAL=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | awk -F/ '{print $(NF-1)}' | tr '\n' ' ' || true)
+      echo "==> delonix strip: commercial modules on disk: ${COMMERCIAL:-none}"
+      for m in $COMMERCIAL firewall; do
+        fwconsole ma -f remove "$m" >/dev/null 2>&1 || true
+        # An encoded module cannot run its own uninstaller without ionCube:
+        # take it out of the module table and off the disk.
+        if [ -d "$MODS/$m" ]; then
+          printf "DELETE FROM modules WHERE modulename='%s';\n" "$m" | mysql asterisk
+          rm -rf "${MODS:?}/$m"
+          echo "    removed by hand: $m"
+        fi
+      done
+      # Encoded AGI scripts the commercial modules left in agi-bin.
+      ENC_AGI=$(grep -lI 'ionCube Loader' /var/lib/asterisk/agi-bin/* 2>/dev/null | tr '\n' ' ' || true)
+      if [ -n "${ENC_AGI// /}" ]; then echo "==> delonix strip: encoded AGI scripts: $ENC_AGI"; rm -f $ENC_AGI; fi
+      LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ' || true)
+      [ -z "${LEFT// /}" ] || { echo "!! delonix strip: commercial modules still on disk: $LEFT"; exit 1; }
+      ENC=$(grep -rlI 'ionCube Loader' /var/www/html /var/lib/asterisk 2>/dev/null | head -5 | tr '\n' ' ' || true)
+      [ -z "${ENC// /}" ] || { echo "!! delonix strip: ionCube-encoded code still present: $ENC"; exit 1; }
+      fwconsole chown >/dev/null 2>&1 || true
+      fwconsole reload
+      mkdir -p /etc/delonix
+      printf 'COMMERCIAL=%q\nENC_AGI=%q\n' "$COMMERCIAL" "$ENC_AGI" > /etc/delonix/freepbx-stripped.env
+      echo "==> delonix strip: done"
   - path: /root/build.sh
     permissions: "0700"
     content: |
@@ -75,22 +111,24 @@ write_files:
       echo "@FREEPBX_INSTALLER_SHA256@  /root/sng_freepbx_debian_install.sh" | sha256sum -c - \
         || { echo "!! FreePBX installer checksum mismatch"; exit 1; }
 
-      # TWO one-line patches to the vendor's script, applied after the
-      # checksum, each checked to touch exactly one line. Both only let the
-      # installer reach its end; neither is trusted to have done the job --
-      # the cleanup after the installer does it, and PROVES it.
+      # TWO one-line edits to the vendor's script, applied after the
+      # checksum, each checked to touch exactly one line.
       #
-      # Measured on the builds of 2026-09-30, with --opensourceonly:
+      # Measured on three builds of 2026-09-30, with --opensourceonly:
       #  1. the installer pipes every commercial module into
       #     `xargs fwconsole ma -f remove`; `oracle_connector` fails its
       #     un-installation scripts and `set -e` aborts the install. The very
-      #     next line already does `... remove firewall ... || true`.
+      #     next line already does `... remove firewall ... || true`; this line
+      #     gets the same.
       #  2. later steps put six ionCube-encoded commercial modules back on disk
-      #     (cos endpoint oracle_connector pms restapps sysadmin), so the last
-      #     step, `fwconsole ma refreshsignatures`, dies on "the ionCube Loader
-      #     for PHP needs to be installed". The vendor wraps that call in
-      #     `set +e` to tolerate it -- and its own `trap ... ERR` fires first
-      #     and exits. `|| true` puts the call where the trap does not fire.
+      #     (cos endpoint oracle_connector pms restapps sysadmin), and from
+      #     then on every `fwconsole` that loads them dies on "the ionCube
+      #     Loader for PHP needs to be installed" -- refreshsignatures, then
+      #     the post-install `fwconsole motd`. Tolerating each one would be
+      #     whack-a-mole, and would leave the encoded code in. Instead ONE
+      #     line, before the installer's "# Refresh signatures", runs
+      #     /root/delonix-strip-commercial.sh: from there on the installer
+      #     runs on open-source modules only, refreshsignatures included.
       I=/root/sng_freepbx_debian_install.sh
       patch_line() {  # patch_line <fixed text that must occur once> <sed expr> <fixed text after>
         [ "$(grep -cF -- "$1" "$I")" = 1 ] || { echo "!! installer patch: '$1' is not there exactly once"; exit 1; }
@@ -100,9 +138,9 @@ write_files:
       patch_line 'xargs -t -I {} fwconsole ma -f remove {} >> "$log"' \
                  's#xargs -t -I {} fwconsole ma -f remove {} >> "$log"$#& || true#' \
                  'fwconsole ma -f remove {} >> "$log" || true'
-      [ "$(grep -cx '    refresh_signatures' "$I")" = 1 ] || { echo "!! installer patch: the refresh_signatures call is not there exactly once"; exit 1; }
-      sed -i 's/^    refresh_signatures$/    refresh_signatures || true/' "$I"
-      [ "$(grep -cx '    refresh_signatures || true' "$I")" = 1 ] || { echo "!! installer patch did not apply: refresh_signatures"; exit 1; }
+      [ "$(grep -cx '# Refresh signatures' "$I")" = 1 ] || { echo "!! installer patch: '# Refresh signatures' is not there exactly once"; exit 1; }
+      sed -i 's|^# Refresh signatures$|/root/delonix-strip-commercial.sh\n&|' "$I"
+      [ "$(grep -cx '/root/delonix-strip-commercial.sh' "$I")" = 1 ] || { echo "!! installer patch did not apply: strip hook"; exit 1; }
 
       # --opensourceonly: no commercial modules (and, with them, no sysadmin
       #   or Responsive Firewall -- fail2ban stays). --skipversion: the
@@ -136,32 +174,13 @@ write_files:
       mkdir -p /etc/delonix
 
       # ------------------------------------------------------------------
-      #  "Open-source only", made true here -- the installer's own
-      #  --opensourceonly leaves commercial, ionCube-encoded code behind (see
-      #  the patches above). Found by license in each module.xml, not by a
-      #  list written today; `firewall` goes too, as the vendor intends: it
-      #  requires /usr/lib/sysadmin/includes.php, which went with sysadmin17.
+      #  "Open-source only": the strip ran inside the installer (see the
+      #  hook above). Re-proved here, after the installer is done -- each
+      #  of these fails the build.
       # ------------------------------------------------------------------
+      [ -s /etc/delonix/freepbx-stripped.env ] || { echo "!! the strip hook never ran"; exit 1; }
+      . /etc/delonix/freepbx-stripped.env
       MODS=/var/www/html/admin/modules
-      COMMERCIAL=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | awk -F/ '{print $(NF-1)}' | tr '\n' ' ')
-      echo "==> commercial modules on disk after the installer: ${COMMERCIAL:-none}"
-      for m in $COMMERCIAL firewall; do
-        fwconsole ma -f remove "$m" >/dev/null 2>&1 || true
-        # An encoded module cannot run its own uninstaller without ionCube:
-        # take it out of the module table and off the disk.
-        if [ -d "$MODS/$m" ]; then
-          printf "DELETE FROM modules WHERE modulename='%s';\n" "$m" | mysql asterisk
-          rm -rf "${MODS:?}/$m"
-          echo "    removed by hand: $m"
-        fi
-      done
-      # Encoded AGI scripts the commercial modules left in agi-bin.
-      ENC_AGI=$(grep -lI 'ionCube Loader' /var/lib/asterisk/agi-bin/* 2>/dev/null | tr '\n' ' ')
-      [ -n "${ENC_AGI// /}" ] && { echo "==> removing encoded AGI scripts: $ENC_AGI"; rm -f $ENC_AGI; }
-      fwconsole chown >/dev/null 2>&1 || true
-      fwconsole reload
-
-      # The proofs, each of which fails the build.
       LEFT=$(grep -l '<license>Commercial' "$MODS"/*/module.xml 2>/dev/null | tr '\n' ' ')
       [ -z "${LEFT// /}" ] || { echo "!! commercial modules still on disk: $LEFT"; exit 1; }
       ENC=$(grep -rlI 'ionCube Loader' /var/www/html /var/lib/asterisk 2>/dev/null | head -5 | tr '\n' ' ')
@@ -187,7 +206,7 @@ write_files:
         echo "  \"modules\": \"open-source only\","
         echo "  \"commercial_modules_removed\": \"${COMMERCIAL% } firewall\","
         echo "  \"encoded_agi_removed\": \"$(for f in $ENC_AGI; do basename "$f"; done | tr '\n' ' ' | sed 's/ $//')\","
-        echo "  \"installer_patches\": \"2 one-line (commercial removal, refresh_signatures): let it finish; the cleanup is ours and checked\","
+        echo "  \"installer_patches\": \"2 one-line: commercial removal tolerates oracle_connector; a hook runs delonix-strip-commercial.sh before refreshsignatures\","
         echo "  \"web_port\": 80,"
         echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
         echo "  \"image_revision\": @IMAGE_REV@"
@@ -200,7 +219,7 @@ write_files:
 
       apt-get clean
       rm -rf /var/lib/apt/lists/*
-      rm -f /root/sng_freepbx_debian_install.sh
+      rm -f /root/sng_freepbx_debian_install.sh /root/delonix-strip-commercial.sh
 
       # No build identity in a golden image: hostname, machine-id, SSH host keys.
       echo localhost > /etc/hostname

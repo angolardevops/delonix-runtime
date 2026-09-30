@@ -53,13 +53,16 @@ The build allows 60 minutes. What it pins, and checks before using:
 **"Open-source only" is made true by this build, not by the vendor's flag.** Measured on
 2026-09-30: the installer's `--opensourceonly` leaves six ionCube-encoded commercial
 modules on disk (`cos`, `endpoint`, `oracle_connector`, `pms`, `restapps`, `sysadmin`) and
-encoded AGI scripts in `agi-bin`, and on the way it aborts twice — once when
-`oracle_connector` cannot uninstall, once when `fwconsole ma refreshsignatures` meets the
-encoded code. The build applies two one-line patches to the pinned installer (each checked
-to touch exactly one line) so it reaches its end, then removes every module whose
-`module.xml` says `Commercial`, plus `firewall` (which needs the commercial `sysadmin`), and
-the encoded AGI scripts. It then **fails** if any commercial module or any ionCube-encoded
-file is left, or if `fwconsole ma refreshsignatures` does not succeed.
+encoded AGI scripts in `agi-bin`, and on the way it aborts — first when `oracle_connector`
+cannot uninstall, then at every `fwconsole` that loads the encoded code (`refreshsignatures`,
+`motd`). The build makes two one-line edits to the pinned installer, each checked to touch
+exactly one line: the first tolerates the `oracle_connector` failure, as the vendor already
+does on the next line; the second is a hook, right before the installer refreshes
+signatures, that runs `delonix-strip-commercial.sh` — which removes every module whose
+`module.xml` says `Commercial`, plus `firewall` (it needs the commercial `sysadmin`), and the
+encoded AGI scripts. From there the installer finishes on open-source code only. The build
+then **fails** if any commercial module or any ionCube-encoded file is left, or if
+`fwconsole ma refreshsignatures` does not succeed.
 
 **What is NOT pinned:** the FreePBX modules. The vendor's installer runs
 `fwconsole ma upgradeall`, so two builds can carry different module versions. The
