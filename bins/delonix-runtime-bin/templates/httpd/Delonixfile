@@ -1,9 +1,15 @@
-# Delonixfile — production-ready Apache httpd.
+# Delonixfile — Apache httpd __TEMPLATE_VERSION__: static site + reverse-proxy-ready.
 # Build with:  delonix build -t __NAME__:dev .
 FROM httpd:__TEMPLATE_VERSION__-alpine
-# Listen on __PORT__ and harden a little (no version banner).
-RUN sed -i 's/^Listen 80$/Listen __PORT__/' /usr/local/apache2/conf/httpd.conf && \
-    printf '\nServerTokens Prod\nServerSignature Off\nTraceEnable Off\n' >> /usr/local/apache2/conf/httpd.conf
+COPY conf/delonix.conf /usr/local/apache2/conf/extra/delonix.conf
+# Two edits to the image's own httpd.conf, then the include: listen on
+# __PORT__, drop its plain-text access log (conf/delonix.conf writes JSON to the
+# same stdout), and syntax-check the result so a typo fails the build.
+RUN sed -i -e 's/^Listen 80$/Listen __PORT__/' \
+           -e 's|^\([[:space:]]*CustomLog /proc/self/fd/1 common\)|#\1|' \
+           /usr/local/apache2/conf/httpd.conf && \
+    echo 'Include conf/extra/delonix.conf' >> /usr/local/apache2/conf/httpd.conf && \
+    httpd -t
 COPY public /usr/local/apache2/htdocs
 EXPOSE __PORT__
 # Delonix extension: the runtime probes this to mark the container healthy.
