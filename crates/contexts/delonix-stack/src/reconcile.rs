@@ -206,6 +206,11 @@ pub struct Change {
     pub diffs: Vec<FieldDiff>,
     /// Convenience for consumers: `action.is_change()`.
     pub changed: bool,
+    /// The digest of this document's plan, for the Kinds whose plan is
+    /// decided from a remote provider's state (ADR-0059 D4). `stack apply
+    /// --plan-digest` refuses when it no longer matches.
+    #[serde(rename = "planDigest", skip_serializing_if = "Option::is_none")]
+    pub plan_digest: Option<String>,
 }
 
 impl Change {
@@ -220,6 +225,7 @@ impl Change {
             conditions: Vec::new(),
             diffs: Vec::new(),
             changed: action.is_change(),
+            plan_digest: None,
         }
     }
     fn with_reason(mut self, reason: impl Into<String>) -> Self {

@@ -509,6 +509,68 @@ fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
     })
 }
 
+/// The digest of this document's plan (ADR-0059 D4): what the manifest
+/// declares, what the appliance holds under the record's mark right now, the
+/// provider, the catalog version and the states of the capabilities the
+/// document uses. `None` when no provider can be resolved — a plan nobody
+/// could apply has nothing to pin.
+///
+/// Read-only. A document never applied has no mark, so nothing on the
+/// appliance is its own and its observed state is empty.
+pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
+    use delonix_compute::capability::{Capability as C, CATALOG_VERSION};
+    let spec: NetworkGatewaySpec = manifest::spec_of(doc)?;
+    let rec = store()?.load(&doc.metadata.name).unwrap_or_default();
+    if rec.provider == LEGACY_NATIVE {
+        return Ok(None);
+    }
+    let Ok((provider_id, provider)) = resolve_provider(spec.provider.as_deref(), &rec.provider)
+    else {
+        return Ok(None);
+    };
+    let observed = if rec.owner.is_empty() {
+        Default::default()
+    } else {
+        provider
+            .observe(&OwnerMark::new(&rec.owner)?)
+            .map_err(at(provider_id, "observe"))?
+    };
+    let policy_rules = all_policy_rules(&spec.policies)?;
+    let mut used = vec![C::NetApplyStaged, C::NetOwnershipMarker, C::NetObserve];
+    if !spec.aliases.is_empty() {
+        used.push(C::NetGatewayAlias);
+    }
+    if !spec.rules.is_empty() || !policy_rules.is_empty() {
+        used.push(C::NetGatewayFilter);
+    }
+    if !policy_rules.is_empty() {
+        used.push(C::NetGatewayRuleOrder);
+    }
+    if policy_rules.iter().any(|r| r.log) {
+        used.push(C::FirewallLogging);
+    }
+    if policy_rules.iter().any(|r| !r.stateful) {
+        used.push(C::FirewallStateless);
+    }
+    let report = provider.capabilities();
+    let states: BTreeMap<String, String> = report
+        .capabilities
+        .iter()
+        .filter(|c| used.contains(&c.capability))
+        .map(|c| (c.capability.name().to_string(), c.state.label().to_string()))
+        .collect();
+    let mut intent = desired(doc)?.fields;
+    // The constant the reconciler compares against is not part of the intent.
+    intent.remove("remote");
+    Ok(Some(delonix_networking::plan::plan_digest(
+        &intent,
+        &delonix_networking::plan::gateway_fingerprint(&observed),
+        provider_id,
+        CATALOG_VERSION,
+        &states,
+    )))
+}
+
 /// The record's owner token, generating one when the record has none yet.
 /// A NEW record gets a token; an OLD record (written before tokens existed)
 /// keeps none on teardown — see [`remove_for_replace`] — but gets one on its

@@ -78,6 +78,13 @@ pub enum Error {
     #[error("{0}")]
     RemoteForeignPending(String),
 
+    /// The digest of a network document's plan, recomputed at apply, is not
+    /// the one the caller planned with (ADR-0059 D4): the intent, the
+    /// observed state, the provider or its capabilities changed in between.
+    /// Refused before anything is written.
+    #[error("{0}")]
+    StalePlan(String),
+
     // ---- unavailable (see also UnsupportedByGatewayProvider and
     // ProviderNotRegistered above) ------------------------------------------
     /// `networkDefaults.<role>` names a provider that is not registered for
@@ -136,6 +143,7 @@ impl Error {
             Error::RemoteObjectNotOwned(_)
             | Error::RemoteObjectDrifted(_)
             | Error::RemoteForeignPending(_) => Reason::ProviderConflict,
+            Error::StalePlan(_) => Reason::StalePlan,
         })
     }
 
@@ -152,7 +160,8 @@ impl From<Error> for Dx {
         let class = match e {
             Error::RemoteObjectNotOwned(text)
             | Error::RemoteObjectDrifted(text)
-            | Error::RemoteForeignPending(text) => Dx::Conflict(text),
+            | Error::RemoteForeignPending(text)
+            | Error::StalePlan(text) => Dx::Conflict(text),
             Error::UnsupportedByGatewayProvider(text)
             | Error::ProviderNotRegistered(text)
             | Error::DefaultProviderNotRegistered(text)
@@ -189,6 +198,7 @@ mod tests {
             Error::RemoteObjectNotOwned("alias 'x' on opnsense is not this engine's".into()),
             Error::RemoteObjectDrifted("rule 'x' on opnsense: source differs".into()),
             Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
+            Error::StalePlan("NetworkGateway/edge: the plan is stale".into()),
             Error::ProviderNotRegistered("no gateway provider named 'x' is registered".into()),
             Error::NoProviderForRole("kind: NetworkZone names no segment provider".into()),
             Error::PolicyNotRepresentable("firewall rule #1: peer '::1' is IPv6".into()),
