@@ -14892,6 +14892,9 @@ msgstr "COPY: não posso substituir o directório {path} por uma ligação simb�
 msgid "project name '{name}' is not usable: it becomes a container name, an image tag and a package name, so it must be lowercase letters, digits and inner hyphens (at most 63) — pass --name {suggestion}"
 msgstr "o nome de projecto '{name}' não serve: vira nome de container, tag de imagem e nome de pacote, por isso só pode ter minúsculas, dígitos e hífens interiores (no máximo 63) — passa --name {suggestion}"
 
+msgid "directory '{dir}' is not usable as a project name; using '{name}' (choose another with --name)"
+msgstr "o directório '{dir}' não serve como nome de projecto; a usar '{name}' (escolhe outro com --name)"
+
 msgid "-v '{v}' is not a plain version (1, 1.2 or 1.2.3)"
 msgstr "-v '{v}' não é uma versão simples (1, 1.2 ou 1.2.3)"
 
@@ -14922,8 +14925,8 @@ msgstr "encontrei {evidence} — não há template para o framework deste projec
 msgid "Project name (default: the directory's name). Lowercase letters, digits and inner hyphens, because it becomes a container name, an image tag and a package name"
 msgstr "Nome do projecto (por omissão: o nome do directório). Minúsculas, dígitos e hífens interiores, porque vira nome de container, tag de imagem e nome de pacote"
 
-msgid "name the project when the directory's name is not a valid one (lowercase letters, digits, inner hyphens)"
-msgstr "dá nome ao projecto quando o nome do directório não é válido (minúsculas, dígitos, hífens interiores)"
+msgid "choose the project name — without --name it comes from the directory, lowercased and hyphenated when needed (the run says which)"
+msgstr "escolhe o nome do projecto — sem --name vem do directório, em minúsculas e com hífens quando preciso (o comando diz qual usou)"
 
 msgid "a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override"
 msgstr "um manifesto que não nomeia nenhum framework suportado recebe o scaffold genérico, com a razão — força um template para o contornar"

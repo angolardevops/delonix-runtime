@@ -1027,7 +1027,7 @@ pub static ENTRIES: &[Entry] = &[
             ("...or a bare major/major.minor for `django`, pinned as `==X.Y.*`", "delonix init -t django -v 5.2 myapp"),
             ("...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`", "delonix init -t laravel -v 12.5 myapp"),
             ("...or a Go toolchain version — this template has no framework to pin", "delonix init -t go -v 1.27 myapp"),
-            ("name the project when the directory's name is not a valid one (lowercase letters, digits, inner hyphens)", "delonix init --name billing-api ./Billing_API"),
+            ("choose the project name — without --name it comes from the directory, lowercased and hyphenated when needed (the run says which)", "delonix init --name billing-api ./Billing_API"),
             ("a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override", "delonix init -t node"),
         ],
         see_also: &["stack init", "vm init", "stack apply", "compose up"],

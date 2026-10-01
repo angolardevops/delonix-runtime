@@ -61,8 +61,14 @@ for t in $TEMPLATES; do
     && ok "$t: a second run preserves edits and adds nothing" || bad "$t: second run changed the project"
 done
 
-refuse 'name with a space and a quote is refused' 'My App"x' "$B" init -t go 'My App"x'
-refuse 'uppercase name is refused' 'Weird' "$B" init -t node Weird
+# A directory is named for people: the project name is derived from it and
+# said. An explicit --name is never rewritten (next check).
+derived() { # name, dir, expected-project-name, cmd...
+  local name="$1" dir="$2" want="$3"; shift 3; local out
+  out=$("$@" </dev/null 2>&1) && echo "$out" | grep -q "using '$want'" && grep -q "name: $want\$" "$dir/delonix-manifest.yaml" \
+    && ok "$name" || bad "$name ($(echo "$out" | tail -1))"; }
+derived 'a directory with a space and a quote gives a derived name' 'My App"x' my-app-x "$B" init -t go 'My App"x'
+derived 'an uppercase directory gives a lowercase name' 'Weird' weird "$B" init -t node Weird
 refuse 'name via --name is checked too' 'nm' "$B" init -t go --name 'Bad_Name' nm
 refuse '-v injection is refused' 'inj' "$B" init -t django -v '5.2.*", "evil==1' inj
 refuse '-v outside the range is refused (next 14)' 'nx14' "$B" init -t nextjs -v 14.2.0 nx14

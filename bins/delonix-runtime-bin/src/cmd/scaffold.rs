@@ -156,6 +156,43 @@ pub(crate) fn check_project_name(name: &str) -> Result<()> {
     )))
 }
 
+/// The project name of a container/stack scaffold: `--name` exactly as given
+/// (and refused later when it is not usable), otherwise the DIRECTORY name.
+///
+/// A directory is named for people (`My App`, `Shop_API`), so a derived name
+/// that is not usable is turned into the nearest valid one and SAID, instead
+/// of refusing a directory the operator did not name for this tool. An
+/// explicit `--name` is never rewritten: a value someone typed is either used
+/// or refused.
+///
+/// `canonicalize` cannot be used: the directory may not exist yet (it is
+/// `init` that creates it). `.`/empty resolve to the cwd; a new path uses its
+/// basename.
+pub(crate) fn project_name(explicit: Option<String>, dir: &Path) -> String {
+    if let Some(n) = explicit {
+        return n;
+    }
+    let p = if dir.as_os_str().is_empty() || dir == Path::new(".") {
+        std::env::current_dir().ok()
+    } else {
+        Some(dir.to_path_buf())
+    };
+    let raw = p
+        .as_deref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "app".to_string());
+    if check_project_name(&raw).is_ok() {
+        return raw;
+    }
+    let derived = slug(&raw);
+    super::output::info(&super::po::tf(
+        "directory '{dir}' is not usable as a project name; using '{name}' (choose another with --name)",
+        &[("dir", &raw), ("name", &derived)],
+    ));
+    derived
+}
+
 /// The nearest valid project name to `name` (used in the error's suggestion).
 fn slug(name: &str) -> String {
     let mut out = String::new();
@@ -1521,6 +1558,28 @@ mod tests {
 
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
     /// upstream image tag, the same idiom as `odoo` — never a dependency file.
+    /// A directory is named for people: the derived project name is the
+    /// nearest usable one. An explicit `--name` comes back untouched, so the
+    /// check that follows can refuse it.
+    #[test]
+    fn a_directory_name_is_turned_into_a_usable_project_name() {
+        for (dir, want) in [
+            ("My App", "my-app"),
+            ("Shop_API", "shop-api"),
+            ("/srv/Weird", "weird"),
+            ("fine-name", "fine-name"),
+        ] {
+            let got = project_name(None, Path::new(dir));
+            assert_eq!(got, want, "{dir}");
+            assert!(check_project_name(&got).is_ok(), "{got}");
+        }
+        assert_eq!(
+            project_name(Some("Bad_Name".into()), Path::new("x")),
+            "Bad_Name"
+        );
+        assert!(check_project_name("Bad_Name").is_err());
+    }
+
     #[test]
     fn nginx_httpd_haproxy_com_v_fixam_a_tag_da_imagem() {
         for (tpl, from_prefix) in [

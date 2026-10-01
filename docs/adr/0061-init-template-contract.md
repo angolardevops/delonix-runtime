@@ -84,7 +84,11 @@ Every application template has, in the framework's own idiom:
 
 - The project name must be a DNS-label-style slug (`[a-z0-9]` and inner `-`, ≤ 63), because
   it becomes a container name, an image tag, an npm/Composer/Go module name and a YAML
-  scalar. Anything else is refused before a file is written, with a suggested slug.
+  scalar. An explicit `--name` that is anything else is refused before a file is written,
+  with a suggested slug. A name DERIVED from the directory (`My App`, `Shop_API`) is turned
+  into the nearest slug and said (`using 'my-app'`): a directory is named for people, and
+  before this ADR such a directory was accepted, so refusing it would break a command that
+  used to work.
 - `-v` must be a plain version (`N`, `N.N`, `N.N.N`) and inside the template's declared
   support range (`versions=` in `template.meta`, majors or major.minor); outside, refused
   with the range. Combinations the framework does not support (Next 14 with React 19) are
