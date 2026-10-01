@@ -2979,6 +2979,40 @@ os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
 que os utilizadores usam), mas nunca num host de produção partilhado sem ser
 esse o pedido explícito.
 
+## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
+
+Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).
+São três defeitos, e só o primeiro era o que se procurava:
+
+- **O `USER` da imagem não é lido por nada.** `container run haproxy:3.4-alpine id` responde
+  `uid=0`; o `resolve_run` só olha para o `--user`. Desde a v1.0.0, sem erro nem aviso.
+- **Com `--user`, o utilizador da aplicação fica DONO do rootfs inteiro.** O init faz
+  `chown_tree_once("/", uid, gid)`. Medido: 940 de 986 entradas do `haproxy`, que escreveu em
+  `/etc/passwd` e substituiu `/usr/local/sbin/haproxy`. Um não-root dono dos ficheiros de
+  sistema não é o confinamento para que se escolhe um não-root.
+- **A mesma varredura atravessa os mounts, e um bind mount é o HOST.** `-u haproxy -v
+  <pasta>:/app` mudou o dono da pasta e dos ficheiros no host de `1000:1000` para o subuid
+  `100098`, e o dono original deixou de conseguir escrever no seu próprio ficheiro. Um volume
+  nomeado é re-apropriado da mesma forma — é a única razão de o utilizador lhe escrever hoje.
+- **O custo cresce com a imagem**: cada `lchown` de um ficheiro de uma layer partilhada copia-o
+  para a camada de escrita (13 MB para uma imagem de 15 MB; no `odoo:20.0`, ~2 GB, a varredura
+  ainda corria aos 16 min com o disco saturado).
+- **Porque existe**: as layers guardam tudo com o dono de quem invoca, por isso a posse que a
+  imagem gravou perde-se (`/var/lib/haproxy` é do `haproxy` na imagem e `root:root` num
+  container sem `-u`). A varredura era o remendo.
+
+**Decidido no ADR-0062 (Proposto), em três passos**: P0 — o `run` DIZ quando o `USER` não é
+aplicado (feito: aviso uma vez, primeira passagem, nunca com `--user`, nunca para um USER
+root; gate na bateria, que constrói a sua imagem com `USER`); P1 — tirar a varredura,
+preservar a posse ao extrair a layer, não re-apropriar mounts; P2 — a omissão passa a ser o
+`USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo de
+hoje, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
+
+**Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
+ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
+ainda estava a correr (o `run -d` devolve antes dela, de propósito). O que corrigiu foi contar
+os donos de TODOS os ficheiros um minuto depois, em vez de olhar para dois.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
