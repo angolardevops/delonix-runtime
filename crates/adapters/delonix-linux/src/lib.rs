@@ -2107,6 +2107,47 @@ fn have_subid_helpers() -> bool {
             .any(|p| std::path::Path::new(p).exists())
 }
 
+/// Can a container on this host hold a user other than uid 0?
+///
+/// Real root maps any id. Rootless needs the `newuidmap`/`newgidmap` helpers and
+/// a subordinate range for this account in BOTH `/etc/subuid` and `/etc/subgid`:
+/// the helpers refuse a map the files do not grant, and without a range the user
+/// namespace holds a single uid.
+pub fn can_map_id_range() -> bool {
+    if !is_rootless() {
+        return true;
+    }
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let name = std::env::var("USER").ok().or_else(|| {
+        let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+        passwd.lines().find_map(|l| {
+            let mut f = l.split(':');
+            let (name, _, id) = (f.next()?, f.next()?, f.next()?);
+            (id.parse::<u32>().ok()? == uid).then(|| name.to_string())
+        })
+    });
+    let granted = |file: &str| {
+        std::fs::read_to_string(file)
+            .map(|body| subid_file_grants(&body, uid, name.as_deref()))
+            .unwrap_or(false)
+    };
+    have_subid_helpers() && granted("/etc/subuid") && granted("/etc/subgid")
+}
+
+/// Does a `/etc/subuid`-format body grant `uid` (by number or by `name`) a range
+/// wide enough for the engine's map? PURE.
+fn subid_file_grants(body: &str, uid: u32, name: Option<&str>) -> bool {
+    body.lines().any(|line| {
+        let mut f = line.trim().split(':');
+        let (Some(who), Some(_start), Some(count)) = (f.next(), f.next(), f.next()) else {
+            return false;
+        };
+        let mine = who == uid.to_string() || name.is_some_and(|n| n == who);
+        mine && count.parse::<u32>().is_ok_and(|c| c >= USERNS_RANGE - 1)
+    })
+}
+
 /// Runs `newuidmap`/`newgidmap <pid> <map...>` (the map args are triplets
 /// `<id_in_ns> <id_on_host> <count>`).
 fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
@@ -9753,6 +9794,23 @@ mod tests {
             165_535
         );
         assert_eq!(container_id_of(33, 1000), 33);
+    }
+
+    /// A subordinate range counts only when it is this account's and wide
+    /// enough for the engine's map; a comment, a short range or another user's
+    /// line grants nothing.
+    #[test]
+    fn a_subid_file_grants_only_this_accounts_wide_range() {
+        let body = "# comment\nother:100000:65536\nwalter:165536:65536\n";
+        assert!(subid_file_grants(body, 1000, Some("walter")));
+        assert!(subid_file_grants("1000:100000:65536\n", 1000, None));
+        assert!(!subid_file_grants(body, 1001, Some("ana")));
+        assert!(!subid_file_grants(
+            "walter:100000:1000\n",
+            1000,
+            Some("walter")
+        ));
+        assert!(!subid_file_grants("", 1000, Some("walter")));
     }
 
     #[test]
