@@ -8228,3 +8228,54 @@ se mediram sob carga dizem-no.
 - **Um processo em estado D depois do SIGKILL não é um bug do motor**: `wb_wait_for_completion` é
   a saída à espera do writeback do disco. O `stop` desiste ao fim de 30 s e diz 0; o processo sai
   minutos depois num host saturado.
+
+## Os templates do `delonix init` têm contrato, e o gerador verifica o que substitui (ADR-0061, 2026-10-01)
+
+Medido com o binário de `9eb2a14d`, gerando cada template num directório vazio e correndo os
+comandos do README e da CI de cada um: a CI documentada **falhava num projecto novo** (django
+`ruff check` rc=1, node `pnpm lint` rc=1 por não ter ESLint, django `pytest` rc=5), o `-v` e o
+nome do projecto eram copiados sem verificação para manifestos (`-v '5.2.*", "evil==1'`
+acrescentou uma dependência ao `pyproject.toml`; um directório `My App"x` deu um `package.json`
+ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
+
+- **O contrato** (`docs/adr/0061-init-template-contract.md`): os sete templates de aplicação
+  (`go`, `node`, `nestjs`, `nextjs`, `fastapi`, `django`, `laravel`) geram um serviço pequeno e
+  completo — uma capacidade (notas) do transporte ao porto, uma forma de erro, configuração
+  validada no arranque, prontidão `starting → ready → draining`, encerramento limitado,
+  Standard Webhooks nos dois sentidos, OpenTelemetry, contrato OpenAPI com teste de deriva, teste
+  de direcção das dependências e teste de um-só-trace. `odoo` e `nginx`/`httpd`/`haproxy` têm
+  outro contrato (deployment de ERP; infra-estrutura).
+- **O `template.meta` é a interface entre um template e o gerador**: `port=`, `health=`,
+  `version=`, `versions=` (os `-v` aceites), `lock=` (o lock do gestor de pacotes, lido pelo modo
+  adopt) e `wait=` (segundos que o `--up` espera pela saúde). Um template novo declara-se aí; o
+  teste `every_template_renders_valid_files_for_each_declared_version` renderiza-o para cada
+  versão e faz parse do JSON/YAML que escreveu, sem precisar de teste próprio.
+- **Locks**: só o `go.sum` é embebido (o `go.mod` fixa versões exactas, logo os hashes são
+  função do manifesto). Para uv/pnpm/Composer um lock embebido ficaria obsoleto a cada `-v`; o
+  primeiro install gera-o, a CI recusa correr sem ele, e o Delonixfile usa-o quando existe.
+- **O gerador nunca corre um gestor de pacotes** nem vai à rede.
+
+**Armadilhas medidas, para quem mexer num template:**
+
+- **O comprimento do nome do projecto muda o comprimento das linhas.** Um `format:check` que
+  passa com `my-svc` pode chumbar com um nome de 63 caracteres. Os tokens `__NAME__`/`__PORT__`
+  ficam num ficheiro de constantes, e o formatador corre só sobre código (nunca sobre Markdown).
+  Testa-se com um nome longo.
+- **`| grep -q` mata o gerador a meio.** Um pipe que fecha cedo entrega SIGPIPE ao `delonix init`
+  e deixa o projecto por metade — parece um bug de escrita parcial e é do teste. Captura-se a
+  saída e compara-se depois.
+- **Uma porta ocupada por outro serviço faz um smoke passar ou falhar pelo serviço errado.** Foi
+  assim que apareceu que o `smoke.sh` não aceitava `"id": "…"` com espaço (o JSON de outro
+  framework). Confirma-se o dono da porta antes de medir.
+- **Um esqueleto vazio é pior que um directório em falta.** O primeiro `.dockerignore` deste
+  motor descia a todo o directório excluído assim que houvesse uma regra `!`, e deixava a
+  árvore de pastas vazia: um `.venv` vazio fazia o `uv sync` recusar («not a valid Python
+  environment»). Só a build real o mostrou — o teste unitário não tinha excepção nenhuma.
+- **Uma lista vazia de processadores não é «sem exportação»** no SDK OpenTelemetry de Node: o
+  provider não é registado e os `trace_id` saem a zeros. Usa-se um processador nulo.
+- **Os erros de exportação do SDK saem em texto livre no stderr** se ninguém instalar um
+  handler — fora do formato JSON dos logs. Cada template encaminha-os para o logger.
+- **O `delonix build` não é o `docker build`**: até esta série não lia `.dockerignore`, deitava
+  fora as fontes do meio de um `COPY a b dst/` e seguia symlinks dentro de uma árvore copiada
+  (um `node_modules` do pnpm não se conseguia copiar entre estágios). Uma imagem «validada com
+  docker» não está validada.
