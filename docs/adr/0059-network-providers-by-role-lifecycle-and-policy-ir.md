@@ -844,3 +844,33 @@ What F4a adds:
     - `apply` refuses without `--replace`, and `--replace` converges (plan 0);
     - `delete` leaves no rule and no category.
 - **Catalog.** OPNsense `net.observe` becomes `supported`.
+
+## Addendum 2026-10-01 — F4b: the plan digest, and a stale plan refused
+
+- **`delonix_networking::plan::plan_digest`** is SHA-256 over the canonical JSON of what a plan is
+  decided from. Object keys are written in sorted order at every depth. The inputs are:
+  - the normalized intent, which is the document's compared fields;
+  - what the provider holds under the record's mark (`gateway_fingerprint`): aliases by name,
+    rules by description, every observed field, and whether a rule is disabled;
+  - the provider id and the catalog version;
+  - the states of the capabilities the document uses;
+  - `PLAN_FORMAT`.
+
+  Pure, with a test that every input moves the digest and that order does not.
+- **`stack plan -o json`** carries `planDigest` on each `NetworkGateway` change. A document no
+  provider resolves for has none.
+- **`stack apply --plan-digest <d>`** is repeatable, one per network document, and the top-level
+  `apply` takes it too. Before the first write it recomputes each network document's digest. One
+  that is not among those given is refused as **DX-5390 `network.stale_plan`** (exit 5, reason
+  `stale_plan`), and nothing is written. The flag is also refused when the manifest has no
+  network document to check. Without the flag nothing is checked: `apply` plans and applies in
+  one invocation, as before.
+- **Live against the OPNsense 26.1.2_5 lab appliance**, by the CLI with an isolated root:
+  - the digest planned before the first apply is accepted and creates the 6 rules;
+  - the digest changes after the apply, and planning twice gives the same one;
+  - a wrong digest is refused with DX-5390 and exit 5;
+  - with a rule disabled on the appliance by hand between plan and apply, the apply with the old
+    digest is refused and the appliance is untouched (5 of 6 rules enabled before and after);
+  - the apply with the new digest converges (6 of 6).
+- **Not in this slice**: `NetworkZone` has no digest yet (F4d). The digest is computed with a
+  second observation of the appliance per plan, separate from the one behind the `remote` field.
