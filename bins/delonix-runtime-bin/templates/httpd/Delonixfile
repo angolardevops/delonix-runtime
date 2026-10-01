@@ -1,17 +1,24 @@
-# Delonixfile — Apache httpd __TEMPLATE_VERSION__: static site + reverse-proxy-ready.
+# Delonixfile — Apache httpd __TEMPLATE_VERSION__: static site + reverse-proxy-ready, HTTPS on.
 # Build with:  delonix build -t __NAME__:dev .
 FROM httpd:__TEMPLATE_VERSION__-alpine
 COPY conf/delonix.conf /usr/local/apache2/conf/extra/delonix.conf
 # Two edits to the image's own httpd.conf, then the include: listen on
 # __PORT__, drop its plain-text access log (conf/delonix.conf writes JSON to the
-# same stdout), and syntax-check the result so a typo fails the build.
+# same stdout), and syntax-check the result so a typo fails the build. The
+# certificate is mounted at run time and never enters the image; `httpd -t`
+# only checks that the two files exist and are not empty, so the check runs
+# against two placeholders that are removed in the same step.
 RUN sed -i -e 's/^Listen 80$/Listen __PORT__/' \
            -e 's|^\([[:space:]]*CustomLog /proc/self/fd/1 common\)|#\1|' \
            /usr/local/apache2/conf/httpd.conf && \
     echo 'Include conf/extra/delonix.conf' >> /usr/local/apache2/conf/httpd.conf && \
-    httpd -t
+    mkdir -p /usr/local/apache2/acme /usr/local/apache2/conf/tls && \
+    echo placeholder > /usr/local/apache2/conf/tls/tls.crt && \
+    echo placeholder > /usr/local/apache2/conf/tls/tls.key && \
+    httpd -t && \
+    rm /usr/local/apache2/conf/tls/tls.crt /usr/local/apache2/conf/tls/tls.key
 COPY public /usr/local/apache2/htdocs
-EXPOSE __PORT__
+EXPOSE __PORT__ __TLS_PORT__
 # Delonix extension: the runtime probes this to mark the container healthy.
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/healthz || exit 1
 CMD ["httpd-foreground"]

@@ -1,7 +1,8 @@
 # __NAME__ (Apache httpd __TEMPLATE_VERSION__)
 
 An Apache httpd edge scaffolded by `delonix init -t httpd -v __TEMPLATE_VERSION__`:
-serves the static site in `public/` on port `__PORT__`, and is ready to become
+serves the static site in `public/` over HTTPS on port `__TLS_PORT__` (port
+`__PORT__` redirects there), and is ready to become
 a reverse proxy in front of an app container. Infrastructure only — there is
 no application code here.
 
@@ -10,7 +11,9 @@ The image's own `conf/httpd.conf` is kept; this template adds
 
 | Concern | What this template does |
 |---|---|
-| Health | `GET /healthz` → `ok` (a static file), excluded from the access log |
+| Health | `GET /healthz` → `ok` (a static file) on both ports, excluded from the access log |
+| TLS | HTTPS with HTTP/2 on `__TLS_PORT__`; `__PORT__` redirects; certificate mounted from `./tls` |
+| Capacity | event MPM, 4 × 64 = 256 request threads, `nofile` 65 535, keep-alive |
 | Access log | one JSON object per request on stdout, with `request_id` |
 | Correlation | keeps the caller's `X-Request-ID` or uses `mod_unique_id`'s; returns it |
 | Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`; `Server: Apache` with no version; `TRACE` off |
@@ -22,11 +25,13 @@ The image's own `conf/httpd.conf` is kept; this template adds
 
 ```bash
 delonix build -t __NAME__:dev .     # runs `httpd -t` as part of the build
-delonix stack apply                 # starts it with restart: always, 128M, 0.5 CPU
-sh scripts/smoke.sh                 # health, headers, request id, 404, status page
+delonix stack apply                 # starts it with restart: always, 512M, 2 CPUs
+sh scripts/smoke.sh                 # health, HTTPS, redirect, headers, request id, 404
 ```
 
-Expected: `smoke: all checks passed`.
+Expected: `smoke: all checks passed`. Or, in one command from an empty
+directory: `delonix stack init -t httpd --up __NAME__`, which ends by printing
+the address to open.
 
 ## Commands
 
@@ -34,7 +39,8 @@ Expected: `smoke: all checks passed`.
 |---|---|
 | Build (and syntax-check) | `delonix build -t __NAME__:dev .` |
 | Run | `delonix stack apply` |
-| Smoke test | `sh scripts/smoke.sh [http://127.0.0.1:__PORT__]` |
+| Smoke test | `sh scripts/smoke.sh [https://127.0.0.1:__TLS_PORT__] [http://127.0.0.1:__PORT__]` |
+| New or renewed certificate | `sh scripts/tls.sh` (see TLS below) |
 | Check the running config | `delonix container exec __NAME__ httpd -t` |
 | Reload without a restart | `delonix container exec __NAME__ httpd -k graceful` |
 | Logs | `delonix container logs -f __NAME__` |
@@ -48,7 +54,10 @@ Expected: `smoke: all checks passed`.
 | `conf/delonix.conf` | everything this template sets, included last |
 | `public/` | the static site (`healthz` is the health file); `style.css` is separate because the CSP forbids inline styles |
 | `Delonixfile` | image build: port, drop the plain-text log, include, `httpd -t` |
-| `delonix-manifest.yaml` | how it runs: port, restart policy, memory and CPU |
+| `delonix-manifest.yaml` | how it runs: ports, the `./tls` and `./acme` mounts, restart policy, memory, CPU, descriptors |
+| `tls/` | certificate and key — generated, never committed, never in the image |
+| `acme/` | Let's Encrypt HTTP-01 webroot |
+| `scripts/tls.sh` | local certificate, install one, or Let's Encrypt |
 | `scripts/smoke.sh` | the checks above, against a running container |
 
 ## Put it in front of an app
@@ -61,11 +70,61 @@ request headers.
 
 ## TLS
 
-Terminate TLS here only when nothing in front of this container does. The
-commented `mod_ssl` block expects `tls.crt`/`tls.key` under
-`/usr/local/apache2/tls/` — mount them as a volume (never `COPY` a key into the
-image), publish `8443` in `delonix-manifest.yaml`, and enable
-`Strict-Transport-Security` only once the site is HTTPS-only.
+HTTPS is on from the first start: `__TLS_PORT__` serves the site (HTTP/2, TLS
+1.2 and 1.3, forward-secret suites only) and `__PORT__` redirects to it.
+
+The certificate and key live in `./tls` on the host and are mounted read-only.
+They are in `.gitignore` and `.dockerignore`: the key never reaches git or the
+image.
+
+| You want | Run |
+|---|---|
+| A local certificate (what `delonix init` already made) | `sh scripts/tls.sh` |
+| More names on it | `sh scripts/tls.sh localhost 127.0.0.1 shop.test` |
+| Browsers on this machine to trust it | install [mkcert](https://github.com/FiloSottile/mkcert), `mkcert -install` once, then `sh scripts/tls.sh` |
+| To use a certificate you already have | `sh scripts/tls.sh install fullchain.pem privkey.pem` |
+| A publicly trusted certificate | `sh scripts/tls.sh letsencrypt example.org you@example.org` |
+
+`tls.sh` reloads the running server; no restart, no dropped connection.
+
+With mkcert the certificate is signed by a CA that exists only on this
+machine; without it the certificate is self-signed, HTTPS works and browsers
+warn. Neither is for the public internet.
+
+### Let's Encrypt
+
+`scripts/tls.sh letsencrypt <domain> <email>` runs certbot's webroot
+challenge: certbot writes the challenge file into `./acme`, this server
+answers it over plain HTTP at `/.well-known/acme-challenge/` (the one path
+that is not redirected), and the certificate is installed into `./tls` and
+loaded. It needs certbot on this host, the domain's DNS pointing at this host,
+and port 80 of the host reaching the container (`"0.0.0.0:80:__PORT__"`).
+Everything certbot keeps goes to `./letsencrypt`, so no root is involved. The
+script prints the `certbot renew` line to put in cron.
+
+`Strict-Transport-Security` is off on purpose: it pins the host name, every
+port of it, and on `localhost` that would force every other local service to
+HTTPS. Turn it on in `conf/delonix.conf` once this serves a real domain.
+
+To serve on the standard ports, publish `"80:__PORT__"` and `"443:__TLS_PORT__"` in
+`delonix-manifest.yaml` (a rootless host needs `install.sh --low-ports`
+first) and drop `:__TLS_PORT__` from the redirect in `conf/delonix.conf`. A published
+port binds `127.0.0.1`; write `"0.0.0.0:443:__TLS_PORT__"` to accept other machines.
+
+## Sized for load
+
+| Setting | Value | Why |
+|---|---|---|
+| MPM | event | idle keep-alive connections do not hold a thread |
+| `ServerLimit` × `ThreadsPerChild` | 4 × 64 | 256 request threads (`MaxRequestWorkers`) |
+| `AsyncRequestWorkerFactor` | 4 | connections accepted beyond the busy threads |
+| `ListenBackLog` | 4096 | a burst waits in the kernel instead of being refused |
+| `MaxKeepAliveRequests` | 1000 | fewer handshakes per client |
+| `SSLSessionCache` | 4 MiB, on a tmpfs | resumable sessions, no disk I/O |
+
+The manifest gives it 2 CPUs, 512 MiB and 65 535 file descriptors. Raise the
+numbers together: more CPUs without more workers is idle capacity, more
+connections without more descriptors is `Too many open files`.
 
 ## Troubleshooting
 
@@ -74,6 +133,10 @@ image), publish `8443` in `delonix-manifest.yaml`, and enable
 - **A page renders unstyled** — the Content-Security-Policy allows same-origin
   resources only; move inline styles and scripts into files, or relax the
   policy for your site deliberately.
+- **The browser warns about the certificate** — expected with a self-signed
+  one; see the TLS table for the two ways out.
+- **`SSLCertificateFile: file … does not exist or is empty`** at start —
+  `./tls` is empty: run `sh scripts/tls.sh`.
 - **Two lines per request in the log** — the Delonixfile's `sed` did not find
   the image's `CustomLog … common` line (a different base image version);
   comment it out in `conf/httpd.conf` by hand.
