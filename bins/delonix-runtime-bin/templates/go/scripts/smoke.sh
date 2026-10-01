@@ -11,7 +11,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 [ "$(code "$BASE/api/v1/health/ready")" = 200 ] || fail "ready is not 200"
 created=$(curl -sf -X POST "$BASE/api/v1/notes" -H 'Content-Type: application/json' \
   -d '{"title":"smoke","body":"created by scripts/smoke.sh"}') || fail "create failed"
-id=$(printf '%s' "$created" | sed -n 's/.*"id":"\([0-9a-f]*\)".*/\1/p')
+id=$(printf '%s' "$created" | sed -n 's/.*"id" *: *"\([0-9a-zA-Z-]*\)".*/\1/p')
 [ -n "$id" ] || fail "no id in $created"
 [ "$(code "$BASE/api/v1/notes/$id")" = 200 ] || fail "created note not found"
 [ "$(code -X POST "$BASE/api/v1/notes" -H 'Content-Type: application/json' -d '{"title":""}')" = 422 ] \

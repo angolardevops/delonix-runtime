@@ -1739,9 +1739,33 @@ fn copy_dir_all(
         if ignored(ignore, &child, ty.is_dir()) {
             continue;
         }
-        // A NESTED entry can itself be a symlink escaping the tree, even though the
-        // top-level src/dst of this COPY already passed `confine_to` — validate every
-        // entry, not just the root.
+        // A symlink inside a copied tree is copied AS A LINK, like Docker does,
+        // never followed: following made a link to a directory fail the whole
+        // COPY (a pnpm `node_modules` is built of them, so `COPY --from=build
+        // /app/node_modules` could not work), and turned an absolute link in a
+        // stage's rootfs into a read of the HOST path it names. The link is
+        // not dereferenced here, so nothing outside the tree is read; a later
+        // step that writes through it is still confined by `confine_to`.
+        if ty.is_symlink() {
+            let link =
+                std::fs::read_link(entry.path()).map_err(|e| Error::Invalid(e.to_string()))?;
+            let target = dst.join(entry.file_name());
+            match std::fs::symlink_metadata(&target) {
+                Ok(m) if m.is_dir() => {
+                    return Err(Error::Invalid(super::po::tf(
+                        "COPY: cannot replace the directory {path} with a symbolic link",
+                        &[("path", &target.display().to_string())],
+                    )))
+                }
+                Ok(_) => {
+                    std::fs::remove_file(&target).map_err(|e| Error::Invalid(e.to_string()))?
+                }
+                Err(_) => {}
+            }
+            std::os::unix::fs::symlink(&link, &target)
+                .map_err(|e| Error::Invalid(format!("symlink {}: {e}", target.display())))?;
+            continue;
+        }
         let entry_path = confine_to(canon_context, &entry.path())?;
         let target = confine_to(canon_rootfs, &dst.join(entry.file_name()))?;
         if ty.is_dir() {
@@ -2137,6 +2161,40 @@ mod dockerignore_tests {
         )
         .unwrap();
         assert!(rootfs2.path().join("app/.env").exists());
+    }
+
+    /// A link inside a copied tree arrives as a link. Before, a link to a
+    /// directory failed the COPY ("neither a regular file nor a symlink to a
+    /// regular file") — the shape of every pnpm `node_modules`.
+    #[test]
+    fn a_symlink_inside_a_copied_tree_is_copied_as_a_link() {
+        let ctx = tempfile::tempdir().unwrap();
+        let root = ctx.path();
+        fs::create_dir_all(root.join("nm/.store/pkg")).unwrap();
+        fs::write(root.join("nm/.store/pkg/index.js"), "x\n").unwrap();
+        std::os::unix::fs::symlink(".store/pkg", root.join("nm/pkg")).unwrap();
+        std::os::unix::fs::symlink("/etc/hostname", root.join("nm/abs")).unwrap();
+        let rootfs = tempfile::tempdir().unwrap();
+        copy_into_rootfs(
+            root,
+            rootfs.path().to_str().unwrap(),
+            "nm",
+            "/app/nm",
+            "/",
+            None,
+        )
+        .unwrap();
+        let out = rootfs.path().join("app/nm");
+        assert_eq!(
+            fs::read_link(out.join("pkg")).unwrap().to_str(),
+            Some(".store/pkg")
+        );
+        assert_eq!(fs::read_to_string(out.join("pkg/index.js")).unwrap(), "x\n");
+        // An absolute link is kept as written, not resolved against the host.
+        assert_eq!(
+            fs::read_link(out.join("abs")).unwrap().to_str(),
+            Some("/etc/hostname")
+        );
     }
 
     /// An ignored file is never copied, so editing it must not invalidate the

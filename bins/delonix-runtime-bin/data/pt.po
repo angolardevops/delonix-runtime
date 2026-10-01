@@ -14886,3 +14886,6 @@ msgid "networkgateway/{name}: the last run was {why} — resuming, with {n} stag
 msgstr "networkgateway/{name}: a última execução ficou {why} — a retomar, com {n} alteração(ões) preparada(s) por ela adoptada(s)"
 msgid "COPY {src}: the source is excluded by .dockerignore"
 msgstr "COPY {src}: a origem está excluída pelo .dockerignore"
+
+msgid "COPY: cannot replace the directory {path} with a symbolic link"
+msgstr "COPY: não posso substituir o directório {path} por uma ligação simbólica"
