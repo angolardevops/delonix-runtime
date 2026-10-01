@@ -109,8 +109,11 @@ fn refuse(why: String) -> Error {
     ))
 }
 
-/// One persisted rule as an IR rule.
-fn rule_of(r: &FwRule) -> Result<Rule, String> {
+/// One persisted rule as an IR rule, or why it cannot be one. Public because a
+/// document that is not a `ContainerFw` (a `NetworkPolicy` with `scope: vm`)
+/// builds its rules through the same parse, so the two never disagree on what
+/// a port, a protocol or a peer means.
+pub fn rule_of(r: &FwRule) -> Result<Rule, String> {
     let action = match r.action.as_str() {
         "allow" => Action::Allow,
         "deny" => Action::Deny,
