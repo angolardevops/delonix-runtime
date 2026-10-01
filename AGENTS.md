@@ -3045,6 +3045,11 @@ antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
   `2755` da imagem é `755` no container). O init repõe o modo depois do `chown` (que os limpa),
   para nada se perder no dia em que a extracção os preservar.
 - **Por validar**: host root (não rootless) e o CRI num nó.
+- **O template `odoo` corre como `odoo`** (`user: odoo` nos dois manifestos, 2026-10-01, depois
+  de o P1 fundir). Medido ao vivo: uid 100, sem o aviso «Running as user 'root'», filestore
+  gravável num volume novo, `/etc/passwd` recusado; no perfil dev os binds `addons/` e
+  `config/` ficam `1000:1000` no host e o dono continua a escrever. Um volume de filestore
+  escrito como root por uma corrida anterior NÃO é migrado (o README di-lo).
 
 **Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
 ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
@@ -3113,6 +3118,54 @@ o separa dos outros dez.
   substituído. A primeira reprodução «falhou» por isso. Para medir, copiar o binário para um
   caminho estável e nunca o sobrescrever enquanto algo dele corre (o holder também o usa: `cp`
   sobre ele dá `Text file busy`).
+
+## Templates de infraestrutura e ERP contra o prompt master (2026-10-01)
+
+Os quatro templates sem código de aplicação — `nginx`, `httpd`, `haproxy`, `odoo` — revistos
+contra a linha «infraestrutura/ERP» do prompt master dos templates do `init`. Os sete de
+aplicação e o gerador (`scaffold.rs`, `init.rs`) são de outra frente de trabalho.
+
+- **nginx, httpd, haproxy** passam a: log de acesso em JSON no stdout com `request_id`
+  (o do chamador, ou um gerado; devolvido na resposta), `/healthz` fora do log, timeouts e
+  limite de corpo explícitos, cabeçalhos de segurança, endpoint de métricas/estado não
+  publicado, config verificada NO BUILD (`nginx -t`, `httpd -t`, `haproxy -c`), blocos
+  comentados de TLS e proxy, `scripts/smoke.sh` e README com os comandos reais. Omissões:
+  nginx `1.30` (= tag `stable` da imagem), haproxy `3.4` (= `lts`), httpd `2.4`; lidas por
+  digest no Docker Hub a 2026-09-30.
+- **Três armadilhas, cada uma medida**: no nginx, um `add_header` dentro de um `location`
+  ANULA os herdados do `server` — o `/healthz` antigo perdia todos os cabeçalhos de segurança;
+  no HAProxy, as respostas que o proxy gera (`http-request return`) saltam as regras
+  `http-response` e só passam por `http-after-response`; e o httpd recusa arrancar sem
+  nenhuma interface configurada (`AH00530 … getaddrinfo fail` com `--net none`) — não é o
+  `mod_unique_id`, é o `Listen`, e o `RUN httpd -t` do build passa porque o build tem rede.
+- **O manifesto de produção do Odoo era um beco sem saída**: `list_db = False` desliga o
+  gestor de bases de dados, e o README mandava «criar a primeira base na UI». Medido no
+  `odoo:20.0`: `/web/login` → seletor → «database manager has been disabled». Com
+  `db_name = <nome>` o Odoo cria e inicializa a base sozinho no primeiro arranque (~10 s em
+  disco calmo); o `dbfilter` fixa os pedidos nela.
+- **A base nasce com `admin`/`admin`.** O README dá o comando de troca (`odoo shell` por
+  `container exec -i … /entrypoint.sh`), e o smoke FALHA enquanto a password de fábrica
+  entrar — medido nos dois estados.
+- **Testes de addon precisam de `--test-tags /<addon>`**: sem isso, uma base nova corre os
+  ~1000 testes do `base` e dependências, 36 falham fora da CI do Odoo, e o comando sai 1 com
+  o teste do addon a passar.
+- **`stack destroy` apaga os volumes da stack** — o README dizia «volumes stay». Corrigido,
+  com o comando que pára sem apagar.
+- **Achado do motor, NÃO corrigido**: `container run` não aplica o `USER` da imagem
+  (`odoo:20.0` declara `user = odoo` e corre como uid 0; assim desde a v1.0.0). `-u odoo`
+  funciona mas dispara o `chown_tree_once` do rootfs inteiro — mais de 16 min em ~2 GB com o
+  disco saturado. Mudar a omissão é uma decisão de semântica para todos os containers.
+- **`container start` numa rede própria** dava a mensagem antiga (hash da netns e
+  `Some(1)`); passa pelo `netns_start_error`, como o `run`. Provado por teste unitário; a
+  reprodução ao vivo foi interrompida por um reinício do host.
+- **Validado ao vivo**: `stack init -t <t> --up` com raiz isolada e o `scripts/smoke.sh`
+  gerado — nginx 9/9, httpd 9/9, haproxy 7/7; odoo (20.0 por omissão) `--up` em 459 s com a
+  base inicializada, smoke de produção 4/4 depois da troca de password, smoke de dev 2/2, e
+  um addon real com teste a passar (`0 failed, 0 error(s) of 3 tests`).
+- **Método**: o primeiro harness apagava a raiz isolada logo a seguir ao `stack destroy`. Um
+  supervisor com `restart: always` cujo registo desaparece volta a arrancar o container —
+  ficou um nginx órfão a segurar a porta e fez falhar os dois templates seguintes. Esperar
+  que nenhum processo com aquele `DELONIX_ROOT` esteja vivo antes de apagar a raiz.
 
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 

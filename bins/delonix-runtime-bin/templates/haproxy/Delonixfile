@@ -1,4 +1,4 @@
-# Delonixfile — production-ready HAProxy (L7 load balancer / reverse proxy).
+# Delonixfile — HAProxy __TEMPLATE_VERSION__: L7 reverse proxy / load balancer.
 # Build with:  delonix build -t __NAME__:dev .
 FROM haproxy:__TEMPLATE_VERSION__-alpine
 COPY haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
