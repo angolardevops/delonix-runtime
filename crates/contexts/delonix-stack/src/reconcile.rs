@@ -292,6 +292,11 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // apply — same "converges without recreating anything" shape as
         // `Image`'s ref/digest just above.
         k::SERVICE => &["matchLabels", "port"],
+        // An apply that died mid-way is finished by applying again: the
+        // record's ledger says where it stopped, and the provider adopts what
+        // the dead process staged (ADR-0059 D4). Every other field of a
+        // gateway stays cold — the appliance has no update in place.
+        k::NETWORK_GATEWAY => &["applied"],
         // `ippool::apply_one` overwrites the definition and keeps the leases.
         k::IPPOOL => &["addresses", "announce", "interface"],
         // Every comparable field of `policy.json` converges hot: `apply_one`

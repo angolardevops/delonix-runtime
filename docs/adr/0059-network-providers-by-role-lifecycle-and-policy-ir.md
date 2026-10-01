@@ -899,3 +899,52 @@ What F4a adds:
   - the apply with the new digest converges (6 of 6).
 - **Not in this slice**: `NetworkZone` has no digest yet (F4d). The digest is computed with a
   second observation of the appliance per plan, separate from the one behind the `remote` field.
+
+## Addendum 2026-10-01 — F4c: the step ledger, and an apply killed mid-way
+
+**Measured first, on the lab appliance with the F4b binary.** A `stack apply` of 6 rules was
+killed (`kill -9`) after 2 were staged and before the commit. The appliance was left with 2 rules
+configured and none loaded in pf. Afterwards:
+- the next `stack apply` planned a replace, because 4 rules were missing;
+- `--replace` was refused with DX-5389, naming this engine's own two staged rules as «not this
+  engine's».
+
+The cause is that what a provider value staged lives only in that process's memory. The document
+was stuck until someone went to the appliance by hand.
+
+What F4c adds:
+
+- **`delonix_networking::ledger::StepLedger`** is plain data, kept in the record. Each step
+  (`ensure_alias`, `ensure_rule`, `remove_rule`, `remove_alias`, `commit`) is opened and the
+  record saved before it runs, then settled and saved after. `finish()` marks the end of a run.
+  `is_interrupted()` is true when a step did not end well, or when steps are done and the run
+  never finished.
+
+  The second case was found live. The first version called a run complete when no step was open.
+  A kill landed after step 2 was settled and before step 3 was opened: every step read `done`,
+  with 2 of 6 rules created.
+- **`GatewayProvider::adopt_pending(owner, removed_ids)`** takes over what a dead run staged:
+  - every pending change of an object carrying the owner's mark;
+  - every pending deletion whose id is in `removed_ids`.
+
+  Anything else pending stays foreign, and the pre-check still refuses it.
+- **`GatewayProvider::owned_rule_ids(owner)`** gives the provider's ids of the owned rules. A
+  teardown saves them in the ledger before the first deletion. A deleted rule carries no mark,
+  so its id is the only way to recognize it later.
+- **The plan.** A record's `applied` field is `complete`, or where its last run stopped. The
+  manifest wants `complete`, and the field converges live. So a plain `stack apply`, with no
+  `--replace`, resumes: it adopts what was staged, ensures what is missing, and commits. While a
+  run is interrupted the `remote` field is not compared, because what is missing is what the run
+  had not reached.
+- **Live, the same kill with the F4c binary:**
+  - after the kill, 2 rules were configured and none loaded;
+  - the next `stack apply` answered `the last run was interrupted: step 2 (ensure_rule
+    'f3e-web-in#2') did not finish, after 1 step(s) done — resuming, with 2 staged change(s) of
+    it adopted`;
+  - it left 6 rules configured and 7 pf lines, and `stack plan --detailed-exitcode` answered 0;
+  - the ledger on disk read 7 steps done and `finished: true`.
+- **Not in this slice**:
+  - `partial_apply` and `rollback_failed` as reasons, and compensations. An apply that fails
+    still leaves what it did, named in the ledger.
+  - A teardown killed mid-way was exercised on the TLS mock only, not live.
+  - A record written before the ledger existed cannot be resumed: it has no steps to read.

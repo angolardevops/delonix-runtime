@@ -434,6 +434,64 @@ impl Client {
         Ok(out)
     }
 
+    /// The uuids of the filter rules carrying `owner`'s category.
+    pub fn owned_rule_ids(&self, owner: &OwnerMark) -> Result<Vec<String>> {
+        let labels = self.owner_categories()?;
+        Ok(self
+            .search_rows("firewall/filter/search_rule")?
+            .iter()
+            .filter(|r| owner_of_row(r, owner, &labels) == Owner::Ours)
+            .filter_map(|r| r.get("uuid").and_then(Value::as_str).map(str::to_string))
+            .collect())
+    }
+
+    /// Records into `staging` the pending changes a DEAD process of this
+    /// engine left staged (ADR-0059 D4): a rule or alias configured and not
+    /// applied that carries `owner`'s category, and a rule still loaded in pf
+    /// whose uuid a teardown's ledger saved before deleting it. What does not
+    /// qualify stays foreign, and the pre-check still refuses it.
+    pub fn adopt_pending(
+        &self,
+        owner: &OwnerMark,
+        removed_ids: &[String],
+        staging: &Staging,
+    ) -> Result<Vec<String>> {
+        let pending = self.pending_changes()?;
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        let labels = self.owner_categories()?;
+        let rules = self.search_rows("firewall/filter/search_rule")?;
+        let aliases = self.search_rows("firewall/alias/search_item")?;
+        let mut adopted = Vec::new();
+        for p in pending {
+            if staging.covers(&p) {
+                continue;
+            }
+            let change = match (p.kind, p.what) {
+                ("rule", "deleted, not applied") => removed_ids
+                    .contains(&p.id)
+                    .then(|| StagedChange::rule(&p.id, &p.label, StagedOp::Deleted)),
+                ("rule", _) => rules
+                    .iter()
+                    .find(|r| r.get("uuid").and_then(Value::as_str) == Some(p.id.as_str()))
+                    .filter(|r| owner_of_row(r, owner, &labels) == Owner::Ours)
+                    .map(|_| StagedChange::rule(&p.id, &p.label, StagedOp::Created)),
+                ("alias", _) => aliases
+                    .iter()
+                    .find(|a| str_field(a, "name") == p.id)
+                    .filter(|a| owner_of_row(a, owner, &labels) == Owner::Ours)
+                    .map(|_| StagedChange::alias(&p.id, StagedOp::Created)),
+                _ => None,
+            };
+            if let Some(change) = change {
+                adopted.push(p.to_string());
+                staging.record(change);
+            }
+        }
+        Ok(adopted)
+    }
+
     pub fn release_owner(&self, owner: &OwnerMark) -> Result<RemoveOutcome> {
         let Some(uuid) = self.owner_category(owner)? else {
             return Ok(RemoveOutcome::Absent);
@@ -1465,6 +1523,22 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<GatewayObserved> {
         self.client
             .observe(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn owned_rule_ids(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+        self.client
+            .owned_rule_ids(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn adopt_pending(
+        &self,
+        owner: &OwnerMark,
+        removed_ids: &[String],
+    ) -> delonix_model::Result<Vec<String>> {
+        self.client
+            .adopt_pending(owner, removed_ids, &self.staging)
             .map_err(delonix_model::Error::from)
     }
 

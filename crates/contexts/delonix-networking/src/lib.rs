@@ -11,6 +11,7 @@
 
 mod error;
 pub mod gateway;
+pub mod ledger;
 pub mod ownership;
 pub mod plan;
 pub mod policy;

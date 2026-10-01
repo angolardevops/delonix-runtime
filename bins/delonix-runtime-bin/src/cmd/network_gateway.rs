@@ -167,11 +167,17 @@ pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules
 /// what the record declared. The manifest always wants `in sync`, so a rule
 /// changed or deleted on the appliance by hand is drift (`stack plan
 /// --detailed-exitcode` answers 2, `delonix drift` names it).
-pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] =
-    &["provider", "aliases", "rules", "policies", "remote"];
+pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] = &[
+    "provider", "aliases", "rules", "policies", "remote", "applied",
+];
 
 /// The `remote` field of a record that matches the appliance.
 const IN_SYNC: &str = "in sync";
+
+/// The `applied` field of a record whose last apply ran to its end. Anything
+/// else is where an apply stopped (ADR-0059 D4): the manifest always wants
+/// `complete`, the field converges live, and applying again resumes.
+const COMPLETE: &str = "complete";
 
 /// A registered record: what was last declared, plus the ownership fields
 /// every ownable Kind's own registry carries (mirrors `ServiceDef`).
@@ -187,6 +193,11 @@ struct NetworkGatewayRecord {
     /// from them on teardown.
     #[serde(default)]
     policies: Vec<GatewayPolicySpec>,
+    /// The steps of the last apply or teardown, each written before it ran
+    /// and settled after (ADR-0059 D4). An unsettled one is where a process
+    /// died.
+    #[serde(default)]
+    ledger: delonix_networking::ledger::StepLedger,
     #[serde(default)]
     labels: BTreeMap<String, String>,
     #[serde(default)]
@@ -446,6 +457,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     fields.insert("rules".into(), rules_field(&spec.rules));
     fields.insert("policies".into(), policies_field(&spec.policies));
     fields.insert("remote".into(), IN_SYNC.into());
+    fields.insert("applied".into(), COMPLETE.into());
     Ok(super::reconcile::Desired {
         kind: k::NETWORK_GATEWAY.into(),
         name: doc.metadata.name.clone(),
@@ -464,6 +476,12 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|rec| {
             let mut fields = record_fields(&rec);
             fields.insert("remote".into(), remote_field(&rec)?);
+            fields.insert(
+                "applied".into(),
+                rec.ledger
+                    .interruption()
+                    .unwrap_or_else(|| COMPLETE.to_string()),
+            );
             Ok(super::reconcile::Actual {
                 kind: k::NETWORK_GATEWAY.into(),
                 name: rec.name.clone(),
@@ -483,6 +501,12 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// without a mark, or from the retired `native` provider, owns nothing that
 /// can be observed, and says so instead of claiming to be in sync.
 fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
+    if rec.ledger.is_interrupted() {
+        // An apply stopped mid-way: what is missing on the appliance is what
+        // it had not reached, and the `applied` field says so. Comparing here
+        // too would plan a replace for what applying again finishes.
+        return Ok(IN_SYNC.into());
+    }
     if rec.owner.is_empty() {
         return Ok("not observed: the record predates owner marks".into());
     }
@@ -562,6 +586,7 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
     let mut intent = desired(doc)?.fields;
     // The constant the reconciler compares against is not part of the intent.
     intent.remove("remote");
+    intent.remove("applied");
     Ok(Some(delonix_networking::plan::plan_digest(
         &intent,
         &delonix_networking::plan::gateway_fingerprint(&observed),
@@ -594,6 +619,54 @@ fn union_by<T: Clone>(old: &[T], new: &[T], key: impl Fn(&T) -> &str) -> Vec<T> 
         .collect();
     out.extend(new.iter().cloned());
     out
+}
+
+/// Runs one step under the record's ledger: opened and SAVED before it runs,
+/// settled and saved after (ADR-0059 D4). A process killed inside `run`
+/// leaves the step unsettled on disk, which is how the next plan knows.
+fn step<T>(
+    s: &JsonStore<NetworkGatewayRecord>,
+    rec: &mut NetworkGatewayRecord,
+    provider: &str,
+    op: &'static str,
+    target: &str,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let id = rec.ledger.open(op, target);
+    s.save(&rec.name, rec)?;
+    let out = run().map_err(at(provider, op));
+    rec.ledger
+        .settle(id, out.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+    s.save(&rec.name, rec)?;
+    out
+}
+
+/// When the record's last run stopped mid-way, takes over what it left
+/// staged on the provider, and says so.
+fn resume_interrupted(
+    rec: &NetworkGatewayRecord,
+    provider_id: &str,
+    provider: &dyn GatewayProvider,
+    owner: &OwnerMark,
+) -> Result<()> {
+    let Some(why) = rec.ledger.interruption() else {
+        return Ok(());
+    };
+    let adopted = provider
+        .adopt_pending(owner, &rec.ledger.removing)
+        .map_err(at(provider_id, "adopt_pending"))?;
+    println!(
+        "{}",
+        super::po::tf(
+            "networkgateway/{name}: the last run was {why} — resuming, with {n} staged change(s) of it adopted",
+            &[
+                ("name", &rec.name),
+                ("why", &why),
+                ("n", &adopted.len().to_string()),
+            ],
+        )
+    );
+    Ok(())
 }
 
 /// Applies one document: refuses if the appliance has changes staged that
@@ -637,13 +710,15 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     rec.policies = union_by(&rec.policies, &spec.policies, |p| p.name.as_str());
     s.save(&name, &rec)?;
 
+    resume_interrupted(&rec, provider_id, provider.as_ref(), &owner)?;
+    rec.ledger = Default::default();
     provider
         .check_no_foreign_pending()
         .map_err(at(provider_id, "check_no_foreign_pending"))?;
     for a in &aliases {
-        provider
-            .ensure_alias(a, &owner)
-            .map_err(at(provider_id, "ensure_alias"))?;
+        step(&s, &mut rec, provider_id, "ensure_alias", &a.name, || {
+            provider.ensure_alias(a, &owner)
+        })?;
     }
     for r in spec
         .rules
@@ -651,12 +726,20 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         .map(to_rule)
         .chain(policy_rules.iter().cloned())
     {
-        provider
-            .ensure_rule(&r, &owner)
-            .map_err(at(provider_id, "ensure_rule"))?;
+        step(
+            &s,
+            &mut rec,
+            provider_id,
+            "ensure_rule",
+            &r.description,
+            || provider.ensure_rule(&r, &owner),
+        )?;
     }
-    provider.commit().map_err(at(provider_id, "commit"))?;
+    step(&s, &mut rec, provider_id, "commit", "", || {
+        provider.commit()
+    })?;
 
+    rec.ledger.finish();
     rec.aliases = spec.aliases.clone();
     rec.rules = spec.rules.clone();
     rec.policies = spec.policies.clone();
@@ -765,26 +848,50 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         descriptions.extend(policy_rules(p)?.into_iter().map(|r| r.description));
     }
     let (provider_id, provider) = resolve_provider(None, &rec.provider)?;
+    let mut rec = rec;
+    resume_interrupted(&rec, provider_id, provider.as_ref(), &owner)?;
+    // The ids about to be deleted, saved BEFORE the first deletion: once a
+    // rule is deleted it no longer carries a mark, and a teardown that dies
+    // after staging the deletion is recognized by these.
+    let mut removing = std::mem::take(&mut rec.ledger.removing);
+    for id in provider
+        .owned_rule_ids(&owner)
+        .map_err(at(provider_id, "owned_rule_ids"))?
+    {
+        if !removing.contains(&id) {
+            removing.push(id);
+        }
+    }
+    rec.ledger = delonix_networking::ledger::StepLedger {
+        steps: Vec::new(),
+        finished: false,
+        removing,
+    };
+    s.save(name, &rec)?;
     provider
         .check_no_foreign_pending()
         .map_err(at(provider_id, "check_no_foreign_pending"))?;
     for d in &descriptions {
-        if let RemoveOutcome::NotOwned(who) = provider
-            .remove_rule(d, &owner)
-            .map_err(at(provider_id, "remove_rule"))?
+        if let RemoveOutcome::NotOwned(who) =
+            step(&s, &mut rec, provider_id, "remove_rule", d, || {
+                provider.remove_rule(d, &owner)
+            })?
         {
             report_left(name, "rule", d, &who.describe());
         }
     }
-    for a in &rec.aliases {
-        if let RemoveOutcome::NotOwned(who) = provider
-            .remove_alias(&a.name, &owner)
-            .map_err(at(provider_id, "remove_alias"))?
+    for a in rec.aliases.clone() {
+        if let RemoveOutcome::NotOwned(who) =
+            step(&s, &mut rec, provider_id, "remove_alias", &a.name, || {
+                provider.remove_alias(&a.name, &owner)
+            })?
         {
             report_left(name, "alias", &a.name, &who.describe());
         }
     }
-    provider.commit().map_err(at(provider_id, "commit"))?;
+    step(&s, &mut rec, provider_id, "commit", "", || {
+        provider.commit()
+    })?;
     // The owner mark's own object (an OPNsense category) goes last; the
     // appliance refuses while anything still carries it, and that is said,
     // not forced.

@@ -315,6 +315,23 @@ pub trait GatewayProvider: delonix_compute::vm_provider::Provider {
     /// D4, observe). Read-only: it stages nothing and applies nothing.
     fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<GatewayObserved>;
 
+    /// The provider's own ids of the rules carrying `owner`'s mark. A
+    /// teardown saves them in its ledger before the first deletion, so a
+    /// deletion staged by a process that died can be recognized later.
+    fn owned_rule_ids(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>>;
+
+    /// Takes over what an apply or teardown that DIED staged and never
+    /// activated (ADR-0059 D4): every pending change of an object carrying
+    /// `owner`'s mark, and every pending deletion whose id is in
+    /// `removed_ids`. From then on this value's `commit` treats them as its
+    /// own instead of refusing them as someone else's. Returns what it
+    /// adopted, for a message. Anything else pending stays foreign.
+    fn adopt_pending(
+        &self,
+        owner: &OwnerMark,
+        removed_ids: &[String],
+    ) -> delonix_model::Result<Vec<String>>;
+
     /// Refuses (`RemoteForeignPending`) when the provider already carries
     /// staged changes nobody applied — called BEFORE the first staged write,
     /// so a refusal leaves nothing of this engine's behind. The
@@ -512,6 +529,16 @@ mod tests {
             }
             fn observe(&self, _: &OwnerMark) -> delonix_model::Result<GatewayObserved> {
                 Ok(GatewayObserved::default())
+            }
+            fn owned_rule_ids(&self, _: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+            fn adopt_pending(
+                &self,
+                _: &OwnerMark,
+                _: &[String],
+            ) -> delonix_model::Result<Vec<String>> {
+                Ok(Vec::new())
             }
             fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
                 Ok(())
