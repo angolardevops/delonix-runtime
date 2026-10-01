@@ -1127,7 +1127,7 @@ check "progresso: todo o • tem o seu ✓" ok bash -c "
 # check exige é que o motor o diga, e só quando é verdade. A imagem é construída
 # aqui para a bateria não depender de uma imagem com USER estar em cache.
 _ud="$OUT/userimg-$PFX"; _ui="e2e-userimg-$PFX:1"
-mkdir -p "$_ud" && printf 'FROM %s\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
+mkdir -p "$_ud" && printf 'FROM %s\nRUN mkdir -p /srv/own && chown 1000:1000 /srv/own\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
 if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
   check "USER da imagem não aplicado: o run avisa" ok bash -c \
     "'$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
@@ -1137,6 +1137,36 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     "! '$BIN' container run --rm --net none -u 0 '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
   check "imagem sem USER não avisa" ok bash -c \
     "! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
+
+  # Um utilizador não-root recebe o que a IMAGEM lhe dá, e mais nada (ADR-0062 P1).
+  #
+  # Medido 2026-10-01 antes da correcção, com `-u`: o init fazia `chown -R` ao
+  # rootfs inteiro — 940 de 986 entradas do utilizador, que escreveu em
+  # /etc/passwd e substituiu o seu próprio binário — e a varredura atravessava
+  # os mounts: uma pasta do HOST montada por bind passou de 1000:1000 para um
+  # subuid, e o dono deixou de conseguir escrever no seu ficheiro. Cada check
+  # abaixo é um desses factos, lido de dentro do container ou no host.
+  _ub="$OUT/userbind-$PFX"; _uv="e2e-uservol-$PFX"
+  mkdir -p "$_ub" && echo dono > "$_ub/f"
+  _own_before="$(stat -c %u:%g "$_ub" "$_ub/f" | tr '\n' ' ')"
+  "$BIN" volume create "$_uv" >/dev/null 2>&1 || true
+  _urun() { "$BIN" container run --rm --net none -u 1000 -v "$_ub:/bind" -v "$_uv:/vol" "$_ui" sh -c "$1" 2>/dev/null; }
+  export -f _urun; export BIN _ub _uv _ui
+  if [ "$(_urun 'id -u')" = 1000 ]; then
+    check "-u: o utilizador NÃO escreve em /etc/passwd" fail bash -c "_urun 'echo x >> /etc/passwd'"
+    check "-u: /etc/passwd continua a ser de root" ok bash -c "[ \"\$(_urun 'stat -c %u /etc/passwd')\" = 0 ]"
+    check "-u: a pasta que a imagem lhe dá é dele e é gravável" ok bash -c \
+      "[ \"\$(_urun 'stat -c %u:%g /srv/own && touch /srv/own/x && echo ok' | tr '\n' ' ')\" = '1000:1000 ok ' ]"
+    check "-u: um volume nomeado vazio é gravável pelo utilizador" ok bash -c "_urun 'touch /vol/x'"
+    check "-u: o bind mount do HOST mantém o dono (não é re-apropriado)" ok bash -c \
+      "[ \"\$(stat -c %u:%g '$_ub' '$_ub/f' | tr '\n' ' ')\" = '$_own_before' ]"
+    check "-u: o dono do bind continua a escrever no seu ficheiro" ok bash -c "echo mais >> '$_ub/f'"
+  else
+    skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
+  fi
+  "$BIN" container run --rm --net none -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
+  "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
+  rm -rf "$_ub"
   "$BIN" image rm "$_ui" >/dev/null 2>&1 || true
 else
   skip "USER da imagem não aplicado" "o build da imagem de teste falhou neste host"

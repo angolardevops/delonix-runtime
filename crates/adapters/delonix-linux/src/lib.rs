@@ -3191,6 +3191,18 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     // `nobody`): the pivot_root and the files go to the host overlay (which accepts
     // the host uid). Without a user ns, it mounts `/dev` right away (bind of the host's real nodes).
     // With a user ns, `/dev` is mounted next, after the setuid — see below.
+    // What a non-root user will need, read NOW: after `pivot_root` neither the
+    // container's own directory nor a volume's host path is visible. Applied
+    // further down, at the user switch (see `apply_image_owners`).
+    let non_root = run_uid.filter(|u| *u != 0);
+    let image_owners = match non_root {
+        Some(_) => pending_image_owners(rootfs),
+        None => Vec::new(),
+    };
+    let fresh_volumes = match non_root {
+        Some(_) => empty_named_volumes(mounts),
+        None => Vec::new(),
+    };
     if let Err(e) = setup_rootfs(
         rootfs,
         hostname,
@@ -3315,7 +3327,15 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     let mut user_switched = false;
     if let Some(uid) = run_uid.filter(|u| *u != 0) {
         let gid = run_gid.unwrap_or(uid);
-        chown_tree_once("/", uid, gid);
+        // The user gets what the IMAGE gives it, and nothing else (ADR-0062).
+        //
+        // This used to be `chown -R uid:gid /`: measured, it made a non-root
+        // user the owner of 940 of 986 entries of its root filesystem — it could
+        // write `/etc/passwd` and replace its own binary — and the walk crossed
+        // mount points, so a bind-mounted HOST directory was re-owned to a subuid
+        // and its owner could no longer write his own files.
+        apply_image_owners(&image_owners);
+        own_fresh_volumes(&fresh_volumes, &image_owners, uid, gid);
         // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
         // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
         // (= /proc/self/fd/1) and REOPEN it already as the USER — which would fail without
@@ -3585,15 +3605,119 @@ pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
     }
 }
 
-/// Like [`lchown_tree`], but idempotent via a `/.delonix_user_<uid>` marker —
-/// only runs the 1st time for a given uid, avoiding the cost on every startup.
-fn chown_tree_once(root: &str, uid: u32, gid: u32) {
-    let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
-    if std::path::Path::new(&marker).exists() {
-        return;
+/// The image's non-root owners for this container, when they have not been
+/// applied yet — and marks them as applied.
+///
+/// Reads `overlay-owners` beside the container's `merged/` (written by the image
+/// store's `prepare_overlay`/`mount_rootfs`). Once per container on purpose: the
+/// write layer keeps what was applied, and a second pass on a later start would
+/// undo an ownership change the container made itself. A container with no such
+/// file (a flat rootfs, or one created before the index existed) gets nothing.
+fn pending_image_owners(rootfs: &str) -> Vec<delonix_compute::owners::Owner> {
+    let Some(base) = std::path::Path::new(rootfs).parent() else {
+        return Vec::new();
+    };
+    let applied = base.join("overlay-owners.applied");
+    if applied.exists() {
+        return Vec::new();
     }
-    lchown_tree(std::path::Path::new(root), uid, gid);
-    let _ = std::fs::File::create(&marker);
+    let Ok(bytes) = std::fs::read(base.join(delonix_compute::owners::OWNERS_FILE)) else {
+        return Vec::new();
+    };
+    let _ = std::fs::File::create(&applied);
+    delonix_compute::owners::decode(&bytes)
+}
+
+/// The targets of the NAMED volumes that are still empty.
+///
+/// A named volume is recognised by its shape on disk — `<volumes>/<name>/_data`
+/// with the store's `meta.json` beside it — so a bind mount of a host path is
+/// never one, whatever it is called. Empty is what makes it safe to give to the
+/// container's user: there is no file in it whose ownership could be changed.
+fn empty_named_volumes(mounts: &[Mount]) -> Vec<String> {
+    mounts
+        .iter()
+        .filter(|m| !m.readonly && is_empty_named_volume(std::path::Path::new(&m.source)))
+        .map(|m| m.target.clone())
+        .collect()
+}
+
+fn is_empty_named_volume(source: &std::path::Path) -> bool {
+    let named = source.file_name().is_some_and(|n| n == "_data")
+        && source
+            .parent()
+            .is_some_and(|p| p.join("meta.json").is_file());
+    named
+        && std::fs::read_dir(source)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(false)
+}
+
+/// Gives back the entries the image gave to a user other than root.
+///
+/// Runs after `pivot_root`, so every path resolves inside the container's root:
+/// a symlink the image planted cannot lead out of it. An entry that resolves
+/// onto ANOTHER filesystem — a volume or a bind mount covering that path — is
+/// skipped: what is mounted there is not the image's, and on a bind mount it is
+/// the host's. `lchown` never follows the last component. Best-effort per entry
+/// (a path a higher layer deleted is simply not there).
+fn apply_image_owners(owners: &[delonix_compute::owners::Owner]) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(root_dev) = std::fs::symlink_metadata("/").map(|m| m.dev()) else {
+        return;
+    };
+    for o in owners {
+        let path = std::path::Path::new("/").join(&o.path);
+        let on_root = std::fs::symlink_metadata(&path).is_ok_and(|m| m.dev() == root_dev);
+        if on_root {
+            lchown_one(&path, o.uid, o.gid);
+        }
+    }
+}
+
+/// An empty named volume belongs to whoever the image gives its mount point to
+/// and, when the image names nobody, to the container's user.
+///
+/// Docker's rule for the first half; the second is this engine's: a volume
+/// created for this container, with nothing in it, at a path the image does not
+/// own, has no other owner to infer, and leaving it to root would make the
+/// user's own volume unwritable. Never a volume that already holds data, never a
+/// bind mount (`empty_named_volumes` lists neither).
+fn own_fresh_volumes(
+    targets: &[String],
+    owners: &[delonix_compute::owners::Owner],
+    uid: u32,
+    gid: u32,
+) {
+    for target in targets {
+        let (u, g) = fresh_volume_owner(target, owners, uid, gid);
+        lchown_one(std::path::Path::new(target), u, g);
+    }
+}
+
+/// Who an empty named volume mounted at `target` belongs to: the image's owner
+/// of that path, or the container's user when the image names none. PURE.
+fn fresh_volume_owner(
+    target: &str,
+    owners: &[delonix_compute::owners::Owner],
+    uid: u32,
+    gid: u32,
+) -> (u32, u32) {
+    let rel = std::path::Path::new(target.trim_start_matches('/'));
+    owners
+        .iter()
+        .find(|o| o.path == rel)
+        .map_or((uid, gid), |o| (o.uid, o.gid))
+}
+
+/// `lchown` of one path; never follows a symlink. Errors are ignored.
+fn lchown_one(path: &std::path::Path, uid: u32, gid: u32) {
+    if let Ok(c) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
+        // SAFETY: `c` is a valid NUL-terminated path owned by this frame.
+        unsafe {
+            libc::lchown(c.as_ptr(), uid, gid);
+        }
+    }
 }
 
 /// PID limit per container (anti fork-bomb).
@@ -9476,6 +9600,83 @@ mod tests {
             locked_flags_from("", std::path::Path::new("/x")),
             MsFlags::empty()
         );
+    }
+
+    /// A named volume is `<name>/_data` with the store's `meta.json` beside it,
+    /// and only an EMPTY one is handed to the container's user. A bind mount of
+    /// a host directory is never one — not even an empty directory called
+    /// `_data` — and a read-only mount is left alone.
+    #[test]
+    fn only_an_empty_named_volume_is_fresh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let named = tmp.path().join("vol/_data");
+        std::fs::create_dir_all(&named).unwrap();
+        std::fs::write(tmp.path().join("vol/meta.json"), b"{}").unwrap();
+        let bind = tmp.path().join("proj/_data");
+        std::fs::create_dir_all(&bind).unwrap();
+        let mount = |src: &std::path::Path, target: &str, readonly: bool| Mount {
+            source: src.to_string_lossy().into_owned(),
+            target: target.into(),
+            readonly,
+            propagation: None,
+            optional: false,
+        };
+        let mounts = [
+            mount(&named, "/var/lib/app", false),
+            mount(&bind, "/app", false),
+            mount(&named, "/ro", true),
+        ];
+        assert_eq!(
+            empty_named_volumes(&mounts),
+            vec!["/var/lib/app".to_string()]
+        );
+        // Data in it: it is somebody's, and it is not touched.
+        std::fs::write(named.join("f"), b"x").unwrap();
+        assert!(empty_named_volumes(&mounts).is_empty());
+    }
+
+    /// An empty volume takes the image's owner of its mount point, and the
+    /// container's user only when the image names none.
+    #[test]
+    fn a_fresh_volume_takes_the_images_owner_first() {
+        let owners = vec![delonix_compute::owners::Owner {
+            path: "var/lib/app".into(),
+            uid: 70,
+            gid: 71,
+        }];
+        assert_eq!(
+            fresh_volume_owner("/var/lib/app", &owners, 99, 99),
+            (70, 71)
+        );
+        assert_eq!(fresh_volume_owner("/data", &owners, 99, 98), (99, 98));
+    }
+
+    /// The owners are handed out once per container: the second start finds the
+    /// marker and applies nothing, so an ownership change the container made
+    /// itself is not undone. No index (a flat rootfs) is no owners.
+    #[test]
+    fn image_owners_are_pending_only_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("merged");
+        std::fs::create_dir_all(&rootfs).unwrap();
+        let rootfs = rootfs.to_string_lossy().into_owned();
+        assert!(
+            pending_image_owners(&rootfs).is_empty(),
+            "no index, no owners"
+        );
+        let owners = vec![delonix_compute::owners::Owner {
+            path: "var/lib/app".into(),
+            uid: 99,
+            gid: 99,
+        }];
+        std::fs::write(
+            tmp.path().join(delonix_compute::owners::OWNERS_FILE),
+            delonix_compute::owners::encode(&owners),
+        )
+        .unwrap();
+        // The earlier call found no index and must not have marked it applied.
+        assert_eq!(pending_image_owners(&rootfs), owners);
+        assert!(pending_image_owners(&rootfs).is_empty(), "second start");
     }
 
     #[test]
