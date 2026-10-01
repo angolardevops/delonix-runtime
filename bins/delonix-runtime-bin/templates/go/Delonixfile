@@ -16,11 +16,15 @@ ARG VERSION=dev
 RUN go build -ldflags "-s -w -X main.version=${VERSION}" -o /out/server ./cmd/__NAME__
 
 FROM alpine:3.24
-# CA roots for the outbound webhook over https, and nothing else.
-RUN apk add --no-cache ca-certificates
+# CA roots for the outbound webhook over https, and an unprivileged user for
+# the service. Nothing in the image belongs to that user: it writes nowhere
+# but the manifest's tmpfs.
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 10001 app && adduser -S -D -H -u 10001 -G app app
 COPY --from=build /out/server /usr/local/bin/server
 EXPOSE __PORT__
 # The runtime probes liveness; readiness is for the load balancer.
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/api/v1/health/live || exit 1
 STOPSIGNAL SIGTERM
+USER app
 CMD ["/usr/local/bin/server"]

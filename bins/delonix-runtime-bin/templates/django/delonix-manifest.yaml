@@ -1,9 +1,10 @@
 # Delonix manifest — the service as it runs. Apply with:
 #   delonix build -t __NAME__:dev .
 #   delonix stack apply
+# The container applies the migrations when it starts (MIGRATE_ON_START below),
+# so /api/v1/health/ready answers 200 once it is up. With that variable
+# removed, readiness stays 503 {"dependency":"migrations"} until you run
 #   delonix container exec __NAME__ /app/.venv/bin/python manage.py migrate
-# Until the migrations are applied, /api/v1/health/live is 200 and
-# /api/v1/health/ready is 503 {"dependency":"migrations"}.
 ---
 apiVersion: delonix.io/v1
 kind: Volume
@@ -21,6 +22,9 @@ metadata:
 spec:
   image: __NAME__:dev
   restart: always
+  # The unprivileged user of the image (uid 10001). Named here because the engine
+  # applies an image's USER only when the manifest asks for it.
+  user: "app"
   ports:
     - "__PORT__:__PORT__"
   env:
@@ -31,6 +35,9 @@ spec:
     # SQLite on the volume: one replica. For more, point DATABASE_URL at
     # PostgreSQL (README "Database and migrations").
     - "DATABASE_URL=sqlite:////data/db.sqlite3"
+    # One replica on SQLite: create and upgrade the schema at start. Remove
+    # this line when there are several replicas and migrate as a release step.
+    - "MIGRATE_ON_START=true"
     # A random key is created in this file on first start and kept on the
     # volume. With several replicas, give all of them one SECRET_KEY from a
     # Delonix secret instead (see below).

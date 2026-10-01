@@ -245,9 +245,10 @@ delonix stack destroy                 # removes what the manifest created
 The image holds `.next/standalone` only (server, traced production
 dependencies, browser assets). The manifest publishes `__PORT__`, sets
 `APP_ENV=production`, 512M/1 CPU, a read-only root filesystem with a `/tmp`
-tmpfs, and `restart: always`. The image runs as uid 0 inside the container;
-with rootless Delonix that uid is your unprivileged host user, which is not
-the same as a non-root user inside the container — see
+tmpfs, and `restart: always`.
+The image runs as the unprivileged user `node` (uid 1000), which owns nothing
+in the image. The manifest names it (`user:`) because the engine applies an
+image's USER only when asked — see
 [docs/adr/0004](docs/adr/0004-container-image.md). Other engines can build the
 `Delonixfile` as a Dockerfile.
 

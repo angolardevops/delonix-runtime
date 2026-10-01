@@ -3,7 +3,9 @@
 ## Start
 - Local: `make migrate` then `make run` (gunicorn). Expect `Listening at` and
   one `telemetry configured` line per worker.
-- Delonix: `delonix build -t __NAME__:dev . && delonix stack apply`, then
+- Delonix: `delonix build -t __NAME__:dev . && delonix stack apply`. The
+  container migrates at start (`MIGRATE_ON_START=true` in the manifest);
+  without that variable, run
   `delonix container exec __NAME__ /app/.venv/bin/python manage.py migrate`.
 - Healthy when `GET /api/v1/health/ready` is 200.
 
@@ -11,7 +13,7 @@
 | Symptom | Check |
 |---|---|
 | process exits at start with `ImproperlyConfigured: configuration:` | the message lists each bad variable |
-| ready 503 `"dependency": "migrations"` | migrations not applied: run `manage.py migrate` |
+| ready 503 `"dependency": "migrations"` | migrations not applied: run `manage.py migrate` (or set `MIGRATE_ON_START=true` for one replica) |
 | ready 503 `"dependency": "database"` | the database does not answer: `DATABASE_URL`, network, credentials |
 | ready 503 `draining` | a SIGTERM was received; the process is stopping |
 | every request 301 → https | production defaults without `TRUSTED_PROXY`; README "Behind a proxy" |

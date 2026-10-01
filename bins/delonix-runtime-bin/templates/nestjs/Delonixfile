@@ -1,10 +1,10 @@
 # Delonixfile — same grammar as a Dockerfile. Build with:
 #   delonix build -t __NAME__:dev .
 #
-# Two stages. The build stage installs every dependency and compiles with the
-# Nest CLI; the runtime stage installs the production dependencies only and
-# takes the compiled dist/ — no TypeScript, CLI, test or lint tooling in the
-# image. The build context is filtered by .dockerignore (.env, node_modules,
+# Two stages. The build stage installs every dependency, compiles with the
+# Nest CLI and prunes to the production dependencies; the runtime stage takes
+# those and the compiled dist/ — no TypeScript, CLI, test, lint tooling or
+# package manager in the image. The build context is filtered by .dockerignore (.env, node_modules,
 # .git never reach a layer).
 FROM node:24-slim AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
@@ -13,23 +13,25 @@ WORKDIR /app
 RUN corepack enable
 COPY . /app
 # From the lock when the project has one (reproducible); a fresh project
-# without pnpm-lock.yaml resolves, and the lock written here is the one the
-# runtime stage installs from. Commit pnpm-lock.yaml: see the README.
+# without pnpm-lock.yaml resolves now. Commit pnpm-lock.yaml: see the README.
 RUN --mount=type=cache,target=/pnpm/store if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile --store-dir /pnpm/store; else pnpm install --store-dir /pnpm/store; fi
-RUN pnpm build
+# Drop the dev dependencies here, so the runtime stage needs no package manager.
+RUN pnpm build && pnpm prune --prod
 
 FROM node:24-slim
-ENV NODE_ENV=production APP_ENV=production COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
+ENV NODE_ENV=production APP_ENV=production
 WORKDIR /app
-RUN corepack enable
-COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
-RUN --mount=type=cache,target=/pnpm/store pnpm install --prod --frozen-lockfile --store-dir /pnpm/store
-COPY --from=build /app/dist /app/dist
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
 ARG VERSION=dev
 ENV APP_VERSION=${VERSION}
 EXPOSE __PORT__
 # The runtime probes liveness; readiness is for the load balancer.
 HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:__PORT__/api/v1/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 STOPSIGNAL SIGTERM
+# node:24-slim ships this unprivileged user (uid 1000); it owns nothing in the
+# image and writes only to the manifest's tmpfs.
+USER node
 # The instrumentation is loaded before the application (see src/instrumentation.ts).
 CMD ["node", "--require", "./dist/instrumentation.js", "dist/main.js"]

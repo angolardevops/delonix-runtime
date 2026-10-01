@@ -152,10 +152,15 @@ only silenced check.
 - PostgreSQL: `uv add 'psycopg[binary]'`, then
   `DATABASE_URL=postgres://user:password@host:5432/name`. Connections are
   reused for 60 s and health-checked before use.
-- Migrations are an explicit step — `make migrate` locally,
+- Locally, migrations are an explicit step: `make migrate`.
+- In the container, `docker/entrypoint.sh` applies them before gunicorn starts
+  when `MIGRATE_ON_START=true`. The manifest sets it, because its default is
+  one replica on SQLite; a failed migration stops the container before it
+  listens.
+- With several replicas, remove `MIGRATE_ON_START` (each replica would race to
+  migrate) and run
   `delonix container exec __NAME__ /app/.venv/bin/python manage.py migrate`
-  in Delonix, a release job in a pipeline. The server never runs them: with
-  several replicas starting at once, each would race to migrate.
+  or a release job in a pipeline instead. gunicorn itself never migrates.
 - Until they are applied, readiness answers 503
   `{"status":"unavailable","dependency":"migrations"}` and the replica gets
   no traffic. `make migrations-check` fails CI when a model changed without
@@ -279,8 +284,7 @@ without draining. `make dev` (`runserver`) has no graceful shutdown at all.
 
 ```bash
 delonix build -t __NAME__:dev .       # two stages; .dockerignore is honoured
-delonix stack apply                   # delonix-manifest.yaml: a volume and the container
-delonix container exec __NAME__ /app/.venv/bin/python manage.py migrate
+delonix stack apply                   # a volume and the container; migrates at start
 curl localhost:__PORT__/api/v1/health/ready
 delonix stack destroy                 # removes what the manifest created
 ```
@@ -289,9 +293,10 @@ The manifest publishes `__PORT__` over plain HTTP, sets `APP_ENV=production`,
 keeps SQLite and a generated `SECRET_KEY_FILE` on the `__NAME__-data` volume,
 512M/1 CPU, a read-only root filesystem with a `/tmp` tmpfs, and
 `restart: always`. The image installs from `uv.lock` when the project has one
-and resolves otherwise (with a message). It runs as uid 0 inside the
-container; with rootless Delonix that uid is your unprivileged host user,
-which is not the same as a non-root user inside the container — see
+and resolves otherwise (with a message).
+It runs as the unprivileged user `app` (uid 10001), which owns nothing in the
+image except `/data`, the mount point of the volume. The manifest names it
+(`user:`) because the engine applies an image's USER only when asked — see
 [docs/adr/0003](docs/adr/0003-container-image.md). Other engines can build
 the `Delonixfile` as a Dockerfile, but only Delonix is the target here.
 

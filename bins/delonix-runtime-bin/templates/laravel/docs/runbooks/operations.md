@@ -41,11 +41,11 @@ SIGTERM (what `delonix container stop` sends) or SIGINT.
   requests get up to `SHUTDOWN_TIMEOUT`, and the process exits 0. With
   `DRAIN_DELAY=0s` (default) the listener closes immediately. Behind a load
   balancer set `DRAIN_DELAY` to a little more than its probe interval.
-- **Worker**: the image has no `ext-pcntl` (it cannot be compiled in a rootless
-  build), so SIGTERM stops the worker at once. A delivery cut that way stays
-  reserved and runs again after 90 s (`retry_after`) — at-least-once, and the
-  receiver de-duplicates by `webhook-id`. With `ext-pcntl` installed (a base
-  image that ships it) the worker finishes the job in hand first.
+- **Worker**: the image has `ext-pcntl`, so `queue:work` handles SIGTERM
+  itself: it finishes the job in hand, then exits 0 (an idle worker logs
+  `Worker STOPPED`). A delivery that is still cut — the stop timeout expired,
+  or the host died — stays reserved and runs again after 90 s (`retry_after`):
+  at-least-once, and the receiver de-duplicates by `webhook-id`.
 - Telemetry is flushed per request and per job, so nothing waits at shutdown.
 
 ## Deploy and roll back

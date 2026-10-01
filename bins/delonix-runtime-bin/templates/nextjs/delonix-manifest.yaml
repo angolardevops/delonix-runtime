@@ -10,6 +10,9 @@ metadata:
 spec:
   image: __NAME__:dev
   restart: always
+  # The unprivileged user of the image (`node`, uid 1000). Named here because the engine
+  # applies an image's USER only when the manifest asks for it.
+  user: "node"
   ports:
     - "__PORT__:__PORT__"
   env:

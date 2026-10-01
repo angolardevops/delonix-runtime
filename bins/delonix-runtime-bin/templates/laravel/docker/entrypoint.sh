@@ -33,8 +33,9 @@ case "$mode" in
       if [ "$i" -ge 60 ]; then echo "worker: schema not migrated after 60s" >&2; exit 1; fi
       sleep 1
     done
-    # SIGTERM stops the worker; a delivery in hand is retried after retry_after
-    # (with ext-pcntl the worker would finish it first — see docs/adr/0003).
+    # With ext-pcntl (in the image) the worker handles SIGTERM itself: it
+    # finishes the delivery in hand, then exits. One that is cut anyway is
+    # retried after retry_after.
     exec php artisan queue:work --sleep=1 --max-time=3600 --no-interaction
     ;;
   *)

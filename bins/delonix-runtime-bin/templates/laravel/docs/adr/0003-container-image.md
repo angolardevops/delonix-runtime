@@ -1,4 +1,4 @@
-# 0003 — FrankenPHP in classic mode, configuration cached at container start
+# 0003 — FrankenPHP in classic mode, an unprivileged user, configuration cached at start
 
 Status: accepted (template default)
 
@@ -15,8 +15,12 @@ secret, and Laravel's `config:cache` freezes whatever environment it sees.
   validates the configuration (`app:check-config`, exit 1 on any problem),
   caches it into `/tmp`, migrates, then starts the server. The same image
   runs the queue worker (`command: ["worker"]`).
-- uid 0 inside the container, read-only root filesystem, tmpfs for `/tmp`,
-  `/data`, `/config`, a volume for the SQLite file.
+- The unprivileged user `app` (uid 10001), created in the image, runs both
+  containers. It owns `/var/lib/app` — the database volume takes that owner
+  on its first mount — and nothing else. Read-only root filesystem, tmpfs for
+  `/tmp`, `/data`, `/config`.
+- `ext-pcntl` is compiled in (`install-php-extensions pcntl`), so the queue
+  worker finishes the job in hand on SIGTERM and enforces a job's `$timeout`.
 
 ## Alternatives
 - **nginx + php-fpm**: two processes and a supervisor, or two containers.
@@ -25,19 +29,21 @@ secret, and Laravel's `config:cache` freezes whatever environment it sees.
   `laravel/octane`, not by default.
 - **`config:cache` at build**: bakes the build machine's environment into a
   layer, so runtime variables — a secret `APP_KEY` among them — are ignored.
-- **`USER` non-root**: better defence in depth where the host has a
-  subordinate uid range; fails to start where it has none.
-- **`install-php-extensions pcntl`**: lets the queue worker finish the job in
-  hand on SIGTERM and enforce a job's `$timeout`. It compiles from the PHP
-  source tarball, and unpacking that fails in a rootless `delonix build`
-  (measured: `tar: Cannot change mode … Operation not permitted`). Left out so
-  the image builds everywhere; add the line back when building as root, or use
-  a base image that ships the extension.
+- **uid 0 inside the container**: needs no subordinate uid range on the host
+  (`/etc/subuid`; the Delonix installer sets one up), but the process could
+  rewrite its own code and `/etc`. A host without a range cannot run a second
+  user; there, remove `user:` from both containers of the manifest.
+- **A base image that ships `pcntl`**: none of the official FrankenPHP tags
+  does.
 
 ## Trade-off
 Each request boots the framework (a few milliseconds with opcache), and
-start-up runs three artisan commands before listening. Rootless Delonix maps
-uid 0 to the unprivileged host user, which bounds a compromise on the host
-but is not the same as a non-root process inside the container. Without ext-pcntl a SIGTERM
-stops the worker at once: a delivery in hand is retried after `retry_after`
-(90 s), which the webhook's at-least-once contract already allows.
+start-up runs three artisan commands before listening. The engine applies an
+image's `USER` only when the manifest names the user, so `USER` in the
+`Delonixfile` and `user:` in `delonix-manifest.yaml` must agree. Compiling
+`pcntl` adds the PHP source unpack and a compiler run to every uncached build.
+`install-php-extensions` unpacks that source with the archive's owners and
+modes, which a rootless build cannot restore (measured: `tar: Cannot change
+mode … Operation not permitted`); `TAR_OPTIONS="--no-same-owner
+--no-same-permissions"` on that line is what makes it build rootless, and it
+is harmless when building as root.

@@ -26,12 +26,12 @@ RUN --mount=type=cache,target=/tmp/composer-cache \
 
 FROM dunglas/frankenphp:1-php8.4
 # The image already has pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl,
-# dom and opcache. Nothing is compiled here on purpose: `install-php-extensions`
-# builds from the PHP source tarball, and unpacking it fails in a rootless
-# build (one mapped uid cannot restore the archive's owners and modes). That
-# leaves out ext-pcntl, so the queue worker cannot finish the job in hand on
-# SIGTERM — see docs/adr/0003 for what that costs and how to add it back.
-RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+# dom and opcache. ext-pcntl is added so the queue worker finishes the job in
+# hand on SIGTERM and enforces a job's timeout.
+RUN TAR_OPTIONS="--no-same-owner --no-same-permissions" install-php-extensions pcntl \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app
 ARG VERSION=dev
 ENV APP_ENV=production \
     APP_DEBUG=false \
@@ -47,12 +47,15 @@ WORKDIR /app
 COPY --from=vendor /app /app
 # Package manifests depend only on composer, so they are safe to build in.
 RUN php artisan package:discover --ansi \
-    && mkdir -p /var/lib/app /tmp/laravel \
+    && mkdir -p /var/lib/app && chown app:app /var/lib/app \
     && chmod +x /app/docker/entrypoint.sh
 VOLUME /var/lib/app
 EXPOSE __PORT__
 # The runtime probes liveness; readiness is for the load balancer.
 HEALTHCHECK CMD php -r "exit(@file_get_contents('http://127.0.0.1:__PORT__/api/v1/health/live') === false ? 1 : 0);"
 STOPSIGNAL SIGTERM
+# The unprivileged user created above (uid 10001). It owns /var/lib/app — the
+# database volume takes that owner on its first mount — and nothing else.
+USER app
 ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["serve"]

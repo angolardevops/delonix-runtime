@@ -240,9 +240,10 @@ The image installs from `uv.lock` when the project has one and resolves
 otherwise (printing that it did). The runtime stage holds only the virtual
 environment: no uv, no tests, no `.env`. The manifest publishes `__PORT__`,
 sets `APP_ENV=production`, 512M/1 CPU, read-only root filesystem with a `/tmp`
-tmpfs, and `restart: always`. The image runs as uid 0 inside the container;
-with rootless Delonix that uid is your unprivileged host user, which is not
-the same as a non-root user inside the container — see
+tmpfs, and `restart: always`.
+The image runs as the unprivileged user `app` (uid 10001), which owns nothing
+in the image. The manifest names it (`user:`) because the engine applies an
+image's USER only when asked — see
 [docs/adr/0003](docs/adr/0003-container-image.md). Other engines can build the
 `Delonixfile` as a Dockerfile.
 

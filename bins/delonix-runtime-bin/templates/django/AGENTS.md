@@ -23,7 +23,7 @@ After `make migrate` and `make run`, `make smoke` must print `smoke: OK`.
 - Views never import `django.db` or `notes.models`; rules and ORM calls live in `notes/services.py`.
 - `notes` never imports `core`, `webhooks`, `django.http` or the telemetry SDK; other apps subscribe to its signals.
 - A model change ships with its migration (`uv run python manage.py makemigrations`); never edit an applied migration.
-- The server never runs migrations; do not add `migrate` to the image's CMD or to a gunicorn hook.
+- gunicorn never runs migrations (no hook). The container entrypoint does, only when `MIGRATE_ON_START=true` — the one-replica default of the manifest; keep it out of the CMD and of gunicorn.
 - New configuration: add it to `config/env.py` (validated), `.env.example` and the README table.
 - Never log request bodies, headers or query strings; sensitive keys are redacted by key name.
 - Secrets only from the environment. Never commit `.env`, a real `SECRET_KEY` or a real `whsec_` value.

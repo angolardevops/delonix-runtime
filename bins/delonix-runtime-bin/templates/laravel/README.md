@@ -24,8 +24,8 @@ before exposing it.
 
 ## Quickstart
 
-Prerequisites: PHP 8.4 with `pdo_sqlite` (`pcntl` is optional: with it the queue
-worker finishes the job in hand on SIGTERM),
+Prerequisites: PHP 8.4 with `pdo_sqlite` (`pcntl` is optional locally; the image
+has it, so the queue worker finishes the job in hand on SIGTERM),
 Composer 2, `curl`; Delonix to build and run the image.
 
 ```bash
@@ -234,9 +234,11 @@ delonix stack destroy                 # removes what the manifest created
 The manifest runs the web container (port `__PORT__`, 512M/1 CPU) and the
 worker (256M), both with a read-only root filesystem, sharing the
 `__NAME__-data` volume that holds the SQLite file. The secret must exist
-before `stack apply` (so `delonix init --up` needs it too). The image runs
-as uid 0 inside the container; with rootless Delonix that uid is your
-unprivileged host user — see [docs/adr/0003](docs/adr/0003-container-image.md).
+before `stack apply` (so `delonix init --up` needs it too).
+The image runs as the unprivileged user `app` (uid 10001), which owns nothing
+in the image except `/var/lib/app`, the mount point of the database volume.
+The manifest names it (`user:`) because the engine applies an image's USER
+only when asked — see [docs/adr/0003](docs/adr/0003-container-image.md).
 Other engines can build the `Delonixfile` as a Dockerfile.
 
 ## Tests and CI

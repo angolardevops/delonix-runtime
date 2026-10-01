@@ -19,10 +19,18 @@ ARG VERSION=dev
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 APP_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=build /app /app
+# An unprivileged user for the service (uid 10001). The only thing it owns is /data,
+# where the manifest mounts the volume: an empty named volume takes the owner
+# the image gives its mount point.
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app \
+    && mkdir /data && chown app:app /data && chmod +x /app/docker/entrypoint.sh
 EXPOSE __PORT__
 # The runtime probes liveness; readiness is for the load balancer.
 HEALTHCHECK CMD /app/.venv/bin/python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live', timeout=2)" || exit 1
 STOPSIGNAL SIGTERM
-# gunicorn reads /app/gunicorn.conf.py (bind, workers, graceful shutdown).
-# Migrations are NOT run here: see README "Database and migrations".
+USER app
+# The entrypoint applies the migrations first when MIGRATE_ON_START=true (the
+# manifest sets it for the one-replica SQLite default; README "Database and
+# migrations"), then execs gunicorn, which reads /app/gunicorn.conf.py.
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["/app/.venv/bin/gunicorn", "config.wsgi:application"]
