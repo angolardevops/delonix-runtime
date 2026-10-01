@@ -592,16 +592,32 @@ impl Client {
     /// one:
     ///
     /// * **rules** — the configured filter rules (`search_rule`) against the
-    ///   labels loaded in pf (`diagnostics/firewall/list_rule_ids`, read from
-    ///   `pfctl -vvPsr`). An MVC rule's pf label IS its uuid
+    ///   labels loaded in pf (`diagnostics/firewall/pf_statistics/rules`,
+    ///   `pfctl -vvsr` run on each call). An MVC rule's pf label IS its uuid
     ///   (`FilterRuleField::serialize`). An enabled rule not loaded, a
     ///   disabled one still loaded, and a loaded uuid no longer configured
     ///   are each pending.
+    ///
+    ///   Not `diagnostics/firewall/list_rule_ids`: measured on 26.1.2_5, its
+    ///   `fetch_rule_labels` caches labels by pf line number and never drops
+    ///   the lines past the end of a ruleset that got shorter, so a rule
+    ///   deleted and applied stays listed for good. The engine's own deletion
+    ///   then failed its commit and every later commit was refused.
     /// * **aliases** — the configured `host`/`network` aliases against pf's
     ///   tables (`alias_util/aliases`, `pfctl -sT`) and, for an alias whose
     ///   entries are all literal addresses, the table's content
-    ///   (`alias_util/list/<name>`). A table left for an alias no longer
-    ///   configured is pending too.
+    ///   (`alias_util/list/<name>`).
+    ///
+    /// A pf table left for an alias no longer configured is **not** read as
+    /// pending. Measured on OPNsense 26.1.2_5: after an alias is deleted and
+    /// both `alias/reconfigure` and `filter/apply` answer, its table stays
+    /// loaded (with its old content) for as long as it was watched, because
+    /// the appliance's `update_tables.py` only drops an orphan table on a full
+    /// refresh that finds its file in `/var/db/aliastables`. Reading it as
+    /// pending made the engine's own deletion fail its commit and then refused
+    /// every later commit as a foreign change. What such a table could
+    /// hide is harmless: the appliance refuses to delete an alias a rule still
+    /// uses, and a deleted rule still loaded is caught by the rule check.
     ///
     /// What this does NOT see: an edit to a rule's match fields (source,
     /// destination, protocol…) that kept its uuid and its enabled state, and
@@ -613,21 +629,10 @@ impl Client {
         let rules = self.search_rows("firewall/filter/search_rule")?;
         let running = self.request(
             reqwest::Method::GET,
-            "diagnostics/firewall/list_rule_ids",
+            "diagnostics/firewall/pf_statistics/rules",
             None,
         )?;
-        let running: std::collections::BTreeSet<String> = running
-            .get("items")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|i| i.get("id").and_then(Value::as_str))
-                    .filter(|id| is_uuid(id))
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let running = running_rule_labels(&running)?;
         let mut configured = std::collections::BTreeSet::new();
         for row in &rules {
             let Some(uuid) = row.get("uuid").and_then(Value::as_str) else {
@@ -668,10 +673,8 @@ impl Client {
                     .collect()
             })
             .unwrap_or_default();
-        let mut names = std::collections::BTreeSet::new();
         for row in &aliases {
             let name = str_field(row, "name");
-            names.insert(name.clone());
             let kind = str_field(row, "type");
             if kind != "host" && kind != "network" || str_field(row, "enabled") == "0" {
                 continue;
@@ -702,17 +705,6 @@ impl Client {
                     what: "content changed, not applied",
                 });
             }
-        }
-        for table in tables.difference(&names) {
-            if is_internal_table(table) {
-                continue;
-            }
-            out.push(PendingChange {
-                kind: "alias",
-                id: table.clone(),
-                label: String::new(),
-                what: "deleted, not applied",
-            });
         }
         Ok(out)
     }
@@ -1043,16 +1035,6 @@ fn literal_entries(content: &str) -> Option<std::collections::BTreeSet<String>> 
         .then(|| all.iter().map(|e| canonical_entry(e)).collect())
 }
 
-/// pf tables the appliance keeps without a configured alias of the same
-/// name: the per-interface `__<if>_network` tables and the built-in ones.
-fn is_internal_table(name: &str) -> bool {
-    name.starts_with("__")
-        || matches!(
-            name,
-            "bogons" | "bogonsv6" | "sshlockout" | "virusprot" | "webConfiguratorlockout"
-        )
-}
-
 /// How an owned alias differs from the declaration, field by field.
 fn alias_drift(row: &Value, want: &GatewayAlias) -> Vec<String> {
     let mut out = Vec::new();
@@ -1082,6 +1064,33 @@ fn alias_drift(row: &Value, want: &GatewayAlias) -> Vec<String> {
         out.push("it is disabled".to_string());
     }
     out
+}
+
+/// The uuid labels of the filter rules pf has loaded, from
+/// `pf_statistics/rules`: one key per pf rule, its text as `pfctl -vvsr`
+/// prints it, ending in `label "<uuid>"`. A `TCP/UDP` rule is two pf rules
+/// with one label. An answer without the `filter rules` section is refused
+/// rather than read as "nothing loaded", which would call every configured
+/// rule unapplied.
+fn running_rule_labels(answer: &Value) -> Result<std::collections::BTreeSet<String>> {
+    let rules = answer
+        .get("rules")
+        .and_then(|r| r.get("filter rules"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            Error::Decode(format!(
+                "diagnostics/firewall/pf_statistics/rules answered without its filter rules: {}",
+                truncate_chars(&answer.to_string(), 200)
+            ))
+        })?;
+    Ok(rules
+        .keys()
+        .filter_map(|line| {
+            let label = line.split(" label \"").nth(1)?;
+            let uuid = label.split('"').next()?;
+            is_uuid(uuid).then(|| uuid.to_string())
+        })
+        .collect())
 }
 
 /// How an owned rule differs from the declaration, field by field. An
