@@ -2002,6 +2002,34 @@ fn proc_sys_read_only(privileged: bool) -> bool {
 pub const USERNS_UID_BASE: u32 = 100_000;
 pub const USERNS_RANGE: u32 = 65_536;
 
+/// The id a container sees for an id the HOST sees, under the rootless map this
+/// engine writes (`0 <own> 1`, then `1 USERNS_UID_BASE USERNS_RANGE-1`): the
+/// invoking id is 0, a subid is its offset into the range, plus one. PURE.
+///
+/// An id outside both stays as it is: the container cannot see it as anything
+/// (it reads as `nobody`), and inventing a number would be a guess.
+pub fn container_id_of(host: u32, own: u32) -> u32 {
+    if host == own {
+        0
+    } else if (USERNS_UID_BASE..USERNS_UID_BASE + USERNS_RANGE - 1).contains(&host) {
+        host - USERNS_UID_BASE + 1
+    } else {
+        host
+    }
+}
+
+/// [`container_id_of`] for a `(uid, gid)` pair as THIS process sees the host —
+/// what a tar header packed outside the container's user namespace needs. Real
+/// root has no map: the ids are already the container's.
+pub fn container_ids(uid: u32, gid: u32) -> (u32, u32) {
+    if !is_rootless() {
+        return (uid, gid);
+    }
+    // SAFETY: geteuid/getegid have no preconditions.
+    let (own_uid, own_gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    (container_id_of(uid, own_uid), container_id_of(gid, own_gid))
+}
+
 /// Writes the uid/gid maps of a container with a user namespace (runs in the PARENT).
 /// - **As root** (engine with `sudo`): maps the range `100000+65536` (container's
 ///   root = unprivileged uid on the host).
@@ -9677,6 +9705,26 @@ mod tests {
         // The earlier call found no index and must not have marked it applied.
         assert_eq!(pending_image_owners(&rootfs), owners);
         assert!(pending_image_owners(&rootfs).is_empty(), "second start");
+    }
+
+    /// Host ids as the container sees them: the invoking id is root, a subid is
+    /// its offset plus one, and anything else is left alone.
+    #[test]
+    fn host_ids_map_back_to_the_containers() {
+        assert_eq!(container_id_of(1000, 1000), 0);
+        assert_eq!(container_id_of(USERNS_UID_BASE, 1000), 1);
+        assert_eq!(container_id_of(100_999, 1000), 1000);
+        assert_eq!(container_id_of(100_098, 1000), 99);
+        assert_eq!(
+            container_id_of(USERNS_UID_BASE + USERNS_RANGE - 2, 1000),
+            65_535
+        );
+        // Past the range, and an unrelated host user: not ours to rename.
+        assert_eq!(
+            container_id_of(USERNS_UID_BASE + USERNS_RANGE - 1, 1000),
+            165_535
+        );
+        assert_eq!(container_id_of(33, 1000), 33);
     }
 
     #[test]

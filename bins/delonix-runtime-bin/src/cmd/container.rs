@@ -4722,12 +4722,17 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             Vec::new(),
             c.env.clone(),
             c.workdir.clone().unwrap_or_default(),
-            String::new(),
+            // The base image's USER survives a commit: it was an empty string
+            // here, so a committed image silently lost the user its base declared.
+            base.config.user.clone(),
             tag,
             &base.config.architecture,
             // `container commit` herda o health check da base, tal como o
             // caminho overlay (`commit_container`) já fazia.
             base.config.healthcheck.clone(),
+            // Packed from the host side: owners go into the layer as the
+            // container sees them, not as host uids (see `pack_rootfs_tar`).
+            &runtime::container_ids,
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS

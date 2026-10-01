@@ -800,11 +800,22 @@ impl ImageStore {
     ///
     /// The flat-rootfs path never hit this because a rootfs on disk has those three
     /// as the empty directories the image extraction created.
-    fn pack_rootfs_tar(rootfs: &std::path::Path) -> Result<Vec<u8>> {
+    ///
+    /// `ids` turns the owner the HOST sees into the owner the CONTAINER sees.
+    /// Packing happens outside the container's user namespace, where a file the
+    /// container knows as `root` is owned by whoever runs the engine and one it
+    /// knows as uid 1000 is owned by a subuid. Written verbatim, those host
+    /// numbers ended up in the layer: measured on a `container commit`, every
+    /// entry said `1000:1000` and the user's own directory `100999:100999` — an
+    /// image that gives its whole filesystem to uid 1000 on any engine that
+    /// honours tar ownership (ADR-0062).
+    fn pack_rootfs_tar(
+        rootfs: &std::path::Path,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
+    ) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
         {
             let mut b = tar::Builder::new(&mut buf);
-            b.follow_symlinks(false);
             let entries =
                 std::fs::read_dir(rootfs).map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
             for entry in entries {
@@ -814,25 +825,55 @@ impl ImageStore {
                 let is_pseudo = name
                     .to_str()
                     .is_some_and(|n| Self::PSEUDO_FS_DIRS.contains(&n));
-                let ft = entry
-                    .file_type()
-                    .map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
-                let res = if is_pseudo && ft.is_dir() {
-                    // The directory entry itself, none of its contents.
-                    b.append_dir(in_tar, entry.path())
-                } else if ft.is_dir() {
-                    b.append_dir_all(in_tar, entry.path())
-                } else {
-                    // Files and symlinks at the top level. `follow_symlinks(false)`
-                    // above makes this store the link, not what it points at.
-                    b.append_path_with_name(entry.path(), in_tar)
-                };
-                res.map_err(|e| Error::Layer(format!("empacotar rootfs: {e}")))?;
+                // A pseudo-filesystem mount point: the directory entry itself,
+                // none of its contents.
+                Self::append_tree(&mut b, &entry.path(), in_tar, !is_pseudo, ids)
+                    .map_err(|e| Error::Layer(format!("empacotar rootfs: {e}")))?;
             }
             b.finish()
                 .map_err(|e| Error::Layer(format!("fechar tar: {e}")))?;
         }
         Ok(buf)
+    }
+
+    /// Appends `src` (and, when `recurse`, everything under it) as `in_tar`,
+    /// with each owner passed through `ids`. Never follows a symlink: the link
+    /// itself is stored. A socket is skipped — it is a live endpoint, not a file
+    /// of the image, and tar has no entry type for one.
+    fn append_tree<W: std::io::Write>(
+        b: &mut tar::Builder<W>,
+        src: &std::path::Path,
+        in_tar: &std::path::Path,
+        recurse: bool,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
+    ) -> std::io::Result<()> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        let meta = std::fs::symlink_metadata(src)?;
+        let ft = meta.file_type();
+        if ft.is_socket() {
+            return Ok(());
+        }
+        let mut header = tar::Header::new_gnu();
+        header.set_metadata_in_mode(&meta, tar::HeaderMode::Complete);
+        let (uid, gid) = ids(meta.uid(), meta.gid());
+        header.set_uid(uid.into());
+        header.set_gid(gid.into());
+        if ft.is_symlink() {
+            header.set_size(0);
+            return b.append_link(&mut header, in_tar, std::fs::read_link(src)?);
+        }
+        if ft.is_file() {
+            return b.append_data(&mut header, in_tar, std::fs::File::open(src)?);
+        }
+        header.set_size(0);
+        b.append_data(&mut header, in_tar, std::io::empty())?;
+        if ft.is_dir() && recurse {
+            for child in std::fs::read_dir(src)? {
+                let child = child?;
+                Self::append_tree(b, &child.path(), &in_tar.join(child.file_name()), true, ids)?;
+            }
+        }
+        Ok(())
     }
 
     /// Creates an image from a FLAT rootfs (*rootless*/vfs mode): packs
@@ -850,8 +891,9 @@ impl ImageStore {
         tag: &str,
         arch: &str,
         healthcheck: Option<String>,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
     ) -> Result<Image> {
-        let buf = Self::pack_rootfs_tar(rootfs)?;
+        let buf = Self::pack_rootfs_tar(rootfs, ids)?;
         self.commit_flat_rootfs_from_tar(
             buf,
             cmd,
@@ -997,6 +1039,49 @@ mod tests {
         parse_run_flags, resolve_target_stage, substitute_vars, Step,
     };
     use std::collections::HashMap;
+
+    /// A rootfs is packed with the owners the CONTAINER sees: every header goes
+    /// through `ids`. A symlink is stored as a link, and a pseudo-filesystem
+    /// mount point keeps its entry and none of its contents.
+    #[test]
+    fn a_packed_rootfs_carries_the_containers_owners() {
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(root.join("etc/passwd"), b"root:x:0:0\n").unwrap();
+        std::os::unix::fs::symlink("passwd", root.join("etc/link")).unwrap();
+        std::fs::create_dir_all(root.join("proc/1")).unwrap();
+        std::fs::write(root.join("proc/1/status"), b"host state").unwrap();
+        let own = std::fs::metadata(root).unwrap().uid();
+        // Whoever runs the test is root in the container; nothing else appears.
+        let ids = |uid: u32, gid: u32| (if uid == own { 0 } else { uid + 7 }, gid);
+        let tar_bytes = crate::ImageStore::pack_rootfs_tar(root, &ids).unwrap();
+
+        let mut seen = HashMap::new();
+        let mut ar = tar::Archive::new(&tar_bytes[..]);
+        for e in ar.entries().unwrap() {
+            let e = e.unwrap();
+            let path = e.path().unwrap().to_string_lossy().into_owned();
+            let link = e
+                .link_name()
+                .unwrap()
+                .map(|l| l.to_string_lossy().into_owned());
+            seen.insert(
+                path,
+                (e.header().uid().unwrap(), e.header().entry_type(), link),
+            );
+        }
+        assert_eq!(
+            seen["etc/passwd"].0, 0,
+            "the invoking uid is root in the layer"
+        );
+        assert!(seen.values().all(|(uid, _, _)| *uid == 0), "{seen:?}");
+        assert_eq!(seen["etc/link"].1, tar::EntryType::Symlink);
+        assert_eq!(seen["etc/link"].2.as_deref(), Some("passwd"));
+        assert!(seen.contains_key("proc"), "the mount point itself is kept");
+        assert!(!seen.keys().any(|p| p.starts_with("proc/")), "{seen:?}");
+    }
 
     fn multistage() -> super::Dockerfile {
         parse_dockerfile_with_args(
