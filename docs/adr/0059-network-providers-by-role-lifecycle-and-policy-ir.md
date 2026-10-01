@@ -744,3 +744,53 @@ is checked against the same golden table.
 - **Not validated against a live node in this slice**: the node evaluator follows how the
   per-VM firewall is documented to work and ADR-0052's live case, which read the compiled
   `tap<vmid>i0-IN` chain once. No packet crossed a VM in a test.
+
+## Addendum 2026-09-30 — F3d: the perimeter filter is a lowering of the IR, measured on a live appliance
+
+Measured on a fresh OPNsense 26.1.2_5, built from the published `opnsense:26.1` image with
+`delonix vm create`, with a lab API key kept in a 0600 file:
+
+- `firewall/filter/add_rule` takes `action`, `destination_port`, `log`, `statetype`, `sequence` in
+  the flat form, and `search_rule` answers them in the same form.
+- pf loads filter rules in `sequence` order, whatever order they were created in. So order needs
+  neither `move_rule_before` nor an update in place.
+- `protocol: TCP/UDP` loads as a TCP and a UDP pf rule under one label. That is the IR's
+  «`any` with a port».
+- `block` loads as `block drop`, `log` as `log`, and a range `8000-8080` as `port 8000:8080`.
+
+What F3d adds:
+
+- **`GatewayRule`** gains `action`, `destination_port`, `log`, `stateful`, `sequence`. The
+  defaults are what every earlier rule was: pass, any port, keep state, no log, the appliance's
+  sequence. So an existing rule does not read as drift. The client sends the new fields, and
+  `rule_drift` compares them.
+- **`delonix_networking::policy::gateway_rules`** lowers one direction of the IR for a target (an
+  alias, a prefix or an address):
+  - each rule is `<name>#<n>` at `sequence = first + n`;
+  - the default verdict is one more rule, `<name>#default`, at the end.
+
+  It refuses by name (DX-1380) a namespace, other-namespaces or selector peer, an engine
+  guardrail, and an ICMP type (the field exists on the appliance; the lowering was not measured
+  against it).
+- **Proofs**:
+  - An appliance evaluator runs over the rules. It models pf quick rules in `sequence` order and
+    state kept by a keep-state rule. It gives each of the 24 golden cells the reference verdict,
+    with the guardrails removed and their refusal checked. «`any` with a port» sent as TCP only
+    turns it red.
+  - Live, `a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields` ensures and
+    commits a lowered policy through the provider. It reads every field back from `search_rule`,
+    and reads pf's load order from `pf_statistics`. It then removes everything and retires the
+    owner.
+- **Found on the way, and fixed first (#624)**: the client's pending-change check read two views
+  of the running state that go stale on this appliance:
+  - a deleted alias's pf table;
+  - `list_rule_ids`'s label cache, which keeps the pf lines past the end of a shorter ruleset.
+
+  Each made the engine's own deletion fail its commit, and refused every commit after it.
+- **Catalog**:
+  - `net.gateway.rule-order`, `firewall.stateless` and `firewall.logging` become `partial`. The
+    port carries them and they are live-tested, but no field of `kind: NetworkGateway` reaches
+    them yet.
+  - `net.ownership-marker` becomes `supported`: its live test ran against this appliance.
+- **Not in this slice**: a manifest surface that declares a policy for a gateway. That is new
+  schema, with a record and a teardown by rule count, and it is its own decision.

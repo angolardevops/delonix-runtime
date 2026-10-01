@@ -80,7 +80,58 @@ pub struct GatewayRule {
     /// `None` = any protocol. `Some("TCP")`/`Some("UDP")`/… otherwise —
     /// measured live as the exact string the docs' worked example sends,
     /// never validated client-side against the full protocol list.
+    /// `Some("TCP/UDP")` is one rule the appliance loads as a TCP and a UDP
+    /// pf rule under the same label (measured on 26.1.2_5, ADR-0059 F3d).
     pub protocol: Option<String>,
+    /// Pass or block. Measured: `block` loads as pf `block drop`.
+    pub action: GatewayAction,
+    /// A port or an `n-m` range on the destination; `None` = every port.
+    /// Measured: `8000-8080` loads as pf `port 8000:8080`.
+    pub destination_port: Option<String>,
+    /// Logs every match (pf `log`).
+    pub log: bool,
+    /// `false` = the appliance's `statetype: none` (no state is kept).
+    pub stateful: bool,
+    /// The rule's position among the appliance's filter rules. Measured on
+    /// 26.1.2_5: pf loads rules in `sequence` order, whatever order they were
+    /// created in. `None` leaves the appliance's own default.
+    pub sequence: Option<u32>,
+}
+
+/// What a [`GatewayRule`] does with a matching packet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GatewayAction {
+    #[default]
+    Pass,
+    Block,
+}
+
+impl GatewayAction {
+    /// The appliance's own word for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GatewayAction::Pass => "pass",
+            GatewayAction::Block => "block",
+        }
+    }
+}
+
+impl Default for GatewayRule {
+    /// A rule that passes any protocol with state and no log — what every
+    /// rule this engine wrote before the fields existed was.
+    fn default() -> Self {
+        GatewayRule {
+            description: String::new(),
+            source: String::new(),
+            destination: String::new(),
+            protocol: None,
+            action: GatewayAction::Pass,
+            destination_port: None,
+            log: false,
+            stateful: true,
+            sequence: None,
+        }
+    }
 }
 
 /// Whether an `ensure_*` call created something or found it already there

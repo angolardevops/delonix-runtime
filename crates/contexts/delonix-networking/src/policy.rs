@@ -171,6 +171,101 @@ fn peer_of(src: &str) -> Result<Peer, String> {
     }
 }
 
+/// One direction of the IR as the perimeter filter rules of a gateway
+/// appliance (ADR-0059 D6, F3d), for traffic to (`ingress`) or from
+/// (`egress`) `target`: an alias name, a prefix or an address the appliance
+/// resolves.
+///
+/// Each rule's identity on the appliance is its description, `<name>#<n>`,
+/// and its position is `sequence = first_sequence + n`: measured on OPNsense
+/// 26.1.2_5, pf loads filter rules in `sequence` order, so the IR's first
+/// match is the appliance's. The default verdict is one more rule at the end,
+/// `<name>#default`, so the policy means the same on an appliance whose own
+/// default differs.
+///
+/// Refused, naming the rule, because the appliance has no engine namespace:
+/// a namespace, other-namespaces or selector peer (never expanded into an
+/// address snapshot that goes stale), and an engine guardrail. An ICMP type
+/// is refused too: the appliance has the field, the lowering was not measured
+/// against it.
+pub fn gateway_rules(
+    target: &str,
+    policy: &Policy,
+    name: &str,
+    first_sequence: u32,
+) -> Result<Vec<crate::gateway::GatewayRule>, Error> {
+    use crate::gateway::{GatewayAction, GatewayRule};
+    let refuse = |n: usize, what: &str| {
+        Err(Error::PolicyNotRepresentable(format!(
+            "gateway policy '{name}', rule #{n}: {what} has no form on the appliance (ADR-0059 D6)"
+        )))
+    };
+    let action = |a: Action| match a {
+        Action::Allow => GatewayAction::Pass,
+        Action::Deny => GatewayAction::Block,
+    };
+    let ends = |peer: String| match policy.direction {
+        Direction::Ingress => (peer, target.to_string()),
+        Direction::Egress => (target.to_string(), peer),
+    };
+    let mut out = Vec::with_capacity(policy.rules.len() + 1);
+    for (i, r) in policy.rules.iter().enumerate() {
+        let n = i + 1;
+        if r.guardrail {
+            return refuse(n, "an engine guardrail (namespace isolation)");
+        }
+        if r.icmp_type.is_some() {
+            return refuse(n, "an ICMP type");
+        }
+        let peer = match &r.peer {
+            Peer::Any => "any".to_string(),
+            Peer::Cidr(c) => {
+                let text = c.to_string_cidr();
+                text.strip_suffix("/32").map(str::to_string).unwrap_or(text)
+            }
+            Peer::Namespace(_) | Peer::OtherNamespaces(_) | Peer::Selector(_) => {
+                return refuse(n, "a peer that names this engine's workloads");
+            }
+        };
+        let protocol = match (r.proto, r.ports.is_some()) {
+            (Proto::Tcp, _) => Some("TCP"),
+            (Proto::Udp, _) => Some("UDP"),
+            (Proto::Any, true) => Some("TCP/UDP"),
+            (Proto::Any, false) => None,
+            (Proto::Icmp, false) => Some("ICMP"),
+            (Proto::Icmp, true) => return refuse(n, "an ICMP rule with a port"),
+        };
+        let (source, destination) = ends(peer);
+        out.push(GatewayRule {
+            description: format!("{name}#{n}"),
+            source,
+            destination,
+            protocol: protocol.map(str::to_string),
+            action: action(r.action),
+            destination_port: r.ports.map(|p| {
+                if p.first == p.last {
+                    p.first.to_string()
+                } else {
+                    format!("{}-{}", p.first, p.last)
+                }
+            }),
+            log: r.log,
+            stateful: r.stateful,
+            sequence: Some(first_sequence + i as u32),
+        });
+    }
+    let (source, destination) = ends("any".to_string());
+    out.push(GatewayRule {
+        description: format!("{name}#default"),
+        source,
+        destination,
+        action: action(policy.default),
+        sequence: Some(first_sequence + policy.rules.len() as u32),
+        ..GatewayRule::default()
+    });
+    Ok(out)
+}
+
 /// The golden table of ADR-0059 D6: a firewall record, a packet, and the
 /// verdict the nft chain in the holder gives it today — the S1 fixes
 /// included (one inbound rule keeps the namespace isolation; `any` with a
@@ -486,5 +581,192 @@ mod tests {
         record.rules[0].origin = Some("web-access".into());
         let t = from_container_fw(&record).unwrap();
         assert_eq!(t.ingress.rules[0].origin.as_deref(), Some("web-access"));
+    }
+
+    /// The verdict the APPLIANCE gives a packet from the rules it was sent:
+    /// an established flow passes on the state a keep-state rule created;
+    /// otherwise pf's quick rules are evaluated in `sequence` order and the
+    /// first match decides. The lowering always ends in a default rule, so a
+    /// packet no rule matches is a lowering bug, and panics.
+    fn appliance_verdict(
+        rules: &[crate::gateway::GatewayRule],
+        direction: Direction,
+        target: u32,
+        pkt: &delonix_net_rules::policy::Packet,
+    ) -> Action {
+        use crate::gateway::GatewayAction;
+        if !pkt.new && rules.iter().all(|r| r.stateful) {
+            return Action::Allow;
+        }
+        let (src, dst) = match direction {
+            Direction::Ingress => (pkt.peer, target),
+            Direction::Egress => (target, pkt.peer),
+        };
+        let addr_ok = |text: &str, addr: u32| match text {
+            "any" => true,
+            t if t.contains('/') => Cidr::parse(t).unwrap().contains(addr),
+            t => Cidr::parse_addr(t).unwrap() == addr,
+        };
+        let mut sorted: Vec<_> = rules.iter().collect();
+        sorted.sort_by_key(|r| r.sequence);
+        for r in sorted {
+            let proto_ok = match r.protocol.as_deref() {
+                None => true,
+                Some("TCP") => pkt.proto == Proto::Tcp,
+                Some("UDP") => pkt.proto == Proto::Udp,
+                Some("TCP/UDP") => matches!(pkt.proto, Proto::Tcp | Proto::Udp),
+                Some("ICMP") => pkt.proto == Proto::Icmp,
+                Some(other) => panic!("the lowering sent protocol {other}"),
+            };
+            let port_ok = match &r.destination_port {
+                None => true,
+                Some(p) => pkt.dport.is_some_and(|d| match p.split_once('-') {
+                    Some((a, b)) => (a.parse().unwrap()..=b.parse().unwrap()).contains(&d),
+                    None => p.parse::<u16>().unwrap() == d,
+                }),
+            };
+            if proto_ok && port_ok && addr_ok(&r.source, src) && addr_ok(&r.destination, dst) {
+                return match r.action {
+                    GatewayAction::Pass => Action::Allow,
+                    GatewayAction::Block => Action::Deny,
+                };
+            }
+        }
+        panic!("no rule matched: the default rule is missing")
+    }
+
+    /// Every golden cell through the gateway lowering: the IR the record
+    /// parses to, minus the namespace guardrails (the appliance has no engine
+    /// namespace, and the lowering refuses them — checked here), lowered for
+    /// the workload's address. The appliance's verdict has to be the
+    /// reference evaluator's verdict for the same IR.
+    #[test]
+    fn the_gateway_rules_give_every_golden_verdict_of_the_ir_they_came_from() {
+        let target = "10.200.0.5";
+        let addr = Cidr::parse_addr(target).unwrap();
+        let cases = golden::cases();
+        assert_eq!(
+            cases.len(),
+            24,
+            "the golden table changed; recount what this covers"
+        );
+        for case in cases {
+            let t = from_container_fw(&case.record).unwrap();
+            let mut ir = match case.direction {
+                Direction::Ingress => t.ingress,
+                Direction::Egress => t.egress,
+            };
+            if ir.rules.iter().any(|r| r.guardrail) {
+                let e = gateway_rules(target, &ir, "p", 100).unwrap_err();
+                assert!(e.to_string().contains("guardrail"), "{}: {e}", case.name);
+                ir.rules.retain(|r| !r.guardrail);
+            }
+            let rules = gateway_rules(target, &ir, "p", 100).unwrap();
+            assert_eq!(
+                appliance_verdict(&rules, case.direction, addr, &case.packet),
+                evaluate(&ir, &case.packet),
+                "{}: {rules:?}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_gateway_lowering_names_positions_and_ends_in_the_default() {
+        use crate::gateway::GatewayAction;
+        let ir = Policy {
+            direction: Direction::Egress,
+            default: Action::Deny,
+            rules: vec![Rule {
+                ports: Some(PortRange {
+                    first: 8000,
+                    last: 8080,
+                }),
+                log: true,
+                stateful: false,
+                ..Rule::new(
+                    Action::Allow,
+                    Proto::Any,
+                    Peer::Cidr(Cidr::parse("10.9.0.0/24").unwrap()),
+                )
+            }],
+        };
+        let rules = gateway_rules("web", &ir, "egress-web", 200).unwrap();
+        assert_eq!(rules.len(), 2);
+        let r = &rules[0];
+        assert_eq!(
+            (r.description.as_str(), r.sequence),
+            ("egress-web#1", Some(200))
+        );
+        assert_eq!(
+            (r.source.as_str(), r.destination.as_str()),
+            ("web", "10.9.0.0/24")
+        );
+        assert_eq!(r.protocol.as_deref(), Some("TCP/UDP"));
+        assert_eq!(r.destination_port.as_deref(), Some("8000-8080"));
+        assert!(r.log && !r.stateful);
+        assert_eq!(r.action, GatewayAction::Pass);
+        let d = &rules[1];
+        assert_eq!(
+            (d.description.as_str(), d.sequence),
+            ("egress-web#default", Some(201))
+        );
+        assert_eq!((d.source.as_str(), d.destination.as_str()), ("web", "any"));
+        assert_eq!(d.action, GatewayAction::Block);
+    }
+
+    #[test]
+    fn what_the_appliance_cannot_hold_is_refused_by_name() {
+        let base = || Rule::new(Action::Allow, Proto::Tcp, Peer::Any);
+        for (rule, word) in [
+            (
+                Rule {
+                    peer: Peer::Namespace("a".into()),
+                    ..base()
+                },
+                "workloads",
+            ),
+            (
+                Rule {
+                    peer: Peer::OtherNamespaces("a".into()),
+                    ..base()
+                },
+                "workloads",
+            ),
+            (
+                Rule {
+                    peer: Peer::Selector(vec![]),
+                    ..base()
+                },
+                "workloads",
+            ),
+            (
+                Rule {
+                    guardrail: true,
+                    ..base()
+                },
+                "guardrail",
+            ),
+            (
+                Rule {
+                    proto: Proto::Icmp,
+                    icmp_type: Some(8),
+                    ..base()
+                },
+                "ICMP type",
+            ),
+        ] {
+            let ir = Policy {
+                direction: Direction::Ingress,
+                default: Action::Deny,
+                rules: vec![rule],
+            };
+            let e = gateway_rules("t", &ir, "p", 1).unwrap_err();
+            assert!(
+                e.to_string().contains(word) && e.to_string().contains("rule #1"),
+                "{e}"
+            );
+            assert_eq!(e.number(), 1380, "{e}");
+        }
     }
 }
