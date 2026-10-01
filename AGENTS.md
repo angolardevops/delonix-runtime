@@ -2979,6 +2979,56 @@ os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
 que os utilizadores usam), mas nunca num host de produção partilhado sem ser
 esse o pedido explícito.
 
+## Os templates de edge nascem com HTTPS e dimensionados para carga (2026-10-01)
+
+`nginx`, `httpd` e `haproxy` tinham o TLS só em comentário, 128M/0,5 CPU, e limites de
+bancada (`worker_connections 1024`, `maxconn 2048`, MPM por omissão). Agora:
+
+- **HTTPS ligado à nascença**: `tls=8443` no `template.meta`, token `__TLS_PORT__`. A porta
+  HTTP fica para o health, o desafio ACME e um 308 para HTTPS. HTTP/2, TLS 1.2/1.3, suites
+  só com forward secrecy. **HSTS fica DESLIGADO de propósito**: fixa o NOME do host em todas
+  as portas, e em `localhost` forçaria HTTPS em todos os outros serviços locais da máquina.
+- **O certificado é gerado pelo `init`**, em `./tls` (`ensure_tls`): `mkcert` se existir no
+  host, senão auto-assinado pelo próprio binário (`rcgen`, já na árvore). Um par que já lá
+  esteja é MANTIDO. A chave fica 0600, é montada só de leitura, e `tls/` está no
+  `.dockerignore` e no `.gitignore`. `scripts/tls.sh` renova, instala um certificado que já
+  se tenha, ou corre o Let's Encrypt (webroot em `./acme`; só nginx e httpd — o HAProxy não
+  serve ficheiros).
+- **`nproc` dentro do container devolve os núcleos do HOST** (medido: 32). Por isso
+  `worker_processes`/`nbthread` são 2, iguais ao `cpus: "2.0"` do manifesto, e não `auto`.
+  `nofile` 65 535 pelo `ulimit:` do manifesto (medido dentro do container).
+- **A verificação de config no build corre sem certificado**: nenhuma das três imagens traz
+  `openssl`. nginx e haproxy validam uma cópia sem as linhas do certificado; o httpd só
+  confere que os ficheiros existem e não estão vazios, e usa dois marcadores apagados no
+  mesmo `RUN`.
+- **HAProxy**: o manifesto diz `user: "0"` e o `haproxy.cfg` diz `user haproxy` — o master
+  lê a chave como root, o worker trata o tráfego como `haproxy`. O `SIGUSR2` recarrega
+  config e certificado com o mesmo PID (medido).
+- **httpd**: a cache de sessões TLS é um ficheiro mapeado em memória; fica num tmpfs
+  (`/run/httpd`) para nunca tocar no disco.
+
+**O gerador** (`cmd/scaffold.rs`): `TEMPLATE_KV` (todas as chaves do `template.meta`:
+`tls`, `open`, `login`, `password`, `wait`) ao lado do `TEMPLATE_META`. Num terminal, o
+`init` pergunta o que só quem gera pode decidir — outra porta quando a do template está
+ocupada (oferece a livre seguinte), nomes extra para o certificado — e fora de um terminal
+usa as omissões e diz o que encontrou. O `--up` recusa uma porta ocupada ANTES do build, com
+o nome do processo; o build desenha os seus próprios passos (corria dobrado sob um único
+spinner); e o fim imprime o endereço a abrir, o certificado e, quando o template as declara
+(`odoo`: `admin`/`admin`), as credenciais de fábrica com o aviso para as mudar. O `wait=` do
+`odoo` (300 s) passou a ser lido — estava no ficheiro e nada o consumia.
+
+**Medido** (2026-10-01, rootless, pela porta publicada): os três com 10 000 pedidos HTTPS a
+300 em simultâneo, 10 000 respostas 200. É uma prova de que aguentam, não um benchmark: a
+ferramenta foi o `curl --parallel`, o host não tem `ab`/`wrk`.
+**Não validado**: o Let's Encrypt de ponta a ponta (precisa de um domínio público) e as
+flags equivalentes às perguntas (`--hostname`, `--port`) — não existem; ficam para depois
+do #634, que reescreve os quatro pontos de entrada do `init`.
+
+**Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
+DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte
+passou, o `slirp4netns` do container ficou vivo a segurar as portas publicadas — o `apply`
+seguinte respondia «port 8080 is already in use by slirp4netns».
+
 ## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
 
 Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).

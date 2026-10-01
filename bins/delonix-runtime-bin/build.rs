@@ -15,6 +15,11 @@ fn main() {
     // Per-template metadata (exposed port + health path + default version,
     // `""` if the template has none) for `--up` and `-v`.
     let mut meta = String::from("pub static TEMPLATE_META: &[(&str, &str, &str, &str)] = &[\n");
+    // Every `key=value` of each `template.meta`, verbatim. The tuple above
+    // carries the three keys the generator always needs; the optional ones
+    // (`tls=`, `open=`, `login=`, `password=`, `wait=`) are looked up here, so
+    // a new key does not change the shape every reader destructures.
+    let mut kv = String::from("pub static TEMPLATE_KV: &[(&str, &[(&str, &str)])] = &[\n");
 
     let mut names: Vec<PathBuf> = std::fs::read_dir(&root)
         .map(|rd| {
@@ -38,8 +43,12 @@ fn main() {
             "/api/v1/health/live".to_string(),
             String::new(),
         );
+        let mut pairs: Vec<(String, String)> = Vec::new();
         if let Ok(txt) = std::fs::read_to_string(tdir.join("template.meta")) {
             for line in txt.lines() {
+                if let Some((k, v)) = line.trim().split_once('=') {
+                    pairs.push((k.trim().to_string(), v.trim().to_string()));
+                }
                 if let Some(v) = line.trim().strip_prefix("port=") {
                     port = v.trim().to_string();
                 } else if let Some(v) = line.trim().strip_prefix("health=") {
@@ -50,6 +59,7 @@ fn main() {
             }
         }
         writeln!(meta, "    ({name:?}, {port:?}, {health:?}, {version:?}),").unwrap();
+        writeln!(kv, "    ({name:?}, &{pairs:?}),").unwrap();
 
         writeln!(out, "    ({name:?}, &[").unwrap();
         let mut files = Vec::new();
@@ -72,6 +82,8 @@ fn main() {
     out.push_str("];\n");
     meta.push_str("];\n");
     out.push_str(&meta);
+    kv.push_str("];\n");
+    out.push_str(&kv);
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("templates.rs");
     std::fs::write(dest, out).unwrap();

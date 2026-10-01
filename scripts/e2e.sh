@@ -4552,17 +4552,32 @@ SCAFN="scaf-$PFX"
 SCAFDIR=$(mktemp -d "${TMPDIR:-/tmp}/e2e-scaffold-XXXXXX")
 check "stack init --template httpd" ok "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN"
 check "o manifesto gerado declara memory/cpus" ok bash -c \
-  "grep -q 'memory: 128M' '$SCAFDIR/$SCAFN/delonix-manifest.yaml'"
+  "grep -q 'memory: 512M' '$SCAFDIR/$SCAFN/delonix-manifest.yaml'"
+# Os templates de edge (nginx/httpd/haproxy) nascem com HTTPS: o `init` gera o
+# certificado em ./tls (mkcert se houver, senão auto-assinado pelo próprio
+# binário), a chave fica 0600 e nunca chega à imagem nem ao git.
+check "o init gera o certificado e a chave privada fica 0600" ok bash -c \
+  "[ -s '$SCAFDIR/$SCAFN/tls/tls.crt' ] && [ \"\$(stat -c %a '$SCAFDIR/$SCAFN/tls/tls.key')\" = 600 ]"
+check "a chave não entra na imagem nem no git (.dockerignore e .gitignore)" ok bash -c \
+  "grep -qx 'tls/' '$SCAFDIR/$SCAFN/.dockerignore' && grep -qx 'tls/' '$SCAFDIR/$SCAFN/.gitignore'"
+check "nenhum token por substituir no projecto gerado" ok bash -c \
+  "! grep -rqE '__(PORT|TLS_PORT|NAME|TEMPLATE_VERSION)__' '$SCAFDIR/$SCAFN'"
 if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
     >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
   check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \
-    "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"128M\"'"
+    "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"512M\"'"
+  check "--up: o HTTPS responde, com HTTP/2, e o HTTP redirecciona para lá" ok bash -c \
+    "[ \"\$(curl -ks -o /dev/null -w '%{http_code} %{http_version}' https://127.0.0.1:8443/)\" = '200 2' ] && curl -s -o /dev/null -D - http://127.0.0.1:8080/x | grep -qi '^location: https://127.0.0.1:8443/x'"
+  check "--up: o resumo final dá o endereço HTTPS a abrir" ok \
+    grep -q 'open:    https://localhost:8443/' "${TMPDIR:-/tmp}/e2e-scaffold-up.log"
+  check "--up: o smoke do próprio template passa" ok bash -c \
+    "cd '$SCAFDIR/$SCAFN' && PATH=\"$(dirname "$BIN"):\$PATH\" sh scripts/smoke.sh"
   check "--up: o container está mesmo a correr" ok bash -c \
     "$BIN container ls | grep -q '$SCAFN'"
   "$BIN" stack destroy -f "$SCAFDIR/$SCAFN/delonix-manifest.yaml" >/dev/null 2>&1
 else
   skip "stack init --template httpd --up" \
-    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
+    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080/8443 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
   "$BIN" container rm -f "$SCAFN" >/dev/null 2>&1
 fi
 rm -rf "$SCAFDIR"

@@ -2,3 +2,6 @@ port=8069
 health=/web/health
 version=20.0
 wait=300
+login=admin
+password=admin
+open=/web

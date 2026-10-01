@@ -142,13 +142,246 @@ fn python_module(name: &str) -> String {
     m
 }
 
-/// Substitutes the `__NAME__`/`__MODULE__`/`__PORT__`/`__TEMPLATE_VERSION__`
-/// tokens (in contents AND paths).
-fn subst(s: &str, o: &InitOpts, module: &str, port: &str, version: &str) -> String {
+/// Substitutes the `__NAME__`/`__MODULE__`/`__PORT__`/`__TLS_PORT__`/
+/// `__TEMPLATE_VERSION__` tokens (in contents AND paths).
+fn subst(s: &str, o: &InitOpts, module: &str, plan: &Plan, version: &str) -> String {
     s.replace("__NAME__", &o.name)
         .replace("__MODULE__", module)
-        .replace("__PORT__", port)
+        .replace("__TLS_PORT__", plan.tls_port.as_deref().unwrap_or(""))
+        .replace("__PORT__", &plan.port)
         .replace("__TEMPLATE_VERSION__", version)
+}
+
+/// An optional key of a template's `template.meta` (`tls=`, `open=`, `login=`,
+/// `password=`, `wait=`). `None` when the template does not declare it.
+fn meta_kv(tname: &str, key: &str) -> Option<&'static str> {
+    TEMPLATE_KV
+        .iter()
+        .find(|(n, _)| *n == tname)
+        .and_then(|(_, kv)| kv.iter().find(|(k, _)| *k == key))
+        .map(|(_, v)| *v)
+}
+
+/// What the generator decided for this project beyond the template's own
+/// defaults: the ports it will publish and the names its certificate covers.
+/// The template's `template.meta` gives the defaults; an interactive run may
+/// change them (a busy port, a real host name).
+pub(crate) struct Plan {
+    pub port: String,
+    /// The HTTPS port, for a template that declares `tls=<port>`.
+    pub tls_port: Option<String>,
+    /// Names and addresses the generated certificate is valid for.
+    pub hosts: Vec<String>,
+}
+
+/// The names a locally generated certificate always covers.
+const LOCAL_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
+
+impl Plan {
+    /// The template's own defaults, with nothing asked.
+    fn defaults(tname: &str) -> Self {
+        let (port, _, _) = template_meta(tname);
+        Plan {
+            port: port.to_string(),
+            tls_port: meta_kv(tname, "tls").map(String::from),
+            hosts: LOCAL_HOSTS.iter().map(|h| h.to_string()).collect(),
+        }
+    }
+}
+
+/// The first port at or after `from` that nothing on this host holds.
+fn next_free_port(from: u16) -> u16 {
+    (from..=u16::MAX)
+        .find(|p| !delonix_sdn::host_port_busy("127.0.0.1", *p))
+        .unwrap_or(from)
+}
+
+/// Asks one question with a default; Enter (or a closed stdin) keeps it.
+fn prompt_line(question: &str, default: &str) -> String {
+    use std::io::Write;
+    eprint!("{question} [{default}] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+        return default.to_string();
+    }
+    match line.trim() {
+        "" => default.to_string(),
+        s => s.to_string(),
+    }
+}
+
+/// A port the project wants that is already held: on a terminal the user
+/// picks another (the next free one is offered); otherwise it is kept and
+/// said — `--up` refuses later with the owner's name, and a project generated
+/// for later use may well find the port free by then.
+fn settle_port(what: &str, wanted: &str, taken: &[u16], interactive: bool) -> String {
+    let Ok(n) = wanted.parse::<u16>() else {
+        return wanted.to_string();
+    };
+    if !delonix_sdn::host_port_busy("127.0.0.1", n) && !taken.contains(&n) {
+        return wanted.to_string();
+    }
+    let mut free = next_free_port(n.saturating_add(1));
+    while taken.contains(&free) {
+        free = next_free_port(free.saturating_add(1));
+    }
+    if !interactive {
+        super::output::warn(&super::po::tf(
+            "{what} port {port} is already in use on this host — the project is generated with it anyway; port {free} is free",
+            &[("what", what), ("port", wanted), ("free", &free.to_string())],
+        ));
+        return wanted.to_string();
+    }
+    loop {
+        let answer = prompt_line(
+            &super::po::tf(
+                "{what} port {port} is already in use. Which port instead?",
+                &[("what", what), ("port", wanted)],
+            ),
+            &free.to_string(),
+        );
+        match answer.parse::<u16>() {
+            Ok(p)
+                if p > 0 && !delonix_sdn::host_port_busy("127.0.0.1", p) && !taken.contains(&p) =>
+            {
+                return p.to_string()
+            }
+            _ => eprintln!(
+                "{}",
+                super::po::tf(
+                    "port {port} is not usable — pick a free one",
+                    &[("port", &answer)]
+                )
+            ),
+        }
+    }
+}
+
+/// A name a certificate can carry: a DNS name or an IP literal. Refuses
+/// anything else, because the list ends up on a `mkcert` command line.
+fn valid_cert_host(h: &str) -> bool {
+    !h.is_empty()
+        && h.len() <= 253
+        && !h.starts_with('-')
+        && h.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '*'))
+}
+
+/// Settles what a template leaves to the person generating the project.
+/// Nothing is asked off a terminal: the defaults are the answer there.
+fn plan_for(tname: &str, interactive: bool) -> Plan {
+    let mut plan = Plan::defaults(tname);
+    plan.port = settle_port("HTTP", &plan.port, &[], interactive);
+    if let Some(tls) = plan.tls_port.clone() {
+        let taken: Vec<u16> = plan.port.parse().into_iter().collect();
+        plan.tls_port = Some(settle_port("HTTPS", &tls, &taken, interactive));
+        if interactive {
+            let answer = prompt_line(
+                super::po::t(
+                    "Extra host names for the TLS certificate, space-separated (localhost is always included)",
+                ),
+                "none",
+            );
+            for h in answer
+                .split([' ', ','])
+                .filter(|h| !h.is_empty() && *h != "none")
+            {
+                if !valid_cert_host(h) {
+                    super::output::warn(&super::po::tf(
+                        "'{host}' is not a host name or an address — left out of the certificate",
+                        &[("host", h)],
+                    ));
+                } else if !plan.hosts.iter().any(|x| x == h) {
+                    plan.hosts.push(h.to_string());
+                }
+            }
+        }
+    }
+    plan
+}
+
+/// Where a project's certificate came from.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum CertSource {
+    /// Signed by this machine's `mkcert` CA.
+    Mkcert,
+    /// Self-signed by this binary: no tool on the host could do better.
+    SelfSigned,
+    /// Already in `./tls`; left alone.
+    Kept,
+}
+
+/// Writes `bytes` to `path` readable by the owner only, replacing what is there.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::remove_file(path);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(bytes)?;
+    Ok(())
+}
+
+/// Makes sure `<dir>/tls` holds a certificate and its key for `hosts`:
+/// `tls.crt`, `tls.key`, and `tls.pem` (both, for servers that want one file).
+///
+/// The files are mounted into the container and never enter the image. An
+/// existing pair is kept — a certificate somebody installed (a public one, a
+/// corporate one) is not ours to replace on a re-run.
+///
+/// `mkcert` is preferred when the host has it: its certificates are trusted by
+/// this machine's browsers once `mkcert -install` has been run. Without it the
+/// certificate is self-signed here, which serves HTTPS just the same and makes
+/// a browser warn.
+fn ensure_tls(dir: &Path, hosts: &[String]) -> Result<CertSource> {
+    // A unit test must not reach the developer's own mkcert: the first call
+    // creates a CA under the home directory, outside anything a test owns.
+    let mkcert = if cfg!(test) {
+        "mkcert-not-in-tests"
+    } else {
+        "mkcert"
+    };
+    ensure_tls_with(dir, hosts, mkcert)
+}
+
+/// [`ensure_tls`] with the `mkcert` program named by the caller.
+fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str) -> Result<CertSource> {
+    let tls = dir.join("tls");
+    std::fs::create_dir_all(&tls)?;
+    let (crt, key, pem) = (
+        tls.join("tls.crt"),
+        tls.join("tls.key"),
+        tls.join("tls.pem"),
+    );
+    let source = if crt.exists() && key.exists() {
+        CertSource::Kept
+    } else {
+        let by_mkcert = std::process::Command::new(mkcert)
+            .arg("-cert-file")
+            .arg(&crt)
+            .arg("-key-file")
+            .arg(&key)
+            .arg("--")
+            .args(hosts)
+            .output()
+            .is_ok_and(|o| o.status.success() && crt.exists() && key.exists());
+        if by_mkcert {
+            CertSource::Mkcert
+        } else {
+            let m = super::ingress_proxy::self_signed_pem(hosts)?;
+            std::fs::write(&crt, m.cert_pem)?;
+            write_private(&key, m.key_pem.as_bytes())?;
+            CertSource::SelfSigned
+        }
+    };
+    let mut both = std::fs::read(&crt)?;
+    both.extend(std::fs::read(&key)?);
+    write_private(&pem, &both)?;
+    Ok(source)
 }
 
 /// The only files a template writes when ADOPTING an existing project — never
@@ -196,6 +429,18 @@ fn dir_has_content(dir: &Path) -> bool {
 /// look before `build`/`--up` — never presented as "ready", since the shape
 /// of the real project might not match what got written.
 fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
+    let plan = Plan::defaults(canonical_template(tname));
+    render_planned(tname, o, show_next, &plan).map(|_| ())
+}
+
+/// [`render_template`] with the ports and certificate names already settled.
+/// Returns where the certificate came from, for a template that serves TLS.
+fn render_planned(
+    tname: &str,
+    o: &InitOpts,
+    show_next: bool,
+    plan: &Plan,
+) -> Result<Option<CertSource>> {
     let tname = canonical_template(tname);
     if tname == "list" {
         println!(
@@ -203,7 +448,7 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
             super::po::t("available templates"),
             template_names().join(", ")
         );
-        return Ok(());
+        return Ok(None);
     }
     let files = TEMPLATES
         .iter()
@@ -219,7 +464,8 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
             ))
         })?;
     let module = python_module(&o.name);
-    let (port, health, default_version) = template_meta(tname);
+    let (_, health, default_version) = template_meta(tname);
+    let port = plan.port.as_str();
     let version = resolve_version(tname, o.template_version.as_deref(), default_version)?;
     let adopt = dir_has_content(&o.dir);
     std::fs::create_dir_all(&o.dir)?;
@@ -228,19 +474,29 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         if adopt && !ADOPT_FILES.contains(rel) {
             continue;
         }
-        let dest = o.dir.join(subst(rel, o, &module, port, version));
+        let dest = o.dir.join(subst(rel, o, &module, plan, version));
         n += usize::from(write_file(
             &dest,
-            &subst(content, o, &module, port, version),
+            &subst(content, o, &module, plan, version),
             o.force,
         )?);
     }
+    // The manifest mounts `./tls`, so the certificate has to exist before the
+    // first `stack apply` — with or without `--up`.
+    let cert = match plan.tls_port {
+        Some(_) => {
+            let source = ensure_tls(&o.dir, &plan.hosts)?;
+            eprintln!("  {}", cert_line(source, &plan.hosts));
+            Some(source)
+        }
+        None => None,
+    };
     if n == 0 {
         eprintln!(
             "{}",
             super::po::t("nothing to do (everything already existed)")
         );
-        return Ok(());
+        return Ok(cert);
     }
     if adopt {
         println!(
@@ -294,7 +550,7 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
             )
         );
     }
-    Ok(())
+    Ok(cert)
 }
 
 /// Writes a file, refusing to destroy work without `--force`.
@@ -395,6 +651,89 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
     }
 }
 
+/// One line saying where the certificate came from and what that means for a
+/// browser — said at generation, and again when the project is up.
+fn cert_line(source: CertSource, hosts: &[String]) -> String {
+    let names = hosts.join(", ");
+    match source {
+        CertSource::Mkcert => super::po::tf(
+            "certificate: ./tls, issued by this machine's mkcert CA for {names} — browsers here trust it once `mkcert -install` has been run",
+            &[("names", &names)],
+        ),
+        CertSource::SelfSigned => super::po::tf(
+            "certificate: ./tls, self-signed for {names} — HTTPS works and browsers will warn; install mkcert and run `sh scripts/tls.sh` for one this machine trusts",
+            &[("names", &names)],
+        ),
+        CertSource::Kept => super::po::t("certificate: ./tls already had one — kept as it is").to_string(),
+    }
+}
+
+/// What `--up` prints once the project answers: where to open it, what the
+/// certificate is, the credentials when the template declares any, and the
+/// three commands that come next. Pure, so the promise is testable.
+fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) -> Vec<String> {
+    let (_, health, _) = template_meta(tname);
+    let port = plan.port.as_str();
+    let open = meta_kv(tname, "open").unwrap_or(health);
+    let mut out = vec![format!(
+        "✨ {}",
+        super::po::tf("{name} is UP", &[("name", name)])
+    )];
+    match &plan.tls_port {
+        Some(tls) => {
+            out.push(format!("   open:    https://localhost:{tls}{open}"));
+            out.push(format!(
+                "            {}",
+                super::po::tf("http://localhost:{port} redirects there", &[("port", port)])
+            ));
+        }
+        None => out.push(format!("   open:    http://localhost:{port}{open}")),
+    }
+    if let Some(source) = cert {
+        out.push(format!("   {}", cert_line(source, &plan.hosts)));
+    }
+    if let (Some(login), Some(password)) = (meta_kv(tname, "login"), meta_kv(tname, "password")) {
+        out.push(format!("   user:    {login}"));
+        out.push(format!("   pass:    {password}"));
+        out.push(format!(
+            "            {}",
+            super::po::t("these are the image's factory credentials — change them before anyone else can reach the port (see README.md)")
+        ));
+    }
+    out.push(format!("   health:  http://localhost:{port}{health}"));
+    out.push(format!("   logs:    delonix container logs -f {name}"));
+    out.push(format!(
+        "   stop:    delonix stack destroy   {}",
+        super::po::t("(tears down everything the stack owns)")
+    ));
+    out
+}
+
+/// Seconds `--up` waits for the health path: the template's `wait=`, or 120.
+fn wait_secs(tname: &str) -> u64 {
+    meta_kv(tname, "wait")
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(120)
+}
+
+/// A port this project is about to publish that something else already holds.
+/// Said BEFORE the build, with the owner's name: found only at `stack apply`,
+/// it costs the whole build first.
+fn refuse_busy_ports(plan: &Plan) -> Result<()> {
+    for port in std::iter::once(&plan.port).chain(plan.tls_port.iter()) {
+        let Ok(n) = port.parse::<u16>() else { continue };
+        if delonix_sdn::host_port_busy("127.0.0.1", n) {
+            let owner = delonix_sdn::host_port_owner_process(n)
+                .unwrap_or_else(|| super::po::t("another process").to_string());
+            return Err(Error::Invalid(super::po::tf(
+                "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`",
+                &[("port", port), ("owner", &owner)],
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Builds the image, applies the generated manifest and waits until healthy —
 /// each step with animated progress (like `cluster create`). A single command
 /// until it is UP.
@@ -409,26 +748,55 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
 /// will not boot without the database, so `stack apply` (not a lone
 /// `container run`) is the way in" — the old fast path violated that on the
 /// very first `--up`.
-fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> {
+///
+/// **The build draws its own steps.** It used to run folded under a single
+/// spinner, and the build is where the time goes: pulling the base image and
+/// installing dependencies showed as one line that did not move for minutes.
+/// It now inherits this terminal, so every instruction (`RUN apk add …`,
+/// `RUN pnpm install`, the packaging) opens and closes its own animated line.
+fn build_and_up(
+    tname: &str,
+    name: &str,
+    dir: &Path,
+    plan: &Plan,
+    cert: Option<CertSource>,
+) -> Result<()> {
+    let (_, health, _) = template_meta(tname);
+    let port = plan.port.as_str();
+    refuse_busy_ports(plan)?;
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
+
+    eprintln!(
+        "\n{}",
+        super::po::tf("Building image {tag} 🔨", &[("tag", &tag)])
+    );
+    let built = std::process::Command::new(&exe)
+        .args(["build", "-t", &tag, "."])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if !built.success() {
+        return Err(Error::Invalid(
+            super::po::t("`delonix build` failed — the step that failed is shown above").into(),
+        ));
+    }
+
     let mut p = super::output::Progress::new();
-
-    p.step(&format!("Building image {tag}"), "🔨");
-    run_quiet(&exe, dir, &["build", "-t", &tag, "."])?;
-    p.ok();
-
     p.step(&format!("Applying the stack ({name})"), "🚀");
     run_quiet(&exe, dir, &["stack", "apply"])?;
     p.ok();
 
     p.step("Waiting until healthy", "❤️ ");
-    wait_health(port, health)?;
+    wait_health(port, health, wait_secs(tname))?;
     p.ok();
+    drop(p);
 
-    println!("\n✨ {name} is UP → http://localhost:{port}{health}");
-    println!("   logs:  delonix container logs -f {name}");
-    println!("   stop:  delonix stack destroy   (tears down everything the stack owns)");
+    println!();
+    for line in up_summary(tname, name, plan, cert) {
+        println!("{line}");
+    }
     Ok(())
 }
 
@@ -453,25 +821,24 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     }
 }
 
-/// Waits for `health` to answer 200 (up to ~120s).
+/// Waits for `health` to answer 200, up to `secs`.
 ///
 /// A ceiling, not a delay: a healthy app answers as soon as it is up. It was
 /// 40s, and measured on a loaded host (load ~30) Odoo 20 took ~85s from its
 /// first log line to serving HTTP — `--up` reported a failure on a stack that
-/// came up on its own a minute later.
-fn wait_health(port: &str, health: &str) -> Result<()> {
-    for _ in 0..240 {
+/// came up on its own a minute later. A template that needs longer says so
+/// with `wait=` in its `template.meta`.
+fn wait_health(port: &str, health: &str, secs: u64) -> Result<()> {
+    for _ in 0..secs * 2 {
         if http_ok(port, health) {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    Err(Error::Invalid(
-        super::po::t(
-            "the container started but did not become healthy in 120s — see `delonix container logs`",
-        )
-        .into(),
-    ))
+    Err(Error::Invalid(super::po::tf(
+        "the container started but did not become healthy in {secs}s — see `delonix container logs`",
+        &[("secs", &secs.to_string())],
+    )))
 }
 
 /// Minimal GET to `127.0.0.1:port` (HTTP/1.0); `true` if the response is `200`.
@@ -530,11 +897,20 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     // A template (via flag or menu) → complete project; optionally an animated
     // build+run (`--up`, or the interactive question).
     if let Some(t) = &chosen {
-        let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
-        render_template(t, o, !do_up)?;
+        let tname = canonical_template(t);
+        if !TEMPLATES.iter().any(|(n, _)| *n == tname) {
+            // Unknown name: let the renderer say so, with the list.
+            return render_template(t, o, false);
+        }
+        // What only the person generating can decide is asked here, on a
+        // terminal, before anything is written: a port that is taken, the
+        // names the certificate must cover, whether to start it now.
+        let interactive = stdin_is_tty();
+        let plan = plan_for(tname, interactive);
+        let do_up = o.up || (interactive && prompt_yes("Build and start it now?", true));
+        let cert = render_planned(t, o, !do_up, &plan)?;
         if do_up {
-            let (port, health, _) = template_meta(canonical_template(t));
-            build_and_up(&o.name, &o.dir, port, health)?;
+            build_and_up(tname, &o.name, &o.dir, &plan, cert)?;
         }
         return Ok(());
     }
@@ -1579,5 +1955,156 @@ mod tests {
                 "{tpl}: token não substituído"
             );
         }
+    }
+
+    fn opts(dir: &Path, template: &str) -> InitOpts {
+        InitOpts {
+            dir: dir.to_path_buf(),
+            name: "edge".into(),
+            image: None,
+            force: false,
+            template: Some(template.into()),
+            template_version: None,
+            up: false,
+        }
+    }
+
+    fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                all_files(&p, out);
+            } else {
+                out.push(p);
+            }
+        }
+    }
+
+    /// The three edge templates come up with HTTPS: every token is replaced
+    /// (the TLS port included), the manifest publishes both ports and mounts
+    /// `./tls`, and the key that was generated is private.
+    #[test]
+    fn the_edge_templates_render_with_tls_and_no_token_left() {
+        use std::os::unix::fs::PermissionsExt;
+        for tpl in ["nginx", "httpd", "haproxy"] {
+            let (_tmp, dir) = scratch();
+            let plan = Plan {
+                port: "18080".into(),
+                tls_port: Some("18443".into()),
+                hosts: vec!["localhost".into(), "127.0.0.1".into()],
+            };
+            let cert = render_planned(tpl, &opts(&dir, tpl), false, &plan).unwrap();
+            assert_eq!(cert, Some(CertSource::SelfSigned), "{tpl}");
+            let mut files = Vec::new();
+            all_files(&dir, &mut files);
+            for f in &files {
+                let text = std::fs::read_to_string(f).unwrap();
+                for token in [
+                    "__PORT__",
+                    "__TLS_PORT__",
+                    "__NAME__",
+                    "__TEMPLATE_VERSION__",
+                ] {
+                    assert!(
+                        !text.contains(token),
+                        "{tpl}: {token} left in {}",
+                        f.display()
+                    );
+                }
+            }
+            let manifest = std::fs::read_to_string(dir.join("delonix-manifest.yaml")).unwrap();
+            assert!(manifest.contains("\"18080:18080\""), "{tpl}:\n{manifest}");
+            assert!(manifest.contains("\"18443:18443\""), "{tpl}:\n{manifest}");
+            assert!(manifest.contains("\"./tls:"), "{tpl}:\n{manifest}");
+            for private in ["tls/tls.key", "tls/tls.pem"] {
+                let mode = std::fs::metadata(dir.join(private))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o777, 0o600, "{tpl}: {private}");
+            }
+            // Neither the key nor the certificate may reach the image or git.
+            for ignore in [".dockerignore", ".gitignore"] {
+                let text = std::fs::read_to_string(dir.join(ignore)).unwrap();
+                assert!(text.lines().any(|l| l == "tls/"), "{tpl}: {ignore}");
+            }
+        }
+    }
+
+    /// `tls=` in a template's meta and the `__TLS_PORT__` token go together:
+    /// a template that uses the token without declaring the port would render
+    /// an empty port, and one that declares it without using it would get a
+    /// certificate nothing mounts.
+    #[test]
+    fn the_tls_token_and_the_tls_meta_key_go_together() {
+        for (name, files) in TEMPLATES {
+            let uses = files.iter().any(|(_, body)| body.contains("__TLS_PORT__"));
+            assert_eq!(uses, meta_kv(name, "tls").is_some(), "{name}");
+        }
+    }
+
+    /// Without mkcert the certificate is self-signed here; a second run keeps
+    /// what is there instead of replacing a certificate somebody installed.
+    #[test]
+    fn a_certificate_is_generated_once_and_then_kept() {
+        let (_tmp, dir) = scratch();
+        let hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+        let first = ensure_tls_with(&dir, &hosts, "mkcert-not-installed").unwrap();
+        assert_eq!(first, CertSource::SelfSigned);
+        let crt = std::fs::read(dir.join("tls/tls.crt")).unwrap();
+        let key = std::fs::read(dir.join("tls/tls.key")).unwrap();
+        assert!(crt.starts_with(b"-----BEGIN CERTIFICATE-----"));
+        let pem = std::fs::read(dir.join("tls/tls.pem")).unwrap();
+        assert_eq!(pem, [crt.clone(), key].concat());
+        let second = ensure_tls_with(&dir, &hosts, "mkcert-not-installed").unwrap();
+        assert_eq!(second, CertSource::Kept);
+        assert_eq!(std::fs::read(dir.join("tls/tls.crt")).unwrap(), crt);
+    }
+
+    /// The names end up on a `mkcert` command line: only host names and
+    /// address literals pass.
+    #[test]
+    fn a_certificate_name_is_a_host_or_an_address() {
+        for ok in [
+            "localhost",
+            "shop.example.org",
+            "*.example.org",
+            "10.0.0.5",
+            "::1",
+        ] {
+            assert!(valid_cert_host(ok), "{ok}");
+        }
+        for bad in ["", "-install", "a b", "x;y", "$(id)", "a/b"] {
+            assert!(!valid_cert_host(bad), "{bad}");
+        }
+    }
+
+    /// What `--up` says at the end: an HTTPS address for a template that
+    /// serves TLS, and the factory credentials for one that has them.
+    #[test]
+    fn the_up_summary_names_the_address_and_the_credentials() {
+        let nginx = up_summary(
+            "nginx",
+            "edge",
+            &Plan::defaults("nginx"),
+            Some(CertSource::SelfSigned),
+        )
+        .join("\n");
+        assert!(nginx.contains("https://localhost:8443/"), "{nginx}");
+        assert!(nginx.contains("self-signed"), "{nginx}");
+        assert!(!nginx.contains("pass:"), "{nginx}");
+
+        let odoo = up_summary("odoo", "erp", &Plan::defaults("odoo"), None).join("\n");
+        assert!(odoo.contains("http://localhost:8069/web"), "{odoo}");
+        assert!(odoo.contains("user:    admin"), "{odoo}");
+        assert!(odoo.contains("pass:    admin"), "{odoo}");
+        assert!(odoo.contains("change them"), "{odoo}");
+    }
+
+    /// `wait=` is read: Odoo declares 300 s, a template that says nothing gets 120.
+    #[test]
+    fn the_health_wait_comes_from_the_template() {
+        assert_eq!(wait_secs("odoo"), 300);
+        assert_eq!(wait_secs("nginx"), 120);
     }
 }

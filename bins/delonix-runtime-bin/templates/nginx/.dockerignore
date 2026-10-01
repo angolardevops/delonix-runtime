@@ -1,3 +1,6 @@
 .git/
 *.md
 scripts/
+tls/
+acme/
+letsencrypt/
