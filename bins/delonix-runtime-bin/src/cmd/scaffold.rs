@@ -1489,26 +1489,29 @@ mod tests {
     /// something different would be a second template under a misleading name.
     #[test]
     fn the_python_alias_renders_the_fastapi_template() {
+        // Every file of the two renders, path and content: the template may
+        // change its layout, the alias may not change what it produces.
         let render = |t: &str| {
-            let (tmp, dir) = scratch();
-            let o = InitOpts {
-                dir: dir.clone(),
-                name: "myapi".into(),
-                image: None,
-                force: false,
-                template: Some(t.into()),
-                template_version: None,
-                up: false,
-            };
-            render_template(t, &o, false).unwrap();
-            let py = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-            let main = std::fs::read_to_string(dir.join("src/myapi/main.py")).unwrap();
-            drop(tmp);
-            (py, main)
+            let (_tmp, dir) = scratch();
+            render_template(t, &opts(dir.clone(), "myapi", t, None), false).unwrap();
+            let mut files = std::collections::BTreeMap::new();
+            let mut stack = vec![dir.clone()];
+            while let Some(d) = stack.pop() {
+                for e in std::fs::read_dir(&d).unwrap() {
+                    let p = e.unwrap().path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else {
+                        let rel = p.strip_prefix(&dir).unwrap().to_path_buf();
+                        files.insert(rel, std::fs::read(&p).unwrap());
+                    }
+                }
+            }
+            files
         };
         let (fastapi, alias) = (render("fastapi"), render("python"));
+        assert!(fastapi.contains_key(Path::new("pyproject.toml")));
         assert_eq!(fastapi, alias);
-        assert!(fastapi.0.contains("\"fastapi==0.142.*\""), "{}", fastapi.0);
         assert!(template_names().contains(&"fastapi"));
         assert!(
             !template_names().contains(&"python"),
