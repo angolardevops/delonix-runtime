@@ -3002,11 +3002,49 @@ São três defeitos, e só o primeiro era o que se procurava:
   container sem `-u`). A varredura era o remendo.
 
 **Decidido no ADR-0062 (Proposto), em três passos**: P0 — o `run` DIZ quando o `USER` não é
-aplicado (feito: aviso uma vez, primeira passagem, nunca com `--user`, nunca para um USER
-root; gate na bateria, que constrói a sua imagem com `USER`); P1 — tirar a varredura,
-preservar a posse ao extrair a layer, não re-apropriar mounts; P2 — a omissão passa a ser o
-`USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo de
-hoje, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
+aplicado; P1 — tirar a varredura e devolver só o que a imagem dá; P2 — a omissão passa a ser o
+`USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo
+antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
+
+**P0 e P1 estão feitos; P2 não.**
+
+- **O índice de donos** (`delonix_compute::owners`, `delonix-oci::owners`): ao extrair uma layer,
+  as entradas que o tar dá a um não-root vão para `layers/<hex>.owners` (AO LADO da pasta, nunca
+  dentro — o que está dentro vira ficheiro de todos os containers da imagem), e o container
+  recebe o índice fundido em `overlay-owners`, ao lado do `overlay-lowers`. Por caminho, decide
+  a layer mais alta que o contém: uma layer superior que volta a trazer o caminho como root
+  retira-o. O ciclo de extracção é o do próprio crate `tar` (0.4.46), repetido porque
+  `Archive::unpack` não dá acesso aos cabeçalhos.
+- **O init aplica-o uma vez** (`overlay-owners.applied`), depois do `pivot_root` (os caminhos
+  ficam confinados ao rootfs), só quando o processo corre como não-root, e **nunca noutro
+  filesystem**: uma entrada que resolve para dentro de um mount é saltada.
+- **Volumes**: um volume nomeado VAZIO fica do dono que a imagem dá ao ponto de montagem, ou do
+  utilizador do container quando a imagem não nomeia ninguém. Um volume com dados e um bind
+  mount nunca são tocados. Um volume nomeado reconhece-se pela forma no disco
+  (`<nome>/_data` com `meta.json` ao lado), não pelo nome.
+- **Preservar os donos NO DISCO foi posto de lado pelo spike**: obrigava todos os leitores do
+  armazém (o export flat do `build`, a migração flat→overlay, o scanner, o `system df`, as
+  remoções) a lidar com ficheiros que não são de quem corre o motor. O custo do índice fica
+  escrito no ADR: copia para a camada de escrita o que a imagem dá a não-root (duas entradas no
+  `haproxy`; uma árvore inteira numa imagem com `COPY --chown`).
+- **O `container commit` gravava os uids do HOST na layer** — encontrado pelo passo 6 da
+  validação, não por leitura: todas as entradas `1000:1000` e a pasta do uid 1000 do container
+  como `100999`. Com o índice, essa imagem daria o rootfs inteiro ao uid 1000. O empacotador
+  passa cada dono pelo mapa rootless (`container_id_of`: quem invoca → 0, subid → deslocamento
+  + 1). O `build` não era afectado, porque empacota dentro do userns mapeado. O commit também
+  largava o `USER` da imagem base.
+- **Medido depois** (`haproxy:3.4-alpine`, `-u haproxy`): `/etc/passwd` e o binário recusados;
+  2 de 987 entradas do utilizador (eram 940); o bind do host mantém `1000:1000` e o dono
+  continua a escrever; camada de escrita 56 K (eram 13 MB). O gate da bateria, corrido contra
+  o motor de antes do P1, falha 4 dos 6 checks de posse.
+- **`odoo:20.0`, a imagem onde o custo foi medido**: primeiro arranque com `-u odoo` em 1,7 s
+  (antes, ainda a varrer aos 16 min); 4 de 122 363 entradas do `odoo`; camada de escrita 480 K;
+  o volume do filestore gravável. O template `odoo` pode passar a declarar `user: odoo` DEPOIS
+  de o P1 estar fundido — antes disso dispararia a varredura antiga.
+- **Limite anterior, que fica**: a extracção não preserva os bits setuid/setgid (um binário
+  `2755` da imagem é `755` no container). O init repõe o modo depois do `chown` (que os limpa),
+  para nada se perder no dia em que a extracção os preservar.
+- **Por validar**: host root (não rootless) e o CRI num nó.
 
 **Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
 ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
