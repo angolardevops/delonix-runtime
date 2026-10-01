@@ -102,6 +102,14 @@ and port 80 of the host reaching the container (`"0.0.0.0:80:__PORT__"`).
 Everything certbot keeps goes to `./letsencrypt`, so no root is involved. The
 script prints the `certbot renew` line to put in cron.
 
+Try it first with `LETSENCRYPT_STAGING=1 sh scripts/tls.sh letsencrypt …`: the
+staging CA exercises the whole path without counting against the domain's
+rate limits (its certificate is not trusted by browsers). `<email>` may be `-`
+to register without one, and `ACME_SERVER=<directory-url>` points the script
+at another ACME CA. If the CA answers `Timeout during connect`, port 80 of
+the public address is not reaching this host — a router or firewall in front
+of it, not this project.
+
 `Strict-Transport-Security` is off on purpose: it pins the host name, every
 port of it, and on `localhost` that would force every other local service to
 HTTPS. Turn it on in `conf/delonix.conf` once this serves a real domain.

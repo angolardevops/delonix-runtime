@@ -3020,7 +3020,16 @@ spinner); e o fim imprime o endereço a abrir, o certificado e, quando o templat
 **Medido** (2026-10-01, rootless, pela porta publicada): os três com 10 000 pedidos HTTPS a
 300 em simultâneo, 10 000 respostas 200. É uma prova de que aguentam, não um benchmark: a
 ferramenta foi o `curl --parallel`, o host não tem `ab`/`wrk`.
-**Não validado**: o Let's Encrypt de ponta a ponta (precisa de um domínio público) e as
+**Let's Encrypt, medido a 2026-10-01**: o `scripts/tls.sh letsencrypt` foi corrido de ponta a
+ponta contra o Pebble (o servidor ACME de testes do Let's Encrypt), com o nginx do host a
+encaminhar só `/.well-known/acme-challenge/` para o container: o desafio foi servido pelo
+container (200 no log dele, agente `LetsEncrypt-Pebble-VA`), o certificado emitido, instalado
+em `./tls` e carregado com o MESMO pid. Contra o staging REAL, com `le-test.ngolacloud.com`
+(o domínio tem wildcard para o IP público deste host), a conta registou-se e a CA respondeu
+`Timeout during connect`: a porta 80 pública não chega a esta máquina (router ou operador).
+O script ganhou `LETSENCRYPT_STAGING=1`, `ACME_SERVER=<url>` e o email `-`. O template
+`httpd` usa o mesmo script e só tem o caminho ACME provado pelo smoke.
+**Não validado**: uma emissão pela CA real do Let's Encrypt, e as
 flags equivalentes às perguntas (`--hostname`, `--port`) — não existem; ficam para depois
 do #634, que reescreve os quatro pontos de entrada do `init`.
 

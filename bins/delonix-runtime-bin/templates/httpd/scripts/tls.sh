@@ -10,6 +10,12 @@
 #       host reaching this container: publish "0.0.0.0:80:__PORT__" in
 #       delonix-manifest.yaml first. Running it accepts the Let's Encrypt
 #       subscriber agreement on your behalf (--agree-tos).
+#       <email> may be `-` to register without one (no expiry notices).
+#       LETSENCRYPT_STAGING=1 uses Let's Encrypt's staging environment: the
+#       whole path is exercised, nothing counts against the domain's rate
+#       limits, and the certificate is NOT trusted by browsers.
+#       ACME_SERVER=<directory-url> uses another ACME CA instead (an
+#       internal step-ca, ZeroSSL, a Pebble test server).
 #
 # A local certificate comes from mkcert when it is installed (trusted by this
 # machine's browsers after `mkcert -install`), otherwise from openssl
@@ -43,7 +49,13 @@ letsencrypt)
     command -v certbot >/dev/null 2>&1 || { echo "certbot is not installed (apt install certbot / dnf install certbot)" >&2; exit 1; }
     mkdir -p acme letsencrypt
     # Everything certbot keeps stays inside the project: no root, no /etc.
-    certbot certonly --webroot -w acme -d "$2" -m "$3" --agree-tos --non-interactive \
+    if [ "$3" = "-" ]; then contact="--register-unsafely-without-email"; else contact="-m $3"; fi
+    staging=""
+    [ "${LETSENCRYPT_STAGING:-0}" = 1 ] && staging="--test-cert"
+    [ -n "${ACME_SERVER:-}" ] && staging="--server $ACME_SERVER"
+    # $contact and $staging are split on purpose: each is zero or more options.
+    # shellcheck disable=SC2086
+    certbot certonly --webroot -w acme -d "$2" $contact $staging --agree-tos --non-interactive \
         --config-dir letsencrypt --work-dir letsencrypt/work --logs-dir letsencrypt/logs
     cp "letsencrypt/live/$2/fullchain.pem" tls/tls.crt
     cp "letsencrypt/live/$2/privkey.pem" tls/tls.key
