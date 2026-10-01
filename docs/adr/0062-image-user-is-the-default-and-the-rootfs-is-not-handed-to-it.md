@@ -1,6 +1,6 @@
 # ADR-0062: An image's USER is the default user, and the root filesystem stops being handed to it
 
-- **Status:** Proposed (2026-10-01)
+- **Status:** Accepted (2026-10-01) — P0, P1 and P2 implemented
 - **Date:** 2026-10-01
 - **Deciders:** Walter Angolar
 - **Relates to:** the engine's third principle (rootless-first: privilege is an explicit opt-in,
@@ -191,16 +191,41 @@ with `-u odoo` returned in 1.7 s on an idle disk; 4 entries are owned by `odoo`,
 index has 24, the write layer is 480 K, the named volume at `/var/lib/odoo` is writable and
 `/etc/passwd` is refused.
 
-Not validated: validation step 5 as a check in the battery (the sizes were measured by hand), a
-real root (non-rootless) host, and the CRI on a node. A container created before P1 keeps what
-the old walk did to it.
+Validated after P1 merged, on a VM (Ubuntu 26.04, k8s 1.36.4), with `haproxy:3.4-alpine`:
 
-One limit is older than this change and stays: the unpack does not keep setuid/setgid bits (a
-`2755` binary of the image is `755` in a container), so a setgid helper such as `unix_chkpwd`
-gets its group back and not its bit. The init restores the mode after a chown, which clears
-those bits, so nothing is lost the day the unpack keeps them.
+- **the engine as real root**: `/var/lib/haproxy` is `99:99` and writable, `/etc/passwd` and the
+  binary are `0:0` and refused, one entry in the root filesystem is owned by the user, a
+  bind-mounted host directory keeps `1000:1000` and is not writable by the container's user, an
+  empty named volume is writable;
+- **the CRI on a kubeadm node**: a pod with no `securityContext` runs as uid 99, `runAsUser: 0`
+  as 0, `runAsUser: 1234` (on `alpine`) as 1234; `/etc/passwd` refused in each non-root case;
+  `kubectl exec` enters as the same user;
+- **rootless with no subordinate id range**: uid 0, with the notice, exit 0.
 
-P2 is not implemented.
+Not validated: validation step 5 as a check in the battery (the sizes were measured by hand). A
+container created before P1 keeps what the old walk did to it.
+
+**The unpack keeps setuid, setgid and sticky bits** (with P2). It did not: `/tmp` was `777`
+instead of `1777` in every container, and a setuid `su` had lost its bit. With a non-root
+default user that stops being cosmetic. A layer unpacked by an older engine is healed from its
+blob's headers the first time an image using it is prepared (a `.modes` sibling marks it).
+
+**P2 is implemented**: `resolve_run` takes the image's user when `--user` is absent, through the
+one function every entry point reaches. Measured rootless: the CLI, `kind: Container`,
+`kind: Pod`, `compose` (and `user: "0"` there), the Docker API, and a `container restart` all
+answer uid 99 for `haproxy:3.4-alpine`; `--user 0` answers 0; `alpine:3.20` answers 0. The
+`haproxy` template passes its smoke 7/7 as uid 99. `build` is not affected: its work containers
+do not go through `resolve_run`, and a `RUN` still executes as root in the work container
+whatever the base image's USER — a difference from Docker that predates this ADR.
+
+**Found by the CRI validation, and fixed with P2**: a mount target behind a symlink of the image
+was refused outright. Alpine and Debian ship `/var/run -> /run` and the kubelet mounts the
+service-account token under `/var/run/secrets`, so every pod from such an image failed with
+`failed to prepare the rootfs: EINVAL`. The target is now resolved inside the root filesystem.
+
+**P2 is a breaking change to a stable group** (`container run`): a container from an image with a
+USER no longer runs as uid 0. The release that carries it is a major, and its notes name
+`--user 0` as the way back.
 
 P0 is in the change that adds this ADR: `resolve_run` reads the image's `user` and returns a
 notice when it is not applied (first pass only, never with `--user`, never for a root USER).

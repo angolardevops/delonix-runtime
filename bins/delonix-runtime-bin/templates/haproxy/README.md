@@ -72,10 +72,11 @@ enable `Strict-Transport-Security` only once the site is HTTPS-only.
 - **A host port below 1024** — publishing one needs the host to allow it
   (`net.ipv4.ip_unprivileged_port_start`); `delonix stack apply` says so and
   names the fix. Keep `__PORT__`, or publish a high host port onto it.
-- **The process runs as root inside the container.** The official image
-  declares `USER haproxy`, and the engine does not apply an image's `USER`
-  yet (`delonix container run` says so). In a rootless Delonix that root is
-  your own unprivileged host user.
+- **The process runs as `haproxy` (uid 99), the user the official image
+  declares.** It cannot bind a port below 1024 inside the container either,
+  which is why the frontends listen on `__PORT__` and 8405. On a host with no
+  subordinate uid range the engine cannot apply that user and says so; the
+  process then runs as root inside the container.
 
 ## Choosing an HAProxy version
 

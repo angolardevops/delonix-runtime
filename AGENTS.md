@@ -3006,7 +3006,11 @@ aplicado; P1 — tirar a varredura e devolver só o que a imagem dá; P2 — a o
 `USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo
 antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
 
-**P0 e P1 estão feitos; P2 não.**
+**P0, P1 e P2 estão feitos** (o ADR passou a Aceite). P2: sem `--user`, o processo corre como o
+`USER` da imagem; `--user 0` fica root. É quebra de contrato do `container run`, logo a release
+que o levar é uma major. Num host rootless sem subuid só cabe um uid: fica a 0 e o `run` di-lo
+(`RunHost::can_map_id_range`). O `build` não muda: os containers de trabalho não passam pelo
+`resolve_run`.
 
 - **O índice de donos** (`delonix_compute::owners`, `delonix-oci::owners`): ao extrair uma layer,
   as entradas que o tar dá a um não-root vão para `layers/<hex>.owners` (AO LADO da pasta, nunca
@@ -3041,10 +3045,20 @@ antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
   (antes, ainda a varrer aos 16 min); 4 de 122 363 entradas do `odoo`; camada de escrita 480 K;
   o volume do filestore gravável. O template `odoo` pode passar a declarar `user: odoo` DEPOIS
   de o P1 estar fundido — antes disso dispararia a varredura antiga.
-- **Limite anterior, que fica**: a extracção não preserva os bits setuid/setgid (um binário
-  `2755` da imagem é `755` no container). O init repõe o modo depois do `chown` (que os limpa),
-  para nada se perder no dia em que a extracção os preservar.
-- **Por validar**: host root (não rootless) e o CRI num nó.
+- **Validado depois, numa VM** (Ubuntu 26.04, k8s 1.36.4): motor como root real (posse `99:99`
+  na pasta da imagem, `/etc/passwd` recusado, bind do host intacto); CRI num nó kubeadm (pod sem
+  `securityContext` → uid 99, `runAsUser: 0` → 0, `runAsUser: 1234` → 1234); rootless sem
+  subuid (uid 0 com aviso).
+- **A extracção passou a guardar setuid/setgid/sticky** (`set_preserve_permissions`): o `/tmp`
+  de TODOS os containers era `777` em vez de `1777`, e um `su` setuid perdia o bit. Uma layer
+  extraída por um motor antigo é corrigida a partir dos cabeçalhos do blob na primeira vez que
+  uma imagem a usa (marcador `layers/<hex>.modes`).
+- **Um alvo de mount atrás de um symlink da imagem era RECUSADO** (`safe_bind_target`), e isso
+  partia o Kubernetes: Alpine e Debian têm `/var/run -> /run`, e o kubelet monta o token em
+  `/var/run/secrets`, logo todo o pod dessas imagens falhava com `failed to prepare the rootfs:
+  EINVAL`. Só um kubelet real o mostrou (as validações anteriores usaram busybox e CoreDNS, que
+  não têm o symlink). Agora resolve-se dentro do rootfs, componente a componente: um link
+  absoluto recomeça no rootfs e o `..` pára lá.
 - **O template `odoo` corre como `odoo`** (`user: odoo` nos dois manifestos, 2026-10-01, depois
   de o P1 fundir). Medido ao vivo: uid 100, sem o aviso «Running as user 'root'», filestore
   gravável num volume novo, `/etc/passwd` recusado; no perfil dev os binds `addons/` e

@@ -832,8 +832,8 @@ msgstr "delonix: falha a preparar o rootfs: {e}"
 msgid "delonix: confinement NOT verified ({e}); aborting the container"
 msgstr "delonix: confinamento NÃO verificado ({e}); a abortar o container"
 
-msgid "delonix: warning — image '{image}' declares USER {user}, which is not applied: the process runs as root (uid 0) inside the container. Pass -u {user} to run as that user."
-msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não é aplicado: o processo corre como root (uid 0) dentro do container. Passa -u {user} para correr como esse utilizador."
+msgid "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container."
+msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não pode ser aplicado neste host: esta conta não tem intervalo de uid/gid subordinados (/etc/subuid, /etc/subgid, newuidmap), por isso não pode existir um segundo utilizador. O processo corre como root (uid 0) dentro do container."
 
 msgid "delonix: warning — failed to enter WORKDIR {w}"
 msgstr "delonix: aviso — falha a entrar no WORKDIR {w}"

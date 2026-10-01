@@ -1214,33 +1214,71 @@ fn mount_target_safe(target: &str) -> bool {
 }
 
 /// Resolves `target` (an in-container path, already lexically validated by
-/// `mount_target_safe`) against `rootfs`, component-by-component, refusing to
-/// descend through any symlink an image layer may have planted along the
-/// way. `mount_target_safe`'s lexical `..` check is not enough on its own:
-/// `create_dir_all`/`OpenOptions::open` (called on the joined path right
-/// after this) FOLLOW symlinks, and `bind_volume` runs BEFORE `pivot_root`
-/// while `/` is still the real host filesystem — an absolute symlink at ANY
-/// path component (a malicious image shipping e.g. `/etc -> /root`, or the
-/// final mount-target component itself already existing as one) redirects
-/// the destination to an arbitrary real host path, and the subsequent
-/// create/open then create real directories/files on the host, as the
-/// engine's own uid. Mirrors the confinement technique `cmd::build::
-/// confine_to` already uses for the build's COPY (a sibling of this exact
-/// bug class, fixed there first) — this is the engine-side equivalent.
+/// `mount_target_safe`) against `rootfs`, the way the container itself would:
+/// a symlink is followed, and it can never lead out of `rootfs`.
+///
+/// `bind_volume` runs BEFORE `pivot_root`, while `/` is still the real host
+/// filesystem, and `create_dir_all`/`open` on the joined path FOLLOW symlinks.
+/// So a link an image ships (`/etc -> /root`, or the final component itself)
+/// would, taken literally, send the mount and the directories created for it
+/// to a real host path. Each component is therefore resolved by hand: an
+/// absolute link restarts at `rootfs`, and `..` stops at `rootfs` — the scoped
+/// resolution runc does.
+///
+/// It used to REFUSE any symlink on the way. That was safe and wrong: Alpine
+/// and Debian ship `/var/run -> /run`, and the kubelet mounts every pod's
+/// service-account token at `/var/run/secrets/…`, so on a Kubernetes node each
+/// pod from such an image failed with `failed to prepare the rootfs: EINVAL`
+/// (measured on a kubeadm node, k8s 1.36).
+///
+/// `None` only for a link chain too long to be anything but a loop.
 fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
-    let mut current = std::path::PathBuf::from(rootfs);
-    for comp in std::path::Path::new(target).components() {
-        let std::path::Component::Normal(c) = comp else {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Component;
+    const MAX_LINKS: u32 = 40;
+    let root = std::path::PathBuf::from(rootfs);
+    let parts = |p: &std::path::Path| -> Vec<OsString> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut pending: VecDeque<OsString> = parts(std::path::Path::new(target)).into();
+    // The resolved path so far, relative to `root`: real components only.
+    let mut resolved: Vec<OsString> = Vec::new();
+    let mut links = 0;
+    while let Some(c) = pending.pop_front() {
+        if c == ".." {
+            resolved.pop(); // never above `root`
             continue;
-        };
-        current.push(c);
-        if let Ok(meta) = std::fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return None;
-            }
+        }
+        let mut here = root.clone();
+        here.extend(&resolved);
+        here.push(&c);
+        let is_link = std::fs::symlink_metadata(&here).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            resolved.push(c);
+            continue;
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return None;
+        }
+        let dest = std::fs::read_link(&here).ok()?;
+        if dest.is_absolute() {
+            resolved.clear();
+        }
+        for part in parts(&dest).into_iter().rev() {
+            pending.push_front(part);
         }
     }
-    Some(current)
+    let mut out = root;
+    out.extend(&resolved);
+    Some(out)
 }
 
 /// The mount flags the kernel LOCKS on a mount that a user namespace merely
@@ -2105,6 +2143,47 @@ fn have_subid_helpers() -> bool {
         && ["/usr/bin/newgidmap", "/bin/newgidmap"]
             .iter()
             .any(|p| std::path::Path::new(p).exists())
+}
+
+/// Can a container on this host hold a user other than uid 0?
+///
+/// Real root maps any id. Rootless needs the `newuidmap`/`newgidmap` helpers and
+/// a subordinate range for this account in BOTH `/etc/subuid` and `/etc/subgid`:
+/// the helpers refuse a map the files do not grant, and without a range the user
+/// namespace holds a single uid.
+pub fn can_map_id_range() -> bool {
+    if !is_rootless() {
+        return true;
+    }
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let name = std::env::var("USER").ok().or_else(|| {
+        let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+        passwd.lines().find_map(|l| {
+            let mut f = l.split(':');
+            let (name, _, id) = (f.next()?, f.next()?, f.next()?);
+            (id.parse::<u32>().ok()? == uid).then(|| name.to_string())
+        })
+    });
+    let granted = |file: &str| {
+        std::fs::read_to_string(file)
+            .map(|body| subid_file_grants(&body, uid, name.as_deref()))
+            .unwrap_or(false)
+    };
+    have_subid_helpers() && granted("/etc/subuid") && granted("/etc/subgid")
+}
+
+/// Does a `/etc/subuid`-format body grant `uid` (by number or by `name`) a range
+/// wide enough for the engine's map? PURE.
+fn subid_file_grants(body: &str, uid: u32, name: Option<&str>) -> bool {
+    body.lines().any(|line| {
+        let mut f = line.trim().split(':');
+        let (Some(who), Some(_start), Some(count)) = (f.next(), f.next(), f.next()) else {
+            return false;
+        };
+        let mine = who == uid.to_string() || name.is_some_and(|n| n == who);
+        mine && count.parse::<u32>().is_ok_and(|c| c >= USERNS_RANGE - 1)
+    })
 }
 
 /// Runs `newuidmap`/`newgidmap <pid> <map...>` (the map args are triplets
@@ -9755,6 +9834,23 @@ mod tests {
         assert_eq!(container_id_of(33, 1000), 33);
     }
 
+    /// A subordinate range counts only when it is this account's and wide
+    /// enough for the engine's map; a comment, a short range or another user's
+    /// line grants nothing.
+    #[test]
+    fn a_subid_file_grants_only_this_accounts_wide_range() {
+        let body = "# comment\nother:100000:65536\nwalter:165536:65536\n";
+        assert!(subid_file_grants(body, 1000, Some("walter")));
+        assert!(subid_file_grants("1000:100000:65536\n", 1000, None));
+        assert!(!subid_file_grants(body, 1001, Some("ana")));
+        assert!(!subid_file_grants(
+            "walter:100000:1000\n",
+            1000,
+            Some("walter")
+        ));
+        assert!(!subid_file_grants("", 1000, Some("walter")));
+    }
+
     #[test]
     fn mount_point_follows_the_source_shape() {
         let tmp = tempfile::tempdir().unwrap();
@@ -9930,45 +10026,45 @@ mod tests {
         );
     }
 
+    /// A symlink on the way to a mount target is followed INSIDE the rootfs,
+    /// never out of it: an absolute link restarts at the rootfs, `..` stops
+    /// there, and a loop is refused.
     #[test]
-    fn safe_bind_target_recusa_symlink_plantado_pela_imagem() {
-        // HIGH fixed here: `mount_target_safe` only rejects lexical `..` —
-        // it never resolves symlinks, and `create_dir_all`/`OpenOptions::open`
-        // (called on the joined path right after, before `pivot_root`) FOLLOW
-        // them. A malicious image shipping e.g. `/etc -> /root` inside its
-        // rootfs redirects a `-v vol:/etc/pwned` mount target to a real host
-        // path. `safe_bind_target` must refuse to descend through ANY
-        // symlink component, whether in the middle of the path or as the
-        // final target itself.
+    fn a_bind_target_through_a_symlink_stays_inside_the_rootfs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         let rootfs = base.join("rootfs");
-        std::fs::create_dir_all(&rootfs).unwrap();
+        std::fs::create_dir_all(rootfs.join("run")).unwrap();
+        std::fs::create_dir_all(rootfs.join("var")).unwrap();
+        let root = rootfs.to_string_lossy().into_owned();
+        let resolve = |t: &str| safe_bind_target(&root, t);
 
-        // Case 1: an intermediate path component is a symlink escaping rootfs.
+        // What Alpine and Debian ship, both spellings.
+        std::os::unix::fs::symlink("/run", rootfs.join("var/run")).unwrap();
+        assert_eq!(
+            resolve("/var/run/secrets/token"),
+            Some(rootfs.join("run/secrets/token"))
+        );
+        std::os::unix::fs::symlink("../run", rootfs.join("var/run2")).unwrap();
+        assert_eq!(resolve("/var/run2/x"), Some(rootfs.join("run/x")));
+
+        // A link to a real HOST path: the result is that path under the rootfs.
         let outside = base.join("outside-victim");
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, rootfs.join("etc")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/etc/pwned").is_none(),
-            "um symlink a meio do caminho deve ser recusado"
-        );
+        let got = resolve("/etc/pwned").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
+        assert!(!got.starts_with(&outside));
 
-        // Case 2: the FINAL target component itself is already a symlink.
-        let victim_file = base.join("victim-file");
-        std::fs::write(&victim_file, b"secret").unwrap();
-        std::fs::create_dir_all(rootfs.join("app")).unwrap();
-        std::os::unix::fs::symlink(&victim_file, rootfs.join("app").join("data")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/app/data").is_none(),
-            "um symlink no próprio componente final deve ser recusado"
-        );
+        // The final component itself a link, and `..` trying to climb out.
+        std::os::unix::fs::symlink("../../../../etc/shadow", rootfs.join("data")).unwrap();
+        let got = resolve("/data").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
 
-        // Legitimate case: no symlinks anywhere, real target resolves normally.
-        assert_eq!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
-            Some(rootfs.join("data").join("inside"))
-        );
+        // No link at all resolves to itself; a loop is refused.
+        assert_eq!(resolve("/srv/inside"), Some(rootfs.join("srv/inside")));
+        std::os::unix::fs::symlink("loop", rootfs.join("loop")).unwrap();
+        assert_eq!(resolve("/loop/x"), None);
     }
 
     #[test]

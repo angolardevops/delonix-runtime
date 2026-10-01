@@ -1119,24 +1119,31 @@ check "progresso: todo o • tem o seu ✓" ok bash -c "
   [ \"\$o\" = \"\$c\" ] || { printf 'abertos=%s fechados=%s\n%s\n' \"\$o\" \"\$c\" \"\$err\"; exit 1; }
 "
 
-# O USER de uma imagem que NÃO é aplicado tem de ser DITO (ADR-0062, P0).
+# O USER de uma imagem é o utilizador por omissão (ADR-0062, P2).
 #
-# Medido 2026-10-01: `haproxy:3.4-alpine` e `odoo:20.0` declaram um utilizador
-# e `container run … id` respondia uid=0 sem uma palavra — aceitar e ignorar,
-# desde a v1.0.0. A omissão ainda não muda (isso é o P2 do ADR); o que este
-# check exige é que o motor o diga, e só quando é verdade. A imagem é construída
-# aqui para a bateria não depender de uma imagem com USER estar em cache.
+# Até 2026-10-01 o `container run … id` respondia uid=0 para uma imagem com
+# `USER`, desde a v1.0.0. Agora corre como o utilizador que a imagem declara, e
+# `-u 0` é a forma explícita de ficar root no container. Num host sem intervalo
+# de subuid só cabe um uid: aí continua a 0 e DI-LO. A imagem é construída aqui
+# para a bateria não depender de uma imagem com USER estar em cache.
 _ud="$OUT/userimg-$PFX"; _ui="e2e-userimg-$PFX:1"
 mkdir -p "$_ud" && printf 'FROM %s\nRUN mkdir -p /srv/own && chown 1000:1000 /srv/own\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
 if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
-  check "USER da imagem não aplicado: o run avisa" ok bash -c \
-    "'$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
-  check "USER da imagem não aplicado: o processo é mesmo uid 0 (o aviso diz a verdade)" ok bash -c \
-    "[ \"\$('$BIN' container run --rm --net none '$_ui' id -u 2>/dev/null)\" = 0 ]"
-  check "com -u explícito não há aviso" ok bash -c \
-    "! '$BIN' container run --rm --net none -u 0 '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
-  check "imagem sem USER não avisa" ok bash -c \
-    "! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  _udef="$("$BIN" container run --rm --net none "$_ui" id -u 2>/dev/null)"
+  if [ "$_udef" = 1000 ]; then
+    check "USER da imagem: sem -u o processo corre como esse utilizador" ok true
+    check "USER da imagem: aplicado, não há aviso" ok bash -c \
+      "! '$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  else
+    check "USER da imagem: sem subuid fica uid 0 e o run diz porquê" ok bash -c \
+      "[ '$_udef' = 0 ] && '$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
+  fi
+  check "USER da imagem: -u 0 fica root no container" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none -u 0 '$_ui' id -u 2>/dev/null)\" = 0 ]"
+  check "imagem sem USER corre como uid 0, sem aviso" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none '$IMG' id -u 2>/dev/null)\" = 0 ] && ! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  check "o /tmp de um container é sticky (1777), não 777" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none '$IMG' stat -c %a /tmp 2>/dev/null)\" = 1777 ]"
 
   # Um utilizador não-root recebe o que a IMAGEM lhe dá, e mais nada (ADR-0062 P1).
   #
@@ -1171,7 +1178,7 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
       check "commit: a layer guarda os donos que o CONTAINER vê" ok bash -c \
         "[ \"\$('$BIN' container run --rm --net none -u 1000 '$_uci' stat -c %u /etc/passwd /srv/own 2>/dev/null | tr '\n' ' ')\" = '0 1000 ' ]"
       check "commit: o USER da imagem base sobrevive" ok bash -c \
-        "'$BIN' container run --rm --net none '$_uci' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
+        "[ \"\$('$BIN' container run --rm --net none '$_uci' id -u 2>/dev/null)\" = 1000 ]"
     else
       skip "commit: donos na layer" "o commit do container de teste falhou neste host"
     fi
@@ -1180,12 +1187,12 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
   else
     skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
   fi
-  "$BIN" container run --rm --net none -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
+  "$BIN" container run --rm --net none -u 0 -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
   "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
   rm -rf "$_ub"
   "$BIN" image remove "$_ui" >/dev/null 2>&1 || true
 else
-  skip "USER da imagem não aplicado" "o build da imagem de teste falhou neste host"
+  skip "USER da imagem" "o build da imagem de teste falhou neste host"
 fi
 rm -rf "$_ud"
 

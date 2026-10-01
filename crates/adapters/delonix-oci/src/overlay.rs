@@ -47,13 +47,14 @@ fn extract_layer_from(reader: impl std::io::Read, dest: &Path) -> Result<Vec<Own
     .map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
 }
 
-/// The non-root owners of a layer blob, from its headers alone (nothing is
-/// written). For a layer unpacked by an engine that did not record them.
-fn scan_layer_owners(reader: impl std::io::Read) -> Result<Vec<Owner>> {
+/// The non-root owners of a layer blob, from its headers alone. For a layer
+/// unpacked by an engine that did not record them — which also unpacked it
+/// without its setuid/setgid/sticky bits, restored here in `unpacked`.
+fn scan_layer_owners(reader: impl std::io::Read, unpacked: &Path) -> Result<Vec<Owner>> {
     with_layer_archive(reader, |archive| match archive {
-        LayerArchive::Gzip(a) => crate::owners::scan(a),
-        LayerArchive::Zstd(a) => crate::owners::scan(a),
-        LayerArchive::Plain(a) => crate::owners::scan(a),
+        LayerArchive::Gzip(a) => crate::owners::scan(a, Some(unpacked)),
+        LayerArchive::Zstd(a) => crate::owners::scan(a, Some(unpacked)),
+        LayerArchive::Plain(a) => crate::owners::scan(a, Some(unpacked)),
     })
     .map_err(|e| Error::Layer(format!("failed to read layer headers: {e}")))
 }
@@ -251,6 +252,12 @@ fn owners_path(layers_dir: &Path, hex: &str) -> PathBuf {
     layers_dir.join(format!("{hex}.owners"))
 }
 
+/// Marks a layer directory as holding the setuid/setgid/sticky bits its blob
+/// records. A sibling of the directory, like the owners.
+fn modes_marker(layers_dir: &Path, hex: &str) -> PathBuf {
+    layers_dir.join(format!("{hex}.modes"))
+}
+
 /// Writes an owners index through a temporary file, so a reader never sees half
 /// of one.
 fn write_owners(path: &Path, owners: &[Owner]) -> Result<()> {
@@ -380,6 +387,7 @@ impl ImageStore {
             .map_err(Error::from)
             .and_then(|f| extract_layer_from(f, &tmp))
             .and_then(|owners| write_owners(&owners_path(layers_dir, hex), &owners))
+            .and_then(|()| std::fs::write(modes_marker(layers_dir, hex), b"").map_err(Error::from))
             .and_then(|()| std::fs::write(tmp.join(".extracted"), b"ok").map_err(Error::from));
         if let Err(e) = extracted {
             let _ = std::fs::remove_dir_all(&tmp);
@@ -506,18 +514,36 @@ impl ImageStore {
     /// One layer's owners: its sidecar, or — for a layer an older engine
     /// unpacked — the headers of its blob, written down for the next reader.
     fn layer_owners(&self, digest: &str, layers_dir: &Path) -> Result<Vec<Owner>> {
-        let path = owners_path(layers_dir, strip(digest));
+        let hex = strip(digest);
+        let path = owners_path(layers_dir, hex);
+        // The modes marker says this layer directory has its special bits: it was
+        // unpacked by an engine that keeps them, or already healed. Without it
+        // the headers are read once more, even when the owners are on record.
+        let modes = modes_marker(layers_dir, hex);
         match std::fs::read(&path) {
-            Ok(bytes) => Ok(crate::owners::decode(&bytes)),
+            Ok(bytes) if modes.exists() => Ok(crate::owners::decode(&bytes)),
+            Ok(_) => self.scan_and_record(digest, layers_dir, &path, &modes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let owners = std::fs::File::open(self.cas().path(digest))
-                    .map_err(Error::from)
-                    .and_then(scan_layer_owners)?;
-                write_owners(&path, &owners)?;
-                Ok(owners)
+                self.scan_and_record(digest, layers_dir, &path, &modes)
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn scan_and_record(
+        &self,
+        digest: &str,
+        layers_dir: &Path,
+        owners_file: &Path,
+        modes: &Path,
+    ) -> Result<Vec<Owner>> {
+        let unpacked = layers_dir.join(strip(digest));
+        let owners = std::fs::File::open(self.cas().path(digest))
+            .map_err(Error::from)
+            .and_then(|f| scan_layer_owners(f, &unpacked))?;
+        write_owners(owners_file, &owners)?;
+        std::fs::write(modes, b"")?;
+        Ok(owners)
     }
 
     /// Marker next to [`Self::LOWERS_FILE`]: this container's overlay is mounted
