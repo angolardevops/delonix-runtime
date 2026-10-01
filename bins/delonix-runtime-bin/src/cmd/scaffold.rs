@@ -101,6 +101,8 @@ struct TemplateMeta {
     versions: &'static str,
     /// Lock file of the template's package manager (`""`: none).
     lock: &'static str,
+    /// Seconds `--up` waits for the health path to answer 200.
+    wait_secs: u64,
 }
 
 /// Default `8000` + the apps' health + no version if the template does not
@@ -109,19 +111,23 @@ fn template_meta(name: &str) -> TemplateMeta {
     TEMPLATE_META
         .iter()
         .find(|m| m.0 == name)
-        .map(|&(_, port, health, version, versions, lock)| TemplateMeta {
-            port,
-            health,
-            version,
-            versions,
-            lock,
-        })
+        .map(
+            |&(_, port, health, version, versions, lock, wait_secs)| TemplateMeta {
+                port,
+                health,
+                version,
+                versions,
+                lock,
+                wait_secs,
+            },
+        )
         .unwrap_or(TemplateMeta {
             port: "8000",
             health: "/api/v1/health/live",
             version: "",
             versions: "",
             lock: "",
+            wait_secs: 120,
         })
 }
 
@@ -616,7 +622,8 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
 /// will not boot without the database, so `stack apply` (not a lone
 /// `container run`) is the way in" — the old fast path violated that on the
 /// very first `--up`.
-fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> {
+fn build_and_up(name: &str, dir: &Path, meta: TemplateMeta) -> Result<()> {
+    let (port, health, wait_secs) = (meta.port, meta.health, meta.wait_secs);
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
     let mut p = super::output::Progress::new();
@@ -630,7 +637,7 @@ fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> 
     p.ok();
 
     p.step("Waiting until healthy", "❤️ ");
-    wait_health(port, health)?;
+    wait_health(port, health, wait_secs)?;
     p.ok();
 
     println!("\n✨ {name} is UP → http://localhost:{port}{health}");
@@ -666,18 +673,18 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
 /// 40s, and measured on a loaded host (load ~30) Odoo 20 took ~85s from its
 /// first log line to serving HTTP — `--up` reported a failure on a stack that
 /// came up on its own a minute later.
-fn wait_health(port: &str, health: &str) -> Result<()> {
-    for _ in 0..240 {
+fn wait_health(port: &str, health: &str, secs: u64) -> Result<()> {
+    for _ in 0..secs * 2 {
         if http_ok(port, health) {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     Err(Error::Invalid(
-        super::po::t(
-            "the container started but did not become healthy in 120s — see `delonix container logs`",
-        )
-        .into(),
+        super::po::tf(
+            "the container started but did not become healthy in {secs}s — see `delonix container logs`",
+            &[("secs", &secs.to_string())],
+        ),
     ))
 }
 
@@ -746,7 +753,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         render_template(t, o, !do_up)?;
         if do_up {
             let meta = template_meta(canonical_template(t));
-            build_and_up(&o.name, &o.dir, meta.port, meta.health)?;
+            build_and_up(&o.name, &o.dir, meta)?;
         }
         return Ok(());
     }

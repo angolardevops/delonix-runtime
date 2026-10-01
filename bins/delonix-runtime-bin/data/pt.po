@@ -3048,8 +3048,8 @@ msgstr "  criado: {path}"
 msgid "`delonix {args}` failed:\n{stderr}"
 msgstr "`delonix {args}` falhou:\n{stderr}"
 
-msgid "the container started but did not become healthy in 120s — see `delonix container logs`"
-msgstr "o container arrancou mas não ficou saudável em 120s — vê `delonix container logs`"
+msgid "the container started but did not become healthy in {secs}s — see `delonix container logs`"
+msgstr "o container arrancou mas não ficou saudável em {secs}s — vê `delonix container logs`"
 
 msgid "done. Now:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
 msgstr "pronto. Agora:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
