@@ -3836,6 +3836,13 @@ spec:
 # while the appliance has changes someone saved and did not apply: its apply
 # pushes everything staged. There is no update in place: a changed spec is
 # removed and applied again.
+#
+# `policies` declare one direction of a target&#x27;s policy in the shape a
+# NetworkPolicy has, lowered to the appliance&#x27;s filter rules (ADR-0059 F3d):
+# rule n lands as `&lt;name&gt;#&lt;n&gt;` at `sequence + n - 1`, and the default verdict
+# as `&lt;name&gt;#default` right after. The appliance loads filter rules in
+# `sequence` order, so the first match here is its first match. A peer that
+# names this engine&#x27;s workloads has no form on the appliance and is refused.
 apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkGateway
 metadata: { name: edge }
@@ -3850,7 +3857,17 @@ spec:
     - description: office to web tier
       source: 192.168.1.0/24   # an alias name, a CIDR, or any
       destination: delonix_web
-      protocol: TCP            # omit for any protocol</code></pre>
+      protocol: TCP            # omit for any protocol
+  policies:
+    - name: web-in
+      target: delonix_web      # an alias name, a prefix, or an address
+      direction: ingress       # ingress (to the target) | egress (from it)
+      defaultPolicy: deny      # the last rule&#x27;s verdict; deny when omitted
+      sequence: 30000          # the first rule&#x27;s position on the appliance
+      rules:
+        - { proto: tcp, port: &quot;443&quot;, from: 192.168.1.0/24 }
+        - { proto: tcp, port: &quot;22&quot;, from: 10.9.0.0/24, log: true }
+        - { port: &quot;8000-8080&quot;, action: deny, stateful: false }</code></pre>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

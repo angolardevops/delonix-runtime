@@ -843,6 +843,97 @@
       ],
       "type": "object"
     },
+    "GatewayPolicyRuleSpec": {
+      "description": "One rule of a [`GatewayPolicySpec`]: the `NetworkPolicy` rule shape, plus\nthe two fields a perimeter appliance holds and the node's chain does not.",
+      "properties": {
+        "action": {
+          "description": "`allow` or `deny`; `allow` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "description": "The other end of an `ingress` rule: an IPv4 address or prefix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log": {
+          "description": "Logs every match.",
+          "type": "boolean"
+        },
+        "port": {
+          "default": "*",
+          "description": "A port, an `n-m` range, or `*` (every port, the default).",
+          "type": "string"
+        },
+        "proto": {
+          "description": "`tcp`, `udp` or `any`; `any` when omitted. With a port, `any` is TCP\nand UDP.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful": {
+          "default": true,
+          "description": "`false` keeps no state for the matched flow; `true` when omitted.",
+          "type": "boolean"
+        },
+        "to": {
+          "description": "The other end of an `egress` rule.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GatewayPolicySpec": {
+      "description": "One direction of the policy for one target (an alias name, a prefix or\nan address the appliance resolves). Each rule lands as\n`<name>#<n>` at `sequence + n - 1`, and the default verdict as\n`<name>#default` right after: pf loads filter rules in `sequence` order\n(measured on OPNsense 26.1.2_5), so the first match here is the\nappliance's.",
+      "properties": {
+        "defaultPolicy": {
+          "description": "`allow` or `deny`; `deny` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress` (traffic to the target) or `egress` (traffic from it).",
+          "type": "string"
+        },
+        "name": {
+          "description": "The prefix of every rule's identity on the appliance.",
+          "type": "string"
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GatewayPolicyRuleSpec"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "description": "The first rule's position among the appliance's filter rules.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "target",
+        "direction",
+        "sequence"
+      ],
+      "type": "object"
+    },
     "GatewayRuleSpec": {
       "properties": {
         "description": {
@@ -1331,6 +1422,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/GatewayAliasSpec"
+          },
+          "type": "array"
+        },
+        "policies": {
+          "description": "Policies for a target behind the gateway, in the same shape a\n`NetworkPolicy` has, lowered to the appliance's filter rules through\nthe policy IR (ADR-0059 F3d/F3e).",
+          "items": {
+            "$ref": "#/$defs/GatewayPolicySpec"
           },
           "type": "array"
         },
