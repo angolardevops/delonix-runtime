@@ -3037,8 +3037,14 @@ antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
   2 de 987 entradas do utilizador (eram 940); o bind do host mantém `1000:1000` e o dono
   continua a escrever; camada de escrita 56 K (eram 13 MB). O gate da bateria, corrido contra
   o motor de antes do P1, falha 4 dos 6 checks de posse.
-- **Por validar**: host root (não rootless), o CRI num nó, e o primeiro arranque do `odoo:20.0`
-  com utilizador num disco calmo.
+- **`odoo:20.0`, a imagem onde o custo foi medido**: primeiro arranque com `-u odoo` em 1,7 s
+  (antes, ainda a varrer aos 16 min); 4 de 122 363 entradas do `odoo`; camada de escrita 480 K;
+  o volume do filestore gravável. O template `odoo` pode passar a declarar `user: odoo` DEPOIS
+  de o P1 estar fundido — antes disso dispararia a varredura antiga.
+- **Limite anterior, que fica**: a extracção não preserva os bits setuid/setgid (um binário
+  `2755` da imagem é `755` no container). O init repõe o modo depois do `chown` (que os limpa),
+  para nada se perder no dia em que a extracção os preservar.
+- **Por validar**: host root (não rootless) e o CRI num nó.
 
 **Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
 ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura

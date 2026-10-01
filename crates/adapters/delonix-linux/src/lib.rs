@@ -3696,9 +3696,24 @@ fn apply_image_owners(owners: &[delonix_compute::owners::Owner]) {
     };
     for o in owners {
         let path = std::path::Path::new("/").join(&o.path);
-        let on_root = std::fs::symlink_metadata(&path).is_ok_and(|m| m.dev() == root_dev);
-        if on_root {
-            lchown_one(&path, o.uid, o.gid);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.dev() != root_dev {
+            continue;
+        }
+        lchown_one(&path, o.uid, o.gid);
+        // The kernel clears setuid/setgid on a chown. An image's setgid binary
+        // (`unix_chkpwd`, group `shadow`) must keep the bit the image gave it,
+        // so the mode goes back. Not for a symlink: it has no mode of its own,
+        // and `chmod` would follow it.
+        let special = meta.mode() & 0o6000 != 0;
+        if special && !meta.file_type().is_symlink() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &path,
+                std::fs::Permissions::from_mode(meta.mode() & 0o7777),
+            );
         }
     }
 }

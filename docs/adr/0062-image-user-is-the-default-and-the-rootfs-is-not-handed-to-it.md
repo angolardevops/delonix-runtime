@@ -186,9 +186,19 @@ are writable; a volume that already held data is untouched; the same holds on a 
 nothing changes without `--user`. `scripts/e2e.sh` checks each of validation steps 1–4 and the
 commit; run against the engine before P1, four of the six ownership checks fail.
 
-Not validated: validation step 5 as a check in the battery (the size was measured by hand), a
-real root (non-rootless) host, the CRI on a node, and `odoo:20.0`'s first start with a user on
-an idle disk. A container created before P1 keeps what the old walk did to it.
+`odoo:20.0` (about 2 GB unpacked, 122 363 entries), the image M4 was measured on: a first start
+with `-u odoo` returned in 1.7 s on an idle disk; 4 entries are owned by `odoo`, the image's
+index has 24, the write layer is 480 K, the named volume at `/var/lib/odoo` is writable and
+`/etc/passwd` is refused.
+
+Not validated: validation step 5 as a check in the battery (the sizes were measured by hand), a
+real root (non-rootless) host, and the CRI on a node. A container created before P1 keeps what
+the old walk did to it.
+
+One limit is older than this change and stays: the unpack does not keep setuid/setgid bits (a
+`2755` binary of the image is `755` in a container), so a setgid helper such as `unix_chkpwd`
+gets its group back and not its bit. The init restores the mode after a chown, which clears
+those bits, so nothing is lost the day the unpack keeps them.
 
 P2 is not implemented.
 
