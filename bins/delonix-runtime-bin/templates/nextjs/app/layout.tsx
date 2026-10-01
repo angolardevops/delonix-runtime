@@ -1,11 +1,16 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { PROJECT_NAME } from "@/lib/project";
+import "./globals.css";
 
-export const metadata = { title: "__NAME__" };
+export const metadata: Metadata = { title: PROJECT_NAME };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <main>{children}</main>
+      </body>
     </html>
   );
 }

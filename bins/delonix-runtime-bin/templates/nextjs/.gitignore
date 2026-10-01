@@ -1,5 +1,10 @@
 node_modules/
 .next/
-.env
-*.log
+coverage/
 next-env.d.ts
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store

@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { json, route } from "@/lib/http/route";
 
-// Liveness probe (used by the Delonixfile HEALTHCHECK).
-export function GET() {
-  return NextResponse.json({ status: "alive" });
-}
+// Never prerendered at build time: the answer is about the running process.
+export const dynamic = "force-dynamic";
+
+/** Liveness: the process answers. Used by the image's HEALTHCHECK. */
+export const GET = route(() => json(200, { status: "alive" }), { probe: true });
