@@ -1342,32 +1342,6 @@ mod tests {
         );
     }
 
-    /// CI/CD (workflows, SonarQube, CONTRIBUTING.md, commitlint) does not
-    /// assume the demo's file layout — only the language's own commands,
-    /// already read from the template's real `package.json` — so it is
-    /// included in adopt mode too, unlike the Delonixfile/manifest.
-    #[test]
-    fn adopcao_tambem_recebe_o_ci_cd_generico() {
-        let (_tmp, dir) = scratch();
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("package.json"), "{}").unwrap();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "app".into(),
-            image: None,
-            force: false,
-            template: Some("node".into()),
-            template_version: None,
-            up: false,
-        };
-        render_template("node", &o, false).unwrap();
-        assert!(dir.join(".github/workflows/ci.yml").exists());
-        assert!(dir.join(".gitlab-ci.yml").exists());
-        assert!(dir.join("sonar-project.properties").exists());
-        assert!(dir.join("CONTRIBUTING.md").exists());
-        assert!(dir.join("commitlint.config.js").exists());
-    }
-
     /// Re-correr `init` sobre o SEU PRÓPRIO scaffold anterior (agora não-vazio)
     /// tem de mudar para adopção — nunca voltar a despejar o código de exemplo
     /// por cima de edições que o utilizador já tenha feito.
@@ -1542,235 +1516,6 @@ mod tests {
         );
     }
 
-    /// `-v` on the `django` template pins `pyproject.toml`'s dependency as
-    /// `django==<version>.*` — a bare major (`5`) or major.minor (`5.2`), the
-    /// same token substituted into the README so the generated project
-    /// documents what it was actually pinned to.
-    #[test]
-    fn django_com_v_fixa_a_dependencia_como_wildcard() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: Some("5.2".into()),
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.2.*\""),
-            "pyproject.toml não fixou a versão pedida:\n{pyproject}"
-        );
-        assert!(
-            !pyproject.contains("__TEMPLATE_VERSION__"),
-            "token não substituído"
-        );
-        let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
-        assert!(readme.contains("django==5.2.*"));
-    }
-
-    /// Without `-v`, `django` falls back to `template.meta`'s own default
-    /// (`5.1`) — never a literal `>=5.1` again (that let a future major in
-    /// unannounced) and never the raw token surviving into the file.
-    #[test]
-    fn django_sem_v_usa_a_versao_por_omissao() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: None,
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.1.*\""),
-            "sem -v, devia cair no default do template.meta:\n{pyproject}"
-        );
-        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// A bare major (`-v 5`, no minor) is a valid form too — it pins
-    /// `django==5.*`, i.e. "any 5.x", not a specific minor.
-    #[test]
-    fn django_com_v_major_nu_fixa_qualquer_5x() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: Some("5".into()),
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.*\""),
-            "um major nu devia fixar `==5.*`, não uma versão específica:\n{pyproject}"
-        );
-    }
-
-    /// `-v` on `fastapi` pins `pyproject.toml`'s FastAPI dependency the same
-    /// way `django` pins its own — `==X.Y.*`, not an unbounded `>=X.Y`.
-    #[test]
-    fn fastapi_with_v_pins_fastapi_as_a_wildcard() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("fastapi".into()),
-            template_version: Some("0.116".into()),
-            up: false,
-        };
-        render_template("fastapi", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"fastapi==0.116.*\""),
-            "pyproject.toml não fixou o fastapi pedido:\n{pyproject}"
-        );
-        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `go` has no framework to pin — it fixes the TOOLCHAIN, in
-    /// BOTH `go.mod` (what `go build` enforces) and the Delonixfile's `FROM`
-    /// (what actually builds it). The two must never disagree.
-    #[test]
-    fn go_com_v_fixa_o_toolchain_no_gomod_e_no_delonixfile() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("go".into()),
-            template_version: Some("1.22".into()),
-            up: false,
-        };
-        render_template("go", &o, false).unwrap();
-        let gomod = std::fs::read_to_string(dir.join("go.mod")).unwrap();
-        assert!(
-            gomod.contains("go 1.22"),
-            "go.mod não fixou a versão:\n{gomod}"
-        );
-        let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
-        assert!(
-            delonixfile.contains("FROM golang:1.22-alpine"),
-            "Delonixfile não fixou o toolchain:\n{delonixfile}"
-        );
-    }
-
-    /// `-v` on `laravel` pins `composer.json`'s `laravel/framework` — the PHP
-    /// version stays independent (it tracks the FrankenPHP base image, not `-v`).
-    #[test]
-    fn laravel_com_v_fixa_o_framework_sem_tocar_no_php() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("laravel".into()),
-            template_version: Some("11".into()),
-            up: false,
-        };
-        render_template("laravel", &o, false).unwrap();
-        let composer = std::fs::read_to_string(dir.join("composer.json")).unwrap();
-        assert!(
-            composer.contains("\"laravel/framework\": \"^11\""),
-            "composer.json não fixou o framework pedido:\n{composer}"
-        );
-        assert!(
-            composer.contains("\"php\": \"^8.2\""),
-            "a versão do PHP não devia mexer com -v:\n{composer}"
-        );
-        assert!(!composer.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `node` pins `package.json`'s `fastify` dependency.
-    #[test]
-    fn node_com_v_fixa_o_fastify() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("node".into()),
-            template_version: Some("5.1.0".into()),
-            up: false,
-        };
-        render_template("node", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        assert!(
-            pkg.contains("\"fastify\": \"^5.1.0\""),
-            "package.json não fixou o fastify pedido:\n{pkg}"
-        );
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `nextjs` pins `package.json`'s `next` dependency.
-    #[test]
-    fn nextjs_com_v_fixa_o_next() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("nextjs".into()),
-            template_version: Some("14.2.0".into()),
-            up: false,
-        };
-        render_template("nextjs", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        assert!(
-            pkg.contains("\"next\": \"^14.2.0\""),
-            "package.json não fixou o next pedido:\n{pkg}"
-        );
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `nestjs` pins EVERY `@nestjs/*` package to the SAME version —
-    /// core, common, platform-express and the CLI move together, never a
-    /// mixed-major install.
-    #[test]
-    fn nestjs_com_v_fixa_todos_os_pacotes_nestjs_juntos() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("nestjs".into()),
-            template_version: Some("10.0.0".into()),
-            up: false,
-        };
-        render_template("nestjs", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        for pkg_name in [
-            "@nestjs/common",
-            "@nestjs/core",
-            "@nestjs/platform-express",
-            "@nestjs/cli",
-        ] {
-            assert!(
-                pkg.contains(&format!("\"{pkg_name}\": \"^10.0.0\"")),
-                "{pkg_name} não ficou fixado à mesma versão:\n{pkg}"
-            );
-        }
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
     /// upstream image tag, the same idiom as `odoo` — never a dependency file.
     #[test]
@@ -1936,5 +1681,99 @@ mod tests {
             "own CI"
         );
         assert!(adopt_ci_skip_reason(&dir, "").is_some());
+    }
+
+    /// Every embedded template, for every `-v` it declares: renders, leaves
+    /// no placeholder, every JSON and YAML file parses, and the version shows
+    /// up in what was written. One test for all templates, so a new template
+    /// (or a new accepted version) is covered the day it is added.
+    #[test]
+    fn every_template_renders_valid_files_for_each_declared_version() {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+        for tpl in template_names() {
+            let meta = template_meta(tpl);
+            let versions: Vec<&str> = if meta.versions.is_empty() {
+                vec![meta.version]
+            } else {
+                assert!(
+                    meta.versions.split(',').any(|v| v.trim() == meta.version),
+                    "{tpl}: the default version {} is not in versions={}",
+                    meta.version,
+                    meta.versions
+                );
+                meta.versions.split(',').map(str::trim).collect()
+            };
+            for v in versions {
+                let (_tmp, dir) = scratch();
+                let v_opt = (!v.is_empty()).then_some(v);
+                render_template(tpl, &opts(dir.clone(), "my-svc", tpl, v_opt), false)
+                    .unwrap_or_else(|e| panic!("{tpl} -v {v}: {e}"));
+                let mut files = Vec::new();
+                walk(&dir, &mut files);
+                let mut version_seen = v.is_empty();
+                for f in &files {
+                    let Ok(text) = std::fs::read_to_string(f) else {
+                        continue;
+                    };
+                    for token in ["__NAME__", "__MODULE__", "__PORT__", "__TEMPLATE_VERSION__"] {
+                        assert!(!text.contains(token), "{tpl} -v {v}: {token} left in {f:?}");
+                    }
+                    version_seen |= text.contains(v);
+                    match f.extension().and_then(|e| e.to_str()) {
+                        Some("json") => {
+                            serde_json::from_str::<serde_json::Value>(&text)
+                                .unwrap_or_else(|e| panic!("{tpl} -v {v}: {f:?}: {e}"));
+                        }
+                        Some("yaml" | "yml") => {
+                            for doc in serde_yaml::Deserializer::from_str(&text) {
+                                <serde_yaml::Value as serde::Deserialize>::deserialize(doc)
+                                    .unwrap_or_else(|e| panic!("{tpl} -v {v}: {f:?}: {e}"));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(version_seen, "{tpl}: -v {v} appears in no generated file");
+            }
+            if !meta.versions.is_empty() {
+                let (_tmp, dir) = scratch();
+                let err =
+                    render_template(tpl, &opts(dir.clone(), "my-svc", tpl, Some("0.0.1")), false);
+                assert!(
+                    err.is_err() && !dir.exists(),
+                    "{tpl}: -v 0.0.1 was accepted"
+                );
+            }
+        }
+    }
+
+    /// Adoption writes the template's CI into a project that uses the
+    /// template's package manager and has no CI of its own.
+    #[test]
+    fn adoption_writes_the_ci_when_the_project_can_run_it() {
+        let (_tmp, dir) = scratch();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        render_template("node", &opts(dir.clone(), "app", "node", None), false).unwrap();
+        assert!(dir.join(".github/workflows/ci.yml").exists());
+        assert!(dir.join(".gitlab-ci.yml").exists());
+        assert!(dir.join("CONTRIBUTING.md").exists());
+        // The same project with npm's lock instead: glue yes, CI no.
+        let (_tmp2, dir2) = scratch();
+        std::fs::create_dir_all(&dir2).unwrap();
+        std::fs::write(dir2.join("package-lock.json"), "{}").unwrap();
+        render_template("node", &opts(dir2.clone(), "app", "node", None), false).unwrap();
+        assert!(dir2.join("Delonixfile").exists());
+        assert!(!dir2.join(".github/workflows/ci.yml").exists());
     }
 }
