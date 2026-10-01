@@ -22,6 +22,9 @@ pub struct ImageConfig {
     pub env: Vec<String>,
     /// `""` when the image sets none.
     pub working_dir: String,
+    /// The image's `USER`, verbatim (`odoo`, `101`, `101:101`); `""` when the
+    /// image sets none. Read so the run can SAY it is not applied (ADR-0062).
+    pub user: String,
 }
 
 /// Images: resolve a reference (pulling it when absent), read its config, and

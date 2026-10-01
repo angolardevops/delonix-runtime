@@ -1119,6 +1119,30 @@ check "progresso: todo o • tem o seu ✓" ok bash -c "
   [ \"\$o\" = \"\$c\" ] || { printf 'abertos=%s fechados=%s\n%s\n' \"\$o\" \"\$c\" \"\$err\"; exit 1; }
 "
 
+# O USER de uma imagem que NÃO é aplicado tem de ser DITO (ADR-0062, P0).
+#
+# Medido 2026-10-01: `haproxy:3.4-alpine` e `odoo:20.0` declaram um utilizador
+# e `container run … id` respondia uid=0 sem uma palavra — aceitar e ignorar,
+# desde a v1.0.0. A omissão ainda não muda (isso é o P2 do ADR); o que este
+# check exige é que o motor o diga, e só quando é verdade. A imagem é construída
+# aqui para a bateria não depender de uma imagem com USER estar em cache.
+_ud="$OUT/userimg-$PFX"; _ui="e2e-userimg-$PFX:1"
+mkdir -p "$_ud" && printf 'FROM %s\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
+if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
+  check "USER da imagem não aplicado: o run avisa" ok bash -c \
+    "'$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
+  check "USER da imagem não aplicado: o processo é mesmo uid 0 (o aviso diz a verdade)" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none '$_ui' id -u 2>/dev/null)\" = 0 ]"
+  check "com -u explícito não há aviso" ok bash -c \
+    "! '$BIN' container run --rm --net none -u 0 '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  check "imagem sem USER não avisa" ok bash -c \
+    "! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  "$BIN" image rm "$_ui" >/dev/null 2>&1 || true
+else
+  skip "USER da imagem não aplicado" "o build da imagem de teste falhou neste host"
+fi
+rm -rf "$_ud"
+
 check "container run -d -p" ok "$BIN" container run -d --name "$C" -p "$P1:80" "$IMG" sleep 600
 if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "container ls mostra-o" ok bash -c "'$BIN' container ls | grep -q '$C'"

@@ -41,6 +41,7 @@ impl delonix_compute::ports::ImageStore for HostImages<'_> {
             cmd: img.config.cmd.clone(),
             env: img.config.env.clone(),
             working_dir: img.config.working_dir.clone(),
+            user: img.config.user.clone(),
         }
     }
 
