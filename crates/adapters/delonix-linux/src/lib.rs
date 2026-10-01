@@ -3407,8 +3407,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         }
     }
     let err = execvp(&argv[0], argv).unwrap_err();
-    let reason = format!("exec {}: {err}", argv[0].to_string_lossy());
-    eprintln!("delonix: {reason}");
+    let reason = report_exec_failure(&argv[0], err);
     if let Some(w) = exec_w {
         // SAFETY: our end of the pipe created in `spawn`; the reason goes to the
         // parent, which is waiting for it on a detached start. SIGPIPE ignored
@@ -5737,6 +5736,15 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
     outcome
 }
 
+/// Says on stderr why an `execvp` failed and returns the reason. One function
+/// for the container's init and for `exec`, so the two cannot word the same
+/// failure differently — or one of them say nothing at all, which `exec` did.
+fn report_exec_failure(program: &std::ffi::CStr, err: nix::errno::Errno) -> String {
+    let reason = format!("exec {}: {err}", program.to_string_lossy());
+    eprintln!("delonix: {reason}");
+    reason
+}
+
 /// How long a detached `run` waits for its command's `execvp` once the mount
 /// namespace is final. Long enough for the common case, short enough that a
 /// one-off chown of a large rootfs does not hold `run -d` hostage.
@@ -7378,7 +7386,13 @@ pub fn exec_with(
                             }
                         }
                     }
-                    let _ = execvp(&cargv[0], &cargv);
+                    // `execvp` only returns when it failed. Say why, as the
+                    // container's own init does: a bare 127 with nothing on
+                    // stderr (measured: `exec <c> id` in an image whose PATH
+                    // had lost /usr/bin) reads as the command having run and
+                    // printed nothing.
+                    let Err(err) = execvp(&cargv[0], &cargv);
+                    report_exec_failure(&cargv[0], err);
                     // SAFETY: `_exit` in the forked child: it must not run the parent's
                     // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(127) };

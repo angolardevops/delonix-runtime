@@ -1143,6 +1143,11 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "container describe" ok "$BIN" container describe "$C"
   check "container inspect (JSON válido)" ok bash -c "'$BIN' container inspect '$C' | python3 -m json.tool >/dev/null"
   check "container exec" ok "$BIN" container exec "$C" /bin/true
+  # A command that does not exist: 127 AND the reason. Measured before: 127
+  # with nothing on stderr, which reads as a command that ran and printed nothing.
+  check "exec de um comando inexistente sai 127" 127 "$BIN" container exec "$C" no-such-command-e2e
+  check "exec de um comando inexistente diz qual e porquê" ok sh -c \
+    "'$BIN' container exec '$C' no-such-command-e2e 2>&1 | grep -q 'exec no-such-command-e2e'"
   check "container logs" ok "$BIN" container logs "$C"
   check "container stats" ok "$BIN" container stats "$C"
 
