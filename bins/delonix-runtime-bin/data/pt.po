@@ -14876,3 +14876,8 @@ msgstr "Aplica só se o plano ainda for este: um `planDigest` do `stack plan -o 
 
 msgid "--plan-digest was given, and the manifest has no network document with a plan digest (kind: NetworkGateway) — nothing would be checked"
 msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede com digest de plano (kind: NetworkGateway) — nada seria verificado"
+
+# ---- ADR-0059 F4c: step ledger ----
+
+msgid "networkgateway/{name}: the last run was {why} — resuming, with {n} staged change(s) of it adopted"
+msgstr "networkgateway/{name}: a última execução ficou {why} — a retomar, com {n} alteração(ões) preparada(s) por ela adoptada(s)"

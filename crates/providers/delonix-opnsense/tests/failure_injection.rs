@@ -703,6 +703,63 @@ fn observe_reads_back_only_what_carries_our_mark() {
     assert_eq!(observed.aliases[0].content, ["10.0.0.1", "10.0.0.2"]);
 }
 
+/// ADR-0059 D4: what a process of this engine staged and died before
+/// applying is adopted by its owner mark; a hand-made rule staged next to it
+/// is not, and the pre-check still refuses it. Measured live first: a killed
+/// apply left 2 staged rules, and the next run called them someone else's.
+#[test]
+fn a_dead_runs_staged_rule_is_adopted_by_its_mark_and_a_hand_made_one_is_not() {
+    // One answer per read: the pending check, the adoption's own lookup, and
+    // the pre-check after it (a scripted reply is served once).
+    let both = || {
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(U1), rule_row(U2, "by hand")])),
+        )
+    };
+    let appliance = MockAppliance::start(script(&[both(), both(), both()]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    let adopted = client.adopt_pending(&mark(), &[], &staging).unwrap();
+    assert_eq!(adopted.len(), 1, "{adopted:?}");
+    assert!(adopted[0].contains(U1), "{adopted:?}");
+    let err = client.check_no_foreign_pending(&staging).unwrap_err();
+    assert!(err.to_string().contains(U2), "{err}");
+    assert!(!err.to_string().contains(U1), "{err}");
+}
+
+/// A teardown that died after staging a deletion: the rule is gone from the
+/// config and still loaded in pf, so nothing carries a mark. It is ours only
+/// when the ledger saved its id before deleting.
+#[test]
+fn a_dead_teardowns_deletion_is_adopted_only_by_the_id_the_ledger_saved() {
+    // pf answers once per pending check: two adoptions and two pre-checks.
+    let loaded = || {
+        (
+            "GET",
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[U2])),
+        )
+    };
+    let appliance = MockAppliance::start(script(&[loaded(), loaded(), loaded(), loaded()]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let unknown = Staging::default();
+    assert!(client
+        .adopt_pending(&mark(), &[], &unknown)
+        .unwrap()
+        .is_empty());
+    assert!(client.check_no_foreign_pending(&unknown).is_err());
+    let known = Staging::default();
+    let adopted = client
+        .adopt_pending(&mark(), &[U2.to_string()], &known)
+        .unwrap();
+    assert_eq!(adopted.len(), 1, "{adopted:?}");
+    client
+        .check_no_foreign_pending(&known)
+        .expect("the deletion is this engine's own");
+}
+
 fn web_rule() -> GatewayRule {
     GatewayRule {
         description: "allow web".into(),
