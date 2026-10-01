@@ -1144,6 +1144,26 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     "[ \"\$('$BIN' container run --rm --net none '$IMG' id -u 2>/dev/null)\" = 0 ] && ! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
   check "o /tmp de um container é sticky (1777), não 777" ok bash -c \
     "[ \"\$('$BIN' container run --rm --net none '$IMG' stat -c %a /tmp 2>/dev/null)\" = 1777 ]"
+  # O build corre cada RUN como o USER em vigor, e a cache não perde os donos.
+  #
+  # Medido 2026-10-01 antes da correcção: um RUN depois de `USER app` corria
+  # como root; e um rebuild com cache devolvia `/home/app` e uma pasta
+  # `chown app` como `root` — o mesmo ficheiro, duas imagens diferentes.
+  _bd="$OUT/userbuild-$PFX"; _bi="e2e-userbuild-$PFX"
+  mkdir -p "$_bd" && printf 'FROM %s\nRUN adduser -D app\nUSER app\nRUN id -u > /home/app/who\nUSER root\nRUN mkdir /srv/own && chown app:app /srv/own\nUSER app\n' "$IMG" > "$_bd/Delonixfile"
+  _bown() { "$BIN" container run --rm --net none "$1" sh -c 'cat /home/app/who; stat -c %U /srv/own /home/app /home/app/who /etc/passwd' 2>/dev/null | tr '\n' ' '; }
+  if [ "$_udef" = 1000 ] && "$BIN" build -t "$_bi:1" "$_bd" >/dev/null 2>&1; then
+    check "build: um RUN depois de USER corre como esse utilizador, e os donos ficam na imagem" ok bash -c \
+      "[ \"$(_bown "$_bi:1")\" = '1000 app app app root ' ]"
+    echo 'RUN true' >> "$_bd/Delonixfile"
+    "$BIN" build -t "$_bi:2" "$_bd" >/dev/null 2>&1 || true
+    check "build: um rebuild com cache dá os mesmos donos" ok bash -c \
+      "[ \"$(_bown "$_bi:2")\" = '1000 app app app root ' ]"
+    "$BIN" image remove "$_bi:1" "$_bi:2" >/dev/null 2>&1 || true
+  else
+    skip "build: USER posicional e donos na cache" "sem subuid, ou o build de teste falhou neste host"
+  fi
+  rm -rf "$_bd"
 
   # Um utilizador não-root recebe o que a IMAGEM lhe dá, e mais nada (ADR-0062 P1).
   #

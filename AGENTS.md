@@ -3009,8 +3009,17 @@ antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
 **P0, P1 e P2 estão feitos** (o ADR passou a Aceite). P2: sem `--user`, o processo corre como o
 `USER` da imagem; `--user 0` fica root. É quebra de contrato do `container run`, logo a release
 que o levar é uma major. Num host rootless sem subuid só cabe um uid: fica a 0 e o `run` di-lo
-(`RunHost::can_map_id_range`). O `build` não muda: os containers de trabalho não passam pelo
-`resolve_run`.
+(`RunHost::can_map_id_range`).
+
+**O `build` segue a mesma regra** (medido e corrigido a seguir). Os containers de trabalho não
+passam pelo `resolve_run`, e tinham três defeitos: um `RUN` depois de `USER app` corria como
+root; um `RUN` sobre uma base com `USER` corria como root; e **um rebuild com cache perdia os
+donos** (`/home/app` voltava `root`). Agora `USER` é um passo posicional (`Step::User`): cada
+`RUN` corre como o utilizador em vigor, resolvido contra o `/etc/passwd` do estágio NESSE passo
+(um nome que não existe é erro ali). A árvore flat recebe o índice de donos da base
+(`__chownidx`), e o clone de estágio e a cache copiam dentro do userns mapeado (`__cptree`) —
+um `cp -a` de fora não consegue manter um dono de subuid. O `WORKDIR` continua a ser criado
+por root, como no Docker. Gate: dois checks «build:» na secção do `USER` do `scripts/e2e.sh`.
 
 - **O índice de donos** (`delonix_compute::owners`, `delonix-oci::owners`): ao extrair uma layer,
   as entradas que o tar dá a um não-root vão para `layers/<hex>.owners` (AO LADO da pasta, nunca

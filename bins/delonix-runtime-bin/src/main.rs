@@ -880,6 +880,19 @@ fn main() {
         }
         std::process::exit(0);
     }
+    if raw.len() == 4 && (raw[1] == "__cptree" || raw[1] == "__chownidx") {
+        let (a, b) = (std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]));
+        let done = if raw[1] == "__cptree" {
+            cmd::mapped::cptree(a, b)
+        } else {
+            cmd::mapped::chownidx(a, b)
+        };
+        if let Err(e) = done {
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
+            std::process::exit(cmd::exitcode::for_error(&e));
+        }
+        std::process::exit(0);
+    }
     if raw.len() == 4 && raw[1] == "__duusage" {
         if let Err(e) =
             cmd::mapped::duusage(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
