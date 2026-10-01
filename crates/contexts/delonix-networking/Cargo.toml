@@ -10,6 +10,9 @@ delonix-model = { workspace = true }
 # `PolicyIr` (ADR-0059 D6): the typed policy the firewall lowerings share.
 delonix-net-rules = { workspace = true }
 thiserror = { workspace = true }
+# The plan digest (ADR-0059 D4): SHA-256 over the canonical JSON of a plan's inputs.
+sha2 = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

@@ -234,6 +234,12 @@ enum Cmd {
         /// Remove what this stack owns and the manifest no longer declares.
         #[arg(long)]
         prune: bool,
+        /// Apply only if this is still the plan: a `planDigest` from `stack
+        /// plan -o json` (repeatable, one per network document). A network
+        /// document whose digest, recomputed now, is not among them is a
+        /// stale plan — refused before anything is written.
+        #[arg(long = "plan-digest", value_name = "DIGEST")]
+        plan_digest: Vec<String>,
     },
     /// Show what an apply would change, and change nothing.
     Plan {
@@ -607,12 +613,14 @@ fn run() -> Result<()> {
             dry_run,
             replace,
             prune,
+            plan_digest,
         } => cmd::stack::run(cmd::stack::StackCmd::Apply {
             name,
             file,
             dry_run,
             replace,
             prune,
+            plan_digest,
         }),
         Cmd::Plan {
             file,

@@ -14859,3 +14859,20 @@ msgstr "digest do plano"
 
 msgid "cause"
 msgstr "causa"
+
+# ---- ADR-0059 F4b: plan digest ----
+
+msgid "the plan was computed against a state that has changed since"
+msgstr "o plano foi calculado contra um estado que entretanto mudou"
+
+msgid "`stack apply --plan-digest` was given a digest, and the digest recomputed now for a network document is not among the ones given: the manifest, what the provider holds, the provider, its capabilities or the catalog changed between the plan and the apply. ADR-0059 D5 reason `stale_plan`. Nothing was written."
+msgstr "O `stack apply --plan-digest` recebeu um digest, e o digest recalculado agora para um documento de rede não está entre os fornecidos: o manifesto, o que o provider tem, o provider, as suas capacidades ou o catálogo mudaram entre o plano e o apply. Razão `stale_plan` do ADR-0059 D5. Nada foi escrito."
+
+msgid "Plan again (`delonix stack plan -o json`), read what changed, and apply with the new `planDigest`."
+msgstr "Volta a planear (`delonix stack plan -o json`), lê o que mudou e aplica com o `planDigest` novo."
+
+msgid "Apply only if this is still the plan: a `planDigest` from `stack plan -o json` (repeatable, one per network document). A network document whose digest, recomputed now, is not among them is a stale plan — refused before anything is written."
+msgstr "Aplica só se o plano ainda for este: um `planDigest` do `stack plan -o json` (repetível, um por documento de rede). Um documento de rede cujo digest, recalculado agora, não esteja entre eles é um plano obsoleto — recusado antes de se escrever seja o que for."
+
+msgid "--plan-digest was given, and the manifest has no network document with a plan digest (kind: NetworkGateway) — nothing would be checked"
+msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede com digest de plano (kind: NetworkGateway) — nada seria verificado"

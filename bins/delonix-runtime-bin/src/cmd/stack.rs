@@ -123,6 +123,12 @@ pub enum StackCmd {
         /// Never happens without this flag.
         #[arg(long = "prune")]
         prune: bool,
+        /// Apply only if this is still the plan: a `planDigest` from `stack
+        /// plan -o json` (repeatable, one per network document). A network
+        /// document whose digest, recomputed now, is not among them is a
+        /// stale plan — refused before anything is written.
+        #[arg(long = "plan-digest", value_name = "DIGEST")]
+        plan_digest: Vec<String>,
     },
     /// Removes everything this stack owns (by the `delonix.io/stack` label).
     ///
@@ -323,6 +329,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             dry_run,
             replace,
             prune,
+            plan_digest,
         } => {
             if dry_run {
                 let path = manifest::resolve_path(file)?;
@@ -330,7 +337,7 @@ pub fn run(action: StackCmd) -> Result<()> {
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file, name, replace, prune)
+                apply(file, name, replace, prune, plan_digest)
             }
         }
         StackCmd::Plan {
@@ -774,7 +781,15 @@ fn plan_cmd(
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
-    let changes = build_plan(&docs, &stack)?;
+    let mut changes = build_plan(&docs, &stack)?;
+    for c in &mut changes {
+        if let Some(doc) = docs
+            .iter()
+            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+        {
+            c.plan_digest = network_plan_digest(doc)?;
+        }
+    }
     let any = changes.iter().any(|c| c.changed);
     match output {
         super::output::OutputFormat::Json => super::output::print_json(&changes)?,
@@ -1459,6 +1474,7 @@ fn apply(
     name: Option<String>,
     replace: Vec<String>,
     do_prune: bool,
+    plan_digests: Vec<String>,
 ) -> Result<()> {
     // `--replace` is the flag that AUTHORIZES a destructive recreate, so a value
     // it cannot possibly match is refused here rather than ignored. Accepting
@@ -1482,7 +1498,59 @@ fn apply(
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
+    refuse_stale_plan(&docs, &plan_digests)?;
     apply_docs(&docs, &path, name.as_deref(), replace, do_prune, None)
+}
+
+/// The digest of one document's plan, for the Kinds that have one (ADR-0059
+/// D4): those whose plan is decided from a remote provider's state.
+fn network_plan_digest(doc: &manifest::ManifestDoc) -> Result<Option<String>> {
+    match doc.kind.as_str() {
+        k::NETWORK_GATEWAY => super::network_gateway::plan_digest(doc),
+        _ => Ok(None),
+    }
+}
+
+/// `--plan-digest`: every network document's digest, recomputed now, has to
+/// be one of those given — the `If-Match` rule applied to a plan. Checked
+/// before the first write; without the flag nothing is checked and `apply`
+/// plans and applies in one invocation, as it always has.
+fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result<()> {
+    if given.is_empty() {
+        return Ok(());
+    }
+    let mut checked = 0;
+    for doc in docs {
+        let id = format!("{}/{}", doc.kind, doc.metadata.name);
+        let now = match doc.kind.as_str() {
+            k::NETWORK_GATEWAY => network_plan_digest(doc)?.ok_or_else(|| {
+                delonix_model::Error::from(delonix_networking::Error::StalePlan(format!(
+                    "{id}: no plan digest can be computed (no provider resolves for it), so \
+                     the plan it was given cannot be confirmed — nothing was written"
+                )))
+            })?,
+            _ => continue,
+        };
+        checked += 1;
+        if !given.iter().any(|g| g == &now) {
+            return Err(delonix_networking::Error::StalePlan(format!(
+                "{id}: the plan is stale — its digest is now {now}, which is not among the \
+                 --plan-digest given. The manifest, what the provider holds, the provider or \
+                 its capabilities changed since the plan. Nothing was written; plan again"
+            ))
+            .into());
+        }
+    }
+    if checked == 0 {
+        return Err(delonix_model::Error::Invalid(
+            super::po::t(
+                "--plan-digest was given, and the manifest has no network document with a plan \
+             digest (kind: NetworkGateway) — nothing would be checked",
+            )
+            .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The apply itself, on documents already in hand.
@@ -3258,6 +3326,7 @@ mod tests {
             changed: Default::default(),
             conditions: Default::default(),
             diffs: Default::default(),
+            plan_digest: None,
         }
     }
 
@@ -3844,6 +3913,7 @@ spec: {}
             conditions: vec![],
             diffs: vec![],
             changed: true,
+            plan_digest: None,
         };
         // Deliberately fed in creation order, to prove the function reorders.
         let changes: Vec<_> = ["Network", "Volume", "Container", "Pod"]

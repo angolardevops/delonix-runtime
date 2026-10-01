@@ -54,6 +54,7 @@ pub fn run(action: ManifestCmd) -> Result<()> {
             dry_run: true,
             replace: Vec::new(),
             prune: false,
+            plan_digest: Vec::new(),
         }),
         ManifestCmd::Schema { kind } => {
             super::schema::run(super::schema::SchemaCmd::Print { kind })

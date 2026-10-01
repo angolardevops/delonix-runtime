@@ -889,6 +889,8 @@ dependencies = [
  "delonix-compute",
  "delonix-model",
  "delonix-net-rules",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.19",
 ]
 
