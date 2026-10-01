@@ -80,7 +80,14 @@ pub struct VNetSpecInput {
 pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets"];
 
 /// Fields the reconciler compares.
-pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &["vnets"];
+///
+/// `remote` is what the cluster holds for the zone under the record's owner
+/// mark, observed on every plan (ADR-0059 D4): `in sync`, or each difference
+/// from what the record declared. The manifest always wants `in sync`.
+pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &["vnets", "remote"];
+
+/// The `remote` field of a record that matches the cluster.
+const IN_SYNC: &str = "in sync";
 
 /// A registered record: what was last declared, plus the ownership fields
 /// every ownable Kind's own registry carries (mirrors `NetworkGatewayRecord`).
@@ -172,6 +179,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let mut fields = BTreeMap::new();
     fields.insert("vnets".into(), vnets_field(&spec.vnets));
+    fields.insert("remote".into(), IN_SYNC.into());
     Ok(super::reconcile::Desired {
         kind: k::NETWORK_ZONE.into(),
         name: doc.metadata.name.clone(),
@@ -184,20 +192,98 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// Every declared `NetworkZone` — the enumeration `--prune` needs, same
 /// reasoning as `network_gateway::actual`.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
-    Ok(store()?
+    store()?
         .list()?
         .into_iter()
-        .map(|rec| super::reconcile::Actual {
-            kind: k::NETWORK_ZONE.into(),
-            name: rec.name.clone(),
-            fields: record_fields(&rec),
-            owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
-            last_applied: rec
-                .annotations
-                .get(super::reconcile::LAST_APPLIED)
-                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        .map(|rec| {
+            let mut fields = record_fields(&rec);
+            fields.insert("remote".into(), remote_field(&rec)?);
+            Ok(super::reconcile::Actual {
+                kind: k::NETWORK_ZONE.into(),
+                name: rec.name.clone(),
+                fields,
+                owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                last_applied: rec
+                    .annotations
+                    .get(super::reconcile::LAST_APPLIED)
+                    .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+            })
         })
-        .collect())
+        .collect()
+}
+
+/// The record's vnets as the port's type, in this zone.
+fn declared_vnets(rec: &NetworkZoneRecord) -> Vec<VNetSpec> {
+    rec.vnets
+        .iter()
+        .map(|v| VNetSpec {
+            name: v.name.clone(),
+            zone: rec.name.clone(),
+            alias: v.alias.clone(),
+        })
+        .collect()
+}
+
+/// What the cluster holds for the record's zone under its owner mark,
+/// compared with what the record declared (ADR-0059 D4, observe; read-only).
+/// A record without a mark owns nothing that can be observed, and says so
+/// instead of claiming to be in sync.
+fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
+    if rec.owner.is_empty() {
+        return Ok("not observed: the record predates owner marks".into());
+    }
+    let owner = OwnerMark::new(&rec.owner)?;
+    let (provider_id, provider) = resolve_provider(&rec.provider)?;
+    let observed = provider
+        .observe(&rec.name, &owner)
+        .map_err(at(provider_id, "observe"))?;
+    let drift = delonix_sdn::segment::segment_drift(&rec.name, &declared_vnets(rec), &observed);
+    Ok(if drift.is_empty() {
+        IN_SYNC.to_string()
+    } else {
+        drift.join("; ")
+    })
+}
+
+/// The digest of this document's plan (ADR-0059 D4): what the manifest
+/// declares, what the cluster holds for the zone under the record's mark
+/// right now, the provider, the catalog version and the states of the
+/// capabilities a zone uses. `None` when no provider resolves.
+pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
+    use delonix_compute::capability::{Capability as C, CATALOG_VERSION};
+    let rec = store()?.load(&doc.metadata.name).unwrap_or_default();
+    let Ok((provider_id, provider)) = resolve_provider(&rec.provider) else {
+        return Ok(None);
+    };
+    let observed = if rec.owner.is_empty() {
+        Default::default()
+    } else {
+        provider
+            .observe(&doc.metadata.name, &OwnerMark::new(&rec.owner)?)
+            .map_err(at(provider_id, "observe"))?
+    };
+    let used = [
+        C::NetSegmentRemote,
+        C::NetApplyStaged,
+        C::NetOwnershipMarker,
+        C::NetObserve,
+    ];
+    let states: BTreeMap<String, String> = provider
+        .capabilities()
+        .capabilities
+        .iter()
+        .filter(|c| used.contains(&c.capability))
+        .map(|c| (c.capability.name().to_string(), c.state.label().to_string()))
+        .collect();
+    let mut intent = desired(doc)?.fields;
+    intent.remove("remote");
+    Ok(Some(delonix_networking::plan::plan_digest(
+        &intent,
+        &delonix_networking::plan::segment_fingerprint(&observed),
+        provider_id,
+        CATALOG_VERSION,
+        &states,
+    )))
 }
 
 /// The record's owner token, generating one when it has none yet.

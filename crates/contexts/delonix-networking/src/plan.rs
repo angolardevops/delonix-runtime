@@ -98,6 +98,25 @@ pub fn gateway_fingerprint(o: &GatewayObserved) -> serde_json::Value {
     serde_json::json!({ "aliases": aliases, "rules": rules })
 }
 
+/// What a segment provider holds for a zone under a mark, as the
+/// fingerprint a digest covers: the zone's presence and the owned vnets by
+/// name.
+pub fn segment_fingerprint(o: &crate::segment::SegmentObserved) -> serde_json::Value {
+    let mut vnets: Vec<serde_json::Value> = o
+        .vnets
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "name": v.name,
+                "zone": v.zone,
+                "alias": v.alias.as_deref().map(str::trim).filter(|a| !a.is_empty()),
+            })
+        })
+        .collect();
+    vnets.sort_by_key(|v| v["name"].as_str().unwrap_or_default().to_string());
+    serde_json::json!({ "zonePresent": o.zone_present, "vnets": vnets })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
