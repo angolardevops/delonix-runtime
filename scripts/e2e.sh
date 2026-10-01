@@ -1161,13 +1161,29 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     check "-u: o bind mount do HOST mantém o dono (não é re-apropriado)" ok bash -c \
       "[ \"\$(stat -c %u:%g '$_ub' '$_ub/f' | tr '\n' ' ')\" = '$_own_before' ]"
     check "-u: o dono do bind continua a escrever no seu ficheiro" ok bash -c "echo mais >> '$_ub/f'"
+    # Um `container commit` empacota do lado do HOST. Gravava os números do host
+    # nos cabeçalhos: medido, todas as entradas 1000:1000 (quem invoca) e a pasta
+    # do uid 1000 do container como 100999 (o subuid) — uma imagem que dá o rootfs
+    # inteiro ao uid 1000 em qualquer motor que respeite a posse do tar.
+    _uc="e2e-usercommit-$PFX"; _uci="e2e-usercommit-$PFX:1"
+    if "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120 >/dev/null 2>&1 \
+       && "$BIN" container commit "$_uc" "$_uci" >/dev/null 2>&1; then
+      check "commit: a layer guarda os donos que o CONTAINER vê" ok bash -c \
+        "[ \"\$('$BIN' container run --rm --net none -u 1000 '$_uci' stat -c %u /etc/passwd /srv/own 2>/dev/null | tr '\n' ' ')\" = '0 1000 ' ]"
+      check "commit: o USER da imagem base sobrevive" ok bash -c \
+        "'$BIN' container run --rm --net none '$_uci' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
+    else
+      skip "commit: donos na layer" "o commit do container de teste falhou neste host"
+    fi
+    "$BIN" container rm -f "$_uc" >/dev/null 2>&1 || true
+    "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
   else
     skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
   fi
   "$BIN" container run --rm --net none -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
   "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
   rm -rf "$_ub"
-  "$BIN" image rm "$_ui" >/dev/null 2>&1 || true
+  "$BIN" image remove "$_ui" >/dev/null 2>&1 || true
 else
   skip "USER da imagem não aplicado" "o build da imagem de teste falhou neste host"
 fi
