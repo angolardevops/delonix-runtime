@@ -69,8 +69,13 @@ enable `Strict-Transport-Security` only once the site is HTTPS-only.
 - **The build fails at `haproxy -c`** — the message names the line.
 - **`503 Service Unavailable`** — every `server` in `backend app` is failing
   its health check, or none is declared and the standalone `return` was removed.
-- **Port below 1024** — the official image runs as the `haproxy` user; keep
-  `__PORT__` or another port ≥ 1024.
+- **A host port below 1024** — publishing one needs the host to allow it
+  (`net.ipv4.ip_unprivileged_port_start`); `delonix stack apply` says so and
+  names the fix. Keep `__PORT__`, or publish a high host port onto it.
+- **The process runs as root inside the container.** The official image
+  declares `USER haproxy`, and the engine does not apply an image's `USER`
+  yet (`delonix container run` says so). In a rootless Delonix that root is
+  your own unprivileged host user.
 
 ## Choosing an HAProxy version
 
