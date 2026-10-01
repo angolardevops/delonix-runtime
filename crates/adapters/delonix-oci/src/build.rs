@@ -193,6 +193,35 @@ fn substituted_too_large(line: &str) -> Error {
 /// check exists at all. Truncating silently would still allocate the
 /// attacker's chosen amount of memory per call before the cut; refusing does
 /// not.
+/// The environment of a packaged image: `base`, then each `KEY=value` of
+/// `additions` in order, with `$VAR`/`${VAR}` in the value expanded against
+/// what is set SO FAR and the new entry REPLACING an earlier one for its key.
+///
+/// Appending the raw entries instead was measured to break the commonest
+/// `ENV` there is: `ENV PATH=/app/.venv/bin:$PATH` left the image with the
+/// literal string `/app/.venv/bin:$PATH` as its PATH (the later duplicate
+/// wins when the process starts), so `id`, `ls` and every other tool outside
+/// that one directory answered "not found" inside the container.
+pub fn merge_env(base: &[String], additions: &[String]) -> Result<Vec<String>> {
+    let mut env: Vec<String> = base.to_vec();
+    for kv in additions {
+        let Some((key, val)) = kv.split_once('=') else {
+            env.push(kv.clone());
+            continue;
+        };
+        let known: HashMap<String, String> = env
+            .iter()
+            .filter_map(|e| e.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let val = substitute_vars(val, &known)?;
+        let prefix = format!("{key}=");
+        env.retain(|e| !e.starts_with(&prefix));
+        env.push(format!("{key}={val}"));
+    }
+    Ok(env)
+}
+
 pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> Result<String> {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.char_indices().peekable();
@@ -733,9 +762,9 @@ impl ImageStore {
         } else {
             df.entrypoint.clone()
         };
-        // Env = the base's + the Dockerfile's.
-        let mut env = base.config.env.clone();
-        env.extend(df.env.iter().cloned());
+        // Env = the base's + the Dockerfile's, each `ENV` expanded against
+        // what is already set and replacing an earlier value of its key.
+        let env = merge_env(&base.config.env, &df.env)?;
         // inherit the base's limits if the Dockerfile does not redefine them.
         let cpus = df.cpus.clone().or_else(|| base.config.cpus.clone());
         let memory = df.memory.clone().or_else(|| base.config.memory.clone());
@@ -1079,6 +1108,32 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("none"), "{e}");
+    }
+
+    /// The image's PATH after `ENV PATH=/app/.venv/bin:$PATH` is the base's
+    /// with the directory in front — one entry, expanded — not the base's
+    /// followed by the literal string.
+    #[test]
+    fn merge_env_expands_against_what_is_set_and_replaces_the_key() {
+        let base = vec![
+            "PATH=/usr/local/bin:/usr/bin".to_string(),
+            "LANG=C.UTF-8".to_string(),
+        ];
+        let add = vec![
+            "APP_HOME=/app".to_string(),
+            "PATH=${APP_HOME}/.venv/bin:$PATH".to_string(),
+            "UNKNOWN=$NOT_SET".to_string(),
+        ];
+        let env = super::merge_env(&base, &add).unwrap();
+        assert_eq!(
+            env,
+            vec![
+                "LANG=C.UTF-8".to_string(),
+                "APP_HOME=/app".to_string(),
+                "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin".to_string(),
+                "UNKNOWN=$NOT_SET".to_string(),
+            ]
+        );
     }
 
     #[test]

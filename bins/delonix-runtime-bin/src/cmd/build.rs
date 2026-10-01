@@ -1135,10 +1135,13 @@ pub fn build_from_spec(
             } else {
                 df.entrypoint.clone()
             };
-            let mut env = final_state.env.clone();
-            if !targeting_intermediate {
-                env.extend(df.env.iter().cloned());
-            }
+            // `final_state.env` is the base image's environment plus every
+            // `ENV` the built stage executed, each already expanded and
+            // replacing its key. Appending `df.env` on top (as this did)
+            // added the RAW values a second time, and the later duplicate
+            // wins: `ENV PATH=/app/.venv/bin:$PATH` packaged an image whose
+            // PATH was that literal string.
+            let env = final_state.env.clone();
             let workdir = if targeting_intermediate {
                 final_state.workdir.clone()
             } else {
