@@ -893,6 +893,18 @@ fn main() {
         }
         std::process::exit(0);
     }
+    // The retry of a build `COPY` inside the mapped user namespace. Silent:
+    // the caller already holds the error of the first attempt and reports it.
+    if raw.len() == 7 && raw[1] == "__copyin" {
+        let done = cmd::build::copy_into_rootfs_here(
+            std::path::Path::new(&raw[2]),
+            &raw[3],
+            &raw[4],
+            &raw[5],
+            &raw[6],
+        );
+        std::process::exit(i32::from(done.is_err()));
+    }
     if raw.len() == 4 && raw[1] == "__duusage" {
         if let Err(e) =
             cmd::mapped::duusage(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))

@@ -1685,7 +1685,34 @@ fn canonical_base(p: &Path) -> Result<PathBuf> {
     })
 }
 
+/// `COPY` into a stage's work tree.
+///
+/// The plain copy runs first, as this process. It cannot replace a file the
+/// base image gives to another user: since the work tree carries the image's
+/// owners, such a file belongs to a subordinate id, and the invoking user is
+/// neither its owner nor root over it. Measured with `httpd:2.4-alpine`, whose
+/// `htdocs/index.html` belongs to uid 501 — `COPY public …/htdocs` failed with
+/// `Permission denied`. So a failed copy is repeated inside the mapped user
+/// namespace, where this user is root over the whole range. What it writes
+/// there is owned by uid 0 of the namespace, as a `COPY` is in Docker.
 fn copy_into_rootfs(
+    context: &Path,
+    rootfs: &str,
+    src: &str,
+    dst: &str,
+    workdir: &str,
+) -> Result<()> {
+    let direct = copy_into_rootfs_here(context, rootfs, src, dst, workdir);
+    let Err(e) = direct else { return Ok(()) };
+    let ctx = context.to_string_lossy();
+    match runtime::reexec_mapped(&["__copyin", &ctx, rootfs, src, dst, workdir]) {
+        Some(true) => Ok(()),
+        _ => Err(e),
+    }
+}
+
+/// The copy itself, in whatever user namespace the caller is in.
+pub(crate) fn copy_into_rootfs_here(
     context: &Path,
     rootfs: &str,
     src: &str,
@@ -1721,7 +1748,7 @@ fn copy_into_rootfs(
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
         }
-        std::fs::copy(&src_path, &dst_path).map_err(|e| {
+        replace_file(&src_path, &dst_path).map_err(|e| {
             Error::Invalid(format!(
                 "COPY {} -> {}: {e}",
                 src_path.display(),
@@ -1730,6 +1757,18 @@ fn copy_into_rootfs(
         })?;
         Ok(())
     }
+}
+
+/// Copies one file over `dst`, REPLACING what is there rather than writing
+/// into it. A copy into an existing file keeps that file's owner, so a `COPY`
+/// over a file the base image gives to another user would hand the new
+/// content to that user; a `COPY` makes the file root's, as in Docker.
+fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(dst).is_ok_and(|m| !m.is_dir()) {
+        // Best-effort: where it cannot be removed, the copy below reports why.
+        let _ = std::fs::remove_file(dst);
+    }
+    std::fs::copy(src, dst).map(|_| ())
 }
 
 fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Path) -> Result<()> {
@@ -1750,7 +1789,7 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
         if ty.is_dir() {
             copy_dir_all(&entry_path, &target, canon_context, canon_rootfs)?;
         } else {
-            std::fs::copy(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
+            replace_file(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
         }
     }
     Ok(())
