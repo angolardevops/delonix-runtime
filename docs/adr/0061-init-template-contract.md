@@ -149,6 +149,48 @@ A second pass fixed the first fix: with any `!` rule, every excluded directory w
 and left as an empty skeleton (a `.venv` skeleton made `uv sync` refuse to create the
 environment). An excluded directory is entered only when an exception can match inside it.
 
+A third defect was found by the images themselves: the last stage's `ENV` was packaged
+twice, the second time unexpanded, so `ENV PATH=/app/.venv/bin:$PATH` produced an image whose
+PATH was that literal string (`id: not found` inside the container; the service ran because
+its command lives in the one directory left). The packaged environment is now the stage's
+own, expanded once.
+
+### D9 — The images run as an unprivileged user
+
+Each Delonixfile ends in `USER` and each manifest names the same user with `user:` — the
+engine applies an image's USER only when asked (ADR-0062 P0), and D1 of that ADR makes the
+manifest line redundant once it lands. The user owns nothing in the image except the mount
+point of a volume the service writes to, which an empty named volume takes over on its first
+mount (ADR-0062 D3).
+
+Measured on both engines, with the `go` and `django` images: built from this branch alone
+(before ADR-0062 P1) and built with P1 merged in, the process runs as the unprivileged user,
+`/etc/passwd` and the application files stay `0:0`, appending to `/etc/passwd` is refused,
+and django's `/data` volume is owned by the user and writable. The templates do not wait for
+P1. What P1 changes for them is how the volume gets its owner (the image's owner of the mount
+point, instead of a walk).
+
+A host with no subordinate uid range cannot run a second user; there the `user:` line is
+removed and the container runs as uid 0 mapped to the invoking user. Not measured on such a
+host.
+
+### D10 — A fresh deployment comes up ready
+
+`delonix init -t <template> --up` must end with a service that answers ready. Two templates
+did not: `django` needed a manual `manage.py migrate`, and `laravel` needed a secret (still
+true — production refuses to start without `APP_KEY`, and a key is never generated into a
+file the project commits). `django` now migrates at start when `MIGRATE_ON_START=true`, which
+its manifest sets because the default is one replica on SQLite; with several replicas the
+variable is removed and the migration is a release step.
+
+### D11 — The generated CI is executed, not only parsed
+
+`scripts/init-ci.sh` generates each application template and runs its CI in a clean rootless
+container: the image the project's `.gitlab-ci.yml` names, the lock created by the command
+the README gives, then the GitLab job as written and every `run:` step of the GitHub
+workflow. The `uses:` actions of the GitHub workflow (checkout, toolchain setup) are the one
+part not executed; the GitLab image and `before_script` stand in for them.
+
 ## Alternatives considered
 
 - **Ship locks for every ecosystem.** Rejected for uv/pnpm/Composer by D2: stale for any

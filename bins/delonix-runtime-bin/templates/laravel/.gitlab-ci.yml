@@ -6,6 +6,10 @@ stages:
 
 check:
   stage: check
+  variables:
+    # The job runs as root in the php image. Composer refuses to load plugins
+    # (and aborts a script that needs one) as root unless told it is intended.
+    COMPOSER_ALLOW_SUPERUSER: "1"
   before_script:
     - apt-get update -yqq && apt-get install -yqq --no-install-recommends git unzip
     - docker-php-ext-install pcntl
