@@ -212,6 +212,18 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .collect()
 }
 
+/// The capabilities a zone needs from its provider: what its apply uses, and
+/// what its plan digest covers (ADR-0059 D4).
+const REQUIRED: [delonix_compute::capability::Capability; 4] = {
+    use delonix_compute::capability::Capability as C;
+    [
+        C::NetSegmentRemote,
+        C::NetApplyStaged,
+        C::NetOwnershipMarker,
+        C::NetObserve,
+    ]
+};
+
 /// The record's vnets as the port's type, in this zone.
 fn declared_vnets(rec: &NetworkZoneRecord) -> Vec<VNetSpec> {
     rec.vnets
@@ -250,7 +262,7 @@ fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
 /// right now, the provider, the catalog version and the states of the
 /// capabilities a zone uses. `None` when no provider resolves.
 pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
-    use delonix_compute::capability::{Capability as C, CATALOG_VERSION};
+    use delonix_compute::capability::CATALOG_VERSION;
     let rec = store()?.load(&doc.metadata.name).unwrap_or_default();
     let Ok((provider_id, provider)) = resolve_provider(&rec.provider) else {
         return Ok(None);
@@ -262,12 +274,7 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
             .observe(&doc.metadata.name, &OwnerMark::new(&rec.owner)?)
             .map_err(at(provider_id, "observe"))?
     };
-    let used = [
-        C::NetSegmentRemote,
-        C::NetApplyStaged,
-        C::NetOwnershipMarker,
-        C::NetObserve,
-    ];
+    let used = REQUIRED;
     let states: BTreeMap<String, String> = provider
         .capabilities()
         .capabilities
@@ -311,6 +318,12 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
     let (provider_id, provider) = resolve_provider(&rec.provider)?;
+    // Validate (ADR-0059 D4): before the record or the cluster is touched.
+    delonix_networking::resolve::require_capabilities(
+        &format!("NetworkZone/{name}"),
+        &provider.capabilities(),
+        &REQUIRED,
+    )?;
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();

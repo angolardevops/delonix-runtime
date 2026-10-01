@@ -533,6 +533,32 @@ fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
     })
 }
 
+/// The capabilities a document needs from its provider: what its apply
+/// uses, and what its plan digest covers (ADR-0059 D4).
+fn required_capabilities(
+    spec: &NetworkGatewaySpec,
+    policy_rules: &[GatewayRule],
+) -> Vec<delonix_compute::capability::Capability> {
+    use delonix_compute::capability::Capability as C;
+    let mut used = vec![C::NetApplyStaged, C::NetOwnershipMarker, C::NetObserve];
+    if !spec.aliases.is_empty() {
+        used.push(C::NetGatewayAlias);
+    }
+    if !spec.rules.is_empty() || !policy_rules.is_empty() {
+        used.push(C::NetGatewayFilter);
+    }
+    if !policy_rules.is_empty() {
+        used.push(C::NetGatewayRuleOrder);
+    }
+    if policy_rules.iter().any(|r| r.log) {
+        used.push(C::FirewallLogging);
+    }
+    if policy_rules.iter().any(|r| !r.stateful) {
+        used.push(C::FirewallStateless);
+    }
+    used
+}
+
 /// The digest of this document's plan (ADR-0059 D4): what the manifest
 /// declares, what the appliance holds under the record's mark right now, the
 /// provider, the catalog version and the states of the capabilities the
@@ -542,7 +568,7 @@ fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
 /// Read-only. A document never applied has no mark, so nothing on the
 /// appliance is its own and its observed state is empty.
 pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
-    use delonix_compute::capability::{Capability as C, CATALOG_VERSION};
+    use delonix_compute::capability::CATALOG_VERSION;
     let spec: NetworkGatewaySpec = manifest::spec_of(doc)?;
     let rec = store()?.load(&doc.metadata.name).unwrap_or_default();
     if rec.provider == LEGACY_NATIVE {
@@ -560,22 +586,7 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
             .map_err(at(provider_id, "observe"))?
     };
     let policy_rules = all_policy_rules(&spec.policies)?;
-    let mut used = vec![C::NetApplyStaged, C::NetOwnershipMarker, C::NetObserve];
-    if !spec.aliases.is_empty() {
-        used.push(C::NetGatewayAlias);
-    }
-    if !spec.rules.is_empty() || !policy_rules.is_empty() {
-        used.push(C::NetGatewayFilter);
-    }
-    if !policy_rules.is_empty() {
-        used.push(C::NetGatewayRuleOrder);
-    }
-    if policy_rules.iter().any(|r| r.log) {
-        used.push(C::FirewallLogging);
-    }
-    if policy_rules.iter().any(|r| !r.stateful) {
-        used.push(C::FirewallStateless);
-    }
+    let used = required_capabilities(&spec, &policy_rules);
     let report = provider.capabilities();
     let states: BTreeMap<String, String> = report
         .capabilities
@@ -702,6 +713,12 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         )));
     }
     let (provider_id, provider) = resolve_provider(named, &rec.provider)?;
+    // Validate (ADR-0059 D4): before the record or the appliance is touched.
+    delonix_networking::resolve::require_capabilities(
+        &format!("NetworkGateway/{name}"),
+        &provider.capabilities(),
+        &required_capabilities(&spec, &policy_rules),
+    )?;
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
