@@ -1,9 +1,13 @@
+.venv/
 __pycache__/
 *.py[cod]
-.venv/
-.env
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+.audit-requirements.txt
 dist/
-build/
 *.egg-info/
+.env
+.DS_Store

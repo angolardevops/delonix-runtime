@@ -1,26 +1,26 @@
-# Delonixfile — same grammar as a Dockerfile, with Delonix extensions.
-# Build with:  delonix build -t __NAME__:dev .
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
 #
-# uv-native (the modern Python tool). Single-stage on purpose (`delonix build`
-# is single-stage). No non-root USER: in Delonix's rootless model the container's
-# uid 0 is ALREADY an unprivileged host uid, and a `chown` would make the flat
-# rootfs unpackable.
-FROM python:3.12-slim
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/app/.venv \
-    PATH=/app/.venv/bin:$PATH
+# Two stages: uv builds the virtual environment (dependencies and this project,
+# non-editable, byte-compiled), and only that environment reaches the runtime
+# image — no uv, no build cache, no source tree, no tests. The build context is
+# filtered by .dockerignore, so `COPY .` never takes .env or .venv.
+FROM python:3.13-slim AS build
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/app/.venv
+RUN pip install --no-cache-dir --disable-pip-version-check uv==0.12.21
 WORKDIR /app
-# uv, the resolver/installer (astral). Bootstrap it with pip (single line — the
-# usual `COPY --from=ghcr.io/astral-sh/uv` is multi-stage, unsupported here).
-RUN pip install --no-cache-dir uv
-COPY pyproject.toml ./
-COPY src ./src
-# Resolve + install into /app/.venv (runtime deps only, no dev group).
-RUN uv sync --no-dev
+COPY . /app
+# From the lock when the context has one (reproducible); a fresh project that
+# has not run `uv lock` yet resolves here instead, and says so.
+RUN --mount=type=cache,target=/root/.cache/uv if [ -f uv.lock ]; then uv sync --locked --no-dev --no-editable; else echo "uv.lock not found: resolving now; run 'uv lock' and commit it for reproducible images" && uv sync --no-dev --no-editable; fi
+
+FROM python:3.13-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH=/app/.venv/bin:$PATH
+WORKDIR /app
+COPY --from=build /app/.venv /app/.venv
 EXPOSE __PORT__
-# Delonix extension: the runtime probes this to mark the container healthy.
-HEALTHCHECK CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live')" || exit 1
-CMD ["uvicorn", "__MODULE__.main:app", "--host", "0.0.0.0", "--port", "__PORT__"]
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live', timeout=3)" || exit 1
+STOPSIGNAL SIGTERM
+# The project's own entry point (server.py): readiness, drain and exit code.
+CMD ["python", "-m", "__MODULE__"]

@@ -1,1 +1,5 @@
+port=8000
+health=/api/v1/health/live
 version=0.142
+versions=0.141,0.142
+lock=uv.lock

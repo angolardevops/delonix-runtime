@@ -41,13 +41,14 @@ a package manager step you have not run; add one when you are ready.
 ## Running the checks locally
 
 ```bash
-uv sync
-uv run ruff check .
-uv run pytest
+make check     # install from uv.lock, ruff format --check, ruff check, mypy, pytest, uv build
+make audit     # pip-audit over the locked runtime dependencies (needs network)
 ```
 
-These are the same three commands `.github/workflows/ci.yml` and
-`.gitlab-ci.yml` run on every push/PR.
+These are the targets `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR. A change to `pyproject.toml` comes with the updated `uv.lock`
+(`make lock`); a change to a route comes with the regenerated contract
+(`make openapi`).
 
 ## Static analysis (SonarQube)
 

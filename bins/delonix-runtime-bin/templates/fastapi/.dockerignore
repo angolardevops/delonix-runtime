@@ -1,9 +1,24 @@
-__pycache__/
-*.pyc
-.venv/
-.git/
+# Honoured by `delonix build` and `docker build` alike: nothing listed here
+# reaches the image.
+.git
+.github
+.gitlab-ci.yml
 .env
-tests/
-.pytest_cache/
-.ruff_cache/
+.env.*
+!.env.example
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+.audit-requirements.txt
+dist
 *.md
+docs
+tests
+deploy
+scripts
+api
