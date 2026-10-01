@@ -63,6 +63,9 @@ pub enum Step {
     Env { key: String, val: String },
     /// `WORKDIR <dir>` — working directory of the following `RUN`s.
     Workdir(String),
+    /// `USER <name|uid[:gid]>` — the user the following `RUN`s execute as. The
+    /// LAST one is also the image's user (`Dockerfile::user`).
+    User(String),
 }
 
 /// An intermediate stage of a multi-stage build (`FROM x AS name`).
@@ -318,7 +321,14 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
             }
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
-            "USER" => df.user = rest.trim().to_string(),
+            "USER" => {
+                df.user = rest.trim().to_string();
+                stages
+                    .last_mut()
+                    .unwrap()
+                    .steps
+                    .push(Step::User(rest.trim().to_string()));
+            }
             "ENV" => {
                 // `ENV k1=v1 k2="v 2" …` (multiple vars) OR the legacy `ENV k v`.
                 for (key, val) in parse_env_pairs(rest) {
@@ -1081,6 +1091,37 @@ mod tests {
         assert_eq!(seen["etc/link"].2.as_deref(), Some("passwd"));
         assert!(seen.contains_key("proc"), "the mount point itself is kept");
         assert!(!seen.keys().any(|p| p.starts_with("proc/")), "{seen:?}");
+    }
+
+    /// `USER` is positional: it is a step between the `RUN`s it separates, and
+    /// the last one is still the image's user.
+    #[test]
+    fn user_is_a_step_and_the_last_one_is_the_images() {
+        let df = parse_dockerfile(
+            "FROM alpine\nRUN a\nUSER app\nRUN b\nUSER root\nRUN c\nUSER app:app\n",
+        )
+        .unwrap();
+        let shape: Vec<String> = df
+            .steps
+            .iter()
+            .map(|s| match s {
+                Step::Run(r) => format!("RUN {}", r.cmdline),
+                Step::User(u) => format!("USER {u}"),
+                _ => "other".into(),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                "RUN a",
+                "USER app",
+                "RUN b",
+                "USER root",
+                "RUN c",
+                "USER app:app"
+            ]
+        );
+        assert_eq!(df.user, "app:app");
     }
 
     fn multistage() -> super::Dockerfile {

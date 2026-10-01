@@ -229,6 +229,65 @@ pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copies the tree `src` into `dst` keeping every owner, mode and link — the
+/// build's stage clone and layer cache.
+///
+/// Inside the mapped userns on purpose. A plain `cp -a` as the invoking user
+/// cannot give a file to a subuid, so a tree a `RUN chown app …` had written
+/// came out of the cache owned by root: the same Delonixfile produced a
+/// different image on a cached rebuild (measured — `/home/app` was `app` on the
+/// first build and `root` on the second). In here `cp` is root over the mapped
+/// range and `-a` keeps what it finds.
+pub fn cptree(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(io_err("copy tree"))?;
+    let status = std::process::Command::new("cp")
+        .arg("-a")
+        .arg("--reflink=auto")
+        .arg("--")
+        .arg(src.join("."))
+        .arg(dst)
+        .status()
+        .map_err(io_err("copy tree"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "copying {} failed ({status})",
+            src.display()
+        )))
+    }
+}
+
+/// Gives the entries of a flat rootfs the owners its image records (ADR-0062).
+///
+/// `index` is an owners index as `delonix_compute::owners::encode` writes it.
+/// A build's work rootfs is exported with every entry owned by whoever runs the
+/// engine; without this a `RUN` executing as the image's user could not write
+/// its own home. An entry whose path crosses a symlink is skipped: the index
+/// names real paths of the image, and following a link here could reach outside
+/// `rootfs`. `lchown` never follows the last component. Best-effort per entry.
+pub fn chownidx(rootfs: &Path, index: &Path) -> Result<()> {
+    let bytes = std::fs::read(index).map_err(io_err("apply owners"))?;
+    for owner in delonix_compute::owners::decode(&bytes) {
+        let mut path = rootfs.to_path_buf();
+        let mut parents = owner.path.components().peekable();
+        let mut crosses_link = false;
+        while let Some(c) = parents.next() {
+            path.push(c);
+            let is_last = parents.peek().is_none();
+            let link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+            if link && !is_last {
+                crosses_link = true;
+                break;
+            }
+        }
+        if !crosses_link && std::fs::symlink_metadata(&path).is_ok() {
+            let _ = std::os::unix::fs::lchown(&path, Some(owner.uid), Some(owner.gid));
+        }
+    }
+    Ok(())
+}
+
 /// Creates an overlayfs **whiteout** — a character device 0:0, which is how
 /// overlayfs records "this path was deleted" in the upper layer.
 ///
@@ -613,6 +672,78 @@ pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tree copy keeps modes and links, and copies INTO an existing or a
+    /// missing destination alike.
+    #[test]
+    fn cptree_keeps_modes_and_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, dst) = (tmp.path().join("src"), tmp.path().join("out/dst"));
+        std::fs::create_dir_all(src.join("bin")).unwrap();
+        std::fs::write(src.join("bin/su"), b"x").unwrap();
+        std::fs::set_permissions(src.join("bin/su"), std::fs::Permissions::from_mode(0o4755))
+            .unwrap();
+        std::os::unix::fs::symlink("bin/su", src.join("link")).unwrap();
+        cptree(&src, &dst).unwrap();
+        let mode = std::fs::metadata(dst.join("bin/su"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7777, 0o4755);
+        assert_eq!(
+            std::fs::read_link(dst.join("link")).unwrap(),
+            Path::new("bin/su")
+        );
+    }
+
+    /// The owners index is applied to real paths of the rootfs only: an entry
+    /// that would be reached THROUGH a symlink is skipped, so a link in the
+    /// image cannot send the chown outside the tree.
+    #[test]
+    fn chownidx_never_goes_through_a_symlink() {
+        use delonix_compute::owners::{encode, Owner};
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("rootfs");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(rootfs.join("home/app")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("victim"), b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, rootfs.join("escape")).unwrap();
+        let me = std::fs::metadata(&rootfs).unwrap();
+        let owner = |p: &str| Owner {
+            path: p.into(),
+            uid: me.uid(),
+            gid: me.gid(),
+        };
+        let index = tmp.path().join("idx");
+        std::fs::write(
+            &index,
+            encode(&[owner("home/app"), owner("escape/victim"), owner("gone")]),
+        )
+        .unwrap();
+        let ctime = |p: &Path| {
+            let m = std::fs::metadata(p).unwrap();
+            (m.ctime(), m.ctime_nsec())
+        };
+        let (victim_before, app_before) = (
+            ctime(&outside.join("victim")),
+            ctime(&rootfs.join("home/app")),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        chownidx(&rootfs, &index).unwrap();
+        assert_eq!(
+            ctime(&outside.join("victim")),
+            victim_before,
+            "followed a link"
+        );
+        assert_ne!(
+            ctime(&rootfs.join("home/app")),
+            app_before,
+            "the real entry"
+        );
+    }
 
     #[test]
     fn rmtree_apaga_a_arvore() {

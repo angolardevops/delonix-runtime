@@ -214,9 +214,18 @@ blob's headers the first time an image using it is prepared (a `.modes` sibling 
 one function every entry point reaches. Measured rootless: the CLI, `kind: Container`,
 `kind: Pod`, `compose` (and `user: "0"` there), the Docker API, and a `container restart` all
 answer uid 99 for `haproxy:3.4-alpine`; `--user 0` answers 0; `alpine:3.20` answers 0. The
-`haproxy` template passes its smoke 7/7 as uid 99. `build` is not affected: its work containers
-do not go through `resolve_run`, and a `RUN` still executes as root in the work container
-whatever the base image's USER — a difference from Docker that predates this ADR.
+`haproxy` template passes its smoke 7/7 as uid 99.
+
+**`build` follows the same rule** (a later change). Its work containers do not go through
+`resolve_run`, and three defects were measured there: a `RUN` after `USER app` ran as root; a
+`RUN` on a base image with a USER ran as root; and a rebuild that hit the cache lost the owners
+(`/home/app` and a directory the file had `chown`ed came back as root — the same file, two
+different images). `USER` is now a positional step: each `RUN` executes as the user in force
+(the base image's until the file says otherwise), resolved against the stage's own
+`/etc/passwd` at that step, and an unknown user is an error there. The flat work tree receives
+the base image's owners index, and the stage clone and the layer cache copy inside the mapped
+user namespace, so a sub-id owner survives both. `WORKDIR` is still created by root, as Docker
+does. On a host that can map only one id the steps run as root, as `run` does.
 
 **Found by the CRI validation, and fixed with P2**: a mount target behind a symlink of the image
 was refused outright. Alpine and Debian ship `/var/run -> /run` and the kubelet mounts the

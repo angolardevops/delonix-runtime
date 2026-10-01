@@ -324,6 +324,7 @@ fn resolve_stage_base(
     } else {
         let img = resolve_or_pull_platform(images, from, platform)?;
         let rootfs = prepare_rootfs_flat(images, &img, new_id)?;
+        apply_base_owners(images, &img, &rootfs);
         let workdir = if img.config.working_dir.is_empty() {
             "/".to_string()
         } else {
@@ -350,30 +351,67 @@ fn resolve_stage_base(
 /// (`/bin -> usr/bin`, …) that a naive recursive copy would wrongly dereference.
 fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<String> {
     let dst = images.root().join("containers").join(id).join("rootfs");
-    std::fs::create_dir_all(&dst)
-        .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
-    let status = std::process::Command::new("cp")
-        .arg("-a")
-        .arg("--reflink=auto")
-        .arg(format!("{}/.", src_rootfs.trim_end_matches('/')))
-        .arg(&dst)
-        .status()
-        .map_err(|e| {
-            Error::Invalid(format!(
-                "{}: {e}",
-                super::po::tf("cp of stage '{src}'", &[("src", src_rootfs)])
-            ))
-        })?;
-    if !status.success() {
+    if !copy_tree(Path::new(src_rootfs), &dst) {
         return Err(Error::Invalid(super::po::tf(
             "cp of stage '{src}' failed",
             &[("src", src_rootfs)],
         )));
     }
-    if runtime::is_rootless() {
-        super::util::chown_tree(&dst, runtime::USERNS_UID_BASE)?;
-    }
     Ok(dst.to_string_lossy().into_owned())
+}
+
+/// Copies a rootfs tree with its owners, modes and links: inside the mapped
+/// user namespace when there is one (see `mapped::cptree` for why a plain
+/// `cp -a` lost the owners a `RUN chown` had written), directly otherwise.
+fn copy_tree(src: &Path, dst: &Path) -> bool {
+    let (s, d) = (src.to_string_lossy(), dst.to_string_lossy());
+    match runtime::reexec_mapped(&["__cptree", &s, &d]) {
+        Some(ok) => ok,
+        None => super::mapped::cptree(src, dst).is_ok(),
+    }
+}
+
+/// Gives a freshly exported base rootfs the owners its image records, so a
+/// `RUN` that executes as the image's user finds its own directories its own.
+/// Best-effort: without it the build behaves as it did before (ADR-0062).
+fn apply_base_owners(images: &ImageStore, img: &Image, rootfs: &str) {
+    let Ok(owners) = images.image_owners(img) else {
+        return;
+    };
+    if owners.is_empty() {
+        return;
+    }
+    let index = Path::new(rootfs).with_file_name("base-owners");
+    if std::fs::write(&index, delonix_compute::owners::encode(&owners)).is_err() {
+        return;
+    }
+    let (r, i) = (rootfs.to_string(), index.to_string_lossy().into_owned());
+    if runtime::reexec_mapped(&["__chownidx", &r, &i]).is_none() && !runtime::is_rootless() {
+        let _ = super::mapped::chownidx(Path::new(rootfs), &index);
+    }
+    let _ = std::fs::remove_file(&index);
+}
+
+/// The uid/gid a `RUN` executes as, or `None` for root.
+///
+/// `user` is the `USER` in effect, resolved against the rootfs as it is NOW —
+/// an earlier `RUN adduser app` is what makes `USER app` resolvable. A host
+/// that cannot hold a second uid (rootless with no subordinate range) runs the
+/// step as root, as it always did.
+fn run_as(rootfs: &str, user: &str) -> Result<Option<(u32, Option<u32>)>> {
+    if !delonix_compute::run::image_user_is_non_root(user) || !runtime::can_map_id_range() {
+        return Ok(None);
+    }
+    let ids = delonix_oci::rootfs_user::resolve_user(Path::new(rootfs), user).map_err(|e| {
+        use delonix_oci::rootfs_user::UserLookupError as E;
+        let why = match e {
+            E::EmptyUser => "the user is empty".to_string(),
+            E::NoSuchUser(u) => format!("no user '{u}' in the image at this step"),
+            E::NoSuchGroup(g) => format!("no group '{g}' in the image at this step"),
+        };
+        Error::Invalid(format!("USER {user}: {why}"))
+    })?;
+    Ok((ids.0 != 0).then_some(ids))
 }
 
 /// Builds ONE stage end to end: resolves its base (image or earlier stage),
@@ -423,7 +461,7 @@ fn step_title(step: &Step) -> Option<String> {
         // devolvem no mesmo instante. Um passo para elas seria um lampejo de
         // cromagem sobre trabalho que ninguém esperou, o mesmo argumento que
         // levou o `step_after` a existir.
-        Step::Env { .. } | Step::Workdir(_) => return None,
+        Step::Env { .. } | Step::Workdir(_) | Step::User(_) => return None,
     };
     let mut out: String = raw.chars().take(MAX).collect();
     if raw.chars().count() > MAX {
@@ -467,6 +505,8 @@ fn build_one_stage(
     let mut container: Option<Container> = None;
     let mut cur_env = base.env.clone();
     let mut cur_workdir = base.workdir.clone();
+    // The user a `RUN` executes as: the base image's, until a `USER` changes it.
+    let mut cur_user = base.user.clone();
     let mut chain_hash = base.chain_hash.clone();
 
     let result = (|| -> Result<()> {
@@ -505,6 +545,12 @@ fn build_one_stage(
                     // cache key for their next RUN. Hashes the EXPANDED value:
                     // it is what actually changed the environment.
                     chain_hash = hash_link(&chain_hash, &format!("ENV:{key}={val}"));
+                }
+                Step::User(user) => {
+                    cur_user = user.clone();
+                    // Like ENV: no change to the rootfs, but every later RUN
+                    // runs differently, so the cache chain has to move.
+                    chain_hash = hash_link(&chain_hash, &format!("USER:{cur_user}"));
                 }
                 Step::Workdir(dir) => {
                     cur_workdir = if dir.starts_with('/') {
@@ -620,10 +666,40 @@ fn build_one_stage(
                         }
                     }
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
-                    let shell =
-                        format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
-                    let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
-                    let exec_result = runtime::exec(c, &argv, false);
+                    let exec_result: Result<i32> = match run_as(&cur_rootfs, &cur_user) {
+                        Err(e) => Err(e),
+                        // Root: as before, one shell that makes the WORKDIR and runs.
+                        Ok(None) => {
+                            let shell = format!(
+                                "mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}"
+                            );
+                            let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
+                            runtime::exec(c, &argv, false).map_err(Into::into)
+                        }
+                        // The `USER` in effect (the base image's, or the last
+                        // `USER` above this line), as Docker runs it. The
+                        // WORKDIR is made by root first: a user cannot create
+                        // `/app`, and Docker makes it as root too.
+                        Ok(Some(ids)) => {
+                            let mk = vec![
+                                "/bin/sh".to_string(),
+                                "-c".to_string(),
+                                format!("mkdir -p {cur_workdir}"),
+                            ];
+                            runtime::exec(c, &mk, false)
+                                .map_err(Error::from)
+                                .and_then(|_| {
+                                    let shell = format!("cd {cur_workdir}; {exports}{cmdline}");
+                                    let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
+                                    let overrides = runtime::ExecOverrides {
+                                        user: Some(ids),
+                                        ..Default::default()
+                                    };
+                                    runtime::exec_with(c, &argv, false, &overrides)
+                                        .map_err(Into::into)
+                                })
+                        }
+                    };
                     // Always unmount — success OR failure — same discipline as
                     // `retire_container`: a secret or cache bind-mount left
                     // attached when a `RUN` fails would otherwise leak into
@@ -657,6 +733,7 @@ fn build_one_stage(
             base.rootfs = cur_rootfs;
             base.env = cur_env;
             base.workdir = cur_workdir;
+            base.user = cur_user;
             base.chain_hash = chain_hash;
             (all_ids, Ok(base))
         }
@@ -1516,19 +1593,11 @@ fn save_to_cache(hash: &str, rootfs: &str) {
     if std::fs::create_dir_all(&tmp_rootfs).is_err() {
         return;
     }
-    let status = std::process::Command::new("cp")
-        .arg("-a")
-        .arg("--reflink=auto")
-        .arg(format!("{}/.", rootfs.trim_end_matches('/')))
-        .arg(&tmp_rootfs)
-        .status();
-    match status {
-        Ok(s) if s.success() => {
-            let _ = std::fs::rename(&tmp_dir, &final_dir);
-        }
-        _ => {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-        }
+    if copy_tree(Path::new(rootfs), &tmp_rootfs) {
+        let _ = std::fs::rename(&tmp_dir, &final_dir);
+    } else if std::fs::remove_dir_all(&tmp_dir).is_err() {
+        // A half-written copy can hold files of mapped users.
+        runtime::remove_tree_mapped(&tmp_dir);
     }
 }
 
