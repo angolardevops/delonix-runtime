@@ -802,3 +802,45 @@ What F3d adds:
   wrote before.
 - **Catalog.** `net.gateway.rule-order`, `firewall.stateless` and `firewall.logging` become
   `supported`. The manifest now reaches them, and the live provider test exercises them.
+
+## Addendum 2026-10-01 — F4a: a `NetworkGateway` plan observes the appliance
+
+F4 is sliced like F3:
+- **F4a** (this addendum): observe for `NetworkGateway`;
+- **F4b**: `planDigest` and `--plan-digest`;
+- **F4c**: the step ledger and the reconciliation of an apply killed mid-way;
+- **F4d**: the same for `NetworkZone`, with per-node verification on the two-node Proxmox lab.
+
+What F4a adds:
+
+- **Observe.** `GatewayProvider::observe(owner)` is a required method, because the port has no
+  default bodies. It is read-only and returns `GatewayObserved`: the aliases and rules carrying
+  the mark, as the appliance holds them, plus the rules it has disabled. OPNsense implements it
+  from `search_rule` and `alias/search_item`, keeping the rows whose categories carry the mark.
+- **Compare.** `gateway_drift` is pure. It names every difference between what a record declared
+  and what the provider holds:
+  - an object that is missing, or owned and not declared;
+  - a field that differs, where a `sequence` counts only when declared and the protocol is
+    compared case-insensitively;
+  - alias content, compared as a set;
+  - a rule that is disabled.
+- **Plan.** A `NetworkGateway` record's `remote` field is observed on every plan. The manifest
+  always wants `in sync`. So a change made on the appliance by hand is drift:
+  - `stack plan --detailed-exitcode` answers 2;
+  - `delonix drift` names it;
+  - `stack apply` refuses without `--replace`, as every change to this Kind does (there is no
+    update in place);
+  - `--replace` converges it.
+
+  A record that cannot be observed says so instead of claiming to be in sync. That covers a
+  record without an owner mark, and one from the retired `native` provider.
+- **Live against the OPNsense 26.1.2_5 lab appliance.**
+  - The provider test reads back exactly the lowered rules. A rule disabled by hand and applied
+    is drift, and it is in sync again once re-enabled.
+  - By the CLI, with an isolated root:
+    - plan 0;
+    - a rule disabled by hand gives plan 2, with `remote: rule 'f3e-web-in#2' is disabled on the
+      appliance`, and the same line in `delonix drift`;
+    - `apply` refuses without `--replace`, and `--replace` converges (plan 0);
+    - `delete` leaves no rule and no category.
+- **Catalog.** OPNsense `net.observe` becomes `supported`.

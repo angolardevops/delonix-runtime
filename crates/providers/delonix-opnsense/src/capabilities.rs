@@ -55,8 +55,8 @@ pub fn capability_report(configured: bool) -> ProviderReport {
                 reason: "creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns",
             },
             C::NetApplyRollback => S::NotImplemented,
-            C::NetObserve => S::Partial {
-                detail: "`search_rule` and the alias read back what exists before a write; no comparison with the record yet (ADR-0059 F4)",
+            C::NetObserve => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields",
             },
             C::NetVerifyDataplane => S::NotImplemented,
             C::NetOwnershipMarker => S::Supported {
@@ -233,6 +233,7 @@ mod tests {
                 "net.gateway.alias",
                 "net.gateway.filter",
                 "net.gateway.rule-order",
+                "net.observe",
                 "net.ownership-marker"
             ]
         );

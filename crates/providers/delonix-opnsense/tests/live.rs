@@ -458,6 +458,30 @@ fn a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields() {
         .count();
     assert_eq!(two_lines, 2, "TCP/UDP is one pf rule per protocol");
 
+    // ADR-0059 D4, observe: what the appliance holds under the mark reads
+    // back as exactly the rules that were lowered…
+    use delonix_networking::gateway::gateway_drift;
+    let observed = provider.observe(&owner).expect("observe");
+    assert_eq!(
+        gateway_drift(&[], &rules, &observed),
+        Vec::<String>::new(),
+        "{observed:?}"
+    );
+    // …and a rule disabled on the appliance by hand, and applied, is drift.
+    hand.disable_rule(&two_uuid);
+    hand.post("firewall/filter/apply", serde_json::json!({}));
+    let drift = gateway_drift(&[], &rules, &provider.observe(&owner).expect("observe"));
+    assert_eq!(
+        drift,
+        ["rule 'delonix-f3d-live#2' is disabled on the appliance"]
+    );
+    hand.post(
+        &format!("firewall/filter/toggle_rule/{two_uuid}/1"),
+        serde_json::json!({}),
+    );
+    hand.post("firewall/filter/apply", serde_json::json!({}));
+    assert!(gateway_drift(&[], &rules, &provider.observe(&owner).unwrap()).is_empty());
+
     for r in &rules {
         assert_eq!(
             provider.remove_rule(&r.description, &owner).unwrap(),

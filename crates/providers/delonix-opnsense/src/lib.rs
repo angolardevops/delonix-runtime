@@ -83,7 +83,10 @@ mod error;
 pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
 
-use delonix_networking::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
+use delonix_networking::gateway::{
+    AliasKind, EnsureOutcome, GatewayAction, GatewayAlias, GatewayObserved, GatewayProvider,
+    GatewayRule,
+};
 use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use serde::Serialize;
 use serde_json::Value;
@@ -380,6 +383,57 @@ impl Client {
     /// Deletes `owner`'s category once nothing carries it — the last step of
     /// a teardown. The appliance itself refuses while an alias or rule still
     /// uses it ("Category in use"), which is surfaced, never forced.
+    /// Every alias and filter rule carrying `owner`'s category, as the
+    /// appliance holds them (ADR-0059 D4, observe). Read-only. An alias of a
+    /// type this client does not write (`port`, `url`, …) is not an alias it
+    /// could have made, and is left out.
+    pub fn observe(&self, owner: &OwnerMark) -> Result<GatewayObserved> {
+        let labels = self.owner_categories()?;
+        let mut out = GatewayObserved::default();
+        for row in self.search_rows("firewall/filter/search_rule")? {
+            if owner_of_row(&row, owner, &labels) != Owner::Ours {
+                continue;
+            }
+            let text = |k: &str| Some(str_field(&row, k)).filter(|v| !v.is_empty());
+            let rule = GatewayRule {
+                description: str_field(&row, "description"),
+                source: str_field(&row, "source_net"),
+                destination: str_field(&row, "destination_net"),
+                protocol: text("protocol").filter(|p| !p.eq_ignore_ascii_case("any")),
+                action: if str_field(&row, "action") == "block" {
+                    GatewayAction::Block
+                } else {
+                    GatewayAction::Pass
+                },
+                destination_port: text("destination_port"),
+                log: str_field(&row, "log") == "1",
+                stateful: str_field(&row, "statetype") != "none",
+                sequence: str_field(&row, "sequence").parse().ok(),
+            };
+            if str_field(&row, "enabled") == "0" {
+                out.disabled_rules.push(rule.description.clone());
+            }
+            out.rules.push(rule);
+        }
+        for row in self.search_rows("firewall/alias/search_item")? {
+            if owner_of_row(&row, owner, &labels) != Owner::Ours {
+                continue;
+            }
+            let kind = match str_field(&row, "type").as_str() {
+                "host" => AliasKind::Host,
+                "network" => AliasKind::Network,
+                _ => continue,
+            };
+            out.aliases.push(GatewayAlias {
+                name: str_field(&row, "name"),
+                kind,
+                content: entries(&str_field(&row, "content")).into_iter().collect(),
+                description: str_field(&row, "description"),
+            });
+        }
+        Ok(out)
+    }
+
     pub fn release_owner(&self, owner: &OwnerMark) -> Result<RemoveOutcome> {
         let Some(uuid) = self.owner_category(owner)? else {
             return Ok(RemoveOutcome::Absent);
@@ -1405,6 +1459,12 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
         self.client
             .release_owner(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<GatewayObserved> {
+        self.client
+            .observe(owner)
             .map_err(delonix_model::Error::from)
     }
 

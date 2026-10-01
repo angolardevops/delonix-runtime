@@ -52,7 +52,7 @@ pub enum AliasKind {
 /// key every alias by `name` at the top level). Found is not owned: an alias
 /// with that name is this engine's only when its description carries the
 /// caller's [`OwnerMark`] (see [`crate::ownership`]).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayAlias {
     pub name: String,
     pub kind: AliasKind,
@@ -68,7 +68,7 @@ pub struct GatewayAlias {
 /// worked example finds-or-creates by `description`). The description
 /// written to the appliance is this one plus the caller's [`OwnerMark`]; a
 /// rule whose description matches WITHOUT the mark is someone else's.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayRule {
     pub description: String,
     /// An alias name, a bare CIDR, or `"any"` — resolved by the appliance,
@@ -134,6 +134,121 @@ impl Default for GatewayRule {
     }
 }
 
+/// What a gateway provider holds under one owner mark, read back from the
+/// appliance (ADR-0059 D4, observe): the aliases and rules carrying the
+/// mark, as the provider normalized them, and the descriptions of those
+/// rules the appliance has disabled.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GatewayObserved {
+    pub aliases: Vec<GatewayAlias>,
+    pub rules: Vec<GatewayRule>,
+    pub disabled_rules: Vec<String>,
+}
+
+/// How what a provider holds under a mark differs from what the record
+/// declared, one line per difference, sorted. Empty = in sync. Pure.
+///
+/// A rule's `sequence` is compared only when the declaration sets one (the
+/// appliance numbers a rule declared without one itself); a protocol is
+/// compared case-insensitively, `None` being any; an alias's content is a
+/// set. An owned object nothing declares is a difference too: it carries
+/// this engine's mark, so nobody else will remove it.
+pub fn gateway_drift(
+    aliases: &[GatewayAlias],
+    rules: &[GatewayRule],
+    observed: &GatewayObserved,
+) -> Vec<String> {
+    use std::collections::BTreeSet;
+    let mut out = Vec::new();
+    for want in aliases {
+        match observed.aliases.iter().find(|a| a.name == want.name) {
+            None => out.push(format!("alias '{}' is missing", want.name)),
+            Some(have) => {
+                if have.kind != want.kind {
+                    out.push(format!("alias '{}' kind differs", want.name));
+                }
+                let set = |c: &[String]| {
+                    c.iter()
+                        .map(|e| e.trim().to_string())
+                        .collect::<BTreeSet<_>>()
+                };
+                if set(&have.content) != set(&want.content) {
+                    out.push(format!(
+                        "alias '{}' content is [{}], declared [{}]",
+                        want.name,
+                        have.content.join(", "),
+                        want.content.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+    for have in &observed.aliases {
+        if !aliases.iter().any(|a| a.name == have.name) {
+            out.push(format!(
+                "alias '{}' carries this engine's mark and is not declared",
+                have.name
+            ));
+        }
+    }
+    for want in rules {
+        let d = &want.description;
+        let Some(have) = observed.rules.iter().find(|r| &r.description == d) else {
+            out.push(format!("rule '{d}' is missing"));
+            continue;
+        };
+        let proto = |p: &Option<String>| p.as_deref().unwrap_or("any").to_ascii_uppercase();
+        let mut field = |name: &str, have: String, want: String| {
+            if have != want {
+                out.push(format!("rule '{d}' {name} is '{have}', declared '{want}'"));
+            }
+        };
+        field("source", have.source.clone(), want.source.clone());
+        field(
+            "destination",
+            have.destination.clone(),
+            want.destination.clone(),
+        );
+        field("protocol", proto(&have.protocol), proto(&want.protocol));
+        field(
+            "action",
+            have.action.as_str().into(),
+            want.action.as_str().into(),
+        );
+        field(
+            "destination_port",
+            have.destination_port.clone().unwrap_or_default(),
+            want.destination_port.clone().unwrap_or_default(),
+        );
+        field("log", have.log.to_string(), want.log.to_string());
+        field(
+            "stateful",
+            have.stateful.to_string(),
+            want.stateful.to_string(),
+        );
+        if let Some(seq) = want.sequence {
+            field(
+                "sequence",
+                have.sequence.map(|n| n.to_string()).unwrap_or_default(),
+                seq.to_string(),
+            );
+        }
+        if observed.disabled_rules.contains(d) {
+            out.push(format!("rule '{d}' is disabled on the appliance"));
+        }
+    }
+    for have in &observed.rules {
+        if !rules.iter().any(|r| r.description == have.description) {
+            out.push(format!(
+                "rule '{}' carries this engine's mark and is not declared",
+                have.description
+            ));
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Whether an `ensure_*` call created something or found it already there
 /// — already there meaning OWNED by the caller's mark and matching the
 /// declaration; an owned object that no longer matches is an error
@@ -195,6 +310,10 @@ pub trait GatewayProvider: delonix_compute::vm_provider::Provider {
     /// Retires `owner` on the provider once a teardown removed everything it
     /// marked — the label object an OPNsense owner mark lives in.
     fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome>;
+
+    /// Reads back every alias and rule carrying `owner`'s mark (ADR-0059
+    /// D4, observe). Read-only: it stages nothing and applies nothing.
+    fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<GatewayObserved>;
 
     /// Refuses (`RemoteForeignPending`) when the provider already carries
     /// staged changes nobody applied — called BEFORE the first staged write,
@@ -391,6 +510,9 @@ mod tests {
             fn release_owner(&self, _: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
                 Ok(RemoveOutcome::Absent)
             }
+            fn observe(&self, _: &OwnerMark) -> delonix_model::Result<GatewayObserved> {
+                Ok(GatewayObserved::default())
+            }
             fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
                 Ok(())
             }
@@ -441,5 +563,81 @@ mod tests {
     #[test]
     fn gateway_provider_for_returns_none_for_an_unknown_name() {
         assert!(gateway_provider_for("this-does-not-exist-at-all").is_none());
+    }
+
+    fn rule(d: &str) -> GatewayRule {
+        GatewayRule {
+            description: d.into(),
+            source: "any".into(),
+            destination: "10.0.0.0/24".into(),
+            ..GatewayRule::default()
+        }
+    }
+
+    #[test]
+    fn what_matches_is_in_sync() {
+        let alias = GatewayAlias {
+            name: "web".into(),
+            kind: AliasKind::Host,
+            content: vec!["10.0.0.2".into(), "10.0.0.1".into()],
+            description: String::new(),
+        };
+        let observed = GatewayObserved {
+            aliases: vec![GatewayAlias {
+                content: vec!["10.0.0.1".into(), " 10.0.0.2".into()],
+                ..alias.clone()
+            }],
+            rules: vec![GatewayRule {
+                protocol: Some("tcp".into()),
+                sequence: Some(4),
+                ..rule("r")
+            }],
+            disabled_rules: vec![],
+        };
+        let declared = GatewayRule {
+            protocol: Some("TCP".into()),
+            ..rule("r")
+        };
+        assert!(gateway_drift(&[alias], &[declared], &observed).is_empty());
+    }
+
+    #[test]
+    fn every_difference_is_named() {
+        let observed = GatewayObserved {
+            aliases: vec![GatewayAlias {
+                name: "stray".into(),
+                kind: AliasKind::Network,
+                content: vec![],
+                description: String::new(),
+            }],
+            rules: vec![
+                GatewayRule {
+                    log: true,
+                    sequence: Some(7),
+                    ..rule("changed")
+                },
+                rule("stray"),
+            ],
+            disabled_rules: vec!["changed".into()],
+        };
+        let declared = [
+            GatewayRule {
+                sequence: Some(5),
+                ..rule("changed")
+            },
+            rule("gone"),
+        ];
+        let drift = gateway_drift(&[], &declared, &observed);
+        assert_eq!(
+            drift,
+            [
+                "alias 'stray' carries this engine's mark and is not declared",
+                "rule 'changed' is disabled on the appliance",
+                "rule 'changed' log is 'true', declared 'false'",
+                "rule 'changed' sequence is '7', declared '5'",
+                "rule 'gone' is missing",
+                "rule 'stray' carries this engine's mark and is not declared",
+            ]
+        );
     }
 }
