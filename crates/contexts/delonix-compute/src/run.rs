@@ -123,6 +123,18 @@ where
     };
 
     let mut notices = edits.notices;
+    // The image's `USER` is read and NOT applied: without `--user` the process
+    // runs as uid 0 inside the container whatever the image declares. Accepting a
+    // declaration and ignoring it in silence is what this engine refuses
+    // everywhere else, so until the default changes (ADR-0062) the run says so.
+    // Only on the first pass: the re-exec into a custom network resolves again.
+    if o.user.is_none() && !second_pass && image_user_is_non_root(&config.user) {
+        notices.push(Notice::new(
+            "delonix: warning — image '{image}' declares USER {user}, which is not applied: \
+             the process runs as root (uid 0) inside the container. Pass -u {user} to run as that user.",
+            &[("image", &o.image), ("user", &config.user)],
+        ));
+    }
     let security = parse_security_opts(&o.security_opt)?;
     let mut seccomp = security
         .seccomp_unconfined
@@ -247,6 +259,14 @@ pub fn parse_security_opts(opts: &[String]) -> Result<SecurityOpts> {
         }
     }
     Ok(out)
+}
+
+/// Does an image's `USER` name someone other than root? `""` (none), `0`,
+/// `root`, and either of those with a group (`0:0`, `root:wheel`) are root.
+/// PURE.
+pub fn image_user_is_non_root(user: &str) -> bool {
+    let name = user.split(':').next().unwrap_or("").trim();
+    !(name.is_empty() || name == "0" || name == "root")
 }
 
 /// The image's ENTRYPOINT followed by the user's command, or by the image's CMD
@@ -580,12 +600,20 @@ mod tests {
 
     struct Fake {
         calls: RefCell<Vec<String>>,
+        image_user: String,
     }
 
     impl Fake {
         fn new() -> Self {
             Fake {
                 calls: RefCell::new(Vec::new()),
+                image_user: String::new(),
+            }
+        }
+        fn with_image_user(user: &str) -> Self {
+            Fake {
+                image_user: user.into(),
+                ..Fake::new()
             }
         }
         fn log(&self, s: impl Into<String>) {
@@ -605,6 +633,7 @@ mod tests {
                 cmd: vec!["serve".into()],
                 env: vec!["PATH=/bin".into()],
                 working_dir: "/app".into(),
+                user: self.image_user.clone(),
             }
         }
         fn prepare_rootfs(
@@ -701,6 +730,37 @@ mod tests {
             f,
             f,
         )
+    }
+
+    /// An image's USER that is read and not applied is SAID, once: on the first
+    /// pass, only when no `--user` was given, and only when it names someone
+    /// other than root.
+    #[test]
+    fn an_unapplied_image_user_is_announced_once() {
+        let warned = |r: &Resolved| {
+            r.notices
+                .iter()
+                .any(|n| n.template.contains("declares USER") && n.render().contains("odoo"))
+        };
+        let o = opts();
+        let f = Fake::with_image_user("odoo");
+        assert!(
+            warned(&run(&o, &f, false).unwrap()),
+            "first pass must say it"
+        );
+        assert!(
+            !warned(&run(&o, &f, true).unwrap()),
+            "the re-exec pass must not repeat it"
+        );
+        let mut with_user = opts();
+        with_user.user = Some("odoo".into());
+        assert!(!warned(&run(&with_user, &f, false).unwrap()));
+        for root in ["", "0", "root", "0:0", "root:root"] {
+            let f = Fake::with_image_user(root);
+            assert!(!warned(&run(&o, &f, false).unwrap()), "{root:?} is root");
+        }
+        assert!(image_user_is_non_root("101:101"));
+        assert!(image_user_is_non_root("haproxy"));
     }
 
     #[test]
