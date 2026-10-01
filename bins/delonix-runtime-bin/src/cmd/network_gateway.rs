@@ -161,8 +161,17 @@ pub struct GatewayRuleSpec {
 pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules", "policies"];
 
 /// Fields the reconciler compares.
+///
+/// `remote` is what the appliance holds under the record's owner mark,
+/// observed on every plan (ADR-0059 D4): `in sync`, or each difference from
+/// what the record declared. The manifest always wants `in sync`, so a rule
+/// changed or deleted on the appliance by hand is drift (`stack plan
+/// --detailed-exitcode` answers 2, `delonix drift` names it).
 pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] =
-    &["provider", "aliases", "rules", "policies"];
+    &["provider", "aliases", "rules", "policies", "remote"];
+
+/// The `remote` field of a record that matches the appliance.
+const IN_SYNC: &str = "in sync";
 
 /// A registered record: what was last declared, plus the ownership fields
 /// every ownable Kind's own registry carries (mirrors `ServiceDef`).
@@ -436,6 +445,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     fields.insert("aliases".into(), aliases_field(&spec.aliases));
     fields.insert("rules".into(), rules_field(&spec.rules));
     fields.insert("policies".into(), policies_field(&spec.policies));
+    fields.insert("remote".into(), IN_SYNC.into());
     Ok(super::reconcile::Desired {
         kind: k::NETWORK_GATEWAY.into(),
         name: doc.metadata.name.clone(),
@@ -448,20 +458,55 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// Every declared `NetworkGateway` — the enumeration `--prune` needs, same
 /// reasoning as `service::actual`.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
-    Ok(store()?
+    store()?
         .list()?
         .into_iter()
-        .map(|rec| super::reconcile::Actual {
-            kind: k::NETWORK_GATEWAY.into(),
-            name: rec.name.clone(),
-            fields: record_fields(&rec),
-            owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
-            last_applied: rec
-                .annotations
-                .get(super::reconcile::LAST_APPLIED)
-                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        .map(|rec| {
+            let mut fields = record_fields(&rec);
+            fields.insert("remote".into(), remote_field(&rec)?);
+            Ok(super::reconcile::Actual {
+                kind: k::NETWORK_GATEWAY.into(),
+                name: rec.name.clone(),
+                fields,
+                owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                last_applied: rec
+                    .annotations
+                    .get(super::reconcile::LAST_APPLIED)
+                    .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+            })
         })
-        .collect())
+        .collect()
+}
+
+/// What the appliance holds under the record's owner mark, compared with
+/// what the record declared (ADR-0059 D4, observe; read-only). A record
+/// without a mark, or from the retired `native` provider, owns nothing that
+/// can be observed, and says so instead of claiming to be in sync.
+fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
+    if rec.owner.is_empty() {
+        return Ok("not observed: the record predates owner marks".into());
+    }
+    if rec.provider == LEGACY_NATIVE {
+        return Ok("not observed: the retired native provider owns nothing remote".into());
+    }
+    let owner = OwnerMark::new(&rec.owner)?;
+    let aliases = rec
+        .aliases
+        .iter()
+        .map(to_alias)
+        .collect::<Result<Vec<_>>>()?;
+    let mut rules: Vec<GatewayRule> = rec.rules.iter().map(to_rule).collect();
+    rules.extend(all_policy_rules(&rec.policies)?);
+    let (provider_id, provider) = resolve_provider(None, &rec.provider)?;
+    let observed = provider
+        .observe(&owner)
+        .map_err(at(provider_id, "observe"))?;
+    let drift = delonix_sdn::gateway::gateway_drift(&aliases, &rules, &observed);
+    Ok(if drift.is_empty() {
+        IN_SYNC.to_string()
+    } else {
+        drift.join("; ")
+    })
 }
 
 /// The record's owner token, generating one when the record has none yet.

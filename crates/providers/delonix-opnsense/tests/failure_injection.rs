@@ -656,6 +656,53 @@ fn ours_row(uuid: &str) -> serde_json::Value {
     row
 }
 
+/// ADR-0059 D4, observe: only what carries OUR category is read back — not
+/// an operator's rule, not another record's — with the fields as the
+/// appliance holds them, and a disabled rule named as such.
+#[test]
+fn observe_reads_back_only_what_carries_our_mark() {
+    let mut ours = ours_row(U1);
+    ours["action"] = "block".into();
+    ours["destination_port"] = "8000-8080".into();
+    ours["log"] = "1".into();
+    ours["statetype"] = "none".into();
+    ours["sequence"] = "30001".into();
+    ours["enabled"] = "0".into();
+    let mut theirs = rule_row(U2, "someone else's");
+    theirs["categories"] = CAT_OTHER.into();
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours, theirs, rule_row(U2, "by hand")])),
+        ),
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(
+                200,
+                rows(&[serde_json::json!({
+                    "uuid": U1, "name": "web", "type": "host", "enabled": "1",
+                    "content": "10.0.0.1\n10.0.0.2", "description": "tier",
+                    "categories": CAT_OURS,
+                })]),
+            ),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let observed = client.observe(&mark()).unwrap();
+    assert_eq!(observed.rules.len(), 1, "{observed:?}");
+    let r = &observed.rules[0];
+    assert_eq!(r.description, "allow web");
+    assert_eq!(r.action, delonix_networking::gateway::GatewayAction::Block);
+    assert_eq!(r.destination_port.as_deref(), Some("8000-8080"));
+    assert!(r.log && !r.stateful);
+    assert_eq!(r.sequence, Some(30001));
+    assert_eq!(observed.disabled_rules, ["allow web"]);
+    assert_eq!(observed.aliases.len(), 1);
+    assert_eq!(observed.aliases[0].content, ["10.0.0.1", "10.0.0.2"]);
+}
+
 fn web_rule() -> GatewayRule {
     GatewayRule {
         description: "allow web".into(),
