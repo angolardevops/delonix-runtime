@@ -1,17 +1,24 @@
-image: php:8.3-cli
+# Same gate as .github/workflows/ci.yml.
+image: php:8.4-cli
 
 stages:
-  - test
+  - check
 
-test:
-  stage: test
+check:
+  stage: check
   before_script:
-    - apt-get update -yqq && apt-get install -yqq git unzip libsqlite3-dev
-    - docker-php-ext-install pdo_sqlite
-    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - apt-get update -yqq && apt-get install -yqq --no-install-recommends git unzip
+    - docker-php-ext-install pcntl
+    # Composer from its official image's published binary, checksum-verified.
+    - curl -fsSLo /usr/local/bin/composer https://getcomposer.org/download/latest-2.x/composer.phar
+    - curl -fsSL https://getcomposer.org/download/latest-2.x/composer.phar.sha256sum | sed 's#composer.phar#/usr/local/bin/composer#' | sha256sum -c -
+    - chmod +x /usr/local/bin/composer
   script:
-    - composer install --no-interaction --prefer-dist
-    - cp .env.example .env
-    - php artisan key:generate
-    - touch database/database.sqlite
-    - php artisan test
+    - test -f composer.lock || { echo "composer.lock is missing. Run 'composer install' once and commit composer.lock (README, Quickstart)."; exit 1; }
+    - composer validate --strict
+    - composer install --no-interaction --no-progress --prefer-dist
+    - composer format-check
+    - composer lint
+    - composer analyse
+    - composer test
+    - composer audit-deps

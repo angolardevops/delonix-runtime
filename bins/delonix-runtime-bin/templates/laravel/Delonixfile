@@ -1,33 +1,58 @@
-# Delonixfile — Laravel + FrankenPHP (single binary, production-grade server).
-# Build with:  delonix build -t __NAME__:dev .
-FROM dunglas/frankenphp:php8.3
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
+#
+# Two stages. The official Composer image installs the PHP dependencies (no
+# installer script piped from the network); only the application and its
+# vendor/ reach the FrankenPHP runtime image. The build context is filtered by
+# .dockerignore (.env, vendor/, node_modules/, logs, .git never get in).
+#
+# Nothing secret is baked: no .env, no APP_KEY, no config cache. The
+# configuration is validated and cached when the CONTAINER starts
+# (docker/entrypoint.sh), from the runtime environment.
+FROM composer:2 AS vendor
+WORKDIR /app
+COPY . /app
+# From composer.lock when the project has one (reproducible); otherwise
+# resolved now, with a warning — commit composer.lock (README, Quickstart).
+RUN --mount=type=cache,target=/tmp/composer-cache \
+    export COMPOSER_CACHE_DIR=/tmp/composer-cache; \
+    if [ -f composer.lock ]; then \
+      composer install --no-dev --no-scripts --no-interaction --no-progress --prefer-dist; \
+    else \
+      echo "WARNING: no composer.lock in the build context; resolving dependencies now" >&2; \
+      composer update --no-dev --no-scripts --no-interaction --no-progress --prefer-dist; \
+    fi \
+    && composer dump-autoload --no-dev --no-scripts --classmap-authoritative
+
+FROM dunglas/frankenphp:1-php8.4
+# The image already has pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl,
+# dom and opcache. Nothing is compiled here on purpose: `install-php-extensions`
+# builds from the PHP source tarball, and unpacking it fails in a rootless
+# build (one mapped uid cannot restore the archive's owners and modes). That
+# leaves out ext-pcntl, so the queue worker cannot finish the job in hand on
+# SIGTERM — see docs/adr/0003 for what that costs and how to add it back.
+RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+ARG VERSION=dev
 ENV APP_ENV=production \
     APP_DEBUG=false \
-    COMPOSER_ALLOW_SUPERUSER=1
+    APP_VERSION=${VERSION} \
+    LOG_CHANNEL=json \
+    PORT=__PORT__ \
+    DB_CONNECTION=sqlite \
+    DB_DATABASE=/var/lib/app/database.sqlite \
+    APP_CONFIG_CACHE=/tmp/laravel/config.php \
+    APP_ROUTES_CACHE=/tmp/laravel/routes.php \
+    APP_EVENTS_CACHE=/tmp/laravel/events.php
 WORKDIR /app
-# unzip lets Composer extract dist packages (the image has neither unzip nor ext-zip).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends unzip \
-    && rm -rf /var/lib/apt/lists/*
-# The frankenphp image already ships everything Laravel needs to boot with
-# SQLite (pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl, dom, opcache).
-# Need more (intl, pcntl, redis…)? `install-php-extensions <ext>` is in the image.
-# Composer — the FrankenPHP image doesn't bundle it. Fetch via PHP (no curl dep).
-RUN php -r "copy('https://getcomposer.org/installer','/tmp/composer-setup.php');" \
-    && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer \
-    && rm /tmp/composer-setup.php
-COPY . .
-# Install, then bake a runnable app: env + sqlite DB + app key.
-# Deliberately NO `config:cache`: a cached config freezes APP_KEY/APP_ENV into
-# bootstrap/cache and would make runtime overrides (e.g. an APP_KEY injected via
-# `delonix secret`, as the manifest suggests) silently ineffective. Cache config
-# from an entrypoint at container start if you want it, not at build time.
-RUN composer install --no-dev --optimize-autoloader --no-interaction \
-    && cp .env.example .env \
-    && touch database/database.sqlite \
-    && php artisan key:generate \
-    && php artisan config:cache
+COPY --from=vendor /app /app
+# Package manifests depend only on composer, so they are safe to build in.
+RUN php artisan package:discover --ansi \
+    && mkdir -p /var/lib/app /tmp/laravel \
+    && chmod +x /app/docker/entrypoint.sh
+VOLUME /var/lib/app
 EXPOSE __PORT__
-# Delonix extension: the runtime probes this to mark the container healthy.
-HEALTHCHECK CMD php -r "exit((@file_get_contents('http://127.0.0.1:__PORT__/api/v1/health/live'))!==false?0:1);"
-CMD ["frankenphp", "php-server", "--listen", "0.0.0.0:__PORT__", "--root", "public/"]
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD php -r "exit(@file_get_contents('http://127.0.0.1:__PORT__/api/v1/health/live') === false ? 1 : 0);"
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
+CMD ["serve"]

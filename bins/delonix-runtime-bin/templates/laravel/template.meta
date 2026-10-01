@@ -1,1 +1,5 @@
-version=12.0
+version=13
+versions=12,13
+port=8000
+health=/api/v1/health/live
+lock=composer.lock

@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: __NAME__
+  version: 1.0.0
+  description: |
+    HTTP contract of __NAME__. This file is the source of truth for the
+    routes: tests/Feature/OpenApiContractTest fails when a route is
+    added to or removed from the code without being added here (and the other
+    way round). Breaking changes go to a new /api/v2 prefix.
+paths:
+  /api/v1/health/live:
+    get:
+      summary: Liveness — the process answers.
+      responses:
+        "200":
+          description: Alive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /api/v1/health/ready:
+    get:
+      summary: Readiness — the process should receive traffic.
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: Starting, draining, or a required dependency is failing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /api/v1/notes:
+    post:
+      summary: Create a note.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NoteInput" }
+      responses:
+        "201":
+          description: Created. The Location header points at the note.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      summary: List notes, newest first.
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotePage" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/notes/{id}:
+    get:
+      summary: Get one note.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The note.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Note" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/webhooks/inbound:
+    post:
+      summary: Receive a signed webhook (Standard Webhooks). Only served when WEBHOOK_INBOUND_SECRET is set.
+      parameters:
+        - { name: webhook-id, in: header, required: true, schema: { type: string } }
+        - { name: webhook-timestamp, in: header, required: true, schema: { type: string } }
+        - { name: webhook-signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "204": { description: Accepted, or a duplicate of an accepted delivery. }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+components:
+  responses:
+    Error:
+      description: Error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [alive, ready, starting, unavailable, draining] }
+        dependency: { type: string, description: The dependency that is failing (database). }
+    NoteInput:
+      type: object
+      required: [title]
+      additionalProperties: false
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        body: { type: string, maxLength: 10000 }
+    Note:
+      type: object
+      required: [id, title, body, created_at]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        created_at: { type: string, format: date-time }
+    NotePage:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Note" } }
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+    WebhookEvent:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [ping, note.create] }
+        data: { $ref: "#/components/schemas/NoteInput" }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields: { type: object, additionalProperties: { type: string } }
+            request_id: { type: string }
