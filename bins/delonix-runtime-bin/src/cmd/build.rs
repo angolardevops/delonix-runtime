@@ -1710,10 +1710,10 @@ fn join_rel(rel: &str, name: &str) -> String {
 }
 
 /// Should the walk leave `rel` out? An excluded directory is still walked
-/// when some rule re-includes (`!`), since a file inside it may come back.
+/// when a `!` rule can re-include something inside it — and only then.
 fn ignored(ignore: Option<&DockerIgnore>, rel: &str, is_dir: bool) -> bool {
     match ignore {
-        Some(ig) if ig.is_excluded(rel) => !(is_dir && ig.has_exceptions()),
+        Some(ig) if ig.is_excluded(rel) => !(is_dir && ig.may_reinclude_under(rel)),
         _ => false,
     }
 }
@@ -2124,7 +2124,13 @@ mod dockerignore_tests {
         fs::write(root.join(".env"), "TOKEN=secret\n").unwrap();
         fs::write(root.join(".env.example"), "TOKEN=\n").unwrap();
         fs::write(root.join("node_modules/pkg/index.js"), "x\n").unwrap();
-        fs::write(root.join(".dockerignore"), "node_modules\n.env\n").unwrap();
+        // The exception is the case that used to leave `node_modules/` behind
+        // as an empty skeleton.
+        fs::write(
+            root.join(".dockerignore"),
+            "node_modules\n.env\n.env.*\n!.env.example\n",
+        )
+        .unwrap();
         ctx
     }
 

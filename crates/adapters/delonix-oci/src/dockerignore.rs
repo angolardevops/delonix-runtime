@@ -82,11 +82,22 @@ impl DockerIgnore {
         self.rules.is_empty()
     }
 
-    /// True when some rule re-includes. A directory the rules exclude can then
-    /// still hold files that are included again, so a walker must descend into
-    /// it instead of skipping the whole subtree.
+    /// True when some rule re-includes.
     pub fn has_exceptions(&self) -> bool {
         self.rules.iter().any(|r| r.exception)
+    }
+
+    /// Could a `!` rule re-include something INSIDE the directory `rel`? A
+    /// walker descends into an excluded directory only then. Asking merely
+    /// "is there any exception" made one `!.env.example` walk every excluded
+    /// tree — a whole `.venv` or `node_modules` — and leave its empty
+    /// directory skeleton in the image.
+    pub fn may_reinclude_under(&self, rel: &str) -> bool {
+        let path = clean(rel);
+        self.rules
+            .iter()
+            .filter(|r| r.exception)
+            .any(|r| prefix_matches(&r.segments, &path))
     }
 
     /// Is `rel` (a path relative to the build context, `/`-separated) excluded?
@@ -121,6 +132,20 @@ fn clean(p: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Can the pattern match some path strictly below `dir`? True when its
+/// leading segments match every segment of `dir` and something remains (or a
+/// `**` makes the depth open-ended).
+fn prefix_matches(pat: &[String], dir: &[String]) -> bool {
+    match (pat.first(), dir.first()) {
+        (Some(p), _) if p == "**" => true,
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(p), Some(d)) => {
+            match_segment(p.as_bytes(), d.as_bytes()) && prefix_matches(&pat[1..], &dir[1..])
+        }
+    }
 }
 
 /// Whole-path match of pattern segments against path segments.
@@ -232,6 +257,18 @@ mod tests {
         assert!(d.is_excluded("README.md"), "a later exclusion wins again");
         assert!(ig("*.md\n!README.md\n").has_exceptions());
         assert!(!ig("*.md\n").has_exceptions());
+    }
+
+    /// One `!` rule must not make every excluded directory worth walking.
+    #[test]
+    fn an_exception_opens_only_the_directories_it_can_reach() {
+        let d = ig(".venv\nnode_modules\n.env.*\n!.env.example\ndocs\n!docs/api/openapi.yaml\n");
+        assert!(!d.may_reinclude_under(".venv"));
+        assert!(!d.may_reinclude_under("node_modules/pkg"));
+        assert!(d.may_reinclude_under("docs"));
+        assert!(d.may_reinclude_under("docs/api"));
+        assert!(!d.may_reinclude_under("docs/adr"));
+        assert!(ig("build\n!**/keep.txt\n").may_reinclude_under("build/deep"));
     }
 
     #[test]
