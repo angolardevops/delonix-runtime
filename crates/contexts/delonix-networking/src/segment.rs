@@ -71,6 +71,11 @@ pub struct VNetSpec {
 pub struct SegmentObserved {
     pub zone_present: bool,
     pub vnets: Vec<VNetSpec>,
+    /// The names of the vnets in this zone that do NOT carry the mark:
+    /// someone else's. Never drift — they are not this engine's to judge —
+    /// but part of what a plan was decided against, so one added between a
+    /// plan and its apply makes the plan stale.
+    pub foreign_vnets: Vec<String>,
 }
 
 /// How what a provider holds differs from what a record declared, one line
@@ -461,6 +466,7 @@ mod tests {
         let observed = SegmentObserved {
             zone_present: true,
             vnets: vec![vnet("v1", "z", None), vnet("v2", "z", Some("app tier"))],
+            foreign_vnets: vec!["someone-elses".into()],
         };
         let declared = [
             vnet("v2", "z", Some(" app tier ")),
@@ -474,6 +480,7 @@ mod tests {
         let observed = SegmentObserved {
             zone_present: false,
             vnets: vec![vnet("moved", "other", Some("x")), vnet("stray", "z", None)],
+            foreign_vnets: vec![],
         };
         let declared = [vnet("moved", "z", Some("y")), vnet("gone", "z", None)];
         assert_eq!(

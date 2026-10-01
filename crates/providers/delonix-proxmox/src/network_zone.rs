@@ -97,6 +97,12 @@ pub(crate) fn observed_from(
                 }
             })
             .collect(),
+        foreign_vnets: vnets
+            .iter()
+            .filter(|v| text(v, "zone") == zone)
+            .filter(|v| owner.owner_of(&text(v, "alias")) != Owner::Ours)
+            .map(|v| text(v, "vnet"))
+            .collect(),
     }
 }
 
@@ -337,6 +343,12 @@ mod tests {
                 },
             ]
         );
-        assert!(!observed_from(&zones, &vnets, "z", &mark()).zone_present);
+        assert_eq!(o.foreign_vnets, ["v3", "v4", "v5"]);
+        let elsewhere = observed_from(&zones, &vnets, "z", &mark());
+        assert!(!elsewhere.zone_present);
+        assert!(
+            elsewhere.foreign_vnets.is_empty(),
+            "foreign vnets are counted per zone"
+        );
     }
 }
