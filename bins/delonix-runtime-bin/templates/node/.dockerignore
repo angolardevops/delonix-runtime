@@ -1,7 +1,13 @@
-node_modules/
-dist/
-.git/
+# Honoured by `delonix build` and `docker build` alike: nothing listed here
+# reaches the image.
+.git
+.github
+.gitlab-ci.yml
+node_modules
+dist
 .env
-test/
+.env.*
+!.env.example
 *.md
-npm-debug.log*
+docs
+coverage
