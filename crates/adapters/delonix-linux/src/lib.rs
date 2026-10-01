@@ -1214,33 +1214,71 @@ fn mount_target_safe(target: &str) -> bool {
 }
 
 /// Resolves `target` (an in-container path, already lexically validated by
-/// `mount_target_safe`) against `rootfs`, component-by-component, refusing to
-/// descend through any symlink an image layer may have planted along the
-/// way. `mount_target_safe`'s lexical `..` check is not enough on its own:
-/// `create_dir_all`/`OpenOptions::open` (called on the joined path right
-/// after this) FOLLOW symlinks, and `bind_volume` runs BEFORE `pivot_root`
-/// while `/` is still the real host filesystem — an absolute symlink at ANY
-/// path component (a malicious image shipping e.g. `/etc -> /root`, or the
-/// final mount-target component itself already existing as one) redirects
-/// the destination to an arbitrary real host path, and the subsequent
-/// create/open then create real directories/files on the host, as the
-/// engine's own uid. Mirrors the confinement technique `cmd::build::
-/// confine_to` already uses for the build's COPY (a sibling of this exact
-/// bug class, fixed there first) — this is the engine-side equivalent.
+/// `mount_target_safe`) against `rootfs`, the way the container itself would:
+/// a symlink is followed, and it can never lead out of `rootfs`.
+///
+/// `bind_volume` runs BEFORE `pivot_root`, while `/` is still the real host
+/// filesystem, and `create_dir_all`/`open` on the joined path FOLLOW symlinks.
+/// So a link an image ships (`/etc -> /root`, or the final component itself)
+/// would, taken literally, send the mount and the directories created for it
+/// to a real host path. Each component is therefore resolved by hand: an
+/// absolute link restarts at `rootfs`, and `..` stops at `rootfs` — the scoped
+/// resolution runc does.
+///
+/// It used to REFUSE any symlink on the way. That was safe and wrong: Alpine
+/// and Debian ship `/var/run -> /run`, and the kubelet mounts every pod's
+/// service-account token at `/var/run/secrets/…`, so on a Kubernetes node each
+/// pod from such an image failed with `failed to prepare the rootfs: EINVAL`
+/// (measured on a kubeadm node, k8s 1.36).
+///
+/// `None` only for a link chain too long to be anything but a loop.
 fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
-    let mut current = std::path::PathBuf::from(rootfs);
-    for comp in std::path::Path::new(target).components() {
-        let std::path::Component::Normal(c) = comp else {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Component;
+    const MAX_LINKS: u32 = 40;
+    let root = std::path::PathBuf::from(rootfs);
+    let parts = |p: &std::path::Path| -> Vec<OsString> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut pending: VecDeque<OsString> = parts(std::path::Path::new(target)).into();
+    // The resolved path so far, relative to `root`: real components only.
+    let mut resolved: Vec<OsString> = Vec::new();
+    let mut links = 0;
+    while let Some(c) = pending.pop_front() {
+        if c == ".." {
+            resolved.pop(); // never above `root`
             continue;
-        };
-        current.push(c);
-        if let Ok(meta) = std::fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return None;
-            }
+        }
+        let mut here = root.clone();
+        here.extend(&resolved);
+        here.push(&c);
+        let is_link = std::fs::symlink_metadata(&here).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            resolved.push(c);
+            continue;
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return None;
+        }
+        let dest = std::fs::read_link(&here).ok()?;
+        if dest.is_absolute() {
+            resolved.clear();
+        }
+        for part in parts(&dest).into_iter().rev() {
+            pending.push_front(part);
         }
     }
-    Some(current)
+    let mut out = root;
+    out.extend(&resolved);
+    Some(out)
 }
 
 /// The mount flags the kernel LOCKS on a mount that a user namespace merely
@@ -9988,45 +10026,45 @@ mod tests {
         );
     }
 
+    /// A symlink on the way to a mount target is followed INSIDE the rootfs,
+    /// never out of it: an absolute link restarts at the rootfs, `..` stops
+    /// there, and a loop is refused.
     #[test]
-    fn safe_bind_target_recusa_symlink_plantado_pela_imagem() {
-        // HIGH fixed here: `mount_target_safe` only rejects lexical `..` —
-        // it never resolves symlinks, and `create_dir_all`/`OpenOptions::open`
-        // (called on the joined path right after, before `pivot_root`) FOLLOW
-        // them. A malicious image shipping e.g. `/etc -> /root` inside its
-        // rootfs redirects a `-v vol:/etc/pwned` mount target to a real host
-        // path. `safe_bind_target` must refuse to descend through ANY
-        // symlink component, whether in the middle of the path or as the
-        // final target itself.
+    fn a_bind_target_through_a_symlink_stays_inside_the_rootfs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         let rootfs = base.join("rootfs");
-        std::fs::create_dir_all(&rootfs).unwrap();
+        std::fs::create_dir_all(rootfs.join("run")).unwrap();
+        std::fs::create_dir_all(rootfs.join("var")).unwrap();
+        let root = rootfs.to_string_lossy().into_owned();
+        let resolve = |t: &str| safe_bind_target(&root, t);
 
-        // Case 1: an intermediate path component is a symlink escaping rootfs.
+        // What Alpine and Debian ship, both spellings.
+        std::os::unix::fs::symlink("/run", rootfs.join("var/run")).unwrap();
+        assert_eq!(
+            resolve("/var/run/secrets/token"),
+            Some(rootfs.join("run/secrets/token"))
+        );
+        std::os::unix::fs::symlink("../run", rootfs.join("var/run2")).unwrap();
+        assert_eq!(resolve("/var/run2/x"), Some(rootfs.join("run/x")));
+
+        // A link to a real HOST path: the result is that path under the rootfs.
         let outside = base.join("outside-victim");
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, rootfs.join("etc")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/etc/pwned").is_none(),
-            "um symlink a meio do caminho deve ser recusado"
-        );
+        let got = resolve("/etc/pwned").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
+        assert!(!got.starts_with(&outside));
 
-        // Case 2: the FINAL target component itself is already a symlink.
-        let victim_file = base.join("victim-file");
-        std::fs::write(&victim_file, b"secret").unwrap();
-        std::fs::create_dir_all(rootfs.join("app")).unwrap();
-        std::os::unix::fs::symlink(&victim_file, rootfs.join("app").join("data")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/app/data").is_none(),
-            "um symlink no próprio componente final deve ser recusado"
-        );
+        // The final component itself a link, and `..` trying to climb out.
+        std::os::unix::fs::symlink("../../../../etc/shadow", rootfs.join("data")).unwrap();
+        let got = resolve("/data").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
 
-        // Legitimate case: no symlinks anywhere, real target resolves normally.
-        assert_eq!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
-            Some(rootfs.join("data").join("inside"))
-        );
+        // No link at all resolves to itself; a loop is refused.
+        assert_eq!(resolve("/srv/inside"), Some(rootfs.join("srv/inside")));
+        std::os::unix::fs::symlink("loop", rootfs.join("loop")).unwrap();
+        assert_eq!(resolve("/loop/x"), None);
     }
 
     #[test]

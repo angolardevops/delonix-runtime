@@ -134,7 +134,7 @@ where
             // Only on the first pass: the re-exec into a custom network resolves again.
             if !second_pass {
                 notices.push(Notice::new(
-                    "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host:                      it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap),                      so a second user cannot exist. The process runs as root (uid 0) inside the container.",
+                    "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container.",
                     &[("image", &o.image), ("user", u)],
                 ));
             }
