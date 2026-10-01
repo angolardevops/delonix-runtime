@@ -7,3 +7,5 @@ pnpm-lock.yaml
 api/openapi.json
 # Markdown tables would be re-aligned for every project name.
 *.md
+# pnpm keeps its store here when the project sits on its own mount (a CI runner).
+.pnpm-store

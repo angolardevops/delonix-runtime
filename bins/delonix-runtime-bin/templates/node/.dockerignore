@@ -11,3 +11,5 @@ dist
 *.md
 docs
 coverage
+# pnpm keeps its store here when the project sits on its own mount (a CI runner).
+.pnpm-store

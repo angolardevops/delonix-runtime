@@ -33,8 +33,6 @@ secret, and Laravel's `config:cache` freezes whatever environment it sees.
   (`/etc/subuid`; the Delonix installer sets one up), but the process could
   rewrite its own code and `/etc`. A host without a range cannot run a second
   user; there, remove `user:` from both containers of the manifest.
-- **A base image that ships `pcntl`**: none of the official FrankenPHP tags
-  does.
 
 ## Trade-off
 Each request boots the framework (a few milliseconds with opcache), and
@@ -42,8 +40,3 @@ start-up runs three artisan commands before listening. The engine applies an
 image's `USER` only when the manifest names the user, so `USER` in the
 `Delonixfile` and `user:` in `delonix-manifest.yaml` must agree. Compiling
 `pcntl` adds the PHP source unpack and a compiler run to every uncached build.
-`install-php-extensions` unpacks that source with the archive's owners and
-modes, which a rootless build cannot restore (measured: `tar: Cannot change
-mode … Operation not permitted`); `TAR_OPTIONS="--no-same-owner
---no-same-permissions"` on that line is what makes it build rootless, and it
-is harmless when building as root.

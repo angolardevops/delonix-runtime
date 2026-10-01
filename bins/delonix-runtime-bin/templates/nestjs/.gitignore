@@ -5,3 +5,5 @@ coverage/
 *.log
 .env
 .DS_Store
+# pnpm keeps its store here when the project sits on its own mount (a CI runner).
+.pnpm-store

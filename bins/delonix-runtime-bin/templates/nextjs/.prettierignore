@@ -7,3 +7,5 @@ next-env.d.ts
 # Holds the project name and port `delonix init` wrote: a long name must not
 # change how the formatter wants the file wrapped.
 lib/project.ts
+# pnpm keeps its store here when the project sits on its own mount (a CI runner).
+.pnpm-store

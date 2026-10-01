@@ -11,7 +11,7 @@ import tseslint from "typescript-eslint";
 const nextCoreWebVitals = next.flatConfig?.coreWebVitals ?? next.configs["core-web-vitals"];
 
 export default tseslint.config(
-  { ignores: [".next/**", "node_modules/**", "coverage/**", "next-env.d.ts"] },
+  { ignores: [".next/**", "node_modules/**", ".pnpm-store/**", "coverage/**", "next-env.d.ts"] },
   ...tseslint.configs.recommended,
   nextCoreWebVitals,
   reactHooks.configs.flat.recommended,
