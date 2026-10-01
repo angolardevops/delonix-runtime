@@ -78,6 +78,7 @@ metadata:
   labels: { app: __NAME__, tier: web }
 spec:
   image: __NAME__:dev
+  user: odoo                    # the image's own user; the engine does not apply it by itself yet
   restart: always
   network: __NAME__-net
   ports:

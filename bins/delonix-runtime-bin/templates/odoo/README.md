@@ -164,14 +164,14 @@ security headers and does not terminate TLS.
 
 ## What this template does not do
 
-- **Odoo runs as `root` inside the container**, and logs `Running as user
-  'root' is a security risk`. The official image declares `USER odoo`, but the
-  engine does not apply an image's `USER` yet; in a rootless Delonix that
-  in-container root is your own unprivileged host user, not host root.
-  `user: odoo` in the manifest does switch the user, after a one-off
-  ownership pass over the image (minutes on a slow disk) — but whether Odoo
-  can then write its filestore volume was not verified for this template, so
-  it is not the default.
+- **It does not migrate a filestore volume written as root.** Both manifests
+  run Odoo as the image's own user (`user: odoo`). A NEW `__NAME__-odoo` volume
+  is handed to that user at its first mount; one that an earlier run filled as
+  root keeps its owner, and Odoo then cannot write to it. Remove the volume, or
+  fix its ownership from a one-off container running as root.
+- **It does not let Odoo write into `addons/` in development.** A bind mount
+  keeps the ownership your host gave it; Odoo reads your addons and does not
+  write there.
 - **No OpenTelemetry.** Odoo has no built-in exporter; what you get is its
   own log on stdout (`delonix container logs`), one line per request with
   timing and query counts.

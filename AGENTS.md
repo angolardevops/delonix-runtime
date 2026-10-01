@@ -3045,6 +3045,11 @@ antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
   `2755` da imagem é `755` no container). O init repõe o modo depois do `chown` (que os limpa),
   para nada se perder no dia em que a extracção os preservar.
 - **Por validar**: host root (não rootless) e o CRI num nó.
+- **O template `odoo` corre como `odoo`** (`user: odoo` nos dois manifestos, 2026-10-01, depois
+  de o P1 fundir). Medido ao vivo: uid 100, sem o aviso «Running as user 'root'», filestore
+  gravável num volume novo, `/etc/passwd` recusado; no perfil dev os binds `addons/` e
+  `config/` ficam `1000:1000` no host e o dono continua a escrever. Um volume de filestore
+  escrito como root por uma corrida anterior NÃO é migrado (o README di-lo).
 
 **Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
 ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
