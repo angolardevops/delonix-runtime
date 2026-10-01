@@ -1,4 +1,7 @@
 node_modules/
 dist/
-.env
+coverage/
+.tmp/
 *.log
+.env
+.DS_Store
