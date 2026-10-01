@@ -1020,6 +1020,7 @@ version = "4.5.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
+ "delonix-net-rules",
  "delonix-networking",
  "rcgen",
  "reqwest 0.12.28",

@@ -108,3 +108,188 @@ pub struct Policy {
     /// In evaluation order: the first match wins.
     pub rules: Vec<Rule>,
 }
+
+impl Policy {
+    /// One direction of the policy IR (ADR-0059 D6) as a VM's own firewall
+    /// policy: the lowering every VM backend receives.
+    ///
+    /// Refused, by name, because a VM firewall on a node cannot hold it with the
+    /// IR's meaning:
+    /// - a namespace, other-namespaces or selector peer — it names workloads on
+    ///   this engine's SDN, which a VM filtered by its node is not on;
+    /// - a guardrail — the engine's namespace isolation lives in the holder
+    ///   chain, and a VM policy that silently dropped it would read as isolated;
+    /// - ICMP, a logged rule, a stateless rule — the port has no field for them.
+    ///
+    /// A single-host prefix renders as the bare address, the form the node
+    /// lists and the reconciler compares.
+    pub fn from_ir(p: &delonix_net_rules::policy::Policy) -> Result<Policy, String> {
+        use delonix_net_rules::policy as ir;
+        let mut rules = Vec::with_capacity(p.rules.len());
+        for (i, r) in p.rules.iter().enumerate() {
+            let n = i + 1;
+            let refuse =
+                |what: &str| Err(format!("rule #{n}: {what} has no form in a VM firewall"));
+            if r.guardrail {
+                return refuse("an engine guardrail (namespace isolation)");
+            }
+            if r.log {
+                return refuse("a logged rule");
+            }
+            if !r.stateful {
+                return refuse("a stateless rule");
+            }
+            let proto = match r.proto {
+                ir::Proto::Tcp => Proto::Tcp,
+                ir::Proto::Udp => Proto::Udp,
+                ir::Proto::Any if r.icmp_type.is_none() => Proto::Any,
+                ir::Proto::Any | ir::Proto::Icmp => return refuse("an ICMP rule"),
+            };
+            let peer = match &r.peer {
+                ir::Peer::Any => None,
+                ir::Peer::Cidr(c) => {
+                    let text = c.to_string_cidr();
+                    Some(text.strip_suffix("/32").map(str::to_string).unwrap_or(text))
+                }
+                ir::Peer::Namespace(_) | ir::Peer::OtherNamespaces(_) | ir::Peer::Selector(_) => {
+                    return refuse("a peer that names this engine's workloads");
+                }
+            };
+            let port = r.ports.map(|p| {
+                if p.first == p.last {
+                    p.first.to_string()
+                } else {
+                    format!("{}-{}", p.first, p.last)
+                }
+            });
+            rules.push(Rule {
+                allow: r.action == ir::Action::Allow,
+                proto,
+                port,
+                peer,
+            });
+        }
+        Ok(Policy {
+            direction: match p.direction {
+                ir::Direction::Ingress => Direction::In,
+                ir::Direction::Egress => Direction::Out,
+            },
+            default_allow: p.default == ir::Action::Allow,
+            rules,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use delonix_net_rules::policy as ir;
+    use delonix_net_rules::Cidr;
+
+    fn one(rule: ir::Rule) -> ir::Policy {
+        ir::Policy {
+            direction: ir::Direction::Ingress,
+            default: ir::Action::Deny,
+            rules: vec![rule],
+        }
+    }
+
+    #[test]
+    fn an_ir_rule_lowers_to_the_vm_rule_the_node_is_sent() {
+        let rule = ir::Rule {
+            ports: Some(ir::PortRange {
+                first: 8000,
+                last: 8080,
+            }),
+            ..ir::Rule::new(
+                ir::Action::Deny,
+                ir::Proto::Tcp,
+                ir::Peer::Cidr(Cidr::parse("10.0.0.0/8").unwrap()),
+            )
+        };
+        let p = Policy::from_ir(&one(rule)).unwrap();
+        assert_eq!(p.direction, Direction::In);
+        assert!(!p.default_allow);
+        assert_eq!(p.rules[0].key(), "deny|tcp|8000-8080|10.0.0.0/8|");
+        let host = ir::Rule::new(
+            ir::Action::Allow,
+            ir::Proto::Any,
+            ir::Peer::Cidr(Cidr {
+                base: Cidr::parse_addr("10.0.0.5").unwrap(),
+                len: 32,
+            }),
+        );
+        assert_eq!(
+            Policy::from_ir(&one(host)).unwrap().rules[0].key(),
+            "allow|any|*|10.0.0.5|"
+        );
+    }
+
+    #[test]
+    fn what_a_vm_firewall_cannot_hold_is_refused_by_name() {
+        let base = || ir::Rule::new(ir::Action::Allow, ir::Proto::Tcp, ir::Peer::Any);
+        let cases = [
+            (
+                ir::Rule {
+                    guardrail: true,
+                    ..base()
+                },
+                "guardrail",
+            ),
+            (
+                ir::Rule {
+                    log: true,
+                    ..base()
+                },
+                "logged",
+            ),
+            (
+                ir::Rule {
+                    stateful: false,
+                    ..base()
+                },
+                "stateless",
+            ),
+            (
+                ir::Rule {
+                    proto: ir::Proto::Icmp,
+                    ..base()
+                },
+                "ICMP",
+            ),
+            (
+                ir::Rule {
+                    proto: ir::Proto::Any,
+                    icmp_type: Some(8),
+                    ..base()
+                },
+                "ICMP",
+            ),
+            (
+                ir::Rule {
+                    peer: ir::Peer::Namespace("a".into()),
+                    ..base()
+                },
+                "workloads",
+            ),
+            (
+                ir::Rule {
+                    peer: ir::Peer::OtherNamespaces("a".into()),
+                    ..base()
+                },
+                "workloads",
+            ),
+            (
+                ir::Rule {
+                    peer: ir::Peer::Selector(vec![]),
+                    ..base()
+                },
+                "workloads",
+            ),
+        ];
+        for (rule, word) in cases {
+            let e = Policy::from_ir(&one(rule.clone())).unwrap_err();
+            assert!(e.contains(word) && e.contains("rule #1"), "{rule:?}: {e}");
+        }
+    }
+}
