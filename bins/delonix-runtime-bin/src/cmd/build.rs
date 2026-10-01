@@ -1323,6 +1323,7 @@ fn commit_flat_rootless(
                 tag,
                 arch,
                 healthcheck,
+                &runtime::container_ids,
             )
             .map_err(Into::into),
     };

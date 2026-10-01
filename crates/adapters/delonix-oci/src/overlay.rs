@@ -3,6 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
+use crate::owners::Owner;
 use crate::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
@@ -27,30 +28,66 @@ fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
 /// Detects the compression by *magic bytes* (gzip `1f 8b`, zstd `28 b5 2f fd`).
 #[cfg(test)]
 fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
-    extract_layer_from(data, dest)
+    extract_layer_from(data, dest).map(|_| ())
 }
 
 /// [`extract_layer`] over any reader: the blob is decompressed and unpacked as
 /// it is read, so extracting a layer costs a buffer and not the layer's size in
 /// memory — which matters once several layers extract at the same time.
-fn extract_layer_from(reader: impl std::io::Read, dest: &Path) -> Result<()> {
+///
+/// Returns the owners the layer's headers give to someone other than root
+/// (ADR-0062): the unpacked files are all owned by whoever runs the engine, so
+/// this is the only moment that information exists outside the blob.
+fn extract_layer_from(reader: impl std::io::Read, dest: &Path) -> Result<Vec<Owner>> {
+    with_layer_archive(reader, |archive| match archive {
+        LayerArchive::Gzip(a) => crate::owners::unpack_recording(a, dest),
+        LayerArchive::Zstd(a) => crate::owners::unpack_recording(a, dest),
+        LayerArchive::Plain(a) => crate::owners::unpack_recording(a, dest),
+    })
+    .map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
+}
+
+/// The non-root owners of a layer blob, from its headers alone (nothing is
+/// written). For a layer unpacked by an engine that did not record them.
+fn scan_layer_owners(reader: impl std::io::Read) -> Result<Vec<Owner>> {
+    with_layer_archive(reader, |archive| match archive {
+        LayerArchive::Gzip(a) => crate::owners::scan(a),
+        LayerArchive::Zstd(a) => crate::owners::scan(a),
+        LayerArchive::Plain(a) => crate::owners::scan(a),
+    })
+    .map_err(|e| Error::Layer(format!("failed to read layer headers: {e}")))
+}
+
+type Buffered<R> = std::io::BufReader<R>;
+
+/// A layer's tar, behind whichever decompressor its magic bytes name.
+enum LayerArchive<'a, R: std::io::Read> {
+    Gzip(&'a mut tar::Archive<flate2::read::GzDecoder<Buffered<R>>>),
+    Zstd(&'a mut tar::Archive<zstd::stream::read::Decoder<'static, Buffered<R>>>),
+    Plain(&'a mut tar::Archive<Buffered<R>>),
+}
+
+/// Opens a layer blob (gzip `1f 8b`, zstd `28 b5 2f fd`, or a plain tar) and
+/// hands the archive to `f`.
+fn with_layer_archive<R: std::io::Read, T>(
+    reader: R,
+    f: impl FnOnce(LayerArchive<'_, R>) -> std::io::Result<T>,
+) -> std::io::Result<T> {
     use std::io::BufRead;
     let mut reader = std::io::BufReader::with_capacity(1 << 20, reader);
-    let head = reader
-        .fill_buf()
-        .map_err(|e| Error::Layer(format!("failed to read layer: {e}")))?;
+    let head = reader.fill_buf()?;
     let is_gzip = head.starts_with(&[0x1f, 0x8b]);
     let is_zstd = head.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
-    let result = if is_gzip {
-        tar::Archive::new(flate2::read::GzDecoder::new(reader)).unpack(dest)
+    if is_gzip {
+        f(LayerArchive::Gzip(&mut tar::Archive::new(
+            flate2::read::GzDecoder::new(reader),
+        )))
     } else if is_zstd {
-        let zd = zstd::stream::read::Decoder::with_buffer(reader)
-            .map_err(|e| Error::Layer(format!("failed to open zstd: {e}")))?;
-        tar::Archive::new(zd).unpack(dest)
+        let zd = zstd::stream::read::Decoder::with_buffer(reader)?;
+        f(LayerArchive::Zstd(&mut tar::Archive::new(zd)))
     } else {
-        tar::Archive::new(reader).unpack(dest)
-    };
-    result.map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
+        f(LayerArchive::Plain(&mut tar::Archive::new(reader)))
+    }
 }
 
 /// Applies a *layer* to a FLAT destination (not overlay), handling the OCI
@@ -209,6 +246,20 @@ fn ensure_owner_writable(p: &Path) {
 /// in-flight container is undisturbed; only callers arriving after the swap
 /// see the fix. If the second rename fails, the first is undone so `dir`
 /// is never left missing for whoever else is reading it.
+/// Where a layer's owners live: beside its directory, not in it.
+fn owners_path(layers_dir: &Path, hex: &str) -> PathBuf {
+    layers_dir.join(format!("{hex}.owners"))
+}
+
+/// Writes an owners index through a temporary file, so a reader never sees half
+/// of one.
+fn write_owners(path: &Path, owners: &[Owner]) -> Result<()> {
+    let tmp = path.with_extension(format!("owners.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, crate::owners::encode(owners))?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 fn publish_layer_dir(tmp: &Path, dir: &Path) -> Result<()> {
     let Some(parent) = dir.parent() else {
         std::fs::rename(tmp, dir)?;
@@ -320,9 +371,15 @@ impl ImageStore {
         let tmp = layers_dir.join(format!(".{hex}.{}.tmp", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp)?;
+        // The owners go to a SIBLING of the layer directory, never inside it:
+        // whatever is inside becomes a file of every container of the image.
+        // Written before the directory is published, so a published layer never
+        // lacks them; a layer published by an older engine has none, and
+        // `layer_owners` reads its headers instead.
         let extracted = std::fs::File::open(self.cas().path(digest))
             .map_err(Error::from)
             .and_then(|f| extract_layer_from(f, &tmp))
+            .and_then(|owners| write_owners(&owners_path(layers_dir, hex), &owners))
             .and_then(|()| std::fs::write(tmp.join(".extracted"), b"ok").map_err(Error::from));
         if let Err(e) = extracted {
             let _ = std::fs::remove_dir_all(&tmp);
@@ -378,6 +435,8 @@ impl ImageStore {
         for d in [&upper, &work, &merged] {
             std::fs::create_dir_all(d)?;
         }
+        // Root mode unpacks layers without their owners too (ADR-0062).
+        write_owners(&base.join(Self::OWNERS_FILE), &self.image_owners(image)?)?;
 
         let lowerdir = lowers
             .iter()
@@ -424,6 +483,42 @@ impl ImageStore {
     /// mount needs has to survive that boundary. A sibling file next to
     /// `merged/` does; a struct built before the re-exec does not.
     pub const LOWERS_FILE: &'static str = "overlay-lowers";
+
+    /// Next to [`Self::LOWERS_FILE`]: the entries the image gives to a user or
+    /// group other than root, as `owners::encode` writes them. The container's
+    /// init applies them once, instead of handing the whole root filesystem to
+    /// the container's user (ADR-0062).
+    pub const OWNERS_FILE: &'static str = delonix_compute::owners::OWNERS_FILE;
+
+    /// The owners of `image` as a container sees it — per path, the topmost
+    /// layer holding it decides. Layers unpacked before the engine recorded
+    /// owners are read from their blob's headers, once, and remembered.
+    pub fn image_owners(&self, image: &Image) -> Result<Vec<Owner>> {
+        let dirs = self.ensure_layers(image)?;
+        let layers_dir = self.root().join("layers");
+        let mut layers = Vec::with_capacity(dirs.len());
+        for (dir, digest) in dirs.into_iter().zip(&image.layers) {
+            layers.push((dir, self.layer_owners(digest, &layers_dir)?));
+        }
+        Ok(crate::owners::merge(&layers))
+    }
+
+    /// One layer's owners: its sidecar, or — for a layer an older engine
+    /// unpacked — the headers of its blob, written down for the next reader.
+    fn layer_owners(&self, digest: &str, layers_dir: &Path) -> Result<Vec<Owner>> {
+        let path = owners_path(layers_dir, strip(digest));
+        match std::fs::read(&path) {
+            Ok(bytes) => Ok(crate::owners::decode(&bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let owners = std::fs::File::open(self.cas().path(digest))
+                    .map_err(Error::from)
+                    .and_then(scan_layer_owners)?;
+                write_owners(&path, &owners)?;
+                Ok(owners)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
 
     /// Marker next to [`Self::LOWERS_FILE`]: this container's overlay is mounted
     /// `volatile` (ADR-0056). Written only for a container whose write layer is
@@ -499,6 +594,10 @@ impl ImageStore {
             .collect::<Vec<_>>()
             .join("\n");
         std::fs::write(base.join(Self::LOWERS_FILE), body)?;
+        // What the image gives to users other than root, for the init to give
+        // back (ADR-0062). Same on-disk contract as the lowers, for the same
+        // reason: it has to survive the re-exec.
+        write_owners(&base.join(Self::OWNERS_FILE), &self.image_owners(image)?)?;
         let marker = base.join(Self::VOLATILE_FILE);
         if volatile {
             std::fs::write(&marker, b"")?;

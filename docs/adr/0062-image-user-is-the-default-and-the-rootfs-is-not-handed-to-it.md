@@ -62,26 +62,35 @@ the user the image declares. `--user 0` (or `root`) is the explicit way to run a
 container. An image that declares none runs as uid 0, as now.
 
 **D2 — no user is ever given the root filesystem.** The recursive `lchown` of `/` is removed.
-What a non-root user may write is what the image says it owns, nothing more. The ownership the
-image recorded is preserved when a layer is unpacked, so no per-container walk is needed:
+What a non-root user may write is what the image says it owns, nothing more.
 
-- rootless with subuid: layers are unpacked inside the mapped user namespace (the mechanism
-  `reexec_mapped` already provides for `__buildtar`, `__rmtree` and `__duusage`), so an entry
-  owned by uid 99 in the image is owned by the subuid for 99 on disk;
-- root: unpacking as root already can preserve ownership;
+The ownership the image recorded is kept in an **owners index**: when a layer is unpacked, the
+entries its tar headers give to a user or group other than root are written to a sidecar beside
+the layer directory, and a container gets the image's merged index (per path, the topmost layer
+holding it decides) next to its `overlay-lowers`. The container's init applies it once, after
+`pivot_root`, only when the process runs as a non-root user, and never onto another filesystem.
+
+The other way to keep ownership — writing the real owners to disk in the layer store, by
+unpacking inside a mapped user namespace — was the first choice and was set aside by the P1
+spike. It makes every reader of the store cope with files it does not own: the flat export
+`build` copies from, the flat→overlay migration, the scanner, `system df`, and every removal.
+That is a wide change for a security fix. Its advantage is real and is recorded here: it costs
+nothing per container, whereas the index copies up, into each container's write layer, the
+entries the image gives to a non-root owner. For most images that is a handful of directories
+(two entries for `haproxy:3.4-alpine`); for an image that ships a large tree owned by its user
+(`COPY --chown`) it is that tree, once per container. It is still bounded by what the image
+gave away, where the walk it replaces was bounded by the whole image.
+
 - rootless without subuid: a second uid cannot exist. An image USER cannot be applied there, and
-  the run says so and continues as uid 0 (the notice of P0), rather than refusing every image
-  that declares a user.
-
-If the P1 spike shows that preserving ownership in the layer store is not viable (every reader
-of the store has to cope with files it does not own: `image save`, `push`, `commit`, `du`,
-`rm`), the fallback is an ownership index written at unpack time and applied at start only to
-the entries the image gives to a non-root owner. Either way the walk over `/` goes.
+  the run says so and continues as uid 0 (the notice of P0).
 
 **D3 — mounts are not re-owned.** A bind mount keeps the ownership the host gave it, always. A
-named volume mounted EMPTY over a directory of the image takes that directory's owner and mode
-once, at its first mount (Docker's rule, and the reason `-v data:/var/lib/app` works there);
-a volume that already has content is left alone.
+named volume that is still EMPTY belongs to whoever the image gives its mount point to (Docker's
+rule, and the reason `-v data:/var/lib/app` works there) and, when the image names nobody, to
+the container's user: a volume created for this container, with nothing in it, at a path the
+image does not own, has no other owner to infer, and leaving it to root would make the user's
+own volume unwritable. A volume that already has content is left alone. A named volume is
+recognised by its shape in the volume store, never by its name.
 
 **D4 — one resolution for every entry point.** The CLI, manifests, compose, the Docker API and
 the CRI resolve the user through the same function in the Compute context, so the default
@@ -126,9 +135,10 @@ back, and `docs/cli-stability.md` updated in the same change.
   longer write into it unless the host permissions allow it. That is the same as Docker rootless,
   and it is the honest state: the alternative is the engine changing who owns the operator's
   files.
-- Layers hold files owned by subuids (if D2's first option holds). Every reader of the layer
-  store has to go through the mapped helpers, as volumes written by containers already require.
-- First start with a non-root user stops costing a copy of the image (M4).
+- The layer store stays as it is: every entry owned by whoever runs the engine. Beside each
+  layer directory there is one more file, its owners.
+- First start with a non-root user stops costing a copy of the image (M4); it costs a copy of
+  what the image gives to non-root owners.
 
 ## Validation required before merge of an implementation
 
@@ -153,8 +163,47 @@ P2:
 
 ## Implementation
 
+**P1 is implemented** (2026-10-01), in three changes:
+
+- the image store records each layer's non-root owners while unpacking it (the unpack loop is
+  `tar`'s own, repeated because `Archive::unpack` gives no access to the headers), and writes
+  the merged index beside a container's overlay; a layer unpacked by an older engine has its
+  headers read once;
+- the init applies the index and owns empty named volumes as D3 says; `chown_tree_once` is gone;
+- `container commit` writes the owners the CONTAINER sees. This was found by validation step 6:
+  a rootless commit packs from the host side and wrote host numbers into the tar headers —
+  measured, every entry `1000:1000` and the directory of the container's uid 1000
+  `100999:100999`. With the index, such an image would have given its whole filesystem to uid
+  1000. The packer now passes each owner through the rootless map. A commit also dropped the
+  base image's USER; it is kept. A layer committed by an older engine still carries the wrong
+  numbers.
+
+Measured after P1 on `haproxy:3.4-alpine` with `-u haproxy`: writing `/etc/passwd` and replacing
+the binary are refused; 2 of 987 entries are owned by the user (its directory and its volume),
+down from 940; a bind-mounted host directory keeps `1000:1000` and its owner still writes to it;
+the write layer is 56 K, down from 13 MB; the image's own directory and two empty named volumes
+are writable; a volume that already held data is untouched; the same holds on a custom network;
+nothing changes without `--user`. `scripts/e2e.sh` checks each of validation steps 1–4 and the
+commit; run against the engine before P1, four of the six ownership checks fail.
+
+`odoo:20.0` (about 2 GB unpacked, 122 363 entries), the image M4 was measured on: a first start
+with `-u odoo` returned in 1.7 s on an idle disk; 4 entries are owned by `odoo`, the image's
+index has 24, the write layer is 480 K, the named volume at `/var/lib/odoo` is writable and
+`/etc/passwd` is refused.
+
+Not validated: validation step 5 as a check in the battery (the sizes were measured by hand), a
+real root (non-rootless) host, and the CRI on a node. A container created before P1 keeps what
+the old walk did to it.
+
+One limit is older than this change and stays: the unpack does not keep setuid/setgid bits (a
+`2755` binary of the image is `755` in a container), so a setgid helper such as `unix_chkpwd`
+gets its group back and not its bit. The init restores the mode after a chown, which clears
+those bits, so nothing is lost the day the unpack keeps them.
+
+P2 is not implemented.
+
 P0 is in the change that adds this ADR: `resolve_run` reads the image's `user` and returns a
 notice when it is not applied (first pass only, never with `--user`, never for a root USER).
 Measured: `haproxy:3.4-alpine` warns once in English and in Portuguese, on the default network
 and on a custom one (two passes, one warning), with stdout unchanged; `-u haproxy` and
-`alpine:3.20` do not warn. P1 and P2 are not implemented.
+`alpine:3.20` do not warn.
