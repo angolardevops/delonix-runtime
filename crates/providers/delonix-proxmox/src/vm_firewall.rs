@@ -603,4 +603,87 @@ mod tests {
         assert!(datacenter_enabled(&json!({"enable": 1})));
         assert!(!datacenter_enabled(&json!({"enable": 0})));
     }
+
+    /// The verdict the NODE gives a packet from the rules it was sent: the
+    /// connection-tracking accept the node puts at the head of every guest
+    /// chain, then the rules in position order (first match), then the guest's
+    /// policy. Read from `NodeRule`s, the exact values `apply` posts.
+    fn node_verdict(
+        dir: Direction,
+        default_allow: bool,
+        rules: &[NodeRule],
+        pkt: &delonix_net_rules::policy::Packet,
+    ) -> bool {
+        use delonix_net_rules::policy::Proto as P;
+        use delonix_net_rules::Cidr;
+        let _ = dir; // the peer field is source for `in`, dest for `out`: both compare the other end
+        if !pkt.new {
+            return true;
+        }
+        for r in rules {
+            let proto_ok = match r.proto {
+                None => true,
+                Some("tcp") => pkt.proto == P::Tcp,
+                Some("udp") => pkt.proto == P::Udp,
+                Some(other) => panic!("the lowering sent proto {other}"),
+            };
+            let port_ok = match &r.dport {
+                None => true,
+                Some(spec) => pkt.dport.is_some_and(|port| match spec.split_once(':') {
+                    Some((a, b)) => (a.parse().unwrap()..=b.parse().unwrap()).contains(&port),
+                    None => spec.parse::<u16>().unwrap() == port,
+                }),
+            };
+            let peer_ok = match &r.peer {
+                None => true,
+                Some(p) if p.contains('/') => Cidr::parse(p).unwrap().contains(pkt.peer),
+                Some(p) => Cidr::parse_addr(p).unwrap() == pkt.peer,
+            };
+            if proto_ok && port_ok && peer_ok {
+                return r.action == "ACCEPT";
+            }
+        }
+        default_allow
+    }
+
+    /// Every golden cell of ADR-0059 D6, through the VM lowering: the IR the
+    /// record parses to, minus the engine's namespace guardrails (a VM on a node
+    /// is not on the SDN they name, and `from_ir` refuses them — checked below),
+    /// lowered to the node rules `apply` sends. The node's verdict has to be the
+    /// reference evaluator's verdict for the same IR.
+    #[test]
+    fn the_node_rules_give_every_golden_verdict_of_the_ir_they_came_from() {
+        use delonix_net_rules::policy::{evaluate, Action, Direction as D};
+        use delonix_networking::policy::{from_container_fw, golden};
+        let cases = golden::cases();
+        assert_eq!(
+            cases.len(),
+            24,
+            "the golden table changed; recount what this covers"
+        );
+        for case in cases {
+            let t = from_container_fw(&case.record).unwrap();
+            let mut ir = match case.direction {
+                D::Ingress => t.ingress,
+                D::Egress => t.egress,
+            };
+            if ir.rules.iter().any(|r| r.guardrail) {
+                assert!(
+                    Policy::from_ir(&ir).unwrap_err().contains("guardrail"),
+                    "{}: a guardrail reached the VM firewall",
+                    case.name
+                );
+                ir.rules.retain(|r| !r.guardrail);
+            }
+            let want = evaluate(&ir, &case.packet) == Action::Allow;
+            let vm = Policy::from_ir(&ir).unwrap();
+            let got = node_verdict(
+                vm.direction,
+                vm.default_allow,
+                &node_rules(&vm),
+                &case.packet,
+            );
+            assert_eq!(got, want, "{}: {vm:?}", case.name);
+        }
+    }
 }

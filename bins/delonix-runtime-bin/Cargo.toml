@@ -18,6 +18,7 @@ delonix-model = { workspace = true }
 delonix-stack = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-networking = { workspace = true }
+delonix-net-rules = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-linux = { workspace = true }
 delonix-oci = { workspace = true }
