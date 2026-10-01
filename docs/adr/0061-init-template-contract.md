@@ -89,8 +89,13 @@ Every application template has, in the framework's own idiom:
   support range (`versions=` in `template.meta`, majors or major.minor); outside, refused
   with the range. Combinations the framework does not support (Next 14 with React 19) are
   expressed by the range, not left to the user to discover.
-- Files are never written through a symlink, and an executable template file keeps its
-  executable bit.
+- Every destination is checked for symlinks before the first file is written, so a refusal
+  leaves the directory as it was; an executable template file keeps its executable bit.
+- `template.meta` carries what the generator needs to know about a template: `port=`,
+  `health=`, `version=`, `versions=`, `lock=` (the package manager's lock file, read by
+  adoption) and `wait=` (seconds `--up` waits for health; default 120).
+- One test renders every embedded template for every version it declares and parses the
+  JSON and YAML it wrote, so a template added later is covered without a new test.
 
 ### D4 — Detection reads manifests, and says "unknown" when it does not know
 
@@ -122,9 +127,23 @@ of each backend template names where a second transport would plug in.
 | node (Fastify) | 5 | 5 | Node 24 LTS |
 | nestjs | 12 | 11, 12 | Node 24 LTS |
 | nextjs | 16 | 15, 16 | Node 24 LTS, React 19 |
-| fastapi | per PR #625 | — | Python 3.13 |
+| fastapi | 0.142 | 0.141, 0.142 | Python 3.13 |
 | django | 5.2 (LTS) | 5.2, 6.0, 6.1 | Python 3.13 |
 | laravel | 13 | 12, 13 | PHP 8.4 |
+
+### D8 — What the image build had to learn
+
+Three things the templates rely on were measured to be false in `delonix build` and fixed in
+the engine rather than worked around in every Delonixfile:
+
+- `.dockerignore` was never read (`COPY . .` took `.env` and `.git` into a layer);
+- `COPY a b dst/` copied `a` and dropped `b` silently;
+- a symlink inside a copied tree was followed, so `COPY --from=build /app/node_modules`
+  failed on pnpm's directory links.
+
+A second pass fixed the first fix: with any `!` rule, every excluded directory was walked
+and left as an empty skeleton (a `.venv` skeleton made `uv sync` refuse to create the
+environment). An excluded directory is entered only when an exception can match inside it.
 
 ## Alternatives considered
 
