@@ -447,7 +447,13 @@ impl Client {
         ledger: &Ledger,
         change: impl FnOnce() -> Result<T>,
     ) -> Result<T> {
+        self.recover_dead_sdn_lock(ledger)?;
         let token = self.acquire_sdn_lock(false)?;
+        // Written BEFORE anything is staged: a process killed from here on
+        // leaves the token on disk, and the next transaction discards what
+        // it staged with it (ADR-0059 D4).
+        save_held_lock(ledger, &token);
+        let _held = HeldLockFile { ledger };
         let outcome = {
             if let Ok(mut g) = self.sdn_lock.lock() {
                 *g = Some((std::thread::current().id(), token.0.clone()));
@@ -479,6 +485,158 @@ impl Client {
                 }
             },
         }
+    }
+}
+
+/// The file a held SDN lock is recorded in, next to the task ledger.
+const HELD_LOCK_FILE: &str = "proxmox-sdn-lock.json";
+
+/// A lock this engine took and has not released yet: its token, and the
+/// process holding it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct HeldLock {
+    pub token: String,
+    pub pid: u32,
+    /// The holder's start time (`/proc/<pid>/stat`, field 22): a pid alone is
+    /// reused by an unrelated process.
+    pub starttime: u64,
+}
+
+/// Field 22 of `/proc/<pid>/stat`. The command name (field 2) may contain
+/// spaces and parentheses, so the fields are counted from the last `)`.
+fn proc_starttime(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// Whether the process that recorded `held` is still that process.
+pub(crate) fn holder_alive(held: &HeldLock) -> bool {
+    proc_starttime(held.pid) == Some(held.starttime)
+}
+
+fn save_held_lock(ledger: &Ledger, token: &SdnLockToken) {
+    let Some(path) = ledger.sibling(HELD_LOCK_FILE) else {
+        return;
+    };
+    let pid = std::process::id();
+    let held = HeldLock {
+        token: token.0.clone(),
+        pid,
+        starttime: proc_starttime(pid).unwrap_or(0),
+    };
+    let write = || -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(&held).unwrap_or_default())?;
+        std::fs::rename(&tmp, &path)
+    };
+    if let Err(e) = write() {
+        tracing::warn!(path = %path.display(), error = %e, "proxmox: the SDN lock token could not be recorded; a killed apply would leave the lock held");
+    }
+}
+
+fn read_held_lock(ledger: &Ledger) -> Option<HeldLock> {
+    let path = ledger.sibling(HELD_LOCK_FILE)?;
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+fn clear_held_lock(ledger: &Ledger) {
+    if let Some(path) = ledger.sibling(HELD_LOCK_FILE) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Removes the held-lock record when a transaction ends, however it ends.
+/// A process KILLED inside the transaction never runs this, which is the
+/// point: the record is what its successor finds.
+struct HeldLockFile<'a> {
+    ledger: &'a Ledger,
+}
+
+impl Drop for HeldLockFile<'_> {
+    fn drop(&mut self) {
+        clear_held_lock(self.ledger);
+    }
+}
+
+impl Client {
+    /// When a transaction of this engine was killed while it held the SDN
+    /// lock, discards what it staged and releases the lock, with the token it
+    /// recorded (ADR-0059 D4). Measured on PVE 9.2.2: a killed apply left a
+    /// zone and three vnets staged and the lock held; nothing but its token
+    /// (or `force=1`) releases it, and every later transaction was refused.
+    ///
+    /// A holder that is still alive is another apply of this engine: refused
+    /// as [`Error::SdnLocked`], never rolled back under it.
+    pub(crate) fn recover_dead_sdn_lock(&self, ledger: &Ledger) -> Result<()> {
+        let Some(held) = read_held_lock(ledger) else {
+            return Ok(());
+        };
+        if holder_alive(&held) {
+            return Err(Error::SdnLocked(format!(
+                "proxmox: another apply of this engine (pid {}) holds the cluster's SDN lock — \
+                 wait for it to finish",
+                held.pid
+            )));
+        }
+        tracing::warn!(pid = held.pid, "proxmox: an SDN transaction of this engine died holding the lock; discarding what it staged");
+        self.rollback_sdn(ledger, Some(&SdnLockToken(held.token.clone())))?;
+        clear_held_lock(ledger);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod held_lock_tests {
+    use super::*;
+
+    #[test]
+    fn the_token_is_recorded_next_to_the_ledger_and_cleared_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::at(dir.path());
+        assert_eq!(read_held_lock(&ledger), None);
+        save_held_lock(&ledger, &SdnLockToken("tok-1".into()));
+        {
+            let _held = HeldLockFile { ledger: &ledger };
+            let held = read_held_lock(&ledger).expect("recorded");
+            assert_eq!(held.token, "tok-1");
+            assert_eq!(held.pid, std::process::id());
+            assert!(holder_alive(&held), "this very process holds it");
+        }
+        assert_eq!(
+            read_held_lock(&ledger),
+            None,
+            "cleared when the transaction ends"
+        );
+    }
+
+    /// A pid that is alive but is not the process that took the lock (its
+    /// start time differs) is a dead holder: pids are reused.
+    #[test]
+    fn a_reused_pid_is_not_the_holder() {
+        let me = std::process::id();
+        let held = HeldLock {
+            token: "t".into(),
+            pid: me,
+            starttime: proc_starttime(me).unwrap() + 1,
+        };
+        assert!(!holder_alive(&held));
+        let gone = HeldLock {
+            token: "t".into(),
+            pid: 0,
+            starttime: 1,
+        };
+        assert!(!holder_alive(&gone));
+    }
+
+    #[test]
+    fn a_ledger_without_a_directory_records_nothing() {
+        let ledger = Ledger::none();
+        save_held_lock(&ledger, &SdnLockToken("tok".into()));
+        assert_eq!(read_held_lock(&ledger), None);
     }
 }
 

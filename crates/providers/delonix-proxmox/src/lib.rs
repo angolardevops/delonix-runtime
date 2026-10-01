@@ -346,6 +346,11 @@ impl Ledger {
         Self { path: None }
     }
 
+    /// A file next to the ledger, for durable state that is not a task.
+    pub(crate) fn sibling(&self, name: &str) -> Option<PathBuf> {
+        self.path.as_ref()?.parent().map(|d| d.join(name))
+    }
+
     pub fn records(&self) -> Vec<TaskRecord> {
         let Some(path) = &self.path else {
             return Vec::new();

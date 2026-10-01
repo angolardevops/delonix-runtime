@@ -2103,6 +2103,80 @@ fn sdn_client(node: &MockNode) -> Client {
     Client::connect_with(&token_target(node), fast()).expect("connect")
 }
 
+/// A transaction killed while it held the lock left its token on disk. The
+/// next one rolls back with that token (which also releases the lock) BEFORE
+/// it asks for the lock itself — measured on PVE 9.2.2, nothing else gets the
+/// lock back, and every later transaction was refused.
+#[test]
+fn a_transaction_that_died_holding_the_lock_is_rolled_back_by_the_next() {
+    let node = MockNode::start(script(&[
+        ("POST", "/cluster/sdn/rollback", ok_data("null")),
+        ("POST", SDN_LOCK, ok_data(r#""tok-2""#)),
+        ("DELETE", "/cluster/sdn/zones/z1", ok_data("null")),
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let held = dir.path().join("proxmox-sdn-lock.json");
+    // pid 0 is never a process of ours: a dead holder.
+    std::fs::write(&held, r#"{"token":"tok-dead","pid":0,"starttime":1}"#).unwrap();
+
+    cli.sdn_transaction(&ledger, || cli.delete_sdn_zone(&ledger, "z1"))
+        .expect("transaction");
+
+    let writes: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.starts_with("/cluster/sdn") && s.method != "GET")
+        .collect();
+    assert_eq!(writes[0].path, "/cluster/sdn/rollback", "{writes:?}");
+    assert!(
+        writes[0].body.contains("lock-token=tok-dead") && writes[0].body.contains("release-lock=1"),
+        "the dead run's token, and the lock released: {:?}",
+        writes[0]
+    );
+    assert_eq!(writes[1].path, SDN_LOCK, "{writes:?}");
+    assert!(
+        !held.exists(),
+        "the record is cleared when the transaction ends"
+    );
+}
+
+/// A recorded holder that is still alive is another apply of this engine:
+/// refused, and nothing is sent — rolling back under it would discard what it
+/// is staging.
+#[test]
+fn a_live_holder_of_the_lock_is_never_rolled_back() {
+    let node = MockNode::start(script(&[]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let me = std::process::id();
+    let stat = std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap();
+    let starttime = stat[stat.rfind(')').unwrap() + 1..]
+        .split_whitespace()
+        .nth(19)
+        .unwrap()
+        .to_string();
+    std::fs::write(
+        dir.path().join("proxmox-sdn-lock.json"),
+        format!(r#"{{"token":"tok-live","pid":{me},"starttime":{starttime}}}"#),
+    )
+    .unwrap();
+
+    let e = cli
+        .sdn_transaction(&ledger, || cli.delete_sdn_zone(&ledger, "z1"))
+        .unwrap_err();
+    assert!(matches!(e, Error::SdnLocked(_)), "{e:?}");
+    let writes = node.log().into_iter().filter(|s| s.method != "GET").count();
+    assert_eq!(writes, 0, "nothing is written under a live holder");
+    assert!(
+        dir.path().join("proxmox-sdn-lock.json").exists(),
+        "the live holder's record is left alone"
+    );
+}
+
 /// The whole transaction on the wire: the lock first, the token on every
 /// staged write (the DELETE's in its query), then ONE apply that carries the
 /// token AND `release-lock=1` — the node's handler does not apply the

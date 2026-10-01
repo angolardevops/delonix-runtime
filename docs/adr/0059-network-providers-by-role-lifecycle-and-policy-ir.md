@@ -948,3 +948,60 @@ What F4c adds:
     still leaves what it did, named in the ledger.
   - A teardown killed mid-way was exercised on the TLS mock only, not live.
   - A record written before the ledger existed cannot be resumed: it has no steps to read.
+
+## Addendum 2026-10-01 — F4d: the same lifecycle for `NetworkZone`
+
+Proven on the two-node Proxmox lab (PVE 9.2.2, nodes `pve` and `pve2`).
+
+What F4d adds:
+
+- **Observe.** `SegmentProvider::observe(zone, owner)` reads back whether the zone exists, the
+  vnets carrying the owner's mark, and the vnets in the zone that do not carry it. The record's
+  `remote` field is `in sync`, or each difference. Read-only: it takes no lock.
+- **It reads the RUNNING configuration.** Measured: the plain `GET /cluster/sdn/zones` and
+  `…/vnets` return the PENDING configuration. A zone staged and never applied is there, with
+  state `new`. `?running=1` returns what the last apply made live, with the same fields.
+- **Plan digest.** `planDigest` and `--plan-digest` work as for the gateway. The fingerprint
+  includes the vnets of others in the zone, so a vnet added out of band makes the plan stale.
+- **Validate.** `resolve::require_capabilities` runs before the record or the provider is
+  touched, for both Kinds. It refuses with DX-6381 and lists every unmet capability with its
+  state.
+- **An apply killed mid-way.** Measured first, with the binary before this change: a
+  `stack apply` of 4 vnets was killed after 2 were staged. The cluster was left with the zone
+  and 3 vnets staged, nothing running, and the SDN lock held under a token only the dead process
+  knew. `--replace` was refused with DX-5515. The lab had to be cleaned by hand
+  (`DELETE /cluster/sdn/lock?force=1`, then a rollback).
+
+  The fix is inside the Proxmox provider; the port did not change:
+  - the lock token is written to `proxmox-sdn-lock.json`, next to the task ledger, with the
+    holder's pid and start time, before anything is staged. It is removed when the transaction
+    ends;
+  - the next transaction that finds the file with a dead holder rolls back with that token,
+    which also releases the lock, and only then takes the lock itself;
+  - a holder that is still alive is another apply of this engine. It is refused as
+    `SdnLocked`, and nothing is sent.
+- **The plan.** The record keeps a one-step ledger (`transaction`) and the `applied` field, as
+  the gateway does. A plain `stack apply`, with no `--replace`, recovers.
+- **Zone ownership across a kill.** The zone carries no mark, so the record's word is the only
+  claim. A zone that is not running when an apply starts is claimed in the record before the
+  transaction, and the claim is taken back if the transaction fails. The closure still trusts
+  only what the record said before the claim, so a zone someone else staged is still refused.
+- **Per-node verification (D4.5)** is the one from plan 63, slice 0b: an SDN apply waits for
+  each node's `srvreload networking` task and fails if one fails. F4d adds nothing to it. In
+  the live runs below both nodes' reloads ended `OK`.
+- **Live:**
+  - apply, then plan: 0;
+  - a vnet added out of band between plan and apply: the apply with the old digest was refused
+    with DX-5390, and the cluster was unchanged;
+  - the engine's vnet removed out of band: plan 2, `remote: vnet 'vf4da' is missing`, and
+    `drift` names it. `--replace` converged;
+  - the kill above, with the F4d binary: the next plan answered 2 with `applied: interrupted:
+    step 1 (transaction 'zf4dk') did not finish`. The next plain `stack apply` logged that a
+    transaction died holding the lock, discarded what it staged, and left the zone and 4 vnets
+    running. The plan after it answered 0;
+  - delete left no zone and no vnet on the cluster.
+- **Not in this slice**:
+  - A kill AFTER the cluster committed and before the record was saved was not produced live.
+    The claim written before the transaction is what covers it.
+  - A lock left by a run from before this change has no token on disk, and is not recovered.
+  - A reload that FAILS on one node was exercised by injection only (plan 63, slice 0b).

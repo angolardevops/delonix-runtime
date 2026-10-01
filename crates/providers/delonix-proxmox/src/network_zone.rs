@@ -231,14 +231,18 @@ impl SegmentProvider for ProxmoxSegmentProvider {
         Ok(RemoveOutcome::Removed)
     }
 
+    /// Reads the RUNNING configuration, not the pending one: measured, the
+    /// plain listings show a zone and vnets a killed apply staged and never
+    /// applied, and reading those back as present is how a plan would call a
+    /// half-staged zone real.
     fn observe(&self, zone: &str, owner: &OwnerMark) -> delonix_model::Result<SegmentObserved> {
         let zones = self
             .client
-            .sdn_zones()
+            .sdn_zones_running()
             .map_err(delonix_model::Error::from)?;
         let vnets = self
             .client
-            .sdn_vnets()
+            .sdn_vnets_running()
             .map_err(delonix_model::Error::from)?;
         Ok(observed_from(&zones, &vnets, zone, owner))
     }
