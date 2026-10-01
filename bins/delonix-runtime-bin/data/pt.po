@@ -3507,9 +3507,6 @@ msgstr "o container não arrancou dentro da rede '{network}' — a razão está 
 msgid "warning: firewall/isolation of '{name}' not reapplied on start: {e}"
 msgstr "aviso: firewall/isolamento de '{name}' não reaplicado no start: {e}"
 
-msgid "the container did not restart inside the network '{netns}' (exit {code})"
-msgstr "o container não rearrancou dentro da rede '{netns}' (exit {code})"
-
 msgid "'{name}' has no rootfs on disk — it was removed, or the container never got to start"
 msgstr "'{name}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar"
 
