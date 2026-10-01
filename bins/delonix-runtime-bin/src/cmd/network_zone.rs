@@ -422,7 +422,18 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         outcome.as_ref().map(|_| ()).map_err(|e| e.to_string()),
     );
     if outcome.is_err() {
-        rec.zone_owned = had_zone;
+        // A transaction can fail AFTER the cluster committed (measured: a
+        // node's network reload that never ran). The zone this run created
+        // is then running, and it is this record's: dropping the claim made
+        // the next apply refuse its own zone, and a delete leave it behind.
+        // When the zone cannot be read back the claim is kept — the closure
+        // above decides again on the next run, against what is there.
+        let committed = created_zone
+            && provider
+                .observe(&name, &owner)
+                .map(|o| o.zone_present)
+                .unwrap_or(true);
+        rec.zone_owned = had_zone || committed;
         s.save(&name, &rec)?;
     }
     outcome?;

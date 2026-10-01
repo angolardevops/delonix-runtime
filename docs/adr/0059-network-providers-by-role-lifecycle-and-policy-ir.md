@@ -1000,8 +1000,27 @@ What F4d adds:
     transaction died holding the lock, discarded what it staged, and left the zone and 4 vnets
     running. The plan after it answered 0;
   - delete left no zone and no vnet on the cluster.
+- **The three cases first listed as not validated, measured live afterwards:**
+  - **Killed after the cluster committed, before the record was saved.** The kill landed when
+    `?running=1` already listed both vnets. The record read `zone_owned: true` and an open
+    `transaction` step. Plan answered 2; the next plain `stack apply` answered 0 and the plan
+    after it 0. The delete left nothing on the cluster.
+  - **A lock nobody recorded** (taken by hand, token thrown away — what a binary from before
+    this change leaves). The apply is refused with DX-5515 and stages nothing. The engine does
+    not force a lock it cannot prove is its own; the message now names the two calls that clear
+    it (`DELETE /cluster/sdn/lock?force=1`, `POST /cluster/sdn/rollback`). After the forced
+    release the same apply answered 0.
+  - **A node's network reload that fails.** `ifreload` on `pve2` was replaced by a script that
+    exits 1. The apply ended in 5 s with DX-6512, naming `pve2` and `command 'ifreload -a'
+    failed: exit code 1`, with the cluster task itself `OK`.
+    A second variant, where the script also failed `ifreload -V`: the node dies before it
+    forks the task, no reload appears, and the apply fails after the 600 s task timeout, naming
+    `pve2`.
+  - **A defect these runs found.** A transaction that failed after the cluster committed gave
+    back the zone claim. The next apply then refused its own zone (DX-5389), and a delete left
+    the zone on the cluster. Now a failed transaction keeps the claim when the zone it created
+    is running. Measured after the fix: the next plain apply answered 0, and the delete left
+    nothing.
 - **Not in this slice**:
-  - A kill AFTER the cluster committed and before the record was saved was not produced live.
-    The claim written before the transaction is what covers it.
-  - A lock left by a run from before this change has no token on disk, and is not recovered.
-  - A reload that FAILS on one node was exercised by injection only (plan 63, slice 0b).
+  - Ten minutes is a long wait for a node that never forks its reload. The timeout is the
+    client's task timeout and was not changed here.

@@ -4325,7 +4325,8 @@ fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &s
         // same words whether no token or a wrong one was sent.
         500 if body.contains("invalid lock token provided") => Error::SdnLocked(format!(
             "{text} — the cluster's SDN configuration is locked by another holder \
-             (`DELETE /cluster/sdn/lock` with its token releases it)"
+             (`DELETE /cluster/sdn/lock` with its token releases it; when the holder is gone and its \
+             token with it, `DELETE /cluster/sdn/lock?force=1` and `POST /cluster/sdn/rollback`)"
         )),
         500 if body.contains("configuration has pending changes") => {
             Error::SdnPendingChanges(format!(
