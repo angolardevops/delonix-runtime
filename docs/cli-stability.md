@@ -50,6 +50,15 @@ Concretamente, garante-se:
 > (ver a nota da v2.0.0 abaixo — essa grafia mudou outra vez).
 > **Os códigos de saída não mudam nesta versão** — ver a secção abaixo.
 
+> **Quebra de contrato na próxima major (ADR-0062).** `container run` de uma
+> imagem que declara `USER` passa a correr como esse utilizador, como no Docker
+> e no Podman; até à v4.5.0 corria como uid 0 dentro do container, declarasse a
+> imagem o que declarasse. `--user 0` (ou `user: "0"` num manifesto) é a forma
+> explícita de ficar root. Uma imagem sem `USER` não muda. E um container com
+> utilizador não-root deixou de ser dono do seu rootfs e de re-apropriar bind
+> mounts do host: escreve só onde a imagem lhe dá posse, num volume nomeado
+> vazio, ou onde as permissões do host deixam.
+
 > **Quebra de contrato na v2.0.0.** O B2 da reestruturação da CLI (v0.67.0)
 > tinha renomeado `image ls`/`image rm` para `image list`/`image remove` — a
 > única excepção de nomenclatura numa CLI onde as outras 15 folhas do tipo
