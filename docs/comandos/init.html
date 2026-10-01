@@ -239,8 +239,8 @@ EXAMPLES:
   # ...or a Go toolchain version — this template has no framework to pin
   delonix init -t go -v 1.27 myapp
 
-  # name the project when the directory&#x27;s name is not a valid one (lowercase
-  # letters, digits, inner hyphens)
+  # choose the project name — without --name it comes from the directory,
+  # lowercased and hyphenated when needed (the run says which)
   delonix init --name billing-api ./Billing_API
 
   # a manifest that names no supported framework gets the generic scaffold,

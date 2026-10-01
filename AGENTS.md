@@ -8279,3 +8279,43 @@ ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
   fora as fontes do meio de um `COPY a b dst/` e seguia symlinks dentro de uma árvore copiada
   (um `node_modules` do pnpm não se conseguia copiar entre estágios). Uma imagem «validada com
   docker» não está validada.
+
+**Segunda passagem (2026-10-01): os pendentes fechados em rootless, e o que só a execução mostrou.**
+
+- **As sete imagens correm sem root.** Cada Delonixfile acaba em `USER` (`app`, uid 10001, criado
+  na imagem; `node`, uid 1000, nos três de Node) e cada manifesto nomeia-o com `user:` — o motor
+  só aplica o USER de uma imagem quando o manifesto o pede (ADR-0062). O utilizador não é dono de
+  nada na imagem a não ser o ponto de montagem de um volume. Medido nos dois motores (este ramo
+  só, e com o P1 do ADR-0062): `id` é o utilizador sem privilégio, `CapEff` 0, `/etc/passwd`
+  continua `0:0` e a escrita é recusada.
+- **O CI gerado é EXECUTADO, não só lido** (`scripts/init-ci.sh`): gera cada template e corre, num
+  container rootless limpo com a imagem que o `.gitlab-ci.yml` nomeia, a criação do lock, o
+  trabalho do GitLab tal como está escrito e cada passo `run:` do workflow do GitHub. Só as
+  acções `uses:` ficam por executar. Foi esta corrida — e não a leitura do YAML, que já passava —
+  que encontrou quatro defeitos:
+  - o `prettier --check .` do `nestjs` chumbava no `.pnpm-store`, que o pnpm cria DENTRO do
+    projecto quando este está num mount próprio (um runner);
+  - o trabalho GitLab do `laravel` corre como root, e o Composer aborta um script que precise de
+    um plugin sem `COMPOSER_ALLOW_SUPERUSER=1`;
+  - o perfil seccomp por omissão negava `fchmodat2`, por isso o `tar` do GNU não conseguia pôr o
+    modo a nenhum directório (579 × «Cannot change mode») e nenhum `docker-php-ext-install`
+    compilava num container. Era também a razão de o `pcntl` não compilar no `delonix build`,
+    que a primeira passagem atribuiu, por leitura, à posse dos ficheiros;
+  - o `ENV` do último estágio era empacotado duas vezes, a segunda por expandir: `ENV
+    PATH=/app/.venv/bin:$PATH` dava uma imagem cujo PATH era essa cadeia literal. O serviço
+    corria (o comando vive no único directório que restava) e `exec <c> id` saía 127 calado.
+- **«Validado» com a imagem a responder não é validado.** Os quatro passavam o smoke. O PATH
+  partido só apareceu ao correr `id` lá dentro, e o `exec` de um comando inexistente não dizia
+  nada — agora diz o mesmo que o init (`delonix: exec <programa>: <errno>`).
+- **Um directório com maiúsculas ou espaços dá um nome derivado, dito na saída**; um `--name`
+  explícito continua a ser usado ou recusado, nunca reescrito.
+- **O `django` migra no arranque** quando `MIGRATE_ON_START=true` (o manifesto define-o: uma
+  réplica em SQLite). O gunicorn nunca migra.
+- **Dois `target` para duas árvores.** Um `CARGO_TARGET_DIR` partilhado entre este ramo e o de
+  validação (com o P1) reutilizou o `delonix-compute` da outra árvore e a compilação falhou em
+  símbolos que existiam no código — a armadilha já escrita em «duas cópias do mesmo repo não são
+  dois builds».
+- **Com o disco do host saturado, o `stop` e o `rm -f` de um container mantido demoram ou dão
+  DX-8101** (o PID 1 fica em `D`, `wb_wait_for_completion`): é o ADR-0056 D4, não é dos
+  templates. Medido aqui com um `sleep` que não escreveu nada, enquanto outra corrida enchia o
+  disco. Repetir o comando resolve.
