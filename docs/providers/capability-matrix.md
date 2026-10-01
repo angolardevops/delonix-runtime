@@ -101,7 +101,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 
 - **linux**: 8 of 47 — 8 supported, 14 partial, 18 unsupported-by-provider, 1 requires-external-component, 6 not-implemented
 - **proxmox**: 3 of 47 — 3 supported, 7 partial, 19 unsupported-by-provider, 2 requires-external-component, 16 not-implemented
-- **opnsense (gateway)**: 8 of 47 — 8 supported, 23 unsupported-by-provider, 2 requires-external-component, 14 not-implemented
+- **opnsense (gateway)**: 10 of 47 — 10 supported, 23 unsupported-by-provider, 2 requires-external-component, 12 not-implemented
 
 | domain | capability | linux | proxmox | opnsense (gateway) |
 |---|---|---|---|---|
@@ -127,8 +127,8 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `net.gateway.rule-order` | unsupported-by-provider — a perimeter appliance's role (ADR-0051, ADR-0059); the node's own rules are the firewall.* rows | unsupported-by-provider — the node's SDN has no perimeter filter of its own; the cluster firewall is administration (ADR-0049 D3) | supported — live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields |
 |  | `net.gateway.multi-wan` | unsupported-by-provider — a perimeter appliance's role (ADR-0051, ADR-0059); the node's own rules are the firewall.* rows | unsupported-by-provider — the node's SDN has no perimeter filter of its own; the cluster firewall is administration (ADR-0049 D3) | not-implemented |
 |  | `net.gateway.vpn` | unsupported-by-provider — a perimeter appliance's role (ADR-0051, ADR-0059); the node's own rules are the firewall.* rows | unsupported-by-provider — the node's SDN has no perimeter filter of its own; the cluster firewall is administration (ADR-0049 D3) | not-implemented |
-|  | `net.nat.snat` | partial — every network masquerades its traffic out through the holder's uplink; no battery check names outbound traffic | not-implemented | not-implemented |
-|  | `net.nat.dnat` | supported — check:update: publish-add a quente | unsupported-by-provider — the SDN has source NAT on a subnet (`snat`) and nothing else | not-implemented |
+|  | `net.nat.snat` | partial — every network masquerades its traffic out through the holder's uplink; no battery check names outbound traffic | not-implemented | supported — live:crates/providers/delonix-opnsense/tests/live.rs::a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed |
+|  | `net.nat.dnat` | supported — check:update: publish-add a quente | unsupported-by-provider — the SDN has source NAT on a subnet (`snat`) and nothing else | supported — live:crates/providers/delonix-opnsense/tests/live.rs::a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed |
 |  | `net.nat.one-to-one` | unsupported-by-provider — a rootless node has no external address of its own to map one-to-one | unsupported-by-provider — the SDN has source NAT on a subnet (`snat`) and nothing else | not-implemented |
 |  | `net.nat.npt` | unsupported-by-provider — IPv6 is disabled in the SDN (net.ipv6) | unsupported-by-provider — the SDN has source NAT on a subnet (`snat`) and nothing else | not-implemented |
 |  | `net.lb.l4` | not-implemented | unsupported-by-provider — PVE has no load balancer | requires-external-component — the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API |

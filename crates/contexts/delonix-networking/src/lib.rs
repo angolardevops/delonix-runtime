@@ -12,6 +12,7 @@
 mod error;
 pub mod gateway;
 pub mod ledger;
+pub mod nat;
 pub mod ownership;
 pub mod plan;
 pub mod policy;

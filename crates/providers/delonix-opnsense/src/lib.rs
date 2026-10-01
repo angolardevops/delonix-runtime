@@ -79,9 +79,11 @@
 
 pub mod capabilities;
 mod error;
+mod nat;
 
 pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
+pub use nat::OpnsenseNatProvider;
 
 use delonix_networking::gateway::{
     AliasKind, EnsureOutcome, GatewayAction, GatewayAlias, GatewayObserved, GatewayProvider,
@@ -1431,23 +1433,46 @@ pub const ID: &str = "opnsense";
 /// failure: an appliance that was down when first selected must not stay
 /// "down" for the rest of the process.
 pub fn register_with(target: Target) -> delonix_model::Result<()> {
-    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    // One connection for both roles: the gateway and the NAT provider of an
+    // appliance are the same client, and each value keeps its own staging.
+    let shared: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let connect = {
+        let shared = shared.clone();
+        move || -> delonix_networking::Result<std::sync::Arc<Client>> {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(c.clone());
+            }
+            let c = std::sync::Arc::new(
+                Client::connect(&target)
+                    .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+            );
+            *slot = Some(c.clone());
+            Ok(c)
+        }
+    };
+    let connect = std::sync::Arc::new(connect);
+    {
+        let connect = connect.clone();
+        delonix_networking::nat::register_nat_provider(
+            delonix_networking::nat::NatProviderRegistration {
+                id: ID,
+                aliases: &[],
+                new: Box::new(move || {
+                    Ok(Box::new(nat::OpnsenseNatProvider::sharing(connect()?))
+                        as Box<dyn delonix_networking::nat::NatProvider>)
+                }),
+            },
+        )?;
+    }
     delonix_networking::gateway::register_gateway_provider(
         delonix_networking::gateway::GatewayProviderRegistration {
             id: ID,
             aliases: &[],
             new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(c) = slot.as_ref() {
-                    return Ok(Box::new(OpnsenseGatewayProvider::sharing(c.clone()))
-                        as Box<dyn GatewayProvider>);
-                }
-                let c = std::sync::Arc::new(
-                    Client::connect(&target)
-                        .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
-                );
-                *slot = Some(c.clone());
-                Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)
+                Ok(Box::new(OpnsenseGatewayProvider::sharing(connect()?))
+                    as Box<dyn GatewayProvider>)
             }),
         },
     )?;

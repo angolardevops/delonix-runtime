@@ -494,3 +494,194 @@ fn a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields() {
         RemoveOutcome::Removed
     );
 }
+
+/// The NAT lines pf has loaded, read by hand.
+fn nat_lines(hand: &Hand) -> Vec<String> {
+    hand.get("diagnostics/firewall/pf_statistics/rules")["rules"]["nat rules"]
+        .as_object()
+        .expect("the nat rules section")
+        .keys()
+        .cloned()
+        .collect()
+}
+
+/// ADR-0059 F5: a source and a destination NAT rule under an owner mark,
+/// proven in the RUNNING packet filter — a NAT rule has no label there, so
+/// what is read is the line itself.
+#[test]
+fn a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed() {
+    use delonix_networking::nat::{nat_drift, NatKind, NatProvider, NatRule, INTERFACE_ADDRESS};
+    let Some(t) = target_or_skip() else {
+        return;
+    };
+    let provider = delonix_opnsense::OpnsenseNatProvider::connect(&t).expect("connect");
+    let hand = Hand::new(&t);
+    let owner = fresh_mark();
+    let snat = NatRule {
+        description: "delonix-opnsense live snat - safe to delete".into(),
+        kind: NatKind::Source,
+        interface: "lan".into(),
+        source: "10.97.0.0/24".into(),
+        protocol: None,
+        port: None,
+        target: INTERFACE_ADDRESS.into(),
+        target_port: None,
+    };
+    let dnat = NatRule {
+        description: "delonix-opnsense live dnat - safe to delete".into(),
+        kind: NatKind::Destination,
+        interface: "lan".into(),
+        source: "any".into(),
+        protocol: Some("tcp".into()),
+        port: Some(18443),
+        target: "10.97.0.10".into(),
+        target_port: Some(443),
+    };
+    let loaded = |needle: &str| nat_lines(&hand).iter().any(|l| l.contains(needle));
+    const SNAT_LINE: &str = " from 10.97.0.0/24 to ";
+    const DNAT_LINE: &str = " -> 10.97.0.10 port 443";
+
+    provider
+        .check_no_foreign_pending()
+        .expect("the appliance must start with nothing staged");
+    assert!(!loaded(SNAT_LINE) && !loaded(DNAT_LINE));
+
+    for rule in [&snat, &dnat] {
+        assert_eq!(
+            provider.ensure_nat(rule, &owner).unwrap(),
+            EnsureOutcome::Created
+        );
+        assert_eq!(
+            provider.ensure_nat(rule, &owner).unwrap(),
+            EnsureOutcome::AlreadyPresent,
+            "ensure_nat must be idempotent for its owner"
+        );
+    }
+    assert!(
+        !loaded(SNAT_LINE) && !loaded(DNAT_LINE),
+        "staged is not loaded: nothing reaches pf before the commit"
+    );
+    provider
+        .commit()
+        .expect("apply, and prove both lines loaded");
+    assert!(loaded(SNAT_LINE), "{:?}", nat_lines(&hand));
+    assert!(loaded(DNAT_LINE), "{:?}", nat_lines(&hand));
+
+    // What the appliance holds under the mark is what was declared.
+    let observed = provider.observe(&owner).expect("observe");
+    let declared = [snat.clone(), dnat.clone()];
+    assert_eq!(nat_drift(&declared, &observed), Vec::<String>::new());
+
+    // Another record's mark finds the same descriptions and owns neither.
+    let stranger = fresh_mark();
+    let err = provider.ensure_nat(&snat, &stranger).unwrap_err();
+    assert_eq!(err.number(), 5389, "{err}");
+    assert!(matches!(
+        provider.remove_nat(&dnat.description, &stranger).unwrap(),
+        RemoveOutcome::NotOwned(Owner::Other(_))
+    ));
+    assert!(provider.observe(&stranger).unwrap().rules.is_empty());
+
+    // A NAT rule staged by hand and not applied refuses the next commit
+    // before anything is applied, and what this engine staged is undone.
+    let by_hand = hand.post(
+        "firewall/source_nat/add_rule",
+        serde_json::json!({ "rule": {
+            "enabled": "1", "interface": "lan", "source_net": "10.98.0.0/24",
+            "destination_net": "any", "target": "lanip",
+            "description": "made by hand - live test",
+        }}),
+    );
+    let by_hand = by_hand["uuid"]
+        .as_str()
+        .expect("the hand-made rule's uuid")
+        .to_string();
+    let extra = NatRule {
+        description: "delonix-opnsense live snat 2 - safe to delete".into(),
+        source: "10.99.0.0/24".into(),
+        ..snat.clone()
+    };
+    let second = delonix_opnsense::OpnsenseNatProvider::connect(&t).expect("connect");
+    let err = second.check_no_foreign_pending().unwrap_err();
+    assert!(
+        err.to_string().contains("made by hand - live test"),
+        "{err}"
+    );
+    assert_eq!(
+        second.ensure_nat(&extra, &owner).unwrap(),
+        EnsureOutcome::Created
+    );
+    let err = second.commit().unwrap_err();
+    assert!(err.to_string().contains("not this engine's"), "{err}");
+    assert!(
+        !loaded(" from 10.98.0.0/24 to ") && !loaded(" from 10.99.0.0/24 to "),
+        "a refused commit applies nothing"
+    );
+    assert_eq!(
+        second.remove_nat(&extra.description, &owner).unwrap(),
+        RemoveOutcome::Absent,
+        "what the refused commit had created is deleted again"
+    );
+    hand.post(
+        &format!("firewall/source_nat/del_rule/{by_hand}"),
+        serde_json::json!({}),
+    );
+
+    // An owned rule disabled on the appliance is drift, named.
+    let rows = hand.post(
+        "firewall/source_nat/search_rule",
+        serde_json::json!({ "current": 1, "rowCount": -1 }),
+    );
+    let ours = rows["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["description"] == snat.description.as_str())
+        .and_then(|r| r["uuid"].as_str())
+        .expect("the owned source nat row")
+        .to_string();
+    hand.post(
+        &format!("firewall/source_nat/toggle_rule/{ours}/0"),
+        serde_json::json!({}),
+    );
+    let drift = nat_drift(&declared, &provider.observe(&owner).unwrap());
+    assert_eq!(
+        drift,
+        vec![format!(
+            "nat rule '{}' is disabled on the provider",
+            snat.description
+        )]
+    );
+    let err = provider.ensure_nat(&snat, &owner).unwrap_err();
+    assert_eq!(err.number(), 5389, "{err}");
+    hand.post(
+        &format!("firewall/source_nat/toggle_rule/{ours}/1"),
+        serde_json::json!({}),
+    );
+
+    for rule in [&snat, &dnat] {
+        assert_eq!(
+            provider.remove_nat(&rule.description, &owner).unwrap(),
+            RemoveOutcome::Removed
+        );
+    }
+    provider
+        .commit()
+        .expect("apply the removal, and prove both lines gone");
+    assert!(
+        !loaded(SNAT_LINE) && !loaded(DNAT_LINE),
+        "{:?}",
+        nat_lines(&hand)
+    );
+    assert_eq!(
+        provider.remove_nat(&snat.description, &owner).unwrap(),
+        RemoveOutcome::Absent
+    );
+    assert_eq!(
+        provider.release_owner(&owner).unwrap(),
+        RemoveOutcome::Removed
+    );
+    provider
+        .check_no_foreign_pending()
+        .expect("the appliance is left with nothing staged");
+}

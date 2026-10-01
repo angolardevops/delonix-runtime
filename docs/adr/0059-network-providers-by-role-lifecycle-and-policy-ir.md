@@ -1024,3 +1024,64 @@ What F4d adds:
 - **Not in this slice**:
   - Ten minutes is a long wait for a node that never forks its reload. The timeout is the
     client's task timeout and was not changed here.
+
+## Addendum 2026-10-01 — F5a, part 1: the NAT role, and OPNsense as its first provider
+
+The port, its registry and the provider, with a live case. No Kind reaches it yet; that is
+part 2.
+
+**Measured first, on the lab appliance (OPNsense 26.1.2_5):**
+
+- **The two controllers are two models.** `firewall/source_nat` is flat, like the filter
+  (`source_net`, `description`, `enabled`, `categories` as uuids). `firewall/d_nat` is the older
+  shape: nested `source`/`destination`, `descr`, `disabled`. Its mark is written in `category`
+  **by name**; a read then answers the uuid under `categories`, like the other tables.
+  `categories` written directly to `d_nat` is ignored.
+- **Any apply pushes everything.** A source NAT rule added and not applied was loaded by
+  `firewall/filter/apply`. `source_nat/apply` loaded two destination NAT rules that were only
+  staged.
+- **A NAT rule has no label in pf.** A filter rule carries its uuid as a label; a NAT rule does
+  not. It is recognized by the text of its line in `pf_statistics/rules`, section `nat rules`:
+
+  ```text
+  nat on vtnet0 inet from 10.77.0.0/24 to any -> (vtnet0:0) port 1024:65535
+  rdr on vtnet0 inet proto tcp from any to (vtnet0:1) port = 8443 -> 10.77.0.10 port 443
+  ```
+
+What part 1 adds:
+
+- **`delonix_networking::nat`**: `NatRule` (source or destination), `NatRule::validate`,
+  `NatObserved`, `nat_drift`, the `NatProvider` port (every method required) and its registry.
+- **The model is what can be read back from pf, and nothing more.** A source NAT rule always
+  has a source network, at its network address. A destination NAT rule always has `tcp` or
+  `udp`, a port, a target address and a target port. IPv4 only. Anything else is refused by
+  `validate`, naming the field.
+- **`delonix_opnsense::OpnsenseNatProvider`**, registered with the gateway provider from the
+  same `providers.yaml` entry. The two share one connection; each keeps its own staging.
+- **The commit** refuses when anything staged is not its own. That includes the filter's and
+  the aliases' pending changes, because the same apply would push them. After the apply it
+  reads pf: a rule it created has to be loaded, and one it removed has to be gone.
+- **The OPNsense report**: `net.nat.snat` and `net.nat.dnat` are `supported`, citing the live
+  case. `net.nat.one-to-one` and `net.nat.npt` stay `not-implemented`.
+- **Live** (`a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed`):
+  - both rules staged, and neither line in pf before the commit;
+  - both lines in pf after it; observe equals the declaration;
+  - another mark is refused with DX-5389, and removes nothing;
+  - a rule staged by hand refuses the next commit, nothing is loaded, and what the engine had
+    created is deleted again;
+  - an owned rule disabled by hand is drift, named;
+  - after the removal both lines are gone, and the appliance has nothing staged.
+
+  The case fails with the foreign-pending check removed.
+- **What the commit does not see**, said here:
+  - a NAT rule someone else deleted and did not apply;
+  - a staged rule whose line cannot be derived (a source that is an alias, a target that is
+    not an address);
+  - two rules with the same source network, or the same protocol, target and target port,
+    read as one line.
+- **Not in part 1**:
+  - a manifest field. Part 2 adds `nat:` to `NetworkGateway`, with the plan, the digest and
+    the ledger.
+  - `networkDefaults.nat` still refuses every value.
+  - a gateway-only commit does not look at staged NAT rules of others, and pushes them.
+  - the appliance in the lab has one interface (`lan`); no packet was translated.
