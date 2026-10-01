@@ -1159,7 +1159,14 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     "$BIN" build -t "$_bi:2" "$_bd" >/dev/null 2>&1 || true
     check "build: um rebuild com cache dá os mesmos donos" ok bash -c \
       "[ \"$(_bown "$_bi:2")\" = '1000 app app app root ' ]"
-    "$BIN" image remove "$_bi:1" "$_bi:2" >/dev/null 2>&1 || true
+    # Um COPY por cima de um ficheiro que a base dá a um não-root. Medido com
+    # `httpd:2.4-alpine` (o `htdocs/index.html` é do uid 501): desde que a árvore
+    # de trabalho leva os donos da imagem, o COPY respondia `Permission denied`.
+    printf 'FROM %s\nCOPY who /home/app/who\n' "$_bi:1" > "$_bd/Delonixfile"; echo copied > "$_bd/who"
+    "$BIN" build -t "$_bi:3" "$_bd" >/dev/null 2>&1 || true
+    check "build: um COPY substitui um ficheiro que a base dá a um não-root, e o novo é de root" ok bash -c \
+      "[ \"\$('$BIN' container run --rm --net none '$_bi:3' sh -c 'cat /home/app/who; stat -c %U /home/app/who' 2>/dev/null | tr '\\n' ' ')\" = 'copied root ' ]"
+    "$BIN" image remove "$_bi:1" "$_bi:2" "$_bi:3" >/dev/null 2>&1 || true
   else
     skip "build: USER posicional e donos na cache" "sem subuid, ou o build de teste falhou neste host"
   fi
