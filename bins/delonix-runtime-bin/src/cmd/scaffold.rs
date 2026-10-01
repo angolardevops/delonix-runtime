@@ -50,7 +50,7 @@ pub(crate) struct InitOpts {
     pub image: Option<String>,
     pub force: bool,
     /// `--template <name>`: instead of the generic scaffold, generates a
-    /// COMPLETE PROJECT for a language/framework (e.g. `python`) with best
+    /// COMPLETE PROJECT for a language/framework (e.g. `fastapi`) with best
     /// practices — code, Delonixfile, manifest, tests and dotfiles. `list`
     /// shows the available ones.
     pub template: Option<String>,
@@ -59,7 +59,7 @@ pub(crate) struct InitOpts {
     pub up: bool,
     /// `-v`/`--template-version`: a version parameter some templates read —
     /// an image tag (`odoo`), a framework version (`django`/`laravel`/
-    /// `nextjs`/`nestjs`/`node`/`python`), or a toolchain version (`go`, which
+    /// `nextjs`/`nestjs`/`node`/`fastapi`), or a toolchain version (`go`, which
     /// has no framework to pin) — each documents the exact accepted form in
     /// its own README. Refused with a clear error on a template that has no
     /// `version=` in its `template.meta` — a version flag that is silently
@@ -70,6 +70,24 @@ pub(crate) struct InitOpts {
 /// Names of the available templates, for `--help`/errors.
 pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
+}
+
+/// Old template names that still answer, mapped to the directory that now
+/// holds the template. A rename does not change what the project IS, so the
+/// alias is silent — the same rule as a renamed Kind (`KIND_ALIASES`). `python`
+/// always generated a FastAPI service; the template carries that name now, and
+/// a script written against `-t python` keeps producing the same project.
+const TEMPLATE_ALIASES: &[(&str, &str)] = &[("python", "fastapi")];
+
+/// The canonical template name for what the user typed (an alias resolves to
+/// its target; anything else passes through, to be refused by the caller with
+/// the list of real names).
+fn canonical_template(name: &str) -> &str {
+    TEMPLATE_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == name)
+        .map(|(_, target)| *target)
+        .unwrap_or(name)
 }
 
 /// `(port, health-path, default-version)` of a template (from the
@@ -178,6 +196,7 @@ fn dir_has_content(dir: &Path) -> bool {
 /// look before `build`/`--up` — never presented as "ready", since the shape
 /// of the real project might not match what got written.
 fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
+    let tname = canonical_template(tname);
     if tname == "list" {
         println!(
             "{}: {}",
@@ -347,8 +366,8 @@ fn choose_template_interactive() -> Result<Option<String>> {
             if k == names.len() + 1 {
                 return Ok(None);
             }
-        } else if names.contains(&s) {
-            return Ok(Some(s.to_string()));
+        } else if names.contains(&canonical_template(s)) {
+            return Ok(Some(canonical_template(s).to_string()));
         }
         eprintln!("invalid — pick 1..{}", names.len() + 1);
     }
@@ -434,9 +453,14 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     }
 }
 
-/// Waits for `health` to answer 200 (up to ~40s).
+/// Waits for `health` to answer 200 (up to ~120s).
+///
+/// A ceiling, not a delay: a healthy app answers as soon as it is up. It was
+/// 40s, and measured on a loaded host (load ~30) Odoo 20 took ~85s from its
+/// first log line to serving HTTP — `--up` reported a failure on a stack that
+/// came up on its own a minute later.
 fn wait_health(port: &str, health: &str) -> Result<()> {
-    for _ in 0..80 {
+    for _ in 0..240 {
         if http_ok(port, health) {
             return Ok(());
         }
@@ -444,7 +468,7 @@ fn wait_health(port: &str, health: &str) -> Result<()> {
     }
     Err(Error::Invalid(
         super::po::t(
-            "the container started but did not become healthy in 40s — see `delonix container logs`",
+            "the container started but did not become healthy in 120s — see `delonix container logs`",
         )
         .into(),
     ))
@@ -509,7 +533,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
         render_template(t, o, !do_up)?;
         if do_up {
-            let (port, health, _) = template_meta(t);
+            let (port, health, _) = template_meta(canonical_template(t));
             build_and_up(&o.name, &o.dir, port, health)?;
         }
         return Ok(());
@@ -1248,6 +1272,52 @@ mod tests {
             !delonixfile.contains("__TEMPLATE_VERSION__"),
             "sem -v, a versão por omissão do template.meta tem de preencher o token:\n{delonixfile}"
         );
+        assert!(
+            delonixfile.contains("FROM odoo:20.0"),
+            "without -v the odoo template defaults to Odoo 20:\n{delonixfile}"
+        );
+        // Odoo 20 listens on 127.0.0.1 unless told otherwise, which inside a
+        // container means the published port never answers. Both configs, the
+        // baked-in one and the one the dev manifest bind-mounts.
+        for conf in ["config/odoo.conf", "config/odoo-dev.conf"] {
+            let text = std::fs::read_to_string(dir.join(conf)).unwrap();
+            assert!(
+                text.lines().any(|l| l.trim() == "http_interface = 0.0.0.0"),
+                "{conf} must bind every interface:\n{text}"
+            );
+        }
+    }
+
+    /// `python` was the FastAPI template's old name. It keeps answering, and
+    /// it must produce the SAME project as `fastapi` — an alias that rendered
+    /// something different would be a second template under a misleading name.
+    #[test]
+    fn the_python_alias_renders_the_fastapi_template() {
+        let render = |t: &str| {
+            let (tmp, dir) = scratch();
+            let o = InitOpts {
+                dir: dir.clone(),
+                name: "myapi".into(),
+                image: None,
+                force: false,
+                template: Some(t.into()),
+                template_version: None,
+                up: false,
+            };
+            render_template(t, &o, false).unwrap();
+            let py = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+            let main = std::fs::read_to_string(dir.join("src/myapi/main.py")).unwrap();
+            drop(tmp);
+            (py, main)
+        };
+        let (fastapi, alias) = (render("fastapi"), render("python"));
+        assert_eq!(fastapi, alias);
+        assert!(fastapi.0.contains("\"fastapi==0.142.*\""), "{}", fastapi.0);
+        assert!(template_names().contains(&"fastapi"));
+        assert!(
+            !template_names().contains(&"python"),
+            "an alias is not listed as a template"
+        );
     }
 
     /// `-v` on the `django` template pins `pyproject.toml`'s dependency as
@@ -1326,22 +1396,21 @@ mod tests {
         );
     }
 
-    /// `-v` on `python` pins `pyproject.toml`'s FastAPI dependency the same
-    /// way `django` pins its own — `==X.Y.*`, not the unbounded `>=X.Y` the
-    /// template hardcoded before this session.
+    /// `-v` on `fastapi` pins `pyproject.toml`'s FastAPI dependency the same
+    /// way `django` pins its own — `==X.Y.*`, not an unbounded `>=X.Y`.
     #[test]
-    fn python_com_v_fixa_o_fastapi_como_wildcard() {
+    fn fastapi_with_v_pins_fastapi_as_a_wildcard() {
         let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
             image: None,
             force: false,
-            template: Some("python".into()),
+            template: Some("fastapi".into()),
             template_version: Some("0.116".into()),
             up: false,
         };
-        render_template("python", &o, false).unwrap();
+        render_template("fastapi", &o, false).unwrap();
         let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
         assert!(
             pyproject.contains("\"fastapi==0.116.*\""),

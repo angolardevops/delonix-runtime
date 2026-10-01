@@ -1020,7 +1020,7 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -3658,7 +3658,16 @@ fn reexec_into_netns(
     // inside the netns, recursively. An explicit internal form doesn't depend on
     // who called it.
     let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
-    let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
+    // A relative bind source (`./addons:/mnt/extra-addons`) is resolved against
+    // the CWD, and the 2nd pass does not run in the caller's CWD: every relative
+    // bind on a custom network or pod failed with `no such bind path ./addons`.
+    // Measured with the `odoo` template's dev manifest, whose two bind mounts are
+    // the whole point of it. Anchored here, where the CWD is still the caller's.
+    let mut anchored = opts.clone();
+    if let Ok(cwd) = std::env::current_dir() {
+        anchored.volumes = anchor_relative_binds(&opts.volumes, &cwd);
+    }
+    let json = serde_json::to_string(&anchored).map_err(|e| Error::Invalid(e.to_string()))?;
     // BUG FOUND: `std::fs::write` creates the file at the ambient umask
     // (typically 0644, world-readable). `opts.env` carries the raw `-e
     // KEY=VALUE` pairs the user passed — commonly credentials — and for a
@@ -3706,12 +3715,66 @@ fn reexec_into_netns(
         if !opts.detach {
             propagate_exit_status(&Status::Failed(status.code().unwrap_or(1)));
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not start inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Name the network the user wrote (`--net myodoo-net`), not the netns id
+        // (a hash that appears nowhere in their manifest), and hand back the
+        // class the inner pass already decided.
+        let label = if opts.net.is_empty() || opts.pod.is_some() {
+            netns
+        } else {
+            opts.net.as_str()
+        };
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
+}
+
+/// Makes every relative bind source (`./x`, `../x`, `.`) absolute against
+/// `cwd`, leaving named volumes and absolute paths untouched. The same test
+/// `VolumeStore::resolve_spec` uses to tell a bind from a named volume: the
+/// source starts with `.` or `/`.
+fn anchor_relative_binds(specs: &[String], cwd: &std::path::Path) -> Vec<String> {
+    specs
+        .iter()
+        .map(|spec| match spec.split_once(':') {
+            Some((src, rest)) if src.starts_with('.') => {
+                format!("{}:{rest}", cwd.join(src).display())
+            }
+            _ => spec.clone(),
+        })
+        .collect()
+}
+
+/// The error of a `--net <custom>`/`--pod` start whose 2nd pass failed.
+///
+/// The 2nd pass is a separate process: it has already printed the real reason
+/// on stderr and exited with that reason's class (69 for a capability this host
+/// lacks, 4 for something missing…). This used to be one `Invalid` for every
+/// case, so the command exited 1 and the last line on screen read `(exit
+/// Some(69))` — measured on the `odoo` template, whose stack stopped there while
+/// the actual cause scrolled past one line above. The class maps back so a
+/// reconciler reading the exit code sees what the inner pass decided.
+fn netns_start_error(network: &str, code: Option<i32>) -> Error {
+    use delonix_model::exitcode as x;
+    let msg = super::po::tf(
+        "the container did not start inside network '{network}' — the reason is on the line above (exit {code})",
+        &[
+            ("network", network),
+            ("code", &code.map_or_else(|| "signal".to_string(), |c| c.to_string())),
+        ],
+    );
+    match code {
+        // `NotFound` prints as «no such {0}», so it gets a noun of its own.
+        Some(x::NOT_FOUND) => Error::NotFound(super::po::tf(
+            "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})",
+            &[("network", network), ("code", &x::NOT_FOUND.to_string())],
+        )),
+        Some(x::NOT_RUNNING) => Error::NotRunning(msg),
+        Some(x::CONFLICT) => Error::Conflict(msg),
+        Some(x::UNAVAILABLE) => Error::Unavailable(msg),
+        Some(x::NO_PERMISSION) => Error::PermissionDenied(msg),
+        Some(x::TIMEOUT) => Error::Timeout(msg),
+        _ => Error::Invalid(msg),
+    }
 }
 
 /// The 2nd re-exec pass (`delonix netns run <spec.json>`, hidden — not a public
@@ -6579,6 +6642,65 @@ mod runspec_single_builder_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Relative bind sources are anchored to the caller's CWD before the 2nd
+    /// pass (which runs elsewhere); named volumes and absolute paths are not
+    /// touched, and neither is the rest of the spec (`:ro`).
+    #[test]
+    fn relative_binds_are_anchored_before_the_reexec() {
+        let cwd = std::path::Path::new("/work/proj");
+        let got = super::anchor_relative_binds(
+            &[
+                "./addons:/mnt/extra-addons".into(),
+                "../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ],
+            cwd,
+        );
+        assert_eq!(
+            got,
+            vec![
+                "/work/proj/./addons:/mnt/extra-addons".to_string(),
+                "/work/proj/../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ]
+        );
+        let nf = super::netns_start_error("od20-net", Some(4)).to_string();
+        assert!(nf.starts_with("no such resource"), "{nf}");
+    }
+
+    /// A failed 2nd pass keeps the class the inner process decided, names the
+    /// network the user wrote, and never prints a Rust `Option` at them.
+    #[test]
+    fn a_failed_netns_start_keeps_the_inner_class() {
+        use delonix_model::exitcode as x;
+        let e = super::netns_start_error("myodoo-net", Some(x::UNAVAILABLE));
+        assert_eq!(x::for_error(&e), x::UNAVAILABLE);
+        let text = e.to_string();
+        assert!(text.contains("'myodoo-net'"), "{text}");
+        assert!(!text.contains("Some("), "{text}");
+        for code in [
+            x::NOT_FOUND,
+            x::NOT_RUNNING,
+            x::CONFLICT,
+            x::NO_PERMISSION,
+            x::TIMEOUT,
+        ] {
+            assert_eq!(
+                x::for_error(&super::netns_start_error("n", Some(code))),
+                code
+            );
+        }
+        assert_eq!(
+            x::for_error(&super::netns_start_error("n", Some(42))),
+            x::GENERIC
+        );
+        assert!(super::netns_start_error("n", None)
+            .to_string()
+            .contains("exit signal"));
+    }
+
     /// `--env-file0`: byte-exact values (multi-line, `=` inside the value),
     /// before `-e` (which wins), and an entry without `KEY=` is refused rather
     /// than silently dropped.

@@ -819,7 +819,7 @@ mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">Gi
                  'delonix stack ls')]},
             "init": {"examples": [
                 ("Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes",
-                 "delonix stack init myapi --template python"),
+                 "delonix stack init myapi --template fastapi"),
                 ("Ver os templates disponíveis", "delonix stack init --template list"),
             ], "notes": """<p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
 linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
@@ -2371,12 +2371,12 @@ isn't that driver physically realized in rootless?</p>"""},
     "stack": {
         "lab": {"pt": """<p>Gera um projecto COMPLETO já pronto (código + Delonixfile +
 manifesto) a partir de um template, e aplica-o.</p>
-<pre><code>delonix stack init minha-api --template python
+<pre><code>delonix stack init minha-api --template fastapi
 cd minha-api
 delonix stack apply</code></pre>""",
                 "en": """<p>Generate a COMPLETE, ready-to-run project (code + Delonixfile +
 manifest) from a template, and apply it.</p>
-<pre><code>delonix stack init my-api --template python
+<pre><code>delonix stack init my-api --template fastapi
 cd my-api
 delonix stack apply</code></pre>"""},
         "challenge": {"pt": """<p>Corre <code>stack apply --dry-run</code> e compara o YAML
