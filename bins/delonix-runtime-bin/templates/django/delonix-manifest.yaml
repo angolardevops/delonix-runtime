@@ -1,16 +1,58 @@
+# Delonix manifest — the service as it runs. Apply with:
+#   delonix build -t __NAME__:dev .
+#   delonix stack apply
+#   delonix container exec __NAME__ /app/.venv/bin/python manage.py migrate
+# Until the migrations are applied, /api/v1/health/live is 200 and
+# /api/v1/health/ready is 503 {"dependency":"migrations"}.
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-data
+spec:
+  driver: local
+---
 apiVersion: delonix.io/v1
 kind: Container
 metadata:
   name: __NAME__
-  labels: { app: __NAME__ }
+  labels:
+    app: __NAME__
 spec:
   image: __NAME__:dev
   restart: always
   ports:
     - "__PORT__:__PORT__"
   env:
-    - "DEBUG=false"
-    - "ALLOWED_HOSTS=*"
-    # - "SECRET_KEY=..."   # set via `delonix secret` in production
+    - "APP_ENV=production"
+    - "LOG_LEVEL=info"
+    - "SHUTDOWN_TIMEOUT=15s"
+    - "ALLOWED_HOSTS=localhost,127.0.0.1"
+    # SQLite on the volume: one replica. For more, point DATABASE_URL at
+    # PostgreSQL (README "Database and migrations").
+    - "DATABASE_URL=sqlite:////data/db.sqlite3"
+    # A random key is created in this file on first start and kept on the
+    # volume. With several replicas, give all of them one SECRET_KEY from a
+    # Delonix secret instead (see below).
+    - "SECRET_KEY_FILE=/data/secret_key"
+    # This manifest publishes plain HTTP on the port. When a TLS-terminating
+    # proxy that sets X-Forwarded-Proto is in front, remove these two lines
+    # and set TRUSTED_PROXY to its address: the production defaults then
+    # redirect to https and send HSTS.
+    - "SECURE_SSL_REDIRECT=false"
+    - "SECURE_HSTS_SECONDS=0"
+  # Secrets (SECRET_KEY, webhook secrets) come from a Delonix secret, never
+  # from this file:
+  #   delonix secret create __NAME__-secrets --from-literal SECRET_KEY=... \
+  #     --from-literal WEBHOOK_INBOUND_SECRET=whsec_...
+  # then use the grouped form of env:
+  #   env:
+  #     vars: ["APP_ENV=production", ...]
+  #     secrets: [__NAME__-secrets]
+  volumes:
+    - "__NAME__-data:/data"
   memory: 512M
   cpus: "1.0"
+  readOnly: true
+  tmpfs:
+    - "/tmp"

@@ -5,19 +5,31 @@ on:
     branches: [main, develop]
   pull_request:
 
+# Read-only token: this workflow builds and tests, it publishes nothing.
+permissions:
+  contents: read
+
+env:
+  # Every `uv run`/`uv sync` below installs exactly what uv.lock records.
+  UV_LOCKED: "1"
+
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
+      - name: uv.lock must be committed
+        run: |
+          test -f uv.lock || { echo "::error::uv.lock is missing — run 'uv lock' locally and commit it (README, Quickstart)"; exit 1; }
       - run: uv sync
-      - run: uv run ruff check .
-      # No app/model code ships in this scaffold yet, so there is nothing for
-      # pytest to collect — `manage.py check` is Django's own project-wide
-      # sanity check (settings load, URLs resolve, no obvious misconfiguration)
-      # and needs no test files to be useful. Swap/add `uv run pytest` once
-      # you have real apps and tests.
-      - run: uv run python manage.py check
+      - run: make fmt-check
+      - run: make lint
+      - run: make migrations-check
+      - run: make deploy-check
+      - run: make test
+      - run: make vuln
