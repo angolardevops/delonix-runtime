@@ -14921,3 +14921,9 @@ msgstr "encontrei {evidence} — não há template para o framework deste projec
 
 msgid "Project name (default: the directory's name). Lowercase letters, digits and inner hyphens, because it becomes a container name, an image tag and a package name"
 msgstr "Nome do projecto (por omissão: o nome do directório). Minúsculas, dígitos e hífens interiores, porque vira nome de container, tag de imagem e nome de pacote"
+
+msgid "name the project when the directory's name is not a valid one (lowercase letters, digits, inner hyphens)"
+msgstr "dá nome ao projecto quando o nome do directório não é válido (minúsculas, dígitos, hífens interiores)"
+
+msgid "a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override"
+msgstr "um manifesto que não nomeia nenhum framework suportado recebe o scaffold genérico, com a razão — força um template para o contornar"
