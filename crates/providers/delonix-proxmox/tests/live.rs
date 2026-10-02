@@ -5922,6 +5922,7 @@ fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
         ipam_drift(
             std::slice::from_ref(&subnet),
             std::slice::from_ref(&reserved),
+            true,
             &observed
         )
         .is_empty(),

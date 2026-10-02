@@ -1195,6 +1195,16 @@ What part 1 adds:
       (DX-5390), nothing changed; a plain apply made `.30` again and left `.40` alone; plan 0;
     - delete with `.40` still in the subnet: refused at `remove_subnet` with the node's «not
       empty», the record kept; with `.40` gone, delete 0, no zone running, no IPAM entry.
-- **Not in this slice**: the other IPAM plugins (NetBox, phpIPAM); a subnet change in place
-  (the node has an update route; the field stays cold); DNS (F5c); a guest that is not a system
-  container (a VM uses the same node path, `add_dhcp_mapping`, and was not run).
+- **Two defects found by measuring a VM as the guest, fixed in this slice** (ADR-0063 D3):
+  - a reservation made before its guest existed was followed, at guest create, by an allocation of
+    a range address for the same MAC, and the guest was served that one while the plan said «in
+    sync». A reservation now counts as held only when the MAC holds no other address in the vnet;
+    the plan shows `~`, the apply releases the other address and names the guest that has to
+    restart. Measured with a VM booting iPXE: `DHCPACK .100`, plan `~`, apply, plan 0, the
+    restarted VM got `DHCPACK .20`;
+  - the IPAM listing skips a zone without `dhcp`, so a zone with reservations and no range failed
+    its own read-back. Reservations now turn the zone's DHCP on; measured with a reservation-only
+    zone, plan 0.
+- **Not in this slice, decided in ADR-0063**: other IPAM plugins (phpIPAM refused, NetBox after a
+  spike), a subnet changed in place (with the gateway-entry repair a failed transaction needs), and
+  a reservation that names an engine VM instead of a MAC. DNS is F5c.

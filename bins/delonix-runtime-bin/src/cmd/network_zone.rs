@@ -90,8 +90,8 @@ pub struct SubnetInput {
     pub cidr: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<String>,
-    /// The ranges the zone's DHCP server hands out. Declaring one makes the
-    /// zone serve DHCP.
+    /// The ranges the zone's DHCP server hands out. Declaring one, or any
+    /// reservation, makes the zone serve DHCP.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dhcp_range: Vec<DhcpRangeInput>,
     /// Addresses reserved per MAC. Hot: a change converges live.
@@ -482,9 +482,15 @@ fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
     if uses_ipam(&[], rec) {
         // Reservations are compared in their own (hot) field; here only the
         // zone's options and the subnets, which are cold.
+        let subnets = declared_subnets(&rec.vnets);
+        let dhcp = delonix_networking::ipam::zone_serves_dhcp(
+            &subnets,
+            !declared_reservations(&rec.vnets).is_empty(),
+        );
         drift.extend(delonix_networking::ipam::ipam_drift(
-            &declared_subnets(&rec.vnets),
+            &subnets,
             &[],
+            dhcp,
             &observe_ipam(provider_id, rec)?,
         ));
     }
@@ -673,7 +679,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         // IPAM/DHCP options first — the node refuses an IPAM change once a
         // subnet exists — then each subnet.
         if let (Some(ipam), false) = (&ipam, subnets.is_empty()) {
-            let dhcp = subnets.iter().any(|s| !s.dhcp_ranges.is_empty());
+            let dhcp = delonix_networking::ipam::zone_serves_dhcp(&subnets, !declared.is_empty());
             ipam.prepare_zone(&name, dhcp)
                 .map_err(at(provider_id, "prepare_zone"))?;
             for subnet in &subnets {

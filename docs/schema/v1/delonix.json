@@ -3183,7 +3183,7 @@
           "type": "string"
         },
         "dhcpRange": {
-          "description": "The ranges the zone's DHCP server hands out. Declaring one makes the\nzone serve DHCP.",
+          "description": "The ranges the zone's DHCP server hands out. Declaring one, or any\nreservation, makes the zone serve DHCP.",
           "items": {
             "$ref": "#/$defs/DhcpRangeInput"
           },

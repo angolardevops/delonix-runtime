@@ -68,6 +68,9 @@ pub struct IpamEntry {
     pub vnet: String,
     pub ip: String,
     pub mac: Option<String>,
+    /// The guest the provider made the entry for, when it says so (an
+    /// allocation at guest create carries one; a reservation does not).
+    pub vmid: Option<u32>,
 }
 
 /// What an IPAM provider holds for one zone, restricted to the vnets the
@@ -192,8 +195,27 @@ impl IpamReservation {
     }
 }
 
+/// The other addresses `r.mac` holds in `r.vnet`, besides the reserved one.
+///
+/// Measured on PVE 9.2.2: a reservation made BEFORE its guest exists is
+/// followed, at guest create, by an allocation of a range address for the
+/// same MAC, and the guest is served that one — the reservation stays in the
+/// IPAM and nobody gets it. An address the MAC also holds is therefore not a
+/// harmless extra: it is the address the guest actually gets. Pure.
+pub fn other_addresses_of<'a>(
+    r: &IpamReservation,
+    observed: &'a IpamObserved,
+) -> Vec<&'a IpamEntry> {
+    observed
+        .entries
+        .iter()
+        .filter(|e| e.vnet == r.vnet && e.ip != r.ip && e.mac.as_deref() == Some(r.mac.as_str()))
+        .collect()
+}
+
 /// The reservations of `wanted` the provider holds as declared: the address
-/// held for the declared MAC in the declared vnet. Pure.
+/// held for the declared MAC in the declared vnet, and no other address for
+/// that MAC there (see [`other_addresses_of`]). Pure.
 pub fn held_reservations(
     wanted: &[IpamReservation],
     observed: &IpamObserved,
@@ -203,14 +225,24 @@ pub fn held_reservations(
         .filter(|w| {
             observed.entries.iter().any(|e| {
                 e.vnet == w.vnet && e.ip == w.ip && e.mac.as_deref() == Some(w.mac.as_str())
-            })
+            }) && other_addresses_of(w, observed).is_empty()
         })
         .cloned()
         .collect()
 }
 
+/// Whether a zone serves DHCP: any subnet declares a range, or the zone holds
+/// reservations. Measured on PVE 9.2.2: the IPAM listing skips every zone
+/// without `dhcp`, so in such a zone a reservation is stored and never read
+/// back — and a reservation exists to be served, which `dnsmasq` does per
+/// subnet in `static` mode whether or not a range is declared. Pure.
+pub fn zone_serves_dhcp(subnets: &[IpamSubnet], has_reservations: bool) -> bool {
+    has_reservations || subnets.iter().any(|s| !s.dhcp_ranges.is_empty())
+}
+
 /// How what a provider holds differs from what a record declared, one line
-/// per difference, sorted. Empty = in sync. Pure.
+/// per difference, sorted. Empty = in sync. `dhcp` is
+/// [`zone_serves_dhcp`] of the record. Pure.
 ///
 /// Entries nobody declared (a guest's allocation) are not differences, and a
 /// subnet in an owned vnet that is not declared is one: nobody else removes
@@ -218,13 +250,13 @@ pub fn held_reservations(
 pub fn ipam_drift(
     subnets: &[IpamSubnet],
     reservations: &[IpamReservation],
+    dhcp: bool,
     observed: &IpamObserved,
 ) -> Vec<String> {
     let mut out = Vec::new();
     if !subnets.is_empty() && !observed.zone_ipam {
         out.push("the zone allocates from no IPAM".into());
     }
-    let dhcp = subnets.iter().any(|s| !s.dhcp_ranges.is_empty());
     if dhcp && !observed.zone_dhcp {
         out.push("the zone does not serve DHCP".into());
     }
@@ -293,6 +325,12 @@ pub fn ipam_drift(
                 want.mac
             )),
             Some(_) => {}
+        }
+        for e in other_addresses_of(want, observed) {
+            out.push(format!(
+                "MAC {} also holds {} in vnet '{}', and the guest is served that one",
+                want.mac, e.ip, want.vnet
+            ));
         }
     }
     out.sort();
@@ -512,17 +550,20 @@ mod tests {
                     vnet: "v1".into(),
                     ip: "10.78.0.1".into(),
                     mac: None,
+                    vmid: None,
                 },
                 IpamEntry {
                     vnet: "v1".into(),
                     ip: "10.78.0.20".into(),
                     mac: Some("BC:24:11:00:00:20".into()),
+                    vmid: None,
                 },
                 // A guest's allocation: not declared, not drift.
                 IpamEntry {
                     vnet: "v1".into(),
                     ip: "10.78.0.101".into(),
                     mac: Some("BC:24:11:00:00:99".into()),
+                    vmid: None,
                 },
             ],
             zone_ipam: true,
@@ -532,7 +573,7 @@ mod tests {
 
     #[test]
     fn what_matches_is_in_sync_and_each_difference_is_one_line() {
-        assert!(ipam_drift(&[subnet()], &[reservation()], &in_sync()).is_empty());
+        assert!(ipam_drift(&[subnet()], &[reservation()], true, &in_sync()).is_empty());
 
         let mut o = in_sync();
         o.zone_dhcp = false;
@@ -546,13 +587,13 @@ mod tests {
             gateway: None,
             dhcp_ranges: vec![],
         });
-        let d = ipam_drift(&[subnet()], &[reservation()], &o);
+        let d = ipam_drift(&[subnet()], &[reservation()], true, &o);
         assert_eq!(d.len(), 6, "{d:?}");
 
         let mut o = in_sync();
         o.subnets.clear();
         o.entries.remove(1);
-        let d = ipam_drift(&[subnet()], &[reservation()], &o);
+        let d = ipam_drift(&[subnet()], &[reservation()], true, &o);
         assert_eq!(
             d,
             vec![
@@ -562,9 +603,43 @@ mod tests {
         );
     }
 
+    /// The order that left a guest on the wrong address (measured): the
+    /// reservation first, then a guest created with that MAC, which the node
+    /// gives a range address too. The reservation is not held while the MAC
+    /// holds the other one.
+    #[test]
+    fn a_reservation_whose_mac_also_holds_an_allocation_is_not_held() {
+        let mut o = in_sync();
+        o.entries.push(IpamEntry {
+            vnet: "v1".into(),
+            ip: "10.78.0.100".into(),
+            mac: Some("BC:24:11:00:00:20".into()),
+            vmid: Some(9863),
+        });
+        assert!(held_reservations(&[reservation()], &o).is_empty());
+        let d = ipam_drift(&[subnet()], &[reservation()], true, &o);
+        assert_eq!(
+            d,
+            vec!["MAC BC:24:11:00:00:20 also holds 10.78.0.100 in vnet 'v1', and the guest is served that one".to_string()]
+        );
+        assert_eq!(
+            held_reservations(&[reservation()], &in_sync()),
+            vec![reservation()]
+        );
+    }
+
+    #[test]
+    fn reservations_alone_make_the_zone_serve_dhcp() {
+        let mut s = subnet();
+        s.dhcp_ranges.clear();
+        assert!(!zone_serves_dhcp(std::slice::from_ref(&s), false));
+        assert!(zone_serves_dhcp(std::slice::from_ref(&s), true));
+        assert!(zone_serves_dhcp(&[subnet()], false));
+    }
+
     #[test]
     fn a_zone_without_subnets_asks_nothing_of_the_zone() {
-        assert!(ipam_drift(&[], &[], &IpamObserved::default()).is_empty());
+        assert!(ipam_drift(&[], &[], false, &IpamObserved::default()).is_empty());
     }
 
     #[test]

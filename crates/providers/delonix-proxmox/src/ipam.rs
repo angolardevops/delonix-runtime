@@ -97,6 +97,50 @@ impl ProxmoxIpamProvider {
         }
     }
 
+    /// The reservation is held; releases every OTHER address the MAC holds in
+    /// the vnet, which is the one its guest would be served (measured: a guest
+    /// created after the reservation gets a range address of its own). A guest
+    /// already running keeps the lease it has (the leases are infinite) until
+    /// it restarts, and the warning names it.
+    fn drop_other_addresses(
+        &self,
+        zone: &str,
+        r: &IpamReservation,
+        mac: &str,
+    ) -> delonix_model::Result<EnsureOutcome> {
+        let wanted = IpamReservation {
+            mac: mac.to_string(),
+            ..r.clone()
+        };
+        let observed = IpamObserved {
+            entries: self.entries(zone)?,
+            ..Default::default()
+        };
+        let others: Vec<IpamEntry> =
+            delonix_networking::ipam::other_addresses_of(&wanted, &observed)
+                .into_iter()
+                .cloned()
+                .collect();
+        if others.is_empty() {
+            return Ok(EnsureOutcome::AlreadyPresent);
+        }
+        for e in &others {
+            self.client
+                .sdn_vnet_ip_delete(&self.ledger, &r.vnet, zone, &e.ip, Some(mac))
+                .map_err(delonix_model::Error::from)?;
+            tracing::warn!(
+                zone,
+                mac,
+                released = e.ip.as_str(),
+                reserved = r.ip.as_str(),
+                vmid = e.vmid,
+                "the MAC also held another address, which its guest is served; released it — a \
+                 guest already running keeps that lease until it restarts"
+            );
+        }
+        Ok(EnsureOutcome::Created)
+    }
+
     /// Every entry of the `pve` IPAM in `zone`.
     fn entries(&self, zone: &str) -> delonix_model::Result<Vec<IpamEntry>> {
         Ok(entries_from(
@@ -144,6 +188,13 @@ pub(crate) fn entries_from(rows: &[serde_json::Value], zone: &str) -> Vec<IpamEn
             mac: Some(text(r, "mac"))
                 .filter(|m| !m.is_empty())
                 .map(|m| m.to_ascii_uppercase()),
+            vmid: r
+                .get("vmid")
+                .and_then(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                })
+                .and_then(|v| u32::try_from(v).ok()),
         })
         .collect()
 }
@@ -299,7 +350,7 @@ impl IpamProvider for ProxmoxIpamProvider {
         })?;
         if let Some(e) = self.entries(zone)?.into_iter().find(|e| e.ip == r.ip) {
             if e.mac.as_deref() == Some(mac.as_str()) {
-                return Ok(EnsureOutcome::AlreadyPresent);
+                return self.drop_other_addresses(zone, r, &mac);
             }
             return Err(delonix_networking::Error::RemoteObjectNotOwned(format!(
                 "address {} in zone '{zone}' is already held {} — refusing to take it over; pick \
@@ -352,6 +403,8 @@ impl IpamProvider for ProxmoxIpamProvider {
         zone: &str,
         r: &IpamReservation,
     ) -> delonix_model::Result<RemoveOutcome> {
+        // (`drop_other_addresses` is the reservation's counterpart: it makes
+        // the reserved address the MAC's only one in the vnet.)
         let Some(mac) = normalize_mac(&r.mac) else {
             return Ok(RemoveOutcome::Absent);
         };
