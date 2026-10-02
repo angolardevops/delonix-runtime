@@ -14287,6 +14287,34 @@ msgstr "A imagem seria enviada para o storage de importação do nó, e esse sto
 msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
 msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
 
+# DX-4001 / DX-6001 / DX-9005 — the node API's own failures (ADR-0042 D2)
+msgid "no such route on the node API"
+msgstr "não há essa rota na API de nó"
+
+msgid "The request reached the node API socket on a method and path it has no handler for. The published OpenAPI (`GET /openapi.json`) lists the contract; a path there may still be one this engine version does not serve (DX-6001)."
+msgstr "O pedido chegou ao socket da API de nó com um método e um caminho para os quais ela não tem handler. O OpenAPI publicado (`GET /openapi.json`) lista o contrato; um caminho que lá esteja pode ainda não ser servido por esta versão do motor (DX-6001)."
+
+msgid "Check the method and the path against `GET /openapi.json`, or open `GET /docs`."
+msgstr "Confere o método e o caminho no `GET /openapi.json`, ou abre o `GET /docs`."
+
+msgid "the node API does not serve this yet"
+msgstr "a API de nó ainda não serve isto"
+
+msgid "The operation is in the contract (`proto/delonix/node/v1`) and this engine version does not serve it: the message names the ADR step that brings it. The HTTP status is 501 Not Implemented, not 503: retrying will not help."
+msgstr "A operação está no contrato (`proto/delonix/node/v1`) e esta versão do motor não a serve: a mensagem nomeia o passo do ADR que a traz. O estado HTTP é 501 Not Implemented, não 503: repetir não ajuda."
+
+msgid "Use the CLI for the operation meanwhile, or an engine version that serves it (`GET /v1/node` gives the version)."
+msgstr "Entretanto usa a CLI para a operação, ou uma versão do motor que a sirva (o `GET /v1/node` dá a versão)."
+
+msgid "the node API failed while answering"
+msgstr "a API de nó falhou ao responder"
+
+msgid "The node API could not compute its answer: a probe it runs panicked or a value it reads could not be produced. The message carries what failed."
+msgstr "A API de nó não conseguiu calcular a resposta: uma sonda que corre entrou em pânico ou um valor que lê não pôde ser obtido. A mensagem diz o que falhou."
+
+msgid "Read the message; the server's log (`delonix serve node-api`) has the detail. Report it if it repeats."
+msgstr "Lê a mensagem; o log do servidor (`delonix serve node-api`) tem o detalhe. Reporta-o se se repetir."
+
 # DX-1540 — a system container the Proxmox node cannot hold (ADR-0058)
 msgid "the system container asks for something the node cannot hold"
 msgstr "o container de sistema pede algo que o nó não consegue guardar"

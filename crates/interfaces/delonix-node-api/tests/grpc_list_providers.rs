@@ -251,10 +251,114 @@ async fn list_providers_answers_as_json_on_the_rest_route() {
         .await
         .unwrap();
     assert_eq!(bad.status(), 400);
+    assert_eq!(
+        bad.headers()["content-type"],
+        "application/problem+json",
+        "an error is an RFC 9457 problem document"
+    );
     let body = bad.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["dx"], "DX-1000", "{v}");
+    assert_eq!(v["code"], "DX_INVALID_ARGUMENT", "{v}");
     assert_eq!(
-        v["code"], 3,
-        "google.rpc.Status code for INVALID_ARGUMENT: {v}"
+        v["grpc_status"], 3,
+        "INVALID_ARGUMENT on the gRPC encoding: {v}"
     );
+    assert_eq!(v["instance"], "/v1/providers", "{v}");
+}
+
+/// ADR-0042 D2/D4: every REST error is a problem document that validates
+/// against the `Problem` schema the server publishes at `/openapi.json` —
+/// required fields present, no field the schema does not declare, each of the
+/// declared type.
+#[tokio::test]
+async fn rest_errors_validate_against_the_published_problem_schema() {
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let app = delonix_node_api::router();
+    let call = |method: &'static str, path: &'static str| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = res.status().as_u16();
+            let ctype = res.headers()["content-type"].to_str().unwrap().to_string();
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            (
+                status,
+                ctype,
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            )
+        }
+    };
+    let schema = &delonix_node_api::openapi_document()["components"]["schemas"]["Problem"];
+    let props = schema["properties"]
+        .as_object()
+        .expect("Problem.properties");
+    for (method, path, want_status, want_dx, want_grpc) in [
+        ("GET", "/v1/providers?kind=ceph", 400, "DX-1000", 3),
+        ("GET", "/v1/nada", 404, "DX-4001", 5),
+        ("DELETE", "/v1/node", 405, "DX-4001", 5),
+    ] {
+        let (status, ctype, v) = call(method, path).await;
+        assert_eq!(status, want_status, "{method} {path}: {v}");
+        assert_eq!(ctype, "application/problem+json", "{method} {path}");
+        assert_eq!(v["dx"], want_dx, "{v}");
+        assert_eq!(v["status"], want_status, "status field = HTTP status: {v}");
+        assert_eq!(v["grpc_status"], want_grpc, "{v}");
+        for req in schema["required"].as_array().unwrap() {
+            assert!(v.get(req.as_str().unwrap()).is_some(), "{req} missing: {v}");
+        }
+        for (k, val) in v.as_object().unwrap() {
+            let decl = props
+                .get(k)
+                .unwrap_or_else(|| panic!("{k} is not declared by Problem: {v}"));
+            match decl["type"].as_str() {
+                Some("string") => assert!(val.is_string(), "{k} should be a string: {v}"),
+                Some("integer") => assert!(val.is_i64(), "{k} should be an integer: {v}"),
+                other => panic!("{k}: unexpected schema type {other:?}"),
+            }
+        }
+        assert!(
+            v["type"].as_str().unwrap().contains("codigos.html#DX-"),
+            "type points at the dictionary entry: {v}"
+        );
+    }
+}
+
+/// Every REST route of the socket answers GET only, so the 405 fallback's
+/// `Allow: GET` is true. A route that gains another method has to change both.
+#[tokio::test]
+async fn the_rest_routes_are_get_only() {
+    use tower::ServiceExt;
+    let app = delonix_node_api::router();
+    for path in [
+        "/v1/providers",
+        "/v1/node",
+        "/v1/node/health",
+        "/v1/node/capacity",
+        "/openapi.json",
+        "/docs",
+        "/redoc",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(
+                axum::http::Request::post(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 405, "POST {path}");
+        assert_eq!(res.headers()["allow"], "GET", "POST {path}");
+    }
 }
