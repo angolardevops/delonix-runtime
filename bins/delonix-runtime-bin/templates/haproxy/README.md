@@ -54,7 +54,7 @@ printing the address to open.
 | `Delonixfile` | image build: config, `haproxy -c`, healthcheck |
 | `delonix-manifest.yaml` | how it runs: ports, the `./tls` mount, restart policy, memory, CPU, descriptors |
 | `tls/` | certificate, key and `tls.pem` (both) — generated, never committed, never in the image |
-| `scripts/tls.sh` | local certificate, or install one you have |
+| `scripts/tls.sh` | local certificate, install one, or Let's Encrypt (DNS-01) |
 | `scripts/smoke.sh` | the checks above, against a running container |
 
 ## Load-balance real servers
@@ -81,6 +81,7 @@ image.
 | More names on it | `sh scripts/tls.sh localhost 127.0.0.1 shop.test` |
 | Browsers on this machine to trust it | install [mkcert](https://github.com/FiloSottile/mkcert), `mkcert -install` once, then `sh scripts/tls.sh` |
 | To use a certificate you already have | `sh scripts/tls.sh install fullchain.pem privkey.pem` |
+| A publicly trusted certificate | `sh scripts/tls.sh letsencrypt-dns example.org you@example.org` |
 
 `tls.sh` reloads the running server; no restart, no dropped connection.
 
@@ -91,10 +92,22 @@ warn. Neither is for the public internet.
 ### Let's Encrypt
 
 HAProxy does not serve files, so the HTTP-01 webroot challenge is not wired
-in this template. Get the certificate with a DNS-01 client (certbot with your
-DNS provider's plugin, acme.sh, lego) and hand it over:
-`sh scripts/tls.sh install fullchain.pem privkey.pem`. This path has not been
-exercised by the template's own checks.
+in this template; the certificate comes by DNS-01:
+`sh scripts/tls.sh letsencrypt-dns <domain> <email>`. The script prints one
+TXT record (`_acme-challenge.<domain>`), you create it at your DNS provider,
+and it carries on by itself once the zone's own name servers answer with it.
+Nothing has to reach this host, so it works behind NAT or CGNAT, and
+`<domain>` may be a wildcard. The certificate is installed into `./tls` and
+loaded with the same process id. Everything certbot keeps goes to
+`./letsencrypt`, so no root is involved.
+
+A certificate issued this way is renewed by running the command again (the CA
+asks for a new record each time); set `DNS_AUTH_HOOK=<command>` (and
+`DNS_CLEANUP_HOOK`) to have a script create the record through your
+provider's API, and the script then prints the `certbot renew` line to put in
+cron. Try it first with `LETSENCRYPT_STAGING=1`; `<email>` may be `-`, and
+`ACME_SERVER=<directory-url>` points the script at another ACME CA. It needs
+certbot and one of `dig`, `host` or `nslookup`.
 
 `Strict-Transport-Security` is off on purpose: it pins the host name, every
 port of it, and on `localhost` that would force every other local service to
