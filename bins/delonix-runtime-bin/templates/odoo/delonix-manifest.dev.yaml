@@ -74,6 +74,7 @@ metadata:
   labels: { app: __NAME__, tier: web }
 spec:
   image: __NAME__:dev
+  user: odoo                    # the image's own user, stated: it does not depend on the default
   restart: always
   network: __NAME__-net
   ports:

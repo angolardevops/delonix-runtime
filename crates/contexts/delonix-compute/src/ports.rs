@@ -22,6 +22,9 @@ pub struct ImageConfig {
     pub env: Vec<String>,
     /// `""` when the image sets none.
     pub working_dir: String,
+    /// The image's `USER`, verbatim (`odoo`, `101`, `101:101`); `""` when the
+    /// image sets none. Read so the run can SAY it is not applied (ADR-0062).
+    pub user: String,
 }
 
 /// Images: resolve a reference (pulling it when absent), read its config, and
@@ -85,6 +88,11 @@ pub trait RunHost {
     fn default_masked_paths(&self) -> Vec<String>;
     fn default_readonly_paths(&self) -> Vec<String>;
     fn rootless(&self) -> bool;
+    /// Can a container on this host hold a user other than uid 0? Always as
+    /// root; rootless, only with a subordinate uid AND gid range for the account
+    /// and the helpers that map it. Without one the user namespace maps a single
+    /// uid, and an image's USER cannot be applied (ADR-0062).
+    fn can_map_id_range(&self) -> bool;
     /// A seccomp profile file: its JSON, and the syscalls it names that this
     /// architecture does not have. `Err` is the reason, shown after the flag.
     fn load_seccomp_profile(

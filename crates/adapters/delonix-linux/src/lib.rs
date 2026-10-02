@@ -1229,33 +1229,71 @@ fn mount_target_safe(target: &str) -> bool {
 }
 
 /// Resolves `target` (an in-container path, already lexically validated by
-/// `mount_target_safe`) against `rootfs`, component-by-component, refusing to
-/// descend through any symlink an image layer may have planted along the
-/// way. `mount_target_safe`'s lexical `..` check is not enough on its own:
-/// `create_dir_all`/`OpenOptions::open` (called on the joined path right
-/// after this) FOLLOW symlinks, and `bind_volume` runs BEFORE `pivot_root`
-/// while `/` is still the real host filesystem — an absolute symlink at ANY
-/// path component (a malicious image shipping e.g. `/etc -> /root`, or the
-/// final mount-target component itself already existing as one) redirects
-/// the destination to an arbitrary real host path, and the subsequent
-/// create/open then create real directories/files on the host, as the
-/// engine's own uid. Mirrors the confinement technique `cmd::build::
-/// confine_to` already uses for the build's COPY (a sibling of this exact
-/// bug class, fixed there first) — this is the engine-side equivalent.
+/// `mount_target_safe`) against `rootfs`, the way the container itself would:
+/// a symlink is followed, and it can never lead out of `rootfs`.
+///
+/// `bind_volume` runs BEFORE `pivot_root`, while `/` is still the real host
+/// filesystem, and `create_dir_all`/`open` on the joined path FOLLOW symlinks.
+/// So a link an image ships (`/etc -> /root`, or the final component itself)
+/// would, taken literally, send the mount and the directories created for it
+/// to a real host path. Each component is therefore resolved by hand: an
+/// absolute link restarts at `rootfs`, and `..` stops at `rootfs` — the scoped
+/// resolution runc does.
+///
+/// It used to REFUSE any symlink on the way. That was safe and wrong: Alpine
+/// and Debian ship `/var/run -> /run`, and the kubelet mounts every pod's
+/// service-account token at `/var/run/secrets/…`, so on a Kubernetes node each
+/// pod from such an image failed with `failed to prepare the rootfs: EINVAL`
+/// (measured on a kubeadm node, k8s 1.36).
+///
+/// `None` only for a link chain too long to be anything but a loop.
 fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
-    let mut current = std::path::PathBuf::from(rootfs);
-    for comp in std::path::Path::new(target).components() {
-        let std::path::Component::Normal(c) = comp else {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Component;
+    const MAX_LINKS: u32 = 40;
+    let root = std::path::PathBuf::from(rootfs);
+    let parts = |p: &std::path::Path| -> Vec<OsString> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut pending: VecDeque<OsString> = parts(std::path::Path::new(target)).into();
+    // The resolved path so far, relative to `root`: real components only.
+    let mut resolved: Vec<OsString> = Vec::new();
+    let mut links = 0;
+    while let Some(c) = pending.pop_front() {
+        if c == ".." {
+            resolved.pop(); // never above `root`
             continue;
-        };
-        current.push(c);
-        if let Ok(meta) = std::fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return None;
-            }
+        }
+        let mut here = root.clone();
+        here.extend(&resolved);
+        here.push(&c);
+        let is_link = std::fs::symlink_metadata(&here).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            resolved.push(c);
+            continue;
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return None;
+        }
+        let dest = std::fs::read_link(&here).ok()?;
+        if dest.is_absolute() {
+            resolved.clear();
+        }
+        for part in parts(&dest).into_iter().rev() {
+            pending.push_front(part);
         }
     }
-    Some(current)
+    let mut out = root;
+    out.extend(&resolved);
+    Some(out)
 }
 
 /// The mount flags the kernel LOCKS on a mount that a user namespace merely
@@ -2017,6 +2055,34 @@ fn proc_sys_read_only(privileged: bool) -> bool {
 pub const USERNS_UID_BASE: u32 = 100_000;
 pub const USERNS_RANGE: u32 = 65_536;
 
+/// The id a container sees for an id the HOST sees, under the rootless map this
+/// engine writes (`0 <own> 1`, then `1 USERNS_UID_BASE USERNS_RANGE-1`): the
+/// invoking id is 0, a subid is its offset into the range, plus one. PURE.
+///
+/// An id outside both stays as it is: the container cannot see it as anything
+/// (it reads as `nobody`), and inventing a number would be a guess.
+pub fn container_id_of(host: u32, own: u32) -> u32 {
+    if host == own {
+        0
+    } else if (USERNS_UID_BASE..USERNS_UID_BASE + USERNS_RANGE - 1).contains(&host) {
+        host - USERNS_UID_BASE + 1
+    } else {
+        host
+    }
+}
+
+/// [`container_id_of`] for a `(uid, gid)` pair as THIS process sees the host —
+/// what a tar header packed outside the container's user namespace needs. Real
+/// root has no map: the ids are already the container's.
+pub fn container_ids(uid: u32, gid: u32) -> (u32, u32) {
+    if !is_rootless() {
+        return (uid, gid);
+    }
+    // SAFETY: geteuid/getegid have no preconditions.
+    let (own_uid, own_gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    (container_id_of(uid, own_uid), container_id_of(gid, own_gid))
+}
+
 /// Writes the uid/gid maps of a container with a user namespace (runs in the PARENT).
 /// - **As root** (engine with `sudo`): maps the range `100000+65536` (container's
 ///   root = unprivileged uid on the host).
@@ -2092,6 +2158,47 @@ fn have_subid_helpers() -> bool {
         && ["/usr/bin/newgidmap", "/bin/newgidmap"]
             .iter()
             .any(|p| std::path::Path::new(p).exists())
+}
+
+/// Can a container on this host hold a user other than uid 0?
+///
+/// Real root maps any id. Rootless needs the `newuidmap`/`newgidmap` helpers and
+/// a subordinate range for this account in BOTH `/etc/subuid` and `/etc/subgid`:
+/// the helpers refuse a map the files do not grant, and without a range the user
+/// namespace holds a single uid.
+pub fn can_map_id_range() -> bool {
+    if !is_rootless() {
+        return true;
+    }
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let name = std::env::var("USER").ok().or_else(|| {
+        let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+        passwd.lines().find_map(|l| {
+            let mut f = l.split(':');
+            let (name, _, id) = (f.next()?, f.next()?, f.next()?);
+            (id.parse::<u32>().ok()? == uid).then(|| name.to_string())
+        })
+    });
+    let granted = |file: &str| {
+        std::fs::read_to_string(file)
+            .map(|body| subid_file_grants(&body, uid, name.as_deref()))
+            .unwrap_or(false)
+    };
+    have_subid_helpers() && granted("/etc/subuid") && granted("/etc/subgid")
+}
+
+/// Does a `/etc/subuid`-format body grant `uid` (by number or by `name`) a range
+/// wide enough for the engine's map? PURE.
+fn subid_file_grants(body: &str, uid: u32, name: Option<&str>) -> bool {
+    body.lines().any(|line| {
+        let mut f = line.trim().split(':');
+        let (Some(who), Some(_start), Some(count)) = (f.next(), f.next(), f.next()) else {
+            return false;
+        };
+        let mine = who == uid.to_string() || name.is_some_and(|n| n == who);
+        mine && count.parse::<u32>().is_ok_and(|c| c >= USERNS_RANGE - 1)
+    })
 }
 
 /// Runs `newuidmap`/`newgidmap <pid> <map...>` (the map args are triplets
@@ -3206,6 +3313,18 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     // `nobody`): the pivot_root and the files go to the host overlay (which accepts
     // the host uid). Without a user ns, it mounts `/dev` right away (bind of the host's real nodes).
     // With a user ns, `/dev` is mounted next, after the setuid — see below.
+    // What a non-root user will need, read NOW: after `pivot_root` neither the
+    // container's own directory nor a volume's host path is visible. Applied
+    // further down, at the user switch (see `apply_image_owners`).
+    let non_root = run_uid.filter(|u| *u != 0);
+    let image_owners = match non_root {
+        Some(_) => pending_image_owners(rootfs),
+        None => Vec::new(),
+    };
+    let fresh_volumes = match non_root {
+        Some(_) => empty_named_volumes(mounts),
+        None => Vec::new(),
+    };
     if let Err(e) = setup_rootfs(
         rootfs,
         hostname,
@@ -3330,7 +3449,15 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     let mut user_switched = false;
     if let Some(uid) = run_uid.filter(|u| *u != 0) {
         let gid = run_gid.unwrap_or(uid);
-        chown_tree_once("/", uid, gid);
+        // The user gets what the IMAGE gives it, and nothing else (ADR-0062).
+        //
+        // This used to be `chown -R uid:gid /`: measured, it made a non-root
+        // user the owner of 940 of 986 entries of its root filesystem — it could
+        // write `/etc/passwd` and replace its own binary — and the walk crossed
+        // mount points, so a bind-mounted HOST directory was re-owned to a subuid
+        // and its owner could no longer write his own files.
+        apply_image_owners(&image_owners);
+        own_fresh_volumes(&fresh_volumes, &image_owners, uid, gid);
         // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
         // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
         // (= /proc/self/fd/1) and REOPEN it already as the USER — which would fail without
@@ -3599,15 +3726,134 @@ pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
     }
 }
 
-/// Like [`lchown_tree`], but idempotent via a `/.delonix_user_<uid>` marker —
-/// only runs the 1st time for a given uid, avoiding the cost on every startup.
-fn chown_tree_once(root: &str, uid: u32, gid: u32) {
-    let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
-    if std::path::Path::new(&marker).exists() {
-        return;
+/// The image's non-root owners for this container, when they have not been
+/// applied yet — and marks them as applied.
+///
+/// Reads `overlay-owners` beside the container's `merged/` (written by the image
+/// store's `prepare_overlay`/`mount_rootfs`). Once per container on purpose: the
+/// write layer keeps what was applied, and a second pass on a later start would
+/// undo an ownership change the container made itself. A container with no such
+/// file (a flat rootfs, or one created before the index existed) gets nothing.
+fn pending_image_owners(rootfs: &str) -> Vec<delonix_compute::owners::Owner> {
+    let Some(base) = std::path::Path::new(rootfs).parent() else {
+        return Vec::new();
+    };
+    let applied = base.join("overlay-owners.applied");
+    if applied.exists() {
+        return Vec::new();
     }
-    lchown_tree(std::path::Path::new(root), uid, gid);
-    let _ = std::fs::File::create(&marker);
+    let Ok(bytes) = std::fs::read(base.join(delonix_compute::owners::OWNERS_FILE)) else {
+        return Vec::new();
+    };
+    let _ = std::fs::File::create(&applied);
+    delonix_compute::owners::decode(&bytes)
+}
+
+/// The targets of the NAMED volumes that are still empty.
+///
+/// A named volume is recognised by its shape on disk — `<volumes>/<name>/_data`
+/// with the store's `meta.json` beside it — so a bind mount of a host path is
+/// never one, whatever it is called. Empty is what makes it safe to give to the
+/// container's user: there is no file in it whose ownership could be changed.
+fn empty_named_volumes(mounts: &[Mount]) -> Vec<String> {
+    mounts
+        .iter()
+        .filter(|m| !m.readonly && is_empty_named_volume(std::path::Path::new(&m.source)))
+        .map(|m| m.target.clone())
+        .collect()
+}
+
+fn is_empty_named_volume(source: &std::path::Path) -> bool {
+    let named = source.file_name().is_some_and(|n| n == "_data")
+        && source
+            .parent()
+            .is_some_and(|p| p.join("meta.json").is_file());
+    named
+        && std::fs::read_dir(source)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(false)
+}
+
+/// Gives back the entries the image gave to a user other than root.
+///
+/// Runs after `pivot_root`, so every path resolves inside the container's root:
+/// a symlink the image planted cannot lead out of it. An entry that resolves
+/// onto ANOTHER filesystem — a volume or a bind mount covering that path — is
+/// skipped: what is mounted there is not the image's, and on a bind mount it is
+/// the host's. `lchown` never follows the last component. Best-effort per entry
+/// (a path a higher layer deleted is simply not there).
+fn apply_image_owners(owners: &[delonix_compute::owners::Owner]) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(root_dev) = std::fs::symlink_metadata("/").map(|m| m.dev()) else {
+        return;
+    };
+    for o in owners {
+        let path = std::path::Path::new("/").join(&o.path);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.dev() != root_dev {
+            continue;
+        }
+        lchown_one(&path, o.uid, o.gid);
+        // The kernel clears setuid/setgid on a chown. An image's setgid binary
+        // (`unix_chkpwd`, group `shadow`) must keep the bit the image gave it,
+        // so the mode goes back. Not for a symlink: it has no mode of its own,
+        // and `chmod` would follow it.
+        let special = meta.mode() & 0o6000 != 0;
+        if special && !meta.file_type().is_symlink() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &path,
+                std::fs::Permissions::from_mode(meta.mode() & 0o7777),
+            );
+        }
+    }
+}
+
+/// An empty named volume belongs to whoever the image gives its mount point to
+/// and, when the image names nobody, to the container's user.
+///
+/// Docker's rule for the first half; the second is this engine's: a volume
+/// created for this container, with nothing in it, at a path the image does not
+/// own, has no other owner to infer, and leaving it to root would make the
+/// user's own volume unwritable. Never a volume that already holds data, never a
+/// bind mount (`empty_named_volumes` lists neither).
+fn own_fresh_volumes(
+    targets: &[String],
+    owners: &[delonix_compute::owners::Owner],
+    uid: u32,
+    gid: u32,
+) {
+    for target in targets {
+        let (u, g) = fresh_volume_owner(target, owners, uid, gid);
+        lchown_one(std::path::Path::new(target), u, g);
+    }
+}
+
+/// Who an empty named volume mounted at `target` belongs to: the image's owner
+/// of that path, or the container's user when the image names none. PURE.
+fn fresh_volume_owner(
+    target: &str,
+    owners: &[delonix_compute::owners::Owner],
+    uid: u32,
+    gid: u32,
+) -> (u32, u32) {
+    let rel = std::path::Path::new(target.trim_start_matches('/'));
+    owners
+        .iter()
+        .find(|o| o.path == rel)
+        .map_or((uid, gid), |o| (o.uid, o.gid))
+}
+
+/// `lchown` of one path; never follows a symlink. Errors are ignored.
+fn lchown_one(path: &std::path::Path, uid: u32, gid: u32) {
+    if let Ok(c) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
+        // SAFETY: `c` is a valid NUL-terminated path owned by this frame.
+        unsafe {
+            libc::lchown(c.as_ptr(), uid, gid);
+        }
+    }
 }
 
 /// PID limit per container (anti fork-bomb).
@@ -9520,6 +9766,120 @@ mod tests {
         );
     }
 
+    /// A named volume is `<name>/_data` with the store's `meta.json` beside it,
+    /// and only an EMPTY one is handed to the container's user. A bind mount of
+    /// a host directory is never one — not even an empty directory called
+    /// `_data` — and a read-only mount is left alone.
+    #[test]
+    fn only_an_empty_named_volume_is_fresh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let named = tmp.path().join("vol/_data");
+        std::fs::create_dir_all(&named).unwrap();
+        std::fs::write(tmp.path().join("vol/meta.json"), b"{}").unwrap();
+        let bind = tmp.path().join("proj/_data");
+        std::fs::create_dir_all(&bind).unwrap();
+        let mount = |src: &std::path::Path, target: &str, readonly: bool| Mount {
+            source: src.to_string_lossy().into_owned(),
+            target: target.into(),
+            readonly,
+            propagation: None,
+            optional: false,
+        };
+        let mounts = [
+            mount(&named, "/var/lib/app", false),
+            mount(&bind, "/app", false),
+            mount(&named, "/ro", true),
+        ];
+        assert_eq!(
+            empty_named_volumes(&mounts),
+            vec!["/var/lib/app".to_string()]
+        );
+        // Data in it: it is somebody's, and it is not touched.
+        std::fs::write(named.join("f"), b"x").unwrap();
+        assert!(empty_named_volumes(&mounts).is_empty());
+    }
+
+    /// An empty volume takes the image's owner of its mount point, and the
+    /// container's user only when the image names none.
+    #[test]
+    fn a_fresh_volume_takes_the_images_owner_first() {
+        let owners = vec![delonix_compute::owners::Owner {
+            path: "var/lib/app".into(),
+            uid: 70,
+            gid: 71,
+        }];
+        assert_eq!(
+            fresh_volume_owner("/var/lib/app", &owners, 99, 99),
+            (70, 71)
+        );
+        assert_eq!(fresh_volume_owner("/data", &owners, 99, 98), (99, 98));
+    }
+
+    /// The owners are handed out once per container: the second start finds the
+    /// marker and applies nothing, so an ownership change the container made
+    /// itself is not undone. No index (a flat rootfs) is no owners.
+    #[test]
+    fn image_owners_are_pending_only_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("merged");
+        std::fs::create_dir_all(&rootfs).unwrap();
+        let rootfs = rootfs.to_string_lossy().into_owned();
+        assert!(
+            pending_image_owners(&rootfs).is_empty(),
+            "no index, no owners"
+        );
+        let owners = vec![delonix_compute::owners::Owner {
+            path: "var/lib/app".into(),
+            uid: 99,
+            gid: 99,
+        }];
+        std::fs::write(
+            tmp.path().join(delonix_compute::owners::OWNERS_FILE),
+            delonix_compute::owners::encode(&owners),
+        )
+        .unwrap();
+        // The earlier call found no index and must not have marked it applied.
+        assert_eq!(pending_image_owners(&rootfs), owners);
+        assert!(pending_image_owners(&rootfs).is_empty(), "second start");
+    }
+
+    /// Host ids as the container sees them: the invoking id is root, a subid is
+    /// its offset plus one, and anything else is left alone.
+    #[test]
+    fn host_ids_map_back_to_the_containers() {
+        assert_eq!(container_id_of(1000, 1000), 0);
+        assert_eq!(container_id_of(USERNS_UID_BASE, 1000), 1);
+        assert_eq!(container_id_of(100_999, 1000), 1000);
+        assert_eq!(container_id_of(100_098, 1000), 99);
+        assert_eq!(
+            container_id_of(USERNS_UID_BASE + USERNS_RANGE - 2, 1000),
+            65_535
+        );
+        // Past the range, and an unrelated host user: not ours to rename.
+        assert_eq!(
+            container_id_of(USERNS_UID_BASE + USERNS_RANGE - 1, 1000),
+            165_535
+        );
+        assert_eq!(container_id_of(33, 1000), 33);
+    }
+
+    /// A subordinate range counts only when it is this account's and wide
+    /// enough for the engine's map; a comment, a short range or another user's
+    /// line grants nothing.
+    #[test]
+    fn a_subid_file_grants_only_this_accounts_wide_range() {
+        let body = "# comment\nother:100000:65536\nwalter:165536:65536\n";
+        assert!(subid_file_grants(body, 1000, Some("walter")));
+        assert!(subid_file_grants("1000:100000:65536\n", 1000, None));
+        assert!(!subid_file_grants(body, 1001, Some("ana")));
+        assert!(!subid_file_grants(
+            "walter:100000:1000\n",
+            1000,
+            Some("walter")
+        ));
+        assert!(!subid_file_grants("", 1000, Some("walter")));
+    }
+
     #[test]
     fn mount_point_follows_the_source_shape() {
         let tmp = tempfile::tempdir().unwrap();
@@ -9695,45 +10055,45 @@ mod tests {
         );
     }
 
+    /// A symlink on the way to a mount target is followed INSIDE the rootfs,
+    /// never out of it: an absolute link restarts at the rootfs, `..` stops
+    /// there, and a loop is refused.
     #[test]
-    fn safe_bind_target_recusa_symlink_plantado_pela_imagem() {
-        // HIGH fixed here: `mount_target_safe` only rejects lexical `..` —
-        // it never resolves symlinks, and `create_dir_all`/`OpenOptions::open`
-        // (called on the joined path right after, before `pivot_root`) FOLLOW
-        // them. A malicious image shipping e.g. `/etc -> /root` inside its
-        // rootfs redirects a `-v vol:/etc/pwned` mount target to a real host
-        // path. `safe_bind_target` must refuse to descend through ANY
-        // symlink component, whether in the middle of the path or as the
-        // final target itself.
+    fn a_bind_target_through_a_symlink_stays_inside_the_rootfs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         let rootfs = base.join("rootfs");
-        std::fs::create_dir_all(&rootfs).unwrap();
+        std::fs::create_dir_all(rootfs.join("run")).unwrap();
+        std::fs::create_dir_all(rootfs.join("var")).unwrap();
+        let root = rootfs.to_string_lossy().into_owned();
+        let resolve = |t: &str| safe_bind_target(&root, t);
 
-        // Case 1: an intermediate path component is a symlink escaping rootfs.
+        // What Alpine and Debian ship, both spellings.
+        std::os::unix::fs::symlink("/run", rootfs.join("var/run")).unwrap();
+        assert_eq!(
+            resolve("/var/run/secrets/token"),
+            Some(rootfs.join("run/secrets/token"))
+        );
+        std::os::unix::fs::symlink("../run", rootfs.join("var/run2")).unwrap();
+        assert_eq!(resolve("/var/run2/x"), Some(rootfs.join("run/x")));
+
+        // A link to a real HOST path: the result is that path under the rootfs.
         let outside = base.join("outside-victim");
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, rootfs.join("etc")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/etc/pwned").is_none(),
-            "um symlink a meio do caminho deve ser recusado"
-        );
+        let got = resolve("/etc/pwned").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
+        assert!(!got.starts_with(&outside));
 
-        // Case 2: the FINAL target component itself is already a symlink.
-        let victim_file = base.join("victim-file");
-        std::fs::write(&victim_file, b"secret").unwrap();
-        std::fs::create_dir_all(rootfs.join("app")).unwrap();
-        std::os::unix::fs::symlink(&victim_file, rootfs.join("app").join("data")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/app/data").is_none(),
-            "um symlink no próprio componente final deve ser recusado"
-        );
+        // The final component itself a link, and `..` trying to climb out.
+        std::os::unix::fs::symlink("../../../../etc/shadow", rootfs.join("data")).unwrap();
+        let got = resolve("/data").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
 
-        // Legitimate case: no symlinks anywhere, real target resolves normally.
-        assert_eq!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
-            Some(rootfs.join("data").join("inside"))
-        );
+        // No link at all resolves to itself; a loop is refused.
+        assert_eq!(resolve("/srv/inside"), Some(rootfs.join("srv/inside")));
+        std::os::unix::fs::symlink("loop", rootfs.join("loop")).unwrap();
+        assert_eq!(resolve("/loop/x"), None);
     }
 
     #[test]

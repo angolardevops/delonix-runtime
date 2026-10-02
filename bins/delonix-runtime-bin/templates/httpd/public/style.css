@@ -1,0 +1,3 @@
+/* Kept in its own file: the Content-Security-Policy in conf/delonix.conf allows
+   only same-origin styles, so an inline <style> would be blocked. */
+body { font: 16px system-ui, sans-serif; margin: 4rem auto; max-width: 40rem; color: #1a1a2e; }

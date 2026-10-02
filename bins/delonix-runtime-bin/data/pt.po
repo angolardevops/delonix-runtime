@@ -832,6 +832,9 @@ msgstr "delonix: falha a preparar o rootfs: {e}"
 msgid "delonix: confinement NOT verified ({e}); aborting the container"
 msgstr "delonix: confinamento NÃO verificado ({e}); a abortar o container"
 
+msgid "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container."
+msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não pode ser aplicado neste host: esta conta não tem intervalo de uid/gid subordinados (/etc/subuid, /etc/subgid, newuidmap), por isso não pode existir um segundo utilizador. O processo corre como root (uid 0) dentro do container."
+
 msgid "delonix: warning — failed to enter WORKDIR {w}"
 msgstr "delonix: aviso — falha a entrar no WORKDIR {w}"
 
@@ -3503,9 +3506,6 @@ msgstr "o container não arrancou dentro da rede '{network}' — a razão está 
 
 msgid "warning: firewall/isolation of '{name}' not reapplied on start: {e}"
 msgstr "aviso: firewall/isolamento de '{name}' não reaplicado no start: {e}"
-
-msgid "the container did not restart inside the network '{netns}' (exit {code})"
-msgstr "o container não rearrancou dentro da rede '{netns}' (exit {code})"
 
 msgid "'{name}' has no rootfs on disk — it was removed, or the container never got to start"
 msgstr "'{name}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar"
@@ -14930,3 +14930,54 @@ msgstr "escolhe o nome do projecto — sem --name vem do directório, em minúsc
 
 msgid "a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override"
 msgstr "um manifesto que não nomeia nenhum framework suportado recebe o scaffold genérico, com a razão — força um template para o contornar"
+
+
+# ---- init: edge templates with TLS, ports and the --up summary ----
+
+msgid "{what} port {port} is already in use on this host — the project is generated with it anyway; port {free} is free"
+msgstr "a porta {what} {port} já está em uso neste host — o projecto é gerado com ela na mesma; a porta {free} está livre"
+
+msgid "{what} port {port} is already in use. Which port instead?"
+msgstr "A porta {what} {port} já está em uso. Que porta usar em vez dela?"
+
+msgid "port {port} is not usable — pick a free one"
+msgstr "a porta {port} não serve — escolhe uma livre"
+
+msgid "Extra host names for the TLS certificate, space-separated (localhost is always included)"
+msgstr "Nomes de host adicionais para o certificado TLS, separados por espaço (localhost entra sempre)"
+
+msgid "'{host}' is not a host name or an address — left out of the certificate"
+msgstr "'{host}' não é um nome de host nem um endereço — ficou fora do certificado"
+
+msgid "certificate: ./tls, issued by this machine's mkcert CA for {names} — browsers here trust it once `mkcert -install` has been run"
+msgstr "certificado: ./tls, emitido pela CA do mkcert desta máquina para {names} — os browsers daqui confiam nele depois de correr `mkcert -install`"
+
+msgid "certificate: ./tls, self-signed for {names} — HTTPS works and browsers will warn; install mkcert and run `sh scripts/tls.sh` for one this machine trusts"
+msgstr "certificado: ./tls, auto-assinado para {names} — o HTTPS funciona e os browsers avisam; instala o mkcert e corre `sh scripts/tls.sh` para ter um em que esta máquina confia"
+
+msgid "certificate: ./tls already had one — kept as it is"
+msgstr "certificado: ./tls já tinha um — ficou como estava"
+
+msgid "another process"
+msgstr "outro processo"
+
+msgid "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`"
+msgstr "a porta {port} já está em uso neste host (por {owner}) — liberta-a, ou muda a porta nos ficheiros gerados e no delonix-manifest.yaml, e corre `delonix stack apply`"
+
+msgid "Building image {tag} 🔨"
+msgstr "A construir a imagem {tag} 🔨"
+
+msgid "`delonix build` failed — the step that failed is shown above"
+msgstr "o `delonix build` falhou — o passo que falhou está acima"
+
+msgid "{name} is UP"
+msgstr "{name} está de pé"
+
+msgid "http://localhost:{port} redirects there"
+msgstr "http://localhost:{port} redirecciona para lá"
+
+msgid "these are the image's factory credentials — change them before anyone else can reach the port (see README.md)"
+msgstr "estas são as credenciais de fábrica da imagem — muda-as antes de mais alguém chegar à porta (ver README.md)"
+
+msgid "(tears down everything the stack owns)"
+msgstr "(desmonta tudo o que a stack possui)"

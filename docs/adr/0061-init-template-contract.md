@@ -98,6 +98,10 @@ Every application template has, in the framework's own idiom:
 - `template.meta` carries what the generator needs to know about a template: `port=`,
   `health=`, `version=`, `versions=`, `lock=` (the package manager's lock file, read by
   adoption) and `wait=` (seconds `--up` waits for health; default 120).
+  Optional keys are read by name (`TEMPLATE_KV`): `tls=<port>` (the template serves HTTPS;
+  `init` generates the certificate into `./tls` and `__TLS_PORT__` is substituted), `open=`
+  (the path `--up` prints as the address to open), and `login=`/`password=` (factory
+  credentials `--up` prints with the warning to change them).
 - One test renders every embedded template for every version it declares and parses the
   JSON and YAML it wrote, so a template added later is covered without a new test.
 

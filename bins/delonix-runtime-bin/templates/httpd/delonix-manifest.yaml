@@ -7,6 +7,18 @@ spec:
   image: __NAME__:dev
   restart: always
   ports:
-    - "__PORT__:__PORT__"
-  memory: 128M
-  cpus: "0.5"
+    - "__PORT__:__PORT__"          # HTTP: health, ACME challenge, redirect
+    - "__TLS_PORT__:__TLS_PORT__"          # HTTPS: the site
+    # To serve on the standard ports: "80:__PORT__" and "443:__TLS_PORT__" (a rootless
+    # host needs `install.sh --low-ports` first), and to accept connections
+    # from other machines: "0.0.0.0:443:__TLS_PORT__" — the default binds 127.0.0.1.
+  volumes:
+    - "./tls:/usr/local/apache2/conf/tls:ro"     # certificate + key, never in the image
+    - "./acme:/usr/local/apache2/acme:ro"   # Let's Encrypt HTTP-01 webroot
+  # Sized for load: 256 request threads (conf/delonix.conf) at ~1 MiB each.
+  memory: 512M
+  cpus: "2.0"
+  ulimit:
+    - "nofile=65535:65535"
+  tmpfs:
+    - "/run/httpd"                 # the TLS session cache, in memory

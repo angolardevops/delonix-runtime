@@ -1137,6 +1137,110 @@ check "progresso: todo o • tem o seu ✓" ok bash -c "
   [ \"\$o\" = \"\$c\" ] || { printf 'abertos=%s fechados=%s\n%s\n' \"\$o\" \"\$c\" \"\$err\"; exit 1; }
 "
 
+# O USER de uma imagem é o utilizador por omissão (ADR-0062, P2).
+#
+# Até 2026-10-01 o `container run … id` respondia uid=0 para uma imagem com
+# `USER`, desde a v1.0.0. Agora corre como o utilizador que a imagem declara, e
+# `-u 0` é a forma explícita de ficar root no container. Num host sem intervalo
+# de subuid só cabe um uid: aí continua a 0 e DI-LO. A imagem é construída aqui
+# para a bateria não depender de uma imagem com USER estar em cache.
+_ud="$OUT/userimg-$PFX"; _ui="e2e-userimg-$PFX:1"
+mkdir -p "$_ud" && printf 'FROM %s\nRUN mkdir -p /srv/own && chown 1000:1000 /srv/own\nUSER 1000\n' "$IMG" > "$_ud/Delonixfile"
+if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
+  _udef="$("$BIN" container run --rm --net none "$_ui" id -u 2>/dev/null)"
+  if [ "$_udef" = 1000 ]; then
+    check "USER da imagem: sem -u o processo corre como esse utilizador" ok true
+    check "USER da imagem: aplicado, não há aviso" ok bash -c \
+      "! '$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  else
+    check "USER da imagem: sem subuid fica uid 0 e o run diz porquê" ok bash -c \
+      "[ '$_udef' = 0 ] && '$BIN' container run --rm --net none '$_ui' true 2>&1 >/dev/null | grep -q 'declares USER 1000'"
+  fi
+  check "USER da imagem: -u 0 fica root no container" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none -u 0 '$_ui' id -u 2>/dev/null)\" = 0 ]"
+  check "imagem sem USER corre como uid 0, sem aviso" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none '$IMG' id -u 2>/dev/null)\" = 0 ] && ! '$BIN' container run --rm --net none '$IMG' true 2>&1 >/dev/null | grep -q 'declares USER'"
+  check "o /tmp de um container é sticky (1777), não 777" ok bash -c \
+    "[ \"\$('$BIN' container run --rm --net none '$IMG' stat -c %a /tmp 2>/dev/null)\" = 1777 ]"
+  # O build corre cada RUN como o USER em vigor, e a cache não perde os donos.
+  #
+  # Medido 2026-10-01 antes da correcção: um RUN depois de `USER app` corria
+  # como root; e um rebuild com cache devolvia `/home/app` e uma pasta
+  # `chown app` como `root` — o mesmo ficheiro, duas imagens diferentes.
+  _bd="$OUT/userbuild-$PFX"; _bi="e2e-userbuild-$PFX"
+  mkdir -p "$_bd" && printf 'FROM %s\nRUN adduser -D app\nUSER app\nRUN id -u > /home/app/who\nUSER root\nRUN mkdir /srv/own && chown app:app /srv/own\nUSER app\n' "$IMG" > "$_bd/Delonixfile"
+  _bown() { "$BIN" container run --rm --net none "$1" sh -c 'cat /home/app/who; stat -c %U /srv/own /home/app /home/app/who /etc/passwd' 2>/dev/null | tr '\n' ' '; }
+  if [ "$_udef" = 1000 ] && "$BIN" build -t "$_bi:1" "$_bd" >/dev/null 2>&1; then
+    check "build: um RUN depois de USER corre como esse utilizador, e os donos ficam na imagem" ok bash -c \
+      "[ \"$(_bown "$_bi:1")\" = '1000 app app app root ' ]"
+    echo 'RUN true' >> "$_bd/Delonixfile"
+    "$BIN" build -t "$_bi:2" "$_bd" >/dev/null 2>&1 || true
+    check "build: um rebuild com cache dá os mesmos donos" ok bash -c \
+      "[ \"$(_bown "$_bi:2")\" = '1000 app app app root ' ]"
+    # Um COPY por cima de um ficheiro que a base dá a um não-root. Medido com
+    # `httpd:2.4-alpine` (o `htdocs/index.html` é do uid 501): desde que a árvore
+    # de trabalho leva os donos da imagem, o COPY respondia `Permission denied`.
+    printf 'FROM %s\nCOPY who /home/app/who\n' "$_bi:1" > "$_bd/Delonixfile"; echo copied > "$_bd/who"
+    "$BIN" build -t "$_bi:3" "$_bd" >/dev/null 2>&1 || true
+    check "build: um COPY substitui um ficheiro que a base dá a um não-root, e o novo é de root" ok bash -c \
+      "[ \"\$('$BIN' container run --rm --net none '$_bi:3' sh -c 'cat /home/app/who; stat -c %U /home/app/who' 2>/dev/null | tr '\\n' ' ')\" = 'copied root ' ]"
+    "$BIN" image remove "$_bi:1" "$_bi:2" "$_bi:3" >/dev/null 2>&1 || true
+  else
+    skip "build: USER posicional e donos na cache" "sem subuid, ou o build de teste falhou neste host"
+  fi
+  rm -rf "$_bd"
+
+  # Um utilizador não-root recebe o que a IMAGEM lhe dá, e mais nada (ADR-0062 P1).
+  #
+  # Medido 2026-10-01 antes da correcção, com `-u`: o init fazia `chown -R` ao
+  # rootfs inteiro — 940 de 986 entradas do utilizador, que escreveu em
+  # /etc/passwd e substituiu o seu próprio binário — e a varredura atravessava
+  # os mounts: uma pasta do HOST montada por bind passou de 1000:1000 para um
+  # subuid, e o dono deixou de conseguir escrever no seu ficheiro. Cada check
+  # abaixo é um desses factos, lido de dentro do container ou no host.
+  _ub="$OUT/userbind-$PFX"; _uv="e2e-uservol-$PFX"
+  mkdir -p "$_ub" && echo dono > "$_ub/f"
+  _own_before="$(stat -c %u:%g "$_ub" "$_ub/f" | tr '\n' ' ')"
+  "$BIN" volume create "$_uv" >/dev/null 2>&1 || true
+  _urun() { "$BIN" container run --rm --net none -u 1000 -v "$_ub:/bind" -v "$_uv:/vol" "$_ui" sh -c "$1" 2>/dev/null; }
+  export -f _urun; export BIN _ub _uv _ui
+  if [ "$(_urun 'id -u')" = 1000 ]; then
+    check "-u: o utilizador NÃO escreve em /etc/passwd" fail bash -c "_urun 'echo x >> /etc/passwd'"
+    check "-u: /etc/passwd continua a ser de root" ok bash -c "[ \"\$(_urun 'stat -c %u /etc/passwd')\" = 0 ]"
+    check "-u: a pasta que a imagem lhe dá é dele e é gravável" ok bash -c \
+      "[ \"\$(_urun 'stat -c %u:%g /srv/own && touch /srv/own/x && echo ok' | tr '\n' ' ')\" = '1000:1000 ok ' ]"
+    check "-u: um volume nomeado vazio é gravável pelo utilizador" ok bash -c "_urun 'touch /vol/x'"
+    check "-u: o bind mount do HOST mantém o dono (não é re-apropriado)" ok bash -c \
+      "[ \"\$(stat -c %u:%g '$_ub' '$_ub/f' | tr '\n' ' ')\" = '$_own_before' ]"
+    check "-u: o dono do bind continua a escrever no seu ficheiro" ok bash -c "echo mais >> '$_ub/f'"
+    # Um `container commit` empacota do lado do HOST. Gravava os números do host
+    # nos cabeçalhos: medido, todas as entradas 1000:1000 (quem invoca) e a pasta
+    # do uid 1000 do container como 100999 (o subuid) — uma imagem que dá o rootfs
+    # inteiro ao uid 1000 em qualquer motor que respeite a posse do tar.
+    _uc="e2e-usercommit-$PFX"; _uci="e2e-usercommit-$PFX:1"
+    if "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120 >/dev/null 2>&1 \
+       && "$BIN" container commit "$_uc" "$_uci" >/dev/null 2>&1; then
+      check "commit: a layer guarda os donos que o CONTAINER vê" ok bash -c \
+        "[ \"\$('$BIN' container run --rm --net none -u 1000 '$_uci' stat -c %u /etc/passwd /srv/own 2>/dev/null | tr '\n' ' ')\" = '0 1000 ' ]"
+      check "commit: o USER da imagem base sobrevive" ok bash -c \
+        "[ \"\$('$BIN' container run --rm --net none '$_uci' id -u 2>/dev/null)\" = 1000 ]"
+    else
+      skip "commit: donos na layer" "o commit do container de teste falhou neste host"
+    fi
+    "$BIN" container rm -f "$_uc" >/dev/null 2>&1 || true
+    "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
+  else
+    skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
+  fi
+  "$BIN" container run --rm --net none -u 0 -v "$OUT:/o" "$_ui" rm -rf "/o/userbind-$PFX" >/dev/null 2>&1 || true
+  "$BIN" volume rm "$_uv" >/dev/null 2>&1 || true
+  rm -rf "$_ub"
+  "$BIN" image remove "$_ui" >/dev/null 2>&1 || true
+else
+  skip "USER da imagem" "o build da imagem de teste falhou neste host"
+fi
+rm -rf "$_ud"
+
 check "container run -d -p" ok "$BIN" container run -d --name "$C" -p "$P1:80" "$IMG" sleep 600
 if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "container ls mostra-o" ok bash -c "'$BIN' container ls | grep -q '$C'"
@@ -4471,17 +4575,32 @@ SCAFN="scaf-$PFX"
 SCAFDIR=$(mktemp -d "${TMPDIR:-/tmp}/e2e-scaffold-XXXXXX")
 check "stack init --template httpd" ok "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN"
 check "o manifesto gerado declara memory/cpus" ok bash -c \
-  "grep -q 'memory: 128M' '$SCAFDIR/$SCAFN/delonix-manifest.yaml'"
+  "grep -q 'memory: 512M' '$SCAFDIR/$SCAFN/delonix-manifest.yaml'"
+# Os templates de edge (nginx/httpd/haproxy) nascem com HTTPS: o `init` gera o
+# certificado em ./tls (mkcert se houver, senão auto-assinado pelo próprio
+# binário), a chave fica 0600 e nunca chega à imagem nem ao git.
+check "o init gera o certificado e a chave privada fica 0600" ok bash -c \
+  "[ -s '$SCAFDIR/$SCAFN/tls/tls.crt' ] && [ \"\$(stat -c %a '$SCAFDIR/$SCAFN/tls/tls.key')\" = 600 ]"
+check "a chave não entra na imagem nem no git (.dockerignore e .gitignore)" ok bash -c \
+  "grep -qx 'tls/' '$SCAFDIR/$SCAFN/.dockerignore' && grep -qx 'tls/' '$SCAFDIR/$SCAFN/.gitignore'"
+check "nenhum token por substituir no projecto gerado" ok bash -c \
+  "! grep -rqE '__(PORT|TLS_PORT|NAME|TEMPLATE_VERSION)__' '$SCAFDIR/$SCAFN'"
 if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
     >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
   check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \
-    "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"128M\"'"
+    "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"512M\"'"
+  check "--up: o HTTPS responde, com HTTP/2, e o HTTP redirecciona para lá" ok bash -c \
+    "[ \"\$(curl -ks -o /dev/null -w '%{http_code} %{http_version}' https://127.0.0.1:8443/)\" = '200 2' ] && curl -s -o /dev/null -D - http://127.0.0.1:8080/x | grep -qi '^location: https://127.0.0.1:8443/x'"
+  check "--up: o resumo final dá o endereço HTTPS a abrir" ok \
+    grep -q 'open:    https://localhost:8443/' "${TMPDIR:-/tmp}/e2e-scaffold-up.log"
+  check "--up: o smoke do próprio template passa" ok bash -c \
+    "cd '$SCAFDIR/$SCAFN' && PATH=\"$(dirname "$BIN"):\$PATH\" sh scripts/smoke.sh"
   check "--up: o container está mesmo a correr" ok bash -c \
     "$BIN container ls | grep -q '$SCAFN'"
   "$BIN" stack destroy -f "$SCAFDIR/$SCAFN/delonix-manifest.yaml" >/dev/null 2>&1
 else
   skip "stack init --template httpd --up" \
-    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
+    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080/8443 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
   "$BIN" container rm -f "$SCAFN" >/dev/null 2>&1
 fi
 rm -rf "$SCAFDIR"

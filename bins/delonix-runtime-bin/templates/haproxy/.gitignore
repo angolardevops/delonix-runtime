@@ -1,0 +1,3 @@
+# The private key never goes into git (nor into the image).
+tls/
+letsencrypt/

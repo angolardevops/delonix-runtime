@@ -3964,7 +3964,7 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             if let Some(port) = c.expose {
                 let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
             }
-            return reexec_start(&c.id, &netns, &ip, true);
+            return reexec_start(&c.id, &netns, &n, &ip, true);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
         if let Some(ip) = c.ip.clone() {
@@ -4070,7 +4070,7 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
                 super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace)?;
             }
             let ip = infra::container_ip(&pn);
-            return reexec_start(&c.id, &pn, &ip, false);
+            return reexec_start(&c.id, &pn, &pn, &ip, false);
         }
         // Deliberately NOT setting `c.ip` here: `cmd_run` leaves a pod member's
         // record without one (the address belongs to the pod's netns, not to the
@@ -4207,7 +4207,10 @@ fn reexec_env(id: &str, ip: &str) -> Vec<(String, std::ffi::OsString)> {
 /// netns is the pod's and is shared with its peers — tearing it down on one
 /// member's failed start would take the whole pod's network with it. Same
 /// contract `cmd_run`'s `--pod` branch already states.
-fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()> {
+/// `label` is what a failure names: the network the user wrote for a custom
+/// network (the netns is a hash that appears in no manifest), the pod's netns
+/// for a pod member.
+fn reexec_start(id: &str, netns: &str, label: &str, ip: &str, owns_netns: bool) -> Result<()> {
     // BUG FIXED HERE: this used `join_argv(id)` and never read its own `netns`
     // parameter. It worked only because the sole caller passed a netns equal to
     // the id (the custom-network case), so the two were the same string. A pod
@@ -4244,10 +4247,9 @@ fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()>
             // does its lease (see `detach_container_keep_lease`).
             infra::detach_container_keep_lease(id, ip);
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not restart inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Same error as a failed `run` on a custom network: the user's network
+        // name and the class the inner pass decided, not a hash and `Some(1)`.
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
 }
@@ -4785,12 +4787,17 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             Vec::new(),
             c.env.clone(),
             c.workdir.clone().unwrap_or_default(),
-            String::new(),
+            // The base image's USER survives a commit: it was an empty string
+            // here, so a committed image silently lost the user its base declared.
+            base.config.user.clone(),
             tag,
             &base.config.architecture,
             // `container commit` herda o health check da base, tal como o
             // caminho overlay (`commit_container`) já fazia.
             base.config.healthcheck.clone(),
+            // Packed from the host side: owners go into the layer as the
+            // container sees them, not as host uids (see `pack_rootfs_tar`).
+            &runtime::container_ids,
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS

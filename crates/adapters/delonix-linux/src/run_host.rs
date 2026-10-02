@@ -31,6 +31,10 @@ impl delonix_compute::ports::RunHost for HostRuntime<'_> {
             .collect()
     }
 
+    fn can_map_id_range(&self) -> bool {
+        crate::can_map_id_range()
+    }
+
     fn default_readonly_paths(&self) -> Vec<String> {
         crate::DEFAULT_READONLY_PATHS
             .iter()

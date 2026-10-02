@@ -2979,6 +2979,166 @@ os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
 que os utilizadores usam), mas nunca num host de produção partilhado sem ser
 esse o pedido explícito.
 
+
+## Os templates de edge nascem com HTTPS e dimensionados para carga (2026-10-01)
+
+`nginx`, `httpd` e `haproxy` tinham o TLS só em comentário, 128M/0,5 CPU, e limites de
+bancada (`worker_connections 1024`, `maxconn 2048`, MPM por omissão). Agora:
+
+- **HTTPS ligado à nascença**: `tls=8443` no `template.meta`, token `__TLS_PORT__`. A porta
+  HTTP fica para o health, o desafio ACME e um 308 para HTTPS. HTTP/2, TLS 1.2/1.3, suites
+  só com forward secrecy. **HSTS fica DESLIGADO de propósito**: fixa o NOME do host em todas
+  as portas, e em `localhost` forçaria HTTPS em todos os outros serviços locais da máquina.
+- **O certificado é gerado pelo `init`**, em `./tls` (`ensure_tls`): `mkcert` se existir no
+  host, senão auto-assinado pelo próprio binário (`rcgen`, já na árvore). Um par que já lá
+  esteja é MANTIDO. A chave fica 0600, é montada só de leitura, e `tls/` está no
+  `.dockerignore` e no `.gitignore`. `scripts/tls.sh` renova, instala um certificado que já
+  se tenha, ou corre o Let's Encrypt (webroot em `./acme`; só nginx e httpd — o HAProxy não
+  serve ficheiros).
+- **`nproc` dentro do container devolve os núcleos do HOST** (medido: 32). Por isso
+  `worker_processes`/`nbthread` são 2, iguais ao `cpus: "2.0"` do manifesto, e não `auto`.
+  `nofile` 65 535 pelo `ulimit:` do manifesto (medido dentro do container).
+- **A verificação de config no build corre sem certificado**: nenhuma das três imagens traz
+  `openssl`. nginx e haproxy validam uma cópia sem as linhas do certificado; o httpd só
+  confere que os ficheiros existem e não estão vazios, e usa dois marcadores apagados no
+  mesmo `RUN`.
+- **HAProxy**: o manifesto diz `user: "0"` e o `haproxy.cfg` diz `user haproxy` — o master
+  lê a chave como root, o worker trata o tráfego como `haproxy`. O `SIGUSR2` recarrega
+  config e certificado com o mesmo PID (medido).
+- **httpd**: a cache de sessões TLS é um ficheiro mapeado em memória; fica num tmpfs
+  (`/run/httpd`) para nunca tocar no disco.
+
+**O gerador** (`cmd/scaffold.rs`): `TEMPLATE_KV` (todas as chaves do `template.meta`:
+`tls`, `open`, `login`, `password`, `wait`) ao lado do `TEMPLATE_META`. Num terminal, o
+`init` pergunta o que só quem gera pode decidir — outra porta quando a do template está
+ocupada (oferece a livre seguinte), nomes extra para o certificado — e fora de um terminal
+usa as omissões e diz o que encontrou. O `--up` recusa uma porta ocupada ANTES do build, com
+o nome do processo; o build desenha os seus próprios passos (corria dobrado sob um único
+spinner); e o fim imprime o endereço a abrir, o certificado e, quando o template as declara
+(`odoo`: `admin`/`admin`), as credenciais de fábrica com o aviso para as mudar. O `wait=` do
+`odoo` (300 s) passou a ser lido — estava no ficheiro e nada o consumia.
+
+**Medido** (2026-10-01, rootless, pela porta publicada): os três com 10 000 pedidos HTTPS a
+300 em simultâneo, 10 000 respostas 200. É uma prova de que aguentam, não um benchmark: a
+ferramenta foi o `curl --parallel`, o host não tem `ab`/`wrk`.
+**Let's Encrypt, medido a 2026-10-01**: o `scripts/tls.sh letsencrypt` foi corrido de ponta a
+ponta contra o Pebble (o servidor ACME de testes do Let's Encrypt), com o nginx do host a
+encaminhar só `/.well-known/acme-challenge/` para o container: o desafio foi servido pelo
+container (200 no log dele, agente `LetsEncrypt-Pebble-VA`), o certificado emitido, instalado
+em `./tls` e carregado com o MESMO pid. Contra o staging REAL, com `le-test.ngolacloud.com`
+(o domínio tem wildcard para o IP público deste host), a conta registou-se e a CA respondeu
+`Timeout during connect`: a porta 80 pública não chega a esta máquina (router ou operador).
+O script ganhou `LETSENCRYPT_STAGING=1`, `ACME_SERVER=<url>` e o email `-`. O template
+`httpd` usa o mesmo script e só tem o caminho ACME provado pelo smoke.
+**Não validado**: uma emissão pela CA real do Let's Encrypt, e as
+flags equivalentes às perguntas (`--hostname`, `--port`) — não existem; ficam para depois
+do #634, que reescreve os quatro pontos de entrada do `init`.
+
+**Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
+DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte
+passou, o `slirp4netns` do container ficou vivo a segurar as portas publicadas — o `apply`
+seguinte respondia «port 8080 is already in use by slirp4netns».
+
+## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
+
+Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).
+São três defeitos, e só o primeiro era o que se procurava:
+
+- **O `USER` da imagem não é lido por nada.** `container run haproxy:3.4-alpine id` responde
+  `uid=0`; o `resolve_run` só olha para o `--user`. Desde a v1.0.0, sem erro nem aviso.
+- **Com `--user`, o utilizador da aplicação fica DONO do rootfs inteiro.** O init faz
+  `chown_tree_once("/", uid, gid)`. Medido: 940 de 986 entradas do `haproxy`, que escreveu em
+  `/etc/passwd` e substituiu `/usr/local/sbin/haproxy`. Um não-root dono dos ficheiros de
+  sistema não é o confinamento para que se escolhe um não-root.
+- **A mesma varredura atravessa os mounts, e um bind mount é o HOST.** `-u haproxy -v
+  <pasta>:/app` mudou o dono da pasta e dos ficheiros no host de `1000:1000` para o subuid
+  `100098`, e o dono original deixou de conseguir escrever no seu próprio ficheiro. Um volume
+  nomeado é re-apropriado da mesma forma — é a única razão de o utilizador lhe escrever hoje.
+- **O custo cresce com a imagem**: cada `lchown` de um ficheiro de uma layer partilhada copia-o
+  para a camada de escrita (13 MB para uma imagem de 15 MB; no `odoo:20.0`, ~2 GB, a varredura
+  ainda corria aos 16 min com o disco saturado).
+- **Porque existe**: as layers guardam tudo com o dono de quem invoca, por isso a posse que a
+  imagem gravou perde-se (`/var/lib/haproxy` é do `haproxy` na imagem e `root:root` num
+  container sem `-u`). A varredura era o remendo.
+
+**Decidido no ADR-0062 (Proposto), em três passos**: P0 — o `run` DIZ quando o `USER` não é
+aplicado; P1 — tirar a varredura e devolver só o que a imagem dá; P2 — a omissão passa a ser o
+`USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo
+antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
+
+**P0, P1 e P2 estão feitos** (o ADR passou a Aceite). P2: sem `--user`, o processo corre como o
+`USER` da imagem; `--user 0` fica root. É quebra de contrato do `container run`, logo a release
+que o levar é uma major. Num host rootless sem subuid só cabe um uid: fica a 0 e o `run` di-lo
+(`RunHost::can_map_id_range`).
+
+**O `build` segue a mesma regra** (medido e corrigido a seguir). Os containers de trabalho não
+passam pelo `resolve_run`, e tinham três defeitos: um `RUN` depois de `USER app` corria como
+root; um `RUN` sobre uma base com `USER` corria como root; e **um rebuild com cache perdia os
+donos** (`/home/app` voltava `root`). Agora `USER` é um passo posicional (`Step::User`): cada
+`RUN` corre como o utilizador em vigor, resolvido contra o `/etc/passwd` do estágio NESSE passo
+(um nome que não existe é erro ali). A árvore flat recebe o índice de donos da base
+(`__chownidx`), e o clone de estágio e a cache copiam dentro do userns mapeado (`__cptree`) —
+um `cp -a` de fora não consegue manter um dono de subuid. O `WORKDIR` continua a ser criado
+por root, como no Docker. Gate: dois checks «build:» na secção do `USER` do `scripts/e2e.sh`.
+
+- **O índice de donos** (`delonix_compute::owners`, `delonix-oci::owners`): ao extrair uma layer,
+  as entradas que o tar dá a um não-root vão para `layers/<hex>.owners` (AO LADO da pasta, nunca
+  dentro — o que está dentro vira ficheiro de todos os containers da imagem), e o container
+  recebe o índice fundido em `overlay-owners`, ao lado do `overlay-lowers`. Por caminho, decide
+  a layer mais alta que o contém: uma layer superior que volta a trazer o caminho como root
+  retira-o. O ciclo de extracção é o do próprio crate `tar` (0.4.46), repetido porque
+  `Archive::unpack` não dá acesso aos cabeçalhos.
+- **O init aplica-o uma vez** (`overlay-owners.applied`), depois do `pivot_root` (os caminhos
+  ficam confinados ao rootfs), só quando o processo corre como não-root, e **nunca noutro
+  filesystem**: uma entrada que resolve para dentro de um mount é saltada.
+- **Volumes**: um volume nomeado VAZIO fica do dono que a imagem dá ao ponto de montagem, ou do
+  utilizador do container quando a imagem não nomeia ninguém. Um volume com dados e um bind
+  mount nunca são tocados. Um volume nomeado reconhece-se pela forma no disco
+  (`<nome>/_data` com `meta.json` ao lado), não pelo nome.
+- **Preservar os donos NO DISCO foi posto de lado pelo spike**: obrigava todos os leitores do
+  armazém (o export flat do `build`, a migração flat→overlay, o scanner, o `system df`, as
+  remoções) a lidar com ficheiros que não são de quem corre o motor. O custo do índice fica
+  escrito no ADR: copia para a camada de escrita o que a imagem dá a não-root (duas entradas no
+  `haproxy`; uma árvore inteira numa imagem com `COPY --chown`).
+- **O `container commit` gravava os uids do HOST na layer** — encontrado pelo passo 6 da
+  validação, não por leitura: todas as entradas `1000:1000` e a pasta do uid 1000 do container
+  como `100999`. Com o índice, essa imagem daria o rootfs inteiro ao uid 1000. O empacotador
+  passa cada dono pelo mapa rootless (`container_id_of`: quem invoca → 0, subid → deslocamento
+  + 1). O `build` não era afectado, porque empacota dentro do userns mapeado. O commit também
+  largava o `USER` da imagem base.
+- **Medido depois** (`haproxy:3.4-alpine`, `-u haproxy`): `/etc/passwd` e o binário recusados;
+  2 de 987 entradas do utilizador (eram 940); o bind do host mantém `1000:1000` e o dono
+  continua a escrever; camada de escrita 56 K (eram 13 MB). O gate da bateria, corrido contra
+  o motor de antes do P1, falha 4 dos 6 checks de posse.
+- **`odoo:20.0`, a imagem onde o custo foi medido**: primeiro arranque com `-u odoo` em 1,7 s
+  (antes, ainda a varrer aos 16 min); 4 de 122 363 entradas do `odoo`; camada de escrita 480 K;
+  o volume do filestore gravável. O template `odoo` pode passar a declarar `user: odoo` DEPOIS
+  de o P1 estar fundido — antes disso dispararia a varredura antiga.
+- **Validado depois, numa VM** (Ubuntu 26.04, k8s 1.36.4): motor como root real (posse `99:99`
+  na pasta da imagem, `/etc/passwd` recusado, bind do host intacto); CRI num nó kubeadm (pod sem
+  `securityContext` → uid 99, `runAsUser: 0` → 0, `runAsUser: 1234` → 1234); rootless sem
+  subuid (uid 0 com aviso).
+- **A extracção passou a guardar setuid/setgid/sticky** (`set_preserve_permissions`): o `/tmp`
+  de TODOS os containers era `777` em vez de `1777`, e um `su` setuid perdia o bit. Uma layer
+  extraída por um motor antigo é corrigida a partir dos cabeçalhos do blob na primeira vez que
+  uma imagem a usa (marcador `layers/<hex>.modes`).
+- **Um alvo de mount atrás de um symlink da imagem era RECUSADO** (`safe_bind_target`), e isso
+  partia o Kubernetes: Alpine e Debian têm `/var/run -> /run`, e o kubelet monta o token em
+  `/var/run/secrets`, logo todo o pod dessas imagens falhava com `failed to prepare the rootfs:
+  EINVAL`. Só um kubelet real o mostrou (as validações anteriores usaram busybox e CoreDNS, que
+  não têm o symlink). Agora resolve-se dentro do rootfs, componente a componente: um link
+  absoluto recomeça no rootfs e o `..` pára lá.
+- **O template `odoo` corre como `odoo`** (`user: odoo` nos dois manifestos, 2026-10-01, depois
+  de o P1 fundir). Medido ao vivo: uid 100, sem o aviso «Running as user 'root'», filestore
+  gravável num volume novo, `/etc/passwd` recusado; no perfil dev os binds `addons/` e
+  `config/` ficam `1000:1000` no host e o dono continua a escrever. Um volume de filestore
+  escrito como root por uma corrida anterior NÃO é migrado (o README di-lo).
+
+**Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
+ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
+ainda estava a correr (o `run -d` devolve antes dela, de propósito). O que corrigiu foi contar
+os donos de TODOS os ficheiros um minuto depois, em vez de olhar para dois.
+
 ## O template `odoo` não arrancava: o preflight de limites não via o cgroup2 numa rede própria (2026-09-30)
 
 Reportado como «`delonix init` falha a arrancar um projecto Odoo». Reproduzido com raiz e rede
@@ -3041,6 +3201,55 @@ o separa dos outros dez.
   substituído. A primeira reprodução «falhou» por isso. Para medir, copiar o binário para um
   caminho estável e nunca o sobrescrever enquanto algo dele corre (o holder também o usa: `cp`
   sobre ele dá `Text file busy`).
+
+
+## Templates de infraestrutura e ERP contra o prompt master (2026-10-01)
+
+Os quatro templates sem código de aplicação — `nginx`, `httpd`, `haproxy`, `odoo` — revistos
+contra a linha «infraestrutura/ERP» do prompt master dos templates do `init`. Os sete de
+aplicação e o gerador (`scaffold.rs`, `init.rs`) são de outra frente de trabalho.
+
+- **nginx, httpd, haproxy** passam a: log de acesso em JSON no stdout com `request_id`
+  (o do chamador, ou um gerado; devolvido na resposta), `/healthz` fora do log, timeouts e
+  limite de corpo explícitos, cabeçalhos de segurança, endpoint de métricas/estado não
+  publicado, config verificada NO BUILD (`nginx -t`, `httpd -t`, `haproxy -c`), blocos
+  comentados de TLS e proxy, `scripts/smoke.sh` e README com os comandos reais. Omissões:
+  nginx `1.30` (= tag `stable` da imagem), haproxy `3.4` (= `lts`), httpd `2.4`; lidas por
+  digest no Docker Hub a 2026-09-30.
+- **Três armadilhas, cada uma medida**: no nginx, um `add_header` dentro de um `location`
+  ANULA os herdados do `server` — o `/healthz` antigo perdia todos os cabeçalhos de segurança;
+  no HAProxy, as respostas que o proxy gera (`http-request return`) saltam as regras
+  `http-response` e só passam por `http-after-response`; e o httpd recusa arrancar sem
+  nenhuma interface configurada (`AH00530 … getaddrinfo fail` com `--net none`) — não é o
+  `mod_unique_id`, é o `Listen`, e o `RUN httpd -t` do build passa porque o build tem rede.
+- **O manifesto de produção do Odoo era um beco sem saída**: `list_db = False` desliga o
+  gestor de bases de dados, e o README mandava «criar a primeira base na UI». Medido no
+  `odoo:20.0`: `/web/login` → seletor → «database manager has been disabled». Com
+  `db_name = <nome>` o Odoo cria e inicializa a base sozinho no primeiro arranque (~10 s em
+  disco calmo); o `dbfilter` fixa os pedidos nela.
+- **A base nasce com `admin`/`admin`.** O README dá o comando de troca (`odoo shell` por
+  `container exec -i … /entrypoint.sh`), e o smoke FALHA enquanto a password de fábrica
+  entrar — medido nos dois estados.
+- **Testes de addon precisam de `--test-tags /<addon>`**: sem isso, uma base nova corre os
+  ~1000 testes do `base` e dependências, 36 falham fora da CI do Odoo, e o comando sai 1 com
+  o teste do addon a passar.
+- **`stack destroy` apaga os volumes da stack** — o README dizia «volumes stay». Corrigido,
+  com o comando que pára sem apagar.
+- **Achado do motor, NÃO corrigido**: `container run` não aplica o `USER` da imagem
+  (`odoo:20.0` declara `user = odoo` e corre como uid 0; assim desde a v1.0.0). `-u odoo`
+  funciona mas dispara o `chown_tree_once` do rootfs inteiro — mais de 16 min em ~2 GB com o
+  disco saturado. Mudar a omissão é uma decisão de semântica para todos os containers.
+- **`container start` numa rede própria** dava a mensagem antiga (hash da netns e
+  `Some(1)`); passa pelo `netns_start_error`, como o `run`. Provado por teste unitário; a
+  reprodução ao vivo foi interrompida por um reinício do host.
+- **Validado ao vivo**: `stack init -t <t> --up` com raiz isolada e o `scripts/smoke.sh`
+  gerado — nginx 9/9, httpd 9/9, haproxy 7/7; odoo (20.0 por omissão) `--up` em 459 s com a
+  base inicializada, smoke de produção 4/4 depois da troca de password, smoke de dev 2/2, e
+  um addon real com teste a passar (`0 failed, 0 error(s) of 3 tests`).
+- **Método**: o primeiro harness apagava a raiz isolada logo a seguir ao `stack destroy`. Um
+  supervisor com `restart: always` cujo registo desaparece volta a arrancar o container —
+  ficou um nginx órfão a segurar a porta e fez falhar os dois templates seguintes. Esperar
+  que nenhum processo com aquele `DELONIX_ROOT` esteja vivo antes de apagar a raiz.
 
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 

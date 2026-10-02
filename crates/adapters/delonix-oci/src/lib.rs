@@ -15,6 +15,7 @@ pub mod image;
 pub mod internal_registry;
 pub mod load;
 pub mod overlay;
+pub mod owners;
 pub mod registry;
 pub mod rootfs_user;
 pub mod run_images;
