@@ -18,11 +18,20 @@ check() { # check <description> <command...>
     if "$@" >/dev/null 2>&1; then echo "ok   $desc"; else echo "FAIL $desc"; fail=1; fi
 }
 
+# Nothing listening is one finding, not a dozen: without this, every check
+# below fails for the same reason, and the two written as "this must NOT
+# happen" pass.
+if ! curl -s -o /dev/null --max-time 5 "$PLAIN/healthz"; then
+    echo "FAIL nothing answers at $PLAIN — is __NAME__ up? (delonix stack apply)"
+    echo "smoke: FAILED"
+    exit 1
+fi
+
 check "/healthz answers ok over HTTP"   sh -c "curl -fsS '$PLAIN/healthz' | grep -qx ok"
 check "/ answers 200 over HTTPS"        curl -kfsS -o /dev/null "$BASE/"
 check "HTTP redirects to HTTPS (308)"   sh -c "curl -s -o /dev/null -D - '$PLAIN/some/page?x=1' | tr -d '\r' | grep -qix 'location: https://127.0.0.1:__TLS_PORT__/some/page?x=1'"
 check "HTTP/2 is negotiated"            sh -c "[ \"\$(curl -ks -o /dev/null -w '%{http_version}' '$BASE/')\" = 2 ]"
-check "TLS 1.1 is refused"              sh -c "! curl -ks -o /dev/null --tls-max 1.1 '$BASE/'"
+check "TLS 1.1 is refused"              sh -c "curl -ks -o /dev/null --tlsv1.2 '$BASE/' && ! curl -ks -o /dev/null --tls-max 1.1 '$BASE/'"
 check "the private key is not world-readable" sh -c "[ \"\$(stat -c %a tls/tls.key)\" = 600 ]"
 check "X-Content-Type-Options: nosniff" sh -c "curl -kfsS -o /dev/null -D - '$BASE/' | tr -d '\r' | grep -qix 'x-content-type-options: nosniff'"
 check "a request id is minted"          sh -c "curl -kfsS -o /dev/null -D - '$BASE/' | grep -qi '^x-request-id: .'"
@@ -31,9 +40,13 @@ check "Content-Security-Policy is set" sh -c "curl -kfsS -o /dev/null -D - '$BAS
 check "an unknown path is a 404"       sh -c "[ \"\$(curl -ks -o /dev/null -w '%{http_code}' '$BASE/no-such-page')\" = 404 ]"
 check "/server-status is not public"    sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' '$PLAIN/server-status')\" = 403 ]"
 check "no version in the Server header" sh -c "curl -kfsS -o /dev/null -D - '$BASE/' | tr -d '\r' | grep -qix 'server: apache'"
-mkdir -p acme/.well-known/acme-challenge && echo smoke-token > acme/.well-known/acme-challenge/smoke
-check "the ACME challenge path is served over HTTP, not redirected" sh -c "curl -fsS '$PLAIN/.well-known/acme-challenge/smoke' | grep -qx smoke-token"
-rm -f acme/.well-known/acme-challenge/smoke
+# A name of its own per run, as a real challenge token is: never asked for
+# before it exists.
+token="smoke-$$"
+mkdir -p acme/.well-known/acme-challenge && echo smoke-token > "acme/.well-known/acme-challenge/$token"
+check "the ACME challenge path is served over HTTP, not redirected" sh -c "curl -fsS '$PLAIN/.well-known/acme-challenge/$token' | grep -qx smoke-token"
+check "a challenge file written after a 404 for its path is served" sh -c "curl -s -o /dev/null '$PLAIN/.well-known/acme-challenge/$token-late'; echo late > 'acme/.well-known/acme-challenge/$token-late'; curl -fsS '$PLAIN/.well-known/acme-challenge/$token-late' | grep -qx late"
+rm -f "acme/.well-known/acme-challenge/$token" "acme/.well-known/acme-challenge/$token-late"
 
 if curl -fsS -o /dev/null "https://localhost:__TLS_PORT__/" 2>/dev/null; then
     echo "note this machine trusts the certificate"
