@@ -99,3 +99,9 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0066** — An L4 load balancer in the engine: `kind: Service` gains `type: VirtualIP`, a VIP
+  from a dedicated IPAM pool (`10.90.0.0/16`), DNAT by `numgen random` in a `svc` chain of the
+  holder rewritten whole and atomically by the control process on every membership event, hairpin
+  that requires `br_netfilter`, publish through the existing slirp path, and health from the
+  per-container supervisor's monitor (no new process). Retires the caller-less `lbset`/`lbclear`
+  pair and the hash-derived `service_vip`. *Proposed*; spike measured in an unprivileged netns.
