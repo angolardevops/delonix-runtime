@@ -261,19 +261,19 @@ does not exist.</p>
 <code>workflow_dispatch</code>-only: the tag and the release are two separate decisions, so a tag that
 reaches the remote by accident (<code>git push --tags</code>, <code>push.followTags=true</code>) can no longer put a
 binary in front of the world. A tag with no release is a normal intermediate state here.</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">git tag -a v4.4.0 -m &quot;v4.4.0&quot; &amp;&amp; git push origin v4.4.0   # cuts the version
-gh workflow run release.yml -f tag=v4.4.0                 # publishes it
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">git tag -a v4.5.0 -m &quot;v4.5.0&quot; &amp;&amp; git push origin v4.5.0   # cuts the version
+gh workflow run release.yml -f tag=v4.5.0                 # publishes it
 </code></pre></div>
 <p>A <code>guard</code> job runs first and costs seconds: it refuses a <code>tag</code> that is not shaped <code>vX.Y.Z</code>, one
 that does not exist on the remote, and one that already has a release — the input picks the commit
 to build and names the release, so an unchecked <code>tag: main</code> would have published a release called
 "main". Only then, in one job:</p>
 <ol>
-<li>Builds <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code> and <code>delonix-mgmt</code> twice — once generic
+<li>Builds <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code> and <code>delonix-node-api</code> twice — once generic
    x86-64, once with <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — on <code>ubuntu-22.04</code> specifically,
    so the glibc baseline (2.35) stays compatible with RHEL 9 and Debian 12, not just the newest
    Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.
-   A separate <code>build-arm64</code> job builds the same four binaries natively on an aarch64 runner (one
+   A separate <code>build-arm64</code> job builds the same five binaries natively on an aarch64 runner (one
    per component, no <code>-v3</code> variant), and they are published as <code>&lt;name&gt;-aarch64-linux</code> under the same
    <code>SHA256SUMS</code>. <code>install.sh</code> installs them on an aarch64 host (#447). The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
@@ -330,8 +330,14 @@ and, as of v1.0.0, reads as the project's real semver promise rather than a with
   even after the per-domain groups (<code>compute.delonix.io/v1alpha1</code>, …) became canonical. This is
   the promise that matters most in practice — it protects what people put in git and review in a
   PR, not just what they type at a prompt.</li>
+<li>The node's <strong>providers file</strong> (<code>providers.yaml</code>, <code>apiVersion: config.delonix.io/v1</code>, ADR-0054)
+  carries the same promise as the manifest schema: a key is never removed or repurposed, a new key
+  is always optional, and the <code>apiVersion</code> only changes with a <code>v2</code> that ships while <code>v1</code> is still
+  read. The schema is generated from the types the engine reads (<code>delonix provider config schema</code>,
+  published as <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/providers.json" target="_blank" rel="noopener"><code>docs/schema/v1/providers.json</code></a>, with a test that fails when the published copy is
+  not the generated one).</li>
 </ul>
-<p><strong>Not stable — can change in any version:</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve docker-api</code> (the local
+<p><strong>Not stable — can change in any version:</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve node-api</code>/<code>serve docker-api</code> (the local
 management API in particular has no published contract and is explicitly not something to
 automate against — see <a href="crates.html#delonix-mgmt">The crates § <code>delonix-mgmt</code></a> and ADR-0040/0041);
 the <code>cluster</code>/<code>vm</code>/<code>pod</code>/<code>workload</code>/<code>net</code> imperative surfaces (their manifest <strong>schema</strong>, where one

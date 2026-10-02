@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:b5a2233cec9f575cc201a08988e44f84c483edc92591778fb2b44afc200baaec -->
+<!-- translated-from: adding-a-kind.md sha256:8efb7affc6ae1e813bc29c234a856c1d66d405e01f157324f10dc3f2de4d657f -->
 # Ajouter un Kind
 
 **À lire avant :** [Conventions de code](coding-conventions.md), [Architecture](architecture.md) et [Les crates](crates.md#delonix-stack) — cette page suppose que vous savez ce que possède `delonix-stack` et pourquoi la planification est pure.
@@ -9,7 +9,7 @@ simple bras de `match` : la table qui décrit ce qu'EST le Kind, le code qui l'
 câblage du réconciliateur qui permet à `stack plan`/`apply` de le traiter comme n'importe quel
 autre Kind. Cette page parcourt cela dans l'ordre, avec un Kind réel — **`Service`** (ADR-0032) —
 comme exemple travaillé de bout en bout. Ce n'est pas le Kind le plus récent (`IPPool`,
-`NetworkGateway`, `NetworkZone` et `RuntimePolicy` sont venus après), mais c'est celui qui
+`NetworkGateway`, `NetworkZone`, `RuntimePolicy` et `SystemContainer` sont venus après), mais c'est celui qui
 parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec namespace et doté
 de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
 souvenir d'une ancienne disposition.
@@ -187,6 +187,15 @@ module appelle « strictement pire que de déclarer le replace d'emblée ». `Se
 qu'aucun redémarrage ne soit nécessaire — rien dans un `Service` n'est froid. Un champ laissé hors
 de `hot_fields` apparaît quand même dans le plan ; il force simplement `Action::Replace`
 (refusé sans `--replace <Kind>/<nom>`) plutôt que `Action::Update`.
+
+Certains champs ne convergent à chaud que **dans un seul sens**. Le volume racine d'un container
+système peut être agrandi sur un container en cours d'exécution, jamais réduit, donc
+`SystemContainer.rootfs` figure dans `grow_only_fields`, pas dans `hot_fields` : `is_hot_change`
+traite un champ grow-only comme chaud quand les deux côtés sont des nombres et que le nouveau n'est
+pas plus petit, et comme froid sinon, si bien qu'une réduction planifie un `Replace`. Si l'apply de
+votre Kind décide lui aussi si un changement exige une recréation, posez la question à la même
+fonction — `cold_changes` dans `cmd/system_container.rs` le fait — sinon `plan` et `apply` ne
+seront pas d'accord.
 
 Trois tests dans `cmd/stack.rs` maintiennent cette table honnête vis-à-vis de la table de
 `kinds.rs` et entre eux :

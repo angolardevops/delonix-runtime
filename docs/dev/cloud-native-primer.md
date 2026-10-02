@@ -195,8 +195,9 @@ Linux networking building blocks:
 - Outbound and port forwarding: `slirp_attach` and `slirp_add_hostfwd` in
   `crates/adapters/delonix-sdn/src/lib.rs` (which spawn `slirp4netns`); in-holder publishing in
   `publish_port`/`do_publish` (`infra.rs`).
-- Firewall: `table ip dlxing` with base chains `fwguard`, `fwdeny`, `fwcont` and the `fwmap`
-  verdict map (`FWMAP`), generated in `infra.rs` (`do_firewall`, `apply_firewall_all`,
+- Firewall: `table ip dlxing` with base chains `fwguard`, `fwdeny`, `fwout` (by source) and
+  `fwcont` (by destination), both looking up the `fwmap` verdict map (`FWMAP`), generated in
+  `infra.rs` (`fw_dispatch_chains`, `do_firewall`, `apply_firewall_all`,
   `ns_set_join` for namespace isolation sets).
 - Internal DNS (standard name `<name>.<namespace>.svc.delonix.internal`, the older
   `<name>.<namespace>.delonix.internal` still answers; `service_fqdn`, `parse_internal_name`):
@@ -268,8 +269,9 @@ from **cloud-init**, which reads a datasource. The **NoCloud** datasource is a s
 
 **In Delonix**
 
-- The port is `VmBackend` in `crates/adapters/delonix-vm/src/lib.rs`, implemented by
-  `CloudHypervisorBackend` and `LibvirtBackend` there and by `ProxmoxBackend` in
+- The port is `VmBackend` in `crates/contexts/delonix-compute/src/vm_backend.rs` (re-exported by
+  `delonix-vm`), implemented by `CloudHypervisorBackend` and `LibvirtBackend` in
+  `crates/adapters/delonix-vm/src/lib.rs` and by `ProxmoxBackend` in
   `crates/providers/delonix-proxmox` ([ADR-0008](../adr/0008-proxmox-vm-backend.md)).
 - Cloud Hypervisor firmware search order: `DEFAULT_CH_FIRMWARES` (EDK2 `CLOUDHV.fd` before
   `hypervisor-fw`); the VMM command line is built in `boot_ch`.

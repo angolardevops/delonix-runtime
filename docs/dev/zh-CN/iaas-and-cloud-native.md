@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
 # IaaS 与云原生——引擎的定位
 
 **阅读之前：**[从这里开始](start-here.md#what-delonix-is-5-minutes)（关于 Delonix 是什么的四句话）。这里还不需要任何内核或 Rust 知识。
@@ -122,9 +122,11 @@ flowchart TB
   原子写入、加密的密钥保管库），以及 `crates/adapters/delonix-oci` 中的镜像存储（`cas.rs`）。
 - **内核（Kernel）**——`crates/adapters/delonix-linux`（进程、命名空间、cgroup、挂载）和
   `crates/adapters/delonix-sdn`（网桥、nftables、DNS）。
-- **Hypervisor（Hypervisors）**——`crates/adapters/delonix-vm/src/lib.rs` 中的 `VmBackend` trait。
+- **Hypervisor（Hypervisors）**——`crates/contexts/delonix-compute/src/vm_backend.rs` 中的
+  `VmBackend` trait，由 `crates/adapters/delonix-vm/src/lib.rs` 里的本地后端实现。
 - **远程 provider（Remote providers）**——`crates/providers/delonix-proxmox`（ADR-0008，
-  已接受并已实现）和 `crates/providers/delonix-truenas`（ADR-0009，已接受）。一个 OpenStack
+  已接受并已实现）、`crates/providers/delonix-opnsense`（ADR-0051）和
+  `crates/providers/delonix-truenas`（ADR-0009，已接受）。一个 OpenStack
   后端目前只是一份提案（ADR-0039，提议中，需先完成一次 spike 才能推进）。
 - **镜像仓库（Registry）**——`crates/adapters/delonix-oci/src/registry.rs`。
 
@@ -151,15 +153,17 @@ Delonix Runtime 就是上图中的**节点执行层**。在单个节点上，它
   `scripts/arch_fitness.py`（`LAYERS`、`ALLOWED`）强制执行；
 - 把**同一套操作通过多扇门**暴露出来：CLI、节点契约、CRI 和 MCP。
 
-关于节点契约有一点要提醒，免得你去找一个并不存在的服务器：`proto/delonix/node/v1/node.proto`
+关于节点契约有一点要提醒，免得你对服务器期望过高：`proto/delonix/node/v1/node.proto`
 被标记为*ADR-0040 的草案契约*。这份契约、由它生成的 `docs/api/openapi.yaml`，以及它的 CI
-门禁（`scripts/contract_gate.py`）都已经存在；但目前还没有任何 crate 在提供 `NodeService`
-服务。ADR-0042（**已接受**，A、B 两步已交付）确定了当服务器真正落地时，这份 API 该如何做
-版本管理和文档化。
+门禁（`scripts/contract_gate.py`）都已经存在，`delonix serve node-api`
+（`crates/interfaces/delonix-node-api`）也在一个本地套接字上提供它——但目前只有
+`NodeService.ListProviders` 会回答；其余 RPC 都回答 `UNIMPLEMENTED`。ADR-0042（**已接受**；
+A、B 两步已交付，C 步随这个服务器开始）确定了这份 API 在逐步提供更多内容时该如何做版本管理和
+文档化。
 
 ### 它刻意不做的事
 
-权威规则是 [`AGENTS.md`](../../AGENTS.md) 顶部的 *«Identidade e fronteira do motor»* 一节：
+权威规则是 [`AGENTS.md`](../../../AGENTS.md) 顶部的 *«Identidade e fronteira do motor»* 一节：
 引擎**不认识任何消费者**——没有平台、控制平面、控制台或代理——也没有**租户、账户、方案、
 配额或计费**的概念。来自某个消费者的需求，只能以对任何客户端都说得通的通用引擎能力的形式进入。
 
@@ -235,7 +239,7 @@ ADR-0010（**已拒绝**，2026-08-10）是让管理 API 保持**本地化**的�
 **在 Delonix 中。** 同一套操作由 CLI、CRI（`delonix serve cri`、
 `crates/interfaces/delonix-cri`）、本地管理套接字（`crates/interfaces/delonix-mgmt`）、
 MCP 服务器（`delonix mcp serve`、`crates/interfaces/delonix-mcp`），以及节点契约
-（`proto/delonix/node/v1/`，草案）共同暴露。这份契约是 gRPC 和 HTTP/JSON 这两种编码方式
+（`proto/delonix/node/v1/`，草案，由 `crates/interfaces/delonix-node-api` 部分提供服务）共同暴露。这份契约是 gRPC 和 HTTP/JSON 这两种编码方式
 共同的真相来源，`docs/api/openapi.yaml` 是从它生成出来的，绝不手工编辑
 （`scripts/contract_gate.py`）。ADR-0040（**提议中**）诚实地记录了今天的差距：这几扇门里
 有好几扇，至今仍是把 CLI 二进制文件当作子进程重新运行，而不是调用一个用例——
@@ -286,7 +290,8 @@ adapters、providers、interfaces 和 binaries，目录本身就是这个层（`
 `crates/contexts/`、`crates/adapters/`、`crates/providers/`、`crates/interfaces/`、
 `bins/`）。允许的依赖方向只写在一个地方，即 `scripts/arch_fitness.py` 里的 `ALLOWED`，
 由 CI 强制执行。端口是 `crates/contexts/delonix-compute/src/ports.rs` 中的各个 trait，
-以及 `delonix-vm` 中的 `VmBackend`；ADR-0008（**已接受**）让 VM 后端变得可注册，
+以及同一个 crate 的 `vm_backend.rs` 中的 `VmBackend`；调用它们的 VM 用例是 `vm.rs` 中的
+`VmEngine`，而 `delonix-vm` 为本节点实现这些端口。ADR-0008（**已接受**）让 VM 后端变得可注册，
 这正是一个远程 Proxmox 节点得以成为又一个后端的方式。
 
 **它对你的要求。** 一个新的 provider，要以一个端口的实现的形式进入。一个新 crate

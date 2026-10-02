@@ -309,7 +309,9 @@ Rust by Example — <a href="https://doc.rust-lang.org/rust-by-example/error/mul
 <hr />
 <h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Les traits comme ports : <code>VmBackend</code> et le registre de backends<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
 <p>Le moteur parle aux providers à travers des <strong>traits</strong> (« ports »), et un provider est une implémentation
-de l’un d’eux. L’exemple le plus clair est <code>VmBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> :</p>
+de l’un d’eux. L’exemple le plus clair est <code>VmBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>
+(il y a été déplacé depuis <code>delonix-vm</code>, qui le réexporte, pour qu’un crate de provider puisse
+l’implémenter sans dépendre d’un adaptateur) :</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-rust">pub trait VmBackend {
     fn id(&amp;self) -&gt; &amp;&#x27;static str;
     fn available(&amp;self) -&gt; bool;
@@ -320,15 +322,16 @@ de l’un d’eux. L’exemple le plus clair est <code>VmBackend</code> dans <a 
     // ... more methods, many with default bodies
 }
 </code></pre></div>
-<p>Implémentations : <code>CloudHypervisorBackend</code> et <code>LibvirtBackend</code> dans le même fichier, et
-<code>ProxmoxBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Les méthodes ayant un <strong>corps
+<p>Implémentations : <code>CloudHypervisorBackend</code> et <code>LibvirtBackend</code> dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, et <code>ProxmoxBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Les méthodes ayant un <strong>corps
 par défaut</strong> dans le trait (par exemple <code>auto_selectable</code>) permettent à un nouveau backend d’hériter d’un comportement raisonnable
 et de ne redéfinir que ce qui diffère.</p>
 <p>Les backends sont choisis à l’exécution, ils sont donc manipulés comme <strong>objets trait</strong>, <code>Box&lt;dyn VmBackend&gt;</code>.
 Ils sont créés au moyen d’un registre de fabriques :</p>
-<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-vm/src/lib.rs
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box&lt;dyn Fn() -&gt; Result&lt;Box&lt;dyn VmBackend&gt;&gt; + Send + Sync&gt;;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegistration&gt;&gt;&gt; =
     std::sync::OnceLock::new();
 </code></pre></div>
@@ -339,11 +342,35 @@ static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegis
   la closure, pas sur le trait <code>VmBackend</code>.</li>
 <li><code>OnceLock</code> initialise la table paresseusement (<code>builtin_backends()</code> y place les deux backends locaux),
   et <code>RwLock</code> permet à <code>register_backend</code> d’en ajouter un troisième au démarrage. Le binaire le fait dans
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>).</li>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>) : le crate du provider
+  construit seulement le <code>BackendRegistration</code> (<code>delonix_proxmox::registration</code>), et la racine de
+  composition le remet à <code>delonix_vm::register_backend</code>.</li>
 </ul>
 <p>La décision derrière cette forme est l’<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. Le même
 motif « trait + implémentations + un seul endroit qui choisit » apparaît ailleurs (par exemple le
-port <code>VmNetwork</code>, conservé dans un <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> près du début du même fichier).</p>
+port <code>VmNetwork</code>, conservé dans un <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> près du début de
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>).</p>
+<p>Tous les ports ne sont pas des trait objects. Les cas d’usage des VM reçoivent leurs ports comme
+<strong>paramètres génériques</strong> :</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
+    pub root: &amp;&#x27;a Path,
+    pub repo: R,       // R: StateRepository&lt;Vm&gt;
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option&lt;&amp;&#x27;a dyn VmNetwork&gt;,
+}
+</code></pre></div>
+<p>La raison est une règle des trait objects : un trait avec une méthode générique n’est pas
+<em>dyn-compatible</em> (object-safe), et <code>StateRepository&lt;T&gt;</code> en a une (<code>update&lt;F&gt;</code>, dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>). L’engine est donc générique, comme
+<code>resolve_run&lt;I, S, D, H&gt;</code> pour <code>container run</code>, et chaque appelant choisit les types concrets :
+<code>delonix-vm</code> construit <code>VmEngine&lt;JsonStore&lt;Vm&gt;, RegistryBackends, QemuImgDisks, CloudLocaldsSeed&gt;</code>
+dans <code>engine</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>), et les tests de <code>vm::tests</code> en construisent
+un au-dessus d’un store en mémoire et de faux qui enregistrent leurs appels. Le prix des génériques
+est une copie du code par combinaison (monomorphisation) ; le gain est qu’aucun port n’a à être
+remodelé pour tenir dans <code>dyn</code>.</p>
 <p><strong>En savoir plus :</strong> The Rust Book —
 <a href="https://doc.rust-lang.org/book/ch10-02-traits.html">Traits</a>,
 <a href="https://doc.rust-lang.org/book/ch18-02-trait-objects.html">Trait objects</a>,

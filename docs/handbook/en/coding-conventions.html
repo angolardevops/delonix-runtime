@@ -418,7 +418,8 @@ Err(Error::Invalid(super::po::tf(
   <code>ImageRegistry</code>, <code>ImageStore</code>, … The ones that exist today are in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>,
   <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) and <code>.../launch.rs</code> (<code>WorkloadRuntime</code>). The older
-  <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> is due to become <code>VmProvider</code> in P4.</li>
+  <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>) coexists with the ADR-0044
+  <code>VmProvider</code> (<code>vm_provider.rs</code>) while P4 moves the backends onto it.</li>
 <li><strong>Host implementations of a port are called <code>Host&lt;Thing&gt;</code>.</strong> <strong>Convention (observed)</strong>:
   <code>delonix-linux/src/workload.rs:HostWorkload</code> (implements <code>WorkloadRuntime</code>),
   <code>delonix-sdn/src/run_network.rs:HostNetwork</code> (implements <code>NetworkProvider</code>),
@@ -691,9 +692,14 @@ already exist.</p>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>A local VM backend (Cloud Hypervisor, libvirt)</td>
-<td><code>delonix-vm</code> (adapter)</td>
-<td>ADR-0008</td>
+<td>What a VM operation decides (create, stop, start, status, remove, day-2 verbs)</td>
+<td><code>delonix-compute</code> (context): <code>vm.rs</code> (<code>VmEngine</code>), reaching the backends, the disk and the seed only through <code>VmBackends</code>/<code>LocalDiskImages</code>/<code>SeedBuilder</code>; no <code>Command::new</code> in a context (<code>context_spawns</code>, baseline 0)</td>
+<td>ADR-0044 P4b.3 (#596, #597)</td>
+</tr>
+<tr>
+<td>A local VM backend (Cloud Hypervisor, libvirt), and this node's implementations of the VM ports</td>
+<td><code>delonix-vm</code> (adapter): <code>lib.rs</code>, <code>local_ports.rs</code></td>
+<td>ADR-0008; ADR-0044 P4b.3</td>
 </tr>
 <tr>
 <td>A remote or pluggable provider (hypervisor API, NAS API)</td>
@@ -771,7 +777,7 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
 <li><strong>Backend-specific knowledge lives on the backend.</strong> For example,
   <code>VmBackend::ip_is_predicted()</code> answers whether a VM's IP was predicted, instead of the call site
   checking <code>backend.contains("cloud-hypervisor")</code>. <strong>Decided</strong>: ADR-0008, quoted in the doc comment
-  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
+  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>.</li>
 <li><strong>An adapter does not depend on another adapter.</strong> What it needs from another concern comes in
   as a hook or a port, wired by the composition root. <strong>Enforced (gate)</strong>: <code>ALLOWED</code> (adapter →
   foundation, context). <strong>Convention (observed)</strong>: the doc comment of

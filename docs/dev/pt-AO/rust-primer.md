@@ -1,4 +1,4 @@
-<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
+<!-- translated-from: rust-primer.md sha256:7df531761d748651535cf66218ca9ae3a61dd2cf269836df4a757ba7df96b431 -->
 # Introdução ao Rust para esta base de código
 
 **Antes de leres:** [Introdução ao cloud native](cloud-native-primer.md), cujo vocabulário os exemplos usam, e Rust básico ([The Rust Programming Language](https://doc.rust-lang.org/book/), capítulos 1–10).
@@ -120,7 +120,9 @@ Rust by Example — [Defining an error type](https://doc.rust-lang.org/rust-by-e
 ## 3.3 Traits como portas: `VmBackend` e o registo de backends
 
 O motor fala com os providers através de **traits** («portas»), e um provider é uma implementação
-de uma delas. O exemplo mais claro é o `VmBackend` em `crates/adapters/delonix-vm/src/lib.rs`:
+de uma delas. O exemplo mais claro é o `VmBackend` em `crates/contexts/delonix-compute/src/vm_backend.rs`
+(mudou-se para lá a partir do `delonix-vm`, que o reexporta, para que um crate de provider o possa
+implementar sem depender de um adapter):
 
 ```rust
 pub trait VmBackend {
@@ -134,8 +136,8 @@ pub trait VmBackend {
 }
 ```
 
-Implementações: `CloudHypervisorBackend` e `LibvirtBackend` no mesmo ficheiro, e
-`ProxmoxBackend` em `crates/providers/delonix-proxmox/src/lib.rs`. Os métodos com **corpo por
+Implementações: `CloudHypervisorBackend` e `LibvirtBackend` em
+`crates/adapters/delonix-vm/src/lib.rs`, e `ProxmoxBackend` em `crates/providers/delonix-proxmox/src/lib.rs`. Os métodos com **corpo por
 omissão** no trait (por exemplo `auto_selectable`) deixam um backend novo herdar um comportamento
 sensato e sobrepor só o que difere.
 
@@ -143,9 +145,10 @@ Os backends são escolhidos em tempo de execução, por isso são tratados como 
 `Box<dyn VmBackend>`. São criados através de um registo de factories:
 
 ```rust
-// crates/adapters/delonix-vm/src/lib.rs
+// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>> =
     std::sync::OnceLock::new();
 ```
@@ -156,11 +159,38 @@ static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>
   closure, não o trait `VmBackend`.
 - O `OnceLock` inicializa a tabela de forma preguiçosa (`builtin_backends()` semeia os dois backends
   locais), e o `RwLock` deixa o `register_backend` acrescentar um terceiro no arranque. O binário
-  fá-lo em `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` (`register_configured`).
+  fá-lo em `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` (`register_configured`): o crate do
+  provider só constrói o `BackendRegistration` (`delonix_proxmox::registration`), e a raiz de
+  composição entrega-o ao `delonix_vm::register_backend`.
 
 A decisão por trás desta forma é o [ADR-0008](../../adr/0008-proxmox-vm-backend.md). O mesmo padrão
 «trait + implementações + um só sítio que escolhe» aparece noutros lados (por exemplo a porta
-`VmNetwork`, guardada num `OnceLock<Box<dyn VmNetwork>>` perto do topo do mesmo ficheiro).
+`VmNetwork`, guardada num `OnceLock<Box<dyn VmNetwork>>` perto do topo de
+`crates/adapters/delonix-vm/src/lib.rs`).
+
+Nem toda a porta é um trait object. Os casos de uso de VM recebem as suas portas como **parâmetros
+genéricos**:
+
+```rust
+// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine<'a, R, B, D, S> {
+    pub root: &'a Path,
+    pub repo: R,       // R: StateRepository<Vm>
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option<&'a dyn VmNetwork>,
+}
+```
+
+A razão é uma regra dos trait objects: um trait com um método genérico não é *dyn-compatible*
+(object-safe), e o `StateRepository<T>` tem um (`update<F>`, em
+`crates/foundation/delonix-model/src/ports.rs`). Por isso o engine é genérico, como o
+`resolve_run<I, S, D, H>` do `container run`, e cada chamador escolhe os tipos concretos: o
+`delonix-vm` constrói `VmEngine<JsonStore<Vm>, RegistryBackends, QemuImgDisks, CloudLocaldsSeed>` no
+`engine` (`crates/adapters/delonix-vm/src/lib.rs`), e os testes em `vm::tests` constroem um sobre um
+store em memória e falsos que registam as chamadas. O preço dos genéricos é uma cópia do código por
+combinação (monomorfização); o ganho é que nenhuma porta tem de ser remodelada para caber em `dyn`.
 
 **Ler mais:** The Rust Book —
 [Traits](https://doc.rust-lang.org/book/ch10-02-traits.html),

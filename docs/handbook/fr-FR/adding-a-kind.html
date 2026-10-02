@@ -217,7 +217,7 @@ simple bras de <code>match</code> : la table qui décrit ce qu'EST le Kind, le 
 câblage du réconciliateur qui permet à <code>stack plan</code>/<code>apply</code> de le traiter comme n'importe quel
 autre Kind. Cette page parcourt cela dans l'ordre, avec un Kind réel — <strong><code>Service</code></strong> (ADR-0032) —
 comme exemple travaillé de bout en bout. Ce n'est pas le Kind le plus récent (<code>IPPool</code>,
-<code>NetworkGateway</code>, <code>NetworkZone</code> et <code>RuntimePolicy</code> sont venus après), mais c'est celui qui
+<code>NetworkGateway</code>, <code>NetworkZone</code>, <code>RuntimePolicy</code> et <code>SystemContainer</code> sont venus après), mais c'est celui qui
 parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec namespace et doté
 de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
 souvenir d'une ancienne disposition.</p>
@@ -430,6 +430,14 @@ module appelle « strictement pire que de déclarer le replace d'emblée ». <co
 qu'aucun redémarrage ne soit nécessaire — rien dans un <code>Service</code> n'est froid. Un champ laissé hors
 de <code>hot_fields</code> apparaît quand même dans le plan ; il force simplement <code>Action::Replace</code>
 (refusé sans <code>--replace &lt;Kind&gt;/&lt;nom&gt;</code>) plutôt que <code>Action::Update</code>.</p>
+<p>Certains champs ne convergent à chaud que <strong>dans un seul sens</strong>. Le volume racine d'un container
+système peut être agrandi sur un container en cours d'exécution, jamais réduit, donc
+<code>SystemContainer.rootfs</code> figure dans <code>grow_only_fields</code>, pas dans <code>hot_fields</code> : <code>is_hot_change</code>
+traite un champ grow-only comme chaud quand les deux côtés sont des nombres et que le nouveau n'est
+pas plus petit, et comme froid sinon, si bien qu'une réduction planifie un <code>Replace</code>. Si l'apply de
+votre Kind décide lui aussi si un changement exige une recréation, posez la question à la même
+fonction — <code>cold_changes</code> dans <code>cmd/system_container.rs</code> le fait — sinon <code>plan</code> et <code>apply</code> ne
+seront pas d'accord.</p>
 <p>Trois tests dans <code>cmd/stack.rs</code> maintiennent cette table honnête vis-à-vis de la table de
 <code>kinds.rs</code> et entre eux :</p>
 <ul>

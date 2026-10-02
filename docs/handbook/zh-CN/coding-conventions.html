@@ -344,7 +344,7 @@ Err(Error::Invalid(super::po::tf(
 </ul>
 <h3 id="33-types-traits-functions-constants">3.3 类型、trait、函数、常量<a class="hanchor" href="#33-types-traits-functions-constants" aria-label="#">#</a></h3>
 <ul>
-<li><strong>端口以能力命名，而不是以技术命名。</strong> <strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D3 列出了这些端口：<code>WorkloadRuntime</code>、<code>SandboxProvider</code>、<code>VmProvider</code>、<code>NetworkProvider</code>、<code>StorageProvider</code>、<code>ImageRegistry</code>、<code>ImageStore</code>……今天已经存在的那些在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>VmNetwork</code>、<code>NetworkProvider</code>）和 <code>.../launch.rs</code>（<code>WorkloadRuntime</code>）里。较老的 <code>VmBackend</code>（在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）会在 P4 阶段改名为 <code>VmProvider</code>。</li>
+<li><strong>端口以能力命名，而不是以技术命名。</strong> <strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D3 列出了这些端口：<code>WorkloadRuntime</code>、<code>SandboxProvider</code>、<code>VmProvider</code>、<code>NetworkProvider</code>、<code>StorageProvider</code>、<code>ImageRegistry</code>、<code>ImageStore</code>……今天已经存在的那些在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>VmNetwork</code>、<code>NetworkProvider</code>）和 <code>.../launch.rs</code>（<code>WorkloadRuntime</code>）里。较老的 <code>VmBackend</code>（在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>）与 ADR-0044 的 <code>VmProvider</code>（<code>vm_provider.rs</code>）并存，直到 P4 把各个后端迁移到后者上。</li>
 <li><strong>一个端口的宿主机实现叫 <code>Host&lt;Thing&gt;</code>。</strong> <strong>惯例（观察所得）</strong>：<code>delonix-linux/src/workload.rs:HostWorkload</code>（实现 <code>WorkloadRuntime</code>）、<code>delonix-sdn/src/run_network.rs:HostNetwork</code>（实现 <code>NetworkProvider</code>）、<code>delonix-oci/src/run_images.rs:HostImages</code>、<code>delonix-volume/src/lib.rs:HostVolumes</code>、<code>delonix-linux/src/cdi.rs:HostDevices</code>。</li>
 <li><strong>纯粹的决策函数</strong>是动词或疑问句的形式：<code>resolve_*</code>、<code>parse_*</code>、<code>valid_*</code>、<code>is_*</code>、<code>*_plan</code>。<strong>惯例（观察所得）</strong>：<code>cmd/vm.rs:resolve_vm_defaults</code>、<code>delonix-oci/src/registry.rs:parse_content_range</code>、<code>cmd/stack.rs:is_pending</code>、<code>delonix-net-rules/src/lib.rs:bridge_name</code>。</li>
 <li><strong>常量</strong>用 <code>SCREAMING_SNAKE_CASE</code>（<strong>强制（门禁）</strong>，clippy 的 <code>-D warnings</code> 下的 rustc lint）。<strong>Kind 的名字也一律是常量，从不用重复的字符串字面量</strong>（<strong>已决定</strong>：AGENTS.md § "Os Kinds ganham grupos e nomes definitivos"；这些常量在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 里：<code>pub const VM: &amp;str = "VirtualMachine";</code>）。</li>
@@ -523,9 +523,14 @@ cpu_affinity: Option&lt;String&gt;,
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>一个本地 VM 后端（Cloud Hypervisor、libvirt）</td>
-<td><code>delonix-vm</code>（adapter）</td>
-<td>ADR-0008</td>
+<td>一次 VM 操作要决定的事情（create、stop、start、status、remove、day-2 动词）</td>
+<td><code>delonix-compute</code>（context）：<code>vm.rs</code>（<code>VmEngine</code>），只能通过 <code>VmBackends</code>/<code>LocalDiskImages</code>/<code>SeedBuilder</code> 去接触后端、磁盘和 seed；context 里不允许出现 <code>Command::new</code>（<code>context_spawns</code>，基线为 0）</td>
+<td>ADR-0044 P4b.3（#596、#597）</td>
+</tr>
+<tr>
+<td>一个本地 VM 后端（Cloud Hypervisor、libvirt），以及本节点对各个 VM 端口的实现</td>
+<td><code>delonix-vm</code>（adapter）：<code>lib.rs</code>、<code>local_ports.rs</code></td>
+<td>ADR-0008；ADR-0044 P4b.3</td>
 </tr>
 <tr>
 <td>一个远程或可插拔的 provider（hypervisor 的 API、NAS 的 API）</td>
@@ -583,7 +588,7 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
 <h3 id="51-ports-and-adapters">5.1 端口与适配器<a class="hanchor" href="#51-ports-and-adapters" aria-label="#">#</a></h3>
 <ul>
 <li><strong>一个新后端要实现一个端口。它绝不能在别的什么地方写成一个 <code>if provider == …</code>。</strong> <strong>已决定</strong>：AGENTS.md § "Identidade e fronteira do motor"（"Um provider novo entra como implementação de uma porta, nunca como um <code>if provider == …</code>"）。ADR-0040 D3 规则 3（"No string matching on provider names outside the composition root"）重申了这一点，目前仍是<strong>提议中</strong>。D3 计划为此写一个 fitness test，但<strong>它在 <code>arch_fitness.py</code> 里还不存在</strong>，所以现在靠评审来执行这条规则。</li>
-<li><strong>和某个具体后端相关的知识要放在那个后端里。</strong> 例如，<code>VmBackend::ip_is_predicted()</code> 会回答一台 VM 的 IP 是不是靠预测得到的，而不是让调用点去检查 <code>backend.contains("cloud-hypervisor")</code>。<strong>已决定</strong>：ADR-0008，被引用在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 的 doc comment 里。</li>
+<li><strong>和某个具体后端相关的知识要放在那个后端里。</strong> 例如，<code>VmBackend::ip_is_predicted()</code> 会回答一台 VM 的 IP 是不是靠预测得到的，而不是让调用点去检查 <code>backend.contains("cloud-hypervisor")</code>。<strong>已决定</strong>：ADR-0008，被引用在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 的 doc comment 里。</li>
 <li><strong>一个适配器不依赖另一个适配器。</strong> 它需要的、属于另一个关注点的东西，要以 hook 或端口的形式进来，由组合根来接线。<strong>强制（门禁）</strong>：<code>ALLOWED</code>（adapter → foundation、context）。<strong>惯例（观察所得）</strong>：<code>delonix-linux/src/workload.rs:HostWorkload</code> 的 doc comment 就是这样解释它的 <code>addresses</code>/<code>attach_slirp</code> 这两个 hook 的。</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/ports.rs — NetworkProvider (excerpt)

@@ -373,11 +373,13 @@ chemins <code>DELONIX_ROOT</code> très profonds.</p>
 <hr />
 <h2 id="2-backends-and-how-one-is-chosen">2. Les backends et comment l'un d'eux est choisi<a class="hanchor" href="#2-backends-and-how-one-is-chosen" aria-label="#">#</a></h2>
 <h3 id="the-port-and-the-registry">Le port et le registre<a class="hanchor" href="#the-port-and-the-registry" aria-label="#">#</a></h3>
-<p><code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) est le port que chaque hyperviseur
+<p><code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>, réexporté par <code>delonix-vm</code>) est le port que chaque hyperviseur
 implémente : <code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, plus des méthodes avec
 implémentation par défaut (<code>destroy</code>, <code>pause</code>, <code>unpause</code>, <code>resume</code>,
 <code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>, <code>preserve_snapshots</code>, <code>ip_is_predicted</code>,
-<code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>). Une implémentation par défaut qui ne peut
+<code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>, et les plus récentes <code>current_handle</code>,
+<code>resize_cold</code>, <code>guest_info</code>, <code>move_to_node</code>, <code>update_cloud_init</code>, <code>apply_firewall</code>/<code>read_firewall</code>).
+Une implémentation par défaut qui ne peut
 pas être honorée <strong>échoue de manière fermée</strong> avec un message, jamais par un no-op silencieux.</p>
 <p>Les backends vivent dans un registre (<code>BACKENDS</code>), et non dans un <code>match</code> :</p>
 <div class="tablewrap"><table>
@@ -417,15 +419,24 @@ L'enregistrement ne fait aucune I/O ; la factory s'exécute la première fois q
 sélectionné. <code>backend_for</code> sur une VM existante résout le backend enregistré, et un nom inconnu est
 une <strong>erreur</strong> (auparavant, il retombait sur CH).</p>
 <h3 id="selection-precedence-for-a-new-vm">Ordre de priorité de la sélection pour une nouvelle VM<a class="hanchor" href="#selection-precedence-for-a-new-vm" aria-label="#">#</a></h3>
-<p>D'après <code>delonix_vm::create_with</code> et <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>), la première
-correspondance l'emporte :</p>
+<p>D'après <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>) et <code>select_for_create</code>
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, que le cas d'usage de VM atteint via
+<code>VmBackends::select</code>), la première correspondance l'emporte :</p>
 <ol>
 <li><code>--backend</code> (ou <code>backend:</code> dans le manifeste).</li>
 <li>Le <code>HYPERVISOR</code> de l'image (enregistré par un build de VMfile), lorsque <code>--disk</code> désigne une
    image locale.</li>
 <li><code>DELONIX_VM_BACKEND</code> (pour toute la session).</li>
-<li><code>delonix vm default-backend --set &lt;backend&gt;</code> (pour toute la machine, stocké dans
-   <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>).</li>
+<li>Le <code>defaultProvider</code> du fichier des providers du nœud (<code>providers.yaml</code>, ADR-0054), que
+   <code>delonix vm default-backend --set &lt;backend&gt;</code> écrit. Le fichier est cherché dans
+   <code>DELONIX_PROVIDERS_CONFIG</code>, sinon <code>$XDG_CONFIG_HOME/delonix/providers.yaml</code> (ou <code>~/.config/…</code>),
+   sinon <code>/etc/delonix/providers.yaml</code> ; le premier l'emporte. Un fichier illisible fait échouer une
+   demande de VM sans <code>--backend</code> au lieu de deviner, et un défaut que ce processus ne peut pas
+   servir (<code>proxmox</code> sans sa cible) échoue en le nommant au lieu de se rabattre sur un hyperviseur
+   local.</li>
+<li>L'ancien défaut par racine <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>, d'avant le fichier des
+   providers ; <code>vm default-backend</code> dit quand la réponse vient de lui, et <code>--set</code> le déplace dans le
+   fichier.</li>
 <li>Heuristique de capacités : <code>volumes</code> présents ⇒ <code>libvirt</code> (seul libvirt fait du virtio-9p) ; une
    cloud image sans <code>--kernel</code> ⇒ <code>libvirt</code> <strong>si libvirt est disponible</strong> ; sinon auto-détection — le
    premier backend enregistré sélectionnable automatiquement qui est installé (CH, puis libvirt).</li>
@@ -436,16 +447,29 @@ sur le SDN.</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-text">$ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+error[DX-1503] invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 </code></pre></div>
+<p><code>delonix provider config validate</code> vérifie le fichier et ce vers quoi il pointe (un fichier de jeton
+lisible seulement par son propriétaire, une CA qui existe) sans rien contacter, et
+<code>delonix provider config schema</code> imprime son JSON Schema.</p>
 <h3 id="proxmox-ve-remote">Proxmox VE (distant)<a class="hanchor" href="#proxmox-ve-remote" aria-label="#">#</a></h3>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> enregistre le backend Proxmox
-au démarrage lorsqu'il est configuré par l'environnement (une mauvaise configuration est un
-avertissement, jamais une erreur fatale pour des commandes sans rapport) :</p>
+au démarrage lorsqu'il est configuré — par une entrée <code>type: proxmox</code> dans le fichier des providers,
+ou par l'environnement ci-dessous (une mauvaise configuration est un avertissement, jamais une erreur
+fatale pour des commandes sans rapport). La liste complète des variables <code>DELONIX_PROXMOX_*</code>, y
+compris les identifiants en fichier (<code>DELONIX_PROXMOX_TOKEN_FILE</code>, <code>DELONIX_PROXMOX_PASSWORD_FILE</code>)
+et les stockages vers lesquels une image locale est envoyée (<code>DELONIX_PROXMOX_IMPORT_STORAGE</code>,
+<code>DELONIX_PROXMOX_DISK_STORAGE</code>), se trouve dans
+<a href="environment-variables.html#proxmox-ve">Variables d'environnement § Proxmox VE</a> :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -460,7 +484,7 @@ avertissement, jamais une erreur fatale pour des commandes sans rapport) :</p>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_NODE</code></td>
-<td>Obligatoire. Le nœud unique auquel s'adresse ce backend (tel que <code>GET /nodes</code> le nomme).</td>
+<td>Obligatoire. Le nœud par lequel ce backend se connecte (tel que <code>GET /nodes</code> le nomme) ; chaque VM est ensuite adressée sur le nœud du cluster où elle tourne réellement (ADR-0053).</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_SECRET</code></td>
@@ -490,7 +514,9 @@ avertissement, jamais une erreur fatale pour des commandes sans rapport) :</p>
 </table></div>
 <p>Sans configuration, <code>--backend proxmox</code> répond que le backend « is not available in this build » et
 indique ce qu'il faut définir (<em>exécuté</em>). Le backend possède son propre stockage
-(<code>manages_own_storage</code>), donc aucun overlay local ni seed NoCloud n'est créé ; <code>--hostname</code>/<code>--ssh-key</code>
+(<code>manages_own_storage</code>), donc aucun overlay local ni seed NoCloud n'est créé ; un <code>--disk</code> qui
+nomme une image du store du moteur est envoyé vers le stockage d'import du nœud et la VM est créée à
+partir d'elle (ADR-0057) ; <code>--hostname</code>/<code>--ssh-key</code>
 vont au cloud-init du nœud, et <code>--user-data</code> est refusé. Conception et limites :
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. Un backend OpenStack est <strong>seulement proposé</strong>
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>) ; il n'existe aucun code pour lui.</p>
@@ -572,7 +598,8 @@ jamais. Les scripts de construction d'appliances se trouvent dans <a class="src"
   --backend cloud-hypervisor --vcpus 2 --memory 2G \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 </code></pre></div>
-<p>Ce qui se passe (<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>) :</p>
+<p>Ce qui se passe (<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>, une enveloppe qui construit un
+<code>delonix_compute::vm::VmEngine</code> au-dessus des ports de ce nœud et appelle son <code>create_with</code>) :</p>
 <ol>
 <li>La <strong>politique du nœud</strong> est imposée avant la résolution de toute image (<code>policy::enforce</code>).</li>
 <li><strong>Résolution du disque</strong> (<code>resolve_image_ref</code>) : <code>--url-img</code> l'emporte (téléchargé, mis en cache,
@@ -588,9 +615,10 @@ jamais. Les scripts de construction d'appliances se trouvent dans <a class="src"
 <li><strong>Backend</strong> choisi (section 2) ; une vérification d'admission refuse lorsque l'hôte manque de
    RAM ; un <code>--namespace</code> autre que <code>default</code> est refusé sur libvirt (la VM vit sur <code>virbr0</code>, en
    dehors du SDN Delonix).</li>
-<li><strong>Overlay</strong> : <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, un qcow2 mince au-dessus de la base
-   (<code>prepare_local_overlay</code>) ; <code>--disk-size &lt;GiB&gt;</code> l'agrandit et ne peut pas être inférieur à la
-   base.</li>
+<li><strong>Overlay</strong> : <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, un qcow2 mince au-dessus de la base (le port
+   <code>LocalDiskImages</code>, implémenté par <code>QemuImgDisks</code> → <code>prepare_local_overlay</code> dans
+   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a> ; sauté pour un backend qui gère son propre
+   stockage) ; <code>--disk-size &lt;GiB&gt;</code> l'agrandit et ne peut pas être inférieur à la base.</li>
 <li><strong>Démarrage</strong> : le <code>boot</code> du backend. <code>create</code> est idempotent : une VM existante et en cours
    d'exécution est renvoyée telle quelle.</li>
 </ol>
@@ -874,8 +902,20 @@ délibérée au rootless dans le code VM (<code>cmd/vmbridge.rs</code>).</p>
 </thead>
 <tbody>
 <tr>
-<td>Port, registre, backends CH et libvirt, <code>create_with</code>, snapshots, recherche du firmware</td>
+<td>Port</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Cas d'usage des VM (<code>VmEngine</code> : create, stop, start, status, list, remove, snapshots, verbes du jour 2) et leurs ports (<code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a>, <code>ports.rs</code></td>
+</tr>
+<tr>
+<td>Registre, backends CH et libvirt, sélection du backend, recherche du firmware, les enveloppes publiques (<code>create_with</code>, <code>stop</code>, …)</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Les implémentations des ports de VM par l'adapter (<code>RegistryBackends</code>, <code>QemuImgDisks</code>, <code>CloudLocaldsSeed</code>)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Génération du seed NoCloud</td>
@@ -941,6 +981,10 @@ délibérée au rootless dans le code VM (<code>cmd/vmbridge.rs</code>).</p>
   tests du registre et de <code>auto_detect</code>, et les tests de parseur/scaffold dans <code>cmd/vmfile.rs</code>.
   Exécutez <code>cargo test -p delonix-vm</code> et <code>cargo test -p delonix-runtime-bin vmfile</code> (voir
   <a href="build-and-test.html">Cloner, compiler et tester</a> pour <code>protoc</code> et le répertoire cible).</li>
+<li><strong>Tests des cas d'usage contre de faux ports</strong> — l'orchestration (<code>VmEngine</code>) est testée dans
+  <code>delonix-compute</code> (<code>vm::tests</code>) avec un store en mémoire, un backend qui enregistre ses appels et
+  un faux disque et un faux seed, si bien qu'un changement de ce que décide <code>create</code>, <code>stop</code> ou
+  <code>status</code> ne demande aucun hyperviseur : <code>cargo test -p delonix-compute vm::</code>.</li>
 <li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — les sections <code>vm</code> s'exécutent sans hyperviseur (listage, refus) et, lorsque
   c'est disponible, exercent les snapshots à travers stop/start sur libvirt (nécessite <code>virsh</code>,
   <code>qemu-img</code> et un <code>qemu:///system</code> utilisable) et sur Cloud Hypervisor. Le script isole les deux
