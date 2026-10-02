@@ -1096,6 +1096,62 @@ fn ensure_up_secret(exe: &Path, name: &str, spec: &str) -> Result<Option<String>
     Ok(Some(secret))
 }
 
+/// What the local image `tag` names IS, if there is one: its layers and its
+/// configuration. Not the image id — that is the digest of a config blob that
+/// carries the build time, so it changes on every build, and a rebuild of an
+/// unchanged project would then recreate a container for nothing.
+fn image_content(tag: &str) -> Option<String> {
+    let (images, _) = super::util::open_stores().ok()?;
+    let image = images.resolve(tag).ok()?;
+    Some(format!(
+        "{}|{}",
+        image.layers.join(","),
+        serde_json::to_string(&image.config).unwrap_or_default()
+    ))
+}
+
+/// Removes a container and waits until it is gone. On a busy disk the exit of
+/// a container can outlast one `rm -f` (it reports that the process is still
+/// exiting and keeps the record); the removal is repeated for up to a few
+/// minutes before that is reported as the failure it then is.
+fn remove_container(exe: &Path, dir: &Path, name: &str) -> Result<()> {
+    let gone = || {
+        super::util::open_stores()
+            .ok()
+            .and_then(|(_, store)| store.list().ok())
+            .is_some_and(|all| !all.iter().any(|c| c.name == name))
+    };
+    let mut last = Ok(());
+    for _ in 0..8 {
+        last = run_quiet(exe, dir, &["container", "rm", "-f", name]);
+        if gone() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    last
+}
+
+/// The containers created from `tag`, each with whether it is running.
+fn containers_of_image(tag: &str) -> Vec<(String, bool)> {
+    let Ok((_, store)) = super::util::open_stores() else {
+        return Vec::new();
+    };
+    store
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.image == tag)
+        .map(|c| {
+            let running = matches!(
+                c.status,
+                delonix_model::records::Status::Running | delonix_model::records::Status::Paused
+            );
+            (c.name, running)
+        })
+        .collect()
+}
+
 /// Seconds `--up` waits for the health path: the template's `wait=`, or 120.
 fn wait_secs(tname: &str) -> u64 {
     template_meta(tname).wait_secs
@@ -1104,17 +1160,31 @@ fn wait_secs(tname: &str) -> u64 {
 /// A port this project is about to publish that something else already holds.
 /// Said BEFORE the build, with the owner's name: found only at `stack apply`,
 /// it costs the whole build first.
-fn refuse_busy_ports(plan: &Plan) -> Result<()> {
+fn refuse_busy_ports(plan: &Plan, name: &str) -> Result<()> {
+    // A port held by THIS project's own running container is not a conflict:
+    // `--up` run a second time on a project that is already up has to reach
+    // `stack apply`, which converges it. Measured: it stopped here, naming the
+    // project's own slirp as "another process".
+    let own = |port: &str| -> Option<String> {
+        let (_, store) = super::util::open_stores().ok()?;
+        super::container::port_owner(&store, port).ok().flatten()
+    };
+    let is_ours = |owner: &str| owner == name || owner.starts_with(&format!("{name}-"));
     for port in std::iter::once(&plan.port).chain(plan.tls_port.iter()) {
         let Ok(n) = port.parse::<u16>() else { continue };
-        if delonix_sdn::host_port_busy("127.0.0.1", n) {
-            let owner = delonix_sdn::host_port_owner_process(n)
-                .unwrap_or_else(|| super::po::t("another process").to_string());
-            return Err(Error::Invalid(super::po::tf(
-                "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`",
-                &[("port", port), ("owner", &owner)],
-            )));
+        if !delonix_sdn::host_port_busy("127.0.0.1", n) {
+            continue;
         }
+        let owner = match own(port) {
+            Some(c) if is_ours(&c) => continue,
+            Some(c) => super::po::tf("the delonix container {name}", &[("name", &c)]),
+            None => delonix_sdn::host_port_owner_process(n)
+                .unwrap_or_else(|| super::po::t("another process").to_string()),
+        };
+        return Err(Error::Invalid(super::po::tf(
+            "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`",
+            &[("port", port), ("owner", &owner)],
+        )));
     }
     Ok(())
 }
@@ -1148,10 +1218,11 @@ fn build_and_up(
 ) -> Result<()> {
     let health = template_meta(tname).health;
     let port = plan.port.as_str();
-    refuse_busy_ports(plan)?;
+    refuse_busy_ports(plan, name)?;
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
 
+    let image_before = image_content(&tag);
     eprintln!(
         "\n{}",
         super::po::tf("Building image {tag} 🔨", &[("tag", &tag)])
@@ -1172,6 +1243,38 @@ fn build_and_up(
         Some(spec) => ensure_up_secret(&exe, name, spec)?,
         None => None,
     };
+
+    // A container that is already running an EARLIER build of this tag would
+    // survive the apply untouched: the manifest names the tag, the tag did not
+    // change, so the plan has nothing to do — and `--up` would report "is UP"
+    // over the previous build (measured: an edited page, rebuilt, still served
+    // the old one). Such a container is removed here and the apply recreates
+    // it from the manifest; named volumes are not touched.
+    //
+    // A container of this tag that is NOT running goes the same way: `stack
+    // apply` leaves an existing record alone, so a dead one would stay dead
+    // and the health wait would run out over it.
+    let rebuilt = matches!((&image_before, image_content(&tag)), (Some(b), Some(a)) if *b != a);
+    for (c, running) in containers_of_image(&tag) {
+        if running && !rebuilt {
+            continue;
+        }
+        eprintln!(
+            "{}",
+            if running {
+                super::po::tf(
+                    "{name} is running the previous build of {tag} — recreating it",
+                    &[("name", &c), ("tag", &tag)],
+                )
+            } else {
+                super::po::tf(
+                    "{name} exists but is not running — recreating it",
+                    &[("name", &c)],
+                )
+            }
+        );
+        remove_container(&exe, dir, &c)?;
+    }
 
     let mut p = super::output::Progress::new();
     p.step(&format!("Applying the stack ({name})"), "🚀");
