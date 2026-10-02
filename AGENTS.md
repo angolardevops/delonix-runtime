@@ -2993,8 +2993,8 @@ bancada (`worker_connections 1024`, `maxconn 2048`, MPM por omissão). Agora:
   host, senão auto-assinado pelo próprio binário (`rcgen`, já na árvore). Um par que já lá
   esteja é MANTIDO. A chave fica 0600, é montada só de leitura, e `tls/` está no
   `.dockerignore` e no `.gitignore`. `scripts/tls.sh` renova, instala um certificado que já
-  se tenha, ou corre o Let's Encrypt (webroot em `./acme`; só nginx e httpd — o HAProxy não
-  serve ficheiros).
+  se tenha, ou corre o Let's Encrypt: por HTTP-01 (webroot em `./acme`; só nginx e httpd — o
+  HAProxy não serve ficheiros) ou por DNS-01 (`letsencrypt-dns`, os três).
 - **`nproc` dentro do container devolve os núcleos do HOST** (medido: 32). Por isso
   `worker_processes`/`nbthread` são 2, iguais ao `cpus: "2.0"` do manifesto, e não `auto`.
   `nofile` 65 535 pelo `ulimit:` do manifesto (medido dentro do container).
@@ -3060,8 +3060,26 @@ só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template —
 uma resposta: substitui a pergunta do terminal e não é adivinhada. `--tls-port`/`--hostname`
 num template sem TLS, as duas portas iguais, um nome que não é host, ou qualquer das três sem
 template são RECUSADOS antes de escrever seja o que for.
-**Não validado**: uma emissão pela CA real do Let's Encrypt (a porta 80 pública não chega a
-este host).
+**Let's Encrypt por DNS-01 (2026-10-02)**: `scripts/tls.sh letsencrypt-dns <domínio> <email>`
+nos três templates. Valida por registo TXT, por isso nada tem de chegar ao host (NAT, CGNAT),
+emite wildcards, e é o primeiro caminho Let's Encrypt do `haproxy`. Sem hook, o script mostra
+o registo, grava-o em `letsencrypt/dns-challenge.txt` e espera até TODOS os servidores de
+nomes da zona o servirem (`DNS_WAIT`, 1800 s; pergunta aos autoritativos, sem recursão: um
+resolvedor público guardaria a resposta negativa). Com `DNS_AUTH_HOOK`/`DNS_CLEANUP_HOOK` um
+comando cria e apaga o registo, e a renovação é o `certbot renew` que o script imprime. Sem
+hook, renovar é correr o comando outra vez. O `haproxy` recusa `letsencrypt` (HTTP-01) pelo
+nome; antes emitia um certificado local para os nomes «letsencrypt, domínio, email».
+**Medido**: contra o staging REAL do Let's Encrypt, com `le-test.ngolacloud.com` (DNS no
+GoDaddy) e a máquina numa rede cuja porta 80 pública não chega cá (medido de três pontos de
+fora): registo criado à mão, servido pelos dois servidores de nomes ao fim de 2390 s,
+certificado emitido (`(STAGING) Baloney Bulgur YE2`), instalado em `./tls` e servido pelo
+nginx sem reiniciar o container. Contra o Pebble: DNS-01 com hooks emitiu `*.shop.test`, e o
+HTTP-01 depois da refactorização emitiu `www.shop.test`.
+**Não validado**: uma emissão pela CA de PRODUÇÃO do Let's Encrypt (só o staging), o HTTP-01
+contra o Let's Encrypt (só contra o Pebble), e uma renovação por `certbot renew` com hooks.
+Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
+(o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
+dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
 
 **Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
 DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte
@@ -8566,6 +8584,9 @@ ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
   - o `ENV` do último estágio era empacotado duas vezes, a segunda por expandir: `ENV
     PATH=/app/.venv/bin:$PATH` dava uma imagem cujo PATH era essa cadeia literal. O serviço
     corria (o comando vive no único directório que restava) e `exec <c> id` saía 127 calado.
+- **Os sete templates correram o seu CI gerado** (2026-10-02, binário de `cfd46e01`, raiz
+  isolada): `node` (4 passos `run:` do GitHub), `nestjs` (8), `nextjs` (5) e `django` (8), cada
+  um com o trabalho do GitLab, sem falhas. `go`, `laravel` e `fastapi` tinham corrido antes.
 - **«Validado» com a imagem a responder não é validado.** Os quatro passavam o smoke. O PATH
   partido só apareceu ao correr `id` lá dentro, e o `exec` de um comando inexistente não dizia
   nada — agora diz o mesmo que o init (`delonix: exec <programa>: <errno>`).
