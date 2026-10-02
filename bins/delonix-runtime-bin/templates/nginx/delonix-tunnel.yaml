@@ -1,0 +1,33 @@
+# Puts __NAME__ on the internet through an OUTBOUND tunnel: no public IP, no
+# port opened on the router, no certificate to manage — the provider serves
+# HTTPS with its own. Nothing here runs until you apply it, and `stack apply`
+# on delonix-manifest.yaml does not touch it.
+#
+#   delonix stack apply -f delonix-tunnel.yaml   # open it (needs `cloudflared` on PATH)
+#   delonix get gateways                         # the public URL
+#   delonix delete gateways __NAME__-tunnel      # close it
+#
+# As written: a Cloudflare QUICK tunnel. No account, a random
+# https://<words>.trycloudflare.com that changes every time it opens.
+#
+# Your own domain (a stable https://app.example.org): the domain's DNS must be
+# on Cloudflare (a free account is enough). Create a tunnel in the dashboard
+# with a public hostname whose service is https://localhost:__TLS_PORT__, keep its token in a
+# Delonix secret, and uncomment the two lines below. README.md, "On the
+# internet without a public IP", has every step.
+#
+# The tunnel talks to the HTTPS port: the redirect on the plain-HTTP port
+# names a port that does not exist on the public URL. The local certificate
+# (mkcert or self-signed) cannot be checked by the tunnel agent, hence
+# `insecureSkipTlsVerify`: it covers only the hop from the agent to
+# localhost; visitors get the provider's own certificate.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: __NAME__-tunnel
+spec:
+  provider: cloudflare
+  localPort: __TLS_PORT__
+  insecureSkipTlsVerify: true
+  # tokenSecretRef: __NAME__-tunnel   # the secret's `token` key holds the tunnel token
+  # hostname: app.example.org         # informational: the route lives in the Cloudflare dashboard
