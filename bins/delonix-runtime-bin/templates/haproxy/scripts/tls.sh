@@ -45,10 +45,19 @@ reload() {
 }
 
 certbot_dirs="--config-dir letsencrypt --work-dir letsencrypt/work --logs-dir letsencrypt/logs"
-acme_options() { # acme_options <email>: the contact and the CA, as certbot options
+acme_server() { # the ACME directory this run talks to
+    if [ -n "${ACME_SERVER:-}" ]; then echo "$ACME_SERVER"
+    elif [ "${LETSENCRYPT_STAGING:-0}" = 1 ]; then echo "https://acme-staging-v02.api.letsencrypt.org/directory"
+    else echo "https://acme-v02.api.letsencrypt.org/directory"; fi
+}
+acme_options() { # acme_options <email> <domain>: the contact and the CA, as certbot options
     if [ "$1" = "-" ]; then printf '%s' "--register-unsafely-without-email"; else printf '%s' "-m $1"; fi
-    if [ -n "${ACME_SERVER:-}" ]; then printf ' %s' "--server $ACME_SERVER"
-    elif [ "${LETSENCRYPT_STAGING:-0}" = 1 ]; then printf ' %s' "--test-cert"; fi
+    printf ' %s' "--server $(acme_server)"
+    # A certificate already issued for this name by ANOTHER CA (staging first,
+    # then production) is replaced; certbot alone would call it "not yet due
+    # for renewal" and keep the old one.
+    conf="letsencrypt/renewal/${2#\*.}.conf"
+    if [ -f "$conf" ] && ! grep -qxF "server = $(acme_server)" "$conf"; then printf ' %s' "--force-renewal"; fi
 }
 say() { # to the terminal when there is one: certbot keeps a hook's output to itself
     if (: >/dev/tty) 2>/dev/null; then echo "$*" >/dev/tty; else echo "$*" >&2; fi
@@ -121,14 +130,14 @@ letsencrypt-dns)
     if [ -n "${DNS_AUTH_HOOK:-}" ]; then
         # $(acme_options) and $certbot_dirs are split on purpose: each is several options.
         # shellcheck disable=SC2046,SC2086
-        certbot certonly --manual --preferred-challenges dns -d "$2" $(acme_options "$3") \
+        certbot certonly --manual --preferred-challenges dns -d "$2" $(acme_options "$3" "$2") \
             --manual-auth-hook "$DNS_AUTH_HOOK" ${DNS_CLEANUP_HOOK:+--manual-cleanup-hook "$DNS_CLEANUP_HOOK"} \
             --agree-tos --non-interactive $certbot_dirs
         after="renew (cron, twice a day):  $renew"
     else
         dns_tool >/dev/null || { echo "none of dig, host or nslookup is installed (apt install dnsutils / dnf install bind-utils)" >&2; exit 1; }
         # shellcheck disable=SC2046,SC2086
-        certbot certonly --manual --preferred-challenges dns -d "$2" $(acme_options "$3") \
+        certbot certonly --manual --preferred-challenges dns -d "$2" $(acme_options "$3" "$2") \
             --manual-auth-hook "sh '$PWD/scripts/tls.sh' __dns-wait" \
             --agree-tos --non-interactive $certbot_dirs
         rm -f letsencrypt/dns-challenge.txt
