@@ -332,8 +332,11 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
             message: format!("failed to create the pod netns '{netns}': {e}"),
         })
     })?;
+    if let Err(e) = container::refuse_if_namespace_isolation_inert(&ns) {
+        infra::detach_container(&netns, &ip);
+        return Err(e);
+    }
     apply_pod_namespace_isolation(&netns, &ip, &ns)?;
-    container::warn_if_namespace_isolation_inert(&ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
     // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them
@@ -443,7 +446,7 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> Result<()> {
     let net = delonix_sdn::run_network::HostNetwork {
         state_root: super::util::state_root(),
-        on_attached: &|_| {},
+        on_attached: &|_| Ok(()),
         register_expose: &|_, _, _, _| Ok(()),
     };
     delonix_compute::network::isolate_shared_netns(&net, netns, ip, ns).map_err(|e| {

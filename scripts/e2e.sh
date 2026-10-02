@@ -1651,6 +1651,55 @@ else
 fi
 
 ########################################
+
+section "network: isolamento por namespace sem br_netfilter é RECUSADO (D5)"
+########################################
+# Decision D5 of the maturity plan: a named namespace on a host that does not
+# filter bridge traffic is REFUSED (DX-6305, exit 69). Before it was a warning
+# and `run` exited 0 on a tenant boundary that blocked nothing.
+#
+# The host here HAS br_netfilter, so the condition is made where it lives: the
+# sysctl is per network namespace, and it is set to 0 INSIDE this run's
+# isolated holder only. A keeper container holds the holder up, because a
+# refused attach that left the holder empty tears it down, and the next one is
+# born with the default (1) — measured, that is how the valve check first
+# passed for the wrong reason.
+#
+# Never on shared state: there the holder is the real one, and the sysctl would
+# switch off isolation for every workload on the node.
+REAL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
+if [[ "$E2E_ISOLATED" != 1 || "$DELONIX_ROOT" == "$REAL_ROOT" ]]; then
+  skip "D5: recusa sem br_netfilter" "estado partilhado — o sysctl tocaria no holder real"
+else
+  N5="n5-$PFX"; K5="k5-$PFX"
+  if "$BIN" network create "$N5" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$K5" --net "$N5" "$IMG" sleep 600 >/dev/null 2>&1 \
+     && PIN5=$(cat "$DELONIX_ROOT/ingress/holder.pid" 2>/dev/null) \
+     && nsenter -t "$PIN5" -U -n --preserve-credentials \
+          sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null; then
+    ORF5=$(ipam_orfaos)
+    check "D5: --namespace sem filtragem de bridge sai com 69" 69 \
+      "$BIN" container run -d --name "r5-$PFX" --namespace teama --net "$N5" "$IMG" sleep 600
+    check "D5: e diz DX-6305" ok bash -c \
+      "'$BIN' container run -d --name r5b-$PFX --namespace teama --net '$N5' '$IMG' sleep 600 2>&1 | grep -q DX-6305"
+    check "D5: o recusado não fica no store" ok bash -c \
+      "! '$BIN' container ps -a | grep -q ' r5-$PFX '"
+    check "D5: nem deixa lease órfão" ok test "$(ipam_orfaos)" = "$ORF5"
+    check "D5: um pod numa namespace também é recusado" 69 bash -c \
+      "printf 'apiVersion: compute.delonix.io/v1alpha1\nkind: Pod\nmetadata: {name: p5-$PFX, namespace: teamx}\nspec:\n  network: $N5\n  containers:\n  - {name: a, image: $IMG, command: [sleep, \"600\"]}\n' > '$OUT/p5.yaml' && '$BIN' pod create -f '$OUT/p5.yaml'"
+    check "D5: a válvula avisa e deixa correr" ok bash -c \
+      "DELONIX_ALLOW_UNENFORCED_ISOLATION=1 '$BIN' container run -d --name v5-$PFX --namespace teama --net '$N5' '$IMG' sleep 600 2>&1 | grep -q 'would not be enforced'"
+    check "D5: a namespace default nunca é recusada" ok \
+      "$BIN" container run -d --name d5-$PFX --net "$N5" "$IMG" sleep 600
+  else
+    skip "D5: recusa sem br_netfilter" "não foi possível preparar o holder isolado (rede, imagem ou nsenter)"
+  fi
+  for c in "r5-$PFX" "r5b-$PFX" "v5-$PFX" "d5-$PFX" "$K5" "p5-$PFX-a"; do
+    "$BIN" container rm -f "$c" >/dev/null 2>&1
+  done
+  "$BIN" pod rm "p5-$PFX" >/dev/null 2>&1
+  "$BIN" network rm "$N5" >/dev/null 2>&1
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"

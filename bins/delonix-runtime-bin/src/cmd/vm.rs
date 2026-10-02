@@ -2104,6 +2104,7 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             libvirt_xml_overlay: spec.libvirt_xml_overlay,
             libvirt_xml: spec.libvirt_xml,
         };
+        refuse_inert_vm_isolation(cfg.namespace.as_deref())?;
         let vm = delonix_vm::create(&base, &cfg)?;
         warn_if_mac_spoofing_allowed(&vm);
         println!("{}", super::po::tf("vm/{name}: ensured", &[("name", name)]));
@@ -2426,7 +2427,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                 p.ok();
                 p.step(step, icon);
             };
-            let created = delonix_vm::create_with(&base, &cfg, &render);
+            // Through the same failure path as the create itself, so a refusal
+            // cleans the seed directory the way a failed create does.
+            let created = refuse_inert_vm_isolation(cfg.namespace.as_deref())
+                .and_then(|()| delonix_vm::create_with(&base, &cfg, &render).map_err(Into::into));
             // The last stage has no successor to close it, so it is closed here
             // — before anything else prints, or the tick lands after the line
             // that says the VM is up.
@@ -2443,7 +2447,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     if let Some(dir) = &seed_to_clean {
                         let _ = std::fs::remove_dir_all(dir);
                     }
-                    return Err(e.into());
+                    return Err(e);
                 }
             };
             warn_if_mac_spoofing_allowed(&vm);
@@ -3417,6 +3421,22 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
         i += 1;
         std::thread::sleep(std::time::Duration::from_millis(400));
     }
+}
+
+/// A VM in a named namespace is isolated by the same nftables chains as a
+/// container, on the same bridge — so it depends on `br_netfilter` the same way
+/// and is refused the same way (DX-6305, decision D5). The holder is brought up
+/// first because the sysctl is per network namespace and only the holder can
+/// answer; a holder that cannot come up makes this «could not ask», and the
+/// create that follows fails on its own with the real reason.
+fn refuse_inert_vm_isolation(namespace: Option<&str>) -> Result<()> {
+    let Some(namespace) = namespace.filter(|n| !n.is_empty() && *n != "default") else {
+        return Ok(());
+    };
+    if delonix_sdn::infra::ensure_up().is_err() {
+        return Ok(());
+    }
+    super::container::refuse_if_namespace_isolation_inert(namespace)
 }
 
 /// `delonix vm vnc <name>` — the VNC address of a graphical VM (created with
