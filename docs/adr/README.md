@@ -101,8 +101,9 @@ never rewritten — supersede them with a new one.
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
 - **0067** — The engine manages storage pools (owner decision D2): a `StoragePoolDriver` port in a
   new `delonix-storage` context, one provider crate per backend (btrfs, zfs, lvm-thin) and the
-  current directory store as the `dir` driver; `kind: StoragePool` (node-scoped, `adopt` by
-  default), `pool:` on `Volume` and on VM disks (raw block, a thin clone of a per-pool image base);
-  privilege probed before any write and refused with class 69; `create` only as root on named,
-  signature-free devices; destroy never by default and never of an adopted pool. Includes a
-  rootless spike (no loop, no device-mapper, btrfs images buildable but not mountable). *Proposed*.
+  current directory store as the `dir` driver; `kind: StoragePool` only uses pools from a root-owned
+  administrator allowlist (no device, path or command in a manifest); the engine stays rootless and
+  privileged operations go through a per-request, socket-activated helper (or an explicitly
+  configured rootful node service); a probe without privilege answers «could not determine», never
+  «no pools»; pools are created and destroyed only by the administrator. *Proposed*; a Portuguese
+  review copy is `0067-storage-pools.pt-AO.md`.

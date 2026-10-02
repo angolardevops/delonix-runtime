@@ -1,277 +1,375 @@
-# ADR-0067: O motor gere pools de armazenamento — LVM-thin, ZFS, btrfs e directório, atrás de uma porta
+# ADR-0067: The engine manages storage pools — LVM-thin, ZFS, btrfs and directory, behind a port
 
-- **Estado:** Proposto (2026-10-02). Nada implementado.
-- **Data:** 2026-10-02
-- **Decisores:** Walter Angolar
-- **Relaciona-se com:** decisão D2 do plano de maturidade (`docs/discovery/65_PLANO_MATURIDADE.md`,
-  PR #658: «o motor gere pools»), ADR-0009 (provisionar numa NAS: posse por carimbo, remoto
-  primeiro e registo em último), ADR-0008/ADR-0044 (registo de backends semeado pela raiz de
-  composição), ADR-0050 (catálogo de capacidades e evidência), ADR-0059 D7 (portas por papel num
-  contexto próprio), ADR-0031 (o que fica fora: armazenamento partilhado entre nós).
+- **Status:** Proposed (2026-10-02). Nothing implemented. The owner's decisions of 2026-10-02 are
+  recorded in D3 and D5; three questions remain open (end of the document).
+- **Date:** 2026-10-02
+- **Deciders:** Walter Angolar
+- **Relates to:** decision D2 of the maturity plan (`docs/discovery/65_PLANO_MATURIDADE.md`,
+  PR #658: «the engine manages pools»), ADR-0009 (provisioning on a NAS: ownership by stamp, the
+  remote first and the record last), ADR-0008/ADR-0044 (backend registry seeded by the composition
+  root), ADR-0050 (capability catalogue and evidence), ADR-0059 D7 (role ports in their own
+  context), ADR-0031 (what stays out: storage shared between nodes).
+- **Review copy:** `docs/adr/0067-storage-pools.pt-AO.md` (Portuguese, internal). This English
+  file is canonical; the two carry the same ID, status, decisions and references.
 
-## Contexto
+## Context
 
-Hoje o motor **consome** armazenamento e não o gere. Um `kind: Volume` é um directório em
-`<root>/volumes/<nome>/_data`, ou uma partilha de rede montada; a quota é **dura** só no modelo
-root (uma imagem ext4 esparsa montada por loop, `delonix-volume/src/lib.rs`) e **vigiada** em
-rootless (uso medido, alerta perto do limite). O disco de uma VM local é sempre um overlay qcow2
-sobre a imagem dourada, num ficheiro em `<root>/vms/`. Na matriz de capacidades
-(`docs/providers/capability-matrix.md`) isto lê-se assim:
+Today the engine **consumes** storage and does not manage it. A `kind: Volume` is a directory in
+`<root>/volumes/<name>/_data`, or a mounted network share; the quota is **hard** only in the root
+model (a sparse ext4 image mounted through a loop device, `delonix-volume/src/lib.rs`) and
+**monitored** in rootless (measured usage, an alert near the limit). A local VM's disk is always a
+qcow2 overlay over the golden image, in a file under `<root>/vms/`. In the capability matrix
+(`docs/providers/capability-matrix.md`) that reads:
 
-| célula | libvirt | cloud-hypervisor | proxmox | linux |
+| cell | libvirt | cloud-hypervisor | proxmox | linux |
 |---|---|---|---|---|
 | `storage.pools` | not-implemented | not-implemented | partial (`disk: <storage>:<gib>`) | unsupported-by-provider |
 | `storage.lvm-thin` | — | — | — | not-implemented |
 | `storage.zfs-btrfs` | — | — | — | not-implemented |
 | `storage.ceph` | — | — | — | requires-external-component |
 
-O dono decidiu (D2) que o motor passa a **gerir** pools: criar ou adoptar um pool, alocar volumes
-e discos dentro dele, com quota, thin provisioning e snapshots nativos. É uma mudança de
-fronteira — o motor passa a escrever em dispositivos de bloco e em metadados do kernel que hoje
-nunca toca — e por isso entra por ADR, com a medição abaixo.
+The owner decided (D2) that the engine now **manages** pools: allocating volumes and disks inside
+them, with native quotas, thin provisioning and snapshots. It is a boundary change — the engine
+starts writing to block devices and kernel metadata it never touches today — so it goes through an
+ADR, with the measurement below.
 
-### O que este host permite sem root (medido, 2026-10-02)
+### What the tested environment allows without root (measured, 2026-10-02)
 
-Spike corrido como `walter` (uid 1000, sem `sudo`, sem pertencer ao grupo `disk`), kernel
-7.0.0-34-generic, Ubuntu 24.04, raiz em ext4. Ficheiros só num directório de scratch do worktree
-(256 MiB + 128 MiB esparsos), apagados no fim.
+Spike run as `walter` (uid 1000, no `sudo`, not in the `disk` group) on **one host**: kernel
+7.0.0-34-generic, Ubuntu 24.04, root filesystem ext4. Files only in a scratch directory of the
+worktree (256 MiB + 128 MiB sparse), deleted at the end. **These results describe this tested
+environment, not every Linux host**: device-node permissions, group membership, udev rules, the
+packages installed and the kernel configuration all change them. They are the reason the design
+probes each host instead of assuming.
 
-| Pergunta | Comando | Resultado |
+| Question | Command | Result on this host |
 |---|---|---|
-| Ferramentas presentes | `command -v …` | `lvm2` 2.03.16, `thin-provisioning-tools` 0.9.0, `btrfs-progs` 6.6.3, `dmsetup`, `losetup`, `qemu-img`, `qemu-nbd`. **Sem `zfs`/`zpool`** (o `zfsutils-linux` não está instalado) |
-| Módulos | `lsmod`, `modinfo zfs` | `btrfs` carregado; `zfs` existe no kernel (2.4.1-1ubuntu5.1) mas **não carregado**; `/dev/zfs` existe com `crw------- root root` |
-| LVM como utilizador | `lvs` | `WARNING: Running as a non-root user` e `/run/lock/lvm/P_global:aux: open failed: Permission denied` — **sai 0** com a lista vazia |
+| Tools present | `command -v …` | `lvm2` 2.03.16, `thin-provisioning-tools` 0.9.0, `btrfs-progs` 6.6.3, `dmsetup`, `losetup`, `qemu-img`, `qemu-nbd`. **No `zfs`/`zpool`** (`zfsutils-linux` not installed) |
+| Modules | `lsmod`, `modinfo zfs` | `btrfs` loaded; `zfs` present in the kernel (2.4.1-1ubuntu5.1) but **not loaded**; `/dev/zfs` exists as `crw------- root root` |
+| LVM as a user | `lvs` | `WARNING: Running as a non-root user` and `/run/lock/lvm/P_global:aux: open failed: Permission denied` — **exits 0** with an empty list |
 | device-mapper | `dmsetup ls` | `/dev/mapper/control: open failed: Permission denied` |
-| Loop como utilizador | `losetup --find --show img` | `/dev/loop-control` é `root:disk 0660` → `Permission denied` |
-| `mkfs.btrfs` num ficheiro | `mkfs.btrfs -q -L dlxspike img` (256 MiB) | **funciona**, 0,26 s; 4,6 MiB ocupados de 256 MiB aparentes; `btrfs inspect-internal dump-super`, `btrfs filesystem show` e `btrfs check --readonly` lêem a imagem sem a montar |
-| Userns + mount ns | `unshare --user --map-root-user --mount` | `tmpfs` e `ramfs` montam; `mount -o loop`, `losetup` e `mount -t btrfs <ficheiro>` falham (o loop é negado mesmo como root do userns); `lvs`, `dmsetup` e `/dev/zfs` dão `Permission denied` |
-| Disco de VM sem pool | `qemu-img create -f raw` / `-f qcow2` | funcionam; `qemu-nbd --connect=/dev/nbd0` falha (sem `/dev/nbd0`, e seria root de qualquer forma) |
-| Pools do libvirt | `virsh -c qemu:///system pool-capabilities` | `dir`, `fs`, `netfs`, `logical`, `disk`, `iscsi`, `scsi`, `mpath` suportados; **`zfs` e `rbd` não** |
+| Loop as a user | `losetup --find --show img` | `/dev/loop-control` is `root:disk 0660` → `Permission denied` |
+| `mkfs.btrfs` on a file | `mkfs.btrfs -q -L dlxspike img` (256 MiB) | **works**, 0.26 s; 4.6 MiB used of 256 MiB apparent; `btrfs inspect-internal dump-super`, `btrfs filesystem show` and `btrfs check --readonly` read the image without mounting it |
+| Userns + mount ns | `unshare --user --map-root-user --mount` | `tmpfs` and `ramfs` mount; `mount -o loop`, `losetup` and `mount -t btrfs <file>` fail (loop is denied even as the userns root); `lvs`, `dmsetup` and `/dev/zfs` give `Permission denied` |
+| VM disk without a pool | `qemu-img create -f raw` / `-f qcow2` | work; `qemu-nbd --connect=/dev/nbd0` fails (no `/dev/nbd0` on this host) |
+| libvirt pools | `virsh -c qemu:///system pool-capabilities` | `dir`, `fs`, `netfs`, `logical`, `disk`, `iscsi`, `scsi`, `mpath` supported; **`zfs` and `rbd` not** |
 
-Três armadilhas que a medição mostrou, e que o código tem de respeitar:
+Three traps the measurement showed, which the code must respect:
 
-1. **`lvs` sem privilégio sai 0 com uma lista vazia.** Um driver que leia o `rc` lê «não há VG»
-   num host que tem VGs. É a classe já catalogada «um `read` que falha não é uma resposta vazia»;
-   o driver tem de ler o aviso e o erro de lock, ou perguntar o privilégio primeiro.
-2. **Sem loop nem device-mapper, uma imagem btrfs/ext4 num ficheiro não serve para nada em
-   rootless**: cria-se, mas não se monta — nem dentro de um userns. Um «pool num ficheiro»
-   rootless não existe neste kernel.
-3. **`/dev/zfs` a `0600` não é a regra do OpenZFS, é a ausência do `zfsutils-linux`**: o pacote
-   instala a regra udev que o põe a `0666`, e é isso que torna a delegação `zfs allow` utilizável
-   por um não-root. Num host sem o pacote, a sonda diz «ZFS indisponível», nunca «ZFS sem
-   delegação».
+1. **Unprivileged `lvs` exits 0 with an empty list.** A driver that reads the exit status reads
+   «no VG» on a host that has VGs. This is the class already catalogued as «a `read` that fails is
+   not an empty answer». The rule (owner decision, D3.5): without sufficient privilege the answer
+   is **«could not determine»**, never «no pools».
+2. **On this host, without loop or device-mapper access, a btrfs/ext4 image in a file is of no use
+   rootless**: it is created, but cannot be mounted — not even inside a userns. Another host may
+   differ (a user in the `disk` group, a different kernel); the probe decides per host.
+3. **`/dev/zfs` at `0600` here is the absence of `zfsutils-linux`**, not an OpenZFS rule: the
+   package installs the udev rule that sets it to `0666`, which is what makes `zfs allow`
+   delegation usable by a non-root user. On a host without the package, the probe says «ZFS
+   unavailable», never «ZFS without delegation».
 
-### O que se leu e não se mediu (sem root, sem pool real)
+### What was read and not measured (no root, no real pool)
 
-- **btrfs**: `btrfs subvolume create` precisa só de escrita no directório pai; `subvolume delete`
-  sem privilégio precisa da opção de montagem `user_subvol_rm_allowed` (ou de o subvolume estar
-  vazio, kernel ≥ 4.18); snapshot de um subvolume que o utilizador possui é permitido; **quotas
-  (`quota enable`, `qgroup limit`) são ioctls de administração — root**. O btrfs não é montável
-  dentro de um userns (não tem `FS_USERNS_MOUNT`), por isso o pool tem de vir montado pelo
-  administrador.
+- **btrfs**: `btrfs subvolume create` needs only write access to the parent directory; an
+  unprivileged `subvolume delete` needs the `user_subvol_rm_allowed` mount option (or an empty
+  subvolume, kernel ≥ 4.18); a snapshot of a subvolume the user owns is allowed; **quotas
+  (`quota enable`, `qgroup limit`) are administrative ioctls — root**. btrfs cannot be mounted
+  inside a userns (it lacks `FS_USERNS_MOUNT`), so the pool has to be mounted by the administrator.
 - **ZFS**: `zfs allow <user> create,destroy,snapshot,rollback,clone,quota,refquota,volsize,mount`
-  delega operações num dataset; no Linux, a permissão `mount` delegada não chega sozinha (o
-  `mount(2)` exige `CAP_SYS_ADMIN`), excepto pela delegação a um user namespace do OpenZFS ≥ 2.2
-  (`zfs zone` / propriedade `zoned`). Um zvol aparece como `/dev/zd*` (`root:disk 0660`): um VMM
-  rootless só o abre com uma regra udev ou ACL dada pelo administrador.
-- **LVM-thin**: tudo passa pelo device-mapper — **root, sem delegação possível**. Um thin pool
-  cheio põe os LVs em erro de I/O; o `thin_pool_autoextend_threshold` do `lvm.conf` é
-  configuração do host, não do motor.
+  delegates operations on a dataset; on Linux a delegated `mount` permission is not enough by
+  itself (`mount(2)` needs `CAP_SYS_ADMIN`), except through OpenZFS ≥ 2.2's user-namespace
+  delegation (`zfs zone` / the `zoned` property). A zvol appears as `/dev/zd*` (`root:disk 0660`): a
+  rootless VMM opens it only with a udev rule or ACL granted by the administrator.
+- **LVM-thin**: everything goes through device-mapper — **root, no delegation possible**. A full
+  thin pool puts its LVs in I/O error; `thin_pool_autoextend_threshold` in `lvm.conf` is host
+  configuration, not the engine's.
 
-## Decisão
+## Decision
 
-### D1 — Uma porta `StoragePoolDriver` num contexto novo, `delonix-storage`
+### D1 — A `StoragePoolDriver` port in a new context, `delonix-storage`
 
-O contexto **storage** (`storage.delonix.io`, ADR-0040 D2.2) ganha o seu crate,
-`crates/contexts/delonix-storage`, com a forma que o `delonix-networking` tem desde o ADR-0059 D7:
-a porta, o registo por nome, as marcas de posse e os tipos puros do pedido. Entra na tabela
-`LAYERS` do `scripts/arch_fitness.py` como `CONTEXT` no mesmo commit em que o directório nasce.
+The **storage** context (`storage.delonix.io`, ADR-0040 D2.2) gets its crate,
+`crates/contexts/delonix-storage`, in the shape `delonix-networking` has had since ADR-0059 D7: the
+port, the registry by name, the ownership marks and the pure request types. It enters the `LAYERS`
+table of `scripts/arch_fitness.py` as `CONTEXT` in the same commit the directory is born.
 
 ```rust
 pub trait StoragePoolDriver: Send + Sync {
     fn id(&self) -> &'static str;                        // "dir" | "btrfs" | "zfs" | "lvm-thin"
-    fn probe(&self, pool: &PoolSpec) -> PoolProbe;       // ferramentas, módulo, privilégio, saúde — sem escrever
-    fn required(&self, op: PoolOp) -> Privilege;         // Unprivileged | Delegated(&'static str) | Root
-    fn adopt(&self, pool: &PoolSpec) -> Result<PoolState>;
-    fn create(&self, pool: &PoolSpec, owner: &Owner) -> Result<PoolState>;
-    fn destroy(&self, pool: &PoolState, owner: &Owner) -> Result<()>;
+    fn probe(&self, pool: &PoolRef) -> PoolProbe;        // tools, module, privilege, health — never writes
+    fn required(&self, op: PoolOp) -> Privilege;         // Unprivileged | Delegated(&'static str) | Helper
+    fn adopt(&self, pool: &PoolRef) -> Result<PoolState>;
     fn allocate(&self, pool: &PoolState, req: &VolumeRequest, owner: &Owner) -> Result<Allocation>;
-    fn resize(&self, a: &Allocation, bytes: u64) -> Result<()>;   // só crescer (como o rootfs da ADR-0058)
+    fn resize(&self, a: &Allocation, bytes: u64) -> Result<()>;   // grow only (like ADR-0058's rootfs)
     fn snapshot(&self, a: &Allocation, name: &str) -> Result<()>;
     fn rollback(&self, a: &Allocation, name: &str) -> Result<()>;
     fn clone_from(&self, snap: &SnapshotRef, req: &VolumeRequest, owner: &Owner) -> Result<Allocation>;
     fn release(&self, a: &Allocation, owner: &Owner) -> Result<()>;
-    fn usage(&self, pool: &PoolState) -> PoolUsage;      // data% e metadata% num thin pool; `unmeasured` com razão
+    fn usage(&self, pool: &PoolState) -> PoolUsage;      // data% and metadata% of a thin pool
 }
 ```
 
-- `VolumeRequest` tem uma forma: `Filesystem` (um directório montado — volume de container) ou
-  `Block` (um caminho de dispositivo ou ficheiro raw — disco de VM). Um driver que não serve uma
-  forma recusa-a pelo nome, nunca a aproxima.
-- **Os drivers são providers, um crate por backend** (`crates/providers/delonix-provider-btrfs`,
-  `-zfs`, `-lvm`), como o libvirt e o Cloud Hypervisor desde a P4b.4: dependem só da fundação e
-  do contexto, e a raiz de composição semeia-os com `registration()`. O driver **`dir`** é o
-  comportamento de hoje expresso como pool, e vive no `delonix-volume` (adaptador) — mudar o
-  sítio onde o directório de hoje vive não é desta decisão.
-- **Nenhum `if driver == …` fora do registo.** O CLI, o reconciliador e o compute pedem uma
-  `Allocation` pelo nome do pool.
-- Registar não faz I/O (ADR-0008); a sonda corre só quando o pool é usado ou listado.
+- `PoolProbe` is **three-valued**: `Available`, `Unavailable { missing }`, and
+  `Undetermined { reason, remedy }`. An empty listing obtained without the privilege to list is
+  `Undetermined` (D3.5), never `Available` with zero pools.
+- `VolumeRequest` has one shape: `Filesystem` (a mounted directory — a container volume) or `Block`
+  (a raw device or file path — a VM disk). A driver that does not serve a shape refuses it by name,
+  never approximates it.
+- **Pool creation and destruction are not on the port.** They are administrator operations
+  (D3.3, D5) performed by the helper's administrative command, never by the engine on behalf of a
+  manifest.
+- **The drivers are providers, one crate per backend** (`crates/providers/delonix-provider-btrfs`,
+  `-zfs`, `-lvm`), like libvirt and Cloud Hypervisor since P4b.4: they depend only on the
+  foundation and the context, and the composition root seeds them with `registration()`. The
+  **`dir`** driver is today's behaviour expressed as a pool, and lives in `delonix-volume`
+  (adapter).
+- **No `if driver == …` outside the registry.** The CLI, the reconciler and compute ask for an
+  `Allocation` by pool name.
+- Registering does no I/O (ADR-0008); the probe runs only when the pool is used or listed.
 
-### D2 — `kind: StoragePool`, e como `Volume` e as VMs o referem
+### D2 — `kind: StoragePool`, and how `Volume` and VMs refer to it
 
 ```yaml
 apiVersion: storage.delonix.io/v1alpha1
 kind: StoragePool
-metadata: { name: fast }
+metadata: { name: fast }        # must name a pool in the administrator's allowlist (D3.2)
 spec:
-  driver: lvm-thin            # dir | btrfs | zfs | lvm-thin
-  mode: adopt                 # adopt (omissão) | create
-  lvmThin: { vg: vg0, thinPool: dlx }            # create: + devices: [/dev/sdb], size: 500G
-  # zfs:   { dataset: tank/dlx }                 # create: + devices / layout
-  # btrfs: { path: /srv/dlx }                    # create: + device, mountpoint
-  # dir:   { path: /srv/volumes }
-  overcommit: { maxRatio: 2.0 }                  # tecto de thin provisioning; acima recusa alocar
+  overcommit: { maxRatio: 1.0 } # thin provisioning ceiling; above it, allocation is refused
   alertPct: 80
 ```
 
-- **Não tem namespace** (`Namespaced::Never`): um pool é recurso do nó. O motor não conhece
-  inquilinos; quem divide um pool por clientes é quem consome o motor, com volumes e quotas.
-- `kind: Volume` ganha `spec.pool: <nome>` e `spec.size`. Com `pool` a quota passa a ser a do
-  backend (dura onde ele a dá). `pool` é exclusivo com `nfs:`/`cifs:`/`webdav:`/`provision:` —
-  recusado em conjunto, nunca um ganha ao outro em silêncio. Sem `pool`, comportamento de hoje.
-- `kind: VirtualMachine` ganha `spec.storage.pool` (o disco de raiz) e `extraDisks[].pool`; na CLI,
-  `vm create --pool` e `volume create --pool <nome> --size <s>`. **Sem grupo de topo novo**: o
-  pool é endereçado pelos verbos genéricos `get|describe|delete storagepools` e por `apply -f`,
-  como a restruturação da CLI (B1, B5) já decidiu para os Kinds sem verbo próprio.
-- `stack plan` compara o que o pool **é** (lido do backend) e não o que o manifesto diz: um
-  `lvextend` feito à mão é deriva. Campos quentes: `overcommit`, `alertPct`, `size` a crescer.
-  Frios: `driver`, `mode`, identidade (`vg`/`dataset`/`path`) — recusados sem `--replace`, e um
-  `--replace` de um pool com volumes é sempre recusado (D5).
+- **A manifest never carries a device, a VG, a dataset or a mount path, and never a command.** The
+  Kind *uses* a pool the administrator declared (D3.2): its name is looked up in the allowlist, and
+  the driver and backing object come from there. A name not in the allowlist is refused before any
+  probe. Fields such as `devices`, `vg`, `dataset`, `path` or `mode: create` are refused by name,
+  never ignored.
+- **It has no namespace** (`Namespaced::Never`): a pool is a node resource. The engine knows no
+  tenants; whoever divides a pool among customers is whoever consumes the engine, with volumes and
+  quotas.
+- `kind: Volume` gets `spec.pool: <name>` and `spec.size`. With `pool`, the quota becomes the
+  backend's (hard where it gives one). `pool` is exclusive with `nfs:`/`cifs:`/`webdav:`/
+  `provision:` — refused together, never one silently winning. Without `pool`, today's behaviour.
+- `kind: VirtualMachine` gets `spec.storage.pool` (the root disk) and `extraDisks[].pool`; in the
+  CLI, `vm create --pool` and `volume create --pool <name> --size <s>`. **No new top-level group**:
+  the pool is addressed through the generic verbs `get|describe|delete storagepools` and through
+  `apply -f`, as the CLI restructuring (B1, B5) already decided for Kinds without a verb of their
+  own. `delete storagepools` unregisters the use; it never destroys the pool (D5).
+- `stack plan` compares what the pool **is** (read from the backend) and not what the manifest
+  says. Hot fields: `overcommit`, `alertPct`, a growing `size`.
 
-### D3 — Privilégio: o que corre sem root, o que pede delegação, o que pede root
+### D3 — Privilege, the helper, and the administrator's allowlist (owner decisions, 2026-10-02)
 
-Cada operação declara o privilégio (`required`), e o motor **sonda antes de escrever**. Faltando
-o privilégio, a recusa sai antes de qualquer comando com classe **69** (`Unavailable`, uma
-capacidade que este host não tem), com um código `DX-` do domínio storage escolhido contra o
-dicionário na implementação, e diz as três coisas: o que falta, porquê, e o que o administrador
-pode fazer. Não há válvula para «fingir»: uma operação que precisa de root não tem forma degradada.
+The owner decided, on 2026-10-02:
 
-| driver | adoptar um pool existente | volume `Filesystem` | volume `Block` (disco de VM) | quota dura | snapshot | criar o pool |
-|---|---|---|---|---|---|---|
-| `dir` | sem root | sem root (directório) | sem root (ficheiro qcow2/raw) | root (loop ext4, como hoje); rootless vigiada | sem root (cópia, como hoje) | sem root (`mkdir`) |
-| `btrfs` | sem root, num btrfs **montado pelo administrador** onde o utilizador escreve | sem root (subvolume) | sem root (ficheiro raw com `chattr +C`) | **root** (qgroups); rootless vigiada | sem root (snapshot de um subvolume próprio); apagar pede `user_subvol_rm_allowed` | root (`mkfs.btrfs` + mount) |
-| `zfs` | delegado (`zfs allow` + `/dev/zfs` legível) | delegado; montar pede root ou `zoned` (OpenZFS ≥ 2.2) — **a medir** | delegado (`zfs create -s -V`) + acesso ao `/dev/zd*` (regra udev do administrador) | delegado (`refquota`/`volsize`) | delegado | root (`zpool create`) |
-| `lvm-thin` | root | root (LV + `mkfs` + mount) | root (o VMM rootless precisa ainda de acesso ao `/dev/dm-*`) | root (tamanho do LV) | root (thin snapshot) | root (`pvcreate`/`vgcreate`/`lvcreate --type thin-pool`) |
+1. **Privileged operations for LVM-thin are accepted, but the engine as a whole never requires
+   root. Rootless stays the default.** Every operation that can run unprivileged (D3.4) runs in the
+   engine's own process; only the operations that need root cross into the helper.
+2. **Devices and pools are limited to an administrator allowlist**, and a manifest can never name a
+   device, a path or a command beyond it.
+3. **Pools are created only through explicit administrator configuration.**
+4. **Pool management runs through a restricted helper, or in an explicitly configured rootful node
+   service.** The choice and its reasons are below.
+5. **An unprivileged `lvs` exit 0 with empty output is never read as «no pools»**; the answer is
+   «could not determine», with an actionable diagnostic.
 
-- **`mode: create` exige root E uma escolha explícita**: os `devices` são nomeados no manifesto,
-  nunca descobertos; um dispositivo com assinatura de sistema de ficheiros (`blkid`) é recusado.
-  Sem uma flag `--wipe-devices` no `apply`, o motor nunca apaga uma assinatura. É o único caminho
-  que escreve em discos crus, e é o único que o motor nunca faz por omissão.
-- **Rootless-first quer dizer `adopt`**: o administrador cria o pool uma vez (como o drop-in de
-  delegação de cgroup), e o motor gere volumes dentro dele.
-- Um disco de VM `Block` num pool cujo dispositivo o VMM não consegue abrir em leitura-escrita é
-  recusado no `create`, com o caminho do dispositivo e o grupo/ACL em falta — antes de arrancar
-  um VMM que morreria com `Permission denied`.
+#### The allowlist
 
-### D4 — Como volumes de container e discos de VM se mapeiam em cada backend
+`/etc/delonix/storage-pools.yaml`, owned by root, mode `0644`, read by the engine and by the
+helper; **only root can write it**, and that write is the administrator's explicit configuration.
 
-| | `Filesystem` (container) | `Block` (VM) | imagem dourada partilhada |
-|---|---|---|---|
-| `dir` | directório | overlay qcow2 sobre a imagem (hoje) | backing file qcow2 (hoje) |
-| `btrfs` | subvolume | ficheiro raw no subvolume da VM, `+C` (sem CoW de dados) | volume-base por imagem, snapshot por VM |
-| `zfs` | dataset | zvol esparso (`-s`) | zvol-base por imagem + snapshot + `zfs clone` por VM |
-| `lvm-thin` | thin LV + ext4/xfs | thin LV | thin LV-base + thin snapshot por VM (`--setactivationskip n`) |
+```yaml
+pools:
+  fast:
+    driver: lvm-thin
+    vg: vg0
+    thinPool: dlx
+    create: { devices: [/dev/disk/by-id/nvme-SAMSUNG_X_1234] }   # optional; only `delonix-storage-helper create-pool` reads it
+    allowUsers: [walter]           # uids/groups allowed to allocate through the helper
+    maxVolumeBytes: 500G
+  tank:
+    driver: zfs
+    dataset: tank/dlx
+  media:
+    driver: btrfs
+    path: /srv/dlx                 # mounted by the administrator
+```
 
-- A imagem entra no pool **uma vez** (`qemu-img convert` do qcow2 do `VmImageStore` para o
-  volume-base, carimbado com o digest), e cada VM é um clone fino dela: o equivalente do backing
-  qcow2, nativo do backend. Um volume-base com clones vivos não se apaga (o ZFS recusa sozinho;
-  nos outros o motor conta os clones pelo carimbo).
-- Um `Block` num pool é **raw**: o qcow2 sobre um zvol ou LV duplicaria o thin provisioning e os
-  snapshots. Os dois backends locais aceitam um dispositivo raw (`--disk path=` no Cloud
-  Hypervisor, `<disk type='block'>` no libvirt). Os snapshots de VM (`vm snapshot`) passam a ser os
-  do pool quando o disco é de um pool; o snapshot de memória do libvirt (D4 do ADR-0050) fica
-  limitado a discos qcow2 e é recusado pelo nome num disco de pool.
-- O `rootfs` dos containers (o `upper` do overlay) **não** vai para pools nesta decisão.
-- **Proxmox fica como está**: `disk: <storage>:<gib>` nomeia o storage do nó; o pool do Proxmox é
-  do Proxmox, e a porta não o administra (ADR-0049 D3).
-- **O libvirt não é usado para gerir pools** (`virsh pool-define`): o motor teria uma segunda
-  noção de pool que o Cloud Hypervisor não tem, e neste host o libvirt não suporta `zfs`. O
-  backend libvirt consome a `Allocation` como qualquer outro.
+- The helper re-reads the file on every operation; the engine never passes it a path, a device or
+  an option — only a pool name, a volume name, a size and an operation.
+- Devices are named by stable `by-id`/`by-path` links and are canonicalised and compared after
+  resolution; a link that resolves to a different block device than at creation is refused.
 
-### D5 — O caminho destrutivo
+#### The helper: per-operation, socket-activated, no resident process (chosen)
 
-- **Posse por carimbo, no próprio objecto**: tags de LVM (`delonix.io_owner=<stack>/<nome>`,
-  `delonix.io_created=1`), propriedades de utilizador do ZFS (`delonix.io:owner`,
-  `delonix.io:created`), e no btrfs/dir um ficheiro `.delonix-pool.json` na raiz do pool e um por
-  volume. O carimbo leva só referências, nunca credenciais (ADR-0009).
-- **`delete storagepools <nome>` nunca destrói dados por omissão**: desregista. Destruir pede
-  `--destroy-data`, e mesmo assim é recusado se (1) o pool foi **adoptado** (`created` ausente),
-  (2) há volumes no pool sem o carimbo deste motor, ou (3) há volumes carimbados ainda referidos
-  por um container ou VM existente. Os volumes primeiro, o pool depois, o registo em último.
-- `stack destroy`/`--prune` de um `StoragePool` desregista; nunca destrói o pool, mesmo criado
-  pelo motor — destruir um pool é sempre um comando dado à mão.
-- Um `apply` que morre entre «LV criado» e «registo escrito» reencontra o objecto pelo carimbo no
-  apply seguinte e adopta-o, em vez de criar um segundo.
+Three mechanisms were evaluated against the daemonless principle (AGENTS.md: «what must persist
+belongs to systemd — unit, timer, socket activation»):
 
-### D6 — Thin provisioning: o motor recusa antes de o pool encher
-
-`overcommit.maxRatio` (omissão 1,0 — sem sobre-alocação) limita a soma dos tamanhos alocados
-face à capacidade; acima disso `allocate` recusa. Num thin pool, `usage` lê `data_percent` e
-`metadata_percent` (`lvs`, `zpool list`, `btrfs filesystem usage`); acima de `alertPct` o motor
-avisa e acima de 95 % recusa alocações novas. O autoextend continua do administrador.
-
-### D7 — O que fica fora
-
-- **Ceph/RBD e qualquer armazenamento partilhado entre nós**: `requires-external-component`
-  (um cluster Ceph que o motor não traz), como hoje; e a migração a quente continua bloqueada
-  pelo ADR-0031.
-- Montar o btrfs dentro de um userns: o kernel não o permite.
-- RAID/layout de vdevs além do declarado, encriptação nativa (ZFS/LUKS), deduplicação, replicação
-  (`zfs send`), resize a encolher.
-
-## Plano por fases
-
-| Fase | O quê | Ficheiros | Prova (bateria / caos) | Células |
+| Option | Resident process | Input surface | Who checks the caller | Verdict |
 |---|---|---|---|---|
-| **P0** | Porta, registo, `kind: StoragePool` com driver `dir`, recusa de privilégio, `volume create --pool` | `crates/contexts/delonix-storage/{lib,pool,registry,ownership,error}.rs`; `Cargo.toml`; `scripts/arch_fitness.py` (LAYERS); `crates/adapters/delonix-volume` (driver `dir`); `crates/contexts/delonix-stack/src/kinds.rs`; `bins/delonix-runtime-bin/src/cmd/{storage_pool,volume,schema}.rs`; `data/pt.po`; `docs/schema/v1/delonix.json`; `crates/contexts/delonix-compute/src/capability.rs` | check «storagepool dir: apply, volume com pool, plan sem diferenças, delete desregista sem apagar dados» | nenhuma ainda |
-| **P1** | btrfs (adopt num btrfs montado; subvolumes, snapshots; qgroups com root) | `crates/providers/delonix-provider-btrfs` | numa VM do laboratório (D1 do plano) com um disco extra: rootless num btrfs montado pelo root; caos `storagepool_apply_dies_midway` | `storage.zfs-btrfs` → partial |
-| **P2** | ZFS (adopt delegado; datasets, zvols, clones) | `crates/providers/delonix-provider-zfs` | VM do laboratório com `zfsutils-linux`; check da delegação `zfs allow` e da recusa sem ela; medir o mount delegado e o `zoned` | `storage.zfs-btrfs` → supported |
-| **P3** | LVM-thin (root) | `crates/providers/delonix-provider-lvm` | VM do laboratório; caos `storagepool_thin_full` (encher até ao limiar: alocação recusada antes de 100 %); check «rootless recusa com 69 sem chamar o `lvcreate`» (um `lvcreate` falso no PATH regista se foi chamado) | `storage.lvm-thin` → supported |
-| **P4** | Discos de VM em pools (volume-base + clone) para libvirt e Cloud Hypervisor | `crates/contexts/delonix-compute/src/ports.rs` (`LocalDiskImages` aceita um pool); `delonix-vm/src/local_ports.rs`; os dois crates de provider | check por backend: VM criada num pool de cada driver, arranca, snapshot e restore do pool, `vm rm` liberta o clone e deixa o base | `storage.pools` libvirt e CH → supported |
-| **P5** | `mode: create` (pool a partir de dispositivos) e `--destroy-data` | os três providers; `cmd/storage_pool.rs` | caos `storagepool_destroy_owned_only`: um pool adoptado nunca é destruído (ler um ficheiro depois), um volume sem carimbo bloqueia o destroy | — |
+| **A. Socket-activated helper** — `delonix-storage-helper.socket` with `Accept=yes` and a template `delonix-storage-helper@.service` (root, hardened unit), one process per connection, exits after one request | **None** (systemd holds the socket) | One typed request (JSON) per connection, validated against the allowlist | `SO_PEERCRED` uid/gid against `allowUsers`; socket mode `0660`, group `delonix-storage` | **Chosen** |
+| B. `sudoers` rule for a command (`walter ALL=(root) NOPASSWD: /usr/libexec/delonix-storage-helper *`) | None | An argv, with sudo's wildcard semantics | sudo | Rejected: argv wildcards in sudoers are a known injection surface; the policy ends up split between sudoers and the allowlist; prompts/TTY behaviour differs per host |
+| C. A resident root daemon | **Yes** | A long-lived socket server | itself | Rejected by the daemonless principle; would need its own ADR with evidence that A cannot work |
 
-As provas de P1–P5 precisam de root e de discos: correm **numa VM descartável** do laboratório,
-nunca no host. Uma célula só passa a `supported` com a evidência citada no relatório do provider
-(ADR-0050).
+In option A the helper process lives only for one request. The unit runs with `ProtectSystem=strict`,
+`ProtectHome=yes`, `PrivateTmp=yes`, `NoNewPrivileges=yes`, `CapabilityBoundingSet` limited to
+`CAP_SYS_ADMIN CAP_MKNOD CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER`, `DeviceAllow=` restricted to
+`/dev/mapper/control`, `/dev/zfs` and the allowlisted devices, and `ReadWritePaths=` limited to the
+allowlisted pool paths. No setuid binary is installed. The helper:
 
-## Alternativas consideradas
+- accepts only the operations `probe`, `allocate`, `resize`, `snapshot`, `rollback`, `clone`,
+  `release`, `usage`, `grant-device` (an ACL on the device node of a volume it allocated, for the
+  calling uid — what a rootless VMM needs to open a zvol or thin LV);
+- never accepts `create-pool` or `destroy-pool` over the socket: those are the administrative
+  command `delonix-storage-helper create-pool <name>` / `destroy-pool <name>`, run by root at a
+  terminal, which reads the `create:` block of the allowlist (D3.3, D5);
+- logs every operation to the journal with the caller's uid.
 
-- **Usar os pools do libvirt** (`virsh pool-*`): rejeitado (D4) — só serve um dos dois backends
-  locais, e neste host não suporta ZFS (medido).
-- **Um crate só para os três drivers**: menos crates, mas um driver ZFS a puxar a compilação do
-  LVM num host sem nenhum dos dois, e um provider por porta é a regra que o motor já segue.
-- **Só consumir pools feitos à mão (sem `create`)**: é o que o `adopt` dá, e é o caminho rootless;
-  o dono pediu gestão, e `create` fica atrás de root e de dispositivos nomeados.
-- **Pool rootless num ficheiro** (btrfs/ext4 numa imagem): medido impossível sem loop.
+**The explicitly configured rootful node service** is the second accepted mode: an engine started
+by the administrator as root (the way `delonix-cri.service` runs on a Kubernetes node) calls the
+same helper code **in-process**, against the same allowlist — no socket, but the same validation and
+the same refusals. It is selected by the administrator's configuration
+(`/etc/delonix/storage-pools.yaml: mode: in-process`), never inferred from `geteuid() == 0`.
 
-## Consequências
+When neither is configured, every operation that needs the helper is refused before any command,
+with exit class **69** (`Unavailable`) and a storage `DX-` code chosen against the dictionary at
+implementation time, naming what is missing and the remedy («enable
+`delonix-storage-helper.socket`, add your user to `allowUsers` of pool `fast`»).
 
-- O motor passa a poder escrever em discos crus — só com root, `mode: create`, dispositivos
-  nomeados e sem assinatura. É a fronteira que esta decisão move; precisa de uma passagem
-  `delonix-runtime-sec` antes da P5.
-- Um nó rootless ganha pools só onde o administrador preparou o terreno (montou o btrfs, delegou
-  o ZFS, deu acesso aos zvols). A recusa diz qual destes falta.
-- O laboratório de root (D1 do plano) passa a ser pré-requisito das fases P1–P5.
+#### What each driver needs
 
-## Perguntas em aberto para o dono
+| driver | volume `Filesystem` | volume `Block` (VM disk) | hard quota | snapshot | pool creation |
+|---|---|---|---|---|---|
+| `dir` | unprivileged (directory) | unprivileged (qcow2/raw file) | helper (loop ext4); otherwise monitored | unprivileged (copy) | administrator (`mkdir` + allowlist entry) |
+| `btrfs` | unprivileged (subvolume) on a btrfs **mounted by the administrator** where the user can write | unprivileged (raw file with `chattr +C`) | helper (qgroups); otherwise monitored | unprivileged (snapshot of an own subvolume); delete needs `user_subvol_rm_allowed` or the helper | administrator (`create-pool`: `mkfs.btrfs` + mount) |
+| `zfs` | delegated (`zfs allow` + readable `/dev/zfs`); mounting needs the helper or `zoned` (OpenZFS ≥ 2.2) — **to be measured** | delegated (`zfs create -s -V`) + device access via `grant-device` | delegated (`refquota`/`volsize`) | delegated | administrator (`create-pool`: `zpool create`) |
+| `lvm-thin` | helper (LV + `mkfs` + mount) | helper (thin LV) + `grant-device` | helper (LV size) | helper (thin snapshot) | administrator (`create-pool`: `pvcreate`/`vgcreate`/`lvcreate --type thin-pool`) |
 
-1. **Correr com privilégio**: aceita que `delonix` corra como root para LVM-thin e para criar
-   pools (como o `delonix-cri` já corre em root num nó Kubernetes), ou prefere um auxiliar
-   privilegiado mínimo (um binário `delonix-storage-helper` com capabilities, chamado por
-   socket) — o que seria um processo residente e pede o seu próprio ADR pelo princípio daemonless?
-2. A célula `storage.zfs-btrfs` junta dois backends. Partir em `storage.zfs` e `storage.btrfs`
-   (catálogo 1.3.0) ou manter, com `supported` só quando os dois tiverem prova?
-3. A omissão do `overcommit.maxRatio` (1,0 — sem sobre-alocação) é aceitável, ou o thin
-   provisioning deve sobre-alocar por omissão como o Proxmox?
-4. Os pools aparecem em `provider ls` sob o provider `linux` (o nó) ou cada driver é um provider
-   próprio (`btrfs`, `zfs`, `lvm-thin`) com coluna na matriz?
+- `create-pool` refuses a device with a filesystem signature (`blkid`) unless the administrator
+  passes `--wipe-devices` at the terminal.
+- A `Block` VM disk whose device the VMM cannot open read-write is refused at `create`, naming the
+  device and the missing ACL — before starting a VMM that would die on `Permission denied`.
+
+#### «Could not determine» is an answer
+
+Every listing that can be partial without privilege is classified, not trusted:
+
+- `lvs`/`vgs` run unprivileged are never interpreted. The LVM driver asks the helper; with no
+  helper, `probe` returns `Undetermined { reason: "LVM state needs root (lvs printed: P_global:aux:
+  open failed: Permission denied)", remedy: "enable delonix-storage-helper.socket" }`, and
+  `get storagepools` shows `UNKNOWN` in the state column, exit class 69 under
+  `--detailed-exitcode`.
+- The same rule for ZFS without a readable `/dev/zfs` and for btrfs qgroups.
+- A gate (unit test over captured output) fails if the LVM driver ever turns the warning-plus-empty
+  output into `Available`.
+
+### D4 — How container volumes and VM disks map onto each backend
+
+| | `Filesystem` (container) | `Block` (VM) | shared golden image |
+|---|---|---|---|
+| `dir` | directory | qcow2 overlay over the image (today) | qcow2 backing file (today) |
+| `btrfs` | subvolume | raw file in the VM's subvolume, `+C` (no data CoW) | base volume per image, snapshot per VM |
+| `zfs` | dataset | sparse zvol (`-s`) | base zvol per image + snapshot + `zfs clone` per VM |
+| `lvm-thin` | thin LV + ext4/xfs | thin LV | base thin LV + thin snapshot per VM (`--setactivationskip n`) |
+
+- The image enters the pool **once** (`qemu-img convert` from the `VmImageStore` qcow2 into the base
+  volume, stamped with the digest), and each VM is a thin clone of it: the backend-native equivalent
+  of the qcow2 backing file. A base volume with live clones is not deleted (ZFS refuses on its own;
+  in the others the engine counts the clones by stamp).
+- A `Block` in a pool is **raw**: qcow2 over a zvol or LV would duplicate thin provisioning and
+  snapshots. Both local backends accept a raw device (`--disk path=` in Cloud Hypervisor,
+  `<disk type='block'>` in libvirt). VM snapshots (`vm snapshot`) become the pool's when the disk is
+  in a pool; libvirt's memory snapshot is limited to qcow2 disks and is refused by name on a pool
+  disk.
+- Containers' `rootfs` (the overlay `upper`) does **not** move to pools in this decision.
+- **Proxmox stays as it is**: `disk: <storage>:<gib>` names the node's storage; Proxmox's pool is
+  Proxmox's, and the port does not administer it (ADR-0049 D3).
+- **libvirt is not used to manage pools** (`virsh pool-define`): the engine would gain a second
+  notion of pool that Cloud Hypervisor does not have, and on the tested host libvirt does not
+  support `zfs`. The libvirt backend consumes the `Allocation` like any other.
+
+### D5 — The destructive path
+
+- **Ownership by stamp, on the object itself**: LVM tags (`delonix.io_owner=<stack>/<name>`), ZFS
+  user properties (`delonix.io:owner`), and in btrfs/dir a `.delonix-volume.json` per volume. The
+  stamp carries only references, never credentials (ADR-0009).
+- **The engine never destroys a pool.** `delete storagepools <name>` unregisters the use;
+  `stack destroy`/`--prune` likewise. Destroying a pool is `delonix-storage-helper destroy-pool
+  <name>` run by root at a terminal, and it is refused while the pool holds a volume without this
+  engine's stamp, or a stamped volume still referenced by an existing container or VM; a pool the
+  allowlist does not mark `create:` (one that existed before the engine) is never destroyed, only
+  removed from the file by the administrator.
+- Volumes: `volume rm` releases a stamped volume through the driver (or the helper); volumes
+  first, the record last. An `apply` that dies between «LV created» and «record written» finds the
+  object again by its stamp on the next apply and adopts it, instead of creating a second.
+
+### D6 — Thin provisioning: the engine refuses before the pool fills
+
+`overcommit.maxRatio` (default 1.0 — no over-allocation; see open question 2) bounds the sum of
+allocated sizes against capacity; above it `allocate` refuses. In a thin pool, `usage` reads
+`data_percent` and `metadata_percent` (`lvs` via the helper, `zpool list`, `btrfs filesystem
+usage`); above `alertPct` the engine warns, and above 95 % it refuses new allocations. Autoextend
+stays the administrator's.
+
+### D7 — What stays out
+
+- **Ceph/RBD and any storage shared between nodes**: `requires-external-component` (a Ceph cluster
+  the engine does not ship), as today; live migration stays blocked by ADR-0031.
+- Mounting btrfs inside a userns: the kernel does not allow it.
+- vdev layouts beyond the declared, native encryption (ZFS/LUKS), deduplication, replication
+  (`zfs send`), shrinking.
+- A resident storage daemon (option C above).
+
+## Phased plan
+
+| Phase | What | Files | Proof (battery / chaos) | Cells |
+|---|---|---|---|---|
+| **P0** | Port, registry, allowlist reader, `kind: StoragePool` with the `dir` driver, three-valued probe, refusal by class 69, `volume create --pool` | `crates/contexts/delonix-storage/{lib,pool,registry,allowlist,ownership,error}.rs`; `Cargo.toml`; `scripts/arch_fitness.py` (LAYERS); `crates/adapters/delonix-volume` (`dir` driver); `crates/contexts/delonix-stack/src/kinds.rs`; `bins/delonix-runtime-bin/src/cmd/{storage_pool,volume,schema}.rs`; `data/pt.po`; `docs/schema/v1/delonix.json`; `crates/contexts/delonix-compute/src/capability.rs` | check «storagepool dir: apply, volume with pool, plan without differences, delete unregisters without deleting data»; check «a pool name not in the allowlist is refused; a manifest with `devices:` is refused by name» | none yet |
+| **P1** | The helper: `bins/delonix-storage-helper` (socket-activated), `dist/delonix-storage-helper.{socket,service}`, `create-pool`/`destroy-pool` admin commands, `install.sh --with-storage-helper` | new bin crate (BIN layer); `dist/`; `scripts/install.sh` | in a lab VM: socket refuses a uid not in `allowUsers` (`SO_PEERCRED`); a request naming a device is refused; no helper process remains after a request; check «without the helper, lvm-thin answers UNKNOWN with exit 69, and a fake `lvcreate` in PATH is never called» | — |
+| **P2** | btrfs (subvolumes, snapshots; qgroups through the helper) | `crates/providers/delonix-provider-btrfs` | in a lab VM with an extra disk: rootless on an admin-mounted btrfs; chaos `storagepool_apply_dies_midway` | `storage.btrfs` → supported (open question 1) |
+| **P3** | ZFS (delegated; datasets, zvols, clones) | `crates/providers/delonix-provider-zfs` | lab VM with `zfsutils-linux`; check of `zfs allow` delegation and of the refusal without it; measure delegated mount and `zoned` | `storage.zfs` → supported |
+| **P4** | LVM-thin (through the helper) | `crates/providers/delonix-provider-lvm` | lab VM; chaos `storagepool_thin_full` (filling to the threshold: allocation refused before 100 %); gate on the captured `lvs` warning-plus-empty output | `storage.lvm-thin` → supported |
+| **P5** | VM disks in pools (base volume + clone) for libvirt and Cloud Hypervisor, with `grant-device` for rootless VMMs | `crates/contexts/delonix-compute/src/ports.rs` (`LocalDiskImages` takes a pool); `delonix-vm/src/local_ports.rs`; both provider crates | check per backend: VM created in a pool of each driver boots, pool snapshot and restore, `vm rm` frees the clone and leaves the base | `storage.pools` libvirt and CH → supported |
+| **P6** | `destroy-pool` and the destructive guards | the helper; the three providers | chaos `storagepool_destroy_owned_only`: a pool without `create:` is never destroyed (read a file afterwards); an unstamped volume blocks the destroy | — |
+
+P1–P6 need root and disks: they run **in a disposable lab VM** (plan decision D1), never on a
+production host. A cell becomes `supported` only with the evidence cited in the provider report
+(ADR-0050). A `delonix-runtime-sec` pass over the helper's request surface is required before P1
+merges.
+
+## Alternatives considered
+
+- **Requiring root for the whole engine when pools are used**: rejected by the owner (D3.1).
+- **`sudoers` or a resident daemon for the privileged part**: evaluated in D3 and rejected.
+- **libvirt's pools** (`virsh pool-*`): rejected (D4) — they serve only one of the two local
+  backends, and on the tested host they do not support ZFS.
+- **One crate for the three drivers**: fewer crates, but a ZFS driver would pull the LVM build onto
+  a host with neither, and one provider per port is the rule the engine already follows.
+- **Pool creation from a manifest** (`mode: create` with `devices:`): rejected by the owner
+  (D3.2, D3.3): a manifest is not where raw devices are chosen.
+- **A rootless pool in a file** (btrfs/ext4 in an image): not possible on the tested host without
+  loop access; not offered.
+
+## Consequences
+
+- The engine never writes to a raw device on a manifest's word: only the administrator's
+  `create-pool`, on devices in the root-owned allowlist, with no signature unless
+  `--wipe-devices`. That is the boundary this decision moves.
+- A rootless node gains pools only where the administrator prepared the ground (allowlist, helper
+  socket, a mounted btrfs, ZFS delegation). The refusal says which one is missing.
+- The engine keeps running without root; the helper exists only for the duration of a request.
+- The root lab (plan D1) becomes a prerequisite of phases P1–P6.
+
+## Open questions (with a recommendation)
+
+1. **Split `storage.zfs-btrfs`?** *Recommendation:* split into `storage.zfs` and `storage.btrfs`
+   (catalogue 1.3.0, the old name kept as an alias in the report). The two backends have different
+   privilege models and different evidence; one cell would stay `partial` until the slower one is
+   proven, hiding a finished backend.
+2. **Over-allocation default?** *Recommendation:* keep `overcommit.maxRatio: 1.0` (no
+   over-allocation). A full LVM thin pool puts every LV into I/O errors; over-allocating by default
+   would make the worst failure mode the default, and an operator who wants Proxmox-style
+   over-allocation sets the ratio explicitly.
+3. **Provider ids?** *Recommendation:* report pools under the node's `linux` storage provider, one
+   capability row per driver (with question 1's split), instead of one provider per driver. The
+   drivers share the node, the allowlist and the helper; separate provider ids would multiply matrix
+   columns full of `unsupported-by-provider` for the other domains.
