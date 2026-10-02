@@ -3939,18 +3939,24 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
 fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
-    // `start` reasserts the desired state = running (clears the user's `stop`).
-    let _ = store.update(&c.id, |cur| {
-        cur.stopped_by_user = false;
-        true
-    });
-    c.stopped_by_user = false;
     if matches!(
         c.status,
         delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
+    // `start` reasserts the desired state = running (clears the user's `stop`).
+    //
+    // AFTER the refusal above, not before it: a `start` that starts nothing
+    // must not withdraw what a `stop` or an `rm -f` asked for. A process still
+    // exiting past their wait (DX-8101) is exactly a container that reads
+    // `Running` here, and clearing the mark on the way to «already running» let
+    // its supervisor restart it once the exit came.
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = false;
+        true
+    });
+    c.stopped_by_user = false;
 
     // Custom network: the SAME two-pass re-exec as `cmd_run` (see
     // `reexec_into_netns`). It was forgotten on the old `join_netns` path — which
@@ -6334,6 +6340,36 @@ mod discard_tests {
         let dir = leftover(&images, &c.id);
         discard_unstarted(&images, &store, &c.id);
         assert!(dir.exists(), "a real container's directory was purged");
+    }
+
+    /// **A `start` that is refused changes nothing.** A container still exiting
+    /// after a `stop` or an `rm -f` gave up on it (DX-8101) reads `Running`, and
+    /// the refused start used to clear `stopped_by_user` on its way out — the mark
+    /// that keeps the `--restart` supervisor from bringing it back. This test
+    /// process stands in for the init that has not exited.
+    #[test]
+    fn a_refused_start_keeps_the_stop_the_operator_asked_for() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let me = std::process::id() as i32;
+        let mut c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "dying".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(me);
+        c.pid_starttime = delonix_node::proc_starttime(me);
+        c.status = Status::Running;
+        c.stopped_by_user = true;
+        store.save(&c).unwrap();
+        let e = start_container(&images, &store, &c.id).unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(
+            store.load(&c.id).unwrap().stopped_by_user,
+            "a start that started nothing withdrew the requested stop"
+        );
     }
 
     /// A record that cannot be READ is not a record that does not exist: purging

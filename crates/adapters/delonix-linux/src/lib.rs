@@ -9145,6 +9145,10 @@ fn remove_waiting(
                         cur.short_id()
                     )));
                 }
+                // The intent goes into the record BEFORE the signal, as `stop`'s
+                // does: past the wait below the record is kept, and its
+                // supervisor reads it when the process exits at last.
+                record_removal_intent(store, &cur.id)?;
                 let _ = kill(Pid::from_raw(pid), signal);
                 if !wait_until_gone(pid, st, exit_ticks) {
                     return Err(Error::StillExiting(format!(
@@ -9174,6 +9178,35 @@ fn remove_waiting(
          the container is kept",
         cur.short_id()
     )))
+}
+
+/// Marks the container as one its operator wants gone, before a forced removal
+/// signals it: `stopped_by_user`, the desired state a `--restart` supervisor
+/// consults before it restarts.
+///
+/// **A removal that gives up is still a removal that was asked for.** `rm -f`
+/// keeps the record when the exit outlives its wait ([`Error::StillExiting`]),
+/// and the record said nothing about why the process had died: its supervisor
+/// read a dead container nobody had stopped and restarted it (measured twice on
+/// 2026-10-02, `--restart always` on a saturated disk: DX-8101, then `Up` with
+/// RESTARTS 1 once the exit came). With the mark the supervisor records
+/// `Stopped` and leaves; the container stays, stopped, for the `rm` the error
+/// asks for — or for a `start`, which clears the mark like after any `stop`.
+///
+/// A record already gone is the removal's own business a few lines below; any
+/// other failure stops the removal before anything was signalled.
+fn record_removal_intent(store: &impl StateRepository<Container>, id: &str) -> Result<()> {
+    let marked = store.update(id, |cur| {
+        if cur.stopped_by_user {
+            return false;
+        }
+        cur.stopped_by_user = true;
+        true
+    });
+    match marked {
+        Err(e) if !e.is_not_found() => Err(e.into()),
+        _ => Ok(()),
+    }
 }
 
 /// How many incarnations one `rm -f` stops before it gives up — see
@@ -9369,6 +9402,52 @@ mod remove_tests {
             "names what the process is doing: {msg}"
         );
         assert!(store.0.borrow().is_some(), "the record must survive: {msg}");
+    }
+
+    /// **A forced removal that gave up is still a removal the operator asked for.**
+    ///
+    /// Measured twice on 2026-10-02, `run -d --restart always` then `rm -f` on a
+    /// saturated disk: the SIGKILL was sent, the exit took minutes, `rm -f`
+    /// answered DX-8101 and kept the record — and when the process exited at
+    /// last its supervisor restarted it (`Up`, RESTARTS 1). The record said
+    /// nothing about the removal, so the supervisor read a dead container nobody
+    /// had stopped. `stop` records its intent before it signals; `rm -f` did not.
+    ///
+    /// This test is the supervisor: the parent of the process, running the same
+    /// `wait_and_record` and asking the same `resume_restart`. SIGWINCH stands in
+    /// for the SIGKILL whose exit outlives the budget.
+    #[test]
+    fn a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let mut c = record_of(&child);
+        c.restart_policy = Some("always".into());
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let err = remove_waiting(&store, &c, true, Signal::SIGWINCH, 2).unwrap_err();
+        assert!(matches!(err, Error::StillExiting(_)), "{err}");
+
+        // The exit comes at last, and the supervisor reaps and records it.
+        let _ = child.kill();
+        let status = wait_and_record(&store, &mut c).expect("the supervisor's wait");
+        // `wait_and_record` reaped it: `child` must not be waited on again.
+        std::mem::forget(child);
+        assert!(
+            delonix_compute::launch::should_restart("always", &status, 0),
+            "the policy alone would restart it ({status:?}) — the record has to say no"
+        );
+        let rec = store.0.borrow().clone().expect("the record is kept");
+        assert!(
+            !crate::supervise::resume_restart(Some(&rec)),
+            "the supervisor would restart a container `rm -f` was asked to remove"
+        );
+        assert_eq!(
+            rec.status,
+            Status::Stopped,
+            "a kill the operator asked for is not a crash"
+        );
+        assert_eq!(rec.pid, None);
     }
 
     /// **A start that fails after the `clone` reaps its child before it returns.**

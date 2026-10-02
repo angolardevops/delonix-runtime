@@ -5863,7 +5863,20 @@ checklist para quem mexer aqui do que como lista de correcções:
   simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste
   de «espera pela saída», o sujeito tem de demorar a sair. **Para reproduzir ao vivo, um `dd`
   isolado não chega** (6 GB acabam em 3 s, antes das remoções, e o binário antigo passou);
-  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda;
+  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda.
+  **E manter o registo não chega: tem de dizer PORQUÊ o processo vai morrer** (2026-10-02, visto
+  duas vezes com o disco saturado): `run -d --restart always` + `rm -f` devolveu `DX-8101`,
+  manteve o registo como a regra manda — e quando o processo saiu por fim o supervisor
+  reiniciou-o (`Up`, RESTARTS 1). O `stop` marca `stopped_by_user` antes de sinalizar; o `rm -f`
+  não marcava nada, e o supervisor leu «morto e ninguém o parou». Agora o `remove_waiting`
+  regista a intenção antes do sinal (`record_removal_intent`), e um `start` recusado com
+  «already running» deixou de limpar a marca pelo caminho — o processo que ainda está a sair é
+  exactamente um container que lê `Running`. O container fica `Stopped` à espera do `rm` que o
+  erro pede; um `start` posterior traz-o de volta como depois de qualquer `stop`. **Gates**:
+  `a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor` (o teste É o supervisor: pai
+  do processo, o mesmo `wait_and_record` e o mesmo `resume_restart`) e
+  `a_refused_start_keeps_the_stop_the_operator_asked_for`, ambos vermelhos com a correcção
+  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**;
 - **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
   registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
   os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,

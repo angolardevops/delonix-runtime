@@ -52,7 +52,7 @@ fn handshake_reason(e: &Error) -> String {
 /// and when the container is already live — a `container start` in the backoff
 /// window brought up its own incarnation with its own supervisor, and restarting
 /// here too would run the command twice in one container.
-fn resume_restart(current: Option<&Container>) -> bool {
+pub(crate) fn resume_restart(current: Option<&Container>) -> bool {
     match current {
         None => false,
         Some(cur) => !cur.stopped_by_user && !cur.is_live(),
