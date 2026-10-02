@@ -101,7 +101,9 @@ never rewritten — supersede them with a new one.
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
 - **0065** — IPv6 in the SDN dataplane: one `table inet` instead of `ip` + an `ip6` refusal,
   v6 addresses derived from the v4 lease (no second IPAM), static assignment and AAAA in the
-  holder's DNS, NAT66 egress through slirp, opt-in per network (`--ipv6`) until a gate proves every
-  IPv4 isolation property on IPv6. The spike found the IPv4 anti-spoof inert (`iifname <veth>` in
-  `forward` sees the bridge, not the port); anti-spoof moves to `table bridge` (P0). *Proposed*;
-  written in Portuguese.
+  holder's DNS, NAT66 egress through slirp. Opt-in per network (`--ipv6`); the default is
+  considered only in a major after six gates (isolation, DNS, routing, firewall, port publishing,
+  provider compatibility). v6 publishing is refused by measured backend capability (slirp4netns
+  1.2.1 cannot), never converted to IPv4. v6 anti-spoof extends the `table bridge` of the separate
+  IPv4 anti-spoof security fix (P0), whose bug the spike found. *Proposed*; a pt-AO review copy
+  sits next to it.
