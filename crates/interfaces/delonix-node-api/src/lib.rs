@@ -3,16 +3,18 @@
 //!
 //! What is served today, and it is said here so nobody reads the socket as the
 //! whole contract: `NodeService.ListProviders` (ADR-0050 D5) — the same
-//! `ProviderInfo` per provider that `delonix provider ls -o json` prints, built
-//! from the same declarations and the same host probes. The other `NodeService`
-//! RPCs answer `UNIMPLEMENTED` with the ADR step that brings them; every other
-//! service of the contract is not registered on this socket at all.
+//! `ProviderInfo` per provider that `delonix provider ls -o json` prints — and
+//! `GetNodeInfo`, `GetHealth` and `GetCapacity` (ADR-0042 step C), computed from
+//! the same functions `delonix system info` reads. `GET /openapi.json` serves
+//! the published document. `WatchEvents` answers `UNIMPLEMENTED` with the step
+//! that brings it; every other service of the contract is not registered on
+//! this socket at all.
 //!
 //! Both encodings come from the same `proto/` files: the gRPC stubs and the
 //! proto3 JSON (`pbjson`, proto field names — what the published OpenAPI
 //! declares). The HTTP route for a `google.api.http` annotation is written by
-//! hand for now (`GET /v1/providers`, the only one); a generic transcoder over
-//! the annotations is the step after this one, recorded in ADR-0042.
+//! hand for now (the four GET routes of `NodeService`); a generic transcoder
+//! over the annotations is a later slice of ADR-0042 step C.
 //!
 //! `delonix serve node-api` runs the `delonix-node-api` binary, which calls
 //! [`serve_blocking`]. The socket is `0600` and every accepted connection is
@@ -30,10 +32,13 @@ pub mod proto {
     }
 }
 
+pub mod node;
 pub mod providers;
 mod service;
 
-pub use service::{list_providers, router, NodeApi};
+pub use service::{
+    capacity, health, list_providers, node_info, openapi_document, router, NodeApi, OPENAPI_YAML,
+};
 
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
 /// path or `unix:///path`. Same pattern as `delonix_mgmt::serve_blocking`.

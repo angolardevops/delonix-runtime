@@ -21,6 +21,7 @@ delonix-proxmox = { workspace = true }
 delonix-linux = { workspace = true }
 delonix-sdn = { workspace = true }
 delonix-volume = { workspace = true }
+delonix-state = { workspace = true }
 delonix-opnsense = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
@@ -28,6 +29,7 @@ pbjson = { workspace = true }
 pbjson-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync"] }
 tokio-stream = { workspace = true }

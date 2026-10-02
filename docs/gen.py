@@ -1457,11 +1457,14 @@ ADR-0010 primeiro: não é uma API remota nem multi-tenant.""",
         "tagline": "O contrato de nó (gRPC + HTTP/JSON do delonix.node.v1) num socket unix.",
         "intro": """O contrato versionado <code>proto/delonix/node/v1</code> servido pelo binário
 <code>delonix-node-api</code> (ADR-0040 P5): gRPC e HTTP/JSON dos MESMOS ficheiros, num socket
-unix local, só para o próprio uid. Hoje serve <code>NodeService.ListProviders</code> —
+unix local, só para o próprio uid. Hoje serve o <code>NodeService</code>:
 <code>GET /v1/providers[?kind=]</code> devolve os mesmos providers e capacidades que
-<code>delonix provider ls -o json</code> (ADR-0050 D5); os restantes RPCs do serviço respondem
-<code>UNIMPLEMENTED</code> a nomear o passo do ADR-0042 que os traz. O OpenAPI gerado está em
-<code>docs/api/openapi.yaml</code>.""",
+<code>delonix provider ls -o json</code> (ADR-0050 D5), e <code>GET /v1/node</code>,
+<code>/v1/node/health</code> e <code>/v1/node/capacity</code> dizem o que o nó é, se pode correr
+workloads e que espaço tem (ADR-0042 passo C) — um valor que não se mediu vem nomeado em
+<code>unmeasured</code>, nunca como zero. <code>GET /openapi.json</code> serve o documento gerado
+(<code>docs/api/openapi.yaml</code>); o <code>WatchEvents</code> responde <code>UNIMPLEMENTED</code>
+a nomear o passo que o traz.""",
         "subs": {},
     },
     "manifest": {
@@ -2008,11 +2011,14 @@ ADR-0010 first: it is not a remote or multi-tenant API.""",
         "tagline": "The node contract (gRPC + HTTP/JSON of delonix.node.v1) on a unix socket.",
         "intro": """The versioned contract <code>proto/delonix/node/v1</code> served by the
 <code>delonix-node-api</code> binary (ADR-0040 P5): gRPC and HTTP/JSON from the SAME files, on a
-local unix socket, for the owning uid only. Today it serves <code>NodeService.ListProviders</code>
-— <code>GET /v1/providers[?kind=]</code> returns the same providers and capabilities as
-<code>delonix provider ls -o json</code> (ADR-0050 D5); the service's other RPCs answer
-<code>UNIMPLEMENTED</code> naming the ADR-0042 step that brings them. The generated OpenAPI is
-<code>docs/api/openapi.yaml</code>.""",
+local unix socket, for the owning uid only. Today it serves the <code>NodeService</code>:
+<code>GET /v1/providers[?kind=]</code> returns the same providers and capabilities as
+<code>delonix provider ls -o json</code> (ADR-0050 D5), and <code>GET /v1/node</code>,
+<code>/v1/node/health</code> and <code>/v1/node/capacity</code> say what the node is, whether it can
+run workloads and what room it has (ADR-0042 step C) — a value that was not measured is named in
+<code>unmeasured</code>, never reported as zero. <code>GET /openapi.json</code> serves the generated
+document (<code>docs/api/openapi.yaml</code>); <code>WatchEvents</code> answers
+<code>UNIMPLEMENTED</code> naming the step that brings it.""",
     },
     "manifest": {
         "tagline": "Work on a manifest without touching the host — render with defaults filled in.",
