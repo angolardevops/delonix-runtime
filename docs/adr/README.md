@@ -99,3 +99,9 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0065** — IPv6 in the SDN dataplane: one `table inet` instead of `ip` + an `ip6` refusal,
+  v6 addresses derived from the v4 lease (no second IPAM), static assignment and AAAA in the
+  holder's DNS, NAT66 egress through slirp, opt-in per network (`--ipv6`) until a gate proves every
+  IPv4 isolation property on IPv6. The spike found the IPv4 anti-spoof inert (`iifname <veth>` in
+  `forward` sees the bridge, not the port); anti-spoof moves to `table bridge` (P0). *Proposed*;
+  written in Portuguese.

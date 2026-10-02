@@ -1,0 +1,14 @@
+expr=[icmpv6 taddr != fd65:1::a] apply_rc=0
+		oifname "tap0" masquerade
+		ip6 saddr fd65:1::/64 oifname "tap0" masquerade
+		iifname "vh-a" ip6 saddr != fd65:1::a counter packets 0 bytes 0 drop
+		iifname "vh-a" icmpv6 type nd-router-advert counter packets 0 bytes 0 drop
+		iifname "vh-a" icmpv6 type nd-neighbor-advert icmpv6 taddr != fd65:1::a counter packets 0 bytes 0 drop
+/dev/stdin:6:89-97: Error: Could not parse integer
+add rule bridge dlxbr2 brfw iifname "vh-a" icmpv6 type nd-neighbor-advert @th,64,128 != fd65:1::a counter drop
+                                                                                        ^^^^^^^^^
+expr=[@th,64,128 != fd65:1::a] apply_rc=1
+		oifname "tap0" masquerade
+Error: No such file or directory
+list table bridge dlxbr2
+                  ^^^^^^

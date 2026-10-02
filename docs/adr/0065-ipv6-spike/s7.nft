@@ -1,0 +1,16 @@
+table bridge dlxspoof {
+  set ports { type ifname; elements = { "vh-a" } }
+  set port4 { type ifname . ipv4_addr; elements = { "vh-a" . 10.9.0.2 } }
+  set port6 { type ifname . ipv6_addr; elements = { "vh-a" . fd65:1::a, "vh-a" . fe80::1 } }
+  set portmac { type ifname . ether_addr; elements = { "vh-a" . 02:00:00:00:00:0a } }
+  chain pre {
+    type filter hook prerouting priority -300;
+    iifname @ports iifname . ether saddr != @portmac counter drop
+    iifname @ports ether type arp iifname . arp saddr ip != @port4 counter drop
+    iifname @ports ether type ip iifname . ip saddr != @port4 counter drop
+    iifname @ports ether type ip6 ip6 saddr != :: iifname . ip6 saddr != @port6 counter drop
+    iifname @ports icmpv6 type { nd-router-advert, nd-redirect } counter drop
+    iifname @ports icmpv6 type nd-neighbor-advert iifname . icmpv6 taddr != @port6 counter drop
+    iifname @ports meta l4proto udp udp sport 547 counter drop
+  }
+}
