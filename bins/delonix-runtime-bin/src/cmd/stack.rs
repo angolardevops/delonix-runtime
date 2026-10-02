@@ -88,7 +88,7 @@ pub enum StackCmd {
         /// Overwrites already existing files.
         #[arg(long)]
         force: bool,
-        /// Generates a complete PROJECT for a stack (e.g. `python`) with best practices,
+        /// Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices,
         /// instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -101,6 +101,8 @@ pub enum StackCmd {
         /// After generating, builds the image, starts it and waits for it to become healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Applies all the manifest Kinds (Network → Volume → Image → Vm → Container).
     Apply {
@@ -117,12 +119,20 @@ pub enum StackCmd {
         /// Authorize DESTROYING and recreating a resource whose change does not
         /// converge live: `--replace <Kind>/<name>` (repeatable), or
         /// `--replace all`. Without it, `apply` refuses and changes nothing.
+        /// A `<Kind>/<name>` also recreates that resource when the plan shows
+        /// no change for it (a field the plan does not compare, like `env`).
         #[arg(long = "replace", value_name = "KIND/NAME")]
         replace: Vec<String>,
         /// Also REMOVE what this stack owns and the manifest no longer declares.
         /// Never happens without this flag.
         #[arg(long = "prune")]
         prune: bool,
+        /// Apply only if this is still the plan: a `planDigest` from `stack
+        /// plan -o json` (repeatable, one per network document). A network
+        /// document whose digest, recomputed now, is not among them is a
+        /// stale plan — refused before anything is written.
+        #[arg(long = "plan-digest", value_name = "DIGEST")]
+        plan_digest: Vec<String>,
     },
     /// Removes everything this stack owns (by the `delonix.io/stack` label).
     ///
@@ -301,6 +311,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return init_for(
@@ -312,6 +323,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     match action {
@@ -323,6 +335,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             dry_run,
             replace,
             prune,
+            plan_digest,
         } => {
             if dry_run {
                 let path = manifest::resolve_path(file)?;
@@ -330,7 +343,7 @@ pub fn run(action: StackCmd) -> Result<()> {
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file, name, replace, prune)
+                apply(file, name, replace, prune, plan_digest)
             }
         }
         StackCmd::Plan {
@@ -477,6 +490,12 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
     // for mount helpers and a hypervisor, and doing it per resource would make a
     // plan of twenty volumes twenty times slower for twenty identical answers.
     let env = super::conditions::Env::probe();
+    // What each existing container/VM was CREATED with, read once for the whole
+    // plan (see `conditions::CREATED_SPEC`). A store that cannot be read degrades
+    // to «no record», which only makes the warning say «not verifiable» — the
+    // conservative side; it never hides one.
+    let created_containers = super::container::created_specs().unwrap_or_default();
+    let created_vms = super::vm::created_specs().unwrap_or_default();
     for c in changes.iter_mut() {
         // A deletion candidate is not in the manifest at all — there is no
         // document to derive prerequisites from, and it is on its way out.
@@ -502,8 +521,17 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // (see the ADR on the reboot class): converging these means rebooting
         // the VM, which is a capability, whereas saying so is honesty. The
         // engine ships the honesty first.
-        if c.kind == k::VM && c.action != reconcile::Action::Create {
-            if let Some(cond) = super::vm::unconverged_fields_condition(doc) {
+        //
+        // Nor on a `Replace`: the recreate applies the whole spec too, so after
+        // it the warning would be false the moment it was printed.
+        let recreated = matches!(
+            c.action,
+            reconcile::Action::Create | reconcile::Action::Replace
+        );
+        if c.kind == k::VM && !recreated {
+            if let Some(cond) =
+                super::vm::unconverged_fields_condition(doc, created_vms.get(&c.name))
+            {
                 c.conditions.push(cond);
             }
         }
@@ -513,8 +541,10 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // `--detailed-exitcode` 0, ou seja um gate de deriva em CI verde por cima
         // de deriva real. O raciocínio já estava escrito aqui em cima e aplicava-se
         // só ao `Vm`; era o Container que precisava dele mais.
-        if c.kind == k::CONTAINER && c.action != reconcile::Action::Create {
-            if let Some(cond) = super::container::unconverged_fields_condition(doc) {
+        if c.kind == k::CONTAINER && !recreated {
+            if let Some(cond) =
+                super::container::unconverged_fields_condition(doc, created_containers.get(&c.name))
+            {
                 c.conditions.push(cond);
             }
         }
@@ -774,7 +804,15 @@ fn plan_cmd(
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
-    let changes = build_plan(&docs, &stack)?;
+    let mut changes = build_plan(&docs, &stack)?;
+    for c in &mut changes {
+        if let Some(doc) = docs
+            .iter()
+            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+        {
+            c.plan_digest = network_plan_digest(doc)?;
+        }
+    }
     let any = changes.iter().any(|c| c.changed);
     match output {
         super::output::OutputFormat::Json => super::output::print_json(&changes)?,
@@ -796,6 +834,12 @@ fn plan_cmd(
 /// not change with the locale).
 fn explain(c: &Change) -> Option<String> {
     match c.action {
+        // A `Replace` with no cold field is one the operator asked for by name
+        // (`promote_named_replaces`): nothing differs, and saying «does not
+        // converge live: » with an empty list would read as a bug.
+        Action::Replace if c.cold_fields.is_empty() => {
+            Some(super::po::t("recreate requested with `--replace`").to_string())
+        }
         Action::Replace => Some(super::po::tf(
             "does not converge live: {fields}",
             &[("fields", &c.cold_fields.join(", "))],
@@ -1408,6 +1452,74 @@ fn replace_matches(token: &str, c: &Change) -> bool {
     }
 }
 
+/// An explicit `--replace <Kind>/<name>` recreates that resource even when the
+/// plan has no diff for it.
+///
+/// The reconciler compares a subset of each Kind's spec. For the rest the plan
+/// attaches `Converged=False (FieldsNotCompared)` and tells the operator to
+/// recreate with `--replace Container/<name>` — and that flag used to do
+/// nothing: it only authorised changes the plan ALREADY proposed as `Replace`,
+/// and an uncompared field never makes one. Measured 2026-10-02: an `env:`
+/// changed on a running container, `stack apply --replace Container/<name>`
+/// returned 0, and `container inspect` still showed the old env. The only path
+/// that worked was `container rm -f` and a second apply.
+///
+/// So the operator naming a resource IS the diff: it becomes a `Replace` here,
+/// before [`refuse_unallowed`], and from then on it goes through exactly the
+/// path every other recreate takes (`destroy_for_replace`, the creation layers,
+/// the stamp) — no second recreate path to drift from the first.
+///
+/// What is deliberately NOT promoted:
+/// - `--replace all` and a bare name. `all` authorises what the plan proposes;
+///   making it recreate every resource of the stack would turn a permission
+///   into a demolition. A bare name can match several Kinds at once (a
+///   `Container/db` and a `Volume/db`), and a forced recreate of a volume
+///   discards its data — only the `Kind/name` form says which one.
+/// - `Create`, `Replace`, `Delete`, `Conflict`: already decided (the conflict
+///   is still refused by `refuse_unallowed`, whatever was named).
+///
+/// What is refused instead of ignored, before anything is touched: a Kind the
+/// plan cannot recreate (ensure-present, or no teardown). Ignoring it would be
+/// this same defect again — a flag that reads as obeyed and changes nothing.
+fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Result<Vec<Change>> {
+    for c in changes.iter_mut() {
+        let named = replace
+            .iter()
+            .any(|r| r.contains('/') && replace_matches(r, c));
+        if !named {
+            continue;
+        }
+        match c.action {
+            Action::NoOp | Action::Update | Action::Adopt => {}
+            Action::NotConverged => {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--replace {kind}/{name}: this Kind is ensure-present in this version and \
+                     cannot be recreated by `stack apply` (nothing was changed)",
+                    &[("kind", &c.kind), ("name", &c.name)],
+                )))
+            }
+            _ => continue,
+        }
+        if !super::kinds::has_teardown(&c.kind) {
+            let why = no_teardown_reason(&c.kind)
+                .map(|w| super::po::t(w).to_string())
+                .unwrap_or_else(|| "removing this Kind declaratively is not implemented".into());
+            return Err(delonix_model::Error::Invalid(format!(
+                "--replace {}/{}: {why}",
+                c.kind, c.name
+            )));
+        }
+        c.action = Action::Replace;
+        // English, like every `reason`: it is part of the `-o json` payload.
+        c.reason = Some("recreate requested by --replace".to_string());
+        // The recreate applies the whole spec: «not applied to the existing
+        // container» would be false by the end of this very apply, which is
+        // when the conditions are printed.
+        c.conditions.retain(|x| x.reason != "FieldsNotCompared");
+    }
+    Ok(changes)
+}
+
 fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     let allow_all = replace.iter().any(|r| r == "all");
     let mut blocked = Vec::new();
@@ -1459,6 +1571,7 @@ fn apply(
     name: Option<String>,
     replace: Vec<String>,
     do_prune: bool,
+    plan_digests: Vec<String>,
 ) -> Result<()> {
     // `--replace` is the flag that AUTHORIZES a destructive recreate, so a value
     // it cannot possibly match is refused here rather than ignored. Accepting
@@ -1482,7 +1595,60 @@ fn apply(
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
+    refuse_stale_plan(&docs, &plan_digests)?;
     apply_docs(&docs, &path, name.as_deref(), replace, do_prune, None)
+}
+
+/// The digest of one document's plan, for the Kinds that have one (ADR-0059
+/// D4): those whose plan is decided from a remote provider's state.
+fn network_plan_digest(doc: &manifest::ManifestDoc) -> Result<Option<String>> {
+    match doc.kind.as_str() {
+        k::NETWORK_GATEWAY => super::network_gateway::plan_digest(doc),
+        k::NETWORK_ZONE => super::network_zone::plan_digest(doc),
+        _ => Ok(None),
+    }
+}
+
+/// `--plan-digest`: every network document's digest, recomputed now, has to
+/// be one of those given — the `If-Match` rule applied to a plan. Checked
+/// before the first write; without the flag nothing is checked and `apply`
+/// plans and applies in one invocation, as it always has.
+fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result<()> {
+    if given.is_empty() {
+        return Ok(());
+    }
+    let mut checked = 0;
+    for doc in docs {
+        let id = format!("{}/{}", doc.kind, doc.metadata.name);
+        let now = match doc.kind.as_str() {
+            k::NETWORK_GATEWAY | k::NETWORK_ZONE => network_plan_digest(doc)?.ok_or_else(|| {
+                delonix_model::Error::from(delonix_networking::Error::StalePlan(format!(
+                    "{id}: no plan digest can be computed (no provider resolves for it), so \
+                     the plan it was given cannot be confirmed — nothing was written"
+                )))
+            })?,
+            _ => continue,
+        };
+        checked += 1;
+        if !given.iter().any(|g| g == &now) {
+            return Err(delonix_networking::Error::StalePlan(format!(
+                "{id}: the plan is stale — its digest is now {now}, which is not among the \
+                 --plan-digest given. The manifest, what the provider holds, the provider or \
+                 its capabilities changed since the plan. Nothing was written; plan again"
+            ))
+            .into());
+        }
+    }
+    if checked == 0 {
+        return Err(delonix_model::Error::Invalid(
+            super::po::t(
+                "--plan-digest was given, and the manifest has no network document with a plan \
+             digest (kind: NetworkGateway, NetworkZone) — nothing would be checked",
+            )
+            .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The apply itself, on documents already in hand.
@@ -1531,9 +1697,11 @@ fn apply_docs(
     // the misspelling that caused it.
     if !replace.iter().any(|r| r == "all") {
         for r in &replace {
-            let hits = changes
-                .iter()
-                .any(|c| format!("{}/{}", c.kind, c.name) == *r || c.name == *r);
+            // The same predicate `refuse_unallowed` authorises with. This check
+            // used to be raw equality against the canonical `Kind/name`, so
+            // `--replace container/web` — which `replace_matches` accepts — was
+            // refused here as a typo before it could authorise anything.
+            let hits = changes.iter().any(|c| replace_matches(r, c));
             if !hits {
                 return Err(delonix_model::Error::Invalid(super::po::tf(
                     "--replace '{value}': no resource with that name in this manifest \
@@ -1543,6 +1711,7 @@ fn apply_docs(
             }
         }
     }
+    let changes = promote_named_replaces(changes, &replace)?;
     refuse_unallowed(&changes, &replace)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
@@ -1734,7 +1903,9 @@ fn salvage_ownership(docs: &[manifest::ManifestDoc], stack: &str, changes: &[Cha
             &[("n", &present.len().to_string())],
         )
     );
-    if let Err(e) = stamp_all(docs, stack, Some(&present)) {
+    // Everything in `present` was CREATED by this apply (`Action::Create`), so
+    // it is also what gets the creation record.
+    if let Err(e) = stamp_all(docs, stack, Some(&present), &present) {
         eprintln!(
             "{}",
             super::po::tf(
@@ -2253,8 +2424,29 @@ fn converge_and_stamp(
     // Re-derive the desired fields from the manifest (not from the plan): the
     // stamp must record what was ASKED for, which is also what the next run will
     // compare against.
-    stamp_all(docs, stack, None)?;
+    // What this apply CREATED — fresh, or destroyed and rebuilt — is the only
+    // thing whose creation record may be (re)written.
+    let created: std::collections::BTreeSet<(String, String)> = changes
+        .iter()
+        .filter(|c| matches!(c.action, Action::Create | Action::Replace))
+        .map(|c| (c.kind.clone(), c.name.clone()))
+        .collect();
+    stamp_all(docs, stack, None, &created)?;
     Ok(())
+}
+
+/// The manifest document of a resource this apply created, if it did.
+fn created_doc<'a>(
+    docs: &'a [manifest::ManifestDoc],
+    created: &std::collections::BTreeSet<(String, String)>,
+    kind: &str,
+    name: &str,
+) -> Option<&'a manifest::ManifestDoc> {
+    if !created.contains(&(kind.to_string(), name.to_string())) {
+        return None;
+    }
+    docs.iter()
+        .find(|d| d.kind == kind && d.metadata.name == name)
 }
 
 /// Stamps ownership + last-applied on what the manifest declares.
@@ -2262,10 +2454,15 @@ fn converge_and_stamp(
 /// `only` restricts it to a set of `(kind, name)`. `None` means «everything the
 /// manifest declares», which is the successful path: every layer ran, so every
 /// declared resource is on the machine with the spec that was asked for.
+///
+/// `created` is what this apply created; only those get the creation record
+/// ([`super::conditions::CREATED_SPEC`]) — a resource left alone keeps the one
+/// it was created with, which is what makes it worth comparing against.
 fn stamp_all(
     docs: &[manifest::ManifestDoc],
     stack: &str,
     only: Option<&std::collections::BTreeSet<(String, String)>>,
+    created: &std::collections::BTreeSet<(String, String)>,
 ) -> Result<()> {
     for d in desired_of(docs)? {
         if !super::kinds::converges(&d.kind) {
@@ -2277,7 +2474,11 @@ fn stamp_all(
             }
         }
         let r = match d.kind.as_str() {
-            k::CONTAINER => super::container::stamp(&d.name, stack, &d.fields),
+            k::CONTAINER => {
+                let spec = created_doc(docs, created, &d.kind, &d.name)
+                    .and_then(super::container::created_spec_of);
+                super::container::stamp(&d.name, stack, &d.fields, spec.as_ref())
+            }
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
@@ -2290,7 +2491,11 @@ fn stamp_all(
                 super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
             }
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
-            k::VM => super::vm::stamp(&d.name, stack, &d.fields),
+            k::VM => {
+                let spec =
+                    created_doc(docs, created, &d.kind, &d.name).map(super::vm::created_spec_of);
+                super::vm::stamp(&d.name, stack, &d.fields, spec.as_ref())
+            }
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
@@ -3186,22 +3391,9 @@ pub(crate) fn init_for(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, use the DIRECTORY name. `canonicalize` cannot be used:
-        // the directory does not exist yet (it is `init` that creates it) and it would
-        // always fail, falling into the fallback — every project would be named "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
+    let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
         target,
         &super::scaffold::InitOpts {
@@ -3212,6 +3404,7 @@ pub(crate) fn init_for(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }
@@ -3258,6 +3451,7 @@ mod tests {
             changed: Default::default(),
             conditions: Default::default(),
             diffs: Default::default(),
+            plan_digest: None,
         }
     }
 
@@ -3296,6 +3490,123 @@ mod tests {
         for t in ["pod/web", "web", "network/api", "net/api", "naoexiste/api"] {
             assert!(!replace_matches(t, &c), "{t} must NOT authorise");
         }
+    }
+
+    fn with_action(mut c: Change, a: Action) -> Change {
+        c.action = a;
+        c
+    }
+
+    /// 2026-10-02: `env` changed on a running container, the plan said `=` and
+    /// told the operator to `--replace Container/<name>`, and that apply
+    /// recreated nothing — the flag only authorised a `Replace` the plan had
+    /// already proposed. Naming the resource now IS the diff, and the rest of
+    /// the stack is left exactly as the plan decided.
+    #[test]
+    fn a_named_replace_recreates_a_resource_the_plan_left_alone() {
+        let plan = vec![
+            with_action(a_change("Container", "web"), Action::NoOp),
+            with_action(a_change("Container", "db"), Action::NoOp),
+            with_action(a_change("Volume", "web"), Action::NoOp),
+        ];
+        let replace = vec!["Container/web".to_string()];
+        let out = promote_named_replaces(plan, &replace).unwrap();
+        assert_eq!(out[0].action, Action::Replace, "the named one is recreated");
+        assert_eq!(out[1].action, Action::NoOp, "another container is not");
+        assert_eq!(
+            out[2].action,
+            Action::NoOp,
+            "nor another Kind of the same name"
+        );
+        // And the gate that follows lets it through: the same flag that asked
+        // for the recreate is what authorises it.
+        refuse_unallowed(&out, &replace).unwrap();
+        assert_eq!(
+            explain(&out[0]).as_deref(),
+            Some("recreate requested with `--replace`")
+        );
+    }
+
+    /// The recreate applies the whole spec, and the apply prints the plan's
+    /// conditions at its END — so «not applied to the existing container» on
+    /// a promoted change would be false by the time anyone read it.
+    #[test]
+    fn a_named_replace_drops_the_fields_not_compared_warning() {
+        let mut c = with_action(a_change("Container", "web"), Action::NoOp);
+        c.conditions = vec![
+            super::super::conditions::Condition::bad("Converged", "FieldsNotCompared", "env"),
+            super::super::conditions::Condition::bad("Mounted", "NfsHelperMissing", "nfs"),
+        ];
+        let out = promote_named_replaces(vec![c], &["Container/web".to_string()]).unwrap();
+        let reasons: Vec<_> = out[0].conditions.iter().map(|x| x.reason).collect();
+        assert_eq!(reasons, ["NfsHelperMissing"], "only the moot one goes");
+    }
+
+    #[test]
+    fn a_named_replace_accepts_every_spelling_and_promotes_update_and_adopt() {
+        for (tok, from) in [
+            ("container/web", Action::NoOp),
+            ("containers/web", Action::Update),
+            ("Container/web", Action::Adopt),
+        ] {
+            let out = promote_named_replaces(
+                vec![with_action(a_change("Container", "web"), from)],
+                &[tok.to_string()],
+            )
+            .unwrap();
+            assert_eq!(out[0].action, Action::Replace, "{tok} from {from:?}");
+        }
+    }
+
+    /// `all` authorises what the plan proposes — making it recreate every
+    /// resource would turn a permission into a demolition. A bare name can be
+    /// a container AND a volume, and a forced volume recreate loses data.
+    #[test]
+    fn all_and_a_bare_name_never_force_a_recreate() {
+        for tok in ["all", "web"] {
+            let out = promote_named_replaces(
+                vec![with_action(a_change("Container", "web"), Action::NoOp)],
+                &[tok.to_string()],
+            )
+            .unwrap();
+            assert_eq!(out[0].action, Action::NoOp, "{tok} must not force");
+        }
+    }
+
+    /// What the plan already decided stays decided; a conflict is still
+    /// refused by `refuse_unallowed`, whatever was named.
+    #[test]
+    fn a_named_replace_leaves_create_delete_and_conflict_alone() {
+        let r = vec!["Container/web".to_string()];
+        for a in [Action::Create, Action::Delete, Action::Conflict] {
+            let out =
+                promote_named_replaces(vec![with_action(a_change("Container", "web"), a)], &r)
+                    .unwrap();
+            assert_eq!(out[0].action, a);
+        }
+        let out = promote_named_replaces(
+            vec![with_action(a_change("Container", "web"), Action::Conflict)],
+            &r,
+        )
+        .unwrap();
+        assert!(refuse_unallowed(&out, &r).is_err());
+    }
+
+    /// A flag that reads as obeyed and changes nothing is the defect itself —
+    /// so a Kind that cannot be recreated is refused, never ignored.
+    #[test]
+    fn a_named_replace_that_cannot_recreate_is_refused_not_ignored() {
+        let ensure_present = promote_named_replaces(
+            vec![with_action(a_change("Secret", "s"), Action::NotConverged)],
+            &["Secret/s".to_string()],
+        );
+        assert!(ensure_present.is_err());
+        let no_teardown = promote_named_replaces(
+            vec![with_action(a_change(k::IMAGE, "alpine"), Action::NoOp)],
+            &[format!("{}/alpine", k::IMAGE)],
+        );
+        let err = no_teardown.unwrap_err().to_string();
+        assert!(err.contains("content-addressed"), "{err}");
     }
 
     use super::*;
@@ -3844,6 +4155,7 @@ spec: {}
             conditions: vec![],
             diffs: vec![],
             changed: true,
+            plan_digest: None,
         };
         // Deliberately fed in creation order, to prove the function reorders.
         let changes: Vec<_> = ["Network", "Volume", "Container", "Pod"]

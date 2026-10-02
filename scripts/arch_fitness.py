@@ -57,6 +57,7 @@ LAYERS = {
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
     "delonix-compute": CONTEXT,
+    "delonix-networking": CONTEXT,  # ADR-0059 D7: the network role ports and their registries
     "delonix-node": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
@@ -65,8 +66,10 @@ LAYERS = {
     "delonix-oci": ADAPTER,
     "delonix-scanner": ADAPTER,
     "delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)
-    "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
+    "delonix-vm": ADAPTER,  # the VM composition root since P4b.4; absorbed by the application layer (P5)
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
+    "delonix-provider-libvirt": PROVIDER,
+    "delonix-provider-cloud-hypervisor": PROVIDER,
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
     "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
     "delonix-cri": INTERFACE,
@@ -119,11 +122,12 @@ EXCEPTIONS = {
         "SecretVault port closes those, not yet built",
     ),
     ("dep", "delonix-vm", "delonix-state"): (
-        "P4",
-        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root — "
-        "AND writes 4 files (set_default_backend's marker, 3 libvirt XML sites including one reached from stop, "
-        "not just create) with the state layer's atomic write; a ConfigWriter port closes those, scope mapped but "
-        "not yet built (ADR-0044 D6 addendum, 2026-09-19)",
+        "P5",
+        "delonix-vm is the VM composition root (ADR-0044 P4b.4): it opens the JsonStore it hands the "
+        "engine as its StateRepository<Vm>, and writes the default-backend marker with the state "
+        "layer's atomic write; the backends no longer touch the state layer (the libvirt XML writes "
+        "use delonix-node's write_atomic_mode since P4b.4b). The application layer absorbs the "
+        "composition in P5",
     ),
     ("dep", "delonix-sdn", "delonix-state"): (
         "P4",
@@ -137,18 +141,19 @@ EXCEPTIONS = {
         "P4",
         "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
     ),
-    ("dep", "delonix-opnsense", "delonix-sdn"): (
-        "P4",
-        "the GatewayProvider port lives in the same crate as the native nftables "
-        "dataplane, by the same reasoning and the same exception as "
-        "delonix-proxmox -> delonix-vm had (ADR-0051), which P4b.2 closed by "
-        "moving VmBackend into the compute context; this one moves the same way",
+    ("dep", "delonix-vm", "delonix-provider-cloud-hypervisor"): (
+        "P5",
+        "delonix-vm is the VM composition root until the application layer exists: it "
+        "seeds the registry with the local backends and assembles the engine the bin and "
+        "three interfaces share, and no layer below INTERFACE may depend on a provider "
+        "(ADR-0044 P4b.4, docs/discovery/61, accepted 2026-09-29)",
     ),
-    ("dep", "delonix-proxmox", "delonix-sdn"): (
-        "P4",
-        "the NetworkZoneProvider port (ADR-0049 addendum) lives in delonix-sdn "
-        "for the same reason GatewayProvider does (ADR-0051): mirrors the "
-        "VmBackend precedent exactly, and moves the same week P4 moves that one",
+    ("dep", "delonix-vm", "delonix-provider-libvirt"): (
+        "P5",
+        "delonix-vm is the VM composition root until the application layer exists: it "
+        "seeds the registry with the local backends and assembles the engine the bin and "
+        "three interfaces share, and no layer below INTERFACE may depend on a provider "
+        "(ADR-0044 P4b.4, docs/discovery/61, accepted 2026-09-29)",
     ),
     ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",

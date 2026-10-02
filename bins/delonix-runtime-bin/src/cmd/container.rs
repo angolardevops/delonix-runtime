@@ -237,35 +237,100 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
 /// **Derivado do `RECONCILED_CONTAINER_FIELDS`, nunca uma segunda lista.** Um
 /// campo acrescentado ao conjunto comparado sai deste aviso sozinho. Duas listas
 /// que têm de concordar é como este repo já partiu o `CONVERGING_KINDS` uma vez.
+///
+/// **Compared against what was declared at creation, not just listed.** Listing
+/// every declared field on every existing container said «NOT applied» right
+/// after a `--replace` had applied them all, and named `command` beside an
+/// edited `env` it had nothing to do with (measured 2026-10-02). A container
+/// created by a stack apply carries [`super::conditions::CREATED_SPEC`]; the
+/// manifest compared against it names only what changed since, and says
+/// nothing when nothing did. Without the record (created by hand or by an older
+/// version) the fields are named as unverifiable, which is what they are.
 pub(crate) fn unconverged_fields_condition(
     doc: &ManifestDoc,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Option<super::conditions::Condition> {
-    let mapping = doc.spec.as_mapping()?;
-    let mut fields: Vec<String> = mapping
-        .keys()
-        .filter_map(|k| k.as_str())
-        .filter(|k| !RECONCILED_CONTAINER_FIELDS.contains(k))
-        // `detach` não é estado do recurso, é o modo de invocação de quem cria —
-        // um container a correr não «tem» um detach para divergir. Listá-lo faria
-        // TODOS os manifestos avisarem, e um aviso que sai sempre deixa de se ler.
-        .filter(|k| *k != "detach")
-        .map(|k| k.to_string())
-        .collect();
-    if fields.is_empty() {
-        return None;
-    }
-    fields.sort();
+    use super::conditions::Uncompared;
+    let declared = declared_uncompared(doc);
+    let (msgid, fields) = match super::conditions::uncompared_state(&declared, created) {
+        Uncompared::Unchanged => return None,
+        Uncompared::Changed(f) => (
+            "changed since it was created and NOT applied to the existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) or change it with `container update` where that field is hot",
+            f,
+        ),
+        Uncompared::Unverifiable(f) => (
+            "declared and not verifiable on an existing container: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) to be sure, or change it with `container update` where that field is hot",
+            f,
+        ),
+    };
     Some(super::conditions::Condition::bad(
         "Converged",
         "FieldsNotCompared",
         super::po::tf(
-            "declared but NOT applied to an existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/<name>`) or change it with `container update` where that field is hot",
+            msgid,
             &[
                 ("fields", &fields.join(", ")),
                 ("compared", &RECONCILED_CONTAINER_FIELDS.join(", ")),
+                ("name", &doc.metadata.name),
             ],
         ),
     ))
+}
+
+/// The legacy spellings of compared fields. `restart:` IS `restartPolicy`, and
+/// the warning used to list it as not compared.
+const CONTAINER_FIELD_ALIASES: &[(&str, &str)] = &[("restart", "restartPolicy")];
+
+/// The declared values of the fields [`RECONCILED_CONTAINER_FIELDS`] leaves
+/// out. `detach` is not resource state but the creator's invocation mode — a
+/// running container does not «have» a detach to diverge, and listing it would
+/// make EVERY manifest warn.
+///
+/// The values are compared with the defaults filled in (the same
+/// `spec_with_defaults` the `--dry-run` renders), so the manifest the user
+/// wrote and the rendered one `stack rollback` replays are one declaration.
+fn declared_uncompared(doc: &ManifestDoc) -> super::conditions::Declared {
+    let filled = if doc.spec.get("containers").is_some() {
+        pod_spec_with_defaults(doc)
+    } else {
+        spec_with_defaults(doc)
+    }
+    .unwrap_or_else(|_| doc.spec.clone());
+    super::conditions::Declared::of(
+        &doc.spec,
+        &filled,
+        RECONCILED_CONTAINER_FIELDS,
+        CONTAINER_FIELD_ALIASES,
+        &["detach"],
+    )
+}
+
+/// What to record as [`super::conditions::CREATED_SPEC`] when a stack apply
+/// creates this container. `None` for the Pod-shaped form (`spec.containers[]`):
+/// its one top-level key holds compared fields too (a live `memory` update
+/// would read as a change), so it is never recorded and stays unverifiable.
+pub(crate) fn created_spec_of(
+    doc: &ManifestDoc,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    if doc.spec.get("containers").is_some() {
+        return None;
+    }
+    Some(declared_uncompared(doc).values)
+}
+
+/// Every container's [`super::conditions::CREATED_SPEC`], by name — read once
+/// per plan, not once per container.
+pub(crate) fn created_specs(
+) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    let (_, store) = open_stores()?;
+    Ok(store
+        .list()?
+        .into_iter()
+        .filter_map(|c| {
+            let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
+            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+        })
+        .collect())
 }
 
 /// Renders a persisted [`Mount`] back into the `source:/target[:ro]` form the
@@ -544,15 +609,18 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     cmd_update(&store, name, o)
 }
 
-/// Records that this stack owns the container, and what it last applied.
+/// Records that this stack owns the container, and what it last applied —
+/// and, when this apply CREATED it, what it was created with (`created`).
 pub(crate) fn stamp(
     name: &str,
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<()> {
     let (_, store) = open_stores()?;
     let c = find(&store, name)?;
     let encoded = super::reconcile::encode_last_applied(fields);
+    let created = created.map(super::reconcile::encode_last_applied);
     store.update(&c.id, |cur| {
         cur.labels
             .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
@@ -560,6 +628,10 @@ pub(crate) fn stamp(
             .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
         cur.annotations
             .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        if let Some(created) = &created {
+            cur.annotations
+                .insert(super::conditions::CREATED_SPEC.into(), created.clone());
+        }
         true
     })?;
     Ok(())
@@ -1020,7 +1092,7 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -1033,6 +1105,8 @@ pub enum ContainerCmd {
         /// After generating, build the image, start it, and wait until it's healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Run a container from an image (pulls it if missing).
     Run {
@@ -1610,6 +1684,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return cmd_init(
@@ -1621,6 +1696,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     let (images, store) = open_stores()?;
@@ -2456,6 +2532,7 @@ pub(crate) fn with_host_workload<R>(
         delonix_sdn::slirp_attach(pid, ports)
             .map_err(|e| delonix_linux::Error::Engine(delonix_model::Error::from(e)))
     };
+    let detach_slirp = |c: &Container, pid: i32| delonix_sdn::run_network::reap_own_slirp(c, pid);
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
             spawn_health_monitor(c.id.clone(), cfg);
@@ -2469,6 +2546,7 @@ pub(crate) fn with_host_workload<R>(
         state_root: &state_root,
         addresses: &addresses,
         attach_slirp: &attach_slirp,
+        detach_slirp: &detach_slirp,
         on_first_start: &on_first_start,
         silent_death: super::po::t(
             "the container did not start, and the supervisor died before saying why",
@@ -2854,6 +2932,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         pod_infra_pid,
         apparmor: apparmor_profile,
         log_path: c.log_path.clone(),
+        replaces_record: false,
     };
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
@@ -3119,8 +3198,16 @@ pub(crate) fn workload_describe(name: &str) -> Result<()> {
 /// wasted work, not wrong — the guard below only fires once per crash regardless of
 /// which caller happens to be first.
 fn reconcile_with_diagnostics(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    // The process is gone and the record is about to forget its pid — the one
+    // thing that names the slirp that served it. A container with no supervisor
+    // has nobody else to release it: the slirp does not exit with its target,
+    // and it went on holding the host port, so the next `start` was refused.
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -3657,7 +3744,16 @@ fn reexec_into_netns(
     // inside the netns, recursively. An explicit internal form doesn't depend on
     // who called it.
     let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
-    let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
+    // A relative bind source (`./addons:/mnt/extra-addons`) is resolved against
+    // the CWD, and the 2nd pass does not run in the caller's CWD: every relative
+    // bind on a custom network or pod failed with `no such bind path ./addons`.
+    // Measured with the `odoo` template's dev manifest, whose two bind mounts are
+    // the whole point of it. Anchored here, where the CWD is still the caller's.
+    let mut anchored = opts.clone();
+    if let Ok(cwd) = std::env::current_dir() {
+        anchored.volumes = anchor_relative_binds(&opts.volumes, &cwd);
+    }
+    let json = serde_json::to_string(&anchored).map_err(|e| Error::Invalid(e.to_string()))?;
     // BUG FOUND: `std::fs::write` creates the file at the ambient umask
     // (typically 0644, world-readable). `opts.env` carries the raw `-e
     // KEY=VALUE` pairs the user passed — commonly credentials — and for a
@@ -3705,12 +3801,66 @@ fn reexec_into_netns(
         if !opts.detach {
             propagate_exit_status(&Status::Failed(status.code().unwrap_or(1)));
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not start inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Name the network the user wrote (`--net myodoo-net`), not the netns id
+        // (a hash that appears nowhere in their manifest), and hand back the
+        // class the inner pass already decided.
+        let label = if opts.net.is_empty() || opts.pod.is_some() {
+            netns
+        } else {
+            opts.net.as_str()
+        };
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
+}
+
+/// Makes every relative bind source (`./x`, `../x`, `.`) absolute against
+/// `cwd`, leaving named volumes and absolute paths untouched. The same test
+/// `VolumeStore::resolve_spec` uses to tell a bind from a named volume: the
+/// source starts with `.` or `/`.
+fn anchor_relative_binds(specs: &[String], cwd: &std::path::Path) -> Vec<String> {
+    specs
+        .iter()
+        .map(|spec| match spec.split_once(':') {
+            Some((src, rest)) if src.starts_with('.') => {
+                format!("{}:{rest}", cwd.join(src).display())
+            }
+            _ => spec.clone(),
+        })
+        .collect()
+}
+
+/// The error of a `--net <custom>`/`--pod` start whose 2nd pass failed.
+///
+/// The 2nd pass is a separate process: it has already printed the real reason
+/// on stderr and exited with that reason's class (69 for a capability this host
+/// lacks, 4 for something missing…). This used to be one `Invalid` for every
+/// case, so the command exited 1 and the last line on screen read `(exit
+/// Some(69))` — measured on the `odoo` template, whose stack stopped there while
+/// the actual cause scrolled past one line above. The class maps back so a
+/// reconciler reading the exit code sees what the inner pass decided.
+fn netns_start_error(network: &str, code: Option<i32>) -> Error {
+    use delonix_model::exitcode as x;
+    let msg = super::po::tf(
+        "the container did not start inside network '{network}' — the reason is on the line above (exit {code})",
+        &[
+            ("network", network),
+            ("code", &code.map_or_else(|| "signal".to_string(), |c| c.to_string())),
+        ],
+    );
+    match code {
+        // `NotFound` prints as «no such {0}», so it gets a noun of its own.
+        Some(x::NOT_FOUND) => Error::NotFound(super::po::tf(
+            "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})",
+            &[("network", network), ("code", &x::NOT_FOUND.to_string())],
+        )),
+        Some(x::NOT_RUNNING) => Error::NotRunning(msg),
+        Some(x::CONFLICT) => Error::Conflict(msg),
+        Some(x::UNAVAILABLE) => Error::Unavailable(msg),
+        Some(x::NO_PERMISSION) => Error::PermissionDenied(msg),
+        Some(x::TIMEOUT) => Error::Timeout(msg),
+        _ => Error::Invalid(msg),
+    }
 }
 
 /// The 2nd re-exec pass (`delonix netns run <spec.json>`, hidden — not a public
@@ -3846,21 +3996,49 @@ fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>) -> Option<Er
 /// (rootless: the flat copy in `containers/<id>/rootfs`; root: remounts the
 /// overlay, whose `upper` preserves the writes). It's what `rm`+`run` lacks: it
 /// doesn't lose the state written inside the container.
+/// `container start`. A start that FAILS after its record was removed takes
+/// the container's directory with it — see [`discard_unstarted`].
+///
+/// `rm -f` of a container whose start is in flight purges the directory while
+/// the start is still writing into it: its init creates the overlay's mount
+/// points under `merged/` and its log shim opens `log`, so the purge fails with
+/// `Directory not empty`, or finishes and is undone. The start then fails (its
+/// rootfs is gone, or its publish is refused: the record is gone), and nothing
+/// will ever find the directory again — `rm` and `prune` go through records.
+/// Measured 2026-09-29, `rm -f` 5 ms after `start`: `rm` rc 0, record gone,
+/// `containers/<id>/{log,merged/sys,merged/proc,merged/.delonix_old}` left.
+/// The start is the last writer, so the start cleans; only on the host's pass,
+/// where `rm` itself would have run.
 pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+    let cid = find(store, id)?.id;
+    let started = start_container(images, store, &cid);
+    if started.is_err() && std::env::var("DELONIX_REEXEC_ID").is_err() {
+        discard_unstarted(images, store, &cid);
+    }
+    started
+}
+
+fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
-    // `start` reasserts the desired state = running (clears the user's `stop`).
-    let _ = store.update(&c.id, |cur| {
-        cur.stopped_by_user = false;
-        true
-    });
-    c.stopped_by_user = false;
     if matches!(
         c.status,
         delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
+    // `start` reasserts the desired state = running (clears the user's `stop`).
+    //
+    // AFTER the refusal above, not before it: a `start` that starts nothing
+    // must not withdraw what a `stop` or an `rm -f` asked for. A process still
+    // exiting past their wait (DX-8101) is exactly a container that reads
+    // `Running` here, and clearing the mark on the way to «already running» let
+    // its supervisor restart it once the exit came.
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = false;
+        true
+    });
+    c.stopped_by_user = false;
 
     // Custom network: the SAME two-pass re-exec as `cmd_run` (see
     // `reexec_into_netns`). It was forgotten on the old `join_netns` path — which
@@ -3878,7 +4056,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             if let Some(port) = c.expose {
                 let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
             }
-            return reexec_start(&c.id, &netns, &ip, true);
+            return reexec_start(&c.id, &netns, &n, &ip, true);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
         if let Some(ip) = c.ip.clone() {
@@ -3984,7 +4162,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
                 super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace)?;
             }
             let ip = infra::container_ip(&pn);
-            return reexec_start(&c.id, &pn, &ip, false);
+            return reexec_start(&c.id, &pn, &pn, &ip, false);
         }
         // Deliberately NOT setting `c.ip` here: `cmd_run` leaves a pod member's
         // record without one (the address belongs to the pod's netns, not to the
@@ -4061,6 +4239,9 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         pod_infra_pid: None,
         apparmor: c.apparmor.clone(),
         log_path: Some(c.log_path.clone().unwrap_or(default_log)),
+        // `start` brings back a container whose record exists: an `rm -f` while
+        // it starts must not see it recreated (see `publish_incarnation`).
+        replaces_record: true,
     };
     let policy = c.restart_policy.clone().unwrap_or_default();
     if should_supervise(&policy, true, true) {
@@ -4118,7 +4299,10 @@ fn reexec_env(id: &str, ip: &str) -> Vec<(String, std::ffi::OsString)> {
 /// netns is the pod's and is shared with its peers — tearing it down on one
 /// member's failed start would take the whole pod's network with it. Same
 /// contract `cmd_run`'s `--pod` branch already states.
-fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()> {
+/// `label` is what a failure names: the network the user wrote for a custom
+/// network (the netns is a hash that appears in no manifest), the pod's netns
+/// for a pod member.
+fn reexec_start(id: &str, netns: &str, label: &str, ip: &str, owns_netns: bool) -> Result<()> {
     // BUG FIXED HERE: this used `join_argv(id)` and never read its own `netns`
     // parameter. It worked only because the sole caller passed a netns equal to
     // the id (the custom-network case), so the two were the same string. A pod
@@ -4155,10 +4339,9 @@ fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()>
             // does its lease (see `detach_container_keep_lease`).
             infra::detach_container_keep_lease(id, ip);
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not restart inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Same error as a failed `run` on a custom network: the user's network
+        // name and the class the inner pass decided, not a hash and `Some(1)`.
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
 }
@@ -4178,8 +4361,18 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
     if let Err(e) = runtime::stop(store, &mut c, time) {
         if e.is_not_running() {
+            // Not running, but what it published may still be held: a container
+            // that exited on its own left its slirp behind (see `stop_ports`).
+            stop_ports(&c, None);
             println!("{}", c.name);
             return Ok(());
+        }
+        // A stop that gave up on a process still exiting has ALREADY signalled
+        // it: nothing is coming back through its ports. Release them now — the
+        // record keeps the process (DX-8101), and by the time it exits there
+        // may be no command left to do this.
+        if matches!(e, runtime::Error::StillExiting(_)) {
+            stop_ports(&c, pid);
         }
         return Err(e.into());
     }
@@ -4696,12 +4889,17 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             Vec::new(),
             c.env.clone(),
             c.workdir.clone().unwrap_or_default(),
-            String::new(),
+            // The base image's USER survives a commit: it was an empty string
+            // here, so a committed image silently lost the user its base declared.
+            base.config.user.clone(),
             tag,
             &base.config.architecture,
             // `container commit` herda o health check da base, tal como o
             // caminho overlay (`commit_container`) já fazia.
             base.config.healthcheck.clone(),
+            // Packed from the host side: owners go into the layer as the
+            // container sees them, not as host uids (see `pack_rootfs_tar`).
+            &runtime::container_ids,
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS
@@ -5693,9 +5891,17 @@ fn cpu_usage_usec(pid: i32) -> Option<u64> {
 /// «died, no pid» of the incarnation before, which is how a running process drops
 /// out of the record and survives `rm -f` (#377/#378 are the same loss by other
 /// writers). `update` re-reads under the lock and reconciles THAT.
-fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+///
+/// The slirp of a container found dead goes here too, for the reason
+/// `reconcile_with_diagnostics` gives: after this write the record has no pid,
+/// and the pid was what named the slirp.
+pub(crate) fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -5972,22 +6178,9 @@ fn cmd_init(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
-        // the directory doesn't exist yet (it's `init` that creates it) and would
-        // always fail, falling into the fallback — every project would be called "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
+    let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
         target,
         &super::scaffold::InitOpts {
@@ -5998,6 +6191,7 @@ fn cmd_init(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }
@@ -6181,8 +6375,16 @@ impl Drop for UnstartedGuard<'_> {
 /// records, and a start that failed never wrote one, so the directory was orphaned on
 /// every failed `run -d` (measured 2026-09-16: one per attempt). Guarded by the record:
 /// if one exists, this is a real container and its state is left alone.
+///
+/// Only a record that DOES NOT EXIST lets it through — not a read that failed. Since
+/// a failed `start` also comes here (see [`cmd_start`]), `is_ok()` would have purged
+/// the rootfs of a real container whose record could not be read for a moment (an
+/// I/O error, a record half-way through its rename).
 fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
-    if store.load(id).is_ok() {
+    if !matches!(
+        store.load(id),
+        Err(delonix_state::Error::NoSuchContainer(_))
+    ) {
         return;
     }
     let _ = images.unmount_rootfs(id);
@@ -6190,6 +6392,102 @@ fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
     // kernel leaves `work/work` at mode 0000, which only the mapped removal takes.
     // Measured: every `run -d` whose command failed to exec left the directory.
     purge_container_dir(images, id);
+}
+
+#[cfg(test)]
+mod discard_tests {
+    use super::*;
+
+    /// The layout the engine uses: records and container directories side by side
+    /// under `<root>/containers`.
+    fn stores(root: &std::path::Path) -> (ImageStore, Store) {
+        let images = ImageStore::open(root).unwrap();
+        let store = Store::open(root.join("containers")).unwrap();
+        (images, store)
+    }
+
+    fn leftover(images: &ImageStore, id: &str) -> std::path::PathBuf {
+        let dir = images.container_path(id);
+        std::fs::create_dir_all(dir.join("merged/proc")).unwrap();
+        std::fs::write(dir.join("log"), b"").unwrap();
+        dir
+    }
+
+    /// What a failed `start` leaves after `rm -f` removed its record goes (measured
+    /// 2026-09-29: `log` and the overlay's mount points under `merged/`).
+    #[test]
+    fn a_container_with_no_record_loses_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let dir = leftover(&images, "a1b2c3d4e5f60718");
+        discard_unstarted(&images, &store, "a1b2c3d4e5f60718");
+        assert!(!dir.exists(), "the orphaned directory is still there");
+    }
+
+    /// A container that has a record is a real one: a failed start leaves it be.
+    #[test]
+    fn a_container_with_a_record_keeps_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "keep".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        store.save(&c).unwrap();
+        let dir = leftover(&images, &c.id);
+        discard_unstarted(&images, &store, &c.id);
+        assert!(dir.exists(), "a real container's directory was purged");
+    }
+
+    /// **A `start` that is refused changes nothing.** A container still exiting
+    /// after a `stop` or an `rm -f` gave up on it (DX-8101) reads `Running`, and
+    /// the refused start used to clear `stopped_by_user` on its way out — the mark
+    /// that keeps the `--restart` supervisor from bringing it back. This test
+    /// process stands in for the init that has not exited.
+    #[test]
+    fn a_refused_start_keeps_the_stop_the_operator_asked_for() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let me = std::process::id() as i32;
+        let mut c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "dying".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(me);
+        c.pid_starttime = delonix_node::proc_starttime(me);
+        c.status = Status::Running;
+        c.stopped_by_user = true;
+        store.save(&c).unwrap();
+        let e = start_container(&images, &store, &c.id).unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(
+            store.load(&c.id).unwrap().stopped_by_user,
+            "a start that started nothing withdrew the requested stop"
+        );
+    }
+
+    /// A record that cannot be READ is not a record that does not exist: purging
+    /// on any load error would take the rootfs of a real container on a transient
+    /// failure, now that a failed `start` comes here too.
+    #[test]
+    fn an_unreadable_record_keeps_the_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        std::fs::write(
+            root.path().join("containers/a1b2c3d4e5f60718.json"),
+            b"{ half",
+        )
+        .unwrap();
+        let dir = leftover(&images, "a1b2c3d4e5f60718");
+        discard_unstarted(&images, &store, "a1b2c3d4e5f60718");
+        assert!(dir.exists(), "purged on a read error");
+    }
 }
 
 /// Starts the health monitor as a CHILD PROCESS of the supervisor, not a thread.
@@ -6375,9 +6673,10 @@ mod unconverged_container_tests {
     /// honesto e um que diz «no changes» sobre um `env` mudado à mão.
     #[test]
     fn nomeia_os_campos_declarados_que_nao_sao_comparados() {
-        let c = unconverged_fields_condition(&doc(
-            "image: alpine\nenv: [A=1]\nuser: '1000'\ncapAdd: [NET_ADMIN]\n",
-        ))
+        let c = unconverged_fields_condition(
+            &doc("image: alpine\nenv: [A=1]\nuser: '1000'\ncapAdd: [NET_ADMIN]\n"),
+            None,
+        )
         .expect("um manifesto com env/user/capAdd tem de avisar");
         for esperado in ["env", "user", "capAdd"] {
             assert!(
@@ -6402,7 +6701,7 @@ mod unconverged_container_tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-        let c = unconverged_fields_condition(&doc(&spec)).expect("o env tem de avisar");
+        let c = unconverged_fields_condition(&doc(&spec), None).expect("o env tem de avisar");
         // Só a PRIMEIRA lista (a dos não-aplicados). A mensagem traz as duas de
         // propósito — a segunda diz o que É comparado — e olhar para a frase
         // inteira faria este teste falhar sobre o texto que existe para ajudar.
@@ -6426,8 +6725,52 @@ mod unconverged_container_tests {
     /// de quem cria, não estado que um container a correr possa ter divergido.
     #[test]
     fn um_manifesto_so_com_campos_comparados_nao_avisa() {
-        assert!(unconverged_fields_condition(&doc("image: alpine\nports: ['80:80']\n")).is_none());
-        assert!(unconverged_fields_condition(&doc("image: alpine\ndetach: true\n")).is_none());
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\nports: ['80:80']\n"), None).is_none()
+        );
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\ndetach: true\n"), None).is_none()
+        );
+        // `restart:` is the legacy spelling of `restartPolicy`, which IS compared.
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\nrestart: always\n"), None).is_none()
+        );
+    }
+
+    /// Measured 2026-10-02: right after `stack apply --replace Container/<n>`
+    /// recreated the container with the new env, the warning still said
+    /// «declared but NOT applied: command, env». With the creation record the
+    /// unchanged manifest has nothing to say, and an edit names only itself —
+    /// and the advice names THIS container, in the form that forces a recreate.
+    #[test]
+    fn against_the_creation_record_only_what_changed_is_named() {
+        let created = created_spec_of(&doc("image: alpine\nenv: [A=old]\ncommand: [sleep, '9']\n"))
+            .expect("the flat form is recorded");
+        let same = doc("image: alpine\nenv: [A=old]\ncommand: [sleep, '9']\n");
+        assert!(unconverged_fields_condition(&same, Some(&created)).is_none());
+
+        let edited = doc("image: alpine\nenv: [A=new]\ncommand: [sleep, '9']\n");
+        let c = unconverged_fields_condition(&edited, Some(&created)).expect("env changed");
+        assert_eq!(c.reason, "FieldsNotCompared");
+        let listed = c
+            .message
+            .split("container: ")
+            .nth(1)
+            .and_then(|s| s.split(" — ").next())
+            .unwrap();
+        assert_eq!(listed, "env", "{}", c.message);
+        assert!(
+            c.message.contains("`--replace Container/c`"),
+            "{}",
+            c.message
+        );
+    }
+
+    /// The Pod-shaped form is never recorded: its single top-level key also
+    /// holds compared fields, so a live `memory` update would read as a change.
+    #[test]
+    fn the_pod_shaped_form_has_no_creation_record() {
+        assert!(created_spec_of(&doc("containers: [{name: a, image: alpine}]\n")).is_none());
     }
 }
 
@@ -6474,6 +6817,65 @@ mod runspec_single_builder_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Relative bind sources are anchored to the caller's CWD before the 2nd
+    /// pass (which runs elsewhere); named volumes and absolute paths are not
+    /// touched, and neither is the rest of the spec (`:ro`).
+    #[test]
+    fn relative_binds_are_anchored_before_the_reexec() {
+        let cwd = std::path::Path::new("/work/proj");
+        let got = super::anchor_relative_binds(
+            &[
+                "./addons:/mnt/extra-addons".into(),
+                "../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ],
+            cwd,
+        );
+        assert_eq!(
+            got,
+            vec![
+                "/work/proj/./addons:/mnt/extra-addons".to_string(),
+                "/work/proj/../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ]
+        );
+        let nf = super::netns_start_error("od20-net", Some(4)).to_string();
+        assert!(nf.starts_with("no such resource"), "{nf}");
+    }
+
+    /// A failed 2nd pass keeps the class the inner process decided, names the
+    /// network the user wrote, and never prints a Rust `Option` at them.
+    #[test]
+    fn a_failed_netns_start_keeps_the_inner_class() {
+        use delonix_model::exitcode as x;
+        let e = super::netns_start_error("myodoo-net", Some(x::UNAVAILABLE));
+        assert_eq!(x::for_error(&e), x::UNAVAILABLE);
+        let text = e.to_string();
+        assert!(text.contains("'myodoo-net'"), "{text}");
+        assert!(!text.contains("Some("), "{text}");
+        for code in [
+            x::NOT_FOUND,
+            x::NOT_RUNNING,
+            x::CONFLICT,
+            x::NO_PERMISSION,
+            x::TIMEOUT,
+        ] {
+            assert_eq!(
+                x::for_error(&super::netns_start_error("n", Some(code))),
+                code
+            );
+        }
+        assert_eq!(
+            x::for_error(&super::netns_start_error("n", Some(42))),
+            x::GENERIC
+        );
+        assert!(super::netns_start_error("n", None)
+            .to_string()
+            .contains("exit signal"));
+    }
+
     /// `--env-file0`: byte-exact values (multi-line, `=` inside the value),
     /// before `-e` (which wins), and an entry without `KEY=` is refused rather
     /// than silently dropped.
@@ -7434,6 +7836,65 @@ restartPolicy: OnFailure
             rec.status,
             delonix_model::records::Status::Running
         ));
+    }
+
+    /// **A reconciliation that records a death releases the dead container's
+    /// slirp.** After the write the record has no pid, and the pid was what
+    /// named the slirp: `container stats` and the kind cluster listing recorded
+    /// the death and left it. A `sleep` under the name `slirp4netns`, with the
+    /// dead pid where the target goes, stands in for the slirp — it is found
+    /// the way the real one is, by its argv.
+    #[test]
+    fn a_recorded_death_releases_the_containers_own_slirp() {
+        use std::os::unix::process::CommandExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
+        let dead = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut ch| {
+                let id = ch.id() as i32;
+                ch.wait().map(|_| id)
+            })
+            .unwrap();
+        let mut slirp = std::process::Command::new("sleep")
+            .arg0("slirp4netns")
+            .args(["30", &dead.to_string()])
+            .spawn()
+            .expect("the stand-in slirp");
+        let mut c = delonix_compute::Container::new(
+            "abc123def4560001".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        c.pid = Some(dead);
+        c.pid_starttime = None;
+        c.ports = vec!["18000:80".into()];
+        store.save(&c).unwrap();
+        // The argv is the stand-in's own only after its `exec`.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(super::reconcile_and_persist(&store, &mut c));
+        let mut exited = false;
+        for _ in 0..30 {
+            if slirp.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = slirp.kill();
+        let _ = slirp.wait();
+        assert_eq!(
+            store.load(&c.id).unwrap().pid,
+            None,
+            "the death is recorded"
+        );
+        assert!(
+            exited,
+            "the record forgot pid {dead} and its slirp was left running"
+        );
     }
 
     #[test]

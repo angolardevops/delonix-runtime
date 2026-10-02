@@ -67,6 +67,8 @@ never rewritten — supersede them with a new one.
 | [0057](0057-proxmox-vm-from-a-local-store-image.md) | A Proxmox VM boots from an image in the engine's own store, uploaded and imported by the node | **Proposed 2026-09-27** — a local image file is the third disk form: uploaded to the import storage named by its sha256 (a cache: one upload per image and node), verified by the node, and imported with `import-from` onto the disk storage; the engine never enables `import` on a storage (DX-6510) and refuses an upload without room (DX-6511) or a `diskSize` smaller than the image; built and measured live on the lab node (upload, import, grow, cache hit, a wrong checksum refused) |
 | [0058](0058-proxmox-lxc-is-not-a-container-provider.md) | A Proxmox LXC container is not a provider of `kind: Container` | **Accepted 2026-09-28** (proposed 2026-09-27; the resource is `kind: SystemContainer`, for parity with Proxmox) — the ADR-0049 D4 spike on PVE 9.2.2: an OCI image becomes an unprivileged container through `oci-registry-pull`, but the API has no `exec`, no logs and no exit status, silently replaces `entrypoint`/`env` on create, ends a start whose DHCP failed with `WARNINGS: 1` (which the shared `task_verdict` reads as a failure, QEMU tasks included), and pulls by tag, without credentials, keeping no digest; if LXC ever enters it is a separate system-container resource with VM-like semantics, and the six traps are its contract rules; the 62 routes stay excluded |
 | [0059](0059-network-providers-by-role-lifecycle-and-policy-ir.md) | Network providers answer by role, through small ports negotiated by capability, and every change goes through validate → plan → apply → observe → verify | **Accepted 2026-09-27** — one port per role only with its first implementation and no default bodies (`native` gateway removed); catalog 1.1.0 (`net.gateway/nat/lb/dns/ipam/apply.*`) and `ProviderKind::Gateway`, OPNsense in `provider ls` and `providers.yaml`; selection by name (`networkDefaults`, record keeps the provider) supersedes ADR-0049's by-count rule; plan digest over intent + observed state; problem+json envelope with reasons in `DX-C380–C399`; one `PolicyIr` with lowerings that refuse what they cannot represent (after S1); new `delonix-networking` context removes two `arch_fitness` exceptions; spike `docs/discovery/64_…` (Proxmox lab read-only, OPNsense image offline); phases F0–F6 |
+| [0060](0060-anonymous-registry-token-cache.md) | Cache a registry token on disk only when it was issued anonymously | **Accepted 2026-09-29** — implemented: anonymous read tokens kept under `auth/tokens/` (0600) and reused by the next command; never with credentials, never for a push; a refused cached token is dropped. Warm `image pull alpine:3.20`: 1.50–1.64 s → 0.94–0.99 s |
+| [0062](0062-image-user-is-the-default-and-the-rootfs-is-not-handed-to-it.md) | An image's USER is the default user, and the root filesystem stops being handed to it | **Accepted 2026-10-01** — implemented: the image's USER is the default (`--user 0` to stay root), a non-root user gets only what the image gives it (owners index, no tree-wide chown, mounts left alone), `commit` writes container owners, the unpack keeps setuid/setgid/sticky. Validated rootless, as root, on a kubeadm node and without subuid. Breaking for `container run`: ships in a major |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
@@ -83,3 +85,17 @@ never rewritten — supersede them with a new one.
   foundation** (`checkpoint_container` is a stub, zero CRIU); real checkpoint needs CRIU, gated on a
   **rootless-CRIU GO/NO-GO spike** + security audit, run only behind a concrete need. Recommends
   keeping the stub and not scheduling the spike yet.
+- **0061** — What a `delonix init` template promises: one capability end to end, webhooks both
+  ways, OpenTelemetry, contract and architecture gates as tests; locks shipped only when they are a
+  function of the manifest (Go); the generator checks the name and `-v` it substitutes; detection
+  reads manifests and says «unknown». *Proposed*.
+- **0063** — IPAM beyond Proxmox's own: an external controller is named by the zone and registered
+  on the cluster (phpIPAM refused while PVE cannot map a MAC to an address; NetBox after a live
+  spike, observed through its own API), gateways and ranges changed in place with a repair of the
+  IPAM's gateway entry after a failed transaction, and a reservation that owns its MAC so a VM
+  created after it gets the reserved address. *Proposed*; the reservation fixes are in #654.
+- **0064** — The DNS role sets a zone's DNS settings (`spec.dns` on a NetworkZone: a controller
+  the cluster's administrator registered, a domain, a reverse controller) and the node writes the
+  records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
+  refused, the field is hot and read from the node, the controller's credential is never held, and
+  the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.

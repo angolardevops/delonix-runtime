@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light dark;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+}
+main {
+  margin: 3rem auto;
+  max-width: 40rem;
+  padding: 0 1rem;
+}
+label {
+  display: block;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+input,
+textarea {
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.4rem;
+  width: 100%;
+}
+button {
+  font: inherit;
+  margin-top: 1rem;
+  padding: 0.4rem 1rem;
+}
+.error {
+  color: #b00020;
+}
+.notes {
+  list-style: none;
+  padding: 0;
+}
+.notes li {
+  border-top: 1px solid #8884;
+  padding: 0.75rem 0;
+}
+.notes time {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}

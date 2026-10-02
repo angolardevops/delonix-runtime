@@ -932,11 +932,11 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <li><code>delonix-linux</code> → <code>delonix-state</code> — removed in <strong>P4a</strong></li>
 <li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — removed in <strong>P5</strong></li>
 <li><code>delonix-oci</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — removed in <strong>P4</strong></li>
 <li><code>delonix-scanner</code> → <code>delonix-oci</code> — removed in <strong>P4</strong></li>
 <li><code>delonix-sdn</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-vm</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
+<li><code>delonix-vm</code> → <code>delonix-provider-cloud-hypervisor</code> — removed in <strong>P5</strong></li>
+<li><code>delonix-vm</code> → <code>delonix-provider-libvirt</code> — removed in <strong>P5</strong></li>
+<li><code>delonix-vm</code> → <code>delonix-state</code> — removed in <strong>P5</strong></li>
 <li><code>delonix-volume</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
 </ul>
 <!-- dev-docs:end layers -->
@@ -1152,6 +1152,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   end
   subgraph context[&quot;Contexts&quot;]
     delonix_compute[&quot;delonix-compute&quot;]
+    delonix_networking[&quot;delonix-networking&quot;]
     delonix_node[&quot;delonix-node&quot;]
     delonix_security_runtime[&quot;delonix-security-runtime&quot;]
     delonix_stack[&quot;delonix-stack&quot;]
@@ -1168,6 +1169,8 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   end
   subgraph provider[&quot;Providers&quot;]
     delonix_opnsense[&quot;delonix-opnsense&quot;]
+    delonix_provider_cloud_hypervisor[&quot;delonix-provider-cloud-hypervisor&quot;]
+    delonix_provider_libvirt[&quot;delonix-provider-libvirt&quot;]
     delonix_proxmox[&quot;delonix-proxmox&quot;]
     delonix_truenas[&quot;delonix-truenas&quot;]
   end
@@ -1184,6 +1187,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
+  delonix_compute --&gt; delonix_net_rules
   delonix_compute --&gt; delonix_node
   delonix_cri --&gt; delonix_compute
   delonix_cri --&gt; delonix_linux
@@ -1223,6 +1227,9 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_mgmt_bin --&gt; delonix_mgmt
   delonix_mgmt_bin --&gt; delonix_node
   delonix_mgmt_bin --&gt; delonix_telemetry
+  delonix_networking --&gt; delonix_compute
+  delonix_networking --&gt; delonix_model
+  delonix_networking --&gt; delonix_net_rules
   delonix_node --&gt; delonix_model
   delonix_node_api --&gt; delonix_compute
   delonix_node_api --&gt; delonix_linux
@@ -1242,14 +1249,22 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_oci --&gt; delonix_state
   delonix_opnsense --&gt; delonix_compute
   delonix_opnsense --&gt; delonix_model
-  delonix_opnsense --&gt; delonix_sdn
+  delonix_opnsense --&gt; delonix_networking
+  delonix_provider_cloud_hypervisor --&gt; delonix_compute
+  delonix_provider_cloud_hypervisor --&gt; delonix_model
+  delonix_provider_cloud_hypervisor --&gt; delonix_node
+  delonix_provider_libvirt --&gt; delonix_compute
+  delonix_provider_libvirt --&gt; delonix_model
+  delonix_provider_libvirt --&gt; delonix_node
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
-  delonix_proxmox --&gt; delonix_sdn
+  delonix_proxmox --&gt; delonix_networking
   delonix_runtime_bin --&gt; delonix_compute
   delonix_runtime_bin --&gt; delonix_linux
   delonix_runtime_bin --&gt; delonix_mgmt
   delonix_runtime_bin --&gt; delonix_model
+  delonix_runtime_bin --&gt; delonix_net_rules
+  delonix_runtime_bin --&gt; delonix_networking
   delonix_runtime_bin --&gt; delonix_node
   delonix_runtime_bin --&gt; delonix_oci
   delonix_runtime_bin --&gt; delonix_opnsense
@@ -1268,6 +1283,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_sdn --&gt; delonix_compute
   delonix_sdn --&gt; delonix_model
   delonix_sdn --&gt; delonix_net_rules
+  delonix_sdn --&gt; delonix_networking
   delonix_sdn --&gt; delonix_node
   delonix_sdn --&gt; delonix_state
   delonix_security_runtime --&gt; delonix_model
@@ -1279,8 +1295,9 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
-  delonix_vm --&gt; delonix_net_rules
   delonix_vm --&gt; delonix_node
+  delonix_vm --&gt; delonix_provider_cloud_hypervisor
+  delonix_vm --&gt; delonix_provider_libvirt
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute
   delonix_volume --&gt; delonix_model
@@ -1295,11 +1312,14 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_networking block
   class delonix_node block
   class delonix_node_api iface
   class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
+  class delonix_provider_cloud_hypervisor external
+  class delonix_provider_libvirt external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block

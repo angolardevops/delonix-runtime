@@ -151,6 +151,7 @@ pub fn for_error(e: &Error) -> i32 {
         Error::Conflict(_) => CONFLICT,
         Error::Unavailable(_) => UNAVAILABLE,
         Error::Timeout(_) => TIMEOUT,
+        Error::PermissionDenied(_) => NO_PERMISSION,
         Error::Coded { inner, .. } => for_error(inner),
         // The KIND is inspected rather than the variant: `Error::Io` is the
         // wrapper every filesystem refusal arrives in, and EACCES inside it is

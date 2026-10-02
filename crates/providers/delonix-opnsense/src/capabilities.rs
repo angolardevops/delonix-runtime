@@ -37,9 +37,15 @@ pub fn capability_report(configured: bool) -> ProviderReport {
             C::NetGatewayFilter | C::NetGatewayAlias | C::NetApplyStaged => {
                 S::Supported { evidence: LIVE }
             }
-            C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder => S::NotImplemented,
+            C::NetGatewayUpdateInPlace => S::NotImplemented,
+            C::NetGatewayRuleOrder | C::FirewallStateless | C::FirewallLogging => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields",
+            },
             C::NetGatewayMultiWan | C::NetGatewayVpn => S::NotImplemented,
-            C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
+            C::NetNatSnat | C::NetNatDnat => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed",
+            },
+            C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
             C::NetLbL4 | C::NetLbHealthCheck => S::RequiresExternalComponent {
                 component: "the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API",
             },
@@ -52,12 +58,12 @@ pub fn capability_report(configured: bool) -> ProviderReport {
                 reason: "creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns",
             },
             C::NetApplyRollback => S::NotImplemented,
-            C::NetObserve => S::Partial {
-                detail: "`search_rule` and the alias read back what exists before a write; no comparison with the record yet (ADR-0059 F4)",
+            C::NetObserve => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields",
             },
             C::NetVerifyDataplane => S::NotImplemented,
-            C::NetOwnershipMarker => S::Partial {
-                detail: "every alias and rule carries a firewall category `delonix-owner:<token>`; one without it is refused, never adopted or deleted, and the commit refuses someone else's staged change — tested on the TLS mock, not yet measured against a live appliance (S6)",
+            C::NetOwnershipMarker => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_commit",
             },
             C::NetBridge
             | C::NetMacvlanIpvlan
@@ -83,7 +89,7 @@ pub fn capability_report(configured: bool) -> ProviderReport {
             | C::FirewallEgressPolicy => S::UnsupportedByProvider {
                 reason: "per-workload rules are the node's; a perimeter appliance answers net.gateway.* (ADR-0051)",
             },
-            C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
+            C::FirewallIcmpType => S::NotImplemented,
             C::FirewallWorkloadPeer => S::UnsupportedByProvider {
                 reason: "the appliance does not know the engine's namespaces; a peer is refused, never expanded into a CIDR snapshot (ADR-0059 D6)",
             },
@@ -224,9 +230,16 @@ mod tests {
         assert_eq!(
             yes,
             [
+                "firewall.logging",
+                "firewall.stateless",
                 "net.apply.staged",
                 "net.gateway.alias",
-                "net.gateway.filter"
+                "net.gateway.filter",
+                "net.gateway.rule-order",
+                "net.nat.dnat",
+                "net.nat.snat",
+                "net.observe",
+                "net.ownership-marker"
             ]
         );
     }

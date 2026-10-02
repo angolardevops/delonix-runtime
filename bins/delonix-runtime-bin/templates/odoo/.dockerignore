@@ -10,3 +10,4 @@ delonix-manifest.dev.yaml
 .editorconfig
 requirements.txt
 test-requirements.txt
+scripts/

@@ -53,7 +53,7 @@
 //! risks the exact trap this module doc exists to avoid.
 //! [`Client::ensure_alias`]/[`Client::ensure_rule`] never update an
 //! existing alias/rule found under the same identity: one of this engine's
-//! that still matches is [`delonix_sdn::gateway::EnsureOutcome::AlreadyPresent`],
+//! that still matches is [`delonix_networking::gateway::EnsureOutcome::AlreadyPresent`],
 //! one that was edited on the appliance is [`Error::Drifted`].
 //!
 //! # Ownership (audit 62, §6 P1)
@@ -79,12 +79,17 @@
 
 pub mod capabilities;
 mod error;
+mod nat;
 
 pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
+pub use nat::OpnsenseNatProvider;
 
-use delonix_sdn::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
-use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::gateway::{
+    AliasKind, EnsureOutcome, GatewayAction, GatewayAlias, GatewayObserved, GatewayProvider,
+    GatewayRule,
+};
+use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -154,8 +159,8 @@ fn alias_write(alias: &GatewayAlias) -> AliasWrite {
     AliasWrite {
         name: alias.name.clone(),
         kind: match alias.kind {
-            delonix_sdn::gateway::AliasKind::Host => "host",
-            delonix_sdn::gateway::AliasKind::Network => "network",
+            delonix_networking::gateway::AliasKind::Host => "host",
+            delonix_networking::gateway::AliasKind::Network => "network",
         },
         content: alias.content.join("\n"),
         description: alias.description.clone(),
@@ -173,6 +178,16 @@ struct RuleWrite {
     destination_net: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     protocol: Option<String>,
+    /// `pass`/`block`, `log` `0`/`1`, `statetype` `keep`/`none`: the flat
+    /// form `add_rule` accepts and `search_rule` returns (measured on
+    /// 26.1.2_5, ADR-0059 F3d).
+    action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination_port: Option<String>,
+    log: &'static str,
+    statetype: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     categories: String,
 }
@@ -183,7 +198,21 @@ fn rule_write(rule: &GatewayRule) -> RuleWrite {
         source_net: rule.source.clone(),
         destination_net: rule.destination.clone(),
         protocol: rule.protocol.clone(),
+        action: rule.action.as_str(),
+        destination_port: rule.destination_port.clone(),
+        log: if rule.log { "1" } else { "0" },
+        statetype: statetype(rule),
+        sequence: rule.sequence.map(|n| n.to_string()),
         categories: String::new(),
+    }
+}
+
+/// The appliance's `statetype` for a rule: `keep`, its default, or `none`.
+fn statetype(rule: &GatewayRule) -> &'static str {
+    if rule.stateful {
+        "keep"
+    } else {
+        "none"
     }
 }
 
@@ -282,7 +311,7 @@ impl Client {
                 "{method} {path}: HTTP 404 — no such route on this appliance/version"
             )));
         }
-        let text = read_bounded(resp, &format!("{method} {path}"))?;
+        let text = self.redact(&read_bounded(resp, &format!("{method} {path}"))?);
         if !status.is_success() {
             return Err(Error::HttpStatus(format!(
                 "{method} {path}: HTTP {status}: {}",
@@ -310,7 +339,7 @@ impl Client {
             .iter()
             .filter_map(|r| {
                 let name = str_field(r, "name");
-                delonix_sdn::ownership::token_of_label(&name)?;
+                delonix_networking::ownership::token_of_label(&name)?;
                 Some((r.get("uuid")?.as_str()?.to_string(), name))
             })
             .collect())
@@ -356,6 +385,115 @@ impl Client {
     /// Deletes `owner`'s category once nothing carries it — the last step of
     /// a teardown. The appliance itself refuses while an alias or rule still
     /// uses it ("Category in use"), which is surfaced, never forced.
+    /// Every alias and filter rule carrying `owner`'s category, as the
+    /// appliance holds them (ADR-0059 D4, observe). Read-only. An alias of a
+    /// type this client does not write (`port`, `url`, …) is not an alias it
+    /// could have made, and is left out.
+    pub fn observe(&self, owner: &OwnerMark) -> Result<GatewayObserved> {
+        let labels = self.owner_categories()?;
+        let mut out = GatewayObserved::default();
+        for row in self.search_rows("firewall/filter/search_rule")? {
+            if owner_of_row(&row, owner, &labels) != Owner::Ours {
+                continue;
+            }
+            let text = |k: &str| Some(str_field(&row, k)).filter(|v| !v.is_empty());
+            let rule = GatewayRule {
+                description: str_field(&row, "description"),
+                source: str_field(&row, "source_net"),
+                destination: str_field(&row, "destination_net"),
+                protocol: text("protocol").filter(|p| !p.eq_ignore_ascii_case("any")),
+                action: if str_field(&row, "action") == "block" {
+                    GatewayAction::Block
+                } else {
+                    GatewayAction::Pass
+                },
+                destination_port: text("destination_port"),
+                log: str_field(&row, "log") == "1",
+                stateful: str_field(&row, "statetype") != "none",
+                sequence: str_field(&row, "sequence").parse().ok(),
+            };
+            if str_field(&row, "enabled") == "0" {
+                out.disabled_rules.push(rule.description.clone());
+            }
+            out.rules.push(rule);
+        }
+        for row in self.search_rows("firewall/alias/search_item")? {
+            if owner_of_row(&row, owner, &labels) != Owner::Ours {
+                continue;
+            }
+            let kind = match str_field(&row, "type").as_str() {
+                "host" => AliasKind::Host,
+                "network" => AliasKind::Network,
+                _ => continue,
+            };
+            out.aliases.push(GatewayAlias {
+                name: str_field(&row, "name"),
+                kind,
+                content: entries(&str_field(&row, "content")).into_iter().collect(),
+                description: str_field(&row, "description"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// The uuids of the filter rules carrying `owner`'s category.
+    pub fn owned_rule_ids(&self, owner: &OwnerMark) -> Result<Vec<String>> {
+        let labels = self.owner_categories()?;
+        Ok(self
+            .search_rows("firewall/filter/search_rule")?
+            .iter()
+            .filter(|r| owner_of_row(r, owner, &labels) == Owner::Ours)
+            .filter_map(|r| r.get("uuid").and_then(Value::as_str).map(str::to_string))
+            .collect())
+    }
+
+    /// Records into `staging` the pending changes a DEAD process of this
+    /// engine left staged (ADR-0059 D4): a rule or alias configured and not
+    /// applied that carries `owner`'s category, and a rule still loaded in pf
+    /// whose uuid a teardown's ledger saved before deleting it. What does not
+    /// qualify stays foreign, and the pre-check still refuses it.
+    pub fn adopt_pending(
+        &self,
+        owner: &OwnerMark,
+        removed_ids: &[String],
+        staging: &Staging,
+    ) -> Result<Vec<String>> {
+        let pending = self.pending_changes()?;
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        let labels = self.owner_categories()?;
+        let rules = self.search_rows("firewall/filter/search_rule")?;
+        let aliases = self.search_rows("firewall/alias/search_item")?;
+        let mut adopted = Vec::new();
+        for p in pending {
+            if staging.covers(&p) {
+                continue;
+            }
+            let change = match (p.kind, p.what) {
+                ("rule", "deleted, not applied") => removed_ids
+                    .contains(&p.id)
+                    .then(|| StagedChange::rule(&p.id, &p.label, StagedOp::Deleted)),
+                ("rule", _) => rules
+                    .iter()
+                    .find(|r| r.get("uuid").and_then(Value::as_str) == Some(p.id.as_str()))
+                    .filter(|r| owner_of_row(r, owner, &labels) == Owner::Ours)
+                    .map(|_| StagedChange::rule(&p.id, &p.label, StagedOp::Created)),
+                ("alias", _) => aliases
+                    .iter()
+                    .find(|a| str_field(a, "name") == p.id)
+                    .filter(|a| owner_of_row(a, owner, &labels) == Owner::Ours)
+                    .map(|_| StagedChange::alias(&p.id, StagedOp::Created)),
+                _ => None,
+            };
+            if let Some(change) = change {
+                adopted.push(p.to_string());
+                staging.record(change);
+            }
+        }
+        Ok(adopted)
+    }
+
     pub fn release_owner(&self, owner: &OwnerMark) -> Result<RemoveOutcome> {
         let Some(uuid) = self.owner_category(owner)? else {
             return Ok(RemoveOutcome::Absent);
@@ -592,16 +730,32 @@ impl Client {
     /// one:
     ///
     /// * **rules** — the configured filter rules (`search_rule`) against the
-    ///   labels loaded in pf (`diagnostics/firewall/list_rule_ids`, read from
-    ///   `pfctl -vvPsr`). An MVC rule's pf label IS its uuid
+    ///   labels loaded in pf (`diagnostics/firewall/pf_statistics/rules`,
+    ///   `pfctl -vvsr` run on each call). An MVC rule's pf label IS its uuid
     ///   (`FilterRuleField::serialize`). An enabled rule not loaded, a
     ///   disabled one still loaded, and a loaded uuid no longer configured
     ///   are each pending.
+    ///
+    ///   Not `diagnostics/firewall/list_rule_ids`: measured on 26.1.2_5, its
+    ///   `fetch_rule_labels` caches labels by pf line number and never drops
+    ///   the lines past the end of a ruleset that got shorter, so a rule
+    ///   deleted and applied stays listed for good. The engine's own deletion
+    ///   then failed its commit and every later commit was refused.
     /// * **aliases** — the configured `host`/`network` aliases against pf's
     ///   tables (`alias_util/aliases`, `pfctl -sT`) and, for an alias whose
     ///   entries are all literal addresses, the table's content
-    ///   (`alias_util/list/<name>`). A table left for an alias no longer
-    ///   configured is pending too.
+    ///   (`alias_util/list/<name>`).
+    ///
+    /// A pf table left for an alias no longer configured is **not** read as
+    /// pending. Measured on OPNsense 26.1.2_5: after an alias is deleted and
+    /// both `alias/reconfigure` and `filter/apply` answer, its table stays
+    /// loaded (with its old content) for as long as it was watched, because
+    /// the appliance's `update_tables.py` only drops an orphan table on a full
+    /// refresh that finds its file in `/var/db/aliastables`. Reading it as
+    /// pending made the engine's own deletion fail its commit and then refused
+    /// every later commit as a foreign change. What such a table could
+    /// hide is harmless: the appliance refuses to delete an alias a rule still
+    /// uses, and a deleted rule still loaded is caught by the rule check.
     ///
     /// What this does NOT see: an edit to a rule's match fields (source,
     /// destination, protocol…) that kept its uuid and its enabled state, and
@@ -613,21 +767,10 @@ impl Client {
         let rules = self.search_rows("firewall/filter/search_rule")?;
         let running = self.request(
             reqwest::Method::GET,
-            "diagnostics/firewall/list_rule_ids",
+            "diagnostics/firewall/pf_statistics/rules",
             None,
         )?;
-        let running: std::collections::BTreeSet<String> = running
-            .get("items")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|i| i.get("id").and_then(Value::as_str))
-                    .filter(|id| is_uuid(id))
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let running = running_rule_labels(&running)?;
         let mut configured = std::collections::BTreeSet::new();
         for row in &rules {
             let Some(uuid) = row.get("uuid").and_then(Value::as_str) else {
@@ -668,10 +811,8 @@ impl Client {
                     .collect()
             })
             .unwrap_or_default();
-        let mut names = std::collections::BTreeSet::new();
         for row in &aliases {
             let name = str_field(row, "name");
-            names.insert(name.clone());
             let kind = str_field(row, "type");
             if kind != "host" && kind != "network" || str_field(row, "enabled") == "0" {
                 continue;
@@ -703,17 +844,6 @@ impl Client {
                 });
             }
         }
-        for table in tables.difference(&names) {
-            if is_internal_table(table) {
-                continue;
-            }
-            out.push(PendingChange {
-                kind: "alias",
-                id: table.clone(),
-                label: String::new(),
-                what: "deleted, not applied",
-            });
-        }
         Ok(out)
     }
 
@@ -730,11 +860,15 @@ impl Client {
     /// Refuses ([`Error::ForeignPending`]) when anything staged on the
     /// appliance is not in `staging`.
     pub fn check_no_foreign_pending(&self, staging: &Staging) -> Result<()> {
-        let foreign: Vec<PendingChange> = self
+        let mut foreign: Vec<PendingChange> = self
             .pending_changes()?
             .into_iter()
             .filter(|p| !staging.covers(p))
             .collect();
+        // The same apply loads the NAT tables too (measured: `filter/apply`
+        // loaded a staged source NAT rule), so a NAT rule someone else staged
+        // is as foreign here as a filter rule.
+        foreign.extend(self.nat_pending_not_owned_by(staging.claimed().as_ref())?);
         if foreign.is_empty() {
             return Ok(());
         }
@@ -897,9 +1031,23 @@ impl StagedChange {
 /// changes from everybody else's. Separate from [`Client`] on purpose: the
 /// client is shared by every provider value the registry builds.
 #[derive(Debug, Default)]
-pub struct Staging(std::sync::Mutex<Vec<StagedChange>>);
+pub struct Staging(
+    std::sync::Mutex<Vec<StagedChange>>,
+    /// The owner mark this caller writes under, once it has used one. A NAT
+    /// rule staged under the same mark is this caller's document too (its
+    /// NAT half commits right after), so it is not foreign here.
+    std::sync::Mutex<Option<OwnerMark>>,
+);
 
 impl Staging {
+    fn claim(&self, owner: &OwnerMark) {
+        *self.1.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner.clone());
+    }
+
+    fn claimed(&self) -> Option<OwnerMark> {
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     fn record(&self, change: StagedChange) {
         self.0
             .lock()
@@ -1043,16 +1191,6 @@ fn literal_entries(content: &str) -> Option<std::collections::BTreeSet<String>> 
         .then(|| all.iter().map(|e| canonical_entry(e)).collect())
 }
 
-/// pf tables the appliance keeps without a configured alias of the same
-/// name: the per-interface `__<if>_network` tables and the built-in ones.
-fn is_internal_table(name: &str) -> bool {
-    name.starts_with("__")
-        || matches!(
-            name,
-            "bogons" | "bogonsv6" | "sshlockout" | "virusprot" | "webConfiguratorlockout"
-        )
-}
-
 /// How an owned alias differs from the declaration, field by field.
 fn alias_drift(row: &Value, want: &GatewayAlias) -> Vec<String> {
     let mut out = Vec::new();
@@ -1084,6 +1222,33 @@ fn alias_drift(row: &Value, want: &GatewayAlias) -> Vec<String> {
     out
 }
 
+/// The uuid labels of the filter rules pf has loaded, from
+/// `pf_statistics/rules`: one key per pf rule, its text as `pfctl -vvsr`
+/// prints it, ending in `label "<uuid>"`. A `TCP/UDP` rule is two pf rules
+/// with one label. An answer without the `filter rules` section is refused
+/// rather than read as "nothing loaded", which would call every configured
+/// rule unapplied.
+fn running_rule_labels(answer: &Value) -> Result<std::collections::BTreeSet<String>> {
+    let rules = answer
+        .get("rules")
+        .and_then(|r| r.get("filter rules"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            Error::Decode(format!(
+                "diagnostics/firewall/pf_statistics/rules answered without its filter rules: {}",
+                truncate_chars(&answer.to_string(), 200)
+            ))
+        })?;
+    Ok(rules
+        .keys()
+        .filter_map(|line| {
+            let label = line.split(" label \"").nth(1)?;
+            let uuid = label.split('"').next()?;
+            is_uuid(uuid).then(|| uuid.to_string())
+        })
+        .collect())
+}
+
 /// How an owned rule differs from the declaration, field by field. An
 /// absent protocol is the appliance's `any`.
 fn rule_drift(row: &Value, want: &GatewayRule) -> Vec<String> {
@@ -1107,8 +1272,87 @@ fn rule_drift(row: &Value, want: &GatewayRule) -> Vec<String> {
     if !have.eq_ignore_ascii_case(declared) {
         out.push(format!("protocol is '{have}', declared '{declared}'"));
     }
+    // The fields ADR-0059 F3d added. A row the appliance wrote with its
+    // defaults reads `pass`, no port, `log 0`, `keep`: what a rule declared
+    // before the fields existed means, so it is not drift.
+    let action = str_field(row, "action");
+    let action = if action.is_empty() {
+        "pass".to_string()
+    } else {
+        action
+    };
+    if action != want.action.as_str() {
+        out.push(format!(
+            "action is '{action}', declared '{}'",
+            want.action.as_str()
+        ));
+    }
+    let port = str_field(row, "destination_port");
+    let declared = want.destination_port.as_deref().unwrap_or("");
+    if port != declared {
+        out.push(format!(
+            "destination_port is '{port}', declared '{declared}'"
+        ));
+    }
+    let log = str_field(row, "log") == "1";
+    if log != want.log {
+        out.push(format!("log is {log}, declared {}", want.log));
+    }
+    let state = str_field(row, "statetype");
+    let state = if state.is_empty() {
+        "keep".to_string()
+    } else {
+        state
+    };
+    if state != statetype(want) {
+        out.push(format!(
+            "statetype is '{state}', declared '{}'",
+            statetype(want)
+        ));
+    }
+    if let Some(seq) = want.sequence {
+        let have = str_field(row, "sequence");
+        if have != seq.to_string() {
+            out.push(format!("sequence is '{have}', declared '{seq}'"));
+        }
+    }
     if str_field(row, "enabled") == "0" {
         out.push("it is disabled".to_string());
+    }
+    out
+}
+
+impl Client {
+    /// `text` without this client's credential: the secret, and the Basic
+    /// header value it is sent in, which a proxy or an error page can echo.
+    /// Every answer passes here before it can reach an error message
+    /// (ADR-0059 D5; the grep-for-the-secret rule of ADR-0049).
+    fn redact(&self, text: &str) -> String {
+        let basic = base64_std(format!("{}:{}", self.auth.key, self.auth.secret).as_bytes());
+        delonix_model::redact_known(text, &[&self.auth.secret, &basic])
+    }
+}
+
+/// Standard base64 with padding (RFC 4648 §4), the encoding of an HTTP Basic
+/// credential. Only used to recognise one in an answer, so it lives here
+/// instead of adding a dependency.
+fn base64_std(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> shift) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
     }
     out
 }
@@ -1207,23 +1451,46 @@ pub const ID: &str = "opnsense";
 /// failure: an appliance that was down when first selected must not stay
 /// "down" for the rest of the process.
 pub fn register_with(target: Target) -> delonix_model::Result<()> {
-    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_sdn::gateway::register_gateway_provider(
-        delonix_sdn::gateway::GatewayProviderRegistration {
+    // One connection for both roles: the gateway and the NAT provider of an
+    // appliance are the same client, and each value keeps its own staging.
+    let shared: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let connect = {
+        let shared = shared.clone();
+        move || -> delonix_networking::Result<std::sync::Arc<Client>> {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(c.clone());
+            }
+            let c = std::sync::Arc::new(
+                Client::connect(&target)
+                    .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+            );
+            *slot = Some(c.clone());
+            Ok(c)
+        }
+    };
+    let connect = std::sync::Arc::new(connect);
+    {
+        let connect = connect.clone();
+        delonix_networking::nat::register_nat_provider(
+            delonix_networking::nat::NatProviderRegistration {
+                id: ID,
+                aliases: &[],
+                new: Box::new(move || {
+                    Ok(Box::new(nat::OpnsenseNatProvider::sharing(connect()?))
+                        as Box<dyn delonix_networking::nat::NatProvider>)
+                }),
+            },
+        )?;
+    }
+    delonix_networking::gateway::register_gateway_provider(
+        delonix_networking::gateway::GatewayProviderRegistration {
             id: ID,
             aliases: &[],
             new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(c) = slot.as_ref() {
-                    return Ok(Box::new(OpnsenseGatewayProvider::sharing(c.clone()))
-                        as Box<dyn GatewayProvider>);
-                }
-                let c = std::sync::Arc::new(
-                    Client::connect(&target)
-                        .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
-                );
-                *slot = Some(c.clone());
-                Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)
+                Ok(Box::new(OpnsenseGatewayProvider::sharing(connect()?))
+                    as Box<dyn GatewayProvider>)
             }),
         },
     )?;
@@ -1233,11 +1500,20 @@ pub fn register_with(target: Target) -> delonix_model::Result<()> {
 // Every failure crosses the trait with its dictionary number
 // (`delonix_model::Error::from`), never `into_root`, which strips the carrier:
 // measured live on the zone provider, a DX-5340 refusal arrived as a bare 5000.
-impl GatewayProvider for OpnsenseGatewayProvider {
-    fn id(&self) -> &'static str {
-        ID
+/// The skeleton every role port extends (ADR-0059 D1 rule 4). The report is
+/// the declared one — a remote appliance is never contacted to answer it —
+/// and this value exists only once its registration was configured.
+impl delonix_compute::vm_provider::Provider for OpnsenseGatewayProvider {
+    fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+        delonix_compute::vm_provider::ProviderId(ID)
     }
 
+    fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+        capability_report(true)
+    }
+}
+
+impl GatewayProvider for OpnsenseGatewayProvider {
     fn available(&self) -> bool {
         // Registered only once `Client::connect` has already proven the
         // credential (ADR-0008's own reasoning for a remote VmBackend):
@@ -1250,12 +1526,14 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         alias: &GatewayAlias,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_alias(alias, owner, &self.staging)
             .map_err(delonix_model::Error::from)
     }
 
     fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_alias(name, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1266,6 +1544,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         rule: &GatewayRule,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_rule(rule, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1276,6 +1555,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         description: &str,
         owner: &OwnerMark,
     ) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_rule(description, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1284,6 +1564,30 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
         self.client
             .release_owner(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<GatewayObserved> {
+        self.client
+            .observe(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn owned_rule_ids(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
+        self.client
+            .owned_rule_ids(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn adopt_pending(
+        &self,
+        owner: &OwnerMark,
+        removed_ids: &[String],
+    ) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
+        self.client
+            .adopt_pending(owner, removed_ids, &self.staging)
             .map_err(delonix_model::Error::from)
     }
 
@@ -1297,5 +1601,24 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         self.client
             .commit(&self.staging)
             .map_err(delonix_model::Error::from)
+    }
+}
+
+#[cfg(test)]
+mod base64_tests {
+    /// The RFC 4648 §10 test vectors.
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        for (i, o) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(super::base64_std(i.as_bytes()), o, "{i}");
+        }
     }
 }

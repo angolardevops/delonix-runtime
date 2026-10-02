@@ -192,6 +192,14 @@ mesma regra que a reorganização da v0.30.0 já seguia. Os grupos continuam:
 <code>delonix container logs</code>, <code>delonix container rm</code>, <code>delonix image list</code>
 (ver a nota da v2.0.0 abaixo — essa grafia mudou outra vez).
 <strong>Os códigos de saída não mudam nesta versão</strong> — ver a secção abaixo.</p>
+<p><strong>Quebra de contrato na próxima major (ADR-0062).</strong> <code>container run</code> de uma
+imagem que declara <code>USER</code> passa a correr como esse utilizador, como no Docker
+e no Podman; até à v4.5.0 corria como uid 0 dentro do container, declarasse a
+imagem o que declarasse. <code>--user 0</code> (ou <code>user: "0"</code> num manifesto) é a forma
+explícita de ficar root. Uma imagem sem <code>USER</code> não muda. E um container com
+utilizador não-root deixou de ser dono do seu rootfs e de re-apropriar bind
+mounts do host: escreve só onde a imagem lhe dá posse, num volume nomeado
+vazio, ou onde as permissões do host deixam.</p>
 <p><strong>Quebra de contrato na v2.0.0.</strong> O B2 da reestruturação da CLI (v0.67.0)
 tinha renomeado <code>image ls</code>/<code>image rm</code> para <code>image list</code>/<code>image remove</code> — a
 única excepção de nomenclatura numa CLI onde as outras 15 folhas do tipo

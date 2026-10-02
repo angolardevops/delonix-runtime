@@ -8,6 +8,7 @@ pub mod capability_host;
 pub mod launch;
 pub mod network;
 mod notice;
+pub mod owners;
 pub mod pod;
 pub mod ports;
 pub mod preflight;
@@ -20,6 +21,7 @@ pub mod vm_backend;
 pub mod vm_error;
 pub mod vm_firewall;
 pub mod vm_provider;
+pub mod vm_registry;
 pub mod workload_net;
 
 pub use notice::Notice;

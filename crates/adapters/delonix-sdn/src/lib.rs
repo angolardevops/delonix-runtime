@@ -42,13 +42,14 @@ pub mod bpf;
 pub mod cni;
 pub mod discover;
 mod flock;
-pub mod gateway;
 pub mod gc;
+/// The role ports and owner marks moved to the networking context (ADR-0059
+/// F2a); re-exported under their old paths so no caller changes.
+pub use delonix_networking::{gateway, ownership, segment};
 pub mod infra;
 pub mod ipam;
-pub mod network_zone;
-pub mod ownership;
 mod pin_userns;
+pub mod policy_nft;
 pub mod provider_report;
 pub mod run_network;
 pub mod vm_network;
@@ -1851,16 +1852,11 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     }
     args.push(pid.to_string());
     args.push("tap0".to_string());
-    let spawned = Command::new("slirp4netns")
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    let spawned = spawn_holding_only(Command::new("slirp4netns").args(&args), wr);
     // SAFETY: the parent closes its write copy; only the slirp keeps it.
     unsafe { libc::close(wr) };
     match spawned {
-        Ok(child) => {
+        Ok(mut child) => {
             // BUG FOUND: this used to be a BARE blocking `read` with no poll
             // guard at all — if slirp4netns never signals AND never closes
             // the write end (a grandchild inheriting it, created WITHOUT
@@ -1888,8 +1884,16 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
             if let Some(sock) = &api_sock {
                 for spec in publish {
                     if let Ok((addr, hp, cp, proto)) = parse_publish_addr(spec) {
-                        if let Err(e) = slirp_add_hostfwd(sock, &hp, &cp, &proto, addr.as_deref()) {
-                            std::mem::forget(child);
+                        let forward = || slirp_add_hostfwd(sock, &hp, &cp, &proto, addr.as_deref());
+                        if let Err(e) = forward_reaping_orphans(forward) {
+                            // The slirp just spawned goes with the start it was
+                            // for. It used to be left running (`mem::forget`):
+                            // its target is killed by the caller a moment later,
+                            // and a slirp4netns does not exit when its target
+                            // does — one more orphan per failed start.
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            let _ = std::fs::remove_file(sock);
                             return Err(e);
                         }
                     }
@@ -1906,6 +1910,160 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
                 context: "slirp4netns",
                 message: e.to_string(),
             })
+        }
+    }
+}
+
+/// One host-forward, and when it is refused, a second try once the slirps of
+/// DEAD containers are out of the way.
+///
+/// The usual reason a publish is refused on this path is the port still being
+/// held by the slirp of this container's previous incarnation: a slirp4netns
+/// does not exit when its target does (measured 2026-10-01: two of them alive,
+/// and listening, an hour after their targets), and a container that exits on
+/// its own has nobody left who knows which slirp was its. The ingress path has
+/// had this retry since [`run_network::publish_with_retry`]; the per-container
+/// path had none, so a `container start` after such an exit failed for as long
+/// as the orphan lived.
+///
+/// The retry is spent only when the sweep reaped something: a port held by an
+/// unrelated process fails at once, with the error of the first attempt.
+fn forward_reaping_orphans(forward: impl Fn() -> Result<()>) -> Result<()> {
+    retry_after(
+        forward,
+        reap_orphan_slirp,
+        40,
+        std::time::Duration::from_millis(50),
+    )
+}
+
+/// `attempt`, and when it fails and `clear` removed something, `attempt` again
+/// up to `tries` times, `pause` apart — what `clear` removed is a process that
+/// was only signalled, and it takes a moment to let go. The error returned is
+/// the FIRST one: it names what was in the way.
+fn retry_after<T>(
+    attempt: impl Fn() -> Result<T>,
+    clear: impl FnOnce() -> usize,
+    tries: u32,
+    pause: std::time::Duration,
+) -> Result<T> {
+    let first = match attempt() {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    if clear() == 0 {
+        return Err(first);
+    }
+    for _ in 0..tries {
+        std::thread::sleep(pause);
+        if let Ok(v) = attempt() {
+            return Ok(v);
+        }
+    }
+    Err(first)
+}
+
+/// Spawns `cmd` detached from its caller's descriptors: stdio on `/dev/null`,
+/// and of everything else the caller has open, only `keep` survives the `exec`.
+///
+/// **A helper that outlives its caller must not inherit what the caller holds.**
+/// `Command` passes on every descriptor that is not close-on-exec, and the
+/// callers here are in the middle of a container start, holding plain `pipe()`
+/// ends: the container's log pipe, and the pipe a detached start reports
+/// through. `slirp4netns` got them all (measured 2026-10-01, `readlink
+/// /proc/<slirp>/fd/*`: both ends of the log pipe and the write end of the
+/// supervisor's handshake), and a slirp lives as long as the container, or
+/// longer:
+///
+/// * the log shim reads the log pipe until EOF, and never saw one — it stayed
+///   behind for as long as the slirp did, after the container was removed;
+/// * a `container start` whose supervisor had already reported a failure and
+///   exited kept reading the handshake pipe for an EOF only the slirp could
+///   give. It hung with no timeout and no message.
+///
+/// Same class as the log shim keeping its caller's sockets and the netns pin
+/// keeping its caller's stderr: «detached» is not «done with the caller's fds».
+///
+/// The descriptors are marked close-on-exec rather than closed: `Command`
+/// reports a failed `exec` through a pipe of its own, and closing that one
+/// would turn «slirp4netns is not installed» into a silent success.
+pub(crate) fn spawn_holding_only(
+    cmd: &mut Command,
+    keep: i32,
+) -> std::io::Result<std::process::Child> {
+    use std::os::unix::process::CommandExt;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: the closure runs in the forked child before `exec` and makes only
+    // async-signal-safe calls (`close_range`, `getrlimit`, `fcntl`); it touches
+    // no memory the parent shares and allocates nothing.
+    unsafe {
+        cmd.pre_exec(move || {
+            cloexec_all_but(keep);
+            Ok(())
+        });
+    }
+    cmd.spawn()
+}
+
+/// Makes `cmd` leave ALL of its caller's descriptors behind at the `exec`,
+/// stdio aside — for a long-lived process that sets its own stdio and is handed
+/// nothing else, or is handed it by a later `pre_exec` (they run in the order
+/// they were registered, so one that clears close-on-exec on the descriptors
+/// the child needs still wins).
+///
+/// The netns pin and the control plane live for as long as the infra does, and
+/// were spawned with whatever the invocation that happened to start them had
+/// open. Their stderr was fixed on 2026-08-15, after it hung a caller reading a
+/// pipe; every other descriptor the caller held went the same way and stayed.
+pub(crate) fn leave_callers_descriptors(cmd: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: as in `spawn_holding_only` — the closure runs in the forked child
+    // before `exec`, makes only async-signal-safe calls and allocates nothing.
+    unsafe {
+        cmd.pre_exec(|| {
+            cloexec_all_but(2);
+            Ok(())
+        })
+    }
+}
+
+/// Marks every descriptor from 3 up close-on-exec, except `keep` (a `keep` of
+/// 2 or less excepts nothing).
+///
+/// # Safety
+///
+/// Async-signal-safe: meant for the child side of a `fork`, before its `exec`.
+unsafe fn cloexec_all_but(keep: i32) {
+    let keep = keep.max(2) as libc::c_uint;
+    // `close_range(CLOSE_RANGE_CLOEXEC)` is Linux 5.11; an older kernel answers
+    // EINVAL (5.9, 5.10) or ENOSYS, and gets the walk below.
+    let range = |first: libc::c_uint, last: libc::c_uint| -> bool {
+        first > last
+            || libc::syscall(
+                libc::SYS_close_range,
+                first,
+                last,
+                libc::CLOSE_RANGE_CLOEXEC as libc::c_uint,
+            ) == 0
+    };
+    if range(3, keep.saturating_sub(1)) && range(keep.saturating_add(1), libc::c_uint::MAX) {
+        return;
+    }
+    let mut lim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let top = if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 {
+        lim.rlim_cur.min(1 << 20) as i32
+    } else {
+        1024
+    };
+    for fd in 3..top {
+        if fd != keep as i32 {
+            // EBADF for the numbers that are not open, which is most of them.
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }
 }
@@ -3341,6 +3499,197 @@ mod tests {
         // (a user network sharing the ingress's addresses) written as a test.
         assert!(store.create_with_base("x", 200).is_err());
         assert!(store.create_with_base("x", 201).is_ok());
+    }
+}
+
+/// What a detached helper inherits, and what a refused publish does next.
+#[cfg(test)]
+mod tests_detached_helper {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    fn plain_pipe() -> (i32, i32) {
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe() fills 2 fds. Deliberately NOT close-on-exec: this is
+        // the kind of pipe a container start holds.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        (fds[0], fds[1])
+    }
+
+    /// **The helper holds none of its caller's descriptors.** The caller's pipe
+    /// reaches EOF the moment the caller closes its own end, with the helper
+    /// still running — which is what the log shim and the handshake of a
+    /// detached start wait for. `sleep` stands in for `slirp4netns`: what is
+    /// inherited is decided before the `exec`, whatever the program.
+    #[test]
+    fn a_detached_helper_does_not_hold_its_callers_pipe() {
+        let (rd, wr) = plain_pipe();
+        let (keep_rd, keep_wr) = plain_pipe();
+        let mut child =
+            spawn_holding_only(Command::new("sleep").arg("30"), keep_wr).expect("spawn sleep");
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(wr);
+            libc::close(keep_wr);
+        }
+        // EOF on a pipe is «readable»: with a writer left it would time out.
+        let caller_pipe_closed = infra::wait_readable(rd, 3000);
+        // The ONE descriptor it was told to keep is still held by it.
+        let kept_is_held = !infra::wait_readable(keep_rd, 300);
+        let fds: Vec<String> = std::fs::read_dir(format!("/proc/{}/fd", child.id()))
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|e| std::fs::read_link(e.path()).ok())
+                    .map(|l| l.to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let _ = child.kill();
+        let _ = child.wait();
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(rd);
+            libc::close(keep_rd);
+        }
+        assert!(
+            caller_pipe_closed,
+            "the helper kept the caller's pipe open; its descriptors: {fds:?}"
+        );
+        assert!(kept_is_held, "the descriptor it was given must survive");
+        assert_eq!(
+            fds.iter().filter(|l| l.starts_with("pipe:")).count(),
+            1,
+            "exactly the kept pipe: {fds:?}"
+        );
+    }
+
+    /// **A long-lived child with nothing to keep gets nothing**, and a later
+    /// `pre_exec` can still hand it a descriptor — the order the netns pin
+    /// depends on for its sync pipes.
+    #[test]
+    fn a_long_lived_child_leaves_its_callers_descriptors_behind() {
+        use std::os::unix::process::CommandExt;
+        let (rd, wr) = plain_pipe();
+        let (given_rd, given_wr) = plain_pipe();
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30").stdin(Stdio::null()).stdout(Stdio::null());
+        leave_callers_descriptors(&mut cmd);
+        // SAFETY: runs in the forked child before `exec`; one `fcntl`.
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::fcntl(given_wr, libc::F_SETFD, 0);
+                Ok(())
+            });
+        }
+        let mut child = cmd.spawn().expect("spawn sleep");
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(wr);
+            libc::close(given_wr);
+        }
+        let callers_pipe_closed = infra::wait_readable(rd, 3000);
+        let given_is_held = !infra::wait_readable(given_rd, 300);
+        let _ = child.kill();
+        let _ = child.wait();
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(rd);
+            libc::close(given_rd);
+        }
+        assert!(callers_pipe_closed, "the child kept its caller's pipe open");
+        assert!(
+            given_is_held,
+            "a later pre_exec must still hand a descriptor over"
+        );
+    }
+
+    /// A program that cannot be executed is still an error — the descriptors
+    /// are marked, not closed, so `Command`'s own error pipe keeps working.
+    #[test]
+    fn a_helper_that_cannot_be_executed_is_an_error() {
+        let (rd, wr) = plain_pipe();
+        let r = spawn_holding_only(&mut Command::new("/nonexistent/slirp4netns"), wr);
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(rd);
+            libc::close(wr);
+        }
+        assert!(r.is_err(), "a missing binary must not look like a start");
+    }
+
+    fn refused() -> Error {
+        Error::Command {
+            context: "add_hostfwd",
+            message: "slirp_add_hostfwd failed".into(),
+        }
+    }
+
+    /// A refused publish is retried once the orphans are gone, and only then.
+    #[test]
+    fn a_refused_publish_is_retried_only_after_something_was_cleared() {
+        let pause = Duration::from_millis(1);
+        // Nothing in the way was ours: one attempt, the first error.
+        let calls = Cell::new(0);
+        let r: Result<()> = retry_after(
+            || {
+                calls.set(calls.get() + 1);
+                Err(refused())
+            },
+            || 0,
+            5,
+            pause,
+        );
+        assert!(r.is_err());
+        assert_eq!(calls.get(), 1, "no orphan reaped, no retry");
+
+        // An orphan was reaped and lets go on the third look.
+        let calls = Cell::new(0);
+        let r = retry_after(
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() < 3 {
+                    Err(refused())
+                } else {
+                    Ok(calls.get())
+                }
+            },
+            || 1,
+            5,
+            pause,
+        );
+        assert_eq!(r.ok(), Some(3));
+
+        // Reaped, and the port is still refused: bounded, with the first error.
+        let calls = Cell::new(0);
+        let r: Result<()> = retry_after(
+            || {
+                calls.set(calls.get() + 1);
+                Err(Error::Command {
+                    context: "add_hostfwd",
+                    message: format!("attempt {}", calls.get()),
+                })
+            },
+            || 1,
+            5,
+            pause,
+        );
+        assert_eq!(calls.get(), 6, "the first attempt and 5 retries");
+        assert!(r.unwrap_err().to_string().contains("attempt 1"));
+
+        // A publish that works is not touched.
+        let cleared = Cell::new(false);
+        let r = retry_after(
+            || Ok(7),
+            || {
+                cleared.set(true);
+                1
+            },
+            5,
+            pause,
+        );
+        assert_eq!(r.ok(), Some(7));
+        assert!(!cleared.get(), "nothing is swept when nothing failed");
     }
 }
 

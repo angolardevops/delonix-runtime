@@ -544,6 +544,46 @@
       ],
       "type": "object"
     },
+    "DhcpRangeInput": {
+      "properties": {
+        "end": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "DnsInput": {
+      "description": "`spec.dns` of a zone: a DNS controller the provider's administrator\nregistered, and the domain the guests' records go under. The provider\nwrites the records — an A and a PTR for each guest that gets an address\nfrom a DHCP range, and for each subnet's gateway (`<vnet>-gw`).",
+      "properties": {
+        "reverseServer": {
+          "description": "The controller the PTR records go to; none when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "description": "The DNS controller (its id on the provider) the A records go to.",
+          "type": "string"
+        },
+        "zone": {
+          "description": "The domain, without the trailing dot.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "zone"
+      ],
+      "type": "object"
+    },
     "Entrypoint": {
       "description": "An entry point (proxy listen port).",
       "properties": {
@@ -840,6 +880,161 @@
         "name",
         "kind",
         "content"
+      ],
+      "type": "object"
+    },
+    "GatewayNatSpec": {
+      "description": "One NAT rule. IPv4 only.",
+      "properties": {
+        "description": {
+          "description": "The rule's identity on the appliance, as a filter rule's is.",
+          "type": "string"
+        },
+        "interface": {
+          "description": "The appliance's own name for the interface (`lan`, `wan`, `opt1`).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`snat` (source NAT) or `dnat` (destination NAT, a port forward).",
+          "type": "string"
+        },
+        "port": {
+          "description": "`dnat` only: the port on the interface's address.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "protocol": {
+          "description": "`dnat` only: `tcp` or `udp`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "`snat`: the network translated, at its network address\n(`10.77.0.0/24`), required. `dnat`: who may use the forward, a\nnetwork or `any` (the default).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "`snat`: `interface-address` (the default) or an address. `dnat`: the\naddress forwarded to, required.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetPort": {
+          "description": "`dnat` only: the port on the target. Defaults to `port`.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "description",
+        "kind",
+        "interface"
+      ],
+      "type": "object"
+    },
+    "GatewayPolicyRuleSpec": {
+      "description": "One rule of a [`GatewayPolicySpec`]: the `NetworkPolicy` rule shape, plus\nthe two fields a perimeter appliance holds and the node's chain does not.",
+      "properties": {
+        "action": {
+          "description": "`allow` or `deny`; `allow` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "description": "The other end of an `ingress` rule: an IPv4 address or prefix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log": {
+          "description": "Logs every match.",
+          "type": "boolean"
+        },
+        "port": {
+          "default": "*",
+          "description": "A port, an `n-m` range, or `*` (every port, the default).",
+          "type": "string"
+        },
+        "proto": {
+          "description": "`tcp`, `udp` or `any`; `any` when omitted. With a port, `any` is TCP\nand UDP.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful": {
+          "default": true,
+          "description": "`false` keeps no state for the matched flow; `true` when omitted.",
+          "type": "boolean"
+        },
+        "to": {
+          "description": "The other end of an `egress` rule.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GatewayPolicySpec": {
+      "description": "One direction of the policy for one target (an alias name, a prefix or\nan address the appliance resolves). Each rule lands as\n`<name>#<n>` at `sequence + n - 1`, and the default verdict as\n`<name>#default` right after: pf loads filter rules in `sequence` order\n(measured on OPNsense 26.1.2_5), so the first match here is the\nappliance's.",
+      "properties": {
+        "defaultPolicy": {
+          "description": "`allow` or `deny`; `deny` when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress` (traffic to the target) or `egress` (traffic from it).",
+          "type": "string"
+        },
+        "name": {
+          "description": "The prefix of every rule's identity on the appliance.",
+          "type": "string"
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GatewayPolicyRuleSpec"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "description": "The first rule's position among the appliance's filter rules.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "target",
+        "direction",
+        "sequence"
       ],
       "type": "object"
     },
@@ -1334,9 +1529,26 @@
           },
           "type": "array"
         },
+        "nat": {
+          "description": "Address translation on the appliance (ADR-0059 F5): source NAT for a\nnetwork leaving through an interface, destination NAT forwarding a\nport of an interface to a host. Served by the document's provider,\nwhich has to be registered for the NAT role too.",
+          "items": {
+            "$ref": "#/$defs/GatewayNatSpec"
+          },
+          "type": "array"
+        },
+        "policies": {
+          "description": "Policies for a target behind the gateway, in the same shape a\n`NetworkPolicy` has, lowered to the appliance's filter rules through\nthe policy IR (ADR-0059 F3d/F3e).",
+          "items": {
+            "$ref": "#/$defs/GatewayPolicySpec"
+          },
+          "type": "array"
+        },
         "provider": {
-          "description": "The registered `GatewayProvider` id (`opnsense`, or `native` — though\nthe native provider refuses every alias/rule operation by design,\nADR-0051 Phase 2, so naming it here always fails at apply time; the\nengine does not special-case that away, since a manifest that names\nthe wrong provider deserves that exact error).",
-          "type": "string"
+          "description": "The registered `GatewayProvider` id (`opnsense`). Optional since\nADR-0059 F2c: without it the record's provider, then\n`networkDefaults.gateway`, then — only without a `providers.yaml` —\nthe single registered gateway provider answers (D3).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "rules": {
           "default": [],
@@ -1346,9 +1558,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "provider"
-      ],
       "type": "object"
     },
     "NetworkRouteSpec": {
@@ -1424,6 +1633,17 @@
       "additionalProperties": false,
       "description": "`spec` of `kind: NetworkZone`.",
       "properties": {
+        "dns": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DnsInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The DNS server the provider registers the zone's guests in (ADR-0059\nF5c). Hot: a change converges live; the records the provider already\nwrote stay as they are."
+        },
         "vnets": {
           "default": [],
           "items": {
@@ -1947,6 +2167,21 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "ReservationInput": {
+      "properties": {
+        "ip": {
+          "type": "string"
+        },
+        "mac": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "mac"
+      ],
       "type": "object"
     },
     "RouteRule": {
@@ -2976,6 +3211,39 @@
       },
       "type": "object"
     },
+    "SubnetInput": {
+      "description": "A subnet inside a vnet.",
+      "properties": {
+        "cidr": {
+          "description": "`a.b.c.d/len`, at its network address.",
+          "type": "string"
+        },
+        "dhcpRange": {
+          "description": "The ranges the zone's DHCP server hands out. Declaring one, or any\nreservation, makes the zone serve DHCP.",
+          "items": {
+            "$ref": "#/$defs/DhcpRangeInput"
+          },
+          "type": "array"
+        },
+        "gateway": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reservations": {
+          "description": "Addresses reserved per MAC. Hot: a change converges live.",
+          "items": {
+            "$ref": "#/$defs/ReservationInput"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cidr"
+      ],
+      "type": "object"
+    },
     "SystemContainerNetDoc": {
       "properties": {
         "bridge": {
@@ -3224,6 +3492,13 @@
         },
         "name": {
           "type": "string"
+        },
+        "subnets": {
+          "description": "The vnet's subnets, allocated from the provider's IPAM (ADR-0059\nF5b). Cold: a change replaces the document.",
+          "items": {
+            "$ref": "#/$defs/SubnetInput"
+          },
+          "type": "array"
         }
       },
       "required": [

@@ -1,0 +1,15 @@
+# Same gate as .github/workflows/ci.yml.
+image: python:3.13
+
+stages:
+  - check
+
+check:
+  stage: check
+  variables:
+    UV_PYTHON_DOWNLOADS: never
+  before_script:
+    - pip install --no-cache-dir uv==0.12.21
+  script:
+    - test -f uv.lock || { echo "uv.lock is missing. Run 'uv lock' locally and commit uv.lock - CI installs only what is locked."; exit 1; }
+    - make install fmt-check lint typecheck test build audit

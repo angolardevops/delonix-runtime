@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      opentelemetry:
+        patterns: ["@opentelemetry/*"]
+      next:
+        patterns: ["next", "@next/eslint-plugin-next", "react", "react-dom", "@types/react", "@types/react-dom"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }

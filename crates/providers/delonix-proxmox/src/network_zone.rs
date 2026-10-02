@@ -1,4 +1,4 @@
-//! `NetworkZoneProvider` implementation for Proxmox VE's own SDN (Zones,
+//! `SegmentProvider` implementation for Proxmox VE's own SDN (Zones,
 //! VNets) — ADR-0049 addendum, closing the gap D3 names.
 //!
 //! Thin, on purpose: every real decision (staged-vs-applied, the id format,
@@ -7,11 +7,13 @@
 //! adapts that surface to the trait `delonix-sdn::network_zone` defines.
 
 use crate::{Client, Error, Ledger};
-use delonix_sdn::network_zone::{EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec};
-use delonix_sdn::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
+use delonix_networking::segment::{
+    EnsureOutcome, NetworkZoneSpec, SegmentObserved, SegmentProvider, VNetSpec,
+};
 
 /// The canonical id this provider registers under, and the only one
-/// [`crate::register_network_zone_provider`] uses (`"pve"` as an alias, the
+/// [`crate::register_segment_provider`] uses (`"pve"` as an alias, the
 /// same pair [`crate::registration`] registers the `VmBackend` under).
 pub const ID: &str = "proxmox";
 
@@ -20,14 +22,14 @@ pub const ID: &str = "proxmox";
 /// alias plus the owner mark must fit.
 const MAX_VNET_ALIAS: usize = 256;
 
-/// The [`NetworkZoneProvider`] this crate exists to provide: Proxmox's
+/// The [`SegmentProvider`] this crate exists to provide: Proxmox's
 /// cluster SDN, wrapped.
-pub struct ProxmoxNetworkZoneProvider {
+pub struct ProxmoxSegmentProvider {
     client: std::sync::Arc<Client>,
     ledger: Ledger,
 }
 
-impl ProxmoxNetworkZoneProvider {
+impl ProxmoxSegmentProvider {
     pub fn new(client: std::sync::Arc<Client>, ledger: Ledger) -> Self {
         Self { client, ledger }
     }
@@ -66,18 +68,65 @@ pub(crate) fn vnet_drift(row: &serde_json::Value, want: &VNetSpec) -> Vec<String
     out
 }
 
-fn sdn_err(e: delonix_sdn::Error) -> delonix_model::Error {
+/// What the cluster's zone and vnet listings say about one zone under one
+/// mark. Pure: the two listings are `GET /cluster/sdn/zones` and
+/// `GET /cluster/sdn/vnets` as the node answers them.
+pub(crate) fn observed_from(
+    zones: &[serde_json::Value],
+    vnets: &[serde_json::Value],
+    zone: &str,
+    owner: &OwnerMark,
+) -> SegmentObserved {
+    let text = |row: &serde_json::Value, k: &str| {
+        row.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    SegmentObserved {
+        zone_present: zones.iter().any(|z| text(z, "zone") == zone),
+        vnets: vnets
+            .iter()
+            .filter(|v| owner.owner_of(&text(v, "alias")) == Owner::Ours)
+            .map(|v| {
+                let alias = split_mark(&text(v, "alias")).0.trim().to_string();
+                VNetSpec {
+                    name: text(v, "vnet"),
+                    zone: text(v, "zone"),
+                    alias: Some(alias).filter(|a| !a.is_empty()),
+                }
+            })
+            .collect(),
+        foreign_vnets: vnets
+            .iter()
+            .filter(|v| text(v, "zone") == zone)
+            .filter(|v| owner.owner_of(&text(v, "alias")) != Owner::Ours)
+            .map(|v| text(v, "vnet"))
+            .collect(),
+    }
+}
+
+fn sdn_err(e: delonix_networking::Error) -> delonix_model::Error {
     delonix_model::Error::from(e)
 }
 
 // Failures cross the trait with their dictionary number
 // (`delonix_model::Error::from`), never `into_root`, which strips it: measured
 // live, a DX-5340 refusal from inside the SDN transaction arrived as 5000.
-impl NetworkZoneProvider for ProxmoxNetworkZoneProvider {
-    fn id(&self) -> &'static str {
-        ID
+/// The skeleton every role port extends (ADR-0059 D1 rule 4). The report is
+/// the declared network one: this value exists only once the node was
+/// configured, and answering never contacts it.
+impl delonix_compute::vm_provider::Provider for ProxmoxSegmentProvider {
+    fn id(&self) -> delonix_compute::vm_provider::ProviderId {
+        delonix_compute::vm_provider::ProviderId(ID)
     }
 
+    fn capabilities(&self) -> delonix_compute::capability::ProviderReport {
+        crate::network_capability_report(true)
+    }
+}
+
+impl SegmentProvider for ProxmoxSegmentProvider {
     fn available(&self) -> bool {
         // Registered only once the client already exists (ADR-0008's own
         // reasoning for a remote VmBackend) — by the time this value
@@ -132,22 +181,26 @@ impl NetworkZoneProvider for ProxmoxNetworkZoneProvider {
         {
             let found = owner.owner_of(row.get("alias").and_then(|v| v.as_str()).unwrap_or(""));
             if found != Owner::Ours {
-                return Err(sdn_err(delonix_sdn::Error::RemoteObjectNotOwned(format!(
-                    "vnet '{}' already exists in the cluster's SDN and is {} — refusing to \
+                return Err(sdn_err(delonix_networking::Error::RemoteObjectNotOwned(
+                    format!(
+                        "vnet '{}' already exists in the cluster's SDN and is {} — refusing to \
                      adopt it by name; pick another vnet name, or remove the one on the \
                      cluster if it is really stale",
-                    vnet.name,
-                    found.describe()
-                ))));
+                        vnet.name,
+                        found.describe()
+                    ),
+                )));
             }
             let drift = vnet_drift(row, vnet);
             if !drift.is_empty() {
-                return Err(sdn_err(delonix_sdn::Error::RemoteObjectDrifted(format!(
+                return Err(sdn_err(delonix_networking::Error::RemoteObjectDrifted(
+                    format!(
                     "vnet '{}' (this engine's) was changed on the cluster: {} — put it back, or \
                      replace the document so the engine recreates it",
                     vnet.name,
                     drift.join("; ")
-                ))));
+                ),
+                )));
             }
             return Ok(EnsureOutcome::AlreadyPresent);
         }
@@ -176,6 +229,22 @@ impl NetworkZoneProvider for ProxmoxNetworkZoneProvider {
             .delete_sdn_vnet(&self.ledger, name)
             .map_err(delonix_model::Error::from)?;
         Ok(RemoveOutcome::Removed)
+    }
+
+    /// Reads the RUNNING configuration, not the pending one: measured, the
+    /// plain listings show a zone and vnets a killed apply staged and never
+    /// applied, and reading those back as present is how a plan would call a
+    /// half-staged zone real.
+    fn observe(&self, zone: &str, owner: &OwnerMark) -> delonix_model::Result<SegmentObserved> {
+        let zones = self
+            .client
+            .sdn_zones_running()
+            .map_err(delonix_model::Error::from)?;
+        let vnets = self
+            .client
+            .sdn_vnets_running()
+            .map_err(delonix_model::Error::from)?;
+        Ok(observed_from(&zones, &vnets, zone, owner))
     }
 
     /// [`Client::sdn_transaction`] (ADR-0049, the cluster's global SDN
@@ -239,5 +308,51 @@ mod tests {
             "vnet": "v1", "zone": "z1", "alias": format!("web {}", mark().tag()),
         });
         assert!(vnet_drift(&same, &spec(Some("web"))).is_empty());
+    }
+
+    /// ADR-0059 D4, observe: only the vnets carrying THIS mark are read back,
+    /// with the alias as declared; the zone is present or not by its own id.
+    #[test]
+    fn observe_reads_the_zone_and_only_the_vnets_carrying_the_mark() {
+        let ours = mark().stamp("app tier");
+        let bare = mark().stamp("");
+        let other = OwnerMark::new("dlx-ffffffffffffffff")
+            .unwrap()
+            .stamp("theirs");
+        let zones = [
+            serde_json::json!({"zone": "z1"}),
+            serde_json::json!({"zone": "zz"}),
+        ];
+        let vnets = [
+            serde_json::json!({"vnet": "v1", "zone": "z1", "alias": ours}),
+            serde_json::json!({"vnet": "v2", "zone": "z1", "alias": bare}),
+            serde_json::json!({"vnet": "v3", "zone": "z1", "alias": other}),
+            serde_json::json!({"vnet": "v4", "zone": "z1", "alias": "by hand"}),
+            serde_json::json!({"vnet": "v5", "zone": "z1"}),
+        ];
+        let o = observed_from(&zones, &vnets, "z1", &mark());
+        assert!(o.zone_present);
+        assert_eq!(
+            o.vnets,
+            [
+                VNetSpec {
+                    name: "v1".into(),
+                    zone: "z1".into(),
+                    alias: Some("app tier".into())
+                },
+                VNetSpec {
+                    name: "v2".into(),
+                    zone: "z1".into(),
+                    alias: None
+                },
+            ]
+        );
+        assert_eq!(o.foreign_vnets, ["v3", "v4", "v5"]);
+        let elsewhere = observed_from(&zones, &vnets, "z", &mark());
+        assert!(!elsewhere.zone_present);
+        assert!(
+            elsewhere.foreign_vnets.is_empty(),
+            "foreign vnets are counted per zone"
+        );
     }
 }

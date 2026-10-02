@@ -16,10 +16,13 @@ members = [
     "crates/providers/delonix-truenas",
     "crates/providers/delonix-proxmox",
     "crates/providers/delonix-opnsense",
+    "crates/providers/delonix-provider-libvirt",
+    "crates/providers/delonix-provider-cloud-hypervisor",
     "crates/interfaces/delonix-mcp",
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
     "crates/contexts/delonix-compute",
+    "crates/contexts/delonix-networking",
     "crates/contexts/delonix-node",
     "crates/adapters/delonix-telemetry",
     "bins/delonix-mcp-bin",
@@ -56,10 +59,13 @@ delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
 delonix-truenas = { path = "crates/providers/delonix-truenas" }
 delonix-proxmox = { path = "crates/providers/delonix-proxmox" }
 delonix-opnsense = { path = "crates/providers/delonix-opnsense" }
+delonix-provider-libvirt = { path = "crates/providers/delonix-provider-libvirt" }
+delonix-provider-cloud-hypervisor = { path = "crates/providers/delonix-provider-cloud-hypervisor" }
 delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }
 delonix-compute = { path = "crates/contexts/delonix-compute" }
+delonix-networking = { path = "crates/contexts/delonix-networking" }
 delonix-node = { path = "crates/contexts/delonix-node" }
 
 serde = { version = "1", features = ["derive"] }

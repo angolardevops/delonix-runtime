@@ -733,6 +733,16 @@ are to what each row now contains:
   `provision.rs`/`network.rs` string matches are replaced by), so it belongs in the same
   slice, and the gate is the same: the two fitness annotations naming P4 for it removed.
 
+**Addendum, 2026-09-29 — P4b.4 closed: the two local backends are provider crates, and
+`delonix-vm` is the composition root until P5.** The D9 row above says «`delonix-vm` retired»;
+the measurement before P4b.4 (docs/discovery/61, addendum accepted 2026-09-29) found no layer
+where the shared composition could live instead — an adapter may not depend on a provider, an
+interface not on another interface, and four copies of the registry would diverge on the order
+that decides auto-detection. So `delonix-vm` stays, holding only the engine assembly, the
+registry seeding, the public wrappers and the local disk and seed ports, behind three exceptions
+that name **P5**: `delonix-provider-libvirt`, `delonix-provider-cloud-hypervisor` and
+`delonix-state`. Retiring it is now the application layer's job, not P4's.
+
 ## Alternatives considered
 
 - **`Extensions` as `HashMap<String, serde_json::Value>`.** Rejected in D2: every provider

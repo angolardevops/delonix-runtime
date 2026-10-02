@@ -1,13 +1,18 @@
-image: python:3.11-slim
+# Same gate as .github/workflows/ci.yml.
+image: python:3.13-slim
 
 stages:
-  - test
+  - check
 
-test:
-  stage: test
+variables:
+  UV_LOCKED: "1"
+
+check:
+  stage: check
   before_script:
-    - pip install uv
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends make
+    - pip install --no-cache-dir uv==0.12.8
   script:
+    - test -f uv.lock || { echo "uv.lock is missing — run 'uv lock' locally and commit it (README, Quickstart)"; exit 1; }
     - uv sync
-    - uv run ruff check .
-    - uv run python manage.py check
+    - make fmt-check lint migrations-check deploy-check test vuln

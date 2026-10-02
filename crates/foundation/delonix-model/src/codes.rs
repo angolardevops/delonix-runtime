@@ -10,7 +10,7 @@
 //! code — the CLI error line, `delonix explain`, the generated page, `-o json`, the
 //! node API — reads this one table.
 
-use crate::Error;
+use crate::{Error, ErrorContext};
 
 /// What the caller does next. The thousands digit of a code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,22 @@ impl Class {
             Class::PermissionDenied => x::NO_PERMISSION,
             Class::Timeout => x::TIMEOUT,
             Class::SystemFailure => x::GENERIC,
+        }
+    }
+
+    /// The HTTP status a failure of this class answers with in a problem
+    /// document (RFC 9457). The same words the local management API already
+    /// uses for the classes it maps, and the nearest HTTP word for the rest.
+    pub fn http_status(self) -> u16 {
+        match self {
+            Class::Success => 200,
+            Class::InvalidArgument | Class::Usage => 400,
+            Class::NotRunning | Class::Conflict => 409,
+            Class::NotFound => 404,
+            Class::Unavailable => 503,
+            Class::PermissionDenied => 403,
+            Class::Timeout => 504,
+            Class::SystemFailure => 500,
         }
     }
 
@@ -207,6 +223,193 @@ pub fn lookup(number: u16) -> Option<&'static Code> {
     CATALOG.iter().find(|c| c.number == number)
 }
 
+/// A number that left the dictionary, with the texts it had and the code that
+/// replaced it. See [`RETIRED`].
+#[derive(Debug)]
+pub struct Retired {
+    /// The entry as it was published.
+    pub code: Code,
+    /// The number that answers the same failure now.
+    pub replaced_by: u16,
+    /// The last release that emitted it; `None` when it only ever lived on the
+    /// main branch. Retired anyway, so a later entry cannot take the number.
+    pub last_release: Option<&'static str>,
+}
+
+/// The retired entry for a number, if it is one.
+pub fn lookup_retired(number: u16) -> Option<&'static Retired> {
+    RETIRED.iter().find(|r| r.code.number == number)
+}
+
+/// The stable reasons of a network provider failure (ADR-0059 D5).
+///
+/// Each reason owns one number in the network domain's block `80`–`99`, the
+/// same `NN` whatever the class: `DX-C3NN` with `C` the reason's class. The
+/// slug is what an envelope carries in its `reason` field; the number is what
+/// the CLI and `delonix explain` show. A reason gets a dictionary entry when
+/// something raises it, not before — the block reserves the numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// The intent cannot be served as written (includes an unknown capability).
+    InvalidIntent,
+    /// The remedy is another provider, not another argument (ADR-0050 D6).
+    UnsupportedCapability,
+    /// The provider's version lacks what the catalog row needs.
+    IncompatibleProvider,
+    /// The provider could not be reached or did not answer.
+    ProviderUnavailable,
+    /// The provider asked to slow down.
+    ProviderRateLimited,
+    /// The provider refused the credential (401, a 302 to a login page, 403).
+    ProviderAuthFailed,
+    /// One of the engine's own guardrails refused it (ADR-0059 D6).
+    PolicyDenied,
+    /// An address is already taken.
+    AddressConflict,
+    /// A pool has no address left.
+    AddressExhausted,
+    /// Someone else's object or staged changes are in the way.
+    ProviderConflict,
+    /// The plan was computed against a state that has changed since.
+    StalePlan,
+    /// The provider no longer matches the declaration.
+    DriftDetected,
+    /// The operation did not finish before its deadline.
+    OperationTimeout,
+    /// Some steps applied and a later one failed.
+    PartialApply,
+    /// The provider accepted the change and reading it back disagreed.
+    VerificationFailed,
+    /// Undoing a partial apply failed too.
+    RollbackFailed,
+    /// Something this operation depends on failed first.
+    DependencyFailed,
+}
+
+impl Reason {
+    /// Every reason, in block order: the position is the `NN` minus 80.
+    pub const ALL: [Reason; 17] = [
+        Reason::InvalidIntent,
+        Reason::UnsupportedCapability,
+        Reason::IncompatibleProvider,
+        Reason::ProviderUnavailable,
+        Reason::ProviderRateLimited,
+        Reason::ProviderAuthFailed,
+        Reason::PolicyDenied,
+        Reason::AddressConflict,
+        Reason::AddressExhausted,
+        Reason::ProviderConflict,
+        Reason::StalePlan,
+        Reason::DriftDetected,
+        Reason::OperationTimeout,
+        Reason::PartialApply,
+        Reason::VerificationFailed,
+        Reason::RollbackFailed,
+        Reason::DependencyFailed,
+    ];
+
+    /// The slug an envelope carries (`unsupported_capability`).
+    pub fn slug(self) -> &'static str {
+        match self {
+            Reason::InvalidIntent => "invalid_intent",
+            Reason::UnsupportedCapability => "unsupported_capability",
+            Reason::IncompatibleProvider => "incompatible_provider",
+            Reason::ProviderUnavailable => "provider_unavailable",
+            Reason::ProviderRateLimited => "provider_rate_limited",
+            Reason::ProviderAuthFailed => "provider_auth_failed",
+            Reason::PolicyDenied => "policy_denied",
+            Reason::AddressConflict => "address_conflict",
+            Reason::AddressExhausted => "address_exhausted",
+            Reason::ProviderConflict => "provider_conflict",
+            Reason::StalePlan => "stale_plan",
+            Reason::DriftDetected => "drift_detected",
+            Reason::OperationTimeout => "operation_timeout",
+            Reason::PartialApply => "partial_apply",
+            Reason::VerificationFailed => "verification_failed",
+            Reason::RollbackFailed => "rollback_failed",
+            Reason::DependencyFailed => "dependency_failed",
+        }
+    }
+
+    /// The class ADR-0059 D5 gives the reason.
+    pub fn class(self) -> Class {
+        match self {
+            Reason::InvalidIntent => Class::InvalidArgument,
+            Reason::UnsupportedCapability
+            | Reason::IncompatibleProvider
+            | Reason::ProviderUnavailable
+            | Reason::ProviderRateLimited => Class::Unavailable,
+            Reason::ProviderAuthFailed | Reason::PolicyDenied => Class::PermissionDenied,
+            Reason::AddressConflict
+            | Reason::AddressExhausted
+            | Reason::ProviderConflict
+            | Reason::StalePlan => Class::Conflict,
+            Reason::DriftDetected => Class::Usage,
+            Reason::OperationTimeout => Class::Timeout,
+            Reason::PartialApply
+            | Reason::VerificationFailed
+            | Reason::RollbackFailed
+            | Reason::DependencyFailed => Class::SystemFailure,
+        }
+    }
+
+    /// The reason's number, `DX-C3NN`.
+    pub fn number(self) -> u16 {
+        let nn = 80 + Reason::ALL.iter().position(|r| *r == self).unwrap_or(0) as u16;
+        self.class().digit() * 1000 + Domain::Network.digit() * 100 + nn
+    }
+}
+
+/// The D5 reason a number stands for, if it is one of the block.
+pub fn reason(number: u16) -> Option<Reason> {
+    Reason::ALL.into_iter().find(|r| r.number() == number)
+}
+
+/// Where the dictionary is published; a problem document's `type` points at
+/// the entry for its code there.
+pub const DICTIONARY_URL: &str = "https://angolardevops.github.io/delonix-runtime/codigos.html";
+
+/// One failure as an RFC 9457 problem document, with the fields ADR-0059 D5
+/// adds: `code` (the `DX_*` class, as ADR-0042 names it), `dx` (the number),
+/// `exit`, `reason` for a code of the network reason block, and the context
+/// the failure carries. `instance` names the request or resource when the
+/// caller has one. A field with no value is left out, never filled.
+pub fn problem(e: &Error, instance: Option<&str>) -> serde_json::Value {
+    let number = e.number();
+    let class = e.class();
+    let entry = lookup(number);
+    let mut doc = serde_json::json!({
+        "type": format!("{DICTIONARY_URL}#{}", label(number)),
+        "title": entry.map(|c| c.message).unwrap_or(class.name()),
+        "status": class.http_status(),
+        "detail": e.to_string(),
+        "code": e.code(),
+        "dx": label(number),
+        "exit": entry.map(|c| c.exit).unwrap_or_else(|| class.exit_code()),
+    });
+    if let Some(i) = instance {
+        doc["instance"] = i.into();
+    }
+    if let Some(r) = reason(number) {
+        doc["reason"] = r.slug().into();
+    }
+    if let Some(c) = e.context() {
+        for (key, value) in [
+            ("provider", &c.provider),
+            ("role", &c.role),
+            ("capability", &c.capability),
+            ("step", &c.step),
+            ("planDigest", &c.plan_digest),
+            ("cause", &c.cause),
+        ] {
+            if let Some(v) = value {
+                doc[key] = v.as_str().into();
+            }
+        }
+    }
+    doc
+}
+
 macro_rules! code {
     ($n:literal, $id:literal, $class:ident, $domain:ident, $exit:expr, $msg:literal, $meaning:literal, $remedy:literal) => {
         Code {
@@ -218,6 +421,16 @@ macro_rules! code {
             message: $msg,
             meaning: $meaning,
             remedy: $remedy,
+        }
+    };
+}
+
+macro_rules! retired {
+    ($by:literal, $last:expr, $n:literal, $id:literal, $class:ident, $domain:ident, $exit:expr, $msg:literal, $meaning:literal, $remedy:literal) => {
+        Retired {
+            code: code!($n, $id, $class, $domain, $exit, $msg, $meaning, $remedy),
+            replaced_by: $by,
+            last_release: $last,
         }
     };
 }
@@ -520,26 +733,14 @@ pub static CATALOG: &[Code] = &[
         "invalid gateway provider registration",
         "A GatewayProvider registration (ADR-0051) had no id, or claimed a name another provider already has.",
         "Fix the registration the message describes; this is a programming error in the process that registered it, not a manifest/flag."),
-    code!(1342, "network.unsupported_by_gateway_provider", InvalidArgument, Network, 1,
-        "not supported by this gateway provider",
-        "The alias, rule or commit operation asked for is not implemented by this GatewayProvider (ADR-0051) — the native provider answers only id()/available().",
-        "Use a gateway provider that supports it (an appliance provider like OPNsense), or drop the operation."),
-    code!(1343, "network.opnsense_validation_failed", InvalidArgument, Network, 1,
-        "OPNsense rejected the fields sent",
-        "The appliance answered HTTP 200 with `{\"result\":\"failed\",\"validations\":{...}}` — a per-field validation error, not a transport failure (ADR-0051 Phase 0, measured live).",
-        "Read the field-by-field reasons in the message and fix the alias/rule spec."),
     code!(1344, "network.zone_provider_registration_refused", InvalidArgument, Network, 1,
         "network zone provider registration refused",
-        "A process tried to register a NetworkZoneProvider with an empty id, or one whose id/alias already belongs to a different provider.",
+        "A process tried to register a SegmentProvider with an empty id, or one whose id/alias already belongs to a different provider.",
         "Fix the registration (an internal call error unless a third-party provider crate is involved)."),
-    code!(1345, "network.no_zone_provider_configured", InvalidArgument, Network, 1,
-        "no network zone provider configured",
-        "`kind: NetworkZone` was applied but the runtime has no NetworkZoneProvider registered — it names no provider itself, on purpose, so the runtime's own configuration decides.",
-        "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."),
-    code!(1346, "network.ambiguous_zone_provider", InvalidArgument, Network, 1,
-        "ambiguous network zone provider",
-        "More than one NetworkZoneProvider is registered and `kind: NetworkZone` has no field to pick one by name.",
-        "Unregister all but one NetworkZoneProvider target."),
+    code!(1380, "network.invalid_intent", InvalidArgument, Network, 1,
+        "the network intent cannot be served as written",
+        "What a network document or providers.yaml asks for cannot be served as written: nothing names a provider for the role and nothing else decides (zero or several registered, or a providers.yaml without networkDefaults.<role>), or the provider rejected the fields sent (OPNsense answers with per-field validations). ADR-0059 D5 reason `invalid_intent`.",
+        "Read the message: name the provider (networkDefaults.<role> in providers.yaml, or spec.provider where the Kind has it), or fix the fields the provider listed."),
     code!(1401, "image.empty_sbom", InvalidArgument, Image, 1,
         "empty SBOM",
         "The image has no apk or dpkg package database, so there is nothing to scan for vulnerabilities.",
@@ -924,18 +1125,14 @@ pub static CATALOG: &[Code] = &[
         "address already taken",
         "The address asked for is already leased to another container, or it belongs to the pool the network's DHCP server hands to VMs.",
         "Pick another address (`delonix network ipam ls` shows the leased ones), or leave the address to the engine."),
-    code!(5340, "network.remote_object_not_owned", Conflict, Network, 5,
-        "remote object not owned by this engine",
-        "An object with the name (or rule description) being ensured or removed already exists on the remote provider — an OPNsense appliance, a Proxmox cluster's SDN — without this engine's owner mark. It belongs to someone else, and this engine refuses to adopt it by name, and never deletes it.",
-        "Rename the object in the manifest, or remove or rename the one on the provider if it is really stale. The mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of the vnet alias (Proxmox); a Proxmox zone has no text field and is owned only when this engine's own record says it created it."),
-    code!(5341, "network.remote_object_drifted", Conflict, Network, 5,
-        "remote object drifted from the declaration",
-        "An object this engine created on the remote provider was edited there, and no longer matches the manifest. The provider has no update in place in this engine, so the object is neither overwritten nor reported as present.",
-        "Put the object back as declared on the provider, or replace it (`delonix stack apply --replace <Kind>/<name>`) so the engine removes and recreates it."),
-    code!(5342, "network.remote_foreign_pending", Conflict, Network, 5,
-        "remote provider has staged changes that are not this engine's",
-        "The remote provider applies everything that is staged at once (OPNsense `filter/apply` and `alias/reconfigure`, Proxmox `PUT /cluster/sdn`). Other staged changes are waiting there, so committing now would push someone else's half-finished work along with this engine's.",
-        "Have whoever staged them apply or discard them on the provider (the message lists what was found), then apply again."),
+    code!(5389, "network.provider_conflict", Conflict, Network, 5,
+        "the network provider holds something this engine will not overwrite",
+        "The remote provider (an OPNsense appliance, a Proxmox cluster's SDN) has an object with the identity being ensured or removed and no owner mark of this engine (someone else's: never adopted by name, never deleted); or an object this engine created was edited there and no longer matches the manifest (there is no update in place); or it has staged changes that are not this engine's, and its commit applies everything staged at once. ADR-0059 D5 reason `provider_conflict`. The owner mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of a vnet alias (Proxmox).",
+        "Read which of the three the message names: rename the object or remove the stale one on the provider; put an edited object back as declared, or replace it (`delonix stack apply --replace <Kind>/<name>`); or have whoever staged the other changes apply or discard them. Then apply again."),
+    code!(5390, "network.stale_plan", Conflict, Network, 5,
+        "the plan was computed against a state that has changed since",
+        "`stack apply --plan-digest` was given a digest, and the digest recomputed now for a network document is not among the ones given: the manifest, what the provider holds, the provider, its capabilities or the catalog changed between the plan and the apply. ADR-0059 D5 reason `stale_plan`. Nothing was written.",
+        "Plan again (`delonix stack plan -o json`), read what changed, and apply with the new `planDigest`."),
     code!(5501, "vm.record_conflict", Conflict, Vm, 5,
         "VM name already used by another VM subsystem",
         "A VM record under this name already exists, created by the other (direct-QEMU) VM subsystem that shares the same vms/ folder.",
@@ -996,6 +1193,14 @@ pub static CATALOG: &[Code] = &[
         "this management API route no longer changes the network",
         "The route wrote the dataplane without the container's record, so the next reapply undid it and a multi-homed workload kept its other addresses open. The management API is frozen (ADR-0041 D4) and refuses instead of writing half a policy.",
         "Use the CLI, which goes through the record: `delonix net ingress`/`net egress` for firewall and egress, `delonix network connect`/`disconnect` for extra networks, `delonix container rm`/`stop` to detach."),
+    code!(6381, "network.unsupported_capability", Unavailable, Network, 69,
+        "no registered provider serves this network capability",
+        "The provider that would serve the request is not registered for its role, or does not implement the operation: a document names one that is not registered, networkDefaults.<role> names one, or a resource's record names the provider that created it and that provider is not registered now. A default is never skipped to try another provider, and a recorded resource never moves (ADR-0059 D3). ADR-0059 D5 reason `unsupported_capability`: the remedy is another provider, not another argument.",
+        "Configure the provider the message names (`delonix provider ls` lists what is registered), or name one that serves the role."),
+    code!(6383, "network.provider_unavailable", Unavailable, Network, 69,
+        "the network provider could not be reached",
+        "The request to the remote network provider (an OPNsense appliance) could not be sent or was not answered: connection refused, DNS, TLS, or a connection dropped mid-answer. When it dropped after a write was sent, whether the write landed is unknown; the next plan reads the provider again. ADR-0059 D5 reason `provider_unavailable`.",
+        "Check that the provider's url in providers.yaml answers from this host, then plan and apply again."),
     code!(6501, "vm.backend_not_configured", Unavailable, Vm, 69,
         "VM backend not configured",
         "This build knows about the named backend, but nothing in this process has configured it (e.g. Proxmox with no target set).",
@@ -1056,6 +1261,10 @@ pub static CATALOG: &[Code] = &[
         "permission denied",
         "The operating system refused on a permission: a file, a directory or a capability.",
         "Fix the permission on the path the message names, or run from a session that has it, and repeat."),
+    code!(7385, "network.provider_auth_failed", PermissionDenied, Network, 77,
+        "the network provider refused the credential",
+        "The remote network provider refused what it was sent: OPNsense answers 401 for a key/secret it does not accept, a 302 to its login page when no credential arrived at all, and 403 for a key without the privilege the route needs (ADR-0051 phase 0). ADR-0059 D5 reason `provider_auth_failed`.",
+        "Check the key and secret files named in providers.yaml, and that the API user holds the firewall privileges on the appliance."),
     code!(8000, "timeout", Timeout, Engine, 124,
         "timed out",
         "The deadline passed with the work unfinished. Nothing said no; it may still be finishing.",
@@ -1136,22 +1345,10 @@ pub static CATALOG: &[Code] = &[
         "could not build the OPNsense API client",
         "The local HTTP/TLS stack could not be built from the given Target (a malformed CA certificate, most likely).",
         "Check `ca_cert_pem`/`insecure_tls` on the Target; nothing on the appliance was reached."),
-    code!(9303, "network.opnsense_request", SystemFailure, Network, 1,
-        "the request to OPNsense could not be sent or answered",
-        "A transport-level failure (DNS, TCP, TLS) talking to the appliance's REST API — not a status the appliance itself returned.",
-        "Check the appliance is reachable at its base_url and the certificate is trusted (or `insecure_tls` is set)."),
     code!(9304, "network.opnsense_http_status", SystemFailure, Network, 1,
         "OPNsense answered with an unexpected status",
         "A non-2xx HTTP status this client has no dedicated class for. The message carries the status and body.",
         "Read the status/body in the message; it may be a version this client has not been measured against (ADR-0051)."),
-    code!(9305, "network.opnsense_unauthorized", SystemFailure, Network, 1,
-        "OPNsense refused the credential",
-        "HTTP 401 (a wrong key/secret pair) or HTTP 302 (no Authorization header sent at all, redirected toward the GUI login) — both measured live against a real appliance (ADR-0051 Phase 0).",
-        "Check the API key/secret on the Target; only a generated key/secret pair authenticates, never a GUI account's username/password."),
-    code!(9306, "network.opnsense_forbidden", SystemFailure, Network, 1,
-        "OPNsense refused the operation",
-        "HTTP 403: a valid key/secret without the privilege this route needs.",
-        "Grant the API user's account the privilege this route needs, in the appliance's own System \u{2023} Access \u{2023} Users."),
     code!(9307, "network.opnsense_response_too_large", SystemFailure, Network, 1,
         "OPNsense response too large",
         "A body past the size this client reads into memory (16 MiB) — the appliance, or whatever answered in its name, is not one of the small JSON bodies this API normally returns.",
@@ -1254,6 +1451,69 @@ pub static CATALOG: &[Code] = &[
         "Read the errno in the message; `delonix system info` checks the host requirements (user namespaces, cgroup delegation)."),
 ];
 
+/// Numbers that left the dictionary. **A number never changes meaning and is
+/// never reused**, so a retired one keeps its texts here: `delonix explain`
+/// still answers it, with the code that replaced it. ADR-0059 D5 folded the
+/// network provider failures into its reason block (`DX-C380`…`DX-C399`).
+pub static RETIRED: &[Retired] = &[
+    retired!(6381, Some("v4.5.0"), 1342, "network.unsupported_by_gateway_provider", InvalidArgument, Network, 1,
+        "not supported by this gateway provider",
+        "The alias, rule or commit operation asked for is not implemented by this GatewayProvider (ADR-0051) — the native provider answers only id()/available().",
+        "Use a gateway provider that supports it (an appliance provider like OPNsense), or drop the operation."),
+    retired!(1380, Some("v4.5.0"), 1343, "network.opnsense_validation_failed", InvalidArgument, Network, 1,
+        "OPNsense rejected the fields sent",
+        "The appliance answered HTTP 200 with `{\"result\":\"failed\",\"validations\":{...}}` — a per-field validation error, not a transport failure (ADR-0051 Phase 0, measured live).",
+        "Read the field-by-field reasons in the message and fix the alias/rule spec."),
+    retired!(1380, Some("v4.5.0"), 1345, "network.no_zone_provider_configured", InvalidArgument, Network, 1,
+        "no network zone provider configured",
+        "`kind: NetworkZone` was applied, no providers.yaml is in force, and the runtime has no SegmentProvider registered — the Kind names no provider itself, on purpose, so the runtime's own configuration decides.",
+        "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."),
+    retired!(1380, Some("v4.5.0"), 1346, "network.ambiguous_zone_provider", InvalidArgument, Network, 1,
+        "ambiguous network zone provider",
+        "More than one SegmentProvider is registered, no providers.yaml is in force, and `kind: NetworkZone` has no field to pick one by name.",
+        "Set networkDefaults.segment in a providers.yaml, or unregister all but one SegmentProvider target."),
+    retired!(1380, None, 1347, "network.no_provider_for_role", InvalidArgument, Network, 1,
+        "no provider answers this network role",
+        "Nothing names a provider for the role: a providers.yaml is in force without networkDefaults.<role>, or a NetworkGateway names no provider while zero or several gateway providers are registered (ADR-0059 D3).",
+        "Set networkDefaults.<role> in providers.yaml, or name the provider in the document where the Kind has the field (NetworkGateway spec.provider)."),
+    retired!(6381, None, 1348, "network.provider_not_registered", InvalidArgument, Network, 1,
+        "the named network provider is not registered",
+        "A document names a provider that is not registered for its role (ADR-0059 D3).",
+        "Name a registered provider (`delonix provider ls`), or configure the one named."),
+    retired!(5389, Some("v4.5.0"), 5340, "network.remote_object_not_owned", Conflict, Network, 5,
+        "remote object not owned by this engine",
+        "An object with the name (or rule description) being ensured or removed already exists on the remote provider — an OPNsense appliance, a Proxmox cluster's SDN — without this engine's owner mark. It belongs to someone else, and this engine refuses to adopt it by name, and never deletes it.",
+        "Rename the object in the manifest, or remove or rename the one on the provider if it is really stale. The mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of the vnet alias (Proxmox); a Proxmox zone has no text field and is owned only when this engine's own record says it created it."),
+    retired!(5389, Some("v4.5.0"), 5341, "network.remote_object_drifted", Conflict, Network, 5,
+        "remote object drifted from the declaration",
+        "An object this engine created on the remote provider was edited there, and no longer matches the manifest. The provider has no update in place in this engine, so the object is neither overwritten nor reported as present.",
+        "Put the object back as declared on the provider, or replace it (`delonix stack apply --replace <Kind>/<name>`) so the engine removes and recreates it."),
+    retired!(5389, Some("v4.5.0"), 5342, "network.remote_foreign_pending", Conflict, Network, 5,
+        "remote provider has staged changes that are not this engine's",
+        "The remote provider applies everything that is staged at once (OPNsense `filter/apply` and `alias/reconfigure`, Proxmox `PUT /cluster/sdn`). Other staged changes are waiting there, so committing now would push someone else's half-finished work along with this engine's.",
+        "Have whoever staged them apply or discard them on the provider (the message lists what was found), then apply again."),
+    retired!(6381, None, 6303, "network.default_provider_not_registered", Unavailable, Network, 69,
+        "the network default names a provider that is not registered",
+        "networkDefaults.<role> in providers.yaml names a provider that is not registered for that role. A default is never skipped to try another provider (ADR-0059 D3).",
+        "Configure the provider the default names (its providers.yaml entry), or change the default to one `delonix provider ls` lists."),
+    retired!(6381, None, 6304, "network.recorded_provider_not_registered", Unavailable, Network, 69,
+        "the provider that created this resource is not registered",
+        "The resource's record names the provider that served it, and that provider is not registered now. A recorded resource never moves to another provider when a default changes (ADR-0059 D3).",
+        "Configure that provider again, or remove the resource with a replace once it is."),
+    retired!(6383, Some("v4.5.0"), 9303, "network.opnsense_request", SystemFailure, Network, 1,
+        "the request to OPNsense could not be sent or answered",
+        "A transport-level failure (DNS, TCP, TLS) talking to the appliance's REST API — not a status the appliance itself returned.",
+        "Check the appliance is reachable at its base_url and the certificate is trusted (or `insecure_tls` is set)."),
+    retired!(7385, Some("v4.5.0"), 9305, "network.opnsense_unauthorized", SystemFailure, Network, 1,
+        "OPNsense refused the credential",
+        "HTTP 401 (a wrong key/secret pair) or HTTP 302 (no Authorization header sent at all, redirected toward the GUI login) — both measured live against a real appliance (ADR-0051 Phase 0).",
+        "Check the API key/secret on the Target; only a generated key/secret pair authenticates, never a GUI account's username/password."),
+    retired!(7385, Some("v4.5.0"), 9306, "network.opnsense_forbidden", SystemFailure, Network, 1,
+        "OPNsense refused the operation",
+        "HTTP 403: a valid key/secret without the privilege this route needs.",
+        "Grant the API user's account the privilege this route needs, in the appliance's own System \u{2023} Access \u{2023} Users."),
+];
+
 impl Error {
     /// The dictionary number of this failure (ADR-0043). A variant built with free
     /// text reports its class's generic entry until it has its own.
@@ -1267,6 +1527,7 @@ impl Error {
             Error::Conflict(_) => 5000,
             Error::Unavailable(_) => 6000,
             Error::Timeout(_) => 8000,
+            Error::PermissionDenied(_) => 7000,
             Error::Invalid(_) => 1000,
             Error::Registry(_) => 9401,
             Error::Runtime { .. } => 9000,
@@ -1295,6 +1556,48 @@ impl Error {
         Error::Coded {
             number,
             inner: Box::new(inner),
+            context: None,
+        }
+    }
+
+    /// The context the failure carries, if anyone gave it one (ADR-0059 D5).
+    pub fn context(&self) -> Option<&ErrorContext> {
+        match self {
+            Error::Coded {
+                context: Some(c), ..
+            } => Some(c),
+            Error::Coded { inner, .. } => inner.context(),
+            _ => None,
+        }
+    }
+
+    /// The same failure with context added. The number, the class, the
+    /// message and the exit code do not change; a field already set closer to
+    /// the failure wins over the one given here, so a caller further up can
+    /// add the role without overwriting the step the provider named.
+    pub fn with_context(self, add: ErrorContext) -> Error {
+        if add.is_empty() {
+            return self;
+        }
+        match self {
+            Error::Coded {
+                number,
+                inner,
+                context,
+            } => {
+                let mut merged = context.map(|c| *c).unwrap_or_default();
+                merged.fill_from(add);
+                Error::Coded {
+                    number,
+                    inner,
+                    context: Some(Box::new(merged)),
+                }
+            }
+            plain => Error::Coded {
+                number: plain.number(),
+                inner: Box::new(plain),
+                context: Some(Box::new(add)),
+            },
         }
     }
 
@@ -1451,6 +1754,7 @@ mod tests {
             Error::Conflict("x".into()),
             Error::Unavailable("wg".into()),
             Error::Timeout("x".into()),
+            Error::PermissionDenied("x".into()),
             Error::Invalid("x".into()),
             Error::Registry("x".into()),
             Error::Runtime {
@@ -1515,6 +1819,129 @@ mod tests {
     #[should_panic(expected = "does not belong to the class")]
     fn a_number_from_another_class_is_refused() {
         let _ = Error::coded(1201, Error::NotFound("volume db".into()));
+    }
+
+    /// Context rides on the carrier and changes nothing else: same number,
+    /// class, message and exit code; the field set closer to the failure wins.
+    #[test]
+    fn context_travels_without_changing_the_failure() {
+        let plain = Error::coded(6381, Error::Unavailable("no provider 'x'".into()));
+        let with = Error::coded(6381, Error::Unavailable("no provider 'x'".into()))
+            .with_context(ErrorContext {
+                step: Some("ensure_alias".into()),
+                ..Default::default()
+            })
+            .with_context(ErrorContext {
+                role: Some("gateway".into()),
+                step: Some("apply".into()),
+                ..Default::default()
+            });
+        assert_eq!(with.number(), plain.number());
+        assert_eq!(with.to_string(), plain.to_string());
+        assert_eq!(with.class(), plain.class());
+        assert_eq!(crate::exitcode::for_error(&with), 69);
+        let c = with.context().expect("context");
+        assert_eq!(c.step.as_deref(), Some("ensure_alias"));
+        assert_eq!(c.role.as_deref(), Some("gateway"));
+        assert!(plain.context().is_none());
+        // A plain error gets its class number and keeps its message.
+        let bare = Error::Conflict("taken".into()).with_context(ErrorContext {
+            provider: Some("opnsense".into()),
+            ..Default::default()
+        });
+        assert_eq!(bare.number(), 5000);
+        assert_eq!(bare.to_string(), "conflict: taken");
+        // An empty context adds no carrier.
+        assert!(matches!(
+            Error::Conflict("x".into()).with_context(ErrorContext::default()),
+            Error::Conflict(_)
+        ));
+    }
+
+    /// The problem document has the RFC 9457 members, the D5 additions, and
+    /// nothing for a field nobody set.
+    #[test]
+    fn a_problem_document_carries_the_code_the_reason_and_the_context() {
+        let e = Error::coded(6381, Error::Unavailable("no provider 'x'".into())).with_context(
+            ErrorContext {
+                provider: Some("x".into()),
+                role: Some("gateway".into()),
+                ..Default::default()
+            },
+        );
+        let p = problem(&e, Some("networkgateways/edge"));
+        assert_eq!(p["type"], format!("{DICTIONARY_URL}#DX-6381"));
+        assert_eq!(p["status"], 503);
+        assert_eq!(p["dx"], "DX-6381");
+        assert_eq!(p["code"], "DX_UNAVAILABLE");
+        assert_eq!(p["exit"], 69);
+        assert_eq!(p["reason"], "unsupported_capability");
+        assert_eq!(p["provider"], "x");
+        assert_eq!(p["role"], "gateway");
+        assert_eq!(p["instance"], "networkgateways/edge");
+        assert!(p.get("step").is_none() && p.get("cause").is_none());
+        let plain = problem(&Error::NotFound("volume db".into()), None);
+        assert_eq!(plain["status"], 404);
+        assert!(plain.get("reason").is_none() && plain.get("instance").is_none());
+        for class in Class::ALL {
+            assert!(
+                (200..600).contains(&class.http_status()),
+                "{}",
+                class.name()
+            );
+        }
+    }
+
+    /// A retired number never comes back, and what replaced it is a live entry.
+    #[test]
+    fn a_retired_number_is_not_reused_and_names_a_live_successor() {
+        for w in RETIRED.windows(2) {
+            assert!(w[0].code.number < w[1].code.number, "{}", w[1].code.label());
+        }
+        for r in RETIRED {
+            assert!(
+                lookup(r.code.number).is_none(),
+                "{} is retired and in the dictionary again",
+                r.code.label()
+            );
+            assert!(
+                lookup(r.replaced_by).is_some(),
+                "{} is replaced by {}, which has no entry",
+                r.code.label(),
+                label(r.replaced_by)
+            );
+            assert!(
+                !CATALOG.iter().any(|c| c.id == r.code.id),
+                "{}: the id {} is in use again",
+                r.code.label(),
+                r.code.id
+            );
+        }
+    }
+
+    /// Each reason owns one `NN` of the network block, in its D5 class, and every
+    /// entry of the block is a reason's (ADR-0059 D5).
+    #[test]
+    fn the_network_block_is_the_d5_reasons() {
+        let mut nns: Vec<u16> = Reason::ALL.iter().map(|r| r.number() % 100).collect();
+        nns.sort_unstable();
+        nns.dedup();
+        assert_eq!(nns.len(), Reason::ALL.len());
+        for r in Reason::ALL {
+            let n = r.number();
+            assert!((80..=99).contains(&(n % 100)), "{}", r.slug());
+            assert_eq!(n / 100 % 10, Domain::Network.digit(), "{}", r.slug());
+            assert_eq!(reason(n), Some(r));
+        }
+        for c in CATALOG {
+            if c.domain == Domain::Network && c.number % 100 >= 80 {
+                let r = reason(c.number).unwrap_or_else(|| {
+                    panic!("{} is in the reason block and is no reason", c.label())
+                });
+                assert_eq!(c.class, r.class(), "{}", c.label());
+                assert!(c.id.ends_with(r.slug()), "{}: id {}", c.label(), c.id);
+            }
+        }
     }
 
     #[test]

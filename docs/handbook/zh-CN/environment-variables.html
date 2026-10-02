@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">参考</p>
-<h1 id="environment-variables-delonix_">环境变量（<code>DELONIX_*</code>）</h1>
+<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/environment-variables.html">阅读英文页面</a></span></div><h1 id="environment-variables-delonix_">环境变量（<code>DELONIX_*</code>）</h1>
 <p><strong>阅读前须知：</strong> 《克隆、构建与测试》里的<a href="build-and-test.html#isolating-the-engines-state">隔离引擎的状态</a>。</p>
 <p>这一页列出了引擎代码里出现的每一个 <code>DELONIX_*</code> 名字，说明它在哪里被读取、它改变了什么，以及你要不要设置它。它是一份参考资料：只读跟你现在在做的事情相关的那一节，不用读整页。读完之后，你就能隔离一次运行、打开你需要的诊断，并且在设置某个会降低安全边界的变量之前先认出它来。</p>
 <h2 id="how-to-read-this-page">如何阅读这一页<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
@@ -1206,6 +1206,34 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>节点能够访问到这台机器的地址：测试会启动一个桩 HTTP 服务器，把 <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> 作为一个 IPAM 控制器和一个 DNS 控制器的 URL 交给节点，因为节点会通过调用它们来验证两者。</td>
 <td>一个节点能路由到的 IP（一个 libvirt-NAT 实验节点用 <code>192.168.122.1</code>）。</td>
 <td>没有它，那个测试里控制器那一半会被跳过；其余部分照常运行。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_CONTROLLER</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>集群管理员已注册的 PowerDNS 控制器 id（<code>/cluster/sdn/dns</code>）——ADR-0064 实机用例把它交给区域，从不创建控制器。</td>
+<td>控制器 id（实验环境中为 <code>pdnslab</code>）。</td>
+<td>四项缺一时跳过 DNS 实机用例。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>实机用例为其客户机注册所用的域名，不带结尾的点；它和 <code>10.in-addr.arpa.</code> 必须已存在于 DNS 服务器上。</td>
+<td>域名，例如 <code>f5c.lab</code>。</td>
+<td>四项缺一时跳过 DNS 实机用例。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>DNS 服务器的 API 基址（<code>http:/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>），由本机访问，供测试读回记录；引擎从不调用它。</td>
+<td>http(s) URL。</td>
+<td>四项缺一时跳过 DNS 实机用例。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>存放 DNS 服务器 API 密钥的文件，用于测试自身的读取与清理。</td>
+<td>存放密钥的文件路径。</td>
+<td>四项缺一时跳过 DNS 实机用例。</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>

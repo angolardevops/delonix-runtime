@@ -92,6 +92,11 @@ enum Cmd {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]
         dir: Option<std::path::PathBuf>,
+        /// Project name (default: the directory's name). Lowercase letters, digits and
+        /// inner hyphens, because it becomes a container name, an image tag and a
+        /// package name.
+        #[arg(long)]
+        name: Option<String>,
         /// Force a template instead of the detected one (`stack init -t list` shows them).
         #[arg(short = 't', long)]
         template: Option<String>,
@@ -104,6 +109,8 @@ enum Cmd {
         /// Overwrite files that already exist.
         #[arg(long)]
         force: bool,
+        #[command(flatten)]
+        edge: cmd::scaffold::EdgeArgs,
     },
     // A subcommand as well as a flag because `<tool> version` is what people type first —
     // git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
@@ -234,6 +241,12 @@ enum Cmd {
         /// Remove what this stack owns and the manifest no longer declares.
         #[arg(long)]
         prune: bool,
+        /// Apply only if this is still the plan: a `planDigest` from `stack
+        /// plan -o json` (repeatable, one per network document). A network
+        /// document whose digest, recomputed now, is not among them is a
+        /// stale plan — refused before anything is written.
+        #[arg(long = "plan-digest", value_name = "DIGEST")]
+        plan_digest: Vec<String>,
     },
     /// Show what an apply would change, and change nothing.
     Plan {
@@ -607,12 +620,14 @@ fn run() -> Result<()> {
             dry_run,
             replace,
             prune,
+            plan_digest,
         } => cmd::stack::run(cmd::stack::StackCmd::Apply {
             name,
             file,
             dry_run,
             replace,
             prune,
+            plan_digest,
         }),
         Cmd::Plan {
             file,
@@ -659,10 +674,12 @@ fn run() -> Result<()> {
         // `delonix --version` are byte-for-byte identical.
         Cmd::Init {
             dir,
+            name,
             template,
             template_version,
             force,
-        } => cmd::init::run(dir, template, template_version, force),
+            edge,
+        } => cmd::init::run(dir, name, template, template_version, force, edge),
         Cmd::Version => {
             // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
             // and the binary clap names is `delonix`. Caught by diffing the two outputs —
@@ -871,6 +888,35 @@ fn main() {
             std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
+    }
+    if raw.len() == 4 && (raw[1] == "__cptree" || raw[1] == "__chownidx") {
+        let (a, b) = (std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]));
+        let done = if raw[1] == "__cptree" {
+            cmd::mapped::cptree(a, b)
+        } else {
+            cmd::mapped::chownidx(a, b)
+        };
+        if let Err(e) = done {
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
+            std::process::exit(cmd::exitcode::for_error(&e));
+        }
+        std::process::exit(0);
+    }
+    // The retry of a build `COPY` inside the mapped user namespace. Silent:
+    // the caller already holds the error of the first attempt and reports it.
+    if raw.len() == 8 && raw[1] == "__copyin" {
+        let context = std::path::Path::new(&raw[2]);
+        let ignore =
+            (raw[7] == "1").then(|| delonix_oci::dockerignore::DockerIgnore::load(context));
+        let done = cmd::build::copy_into_rootfs_here(
+            context,
+            &raw[3],
+            &raw[4],
+            &raw[5],
+            &raw[6],
+            ignore.as_ref(),
+        );
+        std::process::exit(i32::from(done.is_err()));
     }
     if raw.len() == 4 && raw[1] == "__duusage" {
         if let Err(e) =

@@ -63,6 +63,9 @@ pub enum Step {
     Env { key: String, val: String },
     /// `WORKDIR <dir>` — working directory of the following `RUN`s.
     Workdir(String),
+    /// `USER <name|uid[:gid]>` — the user the following `RUN`s execute as. The
+    /// LAST one is also the image's user (`Dockerfile::user`).
+    User(String),
 }
 
 /// An intermediate stage of a multi-stage build (`FROM x AS name`).
@@ -193,6 +196,35 @@ fn substituted_too_large(line: &str) -> Error {
 /// check exists at all. Truncating silently would still allocate the
 /// attacker's chosen amount of memory per call before the cut; refusing does
 /// not.
+/// The environment of a packaged image: `base`, then each `KEY=value` of
+/// `additions` in order, with `$VAR`/`${VAR}` in the value expanded against
+/// what is set SO FAR and the new entry REPLACING an earlier one for its key.
+///
+/// Appending the raw entries instead was measured to break the commonest
+/// `ENV` there is: `ENV PATH=/app/.venv/bin:$PATH` left the image with the
+/// literal string `/app/.venv/bin:$PATH` as its PATH (the later duplicate
+/// wins when the process starts), so `id`, `ls` and every other tool outside
+/// that one directory answered "not found" inside the container.
+pub fn merge_env(base: &[String], additions: &[String]) -> Result<Vec<String>> {
+    let mut env: Vec<String> = base.to_vec();
+    for kv in additions {
+        let Some((key, val)) = kv.split_once('=') else {
+            env.push(kv.clone());
+            continue;
+        };
+        let known: HashMap<String, String> = env
+            .iter()
+            .filter_map(|e| e.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let val = substitute_vars(val, &known)?;
+        let prefix = format!("{key}=");
+        env.retain(|e| !e.starts_with(&prefix));
+        env.push(format!("{key}={val}"));
+    }
+    Ok(env)
+}
+
 pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> Result<String> {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.char_indices().peekable();
@@ -318,7 +350,14 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
             }
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
-            "USER" => df.user = rest.trim().to_string(),
+            "USER" => {
+                df.user = rest.trim().to_string();
+                stages
+                    .last_mut()
+                    .unwrap()
+                    .steps
+                    .push(Step::User(rest.trim().to_string()));
+            }
             "ENV" => {
                 // `ENV k1=v1 k2="v 2" …` (multiple vars) OR the legacy `ENV k v`.
                 for (key, val) in parse_env_pairs(rest) {
@@ -356,11 +395,26 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                         n + 1
                     )));
                 }
-                stages.last_mut().unwrap().steps.push(Step::Copy {
-                    src: parts[0].to_string(),
-                    dst: parts[parts.len() - 1].to_string(),
-                    from: from_stage,
-                });
+                // Every source is copied, not just the first: `COPY a b dst/`
+                // used to drop `b` without a word. Docker requires the
+                // destination of a multi-source COPY to be a directory spelled
+                // with a trailing `/`; without it, where the second file would
+                // land is ambiguous, so it is refused the same way.
+                let dst = parts[parts.len() - 1];
+                let srcs = &parts[..parts.len() - 1];
+                if srcs.len() > 1 && !dst.ends_with('/') {
+                    return Err(Error::Dockerfile(format!(
+                        "line {}: {instr} with more than one source needs a destination directory ending in '/' (got '{dst}')",
+                        n + 1
+                    )));
+                }
+                for src in srcs {
+                    stages.last_mut().unwrap().steps.push(Step::Copy {
+                        src: src.to_string(),
+                        dst: dst.to_string(),
+                        from: from_stage.clone(),
+                    });
+                }
             }
             // --- Delonix extensions (apply to the final image) ---
             "SCAN" => {
@@ -718,9 +772,9 @@ impl ImageStore {
         } else {
             df.entrypoint.clone()
         };
-        // Env = the base's + the Dockerfile's.
-        let mut env = base.config.env.clone();
-        env.extend(df.env.iter().cloned());
+        // Env = the base's + the Dockerfile's, each `ENV` expanded against
+        // what is already set and replacing an earlier value of its key.
+        let env = merge_env(&base.config.env, &df.env)?;
         // inherit the base's limits if the Dockerfile does not redefine them.
         let cpus = df.cpus.clone().or_else(|| base.config.cpus.clone());
         let memory = df.memory.clone().or_else(|| base.config.memory.clone());
@@ -800,11 +854,22 @@ impl ImageStore {
     ///
     /// The flat-rootfs path never hit this because a rootfs on disk has those three
     /// as the empty directories the image extraction created.
-    fn pack_rootfs_tar(rootfs: &std::path::Path) -> Result<Vec<u8>> {
+    ///
+    /// `ids` turns the owner the HOST sees into the owner the CONTAINER sees.
+    /// Packing happens outside the container's user namespace, where a file the
+    /// container knows as `root` is owned by whoever runs the engine and one it
+    /// knows as uid 1000 is owned by a subuid. Written verbatim, those host
+    /// numbers ended up in the layer: measured on a `container commit`, every
+    /// entry said `1000:1000` and the user's own directory `100999:100999` — an
+    /// image that gives its whole filesystem to uid 1000 on any engine that
+    /// honours tar ownership (ADR-0062).
+    fn pack_rootfs_tar(
+        rootfs: &std::path::Path,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
+    ) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
         {
             let mut b = tar::Builder::new(&mut buf);
-            b.follow_symlinks(false);
             let entries =
                 std::fs::read_dir(rootfs).map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
             for entry in entries {
@@ -814,25 +879,55 @@ impl ImageStore {
                 let is_pseudo = name
                     .to_str()
                     .is_some_and(|n| Self::PSEUDO_FS_DIRS.contains(&n));
-                let ft = entry
-                    .file_type()
-                    .map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
-                let res = if is_pseudo && ft.is_dir() {
-                    // The directory entry itself, none of its contents.
-                    b.append_dir(in_tar, entry.path())
-                } else if ft.is_dir() {
-                    b.append_dir_all(in_tar, entry.path())
-                } else {
-                    // Files and symlinks at the top level. `follow_symlinks(false)`
-                    // above makes this store the link, not what it points at.
-                    b.append_path_with_name(entry.path(), in_tar)
-                };
-                res.map_err(|e| Error::Layer(format!("empacotar rootfs: {e}")))?;
+                // A pseudo-filesystem mount point: the directory entry itself,
+                // none of its contents.
+                Self::append_tree(&mut b, &entry.path(), in_tar, !is_pseudo, ids)
+                    .map_err(|e| Error::Layer(format!("empacotar rootfs: {e}")))?;
             }
             b.finish()
                 .map_err(|e| Error::Layer(format!("fechar tar: {e}")))?;
         }
         Ok(buf)
+    }
+
+    /// Appends `src` (and, when `recurse`, everything under it) as `in_tar`,
+    /// with each owner passed through `ids`. Never follows a symlink: the link
+    /// itself is stored. A socket is skipped — it is a live endpoint, not a file
+    /// of the image, and tar has no entry type for one.
+    fn append_tree<W: std::io::Write>(
+        b: &mut tar::Builder<W>,
+        src: &std::path::Path,
+        in_tar: &std::path::Path,
+        recurse: bool,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
+    ) -> std::io::Result<()> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        let meta = std::fs::symlink_metadata(src)?;
+        let ft = meta.file_type();
+        if ft.is_socket() {
+            return Ok(());
+        }
+        let mut header = tar::Header::new_gnu();
+        header.set_metadata_in_mode(&meta, tar::HeaderMode::Complete);
+        let (uid, gid) = ids(meta.uid(), meta.gid());
+        header.set_uid(uid.into());
+        header.set_gid(gid.into());
+        if ft.is_symlink() {
+            header.set_size(0);
+            return b.append_link(&mut header, in_tar, std::fs::read_link(src)?);
+        }
+        if ft.is_file() {
+            return b.append_data(&mut header, in_tar, std::fs::File::open(src)?);
+        }
+        header.set_size(0);
+        b.append_data(&mut header, in_tar, std::io::empty())?;
+        if ft.is_dir() && recurse {
+            for child in std::fs::read_dir(src)? {
+                let child = child?;
+                Self::append_tree(b, &child.path(), &in_tar.join(child.file_name()), true, ids)?;
+            }
+        }
+        Ok(())
     }
 
     /// Creates an image from a FLAT rootfs (*rootless*/vfs mode): packs
@@ -850,8 +945,9 @@ impl ImageStore {
         tag: &str,
         arch: &str,
         healthcheck: Option<String>,
+        ids: &dyn Fn(u32, u32) -> (u32, u32),
     ) -> Result<Image> {
-        let buf = Self::pack_rootfs_tar(rootfs)?;
+        let buf = Self::pack_rootfs_tar(rootfs, ids)?;
         self.commit_flat_rootfs_from_tar(
             buf,
             cmd,
@@ -998,12 +1094,109 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    /// A rootfs is packed with the owners the CONTAINER sees: every header goes
+    /// through `ids`. A symlink is stored as a link, and a pseudo-filesystem
+    /// mount point keeps its entry and none of its contents.
+    #[test]
+    fn a_packed_rootfs_carries_the_containers_owners() {
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(root.join("etc/passwd"), b"root:x:0:0\n").unwrap();
+        std::os::unix::fs::symlink("passwd", root.join("etc/link")).unwrap();
+        std::fs::create_dir_all(root.join("proc/1")).unwrap();
+        std::fs::write(root.join("proc/1/status"), b"host state").unwrap();
+        let own = std::fs::metadata(root).unwrap().uid();
+        // Whoever runs the test is root in the container; nothing else appears.
+        let ids = |uid: u32, gid: u32| (if uid == own { 0 } else { uid + 7 }, gid);
+        let tar_bytes = crate::ImageStore::pack_rootfs_tar(root, &ids).unwrap();
+
+        let mut seen = HashMap::new();
+        let mut ar = tar::Archive::new(&tar_bytes[..]);
+        for e in ar.entries().unwrap() {
+            let e = e.unwrap();
+            let path = e.path().unwrap().to_string_lossy().into_owned();
+            let link = e
+                .link_name()
+                .unwrap()
+                .map(|l| l.to_string_lossy().into_owned());
+            seen.insert(
+                path,
+                (e.header().uid().unwrap(), e.header().entry_type(), link),
+            );
+        }
+        assert_eq!(
+            seen["etc/passwd"].0, 0,
+            "the invoking uid is root in the layer"
+        );
+        assert!(seen.values().all(|(uid, _, _)| *uid == 0), "{seen:?}");
+        assert_eq!(seen["etc/link"].1, tar::EntryType::Symlink);
+        assert_eq!(seen["etc/link"].2.as_deref(), Some("passwd"));
+        assert!(seen.contains_key("proc"), "the mount point itself is kept");
+        assert!(!seen.keys().any(|p| p.starts_with("proc/")), "{seen:?}");
+    }
+
+    /// `USER` is positional: it is a step between the `RUN`s it separates, and
+    /// the last one is still the image's user.
+    #[test]
+    fn user_is_a_step_and_the_last_one_is_the_images() {
+        let df = parse_dockerfile(
+            "FROM alpine\nRUN a\nUSER app\nRUN b\nUSER root\nRUN c\nUSER app:app\n",
+        )
+        .unwrap();
+        let shape: Vec<String> = df
+            .steps
+            .iter()
+            .map(|s| match s {
+                Step::Run(r) => format!("RUN {}", r.cmdline),
+                Step::User(u) => format!("USER {u}"),
+                _ => "other".into(),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                "RUN a",
+                "USER app",
+                "RUN b",
+                "USER root",
+                "RUN c",
+                "USER app:app"
+            ]
+        );
+        assert_eq!(df.user, "app:app");
+    }
+
     fn multistage() -> super::Dockerfile {
         parse_dockerfile_with_args(
             "FROM golang:1.22 AS builder\nRUN go build -o /app\nFROM alpine:3.19 AS runtime\nCOPY --from=builder /app /app\n",
             &[],
         )
         .unwrap()
+    }
+
+    /// Every source of a `COPY` is copied. The parser used to keep the first
+    /// and the last word, so `COPY package.json pnpm-lock.yaml ./` built an
+    /// image without the lockfile and said nothing.
+    #[test]
+    fn a_multi_source_copy_copies_every_source() {
+        let df = parse_dockerfile("FROM alpine:3.20\nCOPY a.json b.lock ./\n").unwrap();
+        let copies: Vec<(&str, &str)> = df
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Copy { src, dst, .. } => Some((src.as_str(), dst.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(copies, vec![("a.json", "./"), ("b.lock", "./")]);
+        let e = parse_dockerfile("FROM alpine:3.20\nCOPY a b dest\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("ending in '/'"), "{e}");
+        // One source keeps its old meaning: `dest` may be a file name.
+        assert!(parse_dockerfile("FROM alpine:3.20\nCOPY a dest\n").is_ok());
     }
 
     #[test]
@@ -1041,6 +1234,32 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("none"), "{e}");
+    }
+
+    /// The image's PATH after `ENV PATH=/app/.venv/bin:$PATH` is the base's
+    /// with the directory in front — one entry, expanded — not the base's
+    /// followed by the literal string.
+    #[test]
+    fn merge_env_expands_against_what_is_set_and_replaces_the_key() {
+        let base = vec![
+            "PATH=/usr/local/bin:/usr/bin".to_string(),
+            "LANG=C.UTF-8".to_string(),
+        ];
+        let add = vec![
+            "APP_HOME=/app".to_string(),
+            "PATH=${APP_HOME}/.venv/bin:$PATH".to_string(),
+            "UNKNOWN=$NOT_SET".to_string(),
+        ];
+        let env = super::merge_env(&base, &add).unwrap();
+        assert_eq!(
+            env,
+            vec![
+                "LANG=C.UTF-8".to_string(),
+                "APP_HOME=/app".to_string(),
+                "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin".to_string(),
+                "UNKNOWN=$NOT_SET".to_string(),
+            ]
+        );
     }
 
     #[test]

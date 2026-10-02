@@ -177,6 +177,9 @@ Options:
       --prune
           Remove what this stack owns and the manifest no longer declares
 
+      --plan-digest &lt;DIGEST&gt;
+          Apply only if this is still the plan: a `planDigest` from `stack plan -o json` (repeatable, one per network document). A network document whose digest, recomputed now, is not among them is a stale plan — refused before anything is written
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

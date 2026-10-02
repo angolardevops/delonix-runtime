@@ -1,12 +1,20 @@
-image: node:20-slim
+# Same gate as .github/workflows/ci.yml.
+image: node:24-slim
+
+variables:
+  NEXT_TELEMETRY_DISABLED: "1"
 
 stages:
-  - build
+  - check
 
-build:
-  stage: build
+check:
+  stage: check
   before_script:
+    - apt-get update -qq && apt-get install -y -qq curl >/dev/null
     - corepack enable
+    - test -f pnpm-lock.yaml || { echo "pnpm-lock.yaml is missing - run 'pnpm install' and commit it"; exit 1; }
+    - pnpm install --frozen-lockfile
   script:
-    - pnpm install
-    - pnpm build
+    - pnpm check
+    - pnpm smoke:production
+    - pnpm audit --prod --audit-level high

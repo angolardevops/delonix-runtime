@@ -212,32 +212,6 @@ pub enum Error {
     #[error("{0}")]
     IpNotInSubnet(String),
 
-    /// A [`crate::gateway::register_gateway_provider`] call with no id, or a
-    /// name another provider already has (ADR-0051).
-    #[error("{0}")]
-    GatewayProviderRegistrationRefused(String),
-
-    /// A [`crate::gateway::GatewayProvider`] operation the provider does not
-    /// implement — every default method (ADR-0051 Phase 2) returns this.
-    #[error("{0}")]
-    UnsupportedByGatewayProvider(String),
-
-    /// A [`crate::network_zone::NetworkZoneProvider`] registration refused —
-    /// an empty id, or one whose id/alias already belongs to a different
-    /// provider (ADR-0049 addendum, mirrors `GatewayProviderRegistrationRefused`).
-    #[error("{0}")]
-    NetworkZoneProviderRegistrationRefused(String),
-
-    /// `kind: NetworkZone` was applied but nothing registered a
-    /// [`crate::network_zone::NetworkZoneProvider`].
-    #[error("{0}")]
-    NoNetworkZoneProviderConfigured(String),
-
-    /// More than one [`crate::network_zone::NetworkZoneProvider`] is
-    /// registered — `kind: NetworkZone` has no field to disambiguate.
-    #[error("{0}")]
-    AmbiguousNetworkZoneProvider(String),
-
     // ---- not found ----------------------------------------------------
     /// No `NetworkRoute` between the given pair.
     #[error("{0}")]
@@ -284,26 +258,6 @@ pub enum Error {
     /// already leases it, or it sits in the VM DHCP pool of its network.
     #[error("{0}")]
     IpInUse(String),
-
-    /// An object with the identity a remote provider (OPNsense, the SDN of a
-    /// Proxmox cluster) was asked to ensure or remove already exists there
-    /// WITHOUT this engine's owner mark (`crate::ownership`) — someone else's.
-    /// Refused instead of adopted: adopting by name is how a hand-made rule
-    /// came to be deleted by a teardown.
-    #[error("{0}")]
-    RemoteObjectNotOwned(String),
-
-    /// An object this engine owns on a remote provider no longer matches what
-    /// was declared (someone edited it there). There is no update in place,
-    /// so it is reported instead of being reported as present.
-    #[error("{0}")]
-    RemoteObjectDrifted(String),
-
-    /// The remote provider carries staged changes that are not this
-    /// engine's; its commit applies EVERYTHING staged, so committing would
-    /// push them too. Refused before anything is applied.
-    #[error("{0}")]
-    RemoteForeignPending(String),
 
     // ---- unavailable ------------------------------------------------------
     /// The `wg` binary is missing from the host.
@@ -395,11 +349,6 @@ impl Error {
             Error::FirewallEncodeFailed(_) => 1338,
             Error::NoFreeIngressPrefix(_) => 1339,
             Error::IpNotInSubnet(_) => 1340,
-            Error::GatewayProviderRegistrationRefused(_) => 1341,
-            Error::UnsupportedByGatewayProvider(_) => 1342,
-            Error::NetworkZoneProviderRegistrationRefused(_) => 1344,
-            Error::NoNetworkZoneProviderConfigured(_) => 1345,
-            Error::AmbiguousNetworkZoneProvider(_) => 1346,
             Error::RouteNotFound(_) => 4301,
             Error::ServiceNotFound(_) => 4302,
             Error::IngressNetworkNotRealized(_) => 4303,
@@ -410,9 +359,6 @@ impl Error {
             Error::BaseOctetTaken(_) => 5305,
             Error::NetworkPrefixConflict(_) => 5306,
             Error::IpInUse(_) => 5308,
-            Error::RemoteObjectNotOwned(_) => 5340,
-            Error::RemoteObjectDrifted(_) => 5341,
-            Error::RemoteForeignPending(_) => 5342,
             Error::WgMissing(_) => 6301,
             Error::Command { .. } => 9301,
             Error::Engine(e) => e.number(),
@@ -459,10 +405,7 @@ impl From<Error> for Dx {
             | Error::NetworkSubnetImmutable(text)
             | Error::BaseOctetTaken(text)
             | Error::NetworkPrefixConflict(text)
-            | Error::IpInUse(text)
-            | Error::RemoteObjectNotOwned(text)
-            | Error::RemoteObjectDrifted(text)
-            | Error::RemoteForeignPending(text) => Dx::Conflict(text),
+            | Error::IpInUse(text) => Dx::Conflict(text),
             Error::WgMissing(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
@@ -520,22 +463,6 @@ mod tests {
             Error::FirewallEncodeFailed("x".into()),
             Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into()),
             Error::IpNotInSubnet("IP x does not belong to network y (10.201.0.0/16)".into()),
-            Error::GatewayProviderRegistrationRefused(
-                "gateway provider 'x' cannot claim the name 'y': it already belongs to 'z'".into(),
-            ),
-            Error::UnsupportedByGatewayProvider(
-                "ensure_alias is not supported by the 'native' gateway provider".into(),
-            ),
-            Error::NetworkZoneProviderRegistrationRefused(
-                "network zone provider 'x' cannot claim the name 'y': it already belongs to 'z'"
-                    .into(),
-            ),
-            Error::NoNetworkZoneProviderConfigured(
-                "kind: NetworkZone has no registered provider".into(),
-            ),
-            Error::AmbiguousNetworkZoneProvider(
-                "kind: NetworkZone has 2 registered providers (a, b)".into(),
-            ),
             Error::RouteNotFound("route: a -> b".into()),
             Error::ServiceNotFound("service: default/web".into()),
             Error::IngressNetworkNotRealized("ingress network 'x' does not exist".into()),
@@ -546,9 +473,6 @@ mod tests {
             Error::BaseOctetTaken("10.50.0.0/16 is already used by network 'x'".into()),
             Error::NetworkPrefixConflict("network 'x' is already realized on 10.50".into()),
             Error::IpInUse("IP 10.50.3.3 is already leased to 'x'".into()),
-            Error::RemoteObjectNotOwned("alias 'x' on opnsense is not this engine's".into()),
-            Error::RemoteObjectDrifted("rule 'x' on opnsense: source differs".into()),
-            Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
             Error::WgMissing("'wg' is not available on this host".into()),
             Error::Command {
                 context: "spawn",

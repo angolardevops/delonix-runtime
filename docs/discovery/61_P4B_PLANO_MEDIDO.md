@@ -351,3 +351,131 @@ funções puras pelos nomes de sempre (importadas de volta só para testes).
 
 **Fica para a P4b.4:** a excepção `("dep", "delonix-vm", "delonix-state")` (o `engine(base)`
 ainda abre o `JsonStore`), o registo, e os dois backends locais, que saem para os seus crates.
+
+## Adenda P4b.4 (2026-09-29) — o desenho, medido antes do código (proposta)
+
+**Base:** `origin/main` depois do #597. Como a P4b.3, esta fatia leva um desenho antes do código,
+porque a medição encontrou um ponto que o plano não confrontou: **onde se monta o engine quando
+o `delonix-vm` sair.**
+
+### O que se mediu
+
+O `delonix-vm` depois da P4b.3b: 8 329 linhas no `lib.rs` (1–1150 helpers e registo; 1151–1952
+Cloud Hypervisor; 1953–4038 libvirt; 4039–4405 a montagem do engine e os 24 invólucros;
+4406–8329, **3 924 linhas de testes**), mais `capabilities.rs` (749: as duas declarações ADR-0050
+e as sondas `LibvirtHost`/`CloudHypervisorHost`), `cloudinit.rs` (317), `local_ports.rs` (157) e
+`provider.rs` (311, o `LocalVmProvider` da P4b.1).
+
+**O que os dois backends partilham é pouco** (chamadas por zona, `grep`):
+
+| Helper | CH | libvirt | Natureza |
+|---|---|---|---|
+| `stable_cmd` / `capture` / `binary_in_path` | 1 / 1 / 1 | 5 / 14 / 1 | correm programas |
+| `mac_for` | 1 | 1 | pura |
+| `network()` | 5 | 0 | o porto `VmNetwork` |
+| `terminate_vmm`, `vmm_left`, `wait_vmm_left`, `vmm_to_signal`, `shq`, `memory_arg`, `cpus_arg` | sim | 0 | só CH |
+| `is_rootless`, `run_quiet`, `disk_backing_format`, `pick_lease_ip`, `leases_max_expiry` | 0 | sim | só libvirt |
+
+**Os testes**, classificados pelo que exercitam (114): libvirt 46, Cloud Hypervisor 27, registo 7,
+invólucros públicos 4, outros 30.
+
+**Quem depende do `delonix-vm`** (dependências reais nos `Cargo.toml`, não menções): o `-bin` e
+três interfaces — `delonix-mgmt`, `delonix-mcp` e `delonix-node-api` —, e estas usam o engine
+completo (`create`, `start`, `status`, `list`) e os relatórios de capacidades.
+
+### O ponto que o plano não confrontou
+
+O plano dizia «`delonix-vm` fora do workspace» no fim da P4b.4. Mas a **montagem** do engine — o
+registo com os dois backends locais por uma ordem que decide a auto-detecção, o `JsonStore`, o
+disco e o seed locais, e a rede registada — tem de viver num sítio que os quatro consumidores
+partilhem, e a tabela `ALLOWED` não tem esse sítio:
+
+- um **adapter** não depende de providers;
+- uma **interface** não depende de outra interface;
+- um **contexto** não conhece providers nem corre programas;
+- montar em cada consumidor são **quatro cópias** do registo, e a ordem de registo é o que decide
+  qual backend uma VM sem `--backend` recebe — quatro cópias divergem.
+
+É o que a camada de aplicação da ADR-0040 (P5) existe para resolver, e ela ainda não existe.
+
+### A proposta
+
+1. **Dois crates de provider**: `delonix-provider-cloud-hypervisor` e `delonix-provider-libvirt`,
+   cada um com o seu `VmBackend`, a sua declaração ADR-0050 e a sua sonda (o `capabilities.rs`
+   parte-se em dois), os seus helpers e os seus testes; cada um expõe `registration()`, como o
+   Proxmox já faz. O libvirt leva também o que a P4b.3 lhe deu por nome: o backup a quente, o
+   domínio sem registo (`unrecorded`/`stop_unrecorded`/`remove_unrecorded`) e o `admit`.
+2. **`mac_for`** (pura) desce para o compute. **`stable_cmd`/`capture`/`binary_in_path`** ficam uma
+   cópia em cada provider (≈20 linhas), cada uma com o teste que fixa o `LC_ALL=C` — a regressão
+   que estas funções existem para impedir (o `virsh` é gettext). Não há outro sítio legal: um
+   provider não depende de outro provider nem de um adapter, e um contexto já não corre programas
+   (`context_spawns` = 0). A cópia é pequena e o teste é o que impede as duas de divergirem na
+   única coisa que importa.
+3. **O registo desce para o compute** (`delonix_compute::vm_registry`, o que o ADR D4 já previa),
+   vazio: ninguém o semeia por dentro; a montagem regista os backends locais por uma ordem
+   explícita e escrita num sítio só.
+4. **Um adapter `delonix-guestfs`** (o nome que a ADR-0040 D2.3 já reservou para o `qemu-img`)
+   leva o `cloudinit.rs` e as implementações `LocalDiskImages`/`SeedBuilder`.
+5. **O `delonix-vm` fica, reduzido à montagem, até à P5** — o engine por chamada, o registo dos
+   dois locais, os 24 invólucros públicos e o `LocalVmProvider` —, com **duas excepções novas e
+   declaradas** no `arch_fitness.py`, `("dep", "delonix-vm", "delonix-provider-libvirt")` e
+   `("dep", "delonix-vm", "delonix-provider-cloud-hypervisor")`, fase **P5**, razão escrita: é a
+   raiz de composição que a camada de aplicação vai absorver. A regra do portão («uma excepção tem
+   de nomear a fase que a remove») é o que torna isto honesto: a dívida fica à vista, com data de
+   saída, em vez de quatro cópias do registo espalhadas pelos consumidores.
+
+   **Isto desvia-se do plano** («`delonix-vm` fora do workspace») e é por isso que vai por escrito
+   antes do código. A alternativa que cumpre o plano à letra é acrescentar uma camada à tabela
+   `ALLOWED` — decisão de estrutura (ADR-0040), não de uma fatia.
+
+### Em fatias, cada uma com o seu portão
+
+- **P4b.4a** — `mac_for` no compute, o registo no compute (semeado pela montagem), o adapter
+  `delonix-guestfs` com o `cloudinit.rs` e os dois portos. Nenhum backend muda de crate.
+- **P4b.4b** — o crate `delonix-provider-libvirt` (backend, declaração, sonda, helpers, testes).
+- **P4b.4c** — o crate `delonix-provider-cloud-hypervisor`, idem.
+- **P4b.4d** — o `delonix-vm` reduzido à montagem, as duas excepções declaradas, `LAYERS` com os
+  dois nomes novos, e o manual regenerado.
+
+**Portão de cada uma:** os símbolos públicos dos quatro consumidores a resolver sem mudar de
+linha, a secção `vm` da bateria (101 checks hoje) e o caos `control_restart` sem regressão, o
+`provider ls`/`provider matrix` byte-a-byte iguais (as declarações só mudam de crate), e o
+`arch_fitness.py` verde com as excepções que cada fatia declara ou remove.
+
+### Provado vs não validado
+
+Provado, por `grep` sobre o código do #597: as zonas e as contagens, os helpers partilhados, a
+repartição dos testes, e que só o `-bin` e as três interfaces dependem do `delonix-vm`. Não
+validado: o custo da partição dos 3 924 linhas de testes (a classificação acima é por palavras,
+não por leitura) e se o `LocalVmProvider` cabe na montagem sem arrastar mais nada.
+
+## Fecho da P4b.4 (2026-09-29) — #599, #602, #608 e a P4b.4d
+
+**O que ficou como a adenda disse:** os dois backends locais vivem nos seus crates
+(`delonix-provider-libvirt`, #602; `delonix-provider-cloud-hypervisor`, #608), o registo e o
+`mac_for` no compute (#599), e o `delonix-vm` é a raiz de composição até à P5, com as duas
+excepções declaradas. A rede de VMs (`set_network`/`network()`) desceu também para o
+`vm_registry` do compute, porque o provider CH precisa dela e não pode depender do adapter.
+
+**O que se desviou da adenda, e porquê:** o adapter `delonix-guestfs` não foi criado. Nenhum
+provider precisa do `cloudinit.rs` nem do disco local, e criá-lo daria uma terceira excepção sem
+consumidor. O disco e o seed ficam no `local_ports.rs` do `delonix-vm`, com os helpers do
+`qemu-img` que lhes pertencem (P4b.4d).
+
+**O que a P4b.4d encontrou e fechou:**
+
+- **A promessa do ponto 2 não tinha sido cumprida.** A adenda dizia que cada cópia do
+  `stable_cmd` levava o teste que fixa o `LC_ALL=C`; nas P4b.4b/c os dois testes ficaram no
+  `delonix-vm`, e nenhum provider tinha o seu. Cada provider tem agora o seu teste do locale.
+- **Um teste oco.** O `os_estados_comparados_sao_os_literais_en_do_virsh` procurava
+  `state == "shut off"` no `lib.rs` do `delonix-vm`, de onde a comparação saíra na P4b.4b; passava
+  porque a string está no próprio código do teste. Foi retirado dali, e o libvirt ganhou a versão
+  que lê só o código (sem comentários nem o módulo de testes).
+- **A razão da excepção `delonix-vm → delonix-state` estava desactualizada** (falava de um porto
+  que já existe e de escritas XML que já estão no provider). Passou à fase P5, com o que é hoje:
+  o `JsonStore` que a montagem entrega ao engine e o marcador do backend por omissão.
+
+**Números:** o `delonix-vm` fica com 4 346 linhas (era 9 249 antes da P4b.3b), das quais o
+`lib.rs` é montagem, os invólucros públicos e os seus testes. Testes unitários (`#[test]` no `src/`): 64 no
+`delonix-vm`, 38 no libvirt, 31 no Cloud Hypervisor.
+

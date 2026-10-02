@@ -26,10 +26,6 @@ Every commit message follows <https://www.conventionalcommits.org/>:
 `build`, `ci`, `chore`. A `!` after the type/scope (`feat!: ...`) or a
 `BREAKING CHANGE:` footer marks a breaking change.
 
-`commitlint.config.js` already extends `@commitlint/config-conventional` — it
-just needs `pnpm add -D @commitlint/cli @commitlint/config-conventional`
-before `npx commitlint` (or a `commit-msg` hook) can enforce it.
-
 ## Versioning (SemVer)
 
 This project follows <https://semver.org/>: `MAJOR.MINOR.PATCH`.
@@ -45,18 +41,16 @@ a package manager step you have not run; add one when you are ready.
 ## Running the checks locally
 
 ```bash
-corepack enable
-pnpm install
-pnpm build
+pnpm install          # first time: writes pnpm-lock.yaml — commit it
+pnpm check            # format check, lint, typecheck, unit + e2e tests, build
+pnpm audit --prod     # known vulnerabilities in production dependencies (needs network)
 ```
 
-The same commands `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
-every push/PR. No `test` script ships yet — add `@nestjs/testing` + Jest
-(Nest's own default) when you add real endpoints, then wire `pnpm test` into
-both pipelines next to `pnpm build`.
+These are the commands `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR (CI installs with `pnpm install --frozen-lockfile`).
 
 ## Static analysis (SonarQube)
 
 `sonar-project.properties` is ready for a `sonar-scanner` run (local or via a
-SonarQube/SonarCloud CI step) — nothing extra to configure for this project's
-layout.
+SonarQube/SonarCloud CI step). Run `pnpm test:cov` first if you want coverage
+reported (`coverage/lcov.info`).

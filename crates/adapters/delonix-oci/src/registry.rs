@@ -8,7 +8,9 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
+use crate::token_cache;
 use crate::{Error, Result};
+use std::path::{Path, PathBuf};
 // Canonical OCI types (crate `oci-spec`, feature `image`) — replace the hand-rolled
 // structs of the OCI/distribution schema that used to be here (C3-IMG).
 use oci_spec::image::{
@@ -315,6 +317,12 @@ fn target_arch() -> &'static str {
     }
 }
 
+/// The root an anonymous read may cache its token under (ADR-0060): the state
+/// root when there are no credentials for the host, nothing otherwise.
+fn anonymous_cache(root: &Path, creds: &Option<(String, String)>) -> Option<PathBuf> {
+    creds.is_none().then(|| root.to_path_buf())
+}
+
 #[derive(Clone)]
 struct Client {
     http: reqwest::blocking::Client,
@@ -327,6 +335,21 @@ struct Client {
     /// (U6): an upload asks the registry to MOUNT the blob from there instead of
     /// sending its bytes. `None` is a plain upload.
     mount_from: Option<String>,
+    /// The state root under which an ANONYMOUS token may be kept between
+    /// commands (ADR-0060). Set only on the read paths, and only when there are
+    /// no credentials for the host: a token that can read private repositories
+    /// never reaches the disk, and a push never uses the cache.
+    token_cache: Option<PathBuf>,
+    /// `token` came from that cache and has not been accepted by the registry
+    /// yet — a `401` on it drops the entry instead of being a real refusal.
+    token_from_cache: bool,
+    /// The size of the `PATCH` chunks a resumable upload sends.
+    upload_chunk: u64,
+    /// Whether blobs larger than one chunk go up in resumable chunks. Off at
+    /// first: chunks cost ~13% on ghcr (a round trip per 4 MiB, measured), so
+    /// a healthy link keeps the one `PUT`. The first failed upload turns it
+    /// on, and from then on a cut costs one chunk, not the blob.
+    chunked: bool,
 }
 
 impl Client {
@@ -366,10 +389,32 @@ impl Client {
         // `_with_hint` here and in `write_req` only: these are the first two
         // contacts with the registry, and a plain-HTTP registry fails right
         // there — the transport gives up before there is any state to report.
+        // ADR-0060: a read with no token yet first tries the anonymous token an
+        // earlier command left, which skips the `401` and the token request.
+        let scope = token_cache::pull_scope(&self.repo);
+        if self.token.is_none() {
+            if let Some(root) = &self.token_cache {
+                if let Some(t) = token_cache::load(root, &self.host, &scope, now_unix()) {
+                    self.token = Some(t);
+                    self.token_from_cache = true;
+                }
+            }
+        }
         let resp = self
             .send_once(url, accept, from)
             .map_err(|e| reg_err_with_hint(e, &self.host))?;
+        if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
+            self.token_from_cache = false;
+        }
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // A cached token the registry refused is gone for good; the `401` it
+            // earned carries a fresh challenge, so the ordinary path runs once.
+            if self.token_from_cache {
+                if let Some(root) = &self.token_cache {
+                    token_cache::forget(root, &self.host, &scope);
+                }
+                self.token_from_cache = false;
+            }
             let www = resp
                 .headers()
                 .get(reqwest::header::WWW_AUTHENTICATE)
@@ -377,7 +422,10 @@ impl Client {
                 .unwrap_or("")
                 .to_string();
             self.token = Some(match self.request_token(&www, None)? {
-                Ok(token) => token,
+                Ok((token, expires_in)) => {
+                    self.remember_anonymous(&www, &scope, &token, expires_in);
+                    token
+                }
                 // A read the registry will not authorise: it answers this way for
                 // a repository that does not exist as well as for one these
                 // credentials cannot see (ghcr: 403 on the token), and it will
@@ -449,8 +497,26 @@ impl Client {
     /// `force_scope`, requests that scope (e.g. `…:pull,push` for the `push`) instead
     /// of the one indicated by the server — the server grants it if the credentials
     /// allow it.
+    /// Keeps an anonymous token for the next command (ADR-0060) — only when
+    /// this client may cache at all, and only when the registry asked for
+    /// exactly the read scope the cache is keyed on, so every stored entry is
+    /// one a later read can find.
+    fn remember_anonymous(&self, www: &str, scope: &str, token: &str, expires_in: Option<u64>) {
+        let Some(root) = &self.token_cache else {
+            return;
+        };
+        if extract(www, "scope").as_deref() != Some(scope) {
+            return;
+        }
+        let now = now_unix();
+        if let Some(until) = token_cache::expiry(token, expires_in, now) {
+            token_cache::store(root, &self.host, scope, token, until, now);
+        }
+    }
+
     fn get_token(&self, www: &str, force_scope: Option<&str>) -> Result<String> {
         self.request_token(www, force_scope)?
+            .map(|(token, _)| token)
             .map_err(|status| Error::Registry(format!("failed to obtain token: HTTP {status}")))
     }
 
@@ -460,7 +526,7 @@ impl Client {
         &self,
         www: &str,
         force_scope: Option<&str>,
-    ) -> Result<std::result::Result<String, reqwest::StatusCode>> {
+    ) -> Result<std::result::Result<(String, Option<u64>), reqwest::StatusCode>> {
         let realm = extract(www, "realm")
             .ok_or_else(|| Error::Registry("authentication without `realm`".into()))?;
         let scope = match force_scope {
@@ -483,10 +549,11 @@ impl Client {
             return Ok(Err(resp.status()));
         }
         let v: serde_json::Value = resp.json().map_err(reg_err)?;
+        let expires_in = v.get("expires_in").and_then(|e| e.as_u64());
         v.get("token")
             .or_else(|| v.get("access_token"))
             .and_then(|t| t.as_str())
-            .map(|t| Ok(t.to_string()))
+            .map(|t| Ok((t.to_string(), expires_in)))
             .ok_or_else(|| Error::Registry("authentication response without token".into()))
     }
 
@@ -841,9 +908,11 @@ impl Client {
 
     /// Sends a small blob held in memory (a config, a signature).
     fn push_blob(&mut self, digest: &str, data: &[u8]) -> Result<()> {
-        self.push_blob_with(digest, &|| {
+        self.push_blob_with(digest, &|offset| {
+            let mut cursor = std::io::Cursor::new(data.to_vec());
+            cursor.set_position(offset);
             Ok((
-                Box::new(std::io::Cursor::new(data.to_vec())) as Box<dyn std::io::Read + Send>,
+                Box::new(cursor) as Box<dyn std::io::Read + Send>,
                 data.len() as u64,
             ))
         })
@@ -860,10 +929,13 @@ impl Client {
         size: u64,
         meter: Option<&MeterSlot>,
     ) -> Result<()> {
-        self.push_blob_with(digest, &|| {
+        self.push_blob_with(digest, &|offset| {
+            use std::io::Seek;
+            let mut file = std::fs::File::open(path)?;
+            file.seek(std::io::SeekFrom::Start(offset))?;
             let body = MeteredFile {
-                file: std::fs::File::open(path)?,
-                pos: 0,
+                file,
+                pos: offset,
                 meter: meter.cloned(),
             };
             Ok((Box::new(body) as Box<dyn std::io::Read + Send>, size))
@@ -882,26 +954,36 @@ impl Client {
     /// say so.
     const PUSH_ATTEMPTS: u32 = 5;
 
-    /// Uploads a blob, retrying what a retry can fix. The push had no retry at
-    /// all: a connection that dropped at 90% of a 2 GiB image meant running
-    /// the command again and sending all of it.
+    /// Uploads a blob, retrying what a retry can fix.
     ///
     /// Every attempt starts with a `HEAD`: a blob the registry already holds
-    /// is done — including one whose `PUT` was accepted but whose answer was
-    /// lost on the way back, which must not be sent twice. A transport failure
-    /// and a 5xx/408/429 are retried with backoff, on a NEW session (a failed
-    /// `PUT` usually invalidates its upload URL); any other answer (400 for a
-    /// digest mismatch, 403) fails at once, since sending the same bytes again
-    /// cannot change it. `body` is called once per attempt.
+    /// is done — including one whose last request was accepted but whose
+    /// answer was lost on the way back, which must not be sent twice. A
+    /// transport failure and a 5xx/408/429 are retried with backoff; any other
+    /// answer (400 for a digest mismatch, 403) fails at once, since sending the
+    /// same bytes again cannot change it. `body` is called once per request.
     ///
-    /// **Retried, not resumed.** The pull continues a cut blob from where it
-    /// stopped (`Range`); an upload here is ONE monolithic `PUT`, so every
-    /// attempt sends the blob from byte 0 — over a ~500 KB/s link a 1.2 GiB
-    /// image that drops at 90% costs another 40 minutes. Resuming needs the
-    /// chunked protocol (`PATCH` with `Content-Range`, then `GET` on the
-    /// session to learn the offset the registry kept) — not done yet.
+    /// **Resumed, not only retried**, once an upload has failed: a blob
+    /// larger than `upload_chunk` then goes up in `PATCH` chunks, and the
+    /// session and the offset the registry confirmed in its last `Range`
+    /// answer are kept across attempts, so on a link that keeps dropping, each
+    /// cut after the first costs one chunk, not the whole blob again. The
+    /// first attempt is one `PUT`: chunks cost ~13% on ghcr (measured), and
+    /// most pushes never see a cut. The confirmed `Range` is enough: measured on ghcr
+    /// (2026-09-30), a `PATCH` cut in the middle leaves none of its bytes
+    /// behind, and sending that chunk again from the confirmed offset is
+    /// accepted — while the `GET` that the spec offers to ask the offset
+    /// answers `303` to a web page there. That `GET` is still asked first,
+    /// for the registries that answer it. A session the registry will not
+    /// continue — `registry:2` keeps part of a cut chunk and then answers
+    /// `404`, sometimes before reading the body — is replaced by a new one, as
+    /// is a resume that did not move: never worse than a monolithic retry. A
+    /// `416` on the first chunk is its size (ghcr takes at most 4 MiB), and
+    /// the chunks are halved. A registry that does not take `PATCH` at all
+    /// (`405`/`501`) gets whole blobs.
     fn push_blob_with(&mut self, digest: &str, body: &BlobBody<'_>) -> Result<()> {
         let mut last = String::new();
+        let mut session: Option<UploadSession> = None;
         for attempt in 1..=Self::PUSH_ATTEMPTS {
             if attempt > 1 {
                 std::thread::sleep(Duration::from_secs(1 << (attempt - 2).min(3)));
@@ -909,7 +991,7 @@ impl Client {
             }
             let outcome = match self.blob_present(digest) {
                 Ok(true) => return Ok(()),
-                Ok(false) => self.upload_once(digest, body),
+                Ok(false) => self.upload_once(digest, body, &mut session),
                 Err(f) => Err(f),
             };
             match outcome {
@@ -948,13 +1030,76 @@ impl Client {
         }
     }
 
-    /// One monolithic upload: `POST` to open the session, then
-    /// `PUT …?digest=<sha256>` with the body `body` produces.
+    /// One upload attempt: chunked (and resumable) when the blob is larger than
+    /// `upload_chunk`, otherwise one `PUT`. `session` is the chunked session a
+    /// previous attempt left confirmed bytes in, if any.
     fn upload_once(
         &mut self,
         digest: &str,
         body: &BlobBody<'_>,
+        session: &mut Option<UploadSession>,
     ) -> std::result::Result<(), UploadFailure> {
+        let size = body(0).map_err(UploadFailure::Fatal)?.1;
+        if !self.chunked || size <= self.upload_chunk {
+            let result = match self.open_upload(digest)? {
+                None => Ok(()),
+                Some(base) => self.upload_monolithic(digest, body, &base),
+            };
+            if matches!(result, Err(UploadFailure::Retry(_))) && size > self.upload_chunk {
+                tracing::warn!(
+                    "the upload of {digest} failed whole; sending it in resumable chunks"
+                );
+                self.chunked = true;
+            }
+            return result;
+        }
+        if session.is_none() {
+            match self.open_upload(digest)? {
+                None => return Ok(()),
+                Some(location) => {
+                    *session = Some(UploadSession {
+                        location,
+                        offset: 0,
+                    })
+                }
+            }
+        } else if let Some(s) = session.as_mut() {
+            // A resume: ask where the registry stands, where it can say.
+            match self.upload_status(&s.location) {
+                SessionStatus::At(at) if at <= size => s.offset = at,
+                SessionStatus::Gone => {
+                    tracing::warn!("the upload session of {digest} is gone; starting over");
+                    *session = None;
+                    return self.upload_once(digest, body, session);
+                }
+                _ => {}
+            }
+            tracing::warn!(
+                "resuming the upload of {digest} at byte {} of {size}",
+                s.offset
+            );
+        }
+        let resumed_from = session.as_ref().map(|s| s.offset).filter(|&o| o > 0);
+        let result = self.upload_chunks(digest, body, size, session);
+        match &result {
+            Ok(()) | Err(UploadFailure::Fatal(_)) => *session = None,
+            Err(UploadFailure::Retry(_)) => {
+                // A resume that did not move is a session the registry will
+                // not continue — it may answer before reading the body, which
+                // reaches this client only as a dropped connection. Start over
+                // next time rather than spend every attempt on it.
+                if resumed_from.is_some() && session.as_ref().map(|s| s.offset) == resumed_from {
+                    *session = None;
+                }
+            }
+        }
+        result
+    }
+
+    /// Opens an upload session. `None` when the registry mounted the blob from
+    /// the source repository (201): no byte has to move. Otherwise the session
+    /// URL, absolute.
+    fn open_upload(&mut self, digest: &str) -> std::result::Result<Option<String>, UploadFailure> {
         let start = upload_start_url(
             scheme_for(&self.host),
             &self.host,
@@ -975,10 +1120,10 @@ impl Client {
         // 201 on a mount request: the registry linked the blob from the source
         // repository, and no byte has to move. A 202 is an ordinary upload
         // session — the source did not have it, or this token cannot read it —
-        // and the upload continues below exactly as without a mount.
+        // and the upload continues exactly as without a mount.
         if self.mount_from.is_some() && resp.status() == reqwest::StatusCode::CREATED {
             tracing::debug!("blob {digest} mounted from {:?}", self.mount_from);
-            return Ok(());
+            return Ok(None);
         }
         if resp.status() != reqwest::StatusCode::ACCEPTED {
             let status = resp.status();
@@ -1004,14 +1149,206 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| {
                 UploadFailure::Fatal(Error::Registry("upload without Location header".into()))
-            })?
-            .to_string();
-        // Location may come absolute or relative to the host.
-        let base = if location.starts_with("http") {
-            location
+            })?;
+        Ok(Some(self.absolute(location)))
+    }
+
+    /// `Location` may come absolute or relative to the host.
+    fn absolute(&self, location: &str) -> String {
+        if location.starts_with("http") {
+            location.to_string()
         } else {
             format!("{}://{}{}", scheme_for(&self.host), self.host, location)
+        }
+    }
+
+    /// The offset a registry says an upload session has reached, from the
+    /// `GET` the distribution spec defines (`204` with `Range: 0-<last>`).
+    /// A `404`/`400`/`416` means the session is no longer usable. Any other
+    /// answer — ghcr redirects it to a web page — says nothing, and the caller
+    /// keeps the offset it confirmed itself.
+    fn upload_status(&mut self, location: &str) -> SessionStatus {
+        let url = location.to_string();
+        let resp = match self.write_req_raw(&|http| Ok(http.get(&url))) {
+            Ok(Ok(r)) => r,
+            _ => return SessionStatus::Unknown,
         };
+        // The HTTP client follows redirects, and ghcr sends this `GET` to a
+        // web page that answers `404` (measured): an answer from anywhere but
+        // the session's own URL says nothing about the session. Read as
+        // "gone", it made every resume on ghcr start over.
+        if resp.url().as_str() != url {
+            return SessionStatus::Unknown;
+        }
+        match resp.status() {
+            reqwest::StatusCode::NO_CONTENT => resp
+                .headers()
+                .get(reqwest::header::RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(confirmed_upload_offset)
+                .map_or(SessionStatus::Unknown, SessionStatus::At),
+            reqwest::StatusCode::NOT_FOUND
+            | reqwest::StatusCode::BAD_REQUEST
+            | reqwest::StatusCode::RANGE_NOT_SATISFIABLE => SessionStatus::Gone,
+            _ => SessionStatus::Unknown,
+        }
+    }
+
+    /// Sends the chunks from `session.offset` on, then closes the upload with
+    /// the digest. The session's offset and location move with every chunk
+    /// the registry confirms, so a failure leaves them where a resume starts.
+    fn upload_chunks(
+        &mut self,
+        digest: &str,
+        body: &BlobBody<'_>,
+        size: u64,
+        session: &mut Option<UploadSession>,
+    ) -> std::result::Result<(), UploadFailure> {
+        let Some(s) = session.as_mut() else {
+            return Err(UploadFailure::Retry("no upload session".into()));
+        };
+        while s.offset < size {
+            let start = s.offset;
+            let len = self.upload_chunk.min(size - start);
+            let url = s.location.clone();
+            let resp = match self.write_req_raw(&|http| {
+                let (reader, _) = body(start)?;
+                Ok(http
+                    .patch(&url)
+                    .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                    .header(
+                        reqwest::header::CONTENT_RANGE,
+                        format!("{start}-{}", start + len - 1),
+                    )
+                    .body(reqwest::blocking::Body::sized(
+                        std::io::Read::take(reader, len),
+                        len,
+                    )))
+            }) {
+                Err(e) => return Err(UploadFailure::Fatal(e)),
+                Ok(Err(e)) => {
+                    return Err(UploadFailure::Retry(format!(
+                    "blob PATCH {digest} at byte {start}: {} (connection lost with {start} of {size} bytes confirmed)",
+                    transport_chain(&e)
+                )))
+                }
+                Ok(Ok(r)) => r,
+            };
+            let status = resp.status();
+            if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
+                && start == 0
+                && self.upload_chunk / 2 >= MIN_UPLOAD_CHUNK
+            {
+                // Refused at byte 0: nothing can be out of place yet, so it is
+                // the chunk's size — ghcr answers this way above 4 MiB
+                // (measured: "exceeds the maximum permissible limit of
+                // 4.00MiB"). Smaller chunks, on a new session.
+                let msg = format!(
+                    "blob PATCH {digest}: {}; trying chunks of {} bytes",
+                    http_failure(resp),
+                    self.upload_chunk / 2
+                );
+                self.upload_chunk /= 2;
+                *session = None;
+                return Err(UploadFailure::Retry(msg));
+            }
+            if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
+                || status == reqwest::StatusCode::NOT_FOUND
+            {
+                // The registry kept part of a cut chunk, or dropped the
+                // session: nothing tells where it stands. Start again.
+                let msg = format!(
+                    "blob PATCH {digest} at byte {start}: {}; starting a new upload session",
+                    http_failure(resp)
+                );
+                *session = None;
+                return Err(UploadFailure::Retry(msg));
+            }
+            if start == 0
+                && (status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                    || status == reqwest::StatusCode::NOT_IMPLEMENTED)
+            {
+                // A registry that does not take chunks: this client sends
+                // whole blobs to it from now on.
+                self.upload_chunk = u64::MAX;
+                *session = None;
+                return Err(UploadFailure::Retry(format!(
+                    "blob PATCH {digest}: {}; the registry does not take chunked uploads, sending the blob whole",
+                    http_failure(resp)
+                )));
+            }
+            if !status.is_success() {
+                let msg = format!(
+                    "blob PATCH {digest} at byte {start}: {}",
+                    http_failure(resp)
+                );
+                return Err(if retryable_status(status) {
+                    UploadFailure::Retry(msg)
+                } else {
+                    UploadFailure::Fatal(Error::Registry(msg))
+                });
+            }
+            let sent_to = start + len;
+            let confirmed = resp
+                .headers()
+                .get(reqwest::header::RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(confirmed_upload_offset)
+                .unwrap_or(sent_to);
+            if confirmed > sent_to || confirmed < start {
+                *session = None;
+                return Err(UploadFailure::Retry(format!(
+                    "blob PATCH {digest}: the registry confirmed byte {confirmed} after a chunk {start}..{sent_to}; starting a new upload session"
+                )));
+            }
+            if let Some(loc) = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+            {
+                s.location = self.absolute(loc);
+            }
+            s.offset = confirmed;
+        }
+        let sep = if s.location.contains('?') { '&' } else { '?' };
+        let put_url = format!("{}{sep}digest={digest}", s.location);
+        let resp = match self.write_req_raw(&|http| {
+            Ok(http
+                .put(&put_url)
+                .header(reqwest::header::CONTENT_LENGTH, 0))
+        }) {
+            Err(e) => return Err(UploadFailure::Fatal(e)),
+            Ok(Err(e)) => {
+                return Err(UploadFailure::Retry(format!(
+                    "blob PUT {digest} (closing the upload): {}",
+                    transport_chain(&e)
+                )))
+            }
+            Ok(Ok(r)) => r,
+        };
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let msg = format!(
+            "blob PUT {digest} (closing the upload): {}",
+            http_failure(resp)
+        );
+        if retryable_status(status) {
+            Err(UploadFailure::Retry(msg))
+        } else {
+            Err(UploadFailure::Fatal(Error::Registry(msg)))
+        }
+    }
+
+    /// One monolithic upload into the session at `base`: `PUT …?digest=` with
+    /// the whole body.
+    fn upload_monolithic(
+        &mut self,
+        digest: &str,
+        body: &BlobBody<'_>,
+        base: &str,
+    ) -> std::result::Result<(), UploadFailure> {
         let sep = if base.contains('?') { '&' } else { '?' };
         let put_url = format!("{base}{sep}digest={digest}");
         // Counted, because when the connection drops mid-body the only error
@@ -1022,7 +1359,7 @@ impl Client {
         let sent = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let total = std::cell::Cell::new(0u64);
         let resp = match self.write_req_raw(&|http| {
-            let (reader, size) = body()?;
+            let (reader, size) = body(0)?;
             sent.store(0, std::sync::atomic::Ordering::Relaxed);
             total.set(size);
             let reader = CountingReader {
@@ -1178,9 +1515,36 @@ impl std::io::Read for MeteredFile {
     }
 }
 
-/// A blob's upload body: a fresh reader over its bytes and their count,
-/// built again for every attempt.
-type BlobBody<'a> = dyn Fn() -> Result<(Box<dyn std::io::Read + Send>, u64)> + 'a;
+/// A blob's upload body: a fresh reader over its bytes starting at the given
+/// offset, and the blob's WHOLE size. Built again for every attempt and every
+/// chunk, so a resumed upload reads from where it continues.
+type BlobBody<'a> = dyn Fn(u64) -> Result<(Box<dyn std::io::Read + Send>, u64)> + 'a;
+
+/// The chunk size of a resumable upload: ghcr's limit (measured 2026-09-30,
+/// a larger `PATCH` is refused with `416`). Over a ~500 KB/s link a chunk is
+/// about 8 s of transfer, which is the most a cut connection costs.
+const UPLOAD_CHUNK: u64 = 4 * 1024 * 1024;
+
+/// How far a registry's refusal of a chunk's size can shrink it.
+const MIN_UPLOAD_CHUNK: u64 = 1024 * 1024;
+
+/// A chunked upload session the registry has confirmed bytes of: where to send
+/// the next chunk, and the offset it continues from.
+struct UploadSession {
+    location: String,
+    offset: u64,
+}
+
+/// What the registry says about an upload session when asked where it stands.
+enum SessionStatus {
+    /// It has the bytes up to this offset.
+    At(u64),
+    /// It does not answer the question (ghcr redirects it to a web page).
+    Unknown,
+    /// The session is gone or no longer valid: `registry:2` answers `404`
+    /// once a cut chunk left bytes past the offset its session state records.
+    Gone,
+}
 
 /// An upload body that records how many bytes `reqwest` has taken from it.
 struct CountingReader {
@@ -1203,6 +1567,19 @@ enum UploadFailure {
     Retry(String),
     /// Anything a retry cannot change.
     Fatal(Error),
+}
+
+/// The offset an upload continues from, read from a `Range: 0-<last>` answer.
+/// `0-0` is read as nothing kept: it is what a session with no bytes answers
+/// (ghcr, measured), and taking it as "one byte" would send the next chunk
+/// from the wrong offset.
+fn confirmed_upload_offset(range: &str) -> Option<u64> {
+    let (from, to) = range.trim().trim_start_matches("bytes=").split_once('-')?;
+    let (from, to): (u64, u64) = (from.parse().ok()?, to.parse().ok()?);
+    if from != 0 {
+        return None;
+    }
+    Some(if to == 0 { 0 } else { to + 1 })
 }
 
 /// Registry answers worth another attempt: server errors, and the two that
@@ -1304,6 +1681,10 @@ pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryCl
             token: None,
             creds,
             mount_from: None,
+            token_cache: None,
+            token_from_cache: false,
+            upload_chunk: UPLOAD_CHUNK,
+            chunked: false,
         },
         reference: refr,
     })
@@ -1473,6 +1854,7 @@ pub fn pull_from_registry_with_creds_full(
     let (host, repo, refr) = parse_reference(reference);
     let http = transfer_client()?;
     let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
+    let cache = anonymous_cache(store.root(), &creds);
     let mut c = Client {
         http,
         host: host.clone(),
@@ -1480,6 +1862,10 @@ pub fn pull_from_registry_with_creds_full(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pulling {repo}:{refr} from {host}");
@@ -1874,6 +2260,10 @@ pub fn push_to_registry_with_progress(
         token: None,
         creds,
         mount_from: mount_source(&image.repo_tags, &host, &repo),
+        token_cache: None,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing {repo}:{refr} to {host}");
@@ -2038,6 +2428,10 @@ fn push_artifact(
         token: None,
         creds,
         mount_from: None,
+        token_cache: None,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing artifact {repo}:{refr} to {host}");
@@ -2127,6 +2521,10 @@ pub fn push_oci_artifact_with_layer_annotations(
         token: None,
         creds,
         mount_from: None,
+        token_cache: None,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
     push_layer_annotated(&mut c, &refr, layer_media_type, data, layer_annotations)
 }
@@ -2192,6 +2590,7 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
     let (host, repo, _refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2199,6 +2598,10 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
     c.list_tags()
 }
@@ -2231,6 +2634,7 @@ pub fn describe_remote_artifact(
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2238,6 +2642,10 @@ pub fn describe_remote_artifact(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
     let url = c.manifest_url(tag);
     let bytes = read_capped(
@@ -2292,6 +2700,7 @@ pub fn pull_oci_artifact_with_meta(
     let (host, repo, refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2299,6 +2708,10 @@ pub fn pull_oci_artifact_with_meta(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2379,6 +2792,7 @@ pub fn pull_oci_artifact_to_file(
     let (host, repo, refr) = parse_reference(source);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
+    let cache = anonymous_cache(root, &creds);
     let mut c = Client {
         http,
         host,
@@ -2386,6 +2800,10 @@ pub fn pull_oci_artifact_to_file(
         token: None,
         creds,
         mount_from: None,
+        token_cache: cache,
+        token_from_cache: false,
+        upload_chunk: UPLOAD_CHUNK,
+        chunked: false,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2840,6 +3258,10 @@ mod tests {
             token: None,
             creds: None,
             mount_from: None,
+            token_cache: None,
+            token_from_cache: false,
+            upload_chunk: crate::registry::UPLOAD_CHUNK,
+            chunked: false,
         }
     }
 
@@ -3737,13 +4159,17 @@ mod tests {
         let payload = vec![7u8; 8 * 1024 * 1024];
         let digest = format!("sha256:{}", sha256_hex(&payload));
         let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
-        let body = || {
+        // This test is about the one-`PUT` upload.
+        c.upload_chunk = u64::MAX;
+        let body = |_offset: u64| {
             Ok((
                 Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>,
                 payload.len() as u64,
             ))
         };
-        let Err(crate::registry::UploadFailure::Retry(msg)) = c.upload_once(&digest, &body) else {
+        let Err(crate::registry::UploadFailure::Retry(msg)) =
+            c.upload_once(&digest, &body, &mut None)
+        else {
             panic!("a cut connection must be a retryable failure");
         };
         assert!(msg.contains("connection lost with"), "{msg}");
@@ -4409,5 +4835,666 @@ mod cross_repo_mount_tests {
             upload_start_url("https", "ghcr.io", "org/b", "sha256:ab", Some("org/a")),
             "https://ghcr.io/v2/org/b/blobs/uploads/?mount=sha256:ab&from=org/a"
         );
+    }
+}
+
+#[cfg(test)]
+mod anonymous_token_cache_tests {
+    //! ADR-0060 — the three behaviours the ADR requires before merge, against a
+    //! registry that answers `401` without the right token.
+
+    use super::list_remote_tags;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    const GOOD: &str = "good-token";
+
+    #[derive(Default)]
+    struct Seen {
+        token_requests: usize,
+        unauthenticated: usize,
+    }
+
+    /// A registry on 127.0.0.1 whose token service hands out `GOOD` for
+    /// `expires_in: 300`, and whose tag list answers only to `Bearer GOOD`.
+    fn registry() -> (u16, Arc<Mutex<Seen>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Seen::default()));
+        let s = seen.clone();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                let Ok(mut c) = conn else { continue };
+                let mut buf = [0u8; 8192];
+                let n = c.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
+                let bearer = req
+                    .lines()
+                    .find(|l| l.to_ascii_lowercase().starts_with("authorization: bearer "))
+                    .map(|l| l["authorization: bearer ".len()..].trim().to_string());
+                let (status, headers, body) = if path.starts_with("/token") {
+                    s.lock().unwrap().token_requests += 1;
+                    (
+                        "200 OK",
+                        "content-type: application/json\r\n".to_string(),
+                        format!(r#"{{"token":"{GOOD}","expires_in":300}}"#),
+                    )
+                } else if bearer.as_deref() == Some(GOOD) {
+                    (
+                        "200 OK",
+                        "content-type: application/json\r\n".to_string(),
+                        r#"{"name":"x","tags":["1"]}"#.to_string(),
+                    )
+                } else {
+                    if bearer.is_none() {
+                        s.lock().unwrap().unauthenticated += 1;
+                    }
+                    (
+                        "401 Unauthorized",
+                        format!(
+                            "www-authenticate: Bearer realm=\"http://127.0.0.1:{port}/token\",service=\"t\",scope=\"repository:x:pull\"\r\n"
+                        ),
+                        String::new(),
+                    )
+                };
+                let _ = c.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (port, seen)
+    }
+
+    fn cached_files(root: &std::path::Path) -> usize {
+        walk(&root.join("auth").join("tokens"))
+    }
+
+    fn walk(d: &std::path::Path) -> usize {
+        std::fs::read_dir(d)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| {
+                        let p = e.path();
+                        if p.is_dir() {
+                            walk(&p)
+                        } else {
+                            1
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Without credentials, the second command sends the token the first one
+    /// obtained: no `401`, no second token request.
+    #[test]
+    fn an_anonymous_token_is_reused_by_the_next_command() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let src = format!("127.0.0.1:{port}/x");
+        assert_eq!(list_remote_tags(root.path(), &src).unwrap(), vec!["1"]);
+        assert_eq!(list_remote_tags(root.path(), &src).unwrap(), vec!["1"]);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.token_requests, 1,
+            "the second command asked for a token again"
+        );
+        assert_eq!(
+            seen.unauthenticated, 1,
+            "the second command started without a token"
+        );
+        assert_eq!(cached_files(root.path()), 1);
+    }
+
+    /// With credentials for the host, the cache is neither read — even a valid
+    /// token sitting in it is not sent — nor written.
+    #[test]
+    fn with_credentials_the_cache_is_neither_read_nor_written() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        crate::auth::login(root.path(), &host, "u", "p").unwrap();
+        let now = crate::image::now_unix();
+        crate::token_cache::store(
+            root.path(),
+            &host,
+            &crate::token_cache::pull_scope("x"),
+            GOOD,
+            now + 200,
+            now,
+        );
+        let src = format!("{host}/x");
+        list_remote_tags(root.path(), &src).unwrap();
+        list_remote_tags(root.path(), &src).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.unauthenticated, 2,
+            "a client with credentials used the cached token"
+        );
+        assert_eq!(seen.token_requests, 2);
+        assert_eq!(
+            cached_files(root.path()),
+            1,
+            "a client with credentials wrote to the cache"
+        );
+    }
+
+    /// A refused cached token is dropped even when the fresh one is not stored
+    /// over it — here the registry challenges for another scope than the one the
+    /// cache is keyed on, so without the drop the refused entry would be sent,
+    /// and refused, by every command after this one.
+    #[test]
+    fn a_refused_cached_token_is_dropped_even_when_nothing_replaces_it() {
+        let (port, _seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        let scope = crate::token_cache::pull_scope("y");
+        let now = crate::image::now_unix();
+        crate::token_cache::store(root.path(), &host, &scope, "revoked", now + 200, now);
+        list_remote_tags(root.path(), &format!("{host}/y")).unwrap();
+        assert_eq!(
+            crate::token_cache::load(root.path(), &host, &scope, now),
+            None
+        );
+        assert_eq!(cached_files(root.path()), 0);
+    }
+
+    /// A cached token the registry refuses is dropped, the ordinary path runs
+    /// once, and the command succeeds with the fresh token — which is stored.
+    #[test]
+    fn a_refused_cached_token_is_dropped_and_the_command_still_succeeds() {
+        let (port, seen) = registry();
+        let root = tempfile::tempdir().unwrap();
+        let host = format!("127.0.0.1:{port}");
+        let scope = crate::token_cache::pull_scope("x");
+        let now = crate::image::now_unix();
+        crate::token_cache::store(root.path(), &host, &scope, "revoked", now + 200, now);
+        assert_eq!(
+            list_remote_tags(root.path(), &format!("{host}/x")).unwrap(),
+            vec!["1"]
+        );
+        assert_eq!(seen.lock().unwrap().token_requests, 1);
+        assert_eq!(
+            crate::token_cache::load(root.path(), &host, &scope, now).as_deref(),
+            Some(GOOD),
+            "the refused token was not replaced"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resumable_upload_tests {
+    //! A blob larger than one chunk goes up in `PATCH` chunks, and an upload
+    //! cut in the middle continues from the offset the registry confirmed.
+    //! The registry below counts every body byte it receives: "resumed" is
+    //! measured as bytes that did not have to cross the link again.
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    /// What the n-th `PATCH` does.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Patch {
+        /// Takes the chunk, answers `202` with the confirmed range.
+        Take,
+        /// Reads this many bytes of the chunk, keeps none of them, closes:
+        /// what ghcr does with a cut chunk (measured).
+        CutDiscard(usize),
+        /// Reads this many bytes, KEEPS them, closes: a registry that keeps
+        /// part of a cut chunk.
+        CutKeep(usize),
+        /// Reads the chunk, keeps none of it, answers this status.
+        Status(u16),
+    }
+
+    struct Registry {
+        port: u16,
+        /// Every body byte received, over all requests.
+        received: Arc<AtomicU64>,
+        patches: Arc<AtomicUsize>,
+        sessions: Arc<AtomicUsize>,
+        stored: Arc<Mutex<Option<Vec<u8>>>>,
+    }
+
+    /// How the registry answers `GET` on a session, and what it does with a
+    /// session a cut chunk left bytes past its confirmed offset in.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        /// `204` with the offset (the spec).
+        Spec,
+        /// `303` to a web page (ghcr, measured).
+        Ghcr,
+        /// `registry:2` (measured): once the bytes and the session's state
+        /// disagree, `GET` and `PATCH` answer `404` — the `PATCH` BEFORE
+        /// reading the body, which the client sees as a dropped connection.
+        Distribution,
+        /// The same, behind something that redirects the status `GET`.
+        DistributionNoStatus,
+    }
+
+    fn serve(script: Vec<Patch>, kind: Kind) -> Registry {
+        serve_limited(script, kind, usize::MAX)
+    }
+
+    /// `max_chunk`: a larger `PATCH` is refused with `416`, as ghcr does.
+    fn serve_limited(script: Vec<Patch>, kind: Kind, max_chunk: usize) -> Registry {
+        serve_full(script, kind, max_chunk, None)
+    }
+
+    /// `cut_put`: the first `PUT` carrying a body is cut after this many
+    /// bytes, and keeps none of them.
+    fn serve_full(
+        script: Vec<Patch>,
+        kind: Kind,
+        max_chunk: usize,
+        cut_put: Option<usize>,
+    ) -> Registry {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let received = Arc::new(AtomicU64::new(0));
+        let patches = Arc::new(AtomicUsize::new(0));
+        let sessions = Arc::new(AtomicUsize::new(0));
+        let stored = Arc::new(Mutex::new(None));
+        let (rc, pc, sc, st) = (
+            received.clone(),
+            patches.clone(),
+            sessions.clone(),
+            stored.clone(),
+        );
+        std::thread::spawn(move || {
+            // The current session's bytes.
+            let mut upload: Vec<u8> = Vec::new();
+            // What the session's state says it has (`registry:2`'s `_state`).
+            let mut confirmed = 0usize;
+            let mut put_was_cut = false;
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let hend = loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break None;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = find_subslice(&buf, b"\r\n\r\n") {
+                        break Some(i);
+                    }
+                };
+                let Some(hend) = hend else { continue };
+                let head = String::from_utf8_lossy(&buf[..hend]).to_lowercase();
+                let header = |name: &str| {
+                    head.lines()
+                        .find(|l| l.starts_with(&format!("{name}:")))
+                        .map(|l| l[name.len() + 1..].trim().to_string())
+                };
+                let len: usize = header("content-length")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let broken = matches!(kind, Kind::Distribution | Kind::DistributionNoStatus)
+                    && upload.len() != confirmed;
+                let status_get = head.starts_with("get ") && kind == Kind::Distribution;
+                if broken && (head.starts_with("patch ") || status_get) {
+                    if head.starts_with("patch ") {
+                        pc.fetch_add(1, Ordering::SeqCst);
+                    }
+                    let _ = s.write_all(
+                        b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    );
+                    continue;
+                }
+                let act = head.starts_with("patch ").then(|| {
+                    let n = pc.fetch_add(1, Ordering::SeqCst);
+                    script[n.min(script.len() - 1)]
+                });
+                let put_cut = if head.starts_with("put ") && len > 0 && !put_was_cut {
+                    cut_put
+                } else {
+                    None
+                };
+                let limit = match act {
+                    Some(Patch::CutDiscard(n)) | Some(Patch::CutKeep(n)) => n.min(len),
+                    _ => put_cut.map_or(len, |n| n.min(len)),
+                };
+                let mut body = buf[hend + 4..].to_vec();
+                while body.len() < limit {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    body.extend_from_slice(&chunk[..n]);
+                }
+                body.truncate(limit.max(if act.is_none() { len } else { 0 }));
+                rc.fetch_add(body.len() as u64, Ordering::SeqCst);
+                let reply = |s: &mut std::net::TcpStream, status: &str, extra: &str| {
+                    let _ = s.write_all(
+                        format!("HTTP/1.1 {status}\r\n{extra}content-length: 0\r\nconnection: close\r\n\r\n")
+                            .as_bytes(),
+                    );
+                };
+                let range = |n: usize| {
+                    if n == 0 {
+                        "range: 0-0\r\n".to_string()
+                    } else {
+                        format!("range: 0-{}\r\n", n - 1)
+                    }
+                };
+                if head.starts_with("head ") {
+                    let have = st.lock().unwrap().is_some();
+                    reply(&mut s, if have { "200 OK" } else { "404 Not Found" }, "");
+                } else if head.starts_with("post ") {
+                    let n = sc.fetch_add(1, Ordering::SeqCst);
+                    upload.clear();
+                    confirmed = 0;
+                    reply(
+                        &mut s,
+                        "202 Accepted",
+                        &format!("location: /v2/r/blobs/uploads/s{n}\r\n{}", range(0)),
+                    );
+                } else if head.starts_with("get ") {
+                    if matches!(kind, Kind::Spec | Kind::Distribution) {
+                        reply(&mut s, "204 No Content", &range(upload.len()));
+                    } else if head.contains(" /-/") {
+                        // The web page ghcr's redirect lands on (measured).
+                        reply(&mut s, "404 Not Found", "");
+                    } else {
+                        reply(
+                            &mut s,
+                            "303 See Other",
+                            "location: /-/v2/packages/container\r\n",
+                        );
+                    }
+                } else if head.starts_with("patch ") {
+                    let from: usize = header("content-range")
+                        .and_then(|v| v.split('-').next().and_then(|x| x.parse().ok()))
+                        .unwrap_or(usize::MAX);
+                    match act.unwrap() {
+                        _ if body.len() > max_chunk => {
+                            reply(&mut s, "416 Range Not Satisfiable", &range(upload.len()))
+                        }
+                        Patch::Status(code) => reply(&mut s, &format!("{code} X"), ""),
+                        _ if from != upload.len() => {
+                            reply(&mut s, "416 Range Not Satisfiable", &range(upload.len()))
+                        }
+                        Patch::Take => {
+                            upload.extend_from_slice(&body);
+                            confirmed = upload.len();
+                            let next = format!(
+                                "location: /v2/r/blobs/uploads/s-{}\r\n{}",
+                                upload.len(),
+                                range(upload.len())
+                            );
+                            reply(&mut s, "202 Accepted", &next);
+                        }
+                        Patch::CutDiscard(_) => {}
+                        Patch::CutKeep(_) => upload.extend_from_slice(&body),
+                    }
+                } else if put_cut.is_some() {
+                    put_was_cut = true;
+                } else if head.starts_with("put ") {
+                    upload.extend_from_slice(&body);
+                    *st.lock().unwrap() = Some(upload.clone());
+                    reply(&mut s, "201 Created", "");
+                } else {
+                    reply(&mut s, "404 Not Found", "");
+                }
+            }
+        });
+        Registry {
+            port,
+            received,
+            patches,
+            sessions,
+            stored,
+        }
+    }
+
+    // The smallest a refused size may shrink to is 1 MiB, so the chunk
+    // here is twice that.
+    const CHUNK: u64 = 2 * 1024 * 1024;
+
+    fn client(port: u16) -> Client {
+        Client {
+            http: reqwest::blocking::Client::new(),
+            host: format!("127.0.0.1:{port}"),
+            repo: "r".into(),
+            token: None,
+            creds: None,
+            mount_from: None,
+            token_cache: None,
+            token_from_cache: false,
+            upload_chunk: CHUNK,
+            chunked: true,
+        }
+    }
+
+    /// Pushes a 1 MiB file (four chunks) and returns the result, the
+    /// payload, and the progress reports.
+    fn push(reg: &Registry) -> (crate::Result<()>, Vec<u8>, Vec<(u64, u64)>) {
+        let payload: Vec<u8> = (0..4 * CHUNK).map(|i| (i % 251) as u8).collect();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("blob");
+        std::fs::write(&path, &payload).unwrap();
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let sink = reports.clone();
+        let meter = MeterSlot {
+            meter: PushMeter::new(
+                1,
+                payload.len() as u64,
+                Arc::new(move |d, t| sink.lock().unwrap().push((d, t))),
+            ),
+            slot: 0,
+        };
+        let mut c = client(reg.port);
+        let res = c.push_blob_file(&digest, &path, payload.len() as u64, Some(&meter));
+        let seen = reports.lock().unwrap().clone();
+        (res, payload, seen)
+    }
+
+    fn stored(reg: &Registry) -> Vec<u8> {
+        reg.stored.lock().unwrap().clone().expect("nothing stored")
+    }
+
+    #[test]
+    fn a_large_blob_goes_up_in_chunks() {
+        let reg = serve(vec![Patch::Take], Kind::Ghcr);
+        let (res, payload, reports) = push(&reg);
+        res.expect("the push succeeds");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 4);
+        assert_eq!(reg.received.load(Ordering::SeqCst), payload.len() as u64);
+        assert!(reports.iter().all(|&(d, t)| d <= t));
+        assert_eq!(
+            reports.last(),
+            Some(&(payload.len() as u64, payload.len() as u64))
+        );
+    }
+
+    /// The case this exists for, as ghcr behaves (measured): the third chunk
+    /// is cut at half, the registry keeps none of it, and its `GET` answers
+    /// `303`. The upload continues from the second chunk's confirmed end, on
+    /// the same session: half a chunk crossed the link twice, not the image.
+    #[test]
+    fn a_cut_upload_continues_from_the_confirmed_offset() {
+        let half = (CHUNK / 2) as usize;
+        let reg = serve(
+            vec![
+                Patch::Take,
+                Patch::Take,
+                Patch::CutDiscard(half),
+                Patch::Take,
+            ],
+            Kind::Ghcr,
+        );
+        let (res, payload, reports) = push(&reg);
+        res.expect("the push survives the cut");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(
+            reg.sessions.load(Ordering::SeqCst),
+            1,
+            "a new session means starting over"
+        );
+        assert_eq!(
+            reg.received.load(Ordering::SeqCst),
+            payload.len() as u64 + half as u64,
+            "only the cut half chunk may cross twice"
+        );
+        assert!(reports.iter().all(|&(d, t)| d <= t));
+    }
+
+    /// A registry that answers the spec's `GET` is asked where it stands: it
+    /// kept a quarter of the cut chunk, and the upload continues from there
+    /// instead of being refused with a `416`.
+    #[test]
+    fn a_registry_that_answers_the_status_get_is_asked_first() {
+        let quarter = (CHUNK / 4) as usize;
+        let reg = serve(
+            vec![Patch::Take, Patch::CutKeep(quarter), Patch::Take],
+            Kind::Spec,
+        );
+        let (res, payload, _) = push(&reg);
+        res.expect("the push resumes from the registry's offset");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.sessions.load(Ordering::SeqCst), 1);
+        assert_eq!(reg.received.load(Ordering::SeqCst), payload.len() as u64);
+    }
+
+    /// A registry that kept part of a cut chunk and cannot say so refuses the
+    /// resent chunk with `416`: the upload starts again on a new session and
+    /// still succeeds — never worse than a monolithic retry.
+    #[test]
+    fn a_416_starts_a_new_session() {
+        let quarter = (CHUNK / 4) as usize;
+        let reg = serve(
+            vec![Patch::Take, Patch::CutKeep(quarter), Patch::Take],
+            Kind::Ghcr,
+        );
+        let (res, payload, _) = push(&reg);
+        res.expect("the push succeeds on a new session");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.sessions.load(Ordering::SeqCst), 2);
+    }
+
+    /// `registry:2`, measured: it keeps the part of the cut chunk it got, and
+    /// then answers `404` to the status `GET` and to every `PATCH` of that
+    /// session. The upload starts over on a new session at once, instead of
+    /// spending its attempts on a session that will never continue.
+    #[test]
+    fn a_session_the_registry_invalidated_is_replaced_at_once() {
+        let half = (CHUNK / 2) as usize;
+        let reg = serve(
+            vec![Patch::Take, Patch::Take, Patch::CutKeep(half), Patch::Take],
+            Kind::Distribution,
+        );
+        let (res, payload, _) = push(&reg);
+        res.expect("the push succeeds on a new session");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.sessions.load(Ordering::SeqCst), 2);
+        // Three chunks until the cut, then four on the new session.
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 3 + 4);
+    }
+
+    /// The same registry where the status `GET` says nothing: the resume is
+    /// refused without moving, and the next attempt starts over instead of
+    /// trying the same offset until the attempts run out.
+    #[test]
+    fn a_resume_that_does_not_move_starts_over() {
+        let half = (CHUNK / 2) as usize;
+        let reg = serve(
+            vec![Patch::Take, Patch::Take, Patch::CutKeep(half), Patch::Take],
+            Kind::DistributionNoStatus,
+        );
+        let (res, payload, _) = push(&reg);
+        res.expect("the push succeeds on a new session");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.sessions.load(Ordering::SeqCst), 2);
+    }
+
+    /// ghcr refuses a chunk above 4 MiB with `416` (measured). A client
+    /// configured with larger chunks halves them and succeeds, instead of
+    /// reading the refusal as a lost session until its attempts run out —
+    /// which is what the first version did against ghcr.
+    #[test]
+    fn a_refused_chunk_size_is_halved() {
+        let reg = serve_limited(vec![Patch::Take], Kind::Ghcr, (CHUNK / 2) as usize);
+        let (res, payload, _) = push(&reg);
+        res.expect("the push succeeds with smaller chunks");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.sessions.load(Ordering::SeqCst), 2);
+        // One refused chunk, then eight of half the size.
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 1 + 8);
+    }
+
+    /// The first upload is one `PUT`, as on a healthy link; cut in the middle,
+    /// the next attempt sends the blob in resumable chunks.
+    #[test]
+    fn a_cut_whole_upload_is_retried_in_chunks() {
+        let half = (2 * CHUNK) as usize;
+        let reg = serve_full(vec![Patch::Take], Kind::Ghcr, usize::MAX, Some(half));
+        let payload: Vec<u8> = (0..4 * CHUNK).map(|i| (i % 251) as u8).collect();
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let mut c = client(reg.port);
+        c.chunked = false;
+        c.push_blob(&digest, &payload)
+            .expect("the retry in chunks succeeds");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(
+            reg.patches.load(Ordering::SeqCst),
+            4,
+            "the retry went in chunks"
+        );
+        assert!(c.chunked, "and the client keeps sending chunks");
+    }
+
+    /// A healthy link keeps the one `PUT`: no chunk until something failed.
+    #[test]
+    fn a_healthy_upload_is_one_put() {
+        let reg = serve(vec![Patch::Take], Kind::Ghcr);
+        let payload: Vec<u8> = (0..4 * CHUNK).map(|i| (i % 251) as u8).collect();
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let mut c = client(reg.port);
+        c.chunked = false;
+        c.push_blob(&digest, &payload).unwrap();
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 0);
+    }
+
+    /// A registry that does not take `PATCH` gets the blob in one `PUT`.
+    #[test]
+    fn a_registry_without_chunks_gets_the_blob_whole() {
+        let reg = serve(vec![Patch::Status(405)], Kind::Ghcr);
+        let (res, payload, _) = push(&reg);
+        res.expect("the push falls back to one PUT");
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 1);
+    }
+
+    /// A small blob stays one `PUT`: no chunk, no extra round trip.
+    #[test]
+    fn a_blob_within_one_chunk_is_one_put() {
+        let reg = serve(vec![Patch::Take], Kind::Ghcr);
+        let payload = vec![3u8; 1000];
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        client(reg.port).push_blob(&digest, &payload).unwrap();
+        assert_eq!(stored(&reg), payload);
+        assert_eq!(reg.patches.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_confirmed_offset_reads_the_range_answer() {
+        assert_eq!(confirmed_upload_offset("0-1048575"), Some(1048576));
+        assert_eq!(confirmed_upload_offset("0-0"), Some(0));
+        assert_eq!(confirmed_upload_offset("bytes=0-9"), Some(10));
+        assert_eq!(confirmed_upload_offset("5-9"), None);
+        assert_eq!(confirmed_upload_offset("junk"), None);
     }
 }

@@ -5590,17 +5590,15 @@ fn a_system_containers_backup_is_restored_over_it_and_deleted() {
 }
 
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
-/// `NetworkZoneProvider` the `kind: NetworkZone` apply uses: a vnet carries
+/// `SegmentProvider` the `kind: NetworkZone` apply uses: a vnet carries
 /// the owner mark in its alias; another record's mark, or none, is refused
 /// and never deleted; a vnet edited on the cluster is drift; and someone
 /// else's staged change refuses the whole transaction before it writes,
 /// leaving that change pending and not applied.
 #[test]
 fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change() {
-    use delonix_sdn::network_zone::{
-        EnsureOutcome, NetworkZoneProvider, NetworkZoneSpec, VNetSpec,
-    };
-    use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
+    use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 
     let Some(t) = target() else {
         return;
@@ -5615,7 +5613,7 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
         std::sync::Arc::new(delonix_proxmox::Client::connect_with(&t, opts).expect("connect"));
     let dir = tempfile::tempdir().expect("tempdir");
     let ledger = delonix_proxmox::Ledger::at(dir.path());
-    let provider = delonix_proxmox::ProxmoxNetworkZoneProvider::new(
+    let provider = delonix_proxmox::ProxmoxSegmentProvider::new(
         client.clone(),
         delonix_proxmox::Ledger::at(dir.path()),
     );
@@ -5669,7 +5667,11 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
 
     // 3. Another record's mark: refused inside the transaction, rolled back.
     let e = apply(&stranger).unwrap_err();
-    assert_eq!(e.number(), 5340, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(
+        e.to_string().contains("refusing to adopt it by name"),
+        "{e}"
+    );
     assert!(
         client.sdn_pending_changes().unwrap().is_empty(),
         "the refusal left nothing staged"
@@ -5715,7 +5717,8 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
         })
         .expect("edit the vnet by hand");
     let e = apply(&owner).unwrap_err();
-    assert_eq!(e.number(), 5341, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("was changed on the cluster"), "{e}");
 
     // 6. Teardown by the owner: vnet then zone, one transaction.
     let mut removed = None;
@@ -5735,4 +5738,601 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
         "the zone must be gone"
     );
     assert!(client.sdn_pending_changes().unwrap().is_empty());
+}
+
+/// ADR-0059 F5b: the IPAM role, end to end through the node. A zone the
+/// segment provider creates gets `ipam=pve` and `dhcp=dnsmasq` inside the
+/// same transaction as its vnet and subnet (with a DHCP range); a reservation
+/// for a system container's MAC is made once the subnet is running, read back,
+/// and refused for another MAC; and the container, started on the vnet, gets
+/// the RESERVED address by DHCP — the per-zone `dnsmasq` serves only the MACs
+/// in its `ethers` file, and the node writes the address the IPAM holds for
+/// that MAC there when the guest starts. The teardown releases the
+/// reservation before the subnet (the node refuses a subnet that still holds
+/// one), and leaves no zone and no IPAM entry.
+#[test]
+fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
+    use delonix_compute::system_container::{
+        NetworkState, SystemContainerNet, SystemContainerProvider, SystemContainerSpec,
+    };
+    use delonix_networking::ipam::{
+        ipam_drift, DhcpRange, IpamProvider, IpamReservation, IpamSubnet,
+    };
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
+        return;
+    };
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let owner = OwnerMark::from_random(
+        &std::process::id()
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("i{suffix}");
+    let vnet = format!("j{suffix}");
+    let octet = suffix % 200 + 20;
+    let subnet = IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.79.{octet}.0/24"),
+        gateway: Some(format!("10.79.{octet}.1")),
+        dhcp_ranges: vec![DhcpRange {
+            start: format!("10.79.{octet}.100"),
+            end: format!("10.79.{octet}.150"),
+        }],
+    };
+
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?,
+                EnsureOutcome::Created
+            );
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("f5b".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, true)?;
+            assert_eq!(
+                ipam.ensure_subnet(&zone, &subnet, &owner)?,
+                EnsureOutcome::Created
+            );
+            Ok(())
+        })
+        .expect("the zone, its vnet and its subnet in one transaction");
+
+    let observed = ipam
+        .observe(&zone, std::slice::from_ref(&vnet))
+        .expect("observe");
+    assert!(observed.zone_ipam && observed.zone_dhcp, "{observed:?}");
+    assert_eq!(observed.subnets, vec![subnet.clone()], "{observed:?}");
+
+    let spec = SystemContainerSpec {
+        name: format!("dlxip{}", suffix % 10000),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: Some(SystemContainerNet {
+            bridge: vnet.clone(),
+            vlan: None,
+            dhcp: true,
+        }),
+        unprivileged: true,
+    };
+    let ct =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let ctdir = tempfile::tempdir().expect("tempdir");
+    let h = ct.create(ctdir.path(), &spec).expect("create");
+    let vmid: u32 = h.locator.rsplit(':').next().unwrap().parse().unwrap();
+    let net0 = client.lxc_config(vmid).expect("config")["net0"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let mac = net0
+        .split(',')
+        .find_map(|kv| kv.strip_prefix("hwaddr="))
+        .unwrap_or_else(|| panic!("no hwaddr in {net0}"))
+        .to_ascii_uppercase();
+
+    // The node allocated an address of the range for the MAC at create.
+    let at_create: Vec<String> = client
+        .sdn_ipam_status("pve")
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            e["zone"] == zone.as_str()
+                && e["mac"]
+                    .as_str()
+                    .is_some_and(|m| m.eq_ignore_ascii_case(&mac))
+        })
+        .map(|e| e["ip"].as_str().unwrap_or_default().to_string())
+        .collect();
+    let reserved = IpamReservation {
+        vnet: vnet.clone(),
+        ip: format!("10.79.{octet}.20"),
+        mac: mac.clone(),
+    };
+    assert_eq!(
+        ipam.ensure_reservation(&zone, &reserved).expect("reserve"),
+        EnsureOutcome::Created
+    );
+    assert_eq!(
+        ipam.ensure_reservation(&zone, &reserved).expect("again"),
+        EnsureOutcome::AlreadyPresent
+    );
+    let foreign = IpamReservation {
+        mac: "BC:24:11:00:00:01".into(),
+        ..reserved.clone()
+    };
+    let e = ipam
+        .ensure_reservation(&zone, &foreign)
+        .expect_err("another MAC on a held address");
+    assert!(e.to_string().contains("already held"), "{e}");
+    let of_mac: Vec<String> = client
+        .sdn_ipam_status("pve")
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            e["zone"] == zone.as_str()
+                && e["mac"]
+                    .as_str()
+                    .is_some_and(|m| m.eq_ignore_ascii_case(&mac))
+        })
+        .map(|e| e["ip"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        of_mac,
+        vec![reserved.ip.clone()],
+        "the MAC holds exactly the reserved address (it held {at_create:?} at create)"
+    );
+    let observed = ipam
+        .observe(&zone, std::slice::from_ref(&vnet))
+        .expect("observe");
+    assert!(
+        ipam_drift(
+            std::slice::from_ref(&subnet),
+            std::slice::from_ref(&reserved),
+            true,
+            &observed
+        )
+        .is_empty(),
+        "{observed:?}"
+    );
+
+    // The DHCP server is the node's own dnsmasq. With the datacenter
+    // firewall on (the lab has it, ADR-0052) the node drops the requests
+    // unless a rule lets udp/67 in: a lab precondition, like the
+    // `management` IPSet (`IN ACCEPT -p udp -dport 67` on each node) — the
+    // engine does not write the node's firewall (ADR-0049 D3) and only warns.
+    let obs = ct.start(ctdir.path(), &h, &spec).expect("start");
+    let got = match &obs.network {
+        NetworkState::Ready { ipv4 } => ipv4.clone(),
+        other => {
+            // Read the lease once more: dnsmasq may answer after the start's
+            // own wait.
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            let again = ct.observe(ctdir.path(), &h, &spec).expect("observe");
+            match again.network {
+                NetworkState::Ready { ipv4 } => ipv4,
+                _ => panic!("the guest got no address by DHCP: {other:?} then {again:?}"),
+            }
+        }
+    };
+    assert_eq!(got, reserved.ip, "the guest must get the reserved address");
+
+    ct.stop(ctdir.path(), &h).expect("stop");
+    ct.destroy(ctdir.path(), &h).expect("destroy");
+    // Destroying the guest releases the address its MAC holds — the
+    // reservation goes with the guest, which a plan then reads as missing.
+    let after_destroy = ipam
+        .observe(&zone, std::slice::from_ref(&vnet))
+        .expect("observe");
+    assert!(
+        !after_destroy
+            .entries
+            .iter()
+            .any(|e| e.mac.as_deref() == Some(mac.as_str())),
+        "the guest's MAC still holds an address after its destroy: {after_destroy:?}"
+    );
+    assert_eq!(
+        ipam.remove_reservation(&zone, &reserved).expect("release"),
+        delonix_networking::ownership::RemoveOutcome::Absent
+    );
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &subnet, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
+    assert!(
+        !client
+            .sdn_zones_running()
+            .unwrap()
+            .iter()
+            .any(|z| z["zone"] == zone.as_str()),
+        "the zone is still running"
+    );
+    assert!(
+        !client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .any(|e| e["zone"] == zone.as_str()),
+        "an IPAM entry of the zone was left behind"
+    );
+}
+
+/// Reads a PowerDNS zone's records through the server's own API (the TEST's
+/// read: the engine never talks to the DNS server). Returns `(name, type,
+/// contents)` without the SOA and NS sets.
+fn powerdns_records(url: &str, key: &str, zone: &str) -> Vec<(String, String, Vec<String>)> {
+    let body: serde_json::Value = reqwest::blocking::Client::new()
+        .get(format!("{url}/zones/{zone}"))
+        .header("X-API-Key", key)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.json())
+        .unwrap_or_else(|e| panic!("read the PowerDNS zone {zone}: {e}"));
+    body["rrsets"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|r| !matches!(r["type"].as_str(), Some("SOA") | Some("NS")))
+        .map(|r| {
+            (
+                r["name"].as_str().unwrap_or_default().to_string(),
+                r["type"].as_str().unwrap_or_default().to_string(),
+                r["records"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|x| x["content"].as_str().unwrap_or_default().to_string())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// Removes one rrset from a PowerDNS zone (the test's own cleanup of what the
+/// node leaves behind).
+fn powerdns_delete(url: &str, key: &str, zone: &str, name: &str, kind: &str) {
+    reqwest::blocking::Client::new()
+        .patch(format!("{url}/zones/{zone}"))
+        .header("X-API-Key", key)
+        .json(&serde_json::json!({
+            "rrsets": [{ "name": name, "type": kind, "changetype": "DELETE" }]
+        }))
+        .send()
+        .and_then(|r| r.error_for_status())
+        .unwrap_or_else(|e| panic!("delete {name} {kind} in {zone}: {e}"));
+}
+
+/// Undoes what the DNS live case made, on EVERY exit — a failed assertion
+/// included — so the shared lab keeps no guest, zone, vnet or DNS record
+/// (the lesson of #587: a teardown written as the test's last lines only runs
+/// when everything before it passed). Best effort: each step ignores what is
+/// already gone.
+struct DnsLabGuard {
+    client: std::sync::Arc<delonix_proxmox::Client>,
+    ledger_dir: std::path::PathBuf,
+    zone: String,
+    vnet: String,
+    cidr: String,
+    vmid: std::cell::Cell<Option<u32>>,
+    url: String,
+    key: String,
+    /// `(DNS zone, name, type)` of every record the node may have written.
+    records: std::cell::RefCell<Vec<(String, String, String)>>,
+}
+
+impl Drop for DnsLabGuard {
+    fn drop(&mut self) {
+        let ledger = delonix_proxmox::Ledger::at(&self.ledger_dir);
+        if let Some(vmid) = self.vmid.get() {
+            let _ = self.client.lxc_destroy(&ledger, vmid);
+        }
+        let present = self
+            .client
+            .sdn_zones()
+            .unwrap_or_default()
+            .iter()
+            .any(|z| z["zone"] == self.zone.as_str());
+        if present {
+            let _ = self.client.sdn_transaction(&ledger, || {
+                let _ = self
+                    .client
+                    .delete_sdn_subnet(&ledger, &self.vnet, &self.zone, &self.cidr);
+                let _ = self.client.delete_sdn_vnet(&ledger, &self.vnet);
+                self.client.delete_sdn_zone(&ledger, &self.zone)
+            });
+        }
+        for (zone, name, kind) in self.records.borrow().iter() {
+            let _ = reqwest::blocking::Client::new()
+                .patch(format!("{}/zones/{zone}", self.url))
+                .header("X-API-Key", &self.key)
+                .json(&serde_json::json!({
+                    "rrsets": [{ "name": name, "type": kind, "changetype": "DELETE" }]
+                }))
+                .send();
+        }
+    }
+}
+
+/// ADR-0059 F5c (ADR-0064): the DNS role, end to end through the node and a
+/// real PowerDNS. The zone gets `dns`/`dnszone`/`reversedns` in the same
+/// transaction as its IPAM, vnet and subnet; the node writes the subnet
+/// gateway's records (`<vnet>-gw`) when the subnet is created, and a guest's
+/// A and PTR when it gets an address from the DHCP range; destroying the guest
+/// removes them. Tearing the zone down leaves the gateway's records on the
+/// server — no node API removes them (measured on PVE 9.2.2) — and this test
+/// asserts that, then removes them itself so the lab stays clean.
+///
+/// Preconditions set by the cluster's administrator (the engine never creates
+/// them): a DNS controller registered on the cluster
+/// (`DELONIX_PROXMOX_TEST_DNS_CONTROLLER`), the domain
+/// (`DELONIX_PROXMOX_TEST_DNS_ZONE`) and `10.in-addr.arpa.` on that server,
+/// and the server's API reachable from the test (`DELONIX_PROXMOX_TEST_DNS_URL`,
+/// key in `DELONIX_PROXMOX_TEST_DNS_KEY_FILE`) to read the records back.
+#[test]
+fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
+    use delonix_compute::system_container::{
+        SystemContainerNet, SystemContainerProvider, SystemContainerSpec,
+    };
+    use delonix_networking::dns::{dns_drift, DnsProvider, ZoneDns};
+    use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamSubnet};
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let Some(t) = target() else {
+        return;
+    };
+    let (Ok(archive), Ok(controller), Ok(domain), Ok(url), Ok(key_file)) = (
+        std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE"),
+        std::env::var("DELONIX_PROXMOX_TEST_DNS_CONTROLLER"),
+        std::env::var("DELONIX_PROXMOX_TEST_DNS_ZONE"),
+        std::env::var("DELONIX_PROXMOX_TEST_DNS_URL"),
+        std::env::var("DELONIX_PROXMOX_TEST_DNS_KEY_FILE"),
+    ) else {
+        return;
+    };
+    let key = std::fs::read_to_string(&key_file)
+        .expect("read the DNS server's key")
+        .trim()
+        .to_string();
+    let archive = std::path::PathBuf::from(archive);
+    let digest = oci_archive_manifest_digest(&archive);
+    let template = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let rootfs = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let dns = delonix_proxmox::ProxmoxDnsProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    assert!(
+        dns.controllers()
+            .expect("list the DNS controllers")
+            .iter()
+            .any(|c| c.id == controller && c.kind == "powerdns"),
+        "the lab needs the DNS controller '{controller}' registered on the cluster"
+    );
+    let owner = OwnerMark::from_random(
+        &std::process::id()
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("d{suffix}");
+    let vnet = format!("e{suffix}");
+    let octet = suffix % 200 + 20;
+    let gateway = format!("10.85.{octet}.1");
+    let subnet = IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.85.{octet}.0/24"),
+        gateway: Some(gateway.clone()),
+        dhcp_ranges: vec![DhcpRange {
+            start: format!("10.85.{octet}.100"),
+            end: format!("10.85.{octet}.150"),
+        }],
+    };
+    let declared = ZoneDns {
+        server: controller.clone(),
+        zone: domain.clone(),
+        reverse_server: Some(controller.clone()),
+    };
+    let gw_ptr = {
+        let o: Vec<&str> = gateway.split('.').collect();
+        format!("{}.{}.{}.{}.in-addr.arpa.", o[3], o[2], o[1], o[0])
+    };
+    let guard = DnsLabGuard {
+        client: client.clone(),
+        ledger_dir: dir.path().to_path_buf(),
+        zone: zone.clone(),
+        vnet: vnet.clone(),
+        cidr: subnet.cidr.clone(),
+        vmid: std::cell::Cell::new(None),
+        url: url.clone(),
+        key: key.clone(),
+        records: std::cell::RefCell::new(vec![
+            (
+                format!("{domain}."),
+                format!("{vnet}-gw.{domain}."),
+                "A".into(),
+            ),
+            ("10.in-addr.arpa.".into(), gw_ptr.clone(), "PTR".into()),
+        ]),
+    };
+
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?,
+                EnsureOutcome::Created
+            );
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("f5c".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, true)?;
+            dns.prepare_zone(&zone, Some(&declared))?;
+            ipam.ensure_subnet(&zone, &subnet, &owner)?;
+            Ok(())
+        })
+        .expect("zone, vnet, DNS and subnet in one transaction");
+    let observed = dns.observe(&zone).expect("observe");
+    assert!(
+        dns_drift(Some(&declared), observed.as_ref()).is_empty(),
+        "{observed:?}"
+    );
+    // Preparing the same settings again writes nothing (and does not fail).
+    segment
+        .transaction(&mut || dns.prepare_zone(&zone, Some(&declared)))
+        .expect("idempotent");
+
+    let fwd = format!("{domain}.");
+    let gw_name = format!("{vnet}-gw.{domain}.");
+    let has = |zone_name: &str, name: &str, kind: &str, content: &str| {
+        powerdns_records(&url, &key, zone_name)
+            .iter()
+            .any(|(n, k, c)| n == name && k == kind && c.iter().any(|x| x == content))
+    };
+    assert!(
+        has(&fwd, &gw_name, "A", &gateway),
+        "the node did not register the gateway: {:?}",
+        powerdns_records(&url, &key, &fwd)
+    );
+
+    let name = format!("dlxdn{}", suffix % 10000);
+    let spec = SystemContainerSpec {
+        name: name.clone(),
+        archive,
+        manifest_digest: digest,
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: Some(SystemContainerNet {
+            bridge: vnet.clone(),
+            vlan: None,
+            dhcp: true,
+        }),
+        unprivileged: true,
+    };
+    let ct =
+        delonix_proxmox::ProxmoxSystemContainerProvider::new(client.clone(), &template, &rootfs);
+    let ctdir = tempfile::tempdir().expect("tempdir");
+    let h = ct.create(ctdir.path(), &spec).expect("create");
+    guard
+        .vmid
+        .set(h.locator.rsplit(':').next().and_then(|v| v.parse().ok()));
+    let ip = client
+        .sdn_ipam_status("pve")
+        .unwrap()
+        .iter()
+        .find(|e| e["zone"] == zone.as_str() && e["hostname"] == name.as_str())
+        .and_then(|e| e["ip"].as_str().map(str::to_string))
+        .unwrap_or_else(|| panic!("the guest '{name}' got no IPAM entry"));
+    let guest = format!("{name}.{domain}.");
+    let ptr = {
+        let o: Vec<&str> = ip.split('.').collect();
+        format!("{}.{}.{}.{}.in-addr.arpa.", o[3], o[2], o[1], o[0])
+    };
+    guard.records.borrow_mut().extend([
+        (fwd.clone(), guest.clone(), "A".into()),
+        ("10.in-addr.arpa.".into(), ptr.clone(), "PTR".into()),
+    ]);
+    assert!(
+        has(&fwd, &guest, "A", &ip),
+        "no A for the guest: {:?}",
+        powerdns_records(&url, &key, &fwd)
+    );
+    assert!(
+        has("10.in-addr.arpa.", &ptr, "PTR", &guest),
+        "no PTR for the guest: {:?}",
+        powerdns_records(&url, &key, "10.in-addr.arpa.")
+    );
+
+    ct.destroy(ctdir.path(), &h).expect("destroy");
+    guard.vmid.set(None);
+    assert!(
+        !powerdns_records(&url, &key, &fwd)
+            .iter()
+            .any(|(n, _, _)| n == &guest),
+        "the guest's A outlived it"
+    );
+    assert!(
+        !powerdns_records(&url, &key, "10.in-addr.arpa.")
+            .iter()
+            .any(|(n, _, _)| n == &ptr),
+        "the guest's PTR outlived it"
+    );
+
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &subnet, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
+    assert_eq!(dns.observe(&zone).expect("observe"), None);
+    // The node leaves the gateway's records: no node API removes them. The
+    // engine says so on a teardown; this test removes them itself.
+    let left_a = has(&fwd, &gw_name, "A", &gateway);
+    let left_ptr = has("10.in-addr.arpa.", &gw_ptr, "PTR", &gw_name);
+    powerdns_delete(&url, &key, &fwd, &gw_name, "A");
+    powerdns_delete(&url, &key, "10.in-addr.arpa.", &gw_ptr, "PTR");
+    assert!(
+        left_a && left_ptr,
+        "the node now removes a deleted subnet's gateway records (A left: {left_a}, PTR left: \
+         {left_ptr}) — drop the teardown's warning (ADR-0064)"
+    );
 }

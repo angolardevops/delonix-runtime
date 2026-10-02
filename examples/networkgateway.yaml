@@ -14,6 +14,13 @@
 # while the appliance has changes someone saved and did not apply: its apply
 # pushes everything staged. There is no update in place: a changed spec is
 # removed and applied again.
+#
+# `policies` declare one direction of a target's policy in the shape a
+# NetworkPolicy has, lowered to the appliance's filter rules (ADR-0059 F3d):
+# rule n lands as `<name>#<n>` at `sequence + n - 1`, and the default verdict
+# as `<name>#default` right after. The appliance loads filter rules in
+# `sequence` order, so the first match here is its first match. A peer that
+# names this engine's workloads has no form on the appliance and is refused.
 apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkGateway
 metadata: { name: edge }
@@ -29,3 +36,13 @@ spec:
       source: 192.168.1.0/24   # an alias name, a CIDR, or any
       destination: delonix_web
       protocol: TCP            # omit for any protocol
+  policies:
+    - name: web-in
+      target: delonix_web      # an alias name, a prefix, or an address
+      direction: ingress       # ingress (to the target) | egress (from it)
+      defaultPolicy: deny      # the last rule's verdict; deny when omitted
+      sequence: 30000          # the first rule's position on the appliance
+      rules:
+        - { proto: tcp, port: "443", from: 192.168.1.0/24 }
+        - { proto: tcp, port: "22", from: 10.9.0.0/24, log: true }
+        - { port: "8000-8080", action: deny, stateful: false }

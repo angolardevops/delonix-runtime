@@ -4,6 +4,7 @@
 //! `Domain::Vm` (a provider continues its port's own domain, never gets
 //! one of its own).
 
+use delonix_model::codes::Reason;
 use thiserror::Error;
 
 /// A failure of the OPNsense gateway provider client (ADR-0051).
@@ -61,7 +62,7 @@ pub enum Error {
 
     /// An alias or rule under the requested name/description exists on the
     /// appliance without this engine's owner mark — someone else's. Refused
-    /// instead of adopted (`delonix_sdn::ownership`).
+    /// instead of adopted (`delonix_networking::ownership`).
     #[error("{0}")]
     NotOwned(String),
 
@@ -93,25 +94,44 @@ pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 impl Error {
     /// The dictionary number of this failure (ADR-0043). Exhaustive on
-    /// purpose, like `delonix_sdn::Error::number`'s: a variant added
+    /// purpose, like `delonix_networking::Error::number`'s: a variant added
     /// tomorrow stops the build here instead of being filed under a
     /// catch-all nobody ever revisits.
     pub fn number(&self) -> u16 {
+        if let Some(r) = self.reason() {
+            return r.number();
+        }
         match self {
-            Error::Validation(_) => 1343,
             Error::RouteNotFound(_) => 4304,
             Error::ClientBuild(_) => 9302,
-            Error::Request(_) => 9303,
             Error::HttpStatus(_) => 9304,
-            Error::Unauthorized(_) => 9305,
-            Error::Forbidden(_) => 9306,
             Error::ResponseTooLarge(_) => 9307,
             Error::Decode(_) => 9308,
-            Error::NotOwned(_) => 5340,
-            Error::Drifted(_) => 5341,
-            Error::ForeignPending(_) => 5342,
             Error::Engine(e) => e.number(),
+            _ => unreachable!("reason() answers every other variant"),
         }
+    }
+
+    /// The ADR-0059 D5 reason, for the failures that are one. Exhaustive:
+    /// a variant added tomorrow stops the build here. A 404, a status this
+    /// client cannot classify, a body too large or unparseable, or a client
+    /// that could not be built keep their own numbers — none of them is a
+    /// D5 reason, and naming one would guess.
+    pub fn reason(&self) -> Option<Reason> {
+        Some(match self {
+            Error::Validation(_) => Reason::InvalidIntent,
+            Error::Request(_) => Reason::ProviderUnavailable,
+            Error::Unauthorized(_) | Error::Forbidden(_) => Reason::ProviderAuthFailed,
+            Error::NotOwned(_) | Error::Drifted(_) | Error::ForeignPending(_) => {
+                Reason::ProviderConflict
+            }
+            Error::RouteNotFound(_)
+            | Error::ClientBuild(_)
+            | Error::HttpStatus(_)
+            | Error::ResponseTooLarge(_)
+            | Error::Decode(_)
+            | Error::Engine(_) => return None,
+        })
     }
 
     /// «An argument is wrong» — a spec the caller can fix and resend.
@@ -137,6 +157,10 @@ impl From<Error> for delonix_model::Error {
         let class = match e {
             Error::RouteNotFound(text) => delonix_model::Error::NotFound(text),
             Error::Validation(text) => delonix_model::Error::Invalid(text),
+            Error::Request(text) => delonix_model::Error::Unavailable(text),
+            Error::Unauthorized(text) | Error::Forbidden(text) => {
+                delonix_model::Error::PermissionDenied(text)
+            }
             Error::NotOwned(text) | Error::Drifted(text) | Error::ForeignPending(text) => {
                 delonix_model::Error::Conflict(text)
             }
@@ -194,6 +218,23 @@ mod tests {
                 "DX-{number:04} ({shown}) has no dictionary entry"
             );
         }
+    }
+
+    /// A reason's class is the class the failure converts into (ADR-0059 D5):
+    /// a refused key exits 77, an appliance that does not answer exits 69.
+    #[test]
+    fn a_reason_converts_into_its_own_class() {
+        for e in every_variant() {
+            let Some(r) = e.reason() else { continue };
+            let shown = e.to_string();
+            let converted = delonix_model::Error::from(e);
+            assert_eq!(converted.class(), r.class(), "{shown}");
+            assert_eq!(converted.number(), r.number(), "{shown}");
+        }
+        let denied = delonix_model::Error::from(Error::Unauthorized("401".into()));
+        assert_eq!(delonix_model::exitcode::for_error(&denied), 77);
+        let down = delonix_model::Error::from(Error::Request("refused".into()));
+        assert_eq!(delonix_model::exitcode::for_error(&down), 69);
     }
 
     #[test]

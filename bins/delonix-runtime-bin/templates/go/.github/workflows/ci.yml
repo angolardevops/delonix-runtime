@@ -5,14 +5,23 @@ on:
     branches: [main, develop]
   pull_request:
 
+# Read-only token: this workflow builds and tests, it publishes nothing.
+permissions:
+  contents: read
+
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go build ./...
-      - run: go vet ./...
-      - run: go test ./...
+      - run: go mod verify
+      - run: make fmt-check
+      - run: make vet
+      - run: make race
+      - run: make build
+      - run: make vuln

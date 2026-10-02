@@ -440,11 +440,11 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 - `delonix-linux` → `delonix-state` — 移除于 **P4a**
 - `delonix-mcp` → `delonix-mgmt` — 移除于 **P5**
 - `delonix-oci` → `delonix-state` — 移除于 **P4**
-- `delonix-opnsense` → `delonix-sdn` — 移除于 **P4**
-- `delonix-proxmox` → `delonix-sdn` — 移除于 **P4**
 - `delonix-scanner` → `delonix-oci` — 移除于 **P4**
 - `delonix-sdn` → `delonix-state` — 移除于 **P4**
-- `delonix-vm` → `delonix-state` — 移除于 **P4**
+- `delonix-vm` → `delonix-provider-cloud-hypervisor` — 移除于 **P5**
+- `delonix-vm` → `delonix-provider-libvirt` — 移除于 **P5**
+- `delonix-vm` → `delonix-state` — 移除于 **P5**
 - `delonix-volume` → `delonix-state` — 移除于 **P4**
 <!-- dev-docs:end layers -->
 
@@ -668,6 +668,7 @@ flowchart TB
   end
   subgraph context["Contexts"]
     delonix_compute["delonix-compute"]
+    delonix_networking["delonix-networking"]
     delonix_node["delonix-node"]
     delonix_security_runtime["delonix-security-runtime"]
     delonix_stack["delonix-stack"]
@@ -684,6 +685,8 @@ flowchart TB
   end
   subgraph provider["Providers"]
     delonix_opnsense["delonix-opnsense"]
+    delonix_provider_cloud_hypervisor["delonix-provider-cloud-hypervisor"]
+    delonix_provider_libvirt["delonix-provider-libvirt"]
     delonix_proxmox["delonix-proxmox"]
     delonix_truenas["delonix-truenas"]
   end
@@ -700,6 +703,7 @@ flowchart TB
     delonix_runtime_bin["delonix-runtime-bin"]
   end
   delonix_compute --> delonix_model
+  delonix_compute --> delonix_net_rules
   delonix_compute --> delonix_node
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
@@ -739,6 +743,9 @@ flowchart TB
   delonix_mgmt_bin --> delonix_mgmt
   delonix_mgmt_bin --> delonix_node
   delonix_mgmt_bin --> delonix_telemetry
+  delonix_networking --> delonix_compute
+  delonix_networking --> delonix_model
+  delonix_networking --> delonix_net_rules
   delonix_node --> delonix_model
   delonix_node_api --> delonix_compute
   delonix_node_api --> delonix_linux
@@ -758,14 +765,22 @@ flowchart TB
   delonix_oci --> delonix_state
   delonix_opnsense --> delonix_compute
   delonix_opnsense --> delonix_model
-  delonix_opnsense --> delonix_sdn
+  delonix_opnsense --> delonix_networking
+  delonix_provider_cloud_hypervisor --> delonix_compute
+  delonix_provider_cloud_hypervisor --> delonix_model
+  delonix_provider_cloud_hypervisor --> delonix_node
+  delonix_provider_libvirt --> delonix_compute
+  delonix_provider_libvirt --> delonix_model
+  delonix_provider_libvirt --> delonix_node
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
-  delonix_proxmox --> delonix_sdn
+  delonix_proxmox --> delonix_networking
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
+  delonix_runtime_bin --> delonix_net_rules
+  delonix_runtime_bin --> delonix_networking
   delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_opnsense
@@ -784,6 +799,7 @@ flowchart TB
   delonix_sdn --> delonix_compute
   delonix_sdn --> delonix_model
   delonix_sdn --> delonix_net_rules
+  delonix_sdn --> delonix_networking
   delonix_sdn --> delonix_node
   delonix_sdn --> delonix_state
   delonix_security_runtime --> delonix_model
@@ -795,8 +811,9 @@ flowchart TB
   delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_model
-  delonix_vm --> delonix_net_rules
   delonix_vm --> delonix_node
+  delonix_vm --> delonix_provider_cloud_hypervisor
+  delonix_vm --> delonix_provider_libvirt
   delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
   delonix_volume --> delonix_model
@@ -811,11 +828,14 @@ flowchart TB
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_networking block
   class delonix_node block
   class delonix_node_api iface
   class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
+  class delonix_provider_cloud_hypervisor external
+  class delonix_provider_libvirt external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block

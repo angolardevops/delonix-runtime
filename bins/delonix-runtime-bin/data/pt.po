@@ -226,6 +226,9 @@ msgstr "indisponível: "
 msgid "timed out: "
 msgstr "esgotou o tempo: "
 
+msgid "permission denied: "
+msgstr "permissão recusada: "
+
 # ---- mensagens migradas do tr() inline -------------------------------------
 
 msgid "active connections (conntrack)"
@@ -828,6 +831,9 @@ msgstr "delonix: falha a preparar o rootfs: {e}"
 
 msgid "delonix: confinement NOT verified ({e}); aborting the container"
 msgstr "delonix: confinamento NÃO verificado ({e}); a abortar o container"
+
+msgid "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container."
+msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não pode ser aplicado neste host: esta conta não tem intervalo de uid/gid subordinados (/etc/subuid, /etc/subgid, newuidmap), por isso não pode existir um segundo utilizador. O processo corre como root (uid 0) dentro do container."
 
 msgid "delonix: warning — failed to enter WORKDIR {w}"
 msgstr "delonix: aviso — falha a entrar no WORKDIR {w}"
@@ -1980,8 +1986,8 @@ msgstr "Segundos a esperar por cada VM ficar alcançável por SSH."
 msgid "Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot."
 msgstr "Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou `--once` para um snapshot de texto."
 
-msgid "Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generate a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, build the image, start it, and wait until it's healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -2184,8 +2190,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "Overwrites already existing files."
 msgstr "Substitui ficheiros já existentes."
 
-msgid "Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, builds the image, starts it and waits for it to become healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -2775,6 +2781,12 @@ msgstr "join do worker '{wnode}'"
 msgid "a worker thread panicked"
 msgstr "uma thread de worker entrou em panic"
 
+msgid "an import thread panicked"
+msgstr "uma thread de importação entrou em panic"
+
+msgid "{image} → {count} node(s)"
+msgstr "{image} → {count} nó(s)"
+
 msgid "{n} worker(s) failed:\n  {list}"
 msgstr "{n} worker(s) falharam:\n  {list}"
 
@@ -2967,8 +2979,11 @@ msgstr "overlay cifrado (wg_ip) mas 'wg' indisponível no host — instala wireg
 msgid "could not evaluate prerequisites: {err}"
 msgstr "não consegui avaliar os pré-requisitos: {err}"
 
-msgid "declared but NOT applied to an existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace`, which discards the disk) or change it with `vm create`/`vm stop`+`start`"
-msgstr "declarado mas NÃO aplicado a uma VM existente: {fields} — o reconciliador compara só {compared}. Recria-a (`--replace`, que deita fora o disco) ou muda-a com `vm create`/`vm stop`+`start`"
+msgid "changed since it was created and NOT applied to the existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) or change it with `vm create`/`vm stop`+`start`"
+msgstr "alterado desde a criação e NÃO aplicado à VM existente: {fields} — o reconciliador compara só {compared}. Recria-a (`--replace VirtualMachine/{name}`, que deita fora o disco) ou muda-a com `vm create`/`vm stop`+`start`"
+
+msgid "declared and not verifiable on an existing VM: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) to be sure, or change it with `vm create`/`vm stop`+`start`"
+msgstr "declarado e não verificável numa VM existente: {fields} — não guarda registo do spec com que foi criada (criada à mão, ou por uma versão anterior), e o reconciliador compara só {compared}. Recria-a (`--replace VirtualMachine/{name}`, que deita fora o disco) para ter a certeza, ou muda-a com `vm create`/`vm stop`+`start`"
 
 msgid "encrypted overlay (wgIp) but 'wg' is unavailable on the host — install wireguard-tools + the kernel module, or drop wgIp for plain (unencrypted) VXLAN transport"
 msgstr "overlay cifrado (wgIp) mas 'wg' indisponível no host — instala wireguard-tools + o módulo do kernel, ou tira o wgIp para transporte VXLAN plano (não cifrado)"
@@ -3039,8 +3054,8 @@ msgstr "  criado: {path}"
 msgid "`delonix {args}` failed:\n{stderr}"
 msgstr "`delonix {args}` falhou:\n{stderr}"
 
-msgid "the container started but did not become healthy in 40s — see `delonix container logs`"
-msgstr "o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`"
+msgid "the container started but did not become healthy in {secs}s — see `delonix container logs`"
+msgstr "o container arrancou mas não ficou saudável em {secs}s — vê `delonix container logs`"
 
 msgid "done. Now:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
 msgstr "pronto. Agora:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
@@ -3486,14 +3501,14 @@ msgstr "o container não arrancou (ver o erro acima)"
 msgid "ingress infra is down — no holder to enter"
 msgstr "infra de ingress em baixo — não há holder onde entrar"
 
-msgid "the container did not start inside the network '{netns}' (exit {code})"
-msgstr "o container não arrancou dentro da rede '{netns}' (exit {code})"
+msgid "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "recurso de que o container precisa dentro da rede '{network}' — a razão está na linha acima (exit {code})"
+
+msgid "the container did not start inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "o container não arrancou dentro da rede '{network}' — a razão está na linha acima (exit {code})"
 
 msgid "warning: firewall/isolation of '{name}' not reapplied on start: {e}"
 msgstr "aviso: firewall/isolamento de '{name}' não reaplicado no start: {e}"
-
-msgid "the container did not restart inside the network '{netns}' (exit {code})"
-msgstr "o container não rearrancou dentro da rede '{netns}' (exit {code})"
 
 msgid "'{name}' has no rootfs on disk — it was removed, or the container never got to start"
 msgstr "'{name}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar"
@@ -3582,14 +3597,11 @@ msgstr ""
 "aviso: volume '{vol}': medium de emptyDir desconhecido '{medium}' (o "
 "Kubernetes define \"\" e \"Memory\"); tratado como tmpfs."
 
-msgid ""
-"declared but NOT applied to an existing container: {fields} — the reconciler "
-"compares only {compared}. Recreate it (`--replace Container/<name>`) or change "
-"it with `container update` where that field is hot"
-msgstr ""
-"declarado mas NÃO aplicado a um container existente: {fields} — o "
-"reconciliador compara só {compared}. Recria-o (`--replace Container/<nome>`) "
-"ou muda-o com `container update` onde esse campo é quente"
+msgid "changed since it was created and NOT applied to the existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) or change it with `container update` where that field is hot"
+msgstr "alterado desde a criação e NÃO aplicado ao container existente: {fields} — o reconciliador compara só {compared}. Recria-o (`--replace Container/{name}`) ou muda-o com `container update` onde esse campo é quente"
+
+msgid "declared and not verifiable on an existing container: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) to be sure, or change it with `container update` where that field is hot"
+msgstr "declarado e não verificável num container existente: {fields} — não guarda registo do spec com que foi criado (criado à mão, ou por uma versão anterior), e o reconciliador compara só {compared}. Recria-o (`--replace Container/{name}`) para ter a certeza, ou muda-o com `container update` onde esse campo é quente"
 
 msgid "Packaging the image"
 msgstr "A empacotar a imagem"
@@ -4034,8 +4046,14 @@ msgstr "Todos os outros Kinds ({kinds}) são «garante presente»: o `apply` cri
 msgid "Not compared on a Container, and why: `env` and `command` (the record holds them merged with the image's), `user` (the record stores the resolved uid), `labels` (the engine adds its own)."
 msgstr "Não comparados num Container, e porquê: `env` e `command` (o registo guarda-os fundidos com os da imagem), `user` (o registo guarda o uid resolvido), `labels` (o motor acrescenta as suas)."
 
-msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing."
-msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada."
+msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `<Kind>/<name>` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)."
+msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada. Um `<Kind>/<name>` também recria esse recurso quando o plano não mostra alteração nele (um campo que o plano não compara, como `env`)."
+
+msgid "recreate requested with `--replace`"
+msgstr "recriação pedida com `--replace`"
+
+msgid "--replace {kind}/{name}: this Kind is ensure-present in this version and cannot be recreated by `stack apply` (nothing was changed)"
+msgstr "--replace {kind}/{name}: este Kind só garante presença nesta versão e não pode ser recriado pelo `stack apply` (nada foi alterado)"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit. Answers \"why is my change not showing up?\" without reading the source."
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai. Responde a «porque é que a minha alteração não aparece?» sem ler o código."
@@ -6635,8 +6653,8 @@ msgstr "o que mudaria, antes de mudar seja o que for"
 msgid "a complete project, files already filled in"
 msgstr "um projecto completo, com os ficheiros já preenchidos"
 
-msgid "a complete Python project — Delonixfile, manifest and README, runnable without editing anything"
-msgstr "um projecto Python completo — Delonixfile, manifesto e README, executável sem editar nada"
+msgid "a complete FastAPI project — Delonixfile, manifest and README, runnable without editing anything"
+msgstr "um projecto FastAPI completo — Delonixfile, manifesto e README, executável sem editar nada"
 
 msgid "which templates exist"
 msgstr "que templates existem"
@@ -11019,8 +11037,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
 
-msgid "pick the template's version — an image tag for `odoo`"
-msgstr "escolhe a versão do template — uma tag de imagem para o `odoo`"
+msgid "pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)"
+msgstr "escolhe a versão do template — uma tag de imagem para o `odoo` (Odoo 20 quando omitida)"
 
 msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
 msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"
@@ -13052,8 +13070,8 @@ msgstr "Lê o corpo em bruto na mensagem; a API da appliance pode ter mudado de 
 msgid "network zone provider registration refused"
 msgstr "registo de provider de zona de rede recusado"
 
-msgid "A process tried to register a NetworkZoneProvider with an empty id, or one whose id/alias already belongs to a different provider."
-msgstr "Um processo tentou registar um NetworkZoneProvider com um id vazio, ou cujo id/alias já pertence a um provider diferente."
+msgid "A process tried to register a SegmentProvider with an empty id, or one whose id/alias already belongs to a different provider."
+msgstr "Um processo tentou registar um SegmentProvider com id vazio, ou com um id/alias que já pertence a outro provider."
 
 msgid "Fix the registration (an internal call error unless a third-party provider crate is involved)."
 msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido um crate de provider de terceiros)."
@@ -13061,8 +13079,8 @@ msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido
 msgid "no network zone provider configured"
 msgstr "nenhum provider de zona de rede configurado"
 
-msgid "`kind: NetworkZone` was applied but the runtime has no NetworkZoneProvider registered — it names no provider itself, on purpose, so the runtime's own configuration decides."
-msgstr "Foi aplicado um `kind: NetworkZone` mas o runtime não tem nenhum NetworkZoneProvider registado — o próprio Kind não nomeia provider nenhum, de propósito, para a configuração do runtime é que decide."
+msgid "`kind: NetworkZone` was applied, no providers.yaml is in force, and the runtime has no SegmentProvider registered — the Kind names no provider itself, on purpose, so the runtime's own configuration decides."
+msgstr "Foi aplicado um `kind: NetworkZone`, não há providers.yaml em vigor e o runtime não tem nenhum SegmentProvider registado — o Kind não nomeia provider nenhum, de propósito, para que decida a configuração do próprio runtime."
 
 msgid "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."
 msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhece) e a sua credencial."
@@ -13070,11 +13088,11 @@ msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhec
 msgid "ambiguous network zone provider"
 msgstr "provider de zona de rede ambíguo"
 
-msgid "More than one NetworkZoneProvider is registered and `kind: NetworkZone` has no field to pick one by name."
-msgstr "Está registado mais de um NetworkZoneProvider e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
+msgid "More than one SegmentProvider is registered, no providers.yaml is in force, and `kind: NetworkZone` has no field to pick one by name."
+msgstr "Está registado mais de um SegmentProvider, não há providers.yaml em vigor, e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
 
-msgid "Unregister all but one NetworkZoneProvider target."
-msgstr "Retira o registo de todos os alvos NetworkZoneProvider excepto um."
+msgid "Set networkDefaults.segment in a providers.yaml, or unregister all but one SegmentProvider target."
+msgstr "Define o networkDefaults.segment num providers.yaml, ou retira o registo de todos os alvos SegmentProvider excepto um."
 
 msgid "no such NetworkRoute"
 msgstr "não existe esse NetworkRoute"
@@ -14733,3 +14751,326 @@ msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm|
 
 msgid "{kind} '{name}' (scope systemcontainer) → target '{target}' is not a declared or registered SystemContainer"
 msgstr "{kind} '{name}' (scope systemcontainer) → o target '{target}' não é um SystemContainer declarado ou registado"
+
+msgid "no provider answers this network role"
+msgstr "nenhum provider responde a este papel de rede"
+
+msgid "Nothing names a provider for the role: a providers.yaml is in force without networkDefaults.<role>, or a NetworkGateway names no provider while zero or several gateway providers are registered (ADR-0059 D3)."
+msgstr "Nada nomeia um provider para o papel: há um providers.yaml em vigor sem networkDefaults.<papel>, ou um NetworkGateway não nomeia provider e estão registados zero ou vários providers de gateway (ADR-0059 D3)."
+
+msgid "Set networkDefaults.<role> in providers.yaml, or name the provider in the document where the Kind has the field (NetworkGateway spec.provider)."
+msgstr "Define o networkDefaults.<papel> no providers.yaml, ou nomeia o provider no documento quando o Kind tem o campo (spec.provider do NetworkGateway)."
+
+msgid "the named network provider is not registered"
+msgstr "o provider de rede nomeado não está registado"
+
+msgid "A document names a provider that is not registered for its role (ADR-0059 D3)."
+msgstr "Um documento nomeia um provider que não está registado para o seu papel (ADR-0059 D3)."
+
+msgid "Name a registered provider (`delonix provider ls`), or configure the one named."
+msgstr "Nomeia um provider registado (`delonix provider ls`), ou configura o que foi nomeado."
+
+msgid "the network default names a provider that is not registered"
+msgstr "o default de rede nomeia um provider que não está registado"
+
+msgid "networkDefaults.<role> in providers.yaml names a provider that is not registered for that role. A default is never skipped to try another provider (ADR-0059 D3)."
+msgstr "O networkDefaults.<papel> do providers.yaml nomeia um provider que não está registado para esse papel. Um default nunca é saltado para se tentar outro provider (ADR-0059 D3)."
+
+msgid "Configure the provider the default names (its providers.yaml entry), or change the default to one `delonix provider ls` lists."
+msgstr "Configura o provider que o default nomeia (a sua entrada no providers.yaml), ou muda o default para um que o `delonix provider ls` liste."
+
+msgid "the provider that created this resource is not registered"
+msgstr "o provider que criou este recurso não está registado"
+
+msgid "The resource's record names the provider that served it, and that provider is not registered now. A recorded resource never moves to another provider when a default changes (ADR-0059 D3)."
+msgstr "O registo do recurso nomeia o provider que o serviu, e esse provider não está registado agora. Um recurso registado nunca muda de provider quando um default muda (ADR-0059 D3)."
+
+msgid "Configure that provider again, or remove the resource with a replace once it is."
+msgstr "Volta a configurar esse provider, ou remove o recurso com um replace quando estiver configurado."
+
+# ADR-0059 D5: o bloco de reasons da rede (DX-C380…C399) e os códigos retirados
+
+msgid "the network intent cannot be served as written"
+msgstr "a intenção de rede não pode ser servida como está escrita"
+
+msgid "What a network document or providers.yaml asks for cannot be served as written: nothing names a provider for the role and nothing else decides (zero or several registered, or a providers.yaml without networkDefaults.<role>), or the provider rejected the fields sent (OPNsense answers with per-field validations). ADR-0059 D5 reason `invalid_intent`."
+msgstr "O que um documento de rede ou o providers.yaml pede não pode ser servido como está escrito: nada nomeia um provider para o papel e nada mais decide (zero ou vários registados, ou um providers.yaml sem networkDefaults.<papel>), ou o provider recusou os campos enviados (o OPNsense responde com validações campo a campo). Reason `invalid_intent` da D5 do ADR-0059."
+
+msgid "Read the message: name the provider (networkDefaults.<role> in providers.yaml, or spec.provider where the Kind has it), or fix the fields the provider listed."
+msgstr "Lê a mensagem: nomeia o provider (networkDefaults.<papel> no providers.yaml, ou spec.provider onde o Kind o tem), ou corrige os campos que o provider listou."
+
+msgid "the network provider holds something this engine will not overwrite"
+msgstr "o provider de rede tem algo que este motor não sobrescreve"
+
+msgid "The remote provider (an OPNsense appliance, a Proxmox cluster's SDN) has an object with the identity being ensured or removed and no owner mark of this engine (someone else's: never adopted by name, never deleted); or an object this engine created was edited there and no longer matches the manifest (there is no update in place); or it has staged changes that are not this engine's, and its commit applies everything staged at once. ADR-0059 D5 reason `provider_conflict`. The owner mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of a vnet alias (Proxmox)."
+msgstr "O provider remoto (um appliance OPNsense, o SDN de um cluster Proxmox) tem um objecto com a identidade que se quer garantir ou remover e sem a marca de dono deste motor (é de outra pessoa: nunca é adoptado pelo nome, nunca é apagado); ou um objecto que este motor criou foi editado lá e já não bate com o manifesto (não há actualização no lugar); ou tem alterações preparadas que não são deste motor, e o commit dele aplica tudo o que está preparado de uma vez. Reason `provider_conflict` da D5 do ADR-0059. A marca de dono é uma categoria de firewall chamada `delonix-owner:<token>` (OPNsense) ou `[delonix-owner:<token>]` no fim do alias de uma vnet (Proxmox)."
+
+msgid "Read which of the three the message names: rename the object or remove the stale one on the provider; put an edited object back as declared, or replace it (`delonix stack apply --replace <Kind>/<name>`); or have whoever staged the other changes apply or discard them. Then apply again."
+msgstr "Lê qual dos três a mensagem nomeia: muda o nome do objecto ou remove o antigo no provider; repõe o objecto editado como foi declarado, ou substitui-o (`delonix stack apply --replace <Kind>/<nome>`); ou pede a quem preparou as outras alterações que as aplique ou descarte. Depois aplica outra vez."
+
+msgid "no registered provider serves this network capability"
+msgstr "nenhum provider registado serve esta capacidade de rede"
+
+msgid "The provider that would serve the request is not registered for its role, or does not implement the operation: a document names one that is not registered, networkDefaults.<role> names one, or a resource's record names the provider that created it and that provider is not registered now. A default is never skipped to try another provider, and a recorded resource never moves (ADR-0059 D3). ADR-0059 D5 reason `unsupported_capability`: the remedy is another provider, not another argument."
+msgstr "O provider que serviria o pedido não está registado para o seu papel, ou não implementa a operação: um documento nomeia um que não está registado, o networkDefaults.<papel> nomeia um, ou o registo de um recurso nomeia o provider que o criou e esse provider já não está registado. Um default nunca é saltado para tentar outro provider, e um recurso registado nunca muda de provider (D3 do ADR-0059). Reason `unsupported_capability` da D5 do ADR-0059: o remédio é outro provider, não outro argumento."
+
+msgid "Configure the provider the message names (`delonix provider ls` lists what is registered), or name one that serves the role."
+msgstr "Configura o provider que a mensagem nomeia (`delonix provider ls` lista o que está registado), ou nomeia um que sirva o papel."
+
+msgid "the network provider could not be reached"
+msgstr "não foi possível chegar ao provider de rede"
+
+msgid "The request to the remote network provider (an OPNsense appliance) could not be sent or was not answered: connection refused, DNS, TLS, or a connection dropped mid-answer. When it dropped after a write was sent, whether the write landed is unknown; the next plan reads the provider again. ADR-0059 D5 reason `provider_unavailable`."
+msgstr "O pedido ao provider de rede remoto (um appliance OPNsense) não pôde ser enviado ou não teve resposta: ligação recusada, DNS, TLS, ou uma ligação cortada a meio da resposta. Quando cortou depois de uma escrita ter sido enviada, não se sabe se a escrita chegou; o plano seguinte volta a ler o provider. Reason `provider_unavailable` da D5 do ADR-0059."
+
+msgid "Check that the provider's url in providers.yaml answers from this host, then plan and apply again."
+msgstr "Confirma que o url do provider no providers.yaml responde a partir deste host, e depois volta a planear e a aplicar."
+
+msgid "the network provider refused the credential"
+msgstr "o provider de rede recusou a credencial"
+
+msgid "The remote network provider refused what it was sent: OPNsense answers 401 for a key/secret it does not accept, a 302 to its login page when no credential arrived at all, and 403 for a key without the privilege the route needs (ADR-0051 phase 0). ADR-0059 D5 reason `provider_auth_failed`."
+msgstr "O provider de rede remoto recusou o que recebeu: o OPNsense responde 401 a uma chave/segredo que não aceita, 302 para a página de login quando não chegou credencial nenhuma, e 403 a uma chave sem o privilégio que a rota pede (fase 0 do ADR-0051). Reason `provider_auth_failed` da D5 do ADR-0059."
+
+msgid "Check the key and secret files named in providers.yaml, and that the API user holds the firewall privileges on the appliance."
+msgstr "Verifica os ficheiros de chave e segredo que o providers.yaml nomeia, e que o utilizador da API tem os privilégios de firewall no appliance."
+
+msgid "Reason"
+msgstr "Motivo"
+
+msgid "Retired"
+msgstr "Retirado"
+
+msgid "replaced by {code}; last emitted by {release}"
+msgstr "substituído por {code}; emitido pela última vez na {release}"
+
+msgid "replaced by {code}; never in a release"
+msgstr "substituído por {code}; nunca saiu numa release"
+
+# ADR-0059 D5: o contexto de uma falha, por baixo da linha de erro
+msgid "reason: {value}"
+msgstr "motivo: {value}"
+
+msgid "provider"
+msgstr "provider"
+
+msgid "role"
+msgstr "papel"
+
+msgid "capability"
+msgstr "capacidade"
+
+msgid "step"
+msgstr "passo"
+
+msgid "plan digest"
+msgstr "digest do plano"
+
+msgid "cause"
+msgstr "causa"
+
+# ---- ADR-0059 F4b: plan digest ----
+
+msgid "the plan was computed against a state that has changed since"
+msgstr "o plano foi calculado contra um estado que entretanto mudou"
+
+msgid "`stack apply --plan-digest` was given a digest, and the digest recomputed now for a network document is not among the ones given: the manifest, what the provider holds, the provider, its capabilities or the catalog changed between the plan and the apply. ADR-0059 D5 reason `stale_plan`. Nothing was written."
+msgstr "O `stack apply --plan-digest` recebeu um digest, e o digest recalculado agora para um documento de rede não está entre os fornecidos: o manifesto, o que o provider tem, o provider, as suas capacidades ou o catálogo mudaram entre o plano e o apply. Razão `stale_plan` do ADR-0059 D5. Nada foi escrito."
+
+msgid "Plan again (`delonix stack plan -o json`), read what changed, and apply with the new `planDigest`."
+msgstr "Volta a planear (`delonix stack plan -o json`), lê o que mudou e aplica com o `planDigest` novo."
+
+msgid "Apply only if this is still the plan: a `planDigest` from `stack plan -o json` (repeatable, one per network document). A network document whose digest, recomputed now, is not among them is a stale plan — refused before anything is written."
+msgstr "Aplica só se o plano ainda for este: um `planDigest` do `stack plan -o json` (repetível, um por documento de rede). Um documento de rede cujo digest, recalculado agora, não esteja entre eles é um plano obsoleto — recusado antes de se escrever seja o que for."
+
+msgid "--plan-digest was given, and the manifest has no network document with a plan digest (kind: NetworkGateway, NetworkZone) — nothing would be checked"
+msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede com digest de plano (kind: NetworkGateway, NetworkZone) — nada seria verificado"
+
+# ---- ADR-0059 F4c: step ledger ----
+
+msgid "networkgateway/{name}: the last run was {why} — resuming, with {n} staged change(s) of it adopted"
+msgstr "networkgateway/{name}: a última execução ficou {why} — a retomar, com {n} alteração(ões) preparada(s) por ela adoptada(s)"
+msgid "COPY {src}: the source is excluded by .dockerignore"
+msgstr "COPY {src}: a origem está excluída pelo .dockerignore"
+
+msgid "COPY: cannot replace the directory {path} with a symbolic link"
+msgstr "COPY: não posso substituir o directório {path} por uma ligação simbólica"
+msgid "project name '{name}' is not usable: it becomes a container name, an image tag and a package name, so it must be lowercase letters, digits and inner hyphens (at most 63) — pass --name {suggestion}"
+msgstr "o nome de projecto '{name}' não serve: vira nome de container, tag de imagem e nome de pacote, por isso só pode ter minúsculas, dígitos e hífens interiores (no máximo 63) — passa --name {suggestion}"
+
+msgid "directory '{dir}' is not usable as a project name; using '{name}' (choose another with --name)"
+msgstr "o directório '{dir}' não serve como nome de projecto; a usar '{name}' (escolhe outro com --name)"
+
+msgid "-v '{v}' is not a plain version (1, 1.2 or 1.2.3)"
+msgstr "-v '{v}' não é uma versão simples (1, 1.2 ou 1.2.3)"
+
+msgid "template '{tname}' is validated with -v {accepted}; '{v}' is outside that range"
+msgstr "o template '{tname}' está validado com -v {accepted}; '{v}' fica fora dessa gama"
+
+msgid "CI files not written: {why}"
+msgstr "ficheiros de CI não escritos: {why}"
+
+msgid "the project already has its own CI"
+msgstr "o projecto já tem a sua própria CI"
+
+msgid "the project has no {lock}, so it does not use the package manager the template's CI runs"
+msgstr "o projecto não tem {lock}, logo não usa o gestor de pacotes que a CI do template corre"
+
+msgid "{path} is a symbolic link — refusing to write through it"
+msgstr "{path} é uma ligação simbólica — recuso escrever através dela"
+
+msgid "found {evidence}, but -t {t} was given: generating the {t} template anyway — the project now has two descriptions to keep in step"
+msgstr "encontrei {evidence}, mas foi dado -t {t}: gero o template {t} na mesma — o projecto passa a ter duas descrições para manter alinhadas"
+
+msgid "using -t {t} → stack init --template {t}"
+msgstr "a usar -t {t} → stack init --template {t}"
+
+msgid "found {evidence} — no template exists for this project's framework; writing the generic scaffold (pass -t <template> to choose one)"
+msgstr "encontrei {evidence} — não há template para o framework deste projecto; escrevo o scaffold genérico (passa -t <template> para escolher um)"
+
+msgid "Project name (default: the directory's name). Lowercase letters, digits and inner hyphens, because it becomes a container name, an image tag and a package name"
+msgstr "Nome do projecto (por omissão: o nome do directório). Minúsculas, dígitos e hífens interiores, porque vira nome de container, tag de imagem e nome de pacote"
+
+msgid "choose the project name — without --name it comes from the directory, lowercased and hyphenated when needed (the run says which)"
+msgstr "escolhe o nome do projecto — sem --name vem do directório, em minúsculas e com hífens quando preciso (o comando diz qual usou)"
+
+msgid "a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override"
+msgstr "um manifesto que não nomeia nenhum framework suportado recebe o scaffold genérico, com a razão — força um template para o contornar"
+
+
+# ---- init: edge templates with TLS, ports and the --up summary ----
+
+msgid "{what} port {port} is already in use on this host — the project is generated with it anyway; port {free} is free"
+msgstr "a porta {what} {port} já está em uso neste host — o projecto é gerado com ela na mesma; a porta {free} está livre"
+
+msgid "{what} port {port} is already in use. Which port instead?"
+msgstr "A porta {what} {port} já está em uso. Que porta usar em vez dela?"
+
+msgid "port {port} is not usable — pick a free one"
+msgstr "a porta {port} não serve — escolhe uma livre"
+
+msgid "Extra host names for the TLS certificate, space-separated (localhost is always included)"
+msgstr "Nomes de host adicionais para o certificado TLS, separados por espaço (localhost entra sempre)"
+
+msgid "'{host}' is not a host name or an address — left out of the certificate"
+msgstr "'{host}' não é um nome de host nem um endereço — ficou fora do certificado"
+
+msgid "certificate: ./tls, issued by this machine's mkcert CA for {names} — browsers here trust it once `mkcert -install` has been run"
+msgstr "certificado: ./tls, emitido pela CA do mkcert desta máquina para {names} — os browsers daqui confiam nele depois de correr `mkcert -install`"
+
+msgid "certificate: ./tls, self-signed for {names} — HTTPS works and browsers will warn; install mkcert and run `sh scripts/tls.sh` for one this machine trusts"
+msgstr "certificado: ./tls, auto-assinado para {names} — o HTTPS funciona e os browsers avisam; instala o mkcert e corre `sh scripts/tls.sh` para ter um em que esta máquina confia"
+
+msgid "certificate: ./tls already had one — kept as it is"
+msgstr "certificado: ./tls já tinha um — ficou como estava"
+
+msgid "another process"
+msgstr "outro processo"
+
+msgid "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`"
+msgstr "a porta {port} já está em uso neste host (por {owner}) — liberta-a, ou muda a porta nos ficheiros gerados e no delonix-manifest.yaml, e corre `delonix stack apply`"
+
+msgid "Building image {tag} 🔨"
+msgstr "A construir a imagem {tag} 🔨"
+
+msgid "`delonix build` failed — the step that failed is shown above"
+msgstr "o `delonix build` falhou — o passo que falhou está acima"
+
+msgid "{name} is UP"
+msgstr "{name} está de pé"
+
+msgid "http://localhost:{port} redirects there"
+msgstr "http://localhost:{port} redirecciona para lá"
+
+msgid "these are the image's factory credentials — change them before anyone else can reach the port (see README.md)"
+msgstr "estas são as credenciais de fábrica da imagem — muda-as antes de mais alguém chegar à porta (ver README.md)"
+
+msgid "(tears down everything the stack owns)"
+msgstr "(desmonta tudo o que a stack possui)"
+
+msgid "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project"
+msgstr "secret:  {secret} foi criado com uma chave gerada — vive no cofre de segredos (`delonix secret inspect {secret}`), não no projecto"
+
+# ---- init: --port / --tls-port / --hostname ----
+
+msgid "Host and container port of the service, instead of the template's own."
+msgstr "Porta do serviço no host e no container, em vez da do template."
+
+msgid "HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)."
+msgstr "Porta HTTPS, num template que serve TLS (nginx, httpd, haproxy)."
+
+msgid "Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)."
+msgstr "Nome de host ou endereço adicional para o certificado TLS gerado (repetível; localhost entra sempre)."
+
+msgid "template '{tname}' does not serve TLS — drop --tls-port/--hostname"
+msgstr "o template '{tname}' não serve TLS — tira --tls-port/--hostname"
+
+msgid "the HTTP and the HTTPS port are both {port} — they must differ"
+msgstr "a porta HTTP e a HTTPS são ambas {port} — têm de ser diferentes"
+
+msgid "--hostname {host}: not a host name or an address"
+msgstr "--hostname {host}: não é um nome de host nem um endereço"
+
+msgid "--port/--tls-port/--hostname need a template to apply them to — pass -t/--template"
+msgstr "--port/--tls-port/--hostname precisam de um template a que se apliquem — passa -t/--template"
+
+msgid "an HTTPS edge on ports of your choice, with a certificate that also covers your own name"
+msgstr "um edge HTTPS nas portas que escolheres, com um certificado que também cobre o teu próprio nome"
+
+msgid "the delonix container {name}"
+msgstr "o container delonix {name}"
+
+msgid "{name} is running the previous build of {tag} — recreating it"
+msgstr "{name} está a correr o build anterior de {tag} — a recriá-lo"
+
+msgid "{name} exists but is not running — recreating it"
+msgstr "{name} existe mas não está a correr — a recriá-lo"
+
+# ---- ADR-0059 F4d: NetworkZone ----
+
+msgid "networkzone/{name}: the last run was {why} — applying again; the provider discards what it left staged"
+msgstr "networkzone/{name}: a última execução ficou {why} — a aplicar de novo; o provider descarta o que ela deixou preparado"
+
+# ---- ADR-0059 F5a: NAT on a NetworkGateway ----
+
+msgid "nat rule '{description}': kind '{kind}' has to be snat or dnat"
+msgstr "regra de nat '{description}': o kind '{kind}' tem de ser snat ou dnat"
+
+msgid "nat rule '{description}' is declared twice — the description is how a rule is found"
+msgstr "a regra de nat '{description}' está declarada duas vezes — é pela descrição que uma regra é encontrada"
+
+msgid "NetworkGateway/{name}: provider '{provider}' is not registered for the nat role — drop `nat:` from the document, or use a provider that has it (`delonix provider ls`)"
+msgstr "NetworkGateway/{name}: o provider '{provider}' não está registado para o papel de nat — tira o `nat:` do documento, ou usa um provider que o tenha (`delonix provider ls`)"
+
+msgid "networkgateway/{name}: {n} nat rule(s) on '{provider}'"
+msgstr "networkgateway/{name}: {n} regra(s) de nat em '{provider}'"
+
+# ADR-0059 F5b: the IPAM role on a NetworkZone
+msgid "the segment provider '{provider}' has no ipam role: a NetworkZone on it cannot declare subnets"
+msgstr "o provider de segmentos '{provider}' não tem o papel ipam: uma NetworkZone nele não pode declarar subnets"
+
+msgid "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reservation(s) on '{provider}'"
+msgstr "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reserva(s) em '{provider}'"
+
+# ADR-0059 F5c: the DNS role on a NetworkZone
+msgid "NetworkZone/{name}: dns: no subnet declares a dhcpRange, and the provider registers only the guests that get an address from one — add a dhcpRange, or drop `dns:`"
+msgstr "NetworkZone/{name}: dns: nenhuma subnet declara um dhcpRange, e o provider só regista os guests que recebem um endereço de um — acrescenta um dhcpRange, ou tira o `dns:`"
+
+msgid "the segment provider '{provider}' has no dns role: a NetworkZone on it cannot declare dns"
+msgstr "o provider de segmentos '{provider}' não tem o papel dns: uma NetworkZone nele não pode declarar dns"
+
+msgid "DNS controller '{id}' on provider '{provider}' — the engine does not create DNS controllers: register it on the cluster (it holds the DNS server's credential)"
+msgstr "controlador DNS '{id}' no provider '{provider}' — o motor não cria controladores DNS: regista-o no cluster (é ele que guarda a credencial do servidor DNS)"
+
+msgid "networkzone/{name}: dns record '{record}' and its PTR left on DNS server '{server}': the provider writes a subnet gateway's records and never removes them"
+msgstr "networkzone/{name}: o registo dns '{record}' e o seu PTR ficaram no servidor DNS '{server}': o provider escreve os registos da gateway de uma subnet e nunca os remove"
+
+msgid "networkzone/{name}: dns changed — the records the provider already wrote (each subnet gateway's and each guest's) stay as they are; a guest is registered under the new settings when it next gets an address"
+msgstr "networkzone/{name}: o dns mudou — os registos que o provider já escreveu (os de cada gateway de subnet e os de cada guest) ficam como estão; um guest é registado com as novas definições quando voltar a receber um endereço"
+
+# init: delonix-tunnel.yaml (kind: Gateway) nos templates
+msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"
+msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endereço https público, sem IP público (README.md)"
+
+msgid "internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")"
+msgstr "internet: delonix stack apply -f delonix-tunnel.yaml — um endereço https público sem IP público (README.md, \"On the internet without a public IP\")"

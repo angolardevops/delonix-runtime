@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (25 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (28 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 25 crates)
+## C4 — Nível 3: Componentes (os 28 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
@@ -141,7 +141,7 @@ graph TB
     RT["delonix-linux<br>motor de containers: clone e namespaces, setup_rootfs,<br>cgroups v2, seccomp, caps, exec, log shim, reconcile_status"]
     NET["delonix-sdn<br>SDN rootless: modulo infra — holder netns, slirp unico,<br>publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover"]
     IMG["delonix-oci<br>imagens OCI: registry pull e push, cas, overlay,<br>build Dockerfile, buildpack CNB, sign, internal_registry"]
-    VM2["delonix-vm<br>microVMs declarativas: trait VmBackend —<br>Cloud Hypervisor ou libvirt"]
+    VM2["delonix-vm<br>raiz de composicao das VMs ate a P5:<br>semeia o registo e monta o VmEngine"]
     VOL["delonix-volume<br>volumes nomeados e bind mounts, sintaxe -v Docker,<br>driver local ou nfs"]
     NODECTX["delonix-node<br>contexto do no: eventos, verificacoes do host,<br>peer_cred, dispatch e as perguntas ao host e aos processos"]
     STATECRATE["delonix-state<br>estado persistido: Store e JsonStore com flock,<br>escrita atomica, SecretStore e CredVault cifrados"]
@@ -149,13 +149,16 @@ graph TB
     TEL["delonix-telemetry<br>observabilidade: logging estruturado, spans OpenTelemetry/OTLP<br>e o registo Prometheus partilhado (saiu do core na P3)"]
     SCAN["delonix-scanner<br>SBOM e varredura de CVE — image scan<br>e a imposicao de scan-on-pull"]
     SEC["delonix-security-runtime<br>decisoes de seguranca do no: politica, admissao<br>unica (container E VM), evento, score, redaccao<br>(ADR-0026) — puro, sem sensores e sem inquilino"]
-    RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
+    RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas, o PolicyIr (ADR-0059 D6); partilhado com o PaaS"]
+    CHV["delonix-provider-cloud-hypervisor<br>backend VmBackend Cloud Hypervisor (microVM por processo, api-socket)<br>(ADR-0044 P4b.4c) — saiu do delonix-vm, que o regista"]
+    LVIRT["delonix-provider-libvirt<br>backend VmBackend libvirt/KVM (QEMU via virsh)<br>(ADR-0044 P4b.4b) — saiu do delonix-vm, que o regista"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
     OPN["delonix-opnsense<br>GatewayProvider REMOTO contra a API REST de UMA appliance OPNsense<br>(ADR-0051) — fora do delonix-sdn por trazer cliente HTTP"]
     MODEL["delonix-model<br>modelo partilhado PURO (foundation, ADR-0040) —<br>o Error e o dicionario DX-CDNN, Status, ContainerFw,<br>typestate, o modelo do segredo e os nomes gerados"]
     STACK["delonix-stack<br>contexto Stack (ADR-0040): tabela de Kinds,<br>reconciliador de 3 vias, Condition, revisões"]
     COMPUTE["delonix-compute<br>contexto Compute (ADR-0040): a especificacao<br>de execucao unica (RunOpts) que as entradas traduzem"]
+    NETCTX["delonix-networking<br>contexto Networking (ADR-0059 D7): as portas de rede por papel<br>(GatewayProvider, NetworkZoneProvider), os registos e as marcas de posse"]
     MGMTBIN["delonix-mgmt-bin<br>o executavel delonix-mgmt, que `delonix serve api` executa (P3m)"]
     MCPBIN["delonix-mcp-bin<br>o executavel delonix-mcp, que `delonix mcp` executa (P3l)"]
     NODEAPI["delonix-node-api<br>o contrato de no delonix.node.v1 SERVIDO: gRPC e HTTP/JSON<br>dos mesmos .proto num socket unix, so o proprio uid;<br>hoje ListProviders (ADR-0050 D5), o resto UNIMPLEMENTED"]
@@ -210,8 +213,21 @@ graph TB
     VM2 --> COMPUTE
 
     NET --> RULES
-    PVE --> VM2
-    OPN --> NET
+    PVE --> NETCTX
+    VM2 --> LVIRT
+    VM2 --> CHV
+    CHV --> COMPUTE
+    CHV --> MODEL
+    CHV --> NODECTX
+    LVIRT --> COMPUTE
+    LVIRT --> MODEL
+    LVIRT --> NODECTX
+    OPN --> NETCTX
+    NET --> NETCTX
+    NETCTX --> MODEL
+    NETCTX --> COMPUTE
+    NETCTX --> RULES
+    BIN --> NETCTX
     STATECRATE --> MODEL
     COMPUTE --> NODECTX
     COMPUTE --> MODEL
@@ -303,8 +319,8 @@ Notas de leitura do grafo (todas verificadas):
   dependências, o `delonix-volume` três e o `delonix-sdn` cinco — meter lá o cliente para
   falar com UM alvo remoto trocaria isso por uma árvore que todo o motor passa a
   arrastar. Por isso o backend Proxmox (ADR-0008) implementa o `VmBackend` e o
-  `GatewayProvider` do OPNsense (ADR-0051) implementa o trait de `delonix-sdn`, os dois a
-  partir de fora, e **registam-se** (`register_backend`/`register_gateway_provider`), com
+  `GatewayProvider` do OPNsense (ADR-0051) implementa a porta do contexto `delonix-networking`
+  (ADR-0059 F2a; até lá vivia no `delonix-sdn`), os dois a partir de fora, e **registam-se** (`register_backend`/`register_gateway_provider`), com
   o alvo conhecido só pelo `-bin`, não pelo motor.
 - **Nada depende de `delonix-proxmox`, `delonix-truenas` nem `delonix-opnsense` a não ser
   o `-bin` e, no caso do `delonix-proxmox`, o `delonix-node-api`** (que o lista entre os

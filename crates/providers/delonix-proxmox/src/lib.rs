@@ -42,7 +42,9 @@
 //!   make HTTP requests.
 
 pub mod cluster;
+mod dns;
 mod error;
+mod ipam;
 pub mod lxc;
 mod network_zone;
 mod sdn;
@@ -61,7 +63,9 @@ pub use sdn_routing::{
     VnetFirewallOptions,
 };
 
-pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_ID};
+pub use dns::ProxmoxDnsProvider;
+pub use ipam::ProxmoxIpamProvider;
+pub use network_zone::{ProxmoxSegmentProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -344,6 +348,11 @@ impl Ledger {
     /// No persistence — for callers that own no VM directory.
     pub fn none() -> Self {
         Self { path: None }
+    }
+
+    /// A file next to the ledger, for durable state that is not a task.
+    pub(crate) fn sibling(&self, name: &str) -> Option<PathBuf> {
+        self.path.as_ref()?.parent().map(|d| d.join(name))
     }
 
     pub fn records(&self) -> Vec<TaskRecord> {
@@ -1306,11 +1315,32 @@ impl Client {
         // Read errors used to be swallowed into an empty body, which then
         // failed to parse as "could not read the answer" — a truncated
         // connection reported as a malformed node. They are transport now.
-        let body = read_bounded(resp, path)?;
+        let body = self.redact(&read_bounded(resp, path)?);
         if !status.is_success() {
             return Err(classify_status(status, &self.base, path, &body));
         }
         Ok(body)
+    }
+
+    /// `text` without this client's credential: the token secret or the
+    /// password, and the ticket and CSRF token a password login holds. Every
+    /// answer passes here before it can reach an error message (ADR-0059 D5;
+    /// ADR-0049's rule that no rendered error carries the secret). The ticket
+    /// lock is only tried: a login in progress holds it, and a missing ticket
+    /// only means there is none to redact yet.
+    fn redact(&self, text: &str) -> String {
+        let mut secrets: Vec<String> = vec![match &self.auth {
+            Auth::ApiToken { secret, .. } => secret.clone(),
+            Auth::Password { password, .. } => password.clone(),
+        }];
+        if let Ok(guard) = self.ticket.try_read() {
+            if let Some(t) = guard.as_ref() {
+                secrets.push(t.ticket.clone());
+                secrets.push(t.csrf.clone());
+            }
+        }
+        let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        delonix_model::redact_known(text, &refs)
     }
 
     /// Sends an authenticated request, and **re-authenticates once on a 401**.
@@ -4299,7 +4329,8 @@ fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &s
         // same words whether no token or a wrong one was sent.
         500 if body.contains("invalid lock token provided") => Error::SdnLocked(format!(
             "{text} — the cluster's SDN configuration is locked by another holder \
-             (`DELETE /cluster/sdn/lock` with its token releases it)"
+             (`DELETE /cluster/sdn/lock` with its token releases it; when the holder is gone and its \
+             token with it, `DELETE /cluster/sdn/lock?force=1` and `POST /cluster/sdn/rollback`)"
         )),
         500 if body.contains("configuration has pending changes") => {
             Error::SdnPendingChanges(format!(
@@ -4412,6 +4443,37 @@ fn parse<T: for<'de> Deserialize<'de>>(body: &str, what: &str) -> Result<T> {
             truncate_chars(body, 160)
         ))
     })
+}
+
+/// [`parse`] for an answer that carries a third-party credential — the SDN
+/// DNS and IPAM controllers come back with their API key or token in clear
+/// (measured on PVE 9.2.2, `GET /cluster/sdn/dns`). The error names the route
+/// and the decoder's complaint and never quotes the body: the `redact` pass
+/// only knows this client's own credentials, not a controller's.
+pub(crate) fn parse_secret_bearing<T: for<'de> Deserialize<'de>>(
+    body: &str,
+    what: &str,
+) -> Result<T> {
+    serde_json::from_str(body).map_err(|e| {
+        Error::Decode(format!(
+            "proxmox: could not read the answer from {what}: {} at line {} column {} (body not \
+             shown: it carries a controller's credential)",
+            decode_category(&e),
+            e.line(),
+            e.column()
+        ))
+    })
+}
+
+/// The category of a decode failure, without its message: serde's message
+/// can quote a fragment of the input (an unexpected string value).
+fn decode_category(e: &serde_json::Error) -> &'static str {
+    match e.classify() {
+        serde_json::error::Category::Io => "an I/O error",
+        serde_json::error::Category::Syntax => "malformed JSON",
+        serde_json::error::Category::Data => "an unexpected shape",
+        serde_json::error::Category::Eof => "a truncated answer",
+    }
 }
 
 /// Truncates to at most `max` BYTES without splitting a character. Slicing a
@@ -6594,7 +6656,7 @@ pub fn registration(
 }
 
 /// Registers this Proxmox target's cluster-native SDN as a
-/// `delonix_sdn::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
+/// `delonix_networking::segment::SegmentProvider` (ADR-0049 addendum) — a
 /// SEPARATE registration from [`registration`]'s `VmBackend` one, with its
 /// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
 /// sharing one across two registries would tie an unrelated port's lifetime
@@ -6609,7 +6671,7 @@ pub fn registration(
 /// has no VM directory of its own (it is cluster-scoped, not VM-scoped —
 /// see `sdn.rs`'s own `SDN_VMID` sentinel), so the caller hands in the
 /// directory this provider's OWN registry uses instead.
-pub fn register_network_zone_provider(
+pub fn register_segment_provider(
     target: Target,
     opts: ClientOptions,
     ledger_dir: std::path::PathBuf,
@@ -6617,31 +6679,68 @@ pub fn register_network_zone_provider(
     validate_target_url(&target.base_url)?;
     validate_node_name(&target.node)?;
 
-    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_sdn::network_zone::register_network_zone_provider(
-        delonix_sdn::network_zone::NetworkZoneProviderRegistration {
+    // ONE client for the three roles: the IPAM and DNS providers' staged
+    // writes run inside the segment provider's transaction and carry the SDN
+    // lock token the client holds (ADR-0059 F5b, F5c).
+    type Slot = std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>>;
+    let shared: Slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let connect = move |slot: &Slot| -> delonix_networking::Result<std::sync::Arc<Client>> {
+        let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = slot.as_ref() {
+            return Ok(c.clone());
+        }
+        // A failed connect is NOT cached — same reasoning as
+        // `registration`: a node down on the first selection must not stay
+        // "down" for the rest of the process.
+        let c = std::sync::Arc::new(
+            Client::connect_with(&target, opts.clone())
+                .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+        );
+        *slot = Some(c.clone());
+        Ok(c)
+    };
+    let connect = std::sync::Arc::new(connect);
+    let (ipam_slot, ipam_connect, ipam_ledger) =
+        (shared.clone(), connect.clone(), ledger_dir.clone());
+    delonix_networking::ipam::register_ipam_provider(
+        delonix_networking::ipam::IpamProviderRegistration {
             id: NETWORK_ZONE_PROVIDER_ID,
             aliases: &["pve"],
             new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                let client = if let Some(c) = slot.as_ref() {
-                    c.clone()
-                } else {
-                    // A failed connect is NOT cached — same reasoning as
-                    // `registration`: a node down on the first selection
-                    // must not stay "down" for the rest of the process.
-                    let c = std::sync::Arc::new(
-                        Client::connect_with(&target, opts.clone())
-                            .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
-                    );
-                    *slot = Some(c.clone());
-                    c
-                };
-                Ok(Box::new(ProxmoxNetworkZoneProvider::new(
-                    client,
+                Ok(Box::new(ProxmoxIpamProvider::new(
+                    ipam_connect(&ipam_slot)?,
+                    Ledger::at(&ipam_ledger),
+                ))
+                    as Box<dyn delonix_networking::ipam::IpamProvider>)
+            }),
+        },
+    )
+    .map_err(delonix_model::Error::from)?;
+    let (dns_slot, dns_connect, dns_ledger) = (shared.clone(), connect.clone(), ledger_dir.clone());
+    delonix_networking::dns::register_dns_provider(
+        delonix_networking::dns::DnsProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
+            aliases: &["pve"],
+            new: Box::new(move || {
+                Ok(Box::new(ProxmoxDnsProvider::new(
+                    dns_connect(&dns_slot)?,
+                    Ledger::at(&dns_ledger),
+                ))
+                    as Box<dyn delonix_networking::dns::DnsProvider>)
+            }),
+        },
+    )
+    .map_err(delonix_model::Error::from)?;
+    delonix_networking::segment::register_segment_provider(
+        delonix_networking::segment::SegmentProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
+            aliases: &["pve"],
+            new: Box::new(move || {
+                Ok(Box::new(ProxmoxSegmentProvider::new(
+                    connect(&shared)?,
                     Ledger::at(&ledger_dir),
                 ))
-                    as Box<dyn delonix_sdn::network_zone::NetworkZoneProvider>)
+                    as Box<dyn delonix_networking::segment::SegmentProvider>)
             }),
         },
     )
@@ -6733,10 +6832,20 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             C::NetLbL4 | C::NetLbHealthCheck => S::UnsupportedByProvider {
                 reason: "PVE has no load balancer",
             },
-            C::NetDnsRecords | C::NetDnsAuthoritative => S::RequiresExternalComponent {
-                component: "a PowerDNS server — the only DNS plugin of PVE 9.2.2",
+            // ADR-0059 F5c (ADR-0064): `dns:` on a NetworkZone names a
+            // controller the cluster's administrator registered; the node
+            // writes a guest's A and PTR, proven against a real PowerDNS.
+            C::NetDnsRecords => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_dns_provider_registers_a_guest_in_the_zones_dns_server",
             },
-            C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp => S::NotImplemented,
+            C::NetDnsAuthoritative => S::UnsupportedByProvider {
+                reason: "the SDN writes records into a PowerDNS server it does not run; it serves no zone itself",
+            },
+            // ADR-0059 F5b: `kind: NetworkZone` subnets, DHCP ranges and
+            // reservations, proven by a guest that gets the reserved address.
+            C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp",
+            },
             C::NetSegmentRemote => S::Partial {
                 detail: "`kind: NetworkZone` creates a simple zone and its VNets in one SDN transaction, live in the e2e section «providers remotos» (S6); the other five zone types are not created",
             },

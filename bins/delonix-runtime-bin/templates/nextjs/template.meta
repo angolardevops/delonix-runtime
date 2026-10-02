@@ -1,3 +1,5 @@
 port=3000
 health=/api/v1/health/live
-version=15.1.0
+version=16
+versions=15,16
+lock=pnpm-lock.yaml

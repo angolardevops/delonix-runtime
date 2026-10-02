@@ -37,8 +37,26 @@ fn io_err(context: &'static str) -> impl Fn(std::io::Error) -> Error {
 ///
 /// We already run as root in a mapped userns (the parent used `newuidmap`), so a
 /// normal `remove_dir_all` is enough: inside this userns we own the subuids.
+///
+/// **A tree that someone is still writing into is retried, not reported.**
+/// `rm -f` of a container whose `start` is in flight purges its directory while
+/// the start's init creates the overlay's mount points under `merged/` and its
+/// log shim opens `log`: `remove_dir_all` meets a directory that was empty when
+/// listed and is not by the `rmdir`, and fails with `Directory not empty`. This
+/// child printed that on the caller's terminal — `rm -f` returned 0 over a line
+/// saying it had failed (measured 2026-09-29, 2 of 30 iterations of `rm -f`
+/// 0-40 ms after `start`), for a directory that was gone a moment later: the
+/// start that fails without a record removes what it left (#607). The writer's
+/// burst is short, so a few passes clear it; a tree that still resists is a real
+/// failure and is still reported — and the caller, which judges by whether the
+/// path is still there, warns with the remedy.
 pub fn rmtree(path: &Path) -> Result<()> {
-    std::fs::remove_dir_all(path).or_else(|e| {
+    retry_while_written(
+        || std::fs::remove_dir_all(path),
+        RMTREE_PASSES,
+        std::time::Duration::from_millis(50),
+    )
+    .or_else(|e| {
         // Already not existing is success — the goal is "not being there".
         if e.kind() == std::io::ErrorKind::NotFound {
             Ok(())
@@ -46,6 +64,29 @@ pub fn rmtree(path: &Path) -> Result<()> {
             Err(io_err("__rmtree")(e))
         }
     })
+}
+
+/// How many removal passes a tree gets while something keeps writing into it.
+const RMTREE_PASSES: u32 = 5;
+
+/// Runs `remove` up to `passes` times, `pause` apart, for as long as it fails
+/// with `Directory not empty` — a concurrent writer, not a permanent condition.
+/// Any other error, and the last `Directory not empty`, are returned as they are.
+fn retry_while_written(
+    mut remove: impl FnMut() -> std::io::Result<()>,
+    passes: u32,
+    pause: std::time::Duration,
+) -> std::io::Result<()> {
+    let mut left = passes.max(1);
+    loop {
+        match remove() {
+            Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty && left > 1 => {
+                left -= 1;
+                std::thread::sleep(pause);
+            }
+            other => return other,
+        }
+    }
 }
 
 /// `__duusage <path> <outfile>` — measures a tree from INSIDE the mapped userns
@@ -185,6 +226,65 @@ pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     b.follow_symlinks(false);
     b.append_dir_all(".", rootfs).map_err(io_err("build tar"))?;
     b.finish().map_err(io_err("build tar"))?;
+    Ok(())
+}
+
+/// Copies the tree `src` into `dst` keeping every owner, mode and link — the
+/// build's stage clone and layer cache.
+///
+/// Inside the mapped userns on purpose. A plain `cp -a` as the invoking user
+/// cannot give a file to a subuid, so a tree a `RUN chown app …` had written
+/// came out of the cache owned by root: the same Delonixfile produced a
+/// different image on a cached rebuild (measured — `/home/app` was `app` on the
+/// first build and `root` on the second). In here `cp` is root over the mapped
+/// range and `-a` keeps what it finds.
+pub fn cptree(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(io_err("copy tree"))?;
+    let status = std::process::Command::new("cp")
+        .arg("-a")
+        .arg("--reflink=auto")
+        .arg("--")
+        .arg(src.join("."))
+        .arg(dst)
+        .status()
+        .map_err(io_err("copy tree"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "copying {} failed ({status})",
+            src.display()
+        )))
+    }
+}
+
+/// Gives the entries of a flat rootfs the owners its image records (ADR-0062).
+///
+/// `index` is an owners index as `delonix_compute::owners::encode` writes it.
+/// A build's work rootfs is exported with every entry owned by whoever runs the
+/// engine; without this a `RUN` executing as the image's user could not write
+/// its own home. An entry whose path crosses a symlink is skipped: the index
+/// names real paths of the image, and following a link here could reach outside
+/// `rootfs`. `lchown` never follows the last component. Best-effort per entry.
+pub fn chownidx(rootfs: &Path, index: &Path) -> Result<()> {
+    let bytes = std::fs::read(index).map_err(io_err("apply owners"))?;
+    for owner in delonix_compute::owners::decode(&bytes) {
+        let mut path = rootfs.to_path_buf();
+        let mut parents = owner.path.components().peekable();
+        let mut crosses_link = false;
+        while let Some(c) = parents.next() {
+            path.push(c);
+            let is_last = parents.peek().is_none();
+            let link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+            if link && !is_last {
+                crosses_link = true;
+                break;
+            }
+        }
+        if !crosses_link && std::fs::symlink_metadata(&path).is_ok() {
+            let _ = std::os::unix::fs::lchown(&path, Some(owner.uid), Some(owner.gid));
+        }
+    }
     Ok(())
 }
 
@@ -573,6 +673,78 @@ pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// The tree copy keeps modes and links, and copies INTO an existing or a
+    /// missing destination alike.
+    #[test]
+    fn cptree_keeps_modes_and_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, dst) = (tmp.path().join("src"), tmp.path().join("out/dst"));
+        std::fs::create_dir_all(src.join("bin")).unwrap();
+        std::fs::write(src.join("bin/su"), b"x").unwrap();
+        std::fs::set_permissions(src.join("bin/su"), std::fs::Permissions::from_mode(0o4755))
+            .unwrap();
+        std::os::unix::fs::symlink("bin/su", src.join("link")).unwrap();
+        cptree(&src, &dst).unwrap();
+        let mode = std::fs::metadata(dst.join("bin/su"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7777, 0o4755);
+        assert_eq!(
+            std::fs::read_link(dst.join("link")).unwrap(),
+            Path::new("bin/su")
+        );
+    }
+
+    /// The owners index is applied to real paths of the rootfs only: an entry
+    /// that would be reached THROUGH a symlink is skipped, so a link in the
+    /// image cannot send the chown outside the tree.
+    #[test]
+    fn chownidx_never_goes_through_a_symlink() {
+        use delonix_compute::owners::{encode, Owner};
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = tmp.path().join("rootfs");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(rootfs.join("home/app")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("victim"), b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, rootfs.join("escape")).unwrap();
+        let me = std::fs::metadata(&rootfs).unwrap();
+        let owner = |p: &str| Owner {
+            path: p.into(),
+            uid: me.uid(),
+            gid: me.gid(),
+        };
+        let index = tmp.path().join("idx");
+        std::fs::write(
+            &index,
+            encode(&[owner("home/app"), owner("escape/victim"), owner("gone")]),
+        )
+        .unwrap();
+        let ctime = |p: &Path| {
+            let m = std::fs::metadata(p).unwrap();
+            (m.ctime(), m.ctime_nsec())
+        };
+        let (victim_before, app_before) = (
+            ctime(&outside.join("victim")),
+            ctime(&rootfs.join("home/app")),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        chownidx(&rootfs, &index).unwrap();
+        assert_eq!(
+            ctime(&outside.join("victim")),
+            victim_before,
+            "followed a link"
+        );
+        assert_ne!(
+            ctime(&rootfs.join("home/app")),
+            app_before,
+            "the real entry"
+        );
+    }
+
     #[test]
     fn rmtree_apaga_a_arvore() {
         let tmp = tempfile::tempdir().unwrap();
@@ -828,5 +1000,65 @@ mod migrate_tests {
         let a = write(t.path(), "a/f", b"x", 0o644);
         assert!(!same_entry(&a, &t.path().join("nao/existe")));
         assert!(!same_entry(&t.path().join("nao/existe"), &a));
+    }
+}
+
+#[cfg(test)]
+mod rmtree_retry_tests {
+    use super::retry_while_written;
+    use std::io::{Error, ErrorKind};
+    use std::time::Duration;
+
+    /// A directory someone was still writing into is removed on a later pass,
+    /// and nothing is reported — the case `rm -f` during a `start` hit.
+    #[test]
+    fn a_tree_still_being_written_is_retried_until_it_goes() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(Error::from(ErrorKind::DirectoryNotEmpty))
+                } else {
+                    Ok(())
+                }
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(calls, 3);
+    }
+
+    /// A tree that keeps resisting is a real failure, reported after the last pass.
+    #[test]
+    fn a_tree_that_never_empties_is_still_reported() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                Err(Error::from(ErrorKind::DirectoryNotEmpty))
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert_eq!(r.unwrap_err().kind(), ErrorKind::DirectoryNotEmpty);
+        assert_eq!(calls, 5);
+    }
+
+    /// Any other error is not a writer racing us: reported at once, no retry.
+    #[test]
+    fn another_error_is_reported_at_once() {
+        let mut calls = 0;
+        let r = retry_while_written(
+            || {
+                calls += 1;
+                Err(Error::from(ErrorKind::PermissionDenied))
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert_eq!(r.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        assert_eq!(calls, 1);
     }
 }

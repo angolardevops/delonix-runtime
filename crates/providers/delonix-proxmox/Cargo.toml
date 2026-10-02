@@ -8,12 +8,9 @@ repository.workspace = true
 [dependencies]
 delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
-# For `NetworkZoneProvider` (ADR-0049 addendum): the trait+registry lives in
-# `delonix-sdn`, the same way `VmBackend` lived in `delonix-vm` before P4b.2 — a
-# second named, phase-tagged exception in `scripts/arch_fitness.py`
-# (`("dep", "delonix-proxmox", "delonix-sdn")`), mirroring
-# `("dep", "delonix-opnsense", "delonix-sdn")` (ADR-0051).
-delonix-sdn = { workspace = true }
+# For `NetworkZoneProvider` (ADR-0049 addendum): the port and its registry live
+# in the networking context since ADR-0059 F2a.
+delonix-networking = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -38,3 +35,6 @@ tempfile = { workspace = true }
 # The live tests show the client's own `tracing` (a task's warnings) when
 # `DELONIX_LOG` is set.
 tracing-subscriber = { workspace = true }
+# The golden-table test evaluates the node rules against the policy IR's own
+# reference verdicts (ADR-0059 F3c).
+delonix-net-rules = { workspace = true }

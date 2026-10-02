@@ -1,0 +1,19 @@
+[package]
+name = "delonix-provider-libvirt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+delonix-compute = { workspace = true }
+delonix-model = { workspace = true }
+delonix-node = { workspace = true }
+tracing = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 25 crates.
+[README.md](README.md) para a arquitectura dos 28 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -237,7 +237,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 
 ```
 crates/foundation/   delonix-model, delonix-net-rules
-crates/contexts/     delonix-stack, delonix-compute, delonix-node, delonix-security-runtime
+crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
@@ -2979,6 +2979,382 @@ os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
 que os utilizadores usam), mas nunca num host de produção partilhado sem ser
 esse o pedido explícito.
 
+
+## Os templates de edge nascem com HTTPS e dimensionados para carga (2026-10-01)
+
+`nginx`, `httpd` e `haproxy` tinham o TLS só em comentário, 128M/0,5 CPU, e limites de
+bancada (`worker_connections 1024`, `maxconn 2048`, MPM por omissão). Agora:
+
+- **HTTPS ligado à nascença**: `tls=8443` no `template.meta`, token `__TLS_PORT__`. A porta
+  HTTP fica para o health, o desafio ACME e um 308 para HTTPS. HTTP/2, TLS 1.2/1.3, suites
+  só com forward secrecy. **HSTS fica DESLIGADO de propósito**: fixa o NOME do host em todas
+  as portas, e em `localhost` forçaria HTTPS em todos os outros serviços locais da máquina.
+- **O certificado é gerado pelo `init`**, em `./tls` (`ensure_tls`): `mkcert` se existir no
+  host, senão auto-assinado pelo próprio binário (`rcgen`, já na árvore). Um par que já lá
+  esteja é MANTIDO. A chave fica 0600, é montada só de leitura, e `tls/` está no
+  `.dockerignore` e no `.gitignore`. `scripts/tls.sh` renova, instala um certificado que já
+  se tenha, ou corre o Let's Encrypt: por HTTP-01 (webroot em `./acme`; só nginx e httpd — o
+  HAProxy não serve ficheiros) ou por DNS-01 (`letsencrypt-dns`, os três).
+- **`nproc` dentro do container devolve os núcleos do HOST** (medido: 32). Por isso
+  `worker_processes`/`nbthread` são 2, iguais ao `cpus: "2.0"` do manifesto, e não `auto`.
+  `nofile` 65 535 pelo `ulimit:` do manifesto (medido dentro do container).
+- **A verificação de config no build corre sem certificado**: nenhuma das três imagens traz
+  `openssl`. nginx e haproxy validam uma cópia sem as linhas do certificado; o httpd só
+  confere que os ficheiros existem e não estão vazios, e usa dois marcadores apagados no
+  mesmo `RUN`.
+- **HAProxy**: o manifesto diz `user: "0"` e o `haproxy.cfg` diz `user haproxy` — o master
+  lê a chave como root, o worker trata o tráfego como `haproxy`. O `SIGUSR2` recarrega
+  config e certificado com o mesmo PID (medido).
+- **httpd**: a cache de sessões TLS é um ficheiro mapeado em memória; fica num tmpfs
+  (`/run/httpd`) para nunca tocar no disco.
+
+**O gerador** (`cmd/scaffold.rs`): `TEMPLATE_KV` (todas as chaves do `template.meta`:
+`tls`, `open`, `login`, `password`, `wait`) ao lado do `TEMPLATE_META`. Num terminal, o
+`init` pergunta o que só quem gera pode decidir — outra porta quando a do template está
+ocupada (oferece a livre seguinte), nomes extra para o certificado — e fora de um terminal
+usa as omissões e diz o que encontrou. O `--up` recusa uma porta ocupada ANTES do build, com
+o nome do processo; o build desenha os seus próprios passos (corria dobrado sob um único
+spinner); e o fim imprime o endereço a abrir, o certificado e, quando o template as declara
+(`odoo`: `admin`/`admin`), as credenciais de fábrica com o aviso para as mudar. O `wait=` do
+`odoo` (300 s) passou a ser lido — estava no ficheiro e nada o consumia.
+
+**Medido** (2026-10-01, rootless, pela porta publicada): os três com 10 000 pedidos HTTPS a
+300 em simultâneo, 10 000 respostas 200. É uma prova de que aguentam, não um benchmark: a
+ferramenta foi o `curl --parallel`, o host não tem `ab`/`wrk`.
+**Let's Encrypt, medido a 2026-10-01**: o `scripts/tls.sh letsencrypt` foi corrido de ponta a
+ponta contra o Pebble (o servidor ACME de testes do Let's Encrypt), com o nginx do host a
+encaminhar só `/.well-known/acme-challenge/` para o container: o desafio foi servido pelo
+container (200 no log dele, agente `LetsEncrypt-Pebble-VA`), o certificado emitido, instalado
+em `./tls` e carregado com o MESMO pid. Contra o staging REAL, com `le-test.ngolacloud.com`
+(o domínio tem wildcard para o IP público deste host), a conta registou-se e a CA respondeu
+`Timeout during connect`: a porta 80 pública não chega a esta máquina (router ou operador).
+O script ganhou `LETSENCRYPT_STAGING=1`, `ACME_SERVER=<url>` e o email `-`. O template
+`httpd` usa o mesmo script e só tem o caminho ACME provado pelo smoke.
+**O smoke mentia com o servidor em baixo, e a cache do nginx guardava um 404 do ACME
+(2026-10-02)**. Com a stack destruída, o `scripts/smoke.sh` imprimia doze falhas e DOIS `ok`
+(«TLS 1.1 is refused», «no version in the Server header»): um check escrito como «isto NÃO
+acontece» passa quando nada responde. Agora o script pára à entrada com uma linha («nothing
+answers at …») e os checks negativos exigem primeiro uma resposta. E no template `nginx` o
+`open_file_cache_errors on` lembrava o «não encontrado»: um caminho do desafio ACME pedido uma
+vez antes de o ficheiro existir respondia 404 com o ficheiro já lá (medido três vezes
+seguidas); `open_file_cache off` nesse `location`, e o smoke tem um check que o reproduz.
+
+**Um segundo `--up` sobre o próprio projecto (2026-10-02)**. Dois defeitos, o primeiro meu:
+a verificação de portas do `--up` recusava um projecto que JÁ estava de pé, a nomear o
+`slirp4netns` dele como «outro processo» — agora uma porta do container do próprio projecto
+(`port_owner`) não é conflito, e a de outro container delonix é dita pelo nome. E, passada
+essa, um projecto alterado e reconstruído ficava «is UP» com o container antigo: o manifesto
+nomeia a TAG, a tag não muda, o plano não tem nada a fazer. O `--up` compara o que a imagem É
+antes e depois do build e recria o container quando mudou. **Compara layers + config, não o
+id**: o id é o digest de um config que leva a hora do build, muda sempre, e recriaria o
+container a cada `--up`. Um container da tag que não esteja a correr também é recriado (o
+`apply` deixa um registo `Dead` como está). A remoção repete até dois minutos, porque com o
+disco ocupado um `rm -f` devolve DX-8101 e mantém o registo.
+**`--force` NÃO regenera um projecto já gerado**: uma pasta com conteúdo é ADOPÇÃO (ADR-0061
+D5) e só se escrevem `Delonixfile`, manifesto e `.dockerignore`. Para receber um template
+actualizado gera-se noutra pasta.
+
+**As flags existem desde 2026-10-02**: `--port`, `--tls-port` e `--hostname` (repetível), num
+só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template — `delonix init`,
+`stack init` e `container init` — para não crescerem flags diferentes em cada um. Uma flag é
+uma resposta: substitui a pergunta do terminal e não é adivinhada. `--tls-port`/`--hostname`
+num template sem TLS, as duas portas iguais, um nome que não é host, ou qualquer das três sem
+template são RECUSADOS antes de escrever seja o que for.
+**Let's Encrypt por DNS-01 (2026-10-02)**: `scripts/tls.sh letsencrypt-dns <domínio> <email>`
+nos três templates. Valida por registo TXT, por isso nada tem de chegar ao host (NAT, CGNAT),
+emite wildcards, e é o primeiro caminho Let's Encrypt do `haproxy`. Sem hook, o script mostra
+o registo, grava-o em `letsencrypt/dns-challenge.txt` e espera até TODOS os servidores de
+nomes da zona o servirem (`DNS_WAIT`, 1800 s; pergunta aos autoritativos, sem recursão: um
+resolvedor público guardaria a resposta negativa). Com `DNS_AUTH_HOOK`/`DNS_CLEANUP_HOOK` um
+comando cria e apaga o registo, e a renovação é o `certbot renew` que o script imprime. Sem
+hook, renovar é correr o comando outra vez. O `haproxy` recusa `letsencrypt` (HTTP-01) pelo
+nome; antes emitia um certificado local para os nomes «letsencrypt, domínio, email».
+**Medido**: contra o staging REAL do Let's Encrypt, com `le-test.ngolacloud.com` (DNS no
+GoDaddy) e a máquina numa rede cuja porta 80 pública não chega cá (medido de três pontos de
+fora): registo criado à mão, servido pelos dois servidores de nomes ao fim de 2390 s,
+certificado emitido (`(STAGING) Baloney Bulgur YE2`), instalado em `./tls` e servido pelo
+nginx sem reiniciar o container. Contra o Pebble: DNS-01 com hooks emitiu `*.shop.test`, e o
+HTTP-01 depois da refactorização emitiu `www.shop.test`.
+**Depois do staging, pedir o de produção não fazia nada** (medido ao pedir o de produção para
+o mesmo nome): o certbot respondia «not yet due for renewal», e o script dizia «reloaded with
+the new certificate» com o de staging ainda lá. Staging primeiro é o caminho que o README
+recomenda, e o HTTP-01 tinha o mesmo defeito. O script passa a nomear o directório ACME com
+que fala (`acme_server`) e força a renovação quando o certificado que já tem para o nome veio
+de outro (`server =` no `letsencrypt/renewal/<nome>.conf`). Contra o Pebble, nos dois modos:
+mesma CA mantém o certificado, outra CA substitui-o. E a linha `certbot renew` que o script
+imprime, com hooks e `--force-renewal`, renovou e instalou pelo deploy hook.
+**Produção, medido a 2026-10-02**: com o certificado de staging já instalado, o mesmo comando
+sem `LETSENCRYPT_STAGING` forçou a renovação, pediu um registo TXT novo (servido pelos dois
+servidores de nomes ao fim de 1470 s) e instalou um certificado da CA de produção (`YE1`,
+válido até 2026-12-31), servido pelo nginx sem reiniciar o container e verificado pelo `curl`
+contra a confiança do sistema (`ssl_verify=0`).
+**HTTP-01 contra o Let's Encrypt, medido a 2026-10-02**, com a porta 80 pública a não chegar
+cá, por um túnel público até à porta HTTP do container. Staging e depois produção para o
+domínio do túnel: os dois emitidos, o de produção (`YE2`) servido pelo nginx e verificado pelo
+`curl` contra a confiança do sistema. Só o `localhost.run` serviu, e os outros dois falharam
+por razões que não são do script: o **ngrok** gratuito redirecciona
+`/.well-known/acme-challenge/` em HTTP para o `acme.ngrok.com` (o ACME dele), e a CA recebeu
+404; o **pinggy** gratuito responde a qualquer agente `Mozilla/…` (o validador do Let's
+Encrypt é um) com uma página de aviso de 15 KB, e a CA recusou-a («reader size limit
+exceeded»). **O `nginx -s reload` volta antes de os workers novos assumirem**: uma ligação
+logo a seguir ao «reloaded» ainda recebeu o certificado antigo, e segundos depois o novo.
+Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
+(o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
+dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
+
+**Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
+DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte
+passou, o `slirp4netns` do container ficou vivo a segurar as portas publicadas — o `apply`
+seguinte respondia «port 8080 is already in use by slirp4netns».
+
+## Os templates trazem um túnel para a internet sem IP público (`delonix-tunnel.yaml`, 2026-10-02)
+
+Os 11 templates do `init` geram `delonix-tunnel.yaml`: um `kind: Gateway` FORA do manifesto
+principal, por isso o `stack apply` nunca o abre. `delonix stack apply -f delonix-tunnel.yaml`
+abre-o, `delonix get gateways` dá o URL, `delonix delete gateways <nome>-tunnel` fecha-o (o
+`stack destroy` não lhe toca: um túnel não tem etiqueta de posse). O README de cada template
+tem a secção «On the internet without a public IP», e o fim do `--up` aponta para ela.
+
+- **Cloudflare é o provider dos templates, e a escolha foi medida.** Cobre os dois modos com o
+  mesmo agente: túnel rápido sem conta (`*.trycloudflare.com`, aleatório) e túnel com nome no
+  domínio do utilizador (DNS no Cloudflare, token num `kind: Secret` por `tokenSecretRef`).
+  Não mostra página de aviso a browsers e envia `X-Forwarded-Proto` com o esquema real. O
+  ngrok gratuito também não mostra aviso, dá um nome FIXO por conta (`*.ngrok-free.dev`, o
+  mesmo nas três aberturas medidas) e envia `X-Forwarded-Proto`; o pinggy gratuito mostra uma
+  página de aviso de 15 KB a qualquer agente `Mozilla/…`; o `localhost.run` não envia
+  `X-Forwarded-Proto` e sai quando o stdin chega ao fim (só aguenta com um stdin que nunca
+  acaba, por isso não está no motor).
+- **Nos templates de edge o túnel aponta para a porta TLS** (`insecureSkipTlsVerify: true`): a
+  porta HTTP redirecciona para `https://<host>:<porta TLS>`, que o endereço público não tem. O
+  certificado local (mkcert ou auto-assinado) não se pode verificar no salto agente→localhost;
+  o visitante recebe o do provider. O servidor TLS dos três redirecciona para
+  `https://<host>/` quando o túnel diz `X-Forwarded-Proto: http` (um cliente directo que mande
+  o cabeçalho só se redirecciona a si próprio).
+- **O Django só responde aos nomes do `ALLOWED_HOSTS`**: tal como gerado, o túnel dá 400. O
+  README manda acrescentar `.trycloudflare.com` (ou o domínio) e `TRUSTED_PROXY=*`, e **recriar
+  o container** (`container rm -f` e `stack apply`): uma mudança de `env` não se aplica a um
+  container que já existe, e o `--replace Container/<nome>` que a condição do plano sugere não
+  faz nada, porque o plano não vê a mudança (registado para corrigir à parte).
+- **Medido ao vivo** (raiz isolada, túnel rápido): nginx, httpd e haproxy servem HTTPS pelo
+  endereço público e mandam o visitante de HTTP para `https://<host>/`, com o redirect local
+  para a porta TLS intacto e os três `smoke.sh` a passar; a API Go e a do Django (depois dos
+  dois ajustes) criaram e listaram uma nota pelo túnel, com `Origin` de browser.
+- **Não validado**: o túnel com nome num domínio próprio (precisa de um domínio com DNS no
+  Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
+  ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
+
+## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
+
+Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).
+São três defeitos, e só o primeiro era o que se procurava:
+
+- **O `USER` da imagem não é lido por nada.** `container run haproxy:3.4-alpine id` responde
+  `uid=0`; o `resolve_run` só olha para o `--user`. Desde a v1.0.0, sem erro nem aviso.
+- **Com `--user`, o utilizador da aplicação fica DONO do rootfs inteiro.** O init faz
+  `chown_tree_once("/", uid, gid)`. Medido: 940 de 986 entradas do `haproxy`, que escreveu em
+  `/etc/passwd` e substituiu `/usr/local/sbin/haproxy`. Um não-root dono dos ficheiros de
+  sistema não é o confinamento para que se escolhe um não-root.
+- **A mesma varredura atravessa os mounts, e um bind mount é o HOST.** `-u haproxy -v
+  <pasta>:/app` mudou o dono da pasta e dos ficheiros no host de `1000:1000` para o subuid
+  `100098`, e o dono original deixou de conseguir escrever no seu próprio ficheiro. Um volume
+  nomeado é re-apropriado da mesma forma — é a única razão de o utilizador lhe escrever hoje.
+- **O custo cresce com a imagem**: cada `lchown` de um ficheiro de uma layer partilhada copia-o
+  para a camada de escrita (13 MB para uma imagem de 15 MB; no `odoo:20.0`, ~2 GB, a varredura
+  ainda corria aos 16 min com o disco saturado).
+- **Porque existe**: as layers guardam tudo com o dono de quem invoca, por isso a posse que a
+  imagem gravou perde-se (`/var/lib/haproxy` é do `haproxy` na imagem e `root:root` num
+  container sem `-u`). A varredura era o remendo.
+
+**Decidido no ADR-0062 (Proposto), em três passos**: P0 — o `run` DIZ quando o `USER` não é
+aplicado; P1 — tirar a varredura e devolver só o que a imagem dá; P2 — a omissão passa a ser o
+`USER` da imagem, na próxima major. **Não mudar a omissão antes do P1**: com o mecanismo
+antigo, todas as imagens com `USER` ganhavam os três defeitos sem os pedirem.
+
+**P0, P1 e P2 estão feitos** (o ADR passou a Aceite). P2: sem `--user`, o processo corre como o
+`USER` da imagem; `--user 0` fica root. É quebra de contrato do `container run`, logo a release
+que o levar é uma major. Num host rootless sem subuid só cabe um uid: fica a 0 e o `run` di-lo
+(`RunHost::can_map_id_range`).
+
+**O `build` segue a mesma regra** (medido e corrigido a seguir). Os containers de trabalho não
+passam pelo `resolve_run`, e tinham três defeitos: um `RUN` depois de `USER app` corria como
+root; um `RUN` sobre uma base com `USER` corria como root; e **um rebuild com cache perdia os
+donos** (`/home/app` voltava `root`). Agora `USER` é um passo posicional (`Step::User`): cada
+`RUN` corre como o utilizador em vigor, resolvido contra o `/etc/passwd` do estágio NESSE passo
+(um nome que não existe é erro ali). A árvore flat recebe o índice de donos da base
+(`__chownidx`), e o clone de estágio e a cache copiam dentro do userns mapeado (`__cptree`) —
+um `cp -a` de fora não consegue manter um dono de subuid. O `WORKDIR` continua a ser criado
+por root, como no Docker. Gate: dois checks «build:» na secção do `USER` do `scripts/e2e.sh`.
+
+- **O índice de donos** (`delonix_compute::owners`, `delonix-oci::owners`): ao extrair uma layer,
+  as entradas que o tar dá a um não-root vão para `layers/<hex>.owners` (AO LADO da pasta, nunca
+  dentro — o que está dentro vira ficheiro de todos os containers da imagem), e o container
+  recebe o índice fundido em `overlay-owners`, ao lado do `overlay-lowers`. Por caminho, decide
+  a layer mais alta que o contém: uma layer superior que volta a trazer o caminho como root
+  retira-o. O ciclo de extracção é o do próprio crate `tar` (0.4.46), repetido porque
+  `Archive::unpack` não dá acesso aos cabeçalhos.
+- **O init aplica-o uma vez** (`overlay-owners.applied`), depois do `pivot_root` (os caminhos
+  ficam confinados ao rootfs), só quando o processo corre como não-root, e **nunca noutro
+  filesystem**: uma entrada que resolve para dentro de um mount é saltada.
+- **Volumes**: um volume nomeado VAZIO fica do dono que a imagem dá ao ponto de montagem, ou do
+  utilizador do container quando a imagem não nomeia ninguém. Um volume com dados e um bind
+  mount nunca são tocados. Um volume nomeado reconhece-se pela forma no disco
+  (`<nome>/_data` com `meta.json` ao lado), não pelo nome.
+- **Preservar os donos NO DISCO foi posto de lado pelo spike**: obrigava todos os leitores do
+  armazém (o export flat do `build`, a migração flat→overlay, o scanner, o `system df`, as
+  remoções) a lidar com ficheiros que não são de quem corre o motor. O custo do índice fica
+  escrito no ADR: copia para a camada de escrita o que a imagem dá a não-root (duas entradas no
+  `haproxy`; uma árvore inteira numa imagem com `COPY --chown`).
+- **O `container commit` gravava os uids do HOST na layer** — encontrado pelo passo 6 da
+  validação, não por leitura: todas as entradas `1000:1000` e a pasta do uid 1000 do container
+  como `100999`. Com o índice, essa imagem daria o rootfs inteiro ao uid 1000. O empacotador
+  passa cada dono pelo mapa rootless (`container_id_of`: quem invoca → 0, subid → deslocamento
+  + 1). O `build` não era afectado, porque empacota dentro do userns mapeado. O commit também
+  largava o `USER` da imagem base.
+- **Medido depois** (`haproxy:3.4-alpine`, `-u haproxy`): `/etc/passwd` e o binário recusados;
+  2 de 987 entradas do utilizador (eram 940); o bind do host mantém `1000:1000` e o dono
+  continua a escrever; camada de escrita 56 K (eram 13 MB). O gate da bateria, corrido contra
+  o motor de antes do P1, falha 4 dos 6 checks de posse.
+- **`odoo:20.0`, a imagem onde o custo foi medido**: primeiro arranque com `-u odoo` em 1,7 s
+  (antes, ainda a varrer aos 16 min); 4 de 122 363 entradas do `odoo`; camada de escrita 480 K;
+  o volume do filestore gravável. O template `odoo` pode passar a declarar `user: odoo` DEPOIS
+  de o P1 estar fundido — antes disso dispararia a varredura antiga.
+- **Validado depois, numa VM** (Ubuntu 26.04, k8s 1.36.4): motor como root real (posse `99:99`
+  na pasta da imagem, `/etc/passwd` recusado, bind do host intacto); CRI num nó kubeadm (pod sem
+  `securityContext` → uid 99, `runAsUser: 0` → 0, `runAsUser: 1234` → 1234); rootless sem
+  subuid (uid 0 com aviso).
+- **A extracção passou a guardar setuid/setgid/sticky** (`set_preserve_permissions`): o `/tmp`
+  de TODOS os containers era `777` em vez de `1777`, e um `su` setuid perdia o bit. Uma layer
+  extraída por um motor antigo é corrigida a partir dos cabeçalhos do blob na primeira vez que
+  uma imagem a usa (marcador `layers/<hex>.modes`).
+- **Um alvo de mount atrás de um symlink da imagem era RECUSADO** (`safe_bind_target`), e isso
+  partia o Kubernetes: Alpine e Debian têm `/var/run -> /run`, e o kubelet monta o token em
+  `/var/run/secrets`, logo todo o pod dessas imagens falhava com `failed to prepare the rootfs:
+  EINVAL`. Só um kubelet real o mostrou (as validações anteriores usaram busybox e CoreDNS, que
+  não têm o symlink). Agora resolve-se dentro do rootfs, componente a componente: um link
+  absoluto recomeça no rootfs e o `..` pára lá.
+- **O template `odoo` corre como `odoo`** (`user: odoo` nos dois manifestos, 2026-10-01, depois
+  de o P1 fundir). Medido ao vivo: uid 100, sem o aviso «Running as user 'root'», filestore
+  gravável num volume novo, `/etc/passwd` recusado; no perfil dev os binds `addons/` e
+  `config/` ficam `1000:1000` no host e o dono continua a escrever. Um volume de filestore
+  escrito como root por uma corrida anterior NÃO é migrado (o README di-lo).
+
+**Lição de método**: a primeira sonda (`stat` logo a seguir ao `run -d`) mostrou os binários
+ainda `root:root`, e quase escrevi que o custo era pequeno e a semântica certa — a varredura
+ainda estava a correr (o `run -d` devolve antes dela, de propósito). O que corrigiu foi contar
+os donos de TODOS os ficheiros um minuto depois, em vez de olhar para dois.
+
+## O template `odoo` não arrancava: o preflight de limites não via o cgroup2 numa rede própria (2026-09-30)
+
+Reportado como «`delonix init` falha a arrancar um projecto Odoo». Reproduzido com raiz e rede
+isoladas: `init -t odoo` gera bem, o `build` passa, e o `stack apply` pára no container com
+`-m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation` — numa sessão
+cujo `system setup` diz `limits: APPLY`. O Odoo é o único template com `network:`, e é isso que
+o separa dos outros dez.
+
+- **A causa é a 2.ª passagem do `--net <rede>`/`--pod`**: corre sob `ip netns exec`, que monta
+  um sysfs novo sobre `/sys` e deixa `/sys/fs/cgroup` com ZERO entradas (medido). O `spawn` já
+  sabia (`reveal_cgroup2_if_masked`, com o comentário «o que falta é visibilidade, não
+  permissão»); a sonda do preflight (`cgroup_limits_apply`, #307) e a irmã `leaf_controllers`
+  vieram depois e nunca destaparam. Com a válvula `DELONIX_ALLOW_UNENFORCED_LIMITS=1` o mesmo
+  container ficava com `memory.max`/`cpu.max` aplicados — logo a recusa era um falso negativo.
+  As duas sondas destapam agora antes de olhar (no-op onde o cgroup2 já se vê).
+- **Todos os checks de limites do `scripts/e2e.sh` usavam `--net none`**, por isso nenhum
+  passava pela 2.ª passagem. O gate novo corre `-m 64M --net <rede>` e lê o `memory.max` do
+  cgroup real; binário antigo rc=1 sem cgroup, corrigido rc=0 e `67108864`.
+- **A mensagem que o utilizador via escondia a causa**: `did not start inside the network
+  '211be9940c59' (exit Some(69))` — um hash de netns que não está em manifesto nenhum, um
+  `Option` em Debug, e o exit 69 do processo interior achatado em 1. O `netns_start_error`
+  nomeia a rede do utilizador e devolve a classe que a passagem interior decidiu.
+- **Odoo 20 passa a ser a omissão** (`template.meta` `version=20.0`; `odoo:20.0` existe no
+  Docker Hub). O Odoo 20 exige PostgreSQL ≥ 16 (`MIN_PG_VERSION` do `release.py`), que é o
+  `postgres:16` do manifesto. `without_demo = all` passou a `True`: desde o 19 a opção é
+  booleana e `all` só sobrevive como aviso «invalid boolean»; `True` quer dizer o mesmo no 18.
+- **`fastapi` é o nome do template que se chamava `python`** — sempre gerou um serviço FastAPI.
+  `python` continua a responder como alias silencioso (`TEMPLATE_ALIASES`, a regra dos Kinds
+  renomeados), e há teste a exigir que os dois produzem o mesmo projecto. A deteção do `init`
+  (`pyproject.toml`/`requirements.txt`) aponta para `fastapi`. Omissão `0.142` (a de antes,
+  `0.115`, tinha um ano). **O grupo de dev leva `httpx` E `httpx2`**, medido: o Starlette actual
+  deprecia `httpx` (aviso em cada `pytest`), e o Starlette de um `-v 0.116` não importa outra
+  coisa — só `httpx2` partia os testes de um projecto com `-v` antigo.
+- **O Odoo 20 escuta em `127.0.0.1` por omissão** (`http_interface`, `config.py` do 20.0; o 19
+  avisava «will change to 127.0.0.1 in 20.0»). Dentro de um container isso torna a porta
+  publicada inalcançável: o `--up` construiu, aplicou e desistiu do health — com o log a dizer
+  `HTTP service running on 127.0.0.1:8069`. Os dois `.conf` levam `http_interface = 0.0.0.0`
+  (a opção existe no 18 e no 19), com teste.
+- **O manifesto dev do Odoo nunca funcionou**: `./addons:/mnt/extra-addons` numa rede própria
+  dava `no such bind path ./addons`. A fonte relativa é canonicalizada contra o CWD, e a 2.ª
+  passagem não corre no CWD do utilizador — a mesma classe do `source_dir` do `kind: App`.
+  `anchor_relative_binds` ancora-as na 1.ª passagem, antes de escrever o spec do re-exec.
+- **O `--up` esperava 40 s pelo health**; medido com load ~30, o Odoo 20 em `dev_mode` levou
+  ~85 s do primeiro log ao HTTP. Passa a 120 s — é um tecto, uma app sã responde antes.
+- **Validado ao vivo**: Odoo 18 (o caso reportado) `stack apply` → `/web/health` `pass` e
+  `psql` do container Odoo ao `db` a responder PostgreSQL 16.15; Odoo 20 (`odoo:20.0`, build
+  do template sem `-v`) pelo manifesto dev (bind-mounts incluídos) e com o `odoo.conf` de
+  produção → `HTTP service running on 0.0.0.0:8069`, health `pass`, e o mesmo `psql`; FastAPI
+  0.142.2 e 0.116.2 com `uv sync`, `ruff`, `pytest` e o servidor a responder
+  `/api/v1/health/live`. **Não re-corrido depois das correcções**: o `stack init -t odoo --up`
+  de ponta a ponta com a imagem reconstruída (o build leva ~45 min neste host); cada passo dele
+  foi provado à parte.
+- **Custo medido e NÃO mexido**: o build rootless do Odoo leva ~20 min neste host carregado. Cada
+  `COPY` (mesmo de um ficheiro) faz snapshot do rootfs inteiro para a cache de build
+  (`cp -a --reflink=auto`, e ext4 não tem reflink) — 2–4 min e ~2 GB por instrução numa imagem de
+  2 GB. É o compromisso já escrito no topo do `cmd/build.rs`; um formato de cache por diferença é
+  trabalho próprio.
+- **Armadilha do próprio investigador**: recompilar o binário enquanto um `build` corre faz o
+  `__buildtar` (que re-executa `current_exe()`) falhar sem mensagem — o `execv` de um ficheiro
+  substituído. A primeira reprodução «falhou» por isso. Para medir, copiar o binário para um
+  caminho estável e nunca o sobrescrever enquanto algo dele corre (o holder também o usa: `cp`
+  sobre ele dá `Text file busy`).
+
+
+## Templates de infraestrutura e ERP contra o prompt master (2026-10-01)
+
+Os quatro templates sem código de aplicação — `nginx`, `httpd`, `haproxy`, `odoo` — revistos
+contra a linha «infraestrutura/ERP» do prompt master dos templates do `init`. Os sete de
+aplicação e o gerador (`scaffold.rs`, `init.rs`) são de outra frente de trabalho.
+
+- **nginx, httpd, haproxy** passam a: log de acesso em JSON no stdout com `request_id`
+  (o do chamador, ou um gerado; devolvido na resposta), `/healthz` fora do log, timeouts e
+  limite de corpo explícitos, cabeçalhos de segurança, endpoint de métricas/estado não
+  publicado, config verificada NO BUILD (`nginx -t`, `httpd -t`, `haproxy -c`), blocos
+  comentados de TLS e proxy, `scripts/smoke.sh` e README com os comandos reais. Omissões:
+  nginx `1.30` (= tag `stable` da imagem), haproxy `3.4` (= `lts`), httpd `2.4`; lidas por
+  digest no Docker Hub a 2026-09-30.
+- **Três armadilhas, cada uma medida**: no nginx, um `add_header` dentro de um `location`
+  ANULA os herdados do `server` — o `/healthz` antigo perdia todos os cabeçalhos de segurança;
+  no HAProxy, as respostas que o proxy gera (`http-request return`) saltam as regras
+  `http-response` e só passam por `http-after-response`; e o httpd recusa arrancar sem
+  nenhuma interface configurada (`AH00530 … getaddrinfo fail` com `--net none`) — não é o
+  `mod_unique_id`, é o `Listen`, e o `RUN httpd -t` do build passa porque o build tem rede.
+- **O manifesto de produção do Odoo era um beco sem saída**: `list_db = False` desliga o
+  gestor de bases de dados, e o README mandava «criar a primeira base na UI». Medido no
+  `odoo:20.0`: `/web/login` → seletor → «database manager has been disabled». Com
+  `db_name = <nome>` o Odoo cria e inicializa a base sozinho no primeiro arranque (~10 s em
+  disco calmo); o `dbfilter` fixa os pedidos nela.
+- **A base nasce com `admin`/`admin`.** O README dá o comando de troca (`odoo shell` por
+  `container exec -i … /entrypoint.sh`), e o smoke FALHA enquanto a password de fábrica
+  entrar — medido nos dois estados.
+- **Testes de addon precisam de `--test-tags /<addon>`**: sem isso, uma base nova corre os
+  ~1000 testes do `base` e dependências, 36 falham fora da CI do Odoo, e o comando sai 1 com
+  o teste do addon a passar.
+- **`stack destroy` apaga os volumes da stack** — o README dizia «volumes stay». Corrigido,
+  com o comando que pára sem apagar.
+- **Achado do motor, NÃO corrigido**: `container run` não aplica o `USER` da imagem
+  (`odoo:20.0` declara `user = odoo` e corre como uid 0; assim desde a v1.0.0). `-u odoo`
+  funciona mas dispara o `chown_tree_once` do rootfs inteiro — mais de 16 min em ~2 GB com o
+  disco saturado. Mudar a omissão é uma decisão de semântica para todos os containers.
+- **`container start` numa rede própria** dava a mensagem antiga (hash da netns e
+  `Some(1)`); passa pelo `netns_start_error`, como o `run`. Provado por teste unitário; a
+  reprodução ao vivo foi interrompida por um reinício do host.
+- **Validado ao vivo**: `stack init -t <t> --up` com raiz isolada e o `scripts/smoke.sh`
+  gerado — nginx 9/9, httpd 9/9, haproxy 7/7; odoo (20.0 por omissão) `--up` em 459 s com a
+  base inicializada, smoke de produção 4/4 depois da troca de password, smoke de dev 2/2, e
+  um addon real com teste a passar (`0 failed, 0 error(s) of 3 tests`).
+- **Método**: o primeiro harness apagava a raiz isolada logo a seguir ao `stack destroy`. Um
+  supervisor com `restart: always` cujo registo desaparece volta a arrancar o container —
+  ficou um nginx órfão a segurar a porta e fez falhar os dois templates seguintes. Esperar
+  que nenhum processo com aquele `DELONIX_ROOT` esteja vivo antes de apagar a raiz.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
@@ -5473,6 +5849,56 @@ checklist para quem mexer aqui do que como lista de correcções:
   correcção feita e o chamador ao lado deixado para trás. **Nota de método**: um `timeout` na
   bateria teria matado a corrida sem explicar nada; o que deu a resposta foi seguir o pipe até
   ao dono (`readlink /proc/*/fd/*`);
+- **o alvo de um `slirp4netns` ter morrido não é o slirp ter saído**, e é a **terceira
+  ocorrência** de «detached não é sem os fds do chamador». O slirp de um container (`-p` sem
+  rede própria) só sai quando o kernel desmonta a netns: medido 13 s e 17 s num host calmo e
+  **mais de uma hora** com o disco saturado (2026-10-01, dois deles à escuta na porta
+  publicada). E era lançado por um `Command::spawn` no meio do arranque, por isso herdava os
+  `pipe()` simples que o `spawn` do container tem abertos — `readlink /proc/<slirp>/fd/*`: as
+  duas pontas do pipe de logs e a ponta de escrita do handshake do supervisor. Três
+  consequências, todas medidas: o shim de logs nunca via EOF e ficava para trás depois do
+  `rm -f`; um container que saía sozinho (ou muito depois de um `stop` que desistira com
+  DX-8101) deixava a porta ocupada, porque o registo perde o pid com a saída e o pid era a
+  única coisa que nomeava o slirp; e o `container start` seguinte **pendurava para sempre** —
+  o `add_hostfwd` do slirp novo era recusado, o supervisor dizia-o e saía, e o pai continuava
+  a ler o handshake à espera de um EOF que só o slirp novo (deixado vivo por um
+  `mem::forget`) podia dar. Corrigido nas quatro pontas: `spawn_holding_only` marca tudo
+  close-on-exec menos o `--ready-fd` (marca, não fecha — o `Command` reporta o `exec`
+  falhado por um pipe seu); o supervisor solta o slirp no instante em que colhe o processo
+  (`Supervision::on_exit`), o `reconcile_with_diagnostics` quando dá pela morte, e o
+  teardown sem pid varre os slirps NOSSOS de alvo morto; um `add_hostfwd` recusado ceifa os
+  órfãos e tenta outra vez, e se falhar mata o slirp que lançou; e o `read_handshake` espera
+  pelo pipe E pelo supervisor — morto o supervisor, o que está no pipe é tudo o que haverá.
+  **Regra: quem lança um processo que sobrevive ao chamador passa-lhe os descritores pelo
+  nome, e quem espera por EOF num pipe espera também pelo processo que o devia fechar.**
+  Gate: `scripts/e2e_slirp_lifecycle.sh` (sete cenários, no `e2e.sh`) e os testes
+  `tests_detached_helper` / `supervise::tests`. **Fechado no mesmo dia o que tinha ficado de
+  fora**: o pin, o pin adoptado e o plano de controlo também eram lançados com os descritores
+  do chamador (só o stderr fora corrigido a 2026-08-15) — `leave_callers_descriptors`,
+  registado ANTES do `pre_exec` que entrega os dois descritores de sincronização ao pin,
+  porque correm pela ordem de registo; cenário `infra` (um fd 9 do chamador aparecia no
+  `netns pin` e no `netns control`). E o `container stats` e a listagem de clusters kind
+  gravavam a morte sem soltar o slirp — passaram os dois pelo `reconcile_and_persist`, que
+  agora o solta; teste `a_recorded_death_releases_the_containers_own_slirp` (um `sleep` com o
+  nome `slirp4netns` e o pid morto no lugar do alvo). **«O slirp desapareceu» não prova que alguém o soltou** — ele sai sozinho, em menos
+  de 1 s ou em 17 s conforme o binário, mesmo com a netns segura por um descritor (medido). A
+  prova é o SINAL: os cenários `exit`, `stats` e `kind` param o slirp (SIGSTOP) antes de o
+  container sair e lêem o SIGTERM pendente em `/proc/<slirp>/status`. E um `run -d` tem SEMPRE
+  supervisor, que regista a saída antes de qualquer comando: o caminho do `stats` e do
+  `cluster ls` só se exercita com o supervisor morto primeiro. Ao vivo, 2026-10-02: binário
+  com as duas solturas revertidas — `stats` e `kind` FAIL, `exit` FAIL em 4 de 5 (a quinta
+  passou porque outro `delonix` do host varreu órfãos nesse segundo: a varredura é por uid,
+  não por root); `main` — os três PASS. **Mais três, com a mesma técnica de segurar a saída**: `stopgaveup`
+  (um `stop` que desiste com DX-8101 solta a porta e o slirp nesse momento — FAIL no binário de
+  antes do #646, PASS depois; o slirp fica ZOMBIE, não desaparece, porque é filho do supervisor);
+  `hang` (um `slirp4netns` falso no PATH que só dorme: o `start` tem de devolver com a causa); e
+  `zombies` — **achado ao provar**: o slirp e o shim de logs são filhos do supervisor, que só
+  colhia o container, e um `--restart always` que cai sempre juntava 2 zombies por reinício (6
+  ao fim de 3, medido). O supervisor colhe-os entre incarnações (`reap_finished_children`;
+  teste num processo próprio, porque `waitpid(-1)` no binário de testes levaria os filhos dos
+  outros testes). Um cenário que depende de saídas rápidas responde 77, e não PASS, quando o
+  disco está saturado — o `zombies` passou uma vez num binário defeituoso porque os reinícios
+  nem chegaram a acontecer;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
@@ -5562,7 +5988,25 @@ checklist para quem mexer aqui do que como lista de correcções:
   simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste
   de «espera pela saída», o sujeito tem de demorar a sair. **Para reproduzir ao vivo, um `dd`
   isolado não chega** (6 GB acabam em 3 s, antes das remoções, e o binário antigo passou);
-  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda;
+  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda.
+  **E manter o registo não chega: tem de dizer PORQUÊ o processo vai morrer** (2026-10-02, visto
+  duas vezes com o disco saturado): `run -d --restart always` + `rm -f` devolveu `DX-8101`,
+  manteve o registo como a regra manda — e quando o processo saiu por fim o supervisor
+  reiniciou-o (`Up`, RESTARTS 1). O `stop` marca `stopped_by_user` antes de sinalizar; o `rm -f`
+  não marcava nada, e o supervisor leu «morto e ninguém o parou». Agora o `remove_waiting`
+  regista a intenção antes do sinal (`record_removal_intent`), e um `start` recusado com
+  «already running» deixou de limpar a marca pelo caminho — o processo que ainda está a sair é
+  exactamente um container que lê `Running`. O container fica `Stopped` à espera do `rm` que o
+  erro pede; um `start` posterior traz-o de volta como depois de qualquer `stop`. **Gates**:
+  `a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor` (o teste É o supervisor: pai
+  do processo, o mesmo `wait_and_record` e o mesmo `resume_restart`) e
+  `a_refused_start_keeps_the_stop_the_operator_asked_for`, ambos vermelhos com a correcção
+  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**.
+  **Provado ao vivo a 2026-10-02, sem disco saturado** (`scripts/e2e_rm_force_gave_up.sh`, no
+  `e2e.sh`): o PID 1 de uma pidns só acaba de sair quando todos os processos dela foram colhidos
+  (`zap_pid_ns_processes`); um `container exec` deixa lá um processo com o pai FORA da pidns, e
+  com esse pai parado (SIGSTOP) o PID 1 fica em estado S até ao SIGCONT — o `rm -f` dá DX-8101
+  sempre. Binário de antes do #647: ressuscitou 3 em 3; `main`: 3 em 3 certos;
 - **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
   registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
   os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,
@@ -5588,7 +6032,16 @@ checklist para quem mexer aqui do que como lista de correcções:
   enquanto o que resta está comprovadamente a sair: zombie, `PF_EXITING` no `stat`, ou um
   supervisor cujos filhos estão todos a sair. Uma fuga (um processo vivo que não está a sair)
   continua a chumbar aos 20 s (provado com um `sleep 900` com `DELONIX_ROOT` no sandbox). Ao
-  chumbar imprime pid, ppid, estado, `wchan`, idade, `DELONIX_ROOT`, `cmdline` e os filhos;
+  chumbar imprime pid, ppid, estado, `wchan`, idade, `DELONIX_ROOT`, `cmdline` e os filhos.
+  **E o `teardown_quiet` descartava o DX-8101** (2026-09-29): o `rm -f` espera até 30 s pela
+  saída e, se o prazo esgotar, mantém o registo (#562), mas o harness ignorava o rc e fazia
+  `netns down` e `rm -rf` do sandbox por baixo do processo, levando o único registo de onde
+  um `rm -f` posterior o encontraria. Medido com o binário da árvore: um workload em `D`
+  (`sync_inodes_sb`, depois `wb_wait_for_completion`) mais de 4 min. Agora o sandbox só se
+  apaga quando o `container ps -aq` responde, com sucesso, vazio; até ao tecto de 120 s repete
+  o `rm -f`, e depois mantém o sandbox e a netns, chumba o veredicto com o erro do `rm -f`, e
+  o `setup` seguinte recusa arrancar por cima (`exit 2`). Os `rm -f … >/dev/null` dos
+  cenários continuam a ignorar o rc: é o teardown que apanha o que eles deixam;
 - **não aparecer numa varredura pela ordem errada não é estar certo** — a varredura dos
   SIGKILL feita no #563 procurava «`kill` e logo a limpeza» e deu como aberto o único sítio do
   `spawn` que tinha essa forma (o caminho sem userns, que só corre como root). Os outros quatro
@@ -7016,7 +7469,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (25 crates)
+## Arquitetura (28 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -7026,11 +7479,14 @@ antes de qualquer commit:
 | `delonix-linux` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Tem o tipo de erro partilhado e o dicionário de códigos `DX-CDNN` (`error`, `codes`), os registos que são só dados (`records`: `Status`, `ContainerFw`/`FwRule` e os seus validadores), o `typestate`, o modelo do segredo (`secret`), os nomes gerados (`names`) e as classes de saída (`exitcode`); o `delonix-runtime-core` re-exporta com os caminhos antigos |
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |
-| `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API. Desde a P4b.3b do ADR-0044, também os use cases da VM (`vm::VmEngine`: create, stop, start, status, list, remove e os verbos de dia 2), genéricos sobre o `StateRepository<Vm>` e os portos `VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`; o `delonix-vm` monta o engine e mantém as funções públicas como invólucros |
+| `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API. Desde a P4b.3b do ADR-0044, também os use cases da VM (`vm::VmEngine`: create, stop, start, status, list, remove e os verbos de dia 2), genéricos sobre o `StateRepository<Vm>` e os portos `VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`; o `delonix-vm` monta o engine e mantém as funções públicas como invólucros. Desde a P4b.4a, também o registo de backends de VM (`vm_registry`: `seed`, `register_backend`, a auto-detecção, `backend_for`, o `mac_for`), semeado pela raiz de composição com os backends em que confia para responder `available()` localmente |
 | `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
+| `delonix-networking` | contexto Networking (`networking.delonix.io`, ADR-0059 D7): as portas de rede por papel (`GatewayProvider`, `NetworkZoneProvider`), os seus registos por nome e as marcas de posse dos objectos remotos. Saíram do `delonix-sdn` no F2a do ADR-0059, com a forma que o `VmBackend` teve na P4b.2; o `delonix-sdn` reexporta os três módulos, e o OPNsense e o Proxmox deixaram de depender do dataplane nativo |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
-| `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
+| `delonix-vm` | a raiz de composição das VMs até à P5 (ADR-0044 P4b.4): semeia o registo do compute com os backends locais, monta o `VmEngine` por chamada (`JsonStore`, disco e seed locais, rede) e mantém as funções públicas como invólucros. Desde a P4b.4c já não tem nenhum backend: os dois locais são crates de provider |
+| `delonix-provider-cloud-hypervisor` | backend `VmBackend` Cloud Hypervisor (uma microVM por processo, pelo api-socket), com a sua declaração ADR-0050, a sonda do host e os snapshots offline. Saiu do `delonix-vm` na P4b.4c; chega à rede do nó por `delonix_compute::vm_registry::network()`, e a raiz de composição semeia-o com `registration()` |
+| `delonix-provider-libvirt` | backend `VmBackend` libvirt/KVM (QEMU via `virsh`), com a sua declaração ADR-0050, a sonda do host, o backup a quente e o domínio sem registo. Saiu do `delonix-vm` na P4b.4b; depende só da fundação e dos contextos, e a raiz de composição semeia-o com `registration()` |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
 | `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |
 | `delonix-opnsense` | `GatewayProvider` remoto contra a API REST de UMA appliance OPNsense (ADR-0051). Fora do `delonix-sdn` pela mesma razão que o `delonix-proxmox` está fora do `delonix-vm` — um cliente HTTP não entra num crate de motor; registado pelo `-bin` (`cmd::gatewayproviders`), que é quem conhece o alvo |
@@ -8076,3 +8532,174 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   não precisam de nó» do `scripts/e2e.sh` (7 checks; 3 chumbam com a recusa revertida,
   verificado). A layer zstd (DX-1409) fica no teste unitário do `delonix-oci`: pelo Kind só se
   chega lá com um nó.
+
+## Performance de imagens: pull, push, build e arranque (2026-09-26 a 2026-09-29, 14 PRs)
+
+Levantamento com três agentes de performance, e depois uma correcção por item, cada uma com a
+sua medição no PR. Os números abaixo são os que ficaram de pé com a máquina calma; os que só
+se mediram sob carga dizem-no.
+
+- **Pull e push em streaming, sem o blob inteiro em memória** (#520/#535, #523, #524). O CAS
+  escreve para um ficheiro temporário e calcula o sha256 à medida, com a escrita em disco numa
+  thread própria (um buffer maior não chegou: só a thread tirou as caudas). Memória no pull do
+  `node:22`: 214 → 27 MB; no pull de VM: 278 → 13 MB, e retoma entre processos (um `kill -9` a
+  meio deixou 48,6 MB e o pull seguinte continuou daí, com o digest certo); no push de VM:
+  837 → 10–13 MB.
+- **O push tenta outra vez e corre em paralelo** (#526, #527). Um PUT cortado a meio é repetido
+  com um HEAD antes de cada tentativa (um blob já aceite nunca vai duas vezes); 5xx/408/429 e
+  erros de transporte repetem, o resto falha logo. Quatro layers em simultâneo: `node:22` a
+  20 MB/s por ligação passou de 65 s para 11 s.
+- **Montar em vez de enviar** (U6, #538). Se uma tag da imagem nomeia outro repositório do
+  MESMO registo, o upload pede `?mount=<digest>&from=<repo>`: 201 é o blob ligado sem bytes, 202
+  é um upload normal. Medido no ghcr: 356 s → 7,0 s. Um servidor de tokens que recuse o scope de
+  `pull` sobre a origem é perguntado outra vez sem ele — uma optimização nunca pode fazer um push
+  falhar.
+- **O pull a quente não reescreve o registo, e o CAS sobrevive a uma queda** (#530). O
+  `save_if_changed` compara ignorando o `created_unix`. Os `fsync` do CAS custaram 18 chamadas por
+  pull do `node:22` e zero no tempo total com a máquina calma (42–45 s nos dois lados, o pull é da
+  rede). **Os 19–30 s medidos antes eram o disco do host saturado, não o `fsync`** — com carga
+  alta, uma medição de I/O mede o vizinho.
+- **Build** (#529). O container de trabalho tem `sleep infinity` como PID 1, que ignora o
+  SIGTERM, por isso cada `stop` gastava os 5 s de tolerância inteiros; agora pára com 0. Um passo
+  que acerta na cache fecha com `✓` (fechava com `✗` e o build saía 0). A cache CNB por app deixou
+  de ser apagada no fim de cada build. Medianas: a frio 6,8 → 2,2 s, só o `COPY` mudado
+  7,2 → 1,1 s.
+- **Primeiro arranque: layers em paralelo, lidas em streaming** (P5, #533). Memória no primeiro
+  `run` do `node:22`: 219 → 21 MB; extracção 4,3 → 2,1 s. O tempo total quase não mexeu, e foi daí
+  que saiu o achado seguinte.
+- **A saída de um container espera pelo disco INTEIRO do host** (ADR-0056, #534 e #537). Ao sair o
+  último processo da mount namespace, o overlay é desmontado e o kernel sincroniza o sistema de
+  ficheiros da upper, que é o do host. Um overlay sem nenhuma escrita esperou 29 s por 1 GB que
+  OUTRO ficheiro tinha por escrever. Um container `--rm` (a upper é apagada à saída) monta agora
+  com `volatile`: `run --rm … true` com 1 GB sujo no disco, 9,5–14 s → 0,14 s. **A marca
+  `incompat/volatile` fica no workdir mesmo depois de uma desmontagem limpa**, e o kernel recusa o
+  mount seguinte: por isso o `work/` é esvaziado antes de cada mount (um `--rm --restart` monta
+  duas vezes). Os containers mantidos ficam como estavam (D4 do ADR). Os containers de trabalho
+  do `build` não têm overlay (rootfs plano), ao contrário do que o ADR dizia na primeira versão.
+- **`cluster load` em todos os nós ao mesmo tempo** (U9, #605): 3 nós, 33,2 → 17,6 s.
+
+**Decidido não fazer, ou só depois de medir, com a razão**:
+- **P3, cache do token do registo em disco — FEITO depois, pelo ADR-0060.** Primeiro recusado
+  por guardar uma credencial em disco; a medição do token anónimo da Docker Hub (`sub` vazio,
+  `pull` sobre um repositório público, 300 s) mostrou que um token pedido SEM credenciais não
+  expõe nada. Só esses são guardados (`auth/tokens/`, 0600), nunca com `image login` para o
+  host nem num push. Pull a quente do `alpine:3.20`: 1,50–1,64 s → 0,94–0,99 s.
+- **U3 passo 2, retomar um upload a meio — FEITO depois, sem o `GET` de estado.** Estava
+  recusado porque o `GET` do estado responde `303` no ghcr. Não é preciso: medido a 2026-09-30,
+  um `PATCH` cortado a meio não deixa bytes no ghcr, e repetir o bloco a partir do último `Range`
+  confirmado é aceite. Três factos que só a prova ao vivo deu, e cada um partia a primeira versão:
+  - **o ghcr aceita partes de no máximo 4 MiB** — com 16 MiB, cada `PATCH` levava `416` e o push
+    FALHAVA sempre. Um `416` no byte 0 corta agora a parte a meio;
+  - **o `registry:2` guarda parte do bloco cortado** e responde `404` ao `GET` e aos `PATCH`
+    seguintes, estes ANTES de ler o corpo (o cliente vê só uma ligação caída). Uma sessão assim,
+    ou uma retoma que não avança, é trocada por uma nova: nunca pior do que o `PUT` único;
+  - **partes custam ~13–17% no ghcr** (uma ida e volta por 4 MiB; 64 MiB: 30–34 s num `PUT`,
+    35–39 s em partes). Por isso o primeiro upload continua a ser um `PUT` único; só depois de uma
+    falha é que esse cliente passa a partes retomáveis.
+
+**Armadilhas de método desta série** (cada uma custou uma medição ou um PR):
+- **Um PR empilhado não corre CI** enquanto a base não é a `main`, e `gh pr merge --delete-branch`
+  no pai FECHA o filho (o #520, continuado no #535). Reapontar o filho antes do merge do pai, e
+  refazer a branch só com os commits próprios — os do hook `ngola-ci` são merges.
+- **`git checkout -- <ficheiro>` para desfazer uma mutação apaga o trabalho por commitar desse
+  ficheiro.** Guardar uma cópia antes da mutação e repô-la.
+- **Com o host carregado (load 37–53 em 32 núcleos), um tempo não decide nada**: o mesmo cenário
+  deu 22,2 s e 1,2 s. Sob carga mede-se o que é determinístico (contagens de passos, de `fsync`,
+  de bytes, memória máxima) e o tempo fica para uma janela calma.
+- **Um processo em estado D depois do SIGKILL não é um bug do motor**: `wb_wait_for_completion` é
+  a saída à espera do writeback do disco. O `stop` desiste ao fim de 30 s e diz 0; o processo sai
+  minutos depois num host saturado.
+
+## Os templates do `delonix init` têm contrato, e o gerador verifica o que substitui (ADR-0061, 2026-10-01)
+
+Medido com o binário de `9eb2a14d`, gerando cada template num directório vazio e correndo os
+comandos do README e da CI de cada um: a CI documentada **falhava num projecto novo** (django
+`ruff check` rc=1, node `pnpm lint` rc=1 por não ter ESLint, django `pytest` rc=5), o `-v` e o
+nome do projecto eram copiados sem verificação para manifestos (`-v '5.2.*", "evil==1'`
+acrescentou uma dependência ao `pyproject.toml`; um directório `My App"x` deu um `package.json`
+ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
+
+- **O contrato** (`docs/adr/0061-init-template-contract.md`): os sete templates de aplicação
+  (`go`, `node`, `nestjs`, `nextjs`, `fastapi`, `django`, `laravel`) geram um serviço pequeno e
+  completo — uma capacidade (notas) do transporte ao porto, uma forma de erro, configuração
+  validada no arranque, prontidão `starting → ready → draining`, encerramento limitado,
+  Standard Webhooks nos dois sentidos, OpenTelemetry, contrato OpenAPI com teste de deriva, teste
+  de direcção das dependências e teste de um-só-trace. `odoo` e `nginx`/`httpd`/`haproxy` têm
+  outro contrato (deployment de ERP; infra-estrutura).
+- **O `template.meta` é a interface entre um template e o gerador**: `port=`, `health=`,
+  `version=`, `versions=` (os `-v` aceites), `lock=` (o lock do gestor de pacotes, lido pelo modo
+  adopt) e `wait=` (segundos que o `--up` espera pela saúde). Um template novo declara-se aí; o
+  teste `every_template_renders_valid_files_for_each_declared_version` renderiza-o para cada
+  versão e faz parse do JSON/YAML que escreveu, sem precisar de teste próprio.
+- **Locks**: só o `go.sum` é embebido (o `go.mod` fixa versões exactas, logo os hashes são
+  função do manifesto). Para uv/pnpm/Composer um lock embebido ficaria obsoleto a cada `-v`; o
+  primeiro install gera-o, a CI recusa correr sem ele, e o Delonixfile usa-o quando existe.
+- **O gerador nunca corre um gestor de pacotes** nem vai à rede.
+
+**Armadilhas medidas, para quem mexer num template:**
+
+- **O comprimento do nome do projecto muda o comprimento das linhas.** Um `format:check` que
+  passa com `my-svc` pode chumbar com um nome de 63 caracteres. Os tokens `__NAME__`/`__PORT__`
+  ficam num ficheiro de constantes, e o formatador corre só sobre código (nunca sobre Markdown).
+  Testa-se com um nome longo.
+- **`| grep -q` mata o gerador a meio.** Um pipe que fecha cedo entrega SIGPIPE ao `delonix init`
+  e deixa o projecto por metade — parece um bug de escrita parcial e é do teste. Captura-se a
+  saída e compara-se depois.
+- **Uma porta ocupada por outro serviço faz um smoke passar ou falhar pelo serviço errado.** Foi
+  assim que apareceu que o `smoke.sh` não aceitava `"id": "…"` com espaço (o JSON de outro
+  framework). Confirma-se o dono da porta antes de medir.
+- **Um esqueleto vazio é pior que um directório em falta.** O primeiro `.dockerignore` deste
+  motor descia a todo o directório excluído assim que houvesse uma regra `!`, e deixava a
+  árvore de pastas vazia: um `.venv` vazio fazia o `uv sync` recusar («not a valid Python
+  environment»). Só a build real o mostrou — o teste unitário não tinha excepção nenhuma.
+- **Uma lista vazia de processadores não é «sem exportação»** no SDK OpenTelemetry de Node: o
+  provider não é registado e os `trace_id` saem a zeros. Usa-se um processador nulo.
+- **Os erros de exportação do SDK saem em texto livre no stderr** se ninguém instalar um
+  handler — fora do formato JSON dos logs. Cada template encaminha-os para o logger.
+- **O `delonix build` não é o `docker build`**: até esta série não lia `.dockerignore`, deitava
+  fora as fontes do meio de um `COPY a b dst/` e seguia symlinks dentro de uma árvore copiada
+  (um `node_modules` do pnpm não se conseguia copiar entre estágios). Uma imagem «validada com
+  docker» não está validada.
+
+**Segunda passagem (2026-10-01): os pendentes fechados em rootless, e o que só a execução mostrou.**
+
+- **As sete imagens correm sem root.** Cada Delonixfile acaba em `USER` (`app`, uid 10001, criado
+  na imagem; `node`, uid 1000, nos três de Node) e cada manifesto nomeia-o com `user:` — o motor
+  só aplica o USER de uma imagem quando o manifesto o pede (ADR-0062). O utilizador não é dono de
+  nada na imagem a não ser o ponto de montagem de um volume. Medido nos dois motores (este ramo
+  só, e com o P1 do ADR-0062): `id` é o utilizador sem privilégio, `CapEff` 0, `/etc/passwd`
+  continua `0:0` e a escrita é recusada.
+- **O CI gerado é EXECUTADO, não só lido** (`scripts/init-ci.sh`): gera cada template e corre, num
+  container rootless limpo com a imagem que o `.gitlab-ci.yml` nomeia, a criação do lock, o
+  trabalho do GitLab tal como está escrito e cada passo `run:` do workflow do GitHub. Só as
+  acções `uses:` ficam por executar. Foi esta corrida — e não a leitura do YAML, que já passava —
+  que encontrou quatro defeitos:
+  - o `prettier --check .` do `nestjs` chumbava no `.pnpm-store`, que o pnpm cria DENTRO do
+    projecto quando este está num mount próprio (um runner);
+  - o trabalho GitLab do `laravel` corre como root, e o Composer aborta um script que precise de
+    um plugin sem `COMPOSER_ALLOW_SUPERUSER=1`;
+  - o perfil seccomp por omissão negava `fchmodat2`, por isso o `tar` do GNU não conseguia pôr o
+    modo a nenhum directório (579 × «Cannot change mode») e nenhum `docker-php-ext-install`
+    compilava num container. Era também a razão de o `pcntl` não compilar no `delonix build`,
+    que a primeira passagem atribuiu, por leitura, à posse dos ficheiros;
+  - o `ENV` do último estágio era empacotado duas vezes, a segunda por expandir: `ENV
+    PATH=/app/.venv/bin:$PATH` dava uma imagem cujo PATH era essa cadeia literal. O serviço
+    corria (o comando vive no único directório que restava) e `exec <c> id` saía 127 calado.
+- **Os sete templates correram o seu CI gerado** (2026-10-02, binário de `cfd46e01`, raiz
+  isolada): `node` (4 passos `run:` do GitHub), `nestjs` (8), `nextjs` (5) e `django` (8), cada
+  um com o trabalho do GitLab, sem falhas. `go`, `laravel` e `fastapi` tinham corrido antes.
+- **«Validado» com a imagem a responder não é validado.** Os quatro passavam o smoke. O PATH
+  partido só apareceu ao correr `id` lá dentro, e o `exec` de um comando inexistente não dizia
+  nada — agora diz o mesmo que o init (`delonix: exec <programa>: <errno>`).
+- **Um directório com maiúsculas ou espaços dá um nome derivado, dito na saída**; um `--name`
+  explícito continua a ser usado ou recusado, nunca reescrito.
+- **O `django` migra no arranque** quando `MIGRATE_ON_START=true` (o manifesto define-o: uma
+  réplica em SQLite). O gunicorn nunca migra.
+- **Dois `target` para duas árvores.** Um `CARGO_TARGET_DIR` partilhado entre este ramo e o de
+  validação (com o P1) reutilizou o `delonix-compute` da outra árvore e a compilação falhou em
+  símbolos que existiam no código — a armadilha já escrita em «duas cópias do mesmo repo não são
+  dois builds».
+- **Com o disco do host saturado, o `stop` e o `rm -f` de um container mantido demoram ou dão
+  DX-8101** (o PID 1 fica em `D`, `wb_wait_for_completion`): é o ADR-0056 D4, não é dos
+  templates. Medido aqui com um `sleep` que não escreveu nada, enquanto outra corrida enchia o
+  disco. Repetir o comando resolve.

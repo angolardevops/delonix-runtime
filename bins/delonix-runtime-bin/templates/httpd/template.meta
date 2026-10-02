@@ -1,3 +1,5 @@
 port=8080
 health=/healthz
 version=2.4
+tls=8443
+open=/

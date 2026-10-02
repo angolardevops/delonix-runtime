@@ -1,0 +1,20 @@
+[package]
+name = "delonix-networking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-compute = { workspace = true }
+delonix-model = { workspace = true }
+# `PolicyIr` (ADR-0059 D6): the typed policy the firewall lowerings share.
+delonix-net-rules = { workspace = true }
+thiserror = { workspace = true }
+# The plan digest (ADR-0059 D4): SHA-256 over the canonical JSON of a plan's inputs.
+sha2 = { workspace = true }
+# The step ledger is persisted inside a record (ADR-0059 D4).
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

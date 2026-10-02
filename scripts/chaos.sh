@@ -156,6 +156,12 @@ EOF
 # filhos (o workload não herda `DELONIX_ROOT`, é pelo supervisor que se chega a
 # ele) — com rc 1.
 #
+# `$3`, opcional: só os processos cujo `cmdline` tem esta palavra — o nome de um
+# container, para medir UM a meio da suite, com a infra de rede ainda de pé
+# (`rm_during_start`). Os supervisores e o log shim levam o nome no `cmdline`
+# (`container start <nome>`, `container run … --name <nome>`); o workload chega-se
+# pelos filhos, como acima.
+#
 # Porque é que 5 s sobre uma lista fixa não chegavam: a 2026-09-29,
 # `control_restart` deu `FAIL sandbox-teardown — 2749065:S:delonix` uma vez e
 # passou nas três corridas seguintes com o mesmo binário; segundos depois o pid
@@ -164,10 +170,11 @@ EOF
 # em `D` em `wb_wait_for_completion`: é a saída descrita no AGENTS.md («um SIGKILL
 # entregue não é um processo morto»), não uma fuga.
 sandbox_leftover() {
-  SANDBOX="$SANDBOX" BASE="${1:-20}" CAP="${2:-120}" python3 - <<'EOF'
+  SANDBOX="$SANDBOX" BASE="${1:-20}" CAP="${2:-120}" ONLY="${3:-}" python3 - <<'EOF'
 import os, time
 want = os.environ["SANDBOX"].rstrip("/") + "/"
 base, cap = float(os.environ["BASE"]), float(os.environ["CAP"])
+only = os.environ["ONLY"]
 hz = os.sysconf("SC_CLK_TCK")
 PF_EXITING = 0x4
 
@@ -190,7 +197,8 @@ def root_of(pid):
 
 def sample():
     return {int(d): r for d in os.listdir("/proc") if d.isdigit()
-            for r in [root_of(d)] if r is not None}
+            for r in [root_of(d)] if r is not None
+            and (not only or only in read(f"/proc/{d}/cmdline").split())}
 
 def stat(pid):
     s = read(f"/proc/{pid}/stat")
@@ -335,7 +343,9 @@ pod_cleanup() {
 }
 
 setup() {
-  teardown_quiet
+  # Uma corrida anterior cujos containers ainda saem não se apaga por baixo —
+  # e esta não arranca por cima dela.
+  teardown_quiet || { echo "chaos.sh: o sandbox da corrida anterior ainda tem containers — não arranco por cima." >&2; exit 2; }
   mkdir -p "$SANDBOX/root" "$SANDBOX/run"
   local real="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
   for d in images layers blobs; do [ -d "$real/$d" ] && ln -sfn "$real/$d" "$SANDBOX/root/$d"; done
@@ -343,9 +353,49 @@ setup() {
   dlx network create chaosnet >/dev/null 2>&1
 }
 
+# Desmonta o sandbox — mas só o APAGA quando o `container ps -aq` responde, com
+# sucesso, que não sobrou nenhum container. Devolve 0 se o sandbox saiu; 1 se o
+# manteve, com o motivo em `TEARDOWN_KEPT` (um container por linha, com o erro do
+# último `rm -f`).
+#
+# Porquê: o `rm -f` espera pela SAÍDA do processo até 30 s e, se o prazo
+# esgotar, devolve `DX-8101 container.still_exiting` e MANTÉM o registo (#562).
+# Esta função descartava o rc e seguia: `netns down` por baixo de um processo que
+# ainda despejava o overlay, e `rm -rf` do sandbox com o registo lá dentro — o
+# único sítio de onde um `rm -f` posterior o encontraria. Agora repete o `rm -f`
+# até ao tecto `DELONIX_CHAOS_TEARDOWN_CAP` (120 s, o mesmo do veredicto) e, se
+# algo ficar, deixa o sandbox e a netns de pé e diz porquê. Um `ps` que falha
+# também mantém: não saber não é estar limpo.
+TEARDOWN_KEPT=""
 teardown_quiet() {
   [ -d "$SANDBOX" ] || return 0
-  for c in $(dlx container ps -aq 2>/dev/null); do dlx container rm -f "$c" >/dev/null 2>&1; done
+  local cap=${DELONIX_CHAOS_TEARDOWN_CAP:-120} t0=$SECONDS ids c err
+  local -A last=()
+  TEARDOWN_KEPT=""
+  while :; do
+    if ! ids=$(dlx container ps -aq 2>"$SANDBOX/.teardown-ps.err"); then
+      TEARDOWN_KEPT="o \`container ps -aq\` falhou: $(head -c 300 "$SANDBOX/.teardown-ps.err")"
+      break
+    fi
+    [ -z "$ids" ] && break
+    if [ $((SECONDS - t0)) -ge "$cap" ]; then
+      for c in $ids; do
+        TEARDOWN_KEPT+="$(printf '%s' "${last[$c]:-$c: sem erro do rm -f}" | tr '\n' ' ' | head -c 300)"$'\n'
+      done
+      TEARDOWN_KEPT="ao fim de $((SECONDS - t0))s ainda no \`ps -a\`:"$'\n'"$TEARDOWN_KEPT"
+      break
+    fi
+    for c in $ids; do
+      err=$(dlx container rm -f "$c" 2>&1) || last[$c]=$err
+    done
+    sleep 1
+  done
+  if [ -n "$TEARDOWN_KEPT" ]; then
+    printf '\033[33mteardown\033[0m: sandbox MANTIDO em %s (sem netns down nem rm) — %s\n' \
+      "$SANDBOX" "$TEARDOWN_KEPT" >&2
+    printf '  quando saírem: scripts/chaos.sh --bin %s --clean\n' "$BIN" >&2
+    return 1
+  fi
   dlx net netns down >/dev/null 2>&1
   # O segundo root do `posse_cross_root` arruma-se sozinho no fim do cenário;
   # esta linha é para quando ele NÃO chega ao fim (--keep, um ^C, um timeout).
@@ -354,7 +404,9 @@ teardown_quiet() {
   dlx net httproute rm >/dev/null 2>&1
   [ -d "$SANDBOX/root2" ] && { dlx2 net httproute rm >/dev/null 2>&1; dlx2 net netns down >/dev/null 2>&1; }
   sleep 1
-  for d in images layers blobs; do rm -f "$SANDBOX/root/$d"; done   # symlinks only
+  # Só os symlinks para o store real; se o store real não existia, o motor criou
+  # directórios próprios, que o `rm -rf` a seguir leva (antes: `Is a directory`).
+  for d in images layers blobs; do [ -L "$SANDBOX/root/$d" ] && rm -f "$SANDBOX/root/$d"; done
   rm -rf "$SANDBOX"
 }
 
@@ -578,6 +630,73 @@ scen_abrupt_kill() {
     *) ok "abrupt-kill (estado reconciliado: $st)" ;;
   esac
   dlx container rm -f ck4 >/dev/null 2>&1
+}
+
+# `rm -f` a meio de um `start`: o registo, o processo e o directório do container
+# vão todos, seja qual for o lado que ganha a corrida.
+#
+# O sobrevivente que abriu esta série (2026-09-28) era um `container start <id>`
+# vivo com o seu `sleep` em S depois do teardown, nunca sinalizado. As três fugas
+# desta forma, e o que as fechou:
+#
+#   - o `start` publicava o pid DEPOIS de o `rm -f` ter lido o registo e antes de
+#     o apagar: o registo ia, o processo ficava (#604 — a remoção decide sob o lock
+#     do registo, e mata o que entretanto foi publicado);
+#   - o `start` publicava DEPOIS da remoção e recriava o registo de um processo a
+#     correr numa árvore purgada (#604 — um `start` não recria um registo apagado);
+#   - a purga do `rm -f` corria com o `start` a escrever lá dentro, e o directório
+#     ficava órfão (#607 — o `start` que falha sem registo leva o que deixou).
+#
+# Medido com o binário real, `rm -f` 0–40 ms depois do `start`: antes das
+# correcções, 11/24 com processo ou registo, 9/30 com o directório; depois, 0.
+#
+# A janela depende do host (num host calmo o `start` publica em ~30 ms), por isso
+# varre-se o atraso de 0 a `CHAOS_RDS_MAX_MS` e conta-se quantas iterações a
+# apanharam — um `start` que falhou foi um que o `rm -f` apanhou a meio. Sem
+# nenhuma, o cenário é SKIP: não se provou nada.
+scen_rm_during_start() {
+  head_ "rm-during-start — um rm -f a meio de um start não deixa processo, registo nem directório"
+  local n=${CHAOS_RDS_ITER:-10} maxms=${CHAOS_RDS_MAX_MS:-40}
+  local i name cid delay strc hits=0 leaks="" left
+  for i in $(seq 1 "$n"); do
+    name="rds$i"
+    cid=$(dlx container run -d --name "$name" "$IMAGE" sleep 60 2>/dev/null | tail -1)
+    if [ -z "$cid" ]; then
+      skip "rm-during-start" "o container de base não arrancou (iteração $i)"
+      return
+    fi
+    dlx container stop -t 1 "$name" >/dev/null 2>&1
+    # A encarnação parada tem de ter saído, ou mede-se a saída dela e não a corrida.
+    sandbox_leftover 20 120 "$name" >/dev/null
+    delay=$(awk -v i="$i" -v n="$n" -v m="$maxms" 'BEGIN{printf "%.3f", m/1000*(i-1)/(n>1?n-1:1)}')
+    dlx container start "$name" >/dev/null 2>&1 &
+    local st=$!
+    sleep "$delay"
+    dlx container rm -f "$name" >/dev/null 2>&1
+    wait "$st"; strc=$?
+    local what=""
+    dlx container ps -a 2>/dev/null | grep -qw -- "$name" && what+="registo "
+    left=$(sandbox_leftover 5 60 "$name") || what+="processo "
+    [ -e "$SANDBOX/root/containers/$cid" ] && what+="directório "
+    # Apanhou o start a meio: ele falhou (recusado, ou a rootfs já tinha ido), ou
+    # deixou algo para trás — o que um start que acabou antes do `rm -f` não faz.
+    { [ "$strc" -ne 0 ] || [ -n "$what" ]; } && hits=$((hits+1))
+    if [ -n "$what" ]; then
+      leaks+="${name}@${delay}s:[${what% }] "
+      log "$name (rm -f ${delay}s depois do start) deixou: ${what% }"
+      [ -n "$left" ] && printf '%s\n' "$left" | sed 's/^/      /'
+    fi
+    # O que tiver sobrado não passa para a iteração seguinte nem para outro cenário.
+    dlx container rm -f "$name" >/dev/null 2>&1
+  done
+  log "rm -f 0–${maxms} ms depois do start: $hits/$n iteração(ões) apanharam o start a meio"
+  if [ -n "$leaks" ]; then
+    bad "rm-during-start" "um rm -f a meio de um start deixou algo para trás: $leaks"
+  elif [ "$hits" -eq 0 ]; then
+    skip "rm-during-start" "nenhuma das $n iterações apanhou o start a meio — a janela deste host é outra (CHAOS_RDS_MAX_MS)"
+  else
+    ok "rm-during-start ($hits/$n iterações apanharam o start a meio; nenhuma deixou processo, registo ou directório)"
+  fi
 }
 
 # The aggregate ceiling is what stands between one leaking workload and the
@@ -1940,7 +2059,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1948,7 +2067,7 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1; shift;;
     --max-load) MAXLOAD="$2"; shift 2;;
     --force) FORCE=1; shift;;
-    --clean) teardown_quiet; echo "sandbox limpo."; exit 0;;
+    --clean) teardown_quiet || exit 1; echo "sandbox limpo."; exit 0;;
     -h|--help) sed -n '2,60p' "$0"; exit 0;;
     *) SEL+=("$1"); shift;;
   esac
@@ -1994,8 +2113,9 @@ done
 # Espera pelas saídas em curso, re-amostrando: `DELONIX_CHAOS_TEARDOWN_WAIT` s
 # (20) para tudo, `DELONIX_CHAOS_TEARDOWN_CAP` s (120) para o que está
 # comprovadamente a sair — ver `sandbox_leftover`.
-if [ "$KEEP" -eq 0 ]; then
-  teardown_quiet
+if [ "$KEEP" -eq 0 ] && ! teardown_quiet; then
+  bad "sandbox-teardown" "containers do sandbox continuam no \`ps -a\` depois do teardown (sandbox mantido): $(printf '%s' "$TEARDOWN_KEPT" | tr '\n' ' ')"
+elif [ "$KEEP" -eq 0 ]; then
   if report=$(sandbox_leftover "${DELONIX_CHAOS_TEARDOWN_WAIT:-20}" "${DELONIX_CHAOS_TEARDOWN_CAP:-120}"); then
     [ -n "$report" ] && log "$report"
     ok "sandbox-teardown (nenhum processo com DELONIX_ROOT em $SANDBOX ficou no host)"

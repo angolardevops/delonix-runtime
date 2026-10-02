@@ -480,3 +480,761 @@ resolves through `networkDefaults` yet — that is F2.
 without the file the row is `NotConfigured`; `defaultProvider: opnsense`, `networkDefaults.nat`
 and a secret file others can read each exit 1 with the reason; `--kind firewall` is refused
 naming the five kinds.
+
+## Addendum 2026-09-30 — F2a: the crate and the move, nothing else
+
+F2 is split. **F2a** is the move D7 names, in the shape `VmBackend` left `delonix-vm` for the
+compute context (ADR-0044 P4b.2), and it changes no behaviour:
+
+- **`crates/contexts/delonix-networking`**, a context depending only on `delonix-model`.
+  It holds `gateway` (`GatewayProvider`, its registry, the `native` provider), `network_zone`
+  (`NetworkZoneProvider`, its registry) and `ownership` (the owner marks), moved from
+  `delonix-sdn` with their tests. `delonix-sdn` re-exports the three modules under their old
+  paths, so the CLI and `delonix-node-api` do not change a line.
+- **The eight failures those modules raise move with them** (`DX-1341`, `1342`, `1344`–`1346`,
+  `5340`–`5342`), each with the same text, class and number, so the CLI prints and exits as
+  before. The DX-C380 block of D5 is a later slice.
+- **`delonix-opnsense` and `delonix-proxmox` depend on the context**, not on the native
+  dataplane. The two exceptions `("dep", "delonix-opnsense", "delonix-sdn")` and
+  `("dep", "delonix-proxmox", "delonix-sdn")` are deleted: `arch_fitness.py` now sees 28 crates
+  and 9 exceptions. This is also the network half of ADR-0044's P4c row.
+
+**What F2 still owes**, unchanged from its row: the ports without default bodies, `native`
+removed, `SegmentProvider` in place of `NetworkZoneProvider`, the per-role registries with D3's
+resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope with the DX-C380 block.
+
+## Addendum 2026-09-30 — F2b: `native` removed, and `GatewayProvider` without default bodies
+
+- **The seven `GatewayProvider` operations are required.** The four that refused by default,
+  and the three that answered `Ok`/`Absent` by default, are declarations now (D1). The one
+  implementation, `delonix-opnsense`, already had every method, so nothing else changes.
+  `NetworkZoneProvider` never had default bodies.
+- **The `native` gateway provider is gone, and the registry starts empty.** It refused every
+  `ensure_*`, so no document naming it could ever be applied. `provider: native` now resolves
+  to no provider and is refused before the record is written, as any unregistered name is.
+  The message says `known: none` rather than an empty list.
+- **A record left by an earlier build that names `native` is deleted without a provider.**
+  That provider refused every write, so nothing remote carries the record's mark. A battery
+  check writes such a record by hand in an isolated root and deletes it.
+- **`DX-1342` has no producer now** (`network.unsupported_by_gateway_provider`). The variant and
+  the number stay, because the dictionary is published (`delonix explain codes`), until D5's
+  DX-C380 block renumbers the envelope.
+
+**Still owed by F2:** `SegmentProvider` in place of `NetworkZoneProvider`, the per-role
+registries with D3's resolution by name, `NetworkZoneRecord.provider`, and the D5 envelope.
+
+## Addendum 2026-09-30 — F2c: `SegmentProvider`, and a provider chosen by name
+
+- **`NetworkZoneProvider` is `SegmentProvider`** (D1), in `delonix_networking::segment`; the
+  registry, its registration type and its functions follow the name. The three failures keep
+  their numbers (`DX-1344`–`1346`) and the dictionary now names the new trait.
+- **D3's resolution is one pure function, `delonix_networking::resolve::choose`**, shared by
+  both roles. Highest first: the document's `spec.provider` (NetworkGateway only), the record's
+  provider, `networkDefaults.<role>`, and only without a `providers.yaml` the single registered
+  provider. A name that resolves to nothing is an error at every step, never a fall-through:
+  - a document naming an unregistered provider: `DX-1348` (`network.provider_not_registered`);
+  - a record naming an unregistered provider: `DX-6304`, exit 69 — the resource never moves;
+  - a default naming an unregistered provider: `DX-6303`, exit 69;
+  - a `providers.yaml` without the role's default, or a gateway with none named and zero or
+    several registered: `DX-1347` (`network.no_provider_for_role`);
+  - with no `providers.yaml`, zero or several segment providers keep `DX-1345`/`DX-1346`.
+- **`NetworkZoneRecord` keeps `provider`**, written on the first apply; a record from before
+  the field has it empty and resolves through the default. `describe` shows it.
+- **`NetworkGateway.spec.provider` is optional.** The reconciler compares it only when the
+  document names one, so an unnamed gateway does not drift against its record.
+- **Resolution runs before the record is written**, so every refusal above leaves no record.
+
+**The exit criterion changed, by the owner's decision (2026-09-30).** The F2 row asks for a
+battery check with two segment providers registered and `networkDefaults.segment` naming one.
+The battery cannot build that: only Proxmox serves the segment role, and `providers.yaml`
+takes one entry per type while `name:` stays reserved (ADR-0054). So the choice between two
+providers is proven in-process, by `resolve::tests` and `segment::tests` with fake providers
+registered in the test; the battery proves with the real binary what it can build — a default
+naming an unregistered provider exits 69, for a zone and for an unnamed gateway, and a
+`providers.yaml` without the default turns the count rule off (exit 1), with no record left
+behind. Lifting ADR-0054's `name:` reservation would let the battery register two real
+providers; that is its own decision.
+
+**Still owed by F2:** every role port extending `Provider` (D1 rule 4: `capabilities()`,
+`health`), and the D5 envelope with the DX-C380 block.
+
+## Addendum 2026-09-30 — F2d, part 1: the role ports extend `Provider`
+
+- **`GatewayProvider` and `SegmentProvider` extend `delonix_compute::vm_provider::Provider`**
+  (D1 rule 4): `id() -> ProviderId`, `capabilities() -> ProviderReport`, and `health`. The role
+  ports' own `id() -> &'static str` is gone, so there is one identity per provider.
+- **OPNsense answers with its declared report** (`capability_report(true)`), **Proxmox with its
+  declared network report** (`network_capability_report(true)`). Neither contacts anything to
+  answer, and the value exists only once its registration was configured.
+- **`delonix-networking` depends on `delonix-compute`**, the direction D7 allows (compute never
+  depends on networking); the C4 page shows the edge.
+
+**Part 2, the D5 envelope and the DX-C380 block, is a separate change**: it renumbers published
+codes, which D5 asks the release notes to name, and it has to be reconciled with the four codes
+F2c introduced.
+
+## Addendum 2026-09-30 — F2d, part 2a: the DX-C380 block
+
+**The owner decided (2026-09-30) to renumber every published network failure that is a D5
+reason into the block**, and that the old DX-1348 exits 69 as D1 rule 2 says. That goes one
+step past D5's own text, which kept DX-1345/1346 as configuration errors: they are
+`invalid_intent` now, still class 1 and exit 1.
+
+- **Each reason owns one `NN`**, whatever its class: `delonix_model::codes::Reason`, in D5's
+  table order from `80` (`invalid_intent`) to `96` (`dependency_failed`), and
+  `Reason::number()` builds `DX-C3NN` from the reason's class. A test holds the block to the
+  reasons: an entry in `80`–`99` of the network domain that is no reason, or is in another
+  class, fails. A reason gets an entry when something raises it; the others keep their
+  number reserved and no entry yet.
+- **The mapping**, and the exit code each failure answers now:
+
+  | new | reason | replaces | exit |
+  |---|---|---|---|
+  | DX-1380 | `invalid_intent` | 1343, 1345, 1346, 1347 | 1 (unchanged) |
+  | DX-5389 | `provider_conflict` | 5340, 5341, 5342 | 5 (unchanged) |
+  | DX-6381 | `unsupported_capability` | 1342, 1348, 6303, 6304 | 69 (1342 and 1348 were 1) |
+  | DX-6383 | `provider_unavailable` | 9303 (OPNsense transport) | 69 (was 1) |
+  | DX-7385 | `provider_auth_failed` | 9305, 9306 (OPNsense 401/302/403) | 77 (was 1) |
+
+  The release notes must carry this table: a script that matched `DX-5340` or read exit 1 for
+  a refused OPNsense key sees a different answer.
+- **A number never changes meaning and is never reused**, so the old ones are not deleted:
+  `codes::RETIRED` keeps each with its published texts, the number that replaced it and the
+  last release that emitted it (`None` for 1347, 1348, 6303 and 6304, which only ever lived on
+  the main branch — retired anyway, so a later entry cannot take them). `delonix explain
+  DX-5340` still answers, with `Retired: replaced by DX-5389`; `explain codes --json` lists the
+  retired ones with `replaced_by`, and the generated `codigos.html` has a «Retired codes» table.
+  A test refuses a retired number or id back in the dictionary.
+- **Several variants share a reason, and the variant still says which.** `Error::reason()` in
+  `delonix-networking` and in `delonix-opnsense` is the exhaustive match; `number()` asks it
+  first. The tests that used the number to tell «not ours» from «someone else's staged
+  changes» now also match the variant or the message.
+- **`provider_auth_failed` needed a class-7 carrier.** The only one was `Error::Io` with
+  `PermissionDenied`, which prints «I/O error» for a refused API key; the model gained
+  `Error::PermissionDenied(String)` («permission denied: …», `DX_PERMISSION_DENIED`, exit 77).
+- **Left as they are**: the registration refusals (1341, 1344 — a programming error in the
+  process that registered, not a provider failure), OPNsense's 404, unclassified status,
+  oversized or unparseable body and unbuildable client (no D5 reason names them), DX-6301/6302,
+  and the Proxmox errors, which live in the VM domain.
+
+**Still owed by F2, part 2b:** the envelope's context fields (`provider`, `role`, `step`,
+`cause` redacted, with ADR-0049's grep-for-the-secret test) on the CLI and the node API.
+
+## Addendum 2026-09-30 — F2d, part 2b: the envelope's context, and the redaction
+
+- **The context travels inside the error.** `delonix_model::ErrorContext` (`provider`, `role`,
+  `capability`, `step`, `plan_digest`, `cause`) rides on the `Error::Coded` carrier the number
+  already uses (ADR-0043 D4). `Error::with_context` adds it without touching the number, the
+  class, the message or the exit code; a field set closer to the failure wins over one added
+  further up, so a caller can add the role without overwriting the step the provider named.
+- **One problem document, built from the error**: `delonix_model::codes::problem(&e, instance)`
+  gives the RFC 9457 members (`type` points at the dictionary entry,
+  `codigos.html#DX-6381`; `title`, `status`, `detail`, `instance`) plus `code` (the `DX_*`
+  class), `dx`, `exit`, `reason` for a code of the network block, and the context fields that
+  are set. An unset field is left out. `Class::http_status` gives each class its HTTP word, the
+  ones the management API already used for the classes it mapped.
+- **The CLI prints the same fields** under the error line: `reason:`, `provider:`, `role:`,
+  `step:` (translated labels; the values stay as the machine reads them). The network Kinds add
+  the context: `resolve_provider` with the role and the provider the document, the record or
+  the default named, and every provider call with its step (`ensure_alias`, `commit`,
+  `ensure_vnet`, `remove_zone`…).
+- **Redaction lives in the provider, because only it holds the credential.** Both remote clients
+  read every answer in one place, and it now passes through `delonix_model::redact_known`
+  before it can reach an error: OPNsense removes the API secret and the Basic header value it
+  travels in (a proxy or an error page can echo it); Proxmox removes the token secret or the
+  password, and the ticket and CSRF token a password login holds. **This closed a real leak**:
+  each client put the answer's body into its error message as it came, and a node that echoed
+  the request put the secret on the operator's terminal. The ADR-0049 test pattern now guards
+  it: `no_rendered_error_carries_the_credential_the_answer_echoed`, in both crates, renders
+  every such error as its message and as its problem document and greps for each secret; with
+  the redaction removed it fails and prints the secret.
+- **Not in this slice**: the node API keeps the `google.rpc.Status` body the published OpenAPI
+  declares for its one route; moving it to problem+json changes the contract and is ADR-0042's
+  step D (and F6 brings the network RPCs that would carry the context). `cause` has no producer
+  yet: the provider's text is already in the message, redacted, and splitting it out is a
+  change to each client's error variants. `plan_digest` waits for F4.
+
+**F2 is closed** with this slice.
+
+## Addendum 2026-09-30 — F3a: the policy IR, its reference evaluator, and the golden table
+
+F3 is sliced by lowering: **F3a** the IR and its reference semantics (this addendum), **F3b** the
+nft lowering, **F3c** the Proxmox per-VM lowering, **F3d** the OPNsense lowering. Each later slice
+is checked against the same golden table.
+
+- **`delonix_net_rules::policy`** — `Policy` (direction, default, ordered rules), `Rule` (action,
+  proto, ports, icmp type, peer, stateful, log, origin, guardrail), `Peer` (`Any`, `Cidr`,
+  `Namespace`, `OtherNamespaces`, `Selector`), `Packet`, and **`evaluate`**, the reference verdict:
+  the return of an admitted flow passes when every rule is stateful; otherwise the first rule that
+  matches decides and the default decides the rest. `any` with a port matches TCP and UDP only.
+  Still zero dependencies. `OtherNamespaces` is a peer this ADR's list did not name: the namespace
+  guardrail cuts «a workload of any namespace but this one», which neither `Namespace` nor
+  `Selector` can say, and traffic from outside the engine's workloads never matches it.
+- **`delonix_networking::policy::from_container_fw`** — the total parse from the persisted
+  `ContainerFw` (no record migration). One rule the IR cannot hold refuses the whole set with
+  DX-1380 `invalid_intent`, naming the rule; nothing is skipped. It rebuilds the holder chain's
+  order: user rules, then the namespace guardrail (`Allow Namespace(ns)` only without an explicit
+  inbound intent, then `Deny OtherNamespaces(ns)`, both marked `guardrail`), then the defaults.
+- **`delonix_networking::policy::golden::cases()`** — the golden table, public so a lowering in
+  another crate runs the same cells: 24 cells of record × packet × verdict, covering the open
+  record, the S1 C1 case (one inbound deny keeps the isolation), a Dependency-style allow across
+  namespaces, the `any`+port widening case, first match, egress, and a bare host address.
+- **The verdicts were written from reading `fw_chain_body`, not measured against a kernel.** F3b
+  closes that: it renders the IR as nft, checks the ruleset with `nft --check`, and evaluates the
+  rendered rules over the same cells.
+- **Two differences from today's code, found by writing the parse and left as they are for now:**
+  a reversed port range (`90-80`) passes `validate_container_fw` (and would fail inside `nft`)
+  but is refused by the parse; and a disabled record gives an empty chain, so a namespaced
+  workload with `enabled: false` has no isolation guardrail. The IR reproduces that (two open
+  policies). ADR invariant 3 says the guardrail's absence is an error; making it one changes what
+  a disabled firewall means and is its own decision.
+
+## Addendum 2026-09-30 — F3b: the nft lowering, and the holder chain built from it
+
+- **`delonix_sdn::policy_nft::chain_body`** renders a `TargetPolicy` as the lines of one address's
+  part of the workload chain. `infra::fw_chain_body` is now parse, then render: the holder chain is
+  built from the IR and nothing else. `validate_container_fw` runs the same translation last, so a
+  record the IR or the lowering refuses is refused on the host and in the holder, before `nft -f`,
+  with the previous ruleset kept.
+- **What the holder chain cannot hold is refused by name**: ICMP (`proto` or type), a selector or
+  namespace peer on a user rule, a logged rule, a stateless rule, an egress guardrail. None of them
+  can come from a `ContainerFw` today; the refusals exist so a later IR producer cannot reach the
+  chain with a meaning the text would drop.
+- **Three proofs, each verified to go red under a mutation**:
+  - the lines equal the old generator's, kept verbatim as a test oracle, for every golden record
+    and five shapes the table does not cover;
+  - an evaluator over the rendered TEXT (prologue plus body, every token parsed, an unknown token
+    fails the test) gives each of the 24 golden cells the reference verdict. Anchoring the egress
+    default on `daddr` turns it red;
+  - `nft --check` accepts every rendered chain (via `unshare -rn`; `counter acept` turns it red).
+    The hosted CI runner blocks unprivileged user namespaces, so there this check returns without
+    running; it ran here with nftables 1.0.9.
+- **Two differences from the old text, and neither changes a verdict.** (1) Inbound and outbound
+  rules are no longer interleaved in record order; each direction keeps its own order, which is the
+  one that decides — an inbound line anchors on `ip daddr <workload>`, an outbound one on
+  `ip saddr <workload>`, and a forwarded packet never carries the workload's address at both ends.
+  (2) A record with `namespace: ""` names the `default` set, as the attach side always did; the old
+  generator hashed `""`, a set no workload joins. Serde never produces that record.
+- **The reversed port range is now refused by `validate_container_fw`** (F3a's first open
+  difference), because validation goes through the parse. Measured before deciding: nft refuses
+  `90-80` itself («Range has zero or negative size»), so the only change is where and how clearly
+  the refusal is reported. The disabled-record guardrail (F3a's second difference) is unchanged.
+
+## Addendum 2026-09-30 — F3c: the per-VM firewall is a lowering of the IR
+
+- **`delonix_compute::vm_firewall::Policy::from_ir`** lowers one direction of the IR to the policy
+  a VM backend receives (`VmBackend::apply_firewall`). It refuses, by name and naming the rule: a
+  namespace, other-namespaces or selector peer; an engine guardrail; ICMP (by protocol or type); a
+  logged rule; a stateless rule. A single-host prefix is sent as the bare address, the form the
+  node lists back. Per D6, `vm_firewall::Rule` is now a lowering output; the port's signature is
+  unchanged.
+- **The production path goes through it.** A `NetworkPolicy` with `scope: vm` is built by the
+  CLI as IR, using the same `delonix_networking::policy::rule_of` a container's record uses, and
+  only then lowered. The shape checks and messages the document already had stay in front.
+- **Proof**: a node evaluator runs over the `NodeRule`s that `vm_firewall::apply` posts. It
+  models the connection-tracking accept the node puts at the head of a guest chain, the rules in
+  position order, then the guest policy. It gives each of the 24 golden cells the reference
+  evaluator's verdict for the same IR, with the engine's namespace guardrails removed (a VM on a
+  node is not on the SDN they name, and `from_ir` refuses them, which the test also checks).
+  Two mutations were each caught: `any` plus a port expanded to TCP only, and an inverted default.
+- **Two changes to what a `scope: vm` document is sent**: a reversed range (`90-80`) is now
+  refused, as it is for a container; and a prefix with host bits (`10.0.0.5/24`) is sent as the
+  network it names (`10.0.0.0/24`). The second changes the comparison key once, so a VM policy
+  applied by an earlier binary with such a prefix plans one update, and the next apply converges it.
+- **Not validated against a live node in this slice**: the node evaluator follows how the
+  per-VM firewall is documented to work and ADR-0052's live case, which read the compiled
+  `tap<vmid>i0-IN` chain once. No packet crossed a VM in a test.
+
+## Addendum 2026-09-30 — F3d: the perimeter filter is a lowering of the IR, measured on a live appliance
+
+Measured on a fresh OPNsense 26.1.2_5, built from the published `opnsense:26.1` image with
+`delonix vm create`, with a lab API key kept in a 0600 file:
+
+- `firewall/filter/add_rule` takes `action`, `destination_port`, `log`, `statetype`, `sequence` in
+  the flat form, and `search_rule` answers them in the same form.
+- pf loads filter rules in `sequence` order, whatever order they were created in. So order needs
+  neither `move_rule_before` nor an update in place.
+- `protocol: TCP/UDP` loads as a TCP and a UDP pf rule under one label. That is the IR's
+  «`any` with a port».
+- `block` loads as `block drop`, `log` as `log`, and a range `8000-8080` as `port 8000:8080`.
+
+What F3d adds:
+
+- **`GatewayRule`** gains `action`, `destination_port`, `log`, `stateful`, `sequence`. The
+  defaults are what every earlier rule was: pass, any port, keep state, no log, the appliance's
+  sequence. So an existing rule does not read as drift. The client sends the new fields, and
+  `rule_drift` compares them.
+- **`delonix_networking::policy::gateway_rules`** lowers one direction of the IR for a target (an
+  alias, a prefix or an address):
+  - each rule is `<name>#<n>` at `sequence = first + n`;
+  - the default verdict is one more rule, `<name>#default`, at the end.
+
+  It refuses by name (DX-1380) a namespace, other-namespaces or selector peer, an engine
+  guardrail, and an ICMP type (the field exists on the appliance; the lowering was not measured
+  against it).
+- **Proofs**:
+  - An appliance evaluator runs over the rules. It models pf quick rules in `sequence` order and
+    state kept by a keep-state rule. It gives each of the 24 golden cells the reference verdict,
+    with the guardrails removed and their refusal checked. «`any` with a port» sent as TCP only
+    turns it red.
+  - Live, `a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields` ensures and
+    commits a lowered policy through the provider. It reads every field back from `search_rule`,
+    and reads pf's load order from `pf_statistics`. It then removes everything and retires the
+    owner.
+- **Found on the way, and fixed first (#624)**: the client's pending-change check read two views
+  of the running state that go stale on this appliance:
+  - a deleted alias's pf table;
+  - `list_rule_ids`'s label cache, which keeps the pf lines past the end of a shorter ruleset.
+
+  Each made the engine's own deletion fail its commit, and refused every commit after it.
+- **Catalog**:
+  - `net.gateway.rule-order`, `firewall.stateless` and `firewall.logging` become `partial`. The
+    port carries them and they are live-tested, but no field of `kind: NetworkGateway` reaches
+    them yet.
+  - `net.ownership-marker` becomes `supported`: its live test ran against this appliance.
+- **Not in this slice**: a manifest surface that declares a policy for a gateway. That is new
+  schema, with a record and a teardown by rule count, and it is its own decision.
+
+## Addendum 2026-09-30 — F3e: `kind: NetworkGateway` declares policies
+
+- **`spec.policies`** declares one direction of one target's policy in the shape a
+  `NetworkPolicy` has. The target is an alias, a prefix or an address. The fields are:
+  - `name`, `target`, `direction` (`ingress` or `egress`), `defaultPolicy` (`deny` when omitted);
+  - `sequence`, the first rule's position;
+  - `rules`, each with `proto`, `port`, `from` or `to`, `action`, `log` and `stateful`.
+- **Lowering.** The rules are built as IR through `delonix_networking::policy::rule_of`, which is
+  now public: the same parse a container's record uses. `gateway_rules` then lowers the IR.
+- **Refused before anything is sent**:
+  - a direction that is neither `ingress` nor `egress`;
+  - a peer named on the wrong side (`from` on an egress rule, or `to` on an ingress rule);
+  - a reversed range;
+  - a name that cannot be an identity;
+  - two policies with one name;
+  - two policies whose positions overlap.
+- **The record keeps the policies last declared.** A teardown recomputes their rule identities
+  from it. The reconciler compares them: a change plans a Replace, as every `NetworkGateway`
+  change already does, since there is no update in place.
+- **Live, by the CLI, against the OPNsense 26.1.2_5 lab appliance.** The manifest had two
+  policies, one ingress with three rules and one egress with one rule. The run, with an isolated
+  root:
+  - `stack apply` put 6 rules on the appliance, and every field read back as declared;
+  - pf loaded the rules in `sequence` order, with `TCP/UDP` as two pf rules;
+  - `stack plan --detailed-exitcode` answered 0;
+  - a second `apply` was idempotent;
+  - `delete networkgateways` left no rule, no pf line and no owner category of its own.
+
+  The rules carry no interface, so they are floating (`in quick inet`), as every rule this client
+  wrote before.
+- **Catalog.** `net.gateway.rule-order`, `firewall.stateless` and `firewall.logging` become
+  `supported`. The manifest now reaches them, and the live provider test exercises them.
+
+## Addendum 2026-10-01 — F4a: a `NetworkGateway` plan observes the appliance
+
+F4 is sliced like F3:
+- **F4a** (this addendum): observe for `NetworkGateway`;
+- **F4b**: `planDigest` and `--plan-digest`;
+- **F4c**: the step ledger and the reconciliation of an apply killed mid-way;
+- **F4d**: the same for `NetworkZone`, with per-node verification on the two-node Proxmox lab.
+
+What F4a adds:
+
+- **Observe.** `GatewayProvider::observe(owner)` is a required method, because the port has no
+  default bodies. It is read-only and returns `GatewayObserved`: the aliases and rules carrying
+  the mark, as the appliance holds them, plus the rules it has disabled. OPNsense implements it
+  from `search_rule` and `alias/search_item`, keeping the rows whose categories carry the mark.
+- **Compare.** `gateway_drift` is pure. It names every difference between what a record declared
+  and what the provider holds:
+  - an object that is missing, or owned and not declared;
+  - a field that differs, where a `sequence` counts only when declared and the protocol is
+    compared case-insensitively;
+  - alias content, compared as a set;
+  - a rule that is disabled.
+- **Plan.** A `NetworkGateway` record's `remote` field is observed on every plan. The manifest
+  always wants `in sync`. So a change made on the appliance by hand is drift:
+  - `stack plan --detailed-exitcode` answers 2;
+  - `delonix drift` names it;
+  - `stack apply` refuses without `--replace`, as every change to this Kind does (there is no
+    update in place);
+  - `--replace` converges it.
+
+  A record that cannot be observed says so instead of claiming to be in sync. That covers a
+  record without an owner mark, and one from the retired `native` provider.
+- **Live against the OPNsense 26.1.2_5 lab appliance.**
+  - The provider test reads back exactly the lowered rules. A rule disabled by hand and applied
+    is drift, and it is in sync again once re-enabled.
+  - By the CLI, with an isolated root:
+    - plan 0;
+    - a rule disabled by hand gives plan 2, with `remote: rule 'f3e-web-in#2' is disabled on the
+      appliance`, and the same line in `delonix drift`;
+    - `apply` refuses without `--replace`, and `--replace` converges (plan 0);
+    - `delete` leaves no rule and no category.
+- **Catalog.** OPNsense `net.observe` becomes `supported`.
+
+## Addendum 2026-10-01 — F4b: the plan digest, and a stale plan refused
+
+- **`delonix_networking::plan::plan_digest`** is SHA-256 over the canonical JSON of what a plan is
+  decided from. Object keys are written in sorted order at every depth. The inputs are:
+  - the normalized intent, which is the document's compared fields;
+  - what the provider holds under the record's mark (`gateway_fingerprint`): aliases by name,
+    rules by description, every observed field, and whether a rule is disabled;
+  - the provider id and the catalog version;
+  - the states of the capabilities the document uses;
+  - `PLAN_FORMAT`.
+
+  Pure, with a test that every input moves the digest and that order does not.
+- **`stack plan -o json`** carries `planDigest` on each `NetworkGateway` change. A document no
+  provider resolves for has none.
+- **`stack apply --plan-digest <d>`** is repeatable, one per network document, and the top-level
+  `apply` takes it too. Before the first write it recomputes each network document's digest. One
+  that is not among those given is refused as **DX-5390 `network.stale_plan`** (exit 5, reason
+  `stale_plan`), and nothing is written. The flag is also refused when the manifest has no
+  network document to check. Without the flag nothing is checked: `apply` plans and applies in
+  one invocation, as before.
+- **Live against the OPNsense 26.1.2_5 lab appliance**, by the CLI with an isolated root:
+  - the digest planned before the first apply is accepted and creates the 6 rules;
+  - the digest changes after the apply, and planning twice gives the same one;
+  - a wrong digest is refused with DX-5390 and exit 5;
+  - with a rule disabled on the appliance by hand between plan and apply, the apply with the old
+    digest is refused and the appliance is untouched (5 of 6 rules enabled before and after);
+  - the apply with the new digest converges (6 of 6).
+- **Not in this slice**: `NetworkZone` has no digest yet (F4d). The digest is computed with a
+  second observation of the appliance per plan, separate from the one behind the `remote` field.
+
+## Addendum 2026-10-01 — F4c: the step ledger, and an apply killed mid-way
+
+**Measured first, on the lab appliance with the F4b binary.** A `stack apply` of 6 rules was
+killed (`kill -9`) after 2 were staged and before the commit. The appliance was left with 2 rules
+configured and none loaded in pf. Afterwards:
+- the next `stack apply` planned a replace, because 4 rules were missing;
+- `--replace` was refused with DX-5389, naming this engine's own two staged rules as «not this
+  engine's».
+
+The cause is that what a provider value staged lives only in that process's memory. The document
+was stuck until someone went to the appliance by hand.
+
+What F4c adds:
+
+- **`delonix_networking::ledger::StepLedger`** is plain data, kept in the record. Each step
+  (`ensure_alias`, `ensure_rule`, `remove_rule`, `remove_alias`, `commit`) is opened and the
+  record saved before it runs, then settled and saved after. `finish()` marks the end of a run.
+  `is_interrupted()` is true when a step did not end well, or when steps are done and the run
+  never finished.
+
+  The second case was found live. The first version called a run complete when no step was open.
+  A kill landed after step 2 was settled and before step 3 was opened: every step read `done`,
+  with 2 of 6 rules created.
+- **`GatewayProvider::adopt_pending(owner, removed_ids)`** takes over what a dead run staged:
+  - every pending change of an object carrying the owner's mark;
+  - every pending deletion whose id is in `removed_ids`.
+
+  Anything else pending stays foreign, and the pre-check still refuses it.
+- **`GatewayProvider::owned_rule_ids(owner)`** gives the provider's ids of the owned rules. A
+  teardown saves them in the ledger before the first deletion. A deleted rule carries no mark,
+  so its id is the only way to recognize it later.
+- **The plan.** A record's `applied` field is `complete`, or where its last run stopped. The
+  manifest wants `complete`, and the field converges live. So a plain `stack apply`, with no
+  `--replace`, resumes: it adopts what was staged, ensures what is missing, and commits. While a
+  run is interrupted the `remote` field is not compared, because what is missing is what the run
+  had not reached.
+- **Live, the same kill with the F4c binary:**
+  - after the kill, 2 rules were configured and none loaded;
+  - the next `stack apply` answered `the last run was interrupted: step 2 (ensure_rule
+    'f3e-web-in#2') did not finish, after 1 step(s) done — resuming, with 2 staged change(s) of
+    it adopted`;
+  - it left 6 rules configured and 7 pf lines, and `stack plan --detailed-exitcode` answered 0;
+  - the ledger on disk read 7 steps done and `finished: true`.
+- **Not in this slice**:
+  - `partial_apply` and `rollback_failed` as reasons, and compensations. An apply that fails
+    still leaves what it did, named in the ledger.
+  - A teardown killed mid-way was exercised on the TLS mock only, not live.
+  - A record written before the ledger existed cannot be resumed: it has no steps to read.
+
+## Addendum 2026-10-01 — F4d: the same lifecycle for `NetworkZone`
+
+Proven on the two-node Proxmox lab (PVE 9.2.2, nodes `pve` and `pve2`).
+
+What F4d adds:
+
+- **Observe.** `SegmentProvider::observe(zone, owner)` reads back whether the zone exists, the
+  vnets carrying the owner's mark, and the vnets in the zone that do not carry it. The record's
+  `remote` field is `in sync`, or each difference. Read-only: it takes no lock.
+- **It reads the RUNNING configuration.** Measured: the plain `GET /cluster/sdn/zones` and
+  `…/vnets` return the PENDING configuration. A zone staged and never applied is there, with
+  state `new`. `?running=1` returns what the last apply made live, with the same fields.
+- **Plan digest.** `planDigest` and `--plan-digest` work as for the gateway. The fingerprint
+  includes the vnets of others in the zone, so a vnet added out of band makes the plan stale.
+- **Validate.** `resolve::require_capabilities` runs before the record or the provider is
+  touched, for both Kinds. It refuses with DX-6381 and lists every unmet capability with its
+  state.
+- **An apply killed mid-way.** Measured first, with the binary before this change: a
+  `stack apply` of 4 vnets was killed after 2 were staged. The cluster was left with the zone
+  and 3 vnets staged, nothing running, and the SDN lock held under a token only the dead process
+  knew. `--replace` was refused with DX-5515. The lab had to be cleaned by hand
+  (`DELETE /cluster/sdn/lock?force=1`, then a rollback).
+
+  The fix is inside the Proxmox provider; the port did not change:
+  - the lock token is written to `proxmox-sdn-lock.json`, next to the task ledger, with the
+    holder's pid and start time, before anything is staged. It is removed when the transaction
+    ends;
+  - the next transaction that finds the file with a dead holder rolls back with that token,
+    which also releases the lock, and only then takes the lock itself;
+  - a holder that is still alive is another apply of this engine. It is refused as
+    `SdnLocked`, and nothing is sent.
+- **The plan.** The record keeps a one-step ledger (`transaction`) and the `applied` field, as
+  the gateway does. A plain `stack apply`, with no `--replace`, recovers.
+- **Zone ownership across a kill.** The zone carries no mark, so the record's word is the only
+  claim. A zone that is not running when an apply starts is claimed in the record before the
+  transaction, and the claim is taken back if the transaction fails. The closure still trusts
+  only what the record said before the claim, so a zone someone else staged is still refused.
+- **Per-node verification (D4.5)** is the one from plan 63, slice 0b: an SDN apply waits for
+  each node's `srvreload networking` task and fails if one fails. F4d adds nothing to it. In
+  the live runs below both nodes' reloads ended `OK`.
+- **Live:**
+  - apply, then plan: 0;
+  - a vnet added out of band between plan and apply: the apply with the old digest was refused
+    with DX-5390, and the cluster was unchanged;
+  - the engine's vnet removed out of band: plan 2, `remote: vnet 'vf4da' is missing`, and
+    `drift` names it. `--replace` converged;
+  - the kill above, with the F4d binary: the next plan answered 2 with `applied: interrupted:
+    step 1 (transaction 'zf4dk') did not finish`. The next plain `stack apply` logged that a
+    transaction died holding the lock, discarded what it staged, and left the zone and 4 vnets
+    running. The plan after it answered 0;
+  - delete left no zone and no vnet on the cluster.
+- **The three cases first listed as not validated, measured live afterwards:**
+  - **Killed after the cluster committed, before the record was saved.** The kill landed when
+    `?running=1` already listed both vnets. The record read `zone_owned: true` and an open
+    `transaction` step. Plan answered 2; the next plain `stack apply` answered 0 and the plan
+    after it 0. The delete left nothing on the cluster.
+  - **A lock nobody recorded** (taken by hand, token thrown away — what a binary from before
+    this change leaves). The apply is refused with DX-5515 and stages nothing. The engine does
+    not force a lock it cannot prove is its own; the message now names the two calls that clear
+    it (`DELETE /cluster/sdn/lock?force=1`, `POST /cluster/sdn/rollback`). After the forced
+    release the same apply answered 0.
+  - **A node's network reload that fails.** `ifreload` on `pve2` was replaced by a script that
+    exits 1. The apply ended in 5 s with DX-6512, naming `pve2` and `command 'ifreload -a'
+    failed: exit code 1`, with the cluster task itself `OK`.
+    A second variant, where the script also failed `ifreload -V`: the node dies before it
+    forks the task, no reload appears, and the apply fails after the 600 s task timeout, naming
+    `pve2`.
+  - **A defect these runs found.** A transaction that failed after the cluster committed gave
+    back the zone claim. The next apply then refused its own zone (DX-5389), and a delete left
+    the zone on the cluster. Now a failed transaction keeps the claim when the zone it created
+    is running. Measured after the fix: the next plain apply answered 0, and the delete left
+    nothing.
+- **Not in this slice**:
+  - Ten minutes is a long wait for a node that never forks its reload. The timeout is the
+    client's task timeout and was not changed here.
+
+## Addendum 2026-10-01 — F5a, part 1: the NAT role, and OPNsense as its first provider
+
+The port, its registry and the provider, with a live case. No Kind reaches it yet; that is
+part 2.
+
+**Measured first, on the lab appliance (OPNsense 26.1.2_5):**
+
+- **The two controllers are two models.** `firewall/source_nat` is flat, like the filter
+  (`source_net`, `description`, `enabled`, `categories` as uuids). `firewall/d_nat` is the older
+  shape: nested `source`/`destination`, `descr`, `disabled`. Its mark is written in `category`
+  **by name**; a read then answers the uuid under `categories`, like the other tables.
+  `categories` written directly to `d_nat` is ignored.
+- **Any apply pushes everything.** A source NAT rule added and not applied was loaded by
+  `firewall/filter/apply`. `source_nat/apply` loaded two destination NAT rules that were only
+  staged.
+- **A NAT rule has no label in pf.** A filter rule carries its uuid as a label; a NAT rule does
+  not. It is recognized by the text of its line in `pf_statistics/rules`, section `nat rules`:
+
+  ```text
+  nat on vtnet0 inet from 10.77.0.0/24 to any -> (vtnet0:0) port 1024:65535
+  rdr on vtnet0 inet proto tcp from any to (vtnet0:1) port = 8443 -> 10.77.0.10 port 443
+  ```
+
+What part 1 adds:
+
+- **`delonix_networking::nat`**: `NatRule` (source or destination), `NatRule::validate`,
+  `NatObserved`, `nat_drift`, the `NatProvider` port (every method required) and its registry.
+- **The model is what can be read back from pf, and nothing more.** A source NAT rule always
+  has a source network, at its network address. A destination NAT rule always has `tcp` or
+  `udp`, a port, a target address and a target port. IPv4 only. Anything else is refused by
+  `validate`, naming the field.
+- **`delonix_opnsense::OpnsenseNatProvider`**, registered with the gateway provider from the
+  same `providers.yaml` entry. The two share one connection; each keeps its own staging.
+- **The commit** refuses when anything staged is not its own. That includes the filter's and
+  the aliases' pending changes, because the same apply would push them. After the apply it
+  reads pf: a rule it created has to be loaded, and one it removed has to be gone.
+- **The OPNsense report**: `net.nat.snat` and `net.nat.dnat` are `supported`, citing the live
+  case. `net.nat.one-to-one` and `net.nat.npt` stay `not-implemented`.
+- **Live** (`a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed`):
+  - both rules staged, and neither line in pf before the commit;
+  - both lines in pf after it; observe equals the declaration;
+  - another mark is refused with DX-5389, and removes nothing;
+  - a rule staged by hand refuses the next commit, nothing is loaded, and what the engine had
+    created is deleted again;
+  - an owned rule disabled by hand is drift, named;
+  - after the removal both lines are gone, and the appliance has nothing staged.
+
+  The case fails with the foreign-pending check removed.
+- **What the commit does not see**, said here:
+  - a NAT rule someone else deleted and did not apply;
+  - a staged rule whose line cannot be derived (a source that is an alias, a target that is
+    not an address);
+  - two rules with the same source network, or the same protocol, target and target port,
+    read as one line.
+- **Not in part 1**:
+  - a manifest field. Part 2 adds `nat:` to `NetworkGateway`, with the plan, the digest and
+    the ledger.
+  - `networkDefaults.nat` still refuses every value.
+  - a gateway-only commit does not look at staged NAT rules of others, and pushes them.
+  - the appliance in the lab has one interface (`lan`); no packet was translated.
+
+## Addendum 2026-10-02 — F5a, part 2: `nat:` on a `NetworkGateway`
+
+- **The manifest field.** `spec.nat` is a list of `{ description, kind: snat|dnat, interface,
+  source, protocol, port, target, targetPort }`. A `snat` defaults its target to
+  `interface-address`; a `dnat` defaults `source` to `any` and `targetPort` to `port`. Each
+  entry is validated before any provider is reached, and a description declared twice is
+  refused.
+- **The provider is the document's.** NAT rules are served by the NAT provider registered
+  under the same id as the gateway provider that serves the document. A provider that is not
+  registered for the NAT role is refused (`ProviderNotRegistered`), naming the role.
+  `networkDefaults.nat` stays refused: there is no separate choice to make.
+- **The lifecycle is the gateway's.** The NAT rules are part of the record, the `remote`
+  field, the plan digest and the step ledger (`ensure_nat`, `remove_nat`, `commit_nat`). A
+  change to `nat` plans a replace, like `aliases`, `rules` and `policies`. Validate adds
+  `net.nat.snat`/`net.nat.dnat` to the capabilities the document needs.
+- **One apply loads everything, and the two halves account for it.** The gateway commits
+  first, then the NAT commit proves its rules in pf.
+  - The gateway's foreign check now counts staged NAT rules that do not carry the document's
+    owner mark. Before this, a document with only filter rules pushed a NAT rule someone else
+    had staged (the gap part 1 named).
+  - A document with only `nat:` runs no gateway check and no gateway commit: it stages nothing
+    on the filter.
+- **A pre-check refusal is a ledger step.** Before this, a refused pre-check left the record
+  written ahead with an empty ledger, and the next plan read the rules as missing and asked
+  for `--replace`. Now the plan says `applied: interrupted: step 1 (check_no_foreign_pending)
+  failed`, and a plain `stack apply` retries. This was a defect of the gateway path before
+  NAT; it showed in this slice's live run.
+- **Live** (lab OPNsense 26.1.2_5, binary of this branch):
+  - a source and a destination NAT rule: apply 0, both lines in pf, plan 0;
+  - the owned source rule disabled by hand: plan 2, `remote: nat rule 'f5 out' is disabled
+    on the provider`, and `drift` names it; an apply with the old digest refused (DX-5390);
+    `--replace` converged; delete left no row and no line;
+  - killed (`kill -9`) after both NAT rules were staged and before the commit: nothing in pf,
+    plan 2 with `applied: interrupted: step 3 (commit)`; the next plain apply adopted and
+    loaded both; plan 0;
+  - one document with an alias, a filter rule and a source NAT rule: apply 0, plan 0, delete
+    clean;
+  - a filter-only document with a NAT rule staged by hand: refused with DX-5389 naming the
+    NAT rule, nothing loaded; plan 2 with `interrupted`; after the hand rule was removed, a
+    plain apply answered 0 and the plan 0.
+- **Not in this slice**: one-to-one NAT and NPT; a NAT rule whose source is an alias; a
+  second interface on the lab appliance, so no packet was translated.
+
+## Addendum 2026-10-02 — F5b: the IPAM role, and Proxmox's SDN IPAM as its first provider
+
+- **The port.** `delonix_networking::ipam`: `IpamSubnet` (vnet, CIDR at its network address,
+  gateway, DHCP ranges), `IpamReservation` (vnet, address, MAC), `IpamObserved`, `ipam_drift`,
+  `held_reservations`, and `trait IpamProvider: Provider` with `prepare_zone`,
+  `ensure_subnet`/`remove_subnet`, `ensure_reservation`/`remove_reservation` and `observe`. A
+  registry by id like the NAT one: a zone's addressing is served by the IPAM provider registered
+  under the id of the segment provider that serves the zone, and one without the role is refused
+  (`ProviderNotRegistered`). The error context keeps `role: segment`, as F5a's NAT steps keep
+  `gateway`: the step name (`ensure_subnet`, `remove_reservation`) says what it was.
+- **Two kinds of write, measured on PVE 9.2.2, and they fix the order.**
+  - The zone's `ipam`/`dhcp` options and the subnets are STAGED: they run inside the segment
+    provider's transaction, after the zone and its vnets, with the lock token the shared client
+    holds. The IPAM provider is registered with the SAME client as the segment provider.
+  - A reservation is IMMEDIATE and is refused until its subnet is running ("can't find any
+    subnet for ip"): made after the transaction, one ledger step each, the record updated after
+    every one.
+  - A teardown releases the reservations first: the node refuses to delete a subnet that still
+    holds one ("cannot delete subnet …, not empty") and a vnet that still holds a subnet.
+- **What the node does that the schema does not say** (each one measured):
+  - a zone without `ipam` takes a reservation with a success answer and stores nothing — every
+    reservation is read back after it is made;
+  - the `ipam` of a zone cannot change once a subnet exists; `dhcp` can;
+  - the per-zone `dnsmasq` serves only the MACs in its `ethers` file
+    (`dhcp-ignore=tag:!known`); the node writes there, when a guest starts, the address its IPAM
+    holds for the guest's MAC;
+  - a guest created on a vnet whose zone serves DHCP already holds an address of the range for
+    its MAC. A reservation that ADDED a second address for that MAC was accepted, and the guest
+    then held two — the first live run left the reserved one gone and the allocated one in place
+    after the destroy. So a reservation for a MAC that already holds an address in the vnet MOVES
+    it (`PUT …/ips`, which moves a MAC), and the MAC ends with exactly one;
+  - destroying the guest releases the address its MAC holds, reservation included.
+- **The manifest.** A `NetworkZone` vnet gains
+  `subnets: [{ cidr, gateway, dhcpRange: [{start, end}], reservations: [{ip, mac}] }]`. Each
+  subnet and reservation is validated before anything is touched (an address outside every
+  subnet of its vnet, the gateway, or an address reserved twice is refused). A declared range
+  makes the zone serve DHCP.
+- **The lifecycle.** `subnets` is cold (a change plans a replace, like `vnets`).
+  `reservations` is hot: an apply removes the ones no longer declared, then ensures every
+  declared one. The `reservations` field of the actual side is what the node HOLDS: one released
+  by hand, or by a guest's destroy, plans `~` and the next plain apply makes it again, instead of
+  being drift that would replace the zone. `remote` covers the zone's options and the subnets.
+  The plan digest covers the IPAM entries of the zone's vnets, so someone's allocation appearing
+  after a plan makes it stale. Validate adds `net.ipam.provider`, `net.ipam.reservation` and
+  `net.ipam.dhcp` when the document uses them.
+- **The node's own firewall.** With the datacenter firewall on and the default input policy,
+  every DHCPDISCOVER reached the vnet's bridge and died in `PVEFW-HOST-IN`: the DHCP server is
+  the node. One inbound udp/67 rule and the guest got its reserved address. The engine neither
+  writes nor reads the node's firewall rules (D3); `prepare_zone` warns when the datacenter
+  switch is on and the input policy is not ACCEPT. The lab carries `IN ACCEPT -p udp -dport 67`
+  on each node as a precondition, like the `management` IPSet of ADR-0052.
+- **Live** (lab PVE 9.2.2, binary of this branch):
+  - provider case: zone, vnet, `ipam=pve`/`dhcp=dnsmasq` and subnet with a range in one
+    transaction; a reservation for a system container's MAC made, made again (present) and
+    refused for another MAC; the container started on the vnet got the RESERVED address by DHCP;
+    its destroy released it; the teardown left no zone and no IPAM entry;
+  - CLI cycle (`stack plan`/`apply`/`delete`, a `providers.yaml` pointing at the lab):
+    - a zone with one subnet, a range and two reservations: plan 2, apply 0, plan 0; the zone
+      running with `ipam=pve`, `dhcp=dnsmasq`; `describe` lists the subnet and reservations;
+    - `.21` dropped, `.20` given another MAC, `.30` added: plan `~ reservations`, apply
+      «updating 1 field(s) live», plan 0, the IPAM exactly as declared;
+    - `.30` released by hand on the node: plan 2 with `~ reservations` (not a replace);
+      someone's allocation `.40` made after that plan: the apply with the old digest refused
+      (DX-5390), nothing changed; a plain apply made `.30` again and left `.40` alone; plan 0;
+    - delete with `.40` still in the subnet: refused at `remove_subnet` with the node's «not
+      empty», the record kept; with `.40` gone, delete 0, no zone running, no IPAM entry.
+- **Two defects found by measuring a VM as the guest, fixed in this slice** (ADR-0063 D3):
+  - a reservation made before its guest existed was followed, at guest create, by an allocation of
+    a range address for the same MAC, and the guest was served that one while the plan said «in
+    sync». A reservation now counts as held only when the MAC holds no other address in the vnet;
+    the plan shows `~`, the apply releases the other address and names the guest that has to
+    restart. Measured with a VM booting iPXE: `DHCPACK .100`, plan `~`, apply, plan 0, the
+    restarted VM got `DHCPACK .20`;
+  - the IPAM listing skips a zone without `dhcp`, so a zone with reservations and no range failed
+    its own read-back. Reservations now turn the zone's DHCP on; measured with a reservation-only
+    zone, plan 0.
+- **Not in this slice, decided in ADR-0063**: other IPAM plugins (phpIPAM refused, NetBox after a
+  spike), a subnet changed in place (with the gateway-entry repair a failed transaction needs), and
+  a reservation that names an engine VM instead of a MAC. DNS is F5c.
+
+## Addendum 2026-10-02 — F5c: the DNS role, and Proxmox's SDN DNS as its first provider
+
+- **What was built**: the `DnsProvider` port (`delonix_networking::dns`: `ZoneDns`, `dns_drift`,
+  `gateway_record_names`, the registry by id), `ProxmoxDnsProvider` on the zone's `dns`/
+  `dnszone`/`reversedns`, and `spec.dns` on `kind: NetworkZone`. The decisions and every measured
+  fact are in **ADR-0064**: the node writes the records (a guest's, a subnet gateway's), the
+  engine never creates a DNS controller nor holds its key, `dns` without a DHCP range is refused,
+  the field is hot and read from the node, and the gateway records the node leaves on a teardown
+  are named. `net.dns.records` → supported; `net.dns.authoritative` → unsupported-by-provider.
+- **Found by a review from another session, fixed in this slice**: the client's general parser
+  quotes 160 characters of a body it cannot decode, which for `GET /cluster/sdn/dns` (and the
+  IPAM controllers) carries a third-party API key; those routes now use a parser that never
+  quotes the body. The digest and the plan read DNS under the same condition. A domain is
+  compared without case.
+- **Proven live** (PVE 9.2.2 lab, a PowerDNS 4.9.17 on `pve2`, controller `pdnslab` registered by
+  hand as the administrator would):
+  - provider case `the_dns_provider_registers_a_guest_in_the_zones_dns_server`: zone, vnet,
+    IPAM, DNS and subnet in one transaction; the gateway record written at subnet create; a
+    container's A and PTR written when it got an address and removed by its destroy; observe in
+    sync; the teardown leaves the gateway's A and PTR on the server (asserted, then removed by the
+    test); a `Drop` guard undoes everything on any exit;
+  - CLI cycle: `dns` without a range refused (DX-1000) and an unknown controller refused
+    (DX-1380), both before any write; create, plan 0; `dnszone` changed by hand on the cluster →
+    plan `~ dns`, a plain apply converged, plan 0; `reverseServer` dropped in the manifest → hot,
+    with the «records already written stay» notice; a container on the vnet answered by `dig` (A
+    and PTR); delete named the gateway record left on the DNS server.
+- **Not in this slice, decided in ADR-0064 D6**: removing the records the node leaves, through
+  the DNS server's API with a credential given to the engine in `providers.yaml`. F5 (NAT, IPAM,
+  DNS) is complete with this slice; F6 is next.

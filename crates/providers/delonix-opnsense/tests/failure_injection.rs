@@ -18,9 +18,9 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
+use delonix_networking::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayRule};
+use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use delonix_opnsense::{Auth, Client, Error, Staging, Target, MAX_RESPONSE_BYTES};
-use delonix_sdn::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayRule};
-use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 
 // ===========================================================================
 // The mock appliance
@@ -84,7 +84,10 @@ fn stock(method: &str, path: &str) -> Reply {
         }
         // The running state of a clean appliance: nothing loaded in pf that
         // the config does not also say.
-        ("GET", "diagnostics/firewall/list_rule_ids") => Reply::Json(200, r#"{"items":[]}"#.into()),
+        ("GET", "diagnostics/firewall/pf_statistics/rules") => Reply::Json(
+            200,
+            r#"{"rules":{"filter rules":{},"nat rules":{}}}"#.into(),
+        ),
         ("GET", "firewall/alias_util/aliases") => {
             Reply::Json(200, r#"["bogons","__lan_network"]"#.into())
         }
@@ -314,6 +317,46 @@ fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_a
 }
 
 // ===========================================================================
+// Redaction (ADR-0059 D5; ADR-0049's grep-for-the-secret rule)
+// ===========================================================================
+
+/// An appliance, a proxy or an error page can echo what it was sent. Every
+/// error that carries the answer is rendered the two ways it leaves the
+/// engine — its message and its problem document — and grepped for the
+/// secret and for the Basic header value it travels in.
+#[test]
+fn no_rendered_error_carries_the_credential_the_answer_echoed() {
+    // base64("test-key:test-secret"), the Authorization: Basic value.
+    let basic = "dGVzdC1rZXk6dGVzdC1zZWNyZXQ=";
+    let echo = format!("authorization: Basic {basic}; secret=test-secret");
+    let cases = [
+        Reply::Json(500, format!(r#"{{"errorMessage":"{echo}"}}"#)),
+        Reply::Json(200, format!("not json: {echo}")),
+        Reply::Json(
+            200,
+            format!(r#"{{"result":"failed","validations":{{"alias.name":"{echo}"}}}}"#),
+        ),
+    ];
+    for reply in cases {
+        let appliance = MockAppliance::start(script(&[("GET", "core/firmware/status", reply)]));
+        let err = Client::connect(&target(&appliance)).unwrap_err();
+        let shown = err.to_string();
+        let doc = delonix_model::codes::problem(&delonix_model::Error::from(err), None).to_string();
+        for rendered in [&shown, &doc] {
+            assert!(
+                !rendered.contains("test-secret"),
+                "secret leaked: {rendered}"
+            );
+            assert!(!rendered.contains(basic), "basic header leaked: {rendered}");
+        }
+        assert!(
+            shown.contains("<redacted>"),
+            "the answer should still be shown: {shown}"
+        );
+    }
+}
+
+// ===========================================================================
 // Status classification (ADR-0051 Phase 0's own measurements)
 // ===========================================================================
 
@@ -385,6 +428,7 @@ fn a_validation_failure_at_http_200_is_typed_not_treated_as_success() {
                 source: "any".into(),
                 destination: "10.0.0.0/24".into(),
                 protocol: Some("BOGUS".into()),
+                ..Default::default()
             },
             &mark(),
             &Staging::default(),
@@ -409,6 +453,7 @@ fn a_result_failed_without_validations_is_http_status_not_a_silent_success() {
                 source: "any".into(),
                 destination: "10.0.0.0/24".into(),
                 protocol: None,
+                ..Default::default()
             },
             &mark(),
             &Staging::default(),
@@ -536,6 +581,7 @@ fn ensure_rule_creates_when_absent() {
         source: "adr0051spike".into(),
         destination: "10.0.0.0/24".into(),
         protocol: Some("TCP".into()),
+        ..Default::default()
     };
     let outcome = client
         .ensure_rule(&rule, &mark(), &Staging::default())
@@ -611,12 +657,117 @@ fn ours_row(uuid: &str) -> serde_json::Value {
     row
 }
 
+/// ADR-0059 D4, observe: only what carries OUR category is read back — not
+/// an operator's rule, not another record's — with the fields as the
+/// appliance holds them, and a disabled rule named as such.
+#[test]
+fn observe_reads_back_only_what_carries_our_mark() {
+    let mut ours = ours_row(U1);
+    ours["action"] = "block".into();
+    ours["destination_port"] = "8000-8080".into();
+    ours["log"] = "1".into();
+    ours["statetype"] = "none".into();
+    ours["sequence"] = "30001".into();
+    ours["enabled"] = "0".into();
+    let mut theirs = rule_row(U2, "someone else's");
+    theirs["categories"] = CAT_OTHER.into();
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours, theirs, rule_row(U2, "by hand")])),
+        ),
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(
+                200,
+                rows(&[serde_json::json!({
+                    "uuid": U1, "name": "web", "type": "host", "enabled": "1",
+                    "content": "10.0.0.1\n10.0.0.2", "description": "tier",
+                    "categories": CAT_OURS,
+                })]),
+            ),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let observed = client.observe(&mark()).unwrap();
+    assert_eq!(observed.rules.len(), 1, "{observed:?}");
+    let r = &observed.rules[0];
+    assert_eq!(r.description, "allow web");
+    assert_eq!(r.action, delonix_networking::gateway::GatewayAction::Block);
+    assert_eq!(r.destination_port.as_deref(), Some("8000-8080"));
+    assert!(r.log && !r.stateful);
+    assert_eq!(r.sequence, Some(30001));
+    assert_eq!(observed.disabled_rules, ["allow web"]);
+    assert_eq!(observed.aliases.len(), 1);
+    assert_eq!(observed.aliases[0].content, ["10.0.0.1", "10.0.0.2"]);
+}
+
+/// ADR-0059 D4: what a process of this engine staged and died before
+/// applying is adopted by its owner mark; a hand-made rule staged next to it
+/// is not, and the pre-check still refuses it. Measured live first: a killed
+/// apply left 2 staged rules, and the next run called them someone else's.
+#[test]
+fn a_dead_runs_staged_rule_is_adopted_by_its_mark_and_a_hand_made_one_is_not() {
+    // One answer per read: the pending check, the adoption's own lookup, and
+    // the pre-check after it (a scripted reply is served once).
+    let both = || {
+        (
+            "POST",
+            "firewall/filter/search_rule",
+            Reply::Json(200, rows(&[ours_row(U1), rule_row(U2, "by hand")])),
+        )
+    };
+    let appliance = MockAppliance::start(script(&[both(), both(), both()]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let staging = Staging::default();
+    let adopted = client.adopt_pending(&mark(), &[], &staging).unwrap();
+    assert_eq!(adopted.len(), 1, "{adopted:?}");
+    assert!(adopted[0].contains(U1), "{adopted:?}");
+    let err = client.check_no_foreign_pending(&staging).unwrap_err();
+    assert!(err.to_string().contains(U2), "{err}");
+    assert!(!err.to_string().contains(U1), "{err}");
+}
+
+/// A teardown that died after staging a deletion: the rule is gone from the
+/// config and still loaded in pf, so nothing carries a mark. It is ours only
+/// when the ledger saved its id before deleting.
+#[test]
+fn a_dead_teardowns_deletion_is_adopted_only_by_the_id_the_ledger_saved() {
+    // pf answers once per pending check: two adoptions and two pre-checks.
+    let loaded = || {
+        (
+            "GET",
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[U2])),
+        )
+    };
+    let appliance = MockAppliance::start(script(&[loaded(), loaded(), loaded(), loaded()]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let unknown = Staging::default();
+    assert!(client
+        .adopt_pending(&mark(), &[], &unknown)
+        .unwrap()
+        .is_empty());
+    assert!(client.check_no_foreign_pending(&unknown).is_err());
+    let known = Staging::default();
+    let adopted = client
+        .adopt_pending(&mark(), &[U2.to_string()], &known)
+        .unwrap();
+    assert_eq!(adopted.len(), 1, "{adopted:?}");
+    client
+        .check_no_foreign_pending(&known)
+        .expect("the deletion is this engine's own");
+}
+
 fn web_rule() -> GatewayRule {
     GatewayRule {
         description: "allow web".into(),
         source: "10.1.0.0/24".into(),
         destination: "10.0.0.0/24".into(),
         protocol: Some("TCP".into()),
+        ..Default::default()
     }
 }
 
@@ -647,7 +798,7 @@ fn a_hand_made_alias_with_the_same_name_is_refused_not_adopted() {
         .ensure_alias(&host_alias(), &mark(), &Staging::default())
         .unwrap_err();
     assert!(matches!(err, Error::NotOwned(_)), "{err}");
-    assert_eq!(err.number(), 5340);
+    assert_eq!(err.number(), 5389);
     assert_eq!(appliance.count("POST", "firewall/alias/add_item"), 0);
 }
 
@@ -716,7 +867,7 @@ fn an_owned_rule_edited_on_the_appliance_is_drift_not_present() {
         .ensure_rule(&web_rule(), &mark(), &Staging::default())
         .unwrap_err();
     assert!(matches!(err, Error::Drifted(_)), "{err}");
-    assert_eq!(err.number(), 5341);
+    assert_eq!(err.number(), 5389);
     assert!(
         err.to_string().contains("destination_net is 'any'"),
         "{err}"
@@ -821,10 +972,65 @@ fn a_foreign_rule_staged_and_not_applied_refuses_the_commit_before_any_apply() {
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client.commit(&Staging::default()).unwrap_err();
     assert!(matches!(err, Error::ForeignPending(_)), "{err}");
-    assert_eq!(err.number(), 5342);
+    assert_eq!(err.number(), 5389);
     assert!(err.to_string().contains(U1), "{err}");
     assert_eq!(appliance.count("POST", "firewall/alias/reconfigure"), 0);
     assert_eq!(appliance.count("POST", "firewall/filter/apply"), 0);
+}
+
+/// `pf_statistics/rules` as the appliance answers it: one key per pf rule,
+/// labelled with the MVC rule's uuid.
+fn pf_rules(uuids: &[&str]) -> String {
+    let lines: serde_json::Map<String, serde_json::Value> = uuids
+        .iter()
+        .enumerate()
+        .map(|(i, u)| {
+            (
+                format!(
+                    "@{i} pass in quick on vtnet0 inet from any to any keep state label \"{u}\""
+                ),
+                serde_json::json!({ "evaluations": 0 }),
+            )
+        })
+        .collect();
+    serde_json::json!({ "rules": { "filter rules": lines } }).to_string()
+}
+
+/// Measured on OPNsense 26.1.2_5: `list_rule_ids` keeps listing a rule that
+/// was deleted and applied (its label cache is keyed by pf line number and
+/// never drops the lines past a shorter ruleset). The running set is read
+/// from `pf_statistics`, which runs `pfctl` on each call.
+#[test]
+fn the_running_rules_are_read_from_pf_not_from_the_label_cache() {
+    let appliance = MockAppliance::start(script(&[(
+        "GET",
+        "diagnostics/firewall/list_rule_ids",
+        Reply::Json(
+            200,
+            format!(r#"{{"items":[{{"id":"{U2}","descr":"stale"}}]}}"#),
+        ),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert!(client.pending_changes().unwrap().is_empty());
+    assert_eq!(
+        appliance.count("GET", "diagnostics/firewall/list_rule_ids"),
+        0
+    );
+}
+
+#[test]
+fn a_pf_answer_without_its_filter_rules_is_refused_not_read_as_empty() {
+    let appliance = MockAppliance::start(script(&[(
+        "GET",
+        "diagnostics/firewall/pf_statistics/rules",
+        Reply::Json(200, r#"{"rules":{}}"#.into()),
+    )]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    let err = client.pending_changes().unwrap_err();
+    assert!(
+        err.to_string().contains("without its filter rules"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -832,11 +1038,8 @@ fn a_foreign_deletion_not_applied_refuses_the_pre_check() {
     // pf still runs a rule the config no longer has.
     let appliance = MockAppliance::start(script(&[(
         "GET",
-        "diagnostics/firewall/list_rule_ids",
-        Reply::Json(
-            200,
-            format!(r#"{{"items":[{{"id":"{U2}","descr":"gone"}}]}}"#),
-        ),
+        "diagnostics/firewall/pf_statistics/rules",
+        Reply::Json(200, pf_rules(&[U2])),
     )]));
     let client = Client::connect(&target(&appliance)).unwrap();
     let err = client
@@ -875,6 +1078,38 @@ fn a_foreign_alias_edit_not_applied_is_seen_through_the_pf_table() {
     assert_eq!(pending.len(), 1, "{pending:?}");
     assert_eq!(pending[0].id, "office");
     assert_eq!(pending[0].what, "content changed, not applied");
+}
+
+/// Measured on OPNsense 26.1.2_5: a deleted alias's pf table stays loaded,
+/// with its old content, after `alias/reconfigure` and `filter/apply`. Reading
+/// it as pending failed the engine's own deletion and then every commit after.
+#[test]
+fn a_table_left_for_a_deleted_alias_is_not_pending() {
+    let appliance = MockAppliance::start(script(&[
+        (
+            "POST",
+            "firewall/alias/search_item",
+            Reply::Json(200, rows(&[])),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/aliases",
+            Reply::Json(
+                200,
+                r#"["bogons","delonix_opnsense_live_test","__lan_network"]"#.into(),
+            ),
+        ),
+        (
+            "GET",
+            "firewall/alias_util/list/delonix_opnsense_live_test",
+            Reply::Json(200, rows(&[serde_json::json!({ "ip": "10.99.99.99" })])),
+        ),
+    ]));
+    let client = Client::connect(&target(&appliance)).unwrap();
+    assert!(client.pending_changes().unwrap().is_empty());
+    client
+        .check_no_foreign_pending(&Staging::default())
+        .expect("an orphan pf table is not a staged change");
 }
 
 #[test]
@@ -924,8 +1159,8 @@ fn our_own_staged_rule_is_applied_and_proven_running_afterwards() {
         ),
         (
             "GET",
-            "diagnostics/firewall/list_rule_ids",
-            Reply::Json(200, r#"{"items":[]}"#.into()),
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[])),
         ),
         // after the apply: running.
         (
@@ -935,11 +1170,8 @@ fn our_own_staged_rule_is_applied_and_proven_running_afterwards() {
         ),
         (
             "GET",
-            "diagnostics/firewall/list_rule_ids",
-            Reply::Json(
-                200,
-                format!(r#"{{"items":[{{"id":"{created}","descr":"allow web"}}]}}"#),
-            ),
+            "diagnostics/firewall/pf_statistics/rules",
+            Reply::Json(200, pf_rules(&[created])),
         ),
     ]));
     let client = Client::connect(&target(&appliance)).unwrap();
@@ -1121,7 +1353,7 @@ fn a_category_still_in_use_is_surfaced_not_forced() {
 
 #[test]
 fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
-    use delonix_sdn::gateway::GatewayProvider;
+    use delonix_networking::gateway::GatewayProvider;
     let appliance = MockAppliance::start(script(&[
         (
             "POST",
@@ -1135,8 +1367,45 @@ fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
         ),
     ]));
     let provider = delonix_opnsense::OpnsenseGatewayProvider::connect(&target(&appliance)).unwrap();
+    // One reason (provider_conflict, ADR-0059 D5) for both; the message still
+    // says which of the two it was.
     let e = provider.ensure_rule(&web_rule(), &mark()).unwrap_err();
-    assert_eq!(e.number(), 5340, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("refusing to adopt"), "{e}");
     let e = provider.check_no_foreign_pending().unwrap_err();
-    assert_eq!(e.number(), 5342, "{e}");
+    assert_eq!(e.number(), 5389, "{e}");
+    assert!(e.to_string().contains("that are not this engine's"), "{e}");
+}
+
+/// One apply loads the NAT tables too, so the gateway's pre-check counts a
+/// NAT rule someone else staged; one staged under the document's own mark
+/// (its NAT half commits right after) is not foreign (ADR-0059 F5a).
+#[test]
+fn a_gateway_refuses_a_foreign_staged_nat_rule_and_not_its_own() {
+    use delonix_networking::gateway::GatewayProvider;
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/source_nat/search_rule",
+        Reply::Json(
+            200,
+            rows(&[
+                serde_json::json!({
+                    "uuid": U1, "enabled": "1", "interface": "lan", "source_net": "10.91.0.0/24",
+                    "target": "lanip", "description": "ours", "categories": CAT_OURS,
+                }),
+                serde_json::json!({
+                    "uuid": U2, "enabled": "1", "interface": "lan", "source_net": "10.92.0.0/24",
+                    "target": "lanip", "description": "by hand", "categories": "",
+                }),
+            ]),
+        ),
+    )]));
+    let provider = delonix_opnsense::OpnsenseGatewayProvider::connect(&target(&appliance)).unwrap();
+    // Any call that takes the owner claims it for this value's commit.
+    provider.adopt_pending(&mark(), &[]).unwrap();
+    let err = provider.check_no_foreign_pending().unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("'by hand'"), "{text}");
+    assert!(!text.contains("'ours'"), "{text}");
+    assert!(text.contains("1 staged change(s)"), "{text}");
 }

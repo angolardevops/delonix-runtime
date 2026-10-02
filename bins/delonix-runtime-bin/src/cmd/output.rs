@@ -139,6 +139,36 @@ pub fn engine_error(e: &delonix_model::Error) {
         paint(color::RED, &coded_label(e)),
         super::po::t_dyn(&e.to_string())
     );
+    for line in error_context_lines(e) {
+        eprintln!("  {}", dim(&line));
+    }
+}
+
+/// The ADR-0059 D5 fields a failure carries besides its message, one per
+/// line, in the envelope's order: the reason of a network-block code, then the
+/// context the raiser gave. Empty for every failure that has neither, so the
+/// error line of everything else is unchanged.
+pub fn error_context_lines(e: &delonix_model::Error) -> Vec<String> {
+    use super::po::{t, tf};
+    let mut out = Vec::new();
+    if let Some(r) = delonix_model::codes::reason(e.number()) {
+        out.push(tf("reason: {value}", &[("value", r.slug())]));
+    }
+    if let Some(c) = e.context() {
+        for (label, value) in [
+            (t("provider"), &c.provider),
+            (t("role"), &c.role),
+            (t("capability"), &c.capability),
+            (t("step"), &c.step),
+            (t("plan digest"), &c.plan_digest),
+            (t("cause"), &c.cause),
+        ] {
+            if let Some(v) = value {
+                out.push(format!("{label}: {v}"));
+            }
+        }
+    }
+    out
 }
 
 /// `error[DX-4501]` — the label [`engine_error`] prints, without colour.
