@@ -343,15 +343,24 @@ detector de desvio de configuração.
 O motor **diz-lho**, em vez de deixar descobrir:
 
 ```
-Vm 'lab-nas': Converged=False (FieldsNotCompared) — declared but NOT applied to an
-existing VM: extraNics, libvirtXmlOverlay, netMode — the reconciler compares only
-disk, vcpus, memory, network, backend.
+VirtualMachine 'lab-nas': Converged=False (FieldsNotCompared) — changed since it was
+created and NOT applied to the existing VM: extraNics, netMode — the reconciler
+compares only disk, vcpus, memory, network, backend. Recreate it
+(`--replace VirtualMachine/lab-nas`, which discards the disk) …
 ```
 
 Mudar placas de rede, XML injectado ou modo de rede num manifesto **não altera uma
-VM que já existe**. Ou se recria (`--replace`, que deita fora o disco), ou se usa
-`vm create`. Vale a pena repetir porque é silencioso na prática: o `apply` diz
-`ensured` e a VM continua como estava.
+VM que já existe**. Ou se recria (`--replace VirtualMachine/lab-nas`, que deita fora o
+disco), ou se usa `vm create`. Vale a pena repetir porque é silencioso na prática: o
+`apply` diz `ensured` e a VM continua como estava.
+
+O aviso compara o manifesto com o que a VM recebeu **ao ser criada** (a anotação
+`delonix.io/created-spec`, escrita por `stack apply` em cada criação ou recriação):
+nomeia só o que mudou desde então, e cala-se quando nada mudou. Numa VM sem esse
+registo — criada à mão ou por uma versão anterior — diz «declared and not
+verifiable» e lista o que o manifesto declara. O `--replace` tem de levar o
+`Kind/nome`: um nome solto (ou `all`) só autoriza o que o plano já propõe, e um
+campo não comparado nunca o propõe.
 
 ### Campos que valem a pena conhecer
 
