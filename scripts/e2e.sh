@@ -614,6 +614,17 @@ if [[ -x "$NODEBIN" ]]; then
     DOC_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/openapi.json)" \
     python3 -c 'import json,os; d=json.loads(os.environ["DOC_JSON"]); assert d["openapi"].startswith("3"); assert {"/v1/node","/v1/node/health","/v1/node/capacity","/v1/providers"} <= set(d["paths"])'
   NODE_ASSETS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  # ADR-0042 D2 (Richardson 3): a client navega a partir de GET /v1 pelos links,
+  # sem construir URIs — cada link oferecido responde 200, e o cabeçalho Link
+  # (RFC 8288) espelha os links do corpo.
+  check "GET /v1: cada link oferecido responde 200, e o cabeçalho Link espelha o corpo" ok env \
+    ROOT_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1)" \
+    ROOT_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1)" \
+    NODESOCK="$NODESOCK" \
+    python3 -c 'import json,os,subprocess; d=json.loads(os.environ["ROOT_JSON"]); assert d["api_version"]=="delonix.node.v1", d; hdr=[l for l in os.environ["ROOT_HDR"].splitlines() if l.lower().startswith("link:")]; assert hdr and "rel=\"self\"" in hdr[0], hdr
+for l in d["links"]:
+    code=subprocess.run(["curl","-s","-o","/dev/null","-w","%{http_code}","--unix-socket",os.environ["NODESOCK"],"http://localhost"+l["href"]],capture_output=True,text=True).stdout
+    assert code=="200", (l, code)'
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \

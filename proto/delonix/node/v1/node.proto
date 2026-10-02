@@ -12,6 +12,11 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
 
 service NodeService {
+  // The entry point (ADR-0042 D2): the API version and a link to every resource
+  // this socket serves, so a client navigates from here without building a URI.
+  rpc GetApiRoot(GetApiRootRequest) returns (ApiRoot) {
+    option (google.api.http) = {get: "/v1"};
+  }
   rpc GetNodeInfo(GetNodeInfoRequest) returns (NodeInfo) {
     option (google.api.http) = {get: "/v1/node"};
   }
@@ -35,6 +40,15 @@ service NodeService {
   }
 }
 
+message GetApiRootRequest {}
+
+message ApiRoot {
+  string api_version = 1; // "delonix.node.v1"
+  // Only what this engine serves: a link to an operation it would answer 501 is
+  // not offered.
+  repeated Link links = 2;
+}
+
 message GetNodeInfoRequest {}
 
 message NodeInfo {
@@ -48,6 +62,7 @@ message NodeInfo {
   string cgroup_driver = 8; // "cgroupfs" | "systemd"
   bool cgroup_delegated = 9;
   repeated string supported_workload_types = 10; // "container", "pod", "vm", "microvm"
+  repeated Link links = 11;
 }
 
 message GetHealthRequest {}
@@ -57,6 +72,7 @@ message Health {
   // "NetworkReady", "StoreWritable", "CgroupDelegated", "ProvidersAvailable".
   ConditionStatus overall = 1;
   repeated Condition conditions = 2;
+  repeated Link links = 3;
 }
 
 message GetCapacityRequest {}
@@ -73,6 +89,7 @@ message Capacity {
   // Fields that could not be measured are listed here instead of being reported as 0.
   // A zero that comes from a failed measurement is not a zero.
   repeated string unmeasured = 9;
+  repeated Link links = 10;
 }
 
 message FilesystemCapacity {
@@ -90,6 +107,7 @@ message ListProvidersRequest {
 
 message ListProvidersResponse {
   repeated ProviderInfo providers = 1;
+  repeated Link links = 2;
 }
 
 message WatchEventsRequest {
