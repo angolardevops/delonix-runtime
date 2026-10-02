@@ -5821,7 +5821,7 @@ checklist para quem mexer aqui do que como lista de correcções:
   pelo pipe E pelo supervisor — morto o supervisor, o que está no pipe é tudo o que haverá.
   **Regra: quem lança um processo que sobrevive ao chamador passa-lhe os descritores pelo
   nome, e quem espera por EOF num pipe espera também pelo processo que o devia fechar.**
-  Gate: `scripts/e2e_slirp_lifecycle.sh` (cinco cenários, no `e2e.sh`) e os testes
+  Gate: `scripts/e2e_slirp_lifecycle.sh` (sete cenários, no `e2e.sh`) e os testes
   `tests_detached_helper` / `supervise::tests`. **Fechado no mesmo dia o que tinha ficado de
   fora**: o pin, o pin adoptado e o plano de controlo também eram lançados com os descritores
   do chamador (só o stderr fora corrigido a 2026-08-15) — `leave_callers_descriptors`,
@@ -5830,9 +5830,15 @@ checklist para quem mexer aqui do que como lista de correcções:
   `netns pin` e no `netns control`). E o `container stats` e a listagem de clusters kind
   gravavam a morte sem soltar o slirp — passaram os dois pelo `reconcile_and_persist`, que
   agora o solta; teste `a_recorded_death_releases_the_containers_own_slirp` (um `sleep` com o
-  nome `slirp4netns` e o pid morto no lugar do alvo). Um cenário e2e para isto NÃO discrimina:
-  desde que o slirp deixou de herdar descritores, sai sozinho em menos de 1 s com o host calmo
-  (medido), e o cenário passava também no binário anterior;
+  nome `slirp4netns` e o pid morto no lugar do alvo). **«O slirp desapareceu» não prova que alguém o soltou** — ele sai sozinho, em menos
+  de 1 s ou em 17 s conforme o binário, mesmo com a netns segura por um descritor (medido). A
+  prova é o SINAL: os cenários `exit`, `stats` e `kind` param o slirp (SIGSTOP) antes de o
+  container sair e lêem o SIGTERM pendente em `/proc/<slirp>/status`. E um `run -d` tem SEMPRE
+  supervisor, que regista a saída antes de qualquer comando: o caminho do `stats` e do
+  `cluster ls` só se exercita com o supervisor morto primeiro. Ao vivo, 2026-10-02: binário
+  com as duas solturas revertidas — `stats` e `kind` FAIL, `exit` FAIL em 4 de 5 (a quinta
+  passou porque outro `delonix` do host varreu órfãos nesse segundo: a varredura é por uid,
+  não por root); `main` — os três PASS;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
