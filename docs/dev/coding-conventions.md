@@ -160,7 +160,8 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   `ImageRegistry`, `ImageStore`, … The ones that exist today are in
   `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`, `DeviceResolver`,
   `RunHost`, `VmNetwork`, `NetworkProvider`) and `.../launch.rs` (`WorkloadRuntime`). The older
-  `VmBackend` in `crates/adapters/delonix-vm/src/lib.rs` is due to become `VmProvider` in P4.
+  `VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`) coexists with the ADR-0044
+  `VmProvider` (`vm_provider.rs`) while P4 moves the backends onto it.
 - **Host implementations of a port are called `Host<Thing>`.** **Convention (observed)**:
   `delonix-linux/src/workload.rs:HostWorkload` (implements `WorkloadRuntime`),
   `delonix-sdn/src/run_network.rs:HostNetwork` (implements `NetworkProvider`),
@@ -353,7 +354,8 @@ already exist.
 | Registry client, CAS, layers, overlay, image build | `delonix-oci` (adapter) | ADR-0040 D2.3 |
 | SBOM / CVE | `delonix-scanner` (adapter) | ADR-0040 D2.3 |
 | Tracing, OpenTelemetry, Prometheus registry setup | `delonix-telemetry` (adapter) | ADR-0040 D2.3 |
-| A local VM backend (Cloud Hypervisor, libvirt) | `delonix-vm` (adapter) | ADR-0008 |
+| What a VM operation decides (create, stop, start, status, remove, day-2 verbs) | `delonix-compute` (context): `vm.rs` (`VmEngine`), reaching the backends, the disk and the seed only through `VmBackends`/`LocalDiskImages`/`SeedBuilder`; no `Command::new` in a context (`context_spawns`, baseline 0) | ADR-0044 P4b.3 (#596, #597) |
+| A local VM backend (Cloud Hypervisor, libvirt), and this node's implementations of the VM ports | `delonix-vm` (adapter): `lib.rs`, `local_ports.rs` | ADR-0008; ADR-0044 P4b.3 |
 | A remote or pluggable provider (hypervisor API, NAS API) | a provider crate in `crates/providers/`. **Write an ADR first** | ADR-0008, ADR-0009; [Contribution workflow](contributing-workflow.md#when-to-write-an-adr) |
 | A CRI RPC | `delonix-cri` (interface) | AGENTS.md |
 | The local management API, `/metrics` | `delonix-mgmt` (interface) | ADR-0010 |
@@ -408,7 +410,7 @@ already exist.
 - **Backend-specific knowledge lives on the backend.** For example,
   `VmBackend::ip_is_predicted()` answers whether a VM's IP was predicted, instead of the call site
   checking `backend.contains("cloud-hypervisor")`. **Decided**: ADR-0008, quoted in the doc comment
-  in `crates/adapters/delonix-vm/src/lib.rs`.
+  in `crates/contexts/delonix-compute/src/vm_backend.rs`.
 - **An adapter does not depend on another adapter.** What it needs from another concern comes in
   as a hook or a port, wired by the composition root. **Enforced (gate)**: `ALLOWED` (adapter →
   foundation, context). **Convention (observed)**: the doc comment of

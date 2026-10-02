@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:a509235c85941dead7c564eb0fe69325be76ad29f67752755461f3637af80128 -->
+<!-- translated-from: build-and-test.md sha256:e3064f16c3cd8456faff94b7b2e482d8957a320e5a93071573df9e38ba594950 -->
 # 克隆、构建与测试
 
 **阅读之前：** [准备你的环境](environment.md)：固定的工具链、`protoc`，以及一台能通过其检查的主机。
@@ -31,8 +31,9 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 | `delonix-cri` | `delonix-cri` | `target/<profile>/delonix-cri` |
 | `delonix-mcp` | `delonix-mcp-bin` | `target/<profile>/delonix-mcp` |
 | `delonix-mgmt` | `delonix-mgmt-bin` | `target/<profile>/delonix-mgmt` |
+| `delonix-node-api` | `delonix-node-api-bin` | `target/<profile>/delonix-node-api` |
 
-发布工作流构建的正是这四个包。如果你设置了 `CARGO_TARGET_DIR`，二进制程序会落到那里，而不是 `target/` 下。
+发布工作流构建的正是这五个包。如果你设置了 `CARGO_TARGET_DIR`，二进制程序会落到那里，而不是 `target/` 下。
 
 两条实用的提示：
 
@@ -55,7 +56,7 @@ command -v delonix                  # which `delonix` your shell would run inste
 
 ### `delonix` 如何找到它的服务器二进制程序
 
-`delonix serve cri`、`delonix serve api` 和 `delonix mcp` 本身并不包含这些服务器：它们会 `exec` `delonix-cri`、`delonix-mgmt` 和 `delonix-mcp`
+`delonix serve cri`、`delonix serve api`、`delonix serve node-api` 和 `delonix mcp` 本身并不包含这些服务器：它们会 `exec` `delonix-cri`、`delonix-mgmt`、`delonix-node-api` 和 `delonix-mcp`
 （`bins/delonix-runtime-bin/src/cmd/serve.rs` 里的 `exec_server`）。查找顺序是：
 
 1. 与正在运行的这个 `delonix` **同目录下**的同名文件；
@@ -64,16 +65,17 @@ command -v delonix                  # which `delonix` your shell would run inste
 `delonix` 会通过 `DELONIX_DISPATCH_VERSION` 把自己的版本号传给服务器，一个来自不同发布版本的服务器会拒绝启动。它还会通过 `DELONIX_BIN` 传入自己的路径，这样服务器就能回调同一个 CLI。一个被直接启动的服务器（比如被某个 unit 启动）会依次通过
 `DELONIX_BIN`、自己同目录下的一个 `delonix`、再到 `PATH`
 （`crates/contexts/delonix-node/src/dispatch.rs` 里的 `cli_bin`）来找到 CLI。
-**把同一次构建产出的这四个二进制程序放在一起**；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。
+**把同一次构建产出的这五个二进制程序放在一起**；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。
 
 `delonix cluster kubeadm` 和 `delonix image vm build` 用它们自己的顺序去找
 `delonix-cri`（`bins/delonix-runtime-bin/src/cmd/vmimage.rs` 里的
 `resolve_cri_bin`）：`--cri-bin`，然后是 `delonix` 同目录下，然后——如果当前目录在一个源码 checkout 里面——是一次 `cargo build --release -p delonix-cri`，只有到最后才会去下载已发布的产物。
 
-在安装它们之前，先把这四个都构建出来：
+在安装它们之前，先把这五个都构建出来：
 
 ```bash
-cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 ```
 
 ### 方案 A——直接从 worktree 运行（最安全）
@@ -94,7 +96,7 @@ Ubuntu 23.10+ 上，这条路径需要一份自己的 AppArmor profile（见
 ```bash
 install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix && delonix --version
 ```
@@ -125,7 +127,7 @@ delonix man --dir ~/.local/share/man
 
 ```bash
 sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 ```
 
 **只在一台没有任何 Delonix 工作负载在使用的机器上这样做。** 已安装的二进制程序不只是一个命令：
@@ -191,7 +193,8 @@ delonix system info       # state root, rootless, cgroup delegation, network inf
 `install.sh` 里没有卸载标志。把你拷贝过去的东西删掉：
 
 ```bash
-rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 ```
@@ -265,6 +268,7 @@ cargo test -p <crate> -- --ignored <test-name>
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | 当前文档里引用的某条 `delonix …` 命令，在这个二进制程序的命令树里并不存在 |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 任何警告 |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | 任何一个测试失败 |
+| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | 测试在它们的临时目录里留下了不属于 `scripts/tmp_roots_baseline.json` 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（`--update`）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 `qemu-img` 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 `Drop` 时删除它的守卫里（`tempfile::TempDir`），这样删除在提前 `return` 和断言失败时也会执行；所以本地运行请用 `--list` 来对比 |
 | `deny` | `cargo deny check advisories licenses sources` | 一条 RUSTSEC 安全公告、一个不被允许的许可证或来源（`deny.toml`） |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | 已提交的站点内容，和这个二进制程序生成器产出的内容不一致 |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` 与 `./target/release/delonix stack validate -f examples/<file>.yaml` | 某个已发布的示例用了一种已废弃的写法，或者含有未解析的引用 |

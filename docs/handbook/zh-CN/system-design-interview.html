@@ -318,7 +318,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <tr>
 <td>节点契约 <code>delonix.node.v1</code></td>
 <td>在<strong>同一个</strong>本地 unix socket 上同时提供 gRPC <strong>与</strong> HTTP/JSON</td>
-<td>任何本地客户端（已设计；尚未提供服务）</td>
+<td>任何本地客户端（部分提供服务：仅 <code>ListProviders</code>，由 <code>delonix-node-api</code> 提供）</td>
 </tr>
 <tr>
 <td>CRI <code>runtime.v1</code></td>
@@ -332,8 +332,8 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 </tbody>
 </table></div>
-<p>节点契约的设计要点，全部写在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4
-和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> 里：</p>
+<p>节点契约的设计要点，全部写在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4
+和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> 里：</p>
 <ul>
 <li><strong><code>.proto</code> 文件是唯一的真相来源</strong>；REST 映射来自 <code>google.api.http</code> 注解，OpenAPI 文档从它们
   生成。一个 CI 门禁会检查格式、lint、相对于上一个版本的破坏性变更、除双向流（<code>Exec</code>、
@@ -345,7 +345,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <li><strong>长任务返回一个 <code>Operation</code></strong>，它在被确认之前就已经持久化，因此一个重启后的服务器能够说出
   <code>Interrupted</code>，而不是永远说 <code>RUNNING</code>。</li>
 <li><strong>仅限本地。</strong> <code>SO_PEERCRED</code>、同一个 uid、没有 TCP、没有 TLS、引擎里没有身份这个概念——
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了一个远程 API。任何节点之外的东西
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了一个远程 API。任何节点之外的东西
   都要在自己前面放一个代理。</li>
 </ul>
 <blockquote class="say say-interviewer"><p><span class="speaker">面试官</span>为什么不直接做一个 REST 服务器？</p>
@@ -512,16 +512,24 @@ netns 内部加一条 DNAT 规则（在控制 socket 上执行 <code>publish …
 不随容器数量增长而改变：</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 </code></pre></div>
-<p><code>fwcont</code> 只有两条规则；每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 <code>fwmap</code>
-verdict map 到达。网络<strong>之间</strong>的流量是按（网络）对丢弃的，除非某个 <code>NetworkRoute</code> 把这一对
+<p>每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 <code>fwmap</code> verdict map 到达——一次按
+<strong>源地址</strong>（<code>fwout</code>），一次按<strong>目的地址</strong>（<code>fwcont</code>）。刻意做成两条 base chain：被跳转到的 chain
+里的 <code>accept</code> 只结束发起跳转的那条 base chain，而 <code>drop</code> 在任何地方都是终结性的，所以源端的
+egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决定。如果只有一条 base chain 同时做两次
+查找，目的端的 <code>accept</code> 会结束整个遍历，源端的 <code>egress deny</code> 永远不会执行（<code>infra.rs</code> 里的
+<code>fw_dispatch_chains</code>；由旧版 holder 建出来的表会由 <code>fw_dispatch_migration_script</code> 就地迁移）。网络<strong>之间</strong>的流量是按（网络）对丢弃的，除非某个 <code>NetworkRoute</code> 把这一对
 放进了 <code>@netpair</code>——一条路由说的是这个包<em>可以</em>跨越，而每个容器自己的 chain 仍然决定它是否
 <em>被允许</em>。</p>
 <p><strong>按命名空间隔离</strong>存在于每个容器自己的 chain 里：<code>@dlxns&lt;hash&gt;</code>（同一命名空间）的成员被
 接受，来自任何其他容器地址（<code>@dlxall</code>）的<strong>新</strong>连接则被丢弃；回复仍然能通过，因为这条 drop
-规则只匹配 <code>ct state new</code>。一条显式的 ingress 策略会替换掉这个默认值。SDN 中的 IPv6 默认被
+规则只匹配 <code>ct state new</code>。这条 drop 是一道任何入站规则都拿不掉的护栏：显式规则被放在它之前，所以一条 <code>deny</code> 永远不会打开
+任何东西，而一条显式的 <code>allow</code>（例如一个 <code>kind: Dependency</code>）仍然只放行它点名的那一个对端
+（<code>infra.rs</code> 里的 <code>fw_chain_body</code>）。一份含有无效规则的防火墙 spec 会被整体拒绝；命名空间隔离
+没能生效时，<code>run</code>、<code>start</code> 和 <code>pod create</code> 会被拒绝并撤销 attach，而不只是发出警告。SDN 中的 IPv6 默认被
 拒绝（<code>table ip6</code>，<code>policy drop</code>），因为以上所有规则都是 IPv4 的。</p>
 <blockquote>
 <p><strong>图例</strong> —— 参与者是各个进程；实线箭头是调用、socket 连线、fork 或 clone（标签会说明具体是
@@ -577,7 +585,7 @@ verdict map 到达。网络<strong>之间</strong>的流量是按（网络）对
   代价——在某台开发用主机上，<code>containers/</code> 占了 47 GiB，其中大部分是完全相同的拷贝，一个
   2.1 GiB 镜像的每一次 <code>run</code> 都要花大约 13 秒去拷贝。共享层之后，那个目录降到了 7.2 GiB。
 - <strong>多层。</strong> 经典的 <code>mount(2)</code> 把 <code>lowerdir=a:b:c……</code> 作为一个字符串传入，内核最多只拷贝其中
-  的一个页面，<strong>并悄悄截断</strong>。为 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 测量过
+  的一个页面，<strong>并悄悄截断</strong>。为 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 测量过
   （2026-09-06 验证）：20 层（4084 字节）能挂载，30 层（5994 字节）就失败了，而一个 91 层的
   builder 镜像需要 9107 字节。现在的挂载改用 <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>，
   每一层调用一次 <code>lowerdir+</code>，因此没有长度上限。</p>
@@ -603,6 +611,12 @@ verdict map 到达。网络<strong>之间</strong>的流量是按（网络）对
   <code>register_backend</code> 可以再加进来更多（Proxmox 后端，只有在配置好之后，才由 CLI 的组合根去
   注册）。一次注册携带一个工厂闭包和一个 <code>auto_selectable</code> 标志，因此自动检测永远不会去
   构造——因而也永远不会去认证——一个远程后端。注册本身不做任何 I/O。</li>
+<li><strong>用例与机制分开。</strong> <code>create</code>、<code>stop</code> 或 <code>status</code> 决定什么，住在计算上下文里的 <code>VmEngine</code>
+  中：它被交给一个记录 store 和三个端口（<code>VmBackends</code>、<code>LocalDiskImages</code>、<code>SeedBuilder</code>），
+  自己从不运行任何程序；适配器用它的注册表、<code>qemu-img</code> 和 <code>cloud-localds</code> 来回答这些端口。
+  因此编排可以对着假实现来测试，而一条特定于某个 hypervisor 的规则（libvirt 的 anti-spoof
+  退出选项、一个没有记录的遗留 domain）必须是某个端口的回答，而不是用例里的一个 <code>if</code>
+  （ADR-0044 P4b.3）。</li>
 <li><strong>给一个 VM 配网络。</strong> Cloud Hypervisor 在 pin 的 netns 内部运行，通过 <code>VmNetwork</code> 端口在
   一个网桥上拿到一个 <code>tap</code>，这个端口由 SDN 实现（<code>HostVmNetwork</code>）；<code>delonix-vm</code> 并不依赖
   <code>delonix-sdn</code>。因为 DHCP 服务器是引擎自己的、而且是确定性的，所以在客户机启动之前，租约
@@ -615,11 +629,13 @@ verdict map 到达。网络<strong>之间</strong>的流量是按（网络）对
   一个 NoCloud ISO，其 <code>network-config</code> 按 <strong>MAC</strong> 地址匹配主网卡，而一个远程后端则可以
   原生地实现它。</li>
 </ul>
-<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>（<code>VmBackend</code>、
-<code>BackendRegistration</code>、<code>builtin_backends</code>、<code>register_backend</code>、<code>select_backend</code>、
-<code>auto_detect</code>、<code>backend_for</code>、<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>、<code>launch_vmm</code>、
+<p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>（<code>VmBackend</code>、
+<code>BackendRegistration</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a>（<code>VmEngine</code>）；
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>（<code>RegistryBackends</code>、<code>QemuImgDisks</code>、
+<code>CloudLocaldsSeed</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>（<code>builtin_backends</code>、<code>register_backend</code>、<code>select_backend</code>、
+<code>select_for_create</code>、<code>auto_detect</code>、<code>backend_for</code>、<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>、<code>launch_vmm</code>、
 <code>DEFAULT_CH_FIRMWARES</code>、<code>set_network</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>
-（<code>generate_seed_iso</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>VmNetwork</code>）；
+（<code>generate_seed_iso</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>VmNetwork</code>、<code>VmBackends</code>、<code>LocalDiskImages</code>、<code>SeedBuilder</code>）；
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a>（<code>HostVmNetwork</code>）；
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>sdn_reachable</code>、<code>dhcp_lease_ip</code>）；
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>（<code>ProxmoxBackend</code>）；
@@ -762,7 +778,7 @@ dataplane；实线箭头是调用；虚线箭头是回复；<code>alt</code> 和
 <li><strong>单节点的限制。</strong> pin 的 netns 内部，每个网络都是一个 <code>/16</code>；每一次 netns/veth/nftables
   变更都要经过同一条串行化的控制连接；<code>slirp4netns</code> 的吞吐是用户态的；而把一个 VM 迁到另
   一台主机（<code>vm migrate</code>）要经历真实的停机——就目前的实现而言，热迁移是一个 NO-GO
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>）。跨节点调度按设计就不在范围
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>）。跨节点调度按设计就不在范围
   之内。</li>
 </ul>
 <p><strong>它在代码中的位置：</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>（<code>ensure_up</code>、
@@ -780,36 +796,36 @@ dataplane；实线箭头是调用；虚线箭头是回复；<code>alt</code> 和
 （<code>delonix_node::events</code>），重启属于每个容器自己的 supervisor，启动持久化则是每个工作负载
 一个 systemd unit（<code>delonix system boot</code>）。一个守护进程需要它自己的、带着「其他方案为什么
 做不到」之证据的 ADR——这个问题被提出来过一次的例子见
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>，而在保持无守护进程的前提下做持续协调的例子
-见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>（<em>Proposed</em>）。</p>
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>，而在保持无守护进程的前提下做持续协调的例子
+见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>（<em>Proposed</em>）。</p>
 <p><strong>如果服务器不能 <code>clone</code>，CRI 是怎么启动一个容器的？</strong>
 <code>StartContainer</code> 构建一个带类型的 <code>RunOpts</code>，把它写进一个 <code>0600</code> 的文件，然后运行
 <code>delonix __apirun &lt;spec&gt;</code>，后者调用的是和 CLI 一样的那个 <code>cmd_run</code>。ADR-0040 D5 会用一个
 launcher 可执行程序取代这一跳 CLI。CRI 路径上的资源策略跟随 kubelet
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>）。</p>
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>）。</p>
 <p><strong>为什么管理 API 只限本地？</strong>
 远程访问意味着身份、授权、证书，以及对调用方的审计——而这些概念，引擎里统统没有。
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了它；出于同样的理由，MCP 界面也只限
-本地（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</p>
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了它；出于同样的理由，MCP 界面也只限
+本地（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</p>
 <p><strong>你会怎么加一个新的 VM provider？</strong>
 一个实现了 <code>VmBackend</code> 的新 crate，在组合根处注册——不需要改动任何调用点
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）。ADR-0040 D3 把 provider 自己的开关挪进了
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）。ADR-0040 D3 把 provider 自己的开关挪进了
 带命名空间的扩展里，把古怪之处挪进了 capability 里；OpenStack 卡在了一次 spike 上
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）。</p>
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）。</p>
 <p><strong>Service 在没有 VIP 的情况下是怎么做负载均衡的？</strong>
 一个 <code>Service</code> 按标签选中若干容器，内部 DNS 每次查询都返回若干条 <code>A</code> 记录，轮流转动——没有
-新的 dataplane（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>）。</p>
+新的 dataplane（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>）。</p>
 <p><strong>为什么 state root 下面用的是 ext4，而不是 btrfs/zfs？</strong>
 在共享层缓存之上做 overlay，已经消除了重复；只有在有了经过测量的需求之后，才会重新考虑换
-一种文件系统（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>）。</p>
+一种文件系统（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>）。</p>
 <p><strong>macOS 和 Windows 怎么办？</strong>
 不是移植——这个引擎所用到的一切，都不存在于 Linux 内核之外。计划是做一个用来启动 Linux
-客户机 VM 的 launcher（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>，<em>Proposed</em>）。</p>
+客户机 VM 的 launcher（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>，<em>Proposed</em>）。</p>
 <p><strong>这场重构最终会走向哪里？</strong>
 四个层、一份运行规格、带 capability 的 provider 端口、一份在一个由 socket 激活的服务器上
 提供服务的节点契约，以及一个拥有每一次创建命名空间的 spawn 的 launcher
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>、
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>）。</p>
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>、
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>）。</p>
 <hr />
 <p><strong>下一篇：</strong><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a> —— 两种构建语法——用于 OCI
 镜像的 Delonixfile，和用于可启动磁盘的 VMfile——就按解析器所接受的样子来讲。</p>

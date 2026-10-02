@@ -330,7 +330,7 @@ onde as outras convergem.</p>
 <tr>
 <td>Contrato de nó <code>delonix.node.v1</code></td>
 <td>gRPC <strong>e</strong> HTTP/JSON no <strong>mesmo</strong> socket unix local</td>
-<td>qualquer cliente local (desenho; ainda não servido)</td>
+<td>qualquer cliente local (servido em parte: só <code>ListProviders</code>, pelo <code>delonix-node-api</code>)</td>
 </tr>
 <tr>
 <td>CRI <code>runtime.v1</code></td>
@@ -532,17 +532,28 @@ e uma regra DNAT dentro da netns do pin (<code>publish …</code> no socket de c
 política por container custe o mesmo seja qual for o número de containers:</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 </code></pre></div>
-<p>O <code>fwcont</code> tem duas regras; as regras de cada container vivem na sua própria chain, alcançada através
-do verdict map <code>fwmap</code> chaveado por IP. O tráfego <strong>entre</strong> redes é descartado par a par, a menos que
+<p>As regras de cada container vivem na sua própria chain, alcançada através do verdict map <code>fwmap</code>
+chaveado por IP — uma vez pela <strong>origem</strong> (<code>fwout</code>) e outra pelo <strong>destino</strong> (<code>fwcont</code>). São duas base
+chains de propósito: um <code>accept</code> dentro de uma chain saltada só termina a base chain que saltou, ao
+passo que um <code>drop</code> é final em todo o lado, por isso a política de egress da origem decide primeiro e
+a de ingress do destino continua a decidir depois. Com uma só base chain com as duas consultas, o
+<code>accept</code> do destino terminava a travessia e o <code>egress deny</code> da origem nunca corria
+(<code>fw_dispatch_chains</code> em <code>infra.rs</code>; uma tabela construída por um holder mais antigo é migrada no
+lugar por <code>fw_dispatch_migration_script</code>). O tráfego <strong>entre</strong> redes é descartado par a par, a menos que
 uma <code>NetworkRoute</code> ponha o par em <code>@netpair</code> — uma rota diz que o pacote <em>pode</em> atravessar, e a chain
 por container continua a decidir se é <em>permitido</em>.</p>
 <p>O <strong>isolamento por namespace</strong> vive na chain de cada container: os membros de <code>@dlxns&lt;hash&gt;</code> (mesmo
 namespace) são aceites, e as ligações <strong>novas</strong> vindas de qualquer outro endereço de container
 (<code>@dlxall</code>) são descartadas; as respostas continuam a fluir porque o drop só casa com <code>ct state new</code>.
-Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
+Esse drop é um guardrail que nenhuma regra de entrada retira: as regras explícitas são emitidas antes
+dele, por isso um <code>deny</code> nunca abre nada e um <code>allow</code> explícito (por exemplo um <code>kind: Dependency</code>)
+continua a admitir o único par que nomeia (<code>fw_chain_body</code> em <code>infra.rs</code>). Uma spec de firewall com
+uma regra inválida é recusada inteira, e um isolamento por namespace que não se aplica recusa o
+<code>run</code>, o <code>start</code> e o <code>pod create</code> e desfaz o attach, em vez de avisar. O IPv6 na SDN é recusado por omissão
 (<code>table ip6</code> com <code>policy drop</code>), porque todas as regras acima são IPv4.</p>
 <blockquote>
 <p><strong>Legenda</strong> — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
@@ -631,6 +642,13 @@ peculiaridades que pertencem ao provider respondidas pelo provider.</p>
   quando configurado). Um registo transporta uma closure factory e uma flag <code>auto_selectable</code>, para
   que a auto-detecção nunca construa — e portanto nunca autentique — um backend remoto. Registar não
   faz I/O.</li>
+<li><strong>Casos de uso à parte do mecanismo.</strong> O que o <code>create</code>, o <code>stop</code> ou o <code>status</code> decidem vive no
+  contexto de computação como <code>VmEngine</code>, que recebe um store de registos e três portas
+  (<code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>) e nunca corre ele próprio um programa; o adapter
+  responde a essas portas com o seu registo, o <code>qemu-img</code> e o <code>cloud-localds</code>. A orquestração é
+  por isso testável contra falsos, e uma regra específica de um hypervisor (a excepção ao
+  anti-spoof do libvirt, um domínio deixado sem registo) tem de ser uma resposta de porta e não um
+  <code>if</code> no caso de uso (ADR-0044 P4b.3).</li>
 <li><strong>Rede de uma VM.</strong> O Cloud Hypervisor corre dentro da netns do pin e recebe um <code>tap</code> numa bridge de
   rede através da porta <code>VmNetwork</code>, que a SDN implementa (<code>HostVmNetwork</code>); o <code>delonix-vm</code> não
   depende do <code>delonix-sdn</code>. Como o servidor DHCP é do próprio motor e determinístico, o lease é
@@ -643,11 +661,13 @@ peculiaridades que pertencem ao provider respondidas pelo provider.</p>
   locais realizam-na como um ISO NoCloud cujo <code>network-config</code> identifica a NIC primária pelo <strong>MAC</strong>,
   e um backend remoto pode realizá-la de forma nativa.</li>
 </ul>
-<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>VmBackend</code>,
-<code>BackendRegistration</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>auto_detect</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> (<code>VmBackend</code>,
+<code>BackendRegistration</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a> (<code>VmEngine</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a> (<code>RegistryBackends</code>, <code>QemuImgDisks</code>,
+<code>CloudLocaldsSeed</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>select_for_create</code>, <code>auto_detect</code>,
 <code>backend_for</code>, <code>CloudHypervisorBackend</code>, <code>LibvirtBackend</code>, <code>launch_vmm</code>, <code>DEFAULT_CH_FIRMWARES</code>,
 <code>set_network</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a> (<code>generate_seed_iso</code>);
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a> (<code>HostVmNetwork</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>sdn_reachable</code>, <code>dhcp_lease_ip</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> (<code>ProxmoxBackend</code>);
@@ -809,7 +829,7 @@ revertida.</p>
 <h2 id="8-follow-up-questions">8. Perguntas de seguimento<a class="hanchor" href="#8-follow-up-questions" aria-label="#">#</a></h2>
 <p><strong>Porque não acrescentar um pequeno daemon para eventos e reinícios?</strong>
 Porque cada processo residente é um domínio de falha e uma superfície de ataque. O registo de eventos
-é um ficheiro só de acrescento (<code>delonix_runtime_core::events</code>), os reinícios pertencem ao supervisor
+é um ficheiro só de acrescento (<code>delonix_node::events</code>), os reinícios pertencem ao supervisor
 por container, e a persistência no arranque é uma unit systemd por carga (<code>delonix system boot</code>). Um
 daemon precisa do seu próprio ADR com a evidência do que as alternativas não conseguiram fazer — ver
 o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> para um caso em que a pergunta surgiu, e o

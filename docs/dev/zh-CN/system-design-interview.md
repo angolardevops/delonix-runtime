@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:521f8c297a328d828b08609f1c7800883ddc9f0b15dfe38970650e270ad31535 -->
+<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
 # 系统设计面试 — Delonix 引擎
 
 **阅读之前：**[架构](architecture.md)和[各个 crate](crates.md) —— 本页论证的是它们所描述的结构*为什么*是这个样子。
@@ -73,12 +73,12 @@
 | 门 | 编码 | 谁使用它 |
 |---|---|---|
 | CLI `delonix` | argv，稳定的退出类别 | 操作者、脚本 |
-| 节点契约 `delonix.node.v1` | 在**同一个**本地 unix socket 上同时提供 gRPC **与** HTTP/JSON | 任何本地客户端（已设计；尚未提供服务） |
+| 节点契约 `delonix.node.v1` | 在**同一个**本地 unix socket 上同时提供 gRPC **与** HTTP/JSON | 任何本地客户端（部分提供服务：仅 `ListProviders`，由 `delonix-node-api` 提供） |
 | CRI `runtime.v1` | 在一个 unix socket 上的 gRPC | kubelet |
 | MCP | 基于 stdio 的 JSON-RPC | 一个本地 AI 客户端，每个进程一个会话 |
 
-节点契约的设计要点，全部写在 [ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md) D4
-和 [ADR-0042](../adr/0042-one-engine-api-maturity-and-docs.md) 里：
+节点契约的设计要点，全部写在 [ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md) D4
+和 [ADR-0042](../../adr/0042-one-engine-api-maturity-and-docs.md) 里：
 
 - **`.proto` 文件是唯一的真相来源**；REST 映射来自 `google.api.http` 注解，OpenAPI 文档从它们
   生成。一个 CI 门禁会检查格式、lint、相对于上一个版本的破坏性变更、除双向流（`Exec`、
@@ -90,7 +90,7 @@
 - **长任务返回一个 `Operation`**，它在被确认之前就已经持久化，因此一个重启后的服务器能够说出
   `Interrupted`，而不是永远说 `RUNNING`。
 - **仅限本地。** `SO_PEERCRED`、同一个 uid、没有 TCP、没有 TLS、引擎里没有身份这个概念——
-  [ADR-0010](../adr/0010-remote-management-api.md) 否决了一个远程 API。任何节点之外的东西
+  [ADR-0010](../../adr/0010-remote-management-api.md) 否决了一个远程 API。任何节点之外的东西
   都要在自己前面放一个代理。
 
 > **面试官：**为什么不直接做一个 REST 服务器？
@@ -279,18 +279,26 @@ netns 内部加一条 DNAT 规则（在控制 socket 上执行 `publish …`）�
 ```text
 forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 ```
 
-`fwcont` 只有两条规则；每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 `fwmap`
-verdict map 到达。网络**之间**的流量是按（网络）对丢弃的，除非某个 `NetworkRoute` 把这一对
+每个容器的规则都活在它自己的 chain 里，通过按 IP 建索引的 `fwmap` verdict map 到达——一次按
+**源地址**（`fwout`），一次按**目的地址**（`fwcont`）。刻意做成两条 base chain：被跳转到的 chain
+里的 `accept` 只结束发起跳转的那条 base chain，而 `drop` 在任何地方都是终结性的，所以源端的
+egress 策略先做决定，目的端的 ingress 策略之后仍然会再做决定。如果只有一条 base chain 同时做两次
+查找，目的端的 `accept` 会结束整个遍历，源端的 `egress deny` 永远不会执行（`infra.rs` 里的
+`fw_dispatch_chains`；由旧版 holder 建出来的表会由 `fw_dispatch_migration_script` 就地迁移）。网络**之间**的流量是按（网络）对丢弃的，除非某个 `NetworkRoute` 把这一对
 放进了 `@netpair`——一条路由说的是这个包*可以*跨越，而每个容器自己的 chain 仍然决定它是否
 *被允许*。
 
 **按命名空间隔离**存在于每个容器自己的 chain 里：`@dlxns<hash>`（同一命名空间）的成员被
 接受，来自任何其他容器地址（`@dlxall`）的**新**连接则被丢弃；回复仍然能通过，因为这条 drop
-规则只匹配 `ct state new`。一条显式的 ingress 策略会替换掉这个默认值。SDN 中的 IPv6 默认被
+规则只匹配 `ct state new`。这条 drop 是一道任何入站规则都拿不掉的护栏：显式规则被放在它之前，所以一条 `deny` 永远不会打开
+任何东西，而一条显式的 `allow`（例如一个 `kind: Dependency`）仍然只放行它点名的那一个对端
+（`infra.rs` 里的 `fw_chain_body`）。一份含有无效规则的防火墙 spec 会被整体拒绝；命名空间隔离
+没能生效时，`run`、`start` 和 `pod create` 会被拒绝并撤销 attach，而不只是发出警告。SDN 中的 IPv6 默认被
 拒绝（`table ip6`，`policy drop`），因为以上所有规则都是 IPv4 的。
 
 > **图例** —— 参与者是各个进程；实线箭头是调用、socket 连线、fork 或 clone（标签会说明具体是
@@ -352,7 +360,7 @@ sequenceDiagram
   代价——在某台开发用主机上，`containers/` 占了 47 GiB，其中大部分是完全相同的拷贝，一个
   2.1 GiB 镜像的每一次 `run` 都要花大约 13 秒去拷贝。共享层之后，那个目录降到了 7.2 GiB。
 - **多层。** 经典的 `mount(2)` 把 `lowerdir=a:b:c……` 作为一个字符串传入，内核最多只拷贝其中
-  的一个页面，**并悄悄截断**。为 [ADR-0037](../adr/0037-overlay-mount-new-api.md) 测量过
+  的一个页面，**并悄悄截断**。为 [ADR-0037](../../adr/0037-overlay-mount-new-api.md) 测量过
   （2026-09-06 验证）：20 层（4084 字节）能挂载，30 层（5994 字节）就失败了，而一个 91 层的
   builder 镜像需要 9107 字节。现在的挂载改用 `fsopen`/`fsconfig`/`fsmount`/`move_mount`，
   每一层调用一次 `lowerdir+`，因此没有长度上限。
@@ -381,6 +389,12 @@ sequenceDiagram
   `register_backend` 可以再加进来更多（Proxmox 后端，只有在配置好之后，才由 CLI 的组合根去
   注册）。一次注册携带一个工厂闭包和一个 `auto_selectable` 标志，因此自动检测永远不会去
   构造——因而也永远不会去认证——一个远程后端。注册本身不做任何 I/O。
+- **用例与机制分开。** `create`、`stop` 或 `status` 决定什么，住在计算上下文里的 `VmEngine`
+  中：它被交给一个记录 store 和三个端口（`VmBackends`、`LocalDiskImages`、`SeedBuilder`），
+  自己从不运行任何程序；适配器用它的注册表、`qemu-img` 和 `cloud-localds` 来回答这些端口。
+  因此编排可以对着假实现来测试，而一条特定于某个 hypervisor 的规则（libvirt 的 anti-spoof
+  退出选项、一个没有记录的遗留 domain）必须是某个端口的回答，而不是用例里的一个 `if`
+  （ADR-0044 P4b.3）。
 - **给一个 VM 配网络。** Cloud Hypervisor 在 pin 的 netns 内部运行，通过 `VmNetwork` 端口在
   一个网桥上拿到一个 `tap`，这个端口由 SDN 实现（`HostVmNetwork`）；`delonix-vm` 并不依赖
   `delonix-sdn`。因为 DHCP 服务器是引擎自己的、而且是确定性的，所以在客户机启动之前，租约
@@ -393,11 +407,13 @@ sequenceDiagram
   一个 NoCloud ISO，其 `network-config` 按 **MAC** 地址匹配主网卡，而一个远程后端则可以
   原生地实现它。
 
-**它在代码中的位置：** `crates/adapters/delonix-vm/src/lib.rs`（`VmBackend`、
-`BackendRegistration`、`builtin_backends`、`register_backend`、`select_backend`、
-`auto_detect`、`backend_for`、`CloudHypervisorBackend`、`LibvirtBackend`、`launch_vmm`、
+**它在代码中的位置：** `crates/contexts/delonix-compute/src/vm_backend.rs`（`VmBackend`、
+`BackendRegistration`）；`crates/contexts/delonix-compute/src/vm.rs`（`VmEngine`）；
+`crates/adapters/delonix-vm/src/local_ports.rs`（`RegistryBackends`、`QemuImgDisks`、
+`CloudLocaldsSeed`）；`crates/adapters/delonix-vm/src/lib.rs`（`builtin_backends`、`register_backend`、`select_backend`、
+`select_for_create`、`auto_detect`、`backend_for`、`CloudHypervisorBackend`、`LibvirtBackend`、`launch_vmm`、
 `DEFAULT_CH_FIRMWARES`、`set_network`）；`crates/adapters/delonix-vm/src/cloudinit.rs`
-（`generate_seed_iso`）；`crates/contexts/delonix-compute/src/ports.rs`（`VmNetwork`）；
+（`generate_seed_iso`）；`crates/contexts/delonix-compute/src/ports.rs`（`VmNetwork`、`VmBackends`、`LocalDiskImages`、`SeedBuilder`）；
 `crates/adapters/delonix-sdn/src/vm_network.rs`（`HostVmNetwork`）；
 `crates/adapters/delonix-sdn/src/infra.rs`（`sdn_reachable`、`dhcp_lease_ip`）；
 `crates/providers/delonix-proxmox/src/lib.rs`（`ProxmoxBackend`）；
@@ -508,7 +524,7 @@ sequenceDiagram
 - **单节点的限制。** pin 的 netns 内部，每个网络都是一个 `/16`；每一次 netns/veth/nftables
   变更都要经过同一条串行化的控制连接；`slirp4netns` 的吞吐是用户态的；而把一个 VM 迁到另
   一台主机（`vm migrate`）要经历真实的停机——就目前的实现而言，热迁移是一个 NO-GO
-  （[ADR-0031](../adr/0031-live-vm-migration-no-go.md)）。跨节点调度按设计就不在范围
+  （[ADR-0031](../../adr/0031-live-vm-migration-no-go.md)）。跨节点调度按设计就不在范围
   之内。
 
 **它在代码中的位置：** `crates/adapters/delonix-sdn/src/infra.rs`（`ensure_up`、
@@ -529,43 +545,43 @@ sequenceDiagram
 （`delonix_node::events`），重启属于每个容器自己的 supervisor，启动持久化则是每个工作负载
 一个 systemd unit（`delonix system boot`）。一个守护进程需要它自己的、带着「其他方案为什么
 做不到」之证据的 ADR——这个问题被提出来过一次的例子见
-[ADR-0034](../adr/0034-csi-daemon-conflict.md)，而在保持无守护进程的前提下做持续协调的例子
-见 [ADR-0021](../adr/0021-gitops-pull-reconciler.md)（*Proposed*）。
+[ADR-0034](../../adr/0034-csi-daemon-conflict.md)，而在保持无守护进程的前提下做持续协调的例子
+见 [ADR-0021](../../adr/0021-gitops-pull-reconciler.md)（*Proposed*）。
 
 **如果服务器不能 `clone`，CRI 是怎么启动一个容器的？**
 `StartContainer` 构建一个带类型的 `RunOpts`，把它写进一个 `0600` 的文件，然后运行
 `delonix __apirun <spec>`，后者调用的是和 CLI 一样的那个 `cmd_run`。ADR-0040 D5 会用一个
 launcher 可执行程序取代这一跳 CLI。CRI 路径上的资源策略跟随 kubelet
-（[ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md)）。
+（[ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md)）。
 
 **为什么管理 API 只限本地？**
 远程访问意味着身份、授权、证书，以及对调用方的审计——而这些概念，引擎里统统没有。
-[ADR-0010](../adr/0010-remote-management-api.md) 否决了它；出于同样的理由，MCP 界面也只限
-本地（[ADR-0025](../adr/0025-mcp-local-ai-control-surface.md)）。
+[ADR-0010](../../adr/0010-remote-management-api.md) 否决了它；出于同样的理由，MCP 界面也只限
+本地（[ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md)）。
 
 **你会怎么加一个新的 VM provider？**
 一个实现了 `VmBackend` 的新 crate，在组合根处注册——不需要改动任何调用点
-（[ADR-0008](../adr/0008-proxmox-vm-backend.md)）。ADR-0040 D3 把 provider 自己的开关挪进了
+（[ADR-0008](../../adr/0008-proxmox-vm-backend.md)）。ADR-0040 D3 把 provider 自己的开关挪进了
 带命名空间的扩展里，把古怪之处挪进了 capability 里；OpenStack 卡在了一次 spike 上
-（[ADR-0039](../adr/0039-openstack-vm-backend.md)）。
+（[ADR-0039](../../adr/0039-openstack-vm-backend.md)）。
 
 **Service 在没有 VIP 的情况下是怎么做负载均衡的？**
 一个 `Service` 按标签选中若干容器，内部 DNS 每次查询都返回若干条 `A` 记录，轮流转动——没有
-新的 dataplane（[ADR-0032](../adr/0032-service-kind-dns-round-robin.md)）。
+新的 dataplane（[ADR-0032](../../adr/0032-service-kind-dns-round-robin.md)）。
 
 **为什么 state root 下面用的是 ext4，而不是 btrfs/zfs？**
 在共享层缓存之上做 overlay，已经消除了重复；只有在有了经过测量的需求之后，才会重新考虑换
-一种文件系统（[ADR-0016](../adr/0016-filesystem-under-the-state-root.md)）。
+一种文件系统（[ADR-0016](../../adr/0016-filesystem-under-the-state-root.md)）。
 
 **macOS 和 Windows 怎么办？**
 不是移植——这个引擎所用到的一切，都不存在于 Linux 内核之外。计划是做一个用来启动 Linux
-客户机 VM 的 launcher（[ADR-0036](../adr/0036-macos-windows-support.md)，*Proposed*）。
+客户机 VM 的 launcher（[ADR-0036](../../adr/0036-macos-windows-support.md)，*Proposed*）。
 
 **这场重构最终会走向哪里？**
 四个层、一份运行规格、带 capability 的 provider 端口、一份在一个由 socket 激活的服务器上
 提供服务的节点契约，以及一个拥有每一次创建命名空间的 spawn 的 launcher
-（[ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md)、
-[ADR-0042](../adr/0042-one-engine-api-maturity-and-docs.md)）。
+（[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)、
+[ADR-0042](../../adr/0042-one-engine-api-maturity-and-docs.md)）。
 
 ---
 

@@ -274,9 +274,9 @@ Podman 的比较，只会出现在有助于解释某个设计选择的地方。<
   创建叶子——见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 中的 <code>user_service_base</code>
   和 <code>try_delegated_base</code>。<code>cgroup_limits_apply</code> 会在不启动任何容器的情况下，回答
   "限制会不会在这台主机上生效？"这个问题。</li>
-<li>关于中间那一层的设计决策是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>；
+<li>关于中间那一层的设计决策是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>；
   CRI 如何遵循 kubelet 的 cgroup 层级结构是
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>，kubelet 给出的那个
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>，kubelet 给出的那个
   父级由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> 中的 <code>KubeCgroupParent::parse</code>
   校验。</li>
 </ul>
@@ -307,7 +307,7 @@ profile 来限制一个进程的 Linux 安全模块。最后，运行时会把�
   <code>apply_masked_paths</code>、<code>apply_readonly_paths</code>、<code>mask_proc_paths</code>。</li>
 <li>节点级别的安全决策（策略、准入、事件、评分）是一个独立的纯 crate：
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-security-runtime/src/admission.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-security-runtime/src/admission.rs</code></a> 中的 <code>evaluate</code>
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0026-security-runtime-decision-crate.md" target="_blank" rel="noopener">ADR-0026</a>）。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0026-security-runtime-decision-crate.md" target="_blank" rel="noopener">ADR-0026</a>）。</li>
 </ul>
 <p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html"><code>capabilities(7)</code></a>、
 <a href="https://docs.kernel.org/userspace-api/seccomp_filter.html">kernel — Seccomp BPF</a>、
@@ -341,8 +341,8 @@ copy-up 上去的可写 <code>upperdir</code>，以及一个 <code>workdir</code
 <li>Overlay 准备：<code>overlay.rs</code> 中的 <code>ImageStore::prepare_overlay</code> 写入一个
   <code>overlay-lowers</code> 标记（<code>LOWERS_FILE</code>）；挂载本身发生在容器自己的用户和挂载命名空间
   内部，在 <code>mount_overlay_if_marked</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>）中
-  完成，用的是新的挂载 API——见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>
-  和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>。</li>
+  完成，用的是新的挂载 API——见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>
+  和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>。</li>
 <li>引擎自己运行容器，而不是把一个 OCI 运行时 bundle 交给 runc/crun。</li>
 </ul>
 <p><strong>延伸阅读：</strong> <a href="https://github.com/opencontainers/image-spec">OCI image spec</a>、
@@ -378,8 +378,9 @@ copy-up 上去的可写 <code>upperdir</code>，以及一个 <code>workdir</code
 <li>出站与端口转发：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> 中的 <code>slirp_attach</code> 和
   <code>slirp_add_hostfwd</code>（它们会 spawn <code>slirp4netns</code>）；holder 内部的发布在
   <code>publish_port</code>/<code>do_publish</code>（<code>infra.rs</code>）中。</li>
-<li>防火墙：<code>table ip dlxing</code>，带有基础链 <code>fwguard</code>、<code>fwdeny</code>、<code>fwcont</code>，以及 <code>fwmap</code>
-  裁决 map（<code>FWMAP</code>），在 <code>infra.rs</code> 中生成（<code>do_firewall</code>、<code>apply_firewall_all</code>，
+<li>防火墙：<code>table ip dlxing</code>，带有基础链 <code>fwguard</code>、<code>fwdeny</code>、<code>fwout</code>（按源地址）和
+  <code>fwcont</code>（按目的地址），后两者都查同一个 <code>fwmap</code> 裁决 map（<code>FWMAP</code>），在 <code>infra.rs</code> 中生成
+  （<code>fw_dispatch_chains</code>、<code>do_firewall</code>、<code>apply_firewall_all</code>，
   用于命名空间隔离集合的 <code>ns_set_join</code>）。</li>
 <li>内部 DNS（标准名字 <code>&lt;name&gt;.&lt;namespace&gt;.svc.delonix.internal</code>，较旧的
   <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code> 依然能应答；<code>service_fqdn</code>、
@@ -392,8 +393,8 @@ copy-up 上去的可写 <code>upperdir</code>，以及一个 <code>workdir</code
   <code>attach_named_netns</code>。无根场景下是可选启用的（<code>enabled_conf</code> 会检查
   <code>DELONIX_CNI=1</code>）；root 的 CRI 路径使用节点自己的 CNI 链
   （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc.rs</code></a> 中的 <code>root_cni_readiness</code>）。</li>
-<li>拓扑决策：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0013-network-topology.md" target="_blank" rel="noopener">ADR-0013</a>、
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0014-runtime-dir-per-root.md" target="_blank" rel="noopener">ADR-0014</a>。</li>
+<li>拓扑决策：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0013-network-topology.md" target="_blank" rel="noopener">ADR-0013</a>、
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0014-runtime-dir-per-root.md" target="_blank" rel="noopener">ADR-0014</a>。</li>
 </ul>
 <p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html"><code>network_namespaces(7)</code></a>、
 <a href="https://man7.org/linux/man-pages/man4/veth.4.html"><code>veth(4)</code></a>、
@@ -444,9 +445,10 @@ QEMU/KVM domain。</p>
 ISO，里面存放着 <code>user-data</code>、<code>meta-data</code>，以及可选的 <code>network-config</code>。</p>
 <p><strong>在 Delonix 中</strong></p>
 <ul>
-<li>这个端口是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 中的 <code>VmBackend</code>，由同一文件里
-  的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>
-  中的 <code>ProxmoxBackend</code>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）实现。</li>
+<li>这个端口是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 中的 <code>VmBackend</code>（由
+  <code>delonix-vm</code> 重新导出），由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的
+  <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>
+  中的 <code>ProxmoxBackend</code>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>）实现。</li>
 <li>Cloud Hypervisor 固件的查找顺序：<code>DEFAULT_CH_FIRMWARES</code>（EDK2 的 <code>CLOUDHV.fd</code> 排在
   <code>hypervisor-fw</code> 之前）；VMM 的命令行在 <code>boot_ch</code> 中构建。</li>
 <li>libvirt 的 domain XML：<code>libvirt_domain_xml</code>。</li>
@@ -481,12 +483,12 @@ ISO，里面存放着 <code>user-data</code>、<code>meta-data</code>，以及�
   保存在资源本身上，放在 <code>LAST_APPLIED</code> 注解（<code>delonix.io/last-applied</code>）下面——
   没有单独的状态文件。</li>
 <li>归属关系是资源上的一个标签；修订历史在 <code>revision.rs</code>
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0019-stack-revision-history.md" target="_blank" rel="noopener">ADR-0019</a>）里。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0019-stack-revision-history.md" target="_blank" rel="noopener">ADR-0019</a>）里。</li>
 <li>清单在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 中解析；<code>stack plan</code>/<code>apply</code>
   住在 <code>cmd/stack.rs</code> 里。</li>
 <li>后台没有运行任何控制器循环：协调只在一条命令运行时才发生（无守护进程）。提议中的
   pull 协调器保留了这个特性——它是一个调用同一个 apply 的 systemd 定时器，而不是
-  一个驻留进程（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>，状态为<em>提议中</em>）。</li>
+  一个驻留进程（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>，状态为<em>提议中</em>）。</li>
 </ul>
 <p><strong>延伸阅读：</strong> <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes — Objects</a>、
 <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Controllers</a>、
@@ -507,7 +509,7 @@ collector。<strong>Prometheus</strong> 以一种文本暴露格式，从一个 
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a> 中提供 <code>/metrics</code> 服务。</li>
 <li>MCP：<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>（构建在 <a href="https://docs.rs/rmcp"><code>rmcp</code></a> 之上，
   stdio 传输），二进制文件在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin</code></a>。范围与限制：
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>。</li>
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>。</li>
 </ul>
 <p><strong>延伸阅读：</strong> <a href="https://opentelemetry.io/docs/">OpenTelemetry documentation</a>、
 <a href="https://opentelemetry.io/docs/specs/otlp/">OTLP specification</a>、
