@@ -99,3 +99,10 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0067** — The engine manages storage pools (owner decision D2): a `StoragePoolDriver` port in a
+  new `delonix-storage` context, one provider crate per backend (btrfs, zfs, lvm-thin) and the
+  current directory store as the `dir` driver; `kind: StoragePool` (node-scoped, `adopt` by
+  default), `pool:` on `Volume` and on VM disks (raw block, a thin clone of a per-pool image base);
+  privilege probed before any write and refused with class 69; `create` only as root on named,
+  signature-free devices; destroy never by default and never of an adopted pool. Includes a
+  rootless spike (no loop, no device-mapper, btrfs images buildable but not mountable). *Proposed*.
