@@ -420,6 +420,20 @@ fn install_filter_privileged(prog: &seccompiler::BpfProgram) -> std::result::Res
     Ok(())
 }
 
+/// `fchmodat2` (Linux 6.6): `fchmodat` with a working `flags` argument. glibc
+/// 2.39 and musl 1.2.5 call it first for `fchmodat(…, AT_SYMLINK_NOFOLLOW)` and
+/// fall back only on ENOSYS, so a filter that answers EPERM makes the call
+/// fail. Measured: GNU tar 1.35 could not set the mode of any directory it
+/// extracted (`Cannot change mode to rwxr-xr-x: Operation not permitted`, 579
+/// times for the PHP source), which broke `docker-php-ext-install` and every
+/// other build-from-source step in a container. It grants nothing `fchmodat`
+/// does not, and Docker's default profile allows it.
+///
+/// A literal because the `libc` crate does not name it on every architecture
+/// this crate builds for; syscalls added since Linux 5.x share one number
+/// across architectures.
+const SYS_FCHMODAT2: i64 = 452;
+
 /// Allowlist of safe syscalls (based on Docker's default profile, for
 /// x86_64). `clone` is handled separately (conditional). The dangerous ones (mount, ptrace,
 /// bpf, kexec, init_module, setns, unshare, …) are LEFT OUT = denied.
@@ -472,6 +486,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_readlinkat,
         SYS_fchmod,
         SYS_fchmodat,
+        SYS_FCHMODAT2,
         SYS_fchown,
         SYS_fchownat,
         SYS_umask,
@@ -3534,8 +3549,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         }
     }
     let err = execvp(&argv[0], argv).unwrap_err();
-    let reason = format!("exec {}: {err}", argv[0].to_string_lossy());
-    eprintln!("delonix: {reason}");
+    let reason = report_exec_failure(&argv[0], err);
     if let Some(w) = exec_w {
         // SAFETY: our end of the pipe created in `spawn`; the reason goes to the
         // parent, which is waiting for it on a detached start. SIGPIPE ignored
@@ -5983,6 +5997,15 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
     outcome
 }
 
+/// Says on stderr why an `execvp` failed and returns the reason. One function
+/// for the container's init and for `exec`, so the two cannot word the same
+/// failure differently — or one of them say nothing at all, which `exec` did.
+fn report_exec_failure(program: &std::ffi::CStr, err: nix::errno::Errno) -> String {
+    let reason = format!("exec {}: {err}", program.to_string_lossy());
+    eprintln!("delonix: {reason}");
+    reason
+}
+
 /// How long a detached `run` waits for its command's `execvp` once the mount
 /// namespace is final. Long enough for the common case, short enough that a
 /// one-off chown of a large rootfs does not hold `run -d` hostage.
@@ -7624,7 +7647,13 @@ pub fn exec_with(
                             }
                         }
                     }
-                    let _ = execvp(&cargv[0], &cargv);
+                    // `execvp` only returns when it failed. Say why, as the
+                    // container's own init does: a bare 127 with nothing on
+                    // stderr (measured: `exec <c> id` in an image whose PATH
+                    // had lost /usr/bin) reads as the command having run and
+                    // printed nothing.
+                    let Err(err) = execvp(&cargv[0], &cargv);
+                    report_exec_failure(&cargv[0], err);
                     // SAFETY: `_exit` in the forked child: it must not run the parent's
                     // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(127) };
@@ -10674,6 +10703,16 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         assert_eq!(bpf_insn(0xb7, 0, 0, 0, 1), 0xb7 | (1u64 << 32));
         // LDX r2 = *(u32*)(r1+0): dst=2 (bits 8-11), src=1 (bits 12-15).
         assert_eq!(bpf_insn(0x61, 2, 1, 0, 0), 0x61 | (2 << 8) | (1 << 12));
+    }
+
+    /// `fchmodat2` is what libc calls for `fchmodat(…, AT_SYMLINK_NOFOLLOW)`;
+    /// denied, GNU tar cannot set a directory's mode. The literal must be the
+    /// number the kernel uses, checked against `libc` where it names it.
+    #[test]
+    fn seccomp_allowlist_includes_fchmodat2() {
+        assert!(allowed_syscalls().contains(&SYS_FCHMODAT2));
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(SYS_FCHMODAT2, libc::SYS_fchmodat2);
     }
 
     #[test]

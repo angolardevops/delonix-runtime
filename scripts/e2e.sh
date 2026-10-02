@@ -1096,6 +1096,24 @@ if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
 fi
 
 ########################################
+section "build: o ENV que a imagem empacota"
+
+# `ENV PATH=/x:$PATH` tem de empacotar o PATH da base com /x à frente. Medido
+# antes: a imagem ficava com a cadeia literal `/x:$PATH` (o ENV do último
+# estágio era acrescentado duas vezes, a segunda por expandir, e ganha a
+# última), e dentro do container `id`/`ls` respondiam «not found».
+build_env_path() {
+  local d="$OUT/build-env" tag="${PFX}-env:1" got
+  mkdir -p "$d"
+  printf 'FROM %s\nENV PATH=/opt/tool/bin:$PATH\nCMD ["true"]\n' "$IMG" >"$d/Delonixfile"
+  "$BIN" build -t "$tag" "$d" >"$OUT/build-env.log" 2>&1 || { echo "build failed: $(tail -1 "$OUT/build-env.log")"; return 2; }
+  got=$("$BIN" container run --rm --net none "$tag" sh -c 'command -v ls >/dev/null && echo "$PATH"' 2>&1)
+  "$BIN" image rm "$tag" >/dev/null 2>&1
+  echo "PATH=$got"
+  case "$got" in /opt/tool/bin:/*) return 0 ;; *) return 1 ;; esac
+}
+check "build: ENV PATH=…:\$PATH empacota o PATH expandido, e as ferramentas da base continuam a resolver" ok build_env_path
+
 section "container: ciclo de vida + hot reconfig"
 ########################################
 C="c-$PFX"
@@ -1229,6 +1247,11 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "container describe" ok "$BIN" container describe "$C"
   check "container inspect (JSON válido)" ok bash -c "'$BIN' container inspect '$C' | python3 -m json.tool >/dev/null"
   check "container exec" ok "$BIN" container exec "$C" /bin/true
+  # A command that does not exist: 127 AND the reason. Measured before: 127
+  # with nothing on stderr, which reads as a command that ran and printed nothing.
+  check "exec de um comando inexistente sai 127" 127 "$BIN" container exec "$C" no-such-command-e2e
+  check "exec de um comando inexistente diz qual e porquê" ok sh -c \
+    "'$BIN' container exec '$C' no-such-command-e2e 2>&1 | grep -q 'exec no-such-command-e2e'"
   check "container logs" ok "$BIN" container logs "$C"
   check "container stats" ok "$BIN" container stats "$C"
 

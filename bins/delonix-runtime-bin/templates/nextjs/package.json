@@ -2,21 +2,53 @@
   "name": "__NAME__",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "dev": "next dev --port __PORT__",
+    "build": "next build && node scripts/copy-static.mjs",
+    "start": "NEXT_MANUAL_SIG_HANDLE=true PORT=${PORT:-__PORT__} node .next/standalone/server.js",
+    "lint": "eslint --max-warnings=0 .",
+    "format": "prettier --write app lib tests scripts instrumentation.ts next.config.ts vitest.config.mts eslint.config.mjs",
+    "format:check": "prettier --check app lib tests scripts instrumentation.ts next.config.ts vitest.config.mts eslint.config.mjs",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "smoke": "sh scripts/smoke.sh",
+    "smoke:production": "sh scripts/smoke-production.sh",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.222.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "@opentelemetry/sdk-trace-node": "^2.11.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "next": "^__TEMPLATE_VERSION__",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "@next/eslint-plugin-next": "^__TEMPLATE_VERSION__",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.2",
+    "yaml": "^2.9.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "sharp"
+    ]
   }
 }

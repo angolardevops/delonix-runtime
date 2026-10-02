@@ -3255,21 +3255,7 @@ pub(crate) fn init_for(
     template_version: Option<String>,
     up: bool,
 ) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, use the DIRECTORY name. `canonicalize` cannot be used:
-        // the directory does not exist yet (it is `init` that creates it) and it would
-        // always fail, falling into the fallback — every project would be named "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
+    let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
         target,
         &super::scaffold::InitOpts {

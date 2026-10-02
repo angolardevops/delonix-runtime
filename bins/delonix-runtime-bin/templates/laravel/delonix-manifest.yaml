@@ -1,17 +1,77 @@
+# Delonix manifest — the service as it runs: one web container, one queue
+# worker, one volume for the SQLite database they share. Apply with:
+#   delonix secret create __NAME__-app --from-literal "APP_KEY=base64:$(head -c 32 /dev/urandom | base64)"
+#   delonix build -t __NAME__:dev .
+#   delonix stack apply
+# The secret must exist first: production refuses to start without APP_KEY,
+# and the key is never baked into the image or written in this file.
+# Webhook secrets go in the same secret (WEBHOOK_INBOUND_SECRET, …).
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-data
+spec:
+  driver: local
+---
 apiVersion: delonix.io/v1
 kind: Container
 metadata:
   name: __NAME__
-  labels: { app: __NAME__ }
+  labels:
+    app: __NAME__
+    tier: web
 spec:
   image: __NAME__:dev
   restart: always
+  # The unprivileged user of the image (uid 10001). Named here because the
+  # engine applies an image's USER only when the manifest asks for it.
+  user: "app"
   ports:
     - "__PORT__:__PORT__"
   env:
-    - "APP_ENV=production"
-    - "APP_DEBUG=false"
-    # APP_KEY is baked at build; in production inject it via `delonix secret`:
-    # - "APP_KEY=base64:..."
+    vars:
+      - "APP_ENV=production"
+      - "LOG_LEVEL=info"
+      - "SHUTDOWN_TIMEOUT=15s"
+    secrets:
+      - __NAME__-app
+  volumes:
+    - "__NAME__-data:/var/lib/app"
   memory: 512M
   cpus: "1.0"
+  readOnly: true
+  tmpfs:
+    - "/tmp"
+    - "/data"
+    - "/config"
+---
+# The queue worker: delivers outbound webhooks (`php artisan queue:work`).
+# Same image, same database volume, no port. Without it, events queue up in
+# the jobs table and nothing is sent.
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__-worker
+  labels:
+    app: __NAME__
+    tier: worker
+spec:
+  image: __NAME__:dev
+  command: ["worker"]
+  restart: always
+  # The unprivileged user of the image (uid 10001). Named here because the
+  # engine applies an image's USER only when the manifest asks for it.
+  user: "app"
+  env:
+    vars:
+      - "APP_ENV=production"
+      - "LOG_LEVEL=info"
+    secrets:
+      - __NAME__-app
+  volumes:
+    - "__NAME__-data:/var/lib/app"
+  memory: 256M
+  cpus: "0.5"
+  readOnly: true
+  tmpfs:
+    - "/tmp"

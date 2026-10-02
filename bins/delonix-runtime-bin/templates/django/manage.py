@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Django's command-line utility."""
+"""Django's command-line utility (migrate, check, runserver, shell…)."""
+
 import os
 import sys
 

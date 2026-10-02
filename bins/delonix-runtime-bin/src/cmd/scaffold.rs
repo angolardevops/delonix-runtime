@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use delonix_model::{Error, Result};
 
-// Templates embedded by `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str)])]`
-// = [(name, [(relative-path, content)])].
+// Templates embedded by `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str, bool)])]`
+// = [(name, [(relative-path, content, executable)])], and `TEMPLATE_META`.
 include!(concat!(env!("OUT_DIR"), "/templates.rs"));
 
 /// Default images — this is what fills the project when `--image` is NOT
@@ -90,15 +90,161 @@ fn canonical_template(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-/// `(port, health-path, default-version)` of a template (from the
-/// `template.meta` embedded by build.rs). Default `8000` + the apps' health +
-/// no version if the template does not declare one.
-fn template_meta(name: &str) -> (&'static str, &'static str, &'static str) {
+/// What a template's `template.meta` declares (embedded by build.rs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TemplateMeta {
+    port: &'static str,
+    health: &'static str,
+    /// Default `-v`; `""` when the template has no version parameter.
+    version: &'static str,
+    /// Accepted `-v` values, comma-separated (`""`: any plain version).
+    versions: &'static str,
+    /// Lock file of the template's package manager (`""`: none).
+    lock: &'static str,
+    /// Seconds `--up` waits for the health path to answer 200.
+    wait_secs: u64,
+}
+
+/// Default `8000` + the apps' health + no version if the template does not
+/// declare one.
+fn template_meta(name: &str) -> TemplateMeta {
     TEMPLATE_META
         .iter()
-        .find(|(n, _, _, _)| *n == name)
-        .map(|(_, p, h, v)| (*p, *h, *v))
-        .unwrap_or(("8000", "/api/v1/health/live", ""))
+        .find(|m| m.0 == name)
+        .map(
+            |&(_, port, health, version, versions, lock, wait_secs)| TemplateMeta {
+                port,
+                health,
+                version,
+                versions,
+                lock,
+                wait_secs,
+            },
+        )
+        .unwrap_or(TemplateMeta {
+            port: "8000",
+            health: "/api/v1/health/live",
+            version: "",
+            versions: "",
+            lock: "",
+            wait_secs: 120,
+        })
+}
+
+/// Checks a project name before it is substituted anywhere. The name becomes
+/// a container name, an image tag, an npm/Composer/Go module name and a YAML
+/// scalar at once; the one shape all of them accept is a DNS label: lowercase
+/// letters, digits and inner hyphens, at most 63 characters. Measured before
+/// this check: a directory `My App"x` produced an unparsable `package.json`
+/// and `Weird Go` a `module Weird Go` — both with exit 0.
+pub(crate) fn check_project_name(name: &str) -> Result<()> {
+    let b = name.as_bytes();
+    let ok = !b.is_empty()
+        && b.len() <= 63
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+        && b[0] != b'-'
+        && b[b.len() - 1] != b'-';
+    if ok {
+        return Ok(());
+    }
+    Err(Error::Invalid(super::po::tf(
+        "project name '{name}' is not usable: it becomes a container name, an image tag and a \
+         package name, so it must be lowercase letters, digits and inner hyphens (at most 63) \
+         — pass --name {suggestion}",
+        &[("name", name), ("suggestion", &slug(name))],
+    )))
+}
+
+/// The project name of a container/stack scaffold: `--name` exactly as given
+/// (and refused later when it is not usable), otherwise the DIRECTORY name.
+///
+/// A directory is named for people (`My App`, `Shop_API`), so a derived name
+/// that is not usable is turned into the nearest valid one and SAID, instead
+/// of refusing a directory the operator did not name for this tool. An
+/// explicit `--name` is never rewritten: a value someone typed is either used
+/// or refused.
+///
+/// `canonicalize` cannot be used: the directory may not exist yet (it is
+/// `init` that creates it). `.`/empty resolve to the cwd; a new path uses its
+/// basename.
+pub(crate) fn project_name(explicit: Option<String>, dir: &Path) -> String {
+    if let Some(n) = explicit {
+        return n;
+    }
+    let p = if dir.as_os_str().is_empty() || dir == Path::new(".") {
+        std::env::current_dir().ok()
+    } else {
+        Some(dir.to_path_buf())
+    };
+    let raw = p
+        .as_deref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "app".to_string());
+    if check_project_name(&raw).is_ok() {
+        return raw;
+    }
+    let derived = slug(&raw);
+    super::output::info(&super::po::tf(
+        "directory '{dir}' is not usable as a project name; using '{name}' (choose another with --name)",
+        &[("dir", &raw), ("name", &derived)],
+    ));
+    derived
+}
+
+/// The nearest valid project name to `name` (used in the error's suggestion).
+fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out: String = out.trim_matches('-').chars().take(63).collect();
+    let out = out.trim_end_matches('-').to_string();
+    if out.is_empty() {
+        "app".to_string()
+    } else {
+        out
+    }
+}
+
+/// A `-v` value is copied into `pyproject.toml`, `package.json`, `go.mod`,
+/// `composer.json` and a `FROM` line, so it may only be a plain version —
+/// `1`, `1.2` or `1.2.3`. Measured before: `-v '5.2.*", "evil==1'` added a
+/// dependency to `pyproject.toml`. When the template lists the values it
+/// supports, the version must be one of them or a more precise form of one
+/// (`5.2.3` under `5.2`): a framework major the template was not validated
+/// against is refused with the list, not discovered by the first build.
+fn check_version(tname: &str, v: &str, accepted: &str) -> Result<()> {
+    let plain = !v.is_empty()
+        && v.split('.').count() <= 3
+        && v.split('.')
+            .all(|p| !p.is_empty() && p.len() <= 6 && p.bytes().all(|c| c.is_ascii_digit()));
+    if !plain {
+        return Err(Error::Invalid(super::po::tf(
+            "-v '{v}' is not a plain version (1, 1.2 or 1.2.3)",
+            &[("v", v)],
+        )));
+    }
+    if accepted.is_empty() {
+        return Ok(());
+    }
+    let inside = accepted
+        .split(',')
+        .map(str::trim)
+        .any(|a| v == a || v.strip_prefix(a).is_some_and(|rest| rest.starts_with('.')));
+    if inside {
+        Ok(())
+    } else {
+        Err(Error::Invalid(super::po::tf(
+            "template '{tname}' is validated with -v {accepted}; '{v}' is outside that range",
+            &[("tname", tname), ("accepted", accepted), ("v", v)],
+        )))
+    }
 }
 
 /// Resolves `-v`/`--template-version` against a template's own default. `-v`
@@ -112,13 +258,17 @@ fn resolve_version<'a>(
     tname: &str,
     requested: Option<&'a str>,
     default_version: &'a str,
+    accepted: &str,
 ) -> Result<&'a str> {
     match (requested, default_version) {
         (Some(_), "") => Err(Error::Invalid(super::po::tf(
             "template '{tname}' has no version parameter — drop -v/--template-version",
             &[("tname", tname)],
         ))),
-        (Some(v), _) => Ok(v),
+        (Some(v), _) => {
+            check_version(tname, v, accepted)?;
+            Ok(v)
+        }
         (None, d) => Ok(d),
     }
 }
@@ -180,9 +330,8 @@ const LOCAL_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 impl Plan {
     /// The template's own defaults, with nothing asked.
     fn defaults(tname: &str) -> Self {
-        let (port, _, _) = template_meta(tname);
         Plan {
-            port: port.to_string(),
+            port: template_meta(tname).port.to_string(),
             tls_port: meta_kv(tname, "tls").map(String::from),
             hosts: LOCAL_HOSTS.iter().map(|h| h.to_string()).collect(),
         }
@@ -398,7 +547,39 @@ fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str) -> Result<CertSou
 /// read from the template's real `package.json`/`pyproject.toml`/etc., not
 /// invented), never a source path specific to the demo app, so they carry no
 /// such risk and are exactly as safe to hand to a real project as to a fresh one.
-const ADOPT_FILES: [&str; 8] = [
+/// The adopted files that encode a CI pipeline, a package manager or a commit
+/// tool. Written into an adopted project only when it has no CI of its own
+/// AND uses the template's package manager (its lock file is present):
+/// measured before, an npm project with its own workflow received a pnpm
+/// `ci.yml` and `.gitlab-ci.yml` that could not run.
+const CI_FILES: [&str; 5] = [
+    ".github/workflows/ci.yml",
+    ".github/dependabot.yml",
+    ".gitlab-ci.yml",
+    "sonar-project.properties",
+    "commitlint.config.js",
+];
+
+/// Why the CI files must not be written into the adopted project at `dir`,
+/// or `None` when they fit it.
+fn adopt_ci_skip_reason(dir: &Path, lock: &str) -> Option<String> {
+    let workflows = dir.join(".github/workflows");
+    let has_workflow = std::fs::read_dir(&workflows)
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false);
+    if has_workflow || dir.join(".gitlab-ci.yml").exists() {
+        return Some(super::po::t("the project already has its own CI").to_string());
+    }
+    if !lock.is_empty() && !dir.join(lock).exists() {
+        return Some(super::po::tf(
+            "the project has no {lock}, so it does not use the package manager the template's CI runs",
+            &[("lock", lock)],
+        ));
+    }
+    None
+}
+
+const ADOPT_FILES: [&str; 9] = [
     "Delonixfile",
     "delonix-manifest.yaml",
     ".dockerignore",
@@ -407,6 +588,7 @@ const ADOPT_FILES: [&str; 8] = [
     "sonar-project.properties",
     "CONTRIBUTING.md",
     "commitlint.config.js",
+    ".github/dependabot.yml",
 ];
 
 /// True when `dir` already has something in it. The signal for "this is a
@@ -463,23 +645,53 @@ fn render_planned(
                 ],
             ))
         })?;
+    // Everything substituted is checked BEFORE the first file is written:
+    // a refusal after half the project exists would be the misleading partial
+    // output the checks are here to prevent.
+    check_project_name(&o.name)?;
     let module = python_module(&o.name);
-    let (_, health, default_version) = template_meta(tname);
+    let meta = template_meta(tname);
+    let health = meta.health;
     let port = plan.port.as_str();
-    let version = resolve_version(tname, o.template_version.as_deref(), default_version)?;
+    let version = resolve_version(
+        tname,
+        o.template_version.as_deref(),
+        meta.version,
+        meta.versions,
+    )?;
     let adopt = dir_has_content(&o.dir);
+    let ci_skip = if adopt {
+        adopt_ci_skip_reason(&o.dir, meta.lock)
+    } else {
+        None
+    };
+    let outputs: Vec<(PathBuf, String, bool)> = files
+        .iter()
+        .filter(|(rel, _, _)| !adopt || ADOPT_FILES.contains(rel))
+        .filter(|(rel, _, _)| ci_skip.is_none() || !CI_FILES.contains(rel))
+        .map(|(rel, content, exec)| {
+            (
+                o.dir.join(subst(rel, o, &module, plan, version)),
+                subst(content, o, &module, plan, version),
+                *exec,
+            )
+        })
+        .collect();
+    // Every destination is checked before the first write, so a refusal
+    // leaves the directory exactly as it was.
+    for (dest, _, _) in &outputs {
+        refuse_symlinks(&o.dir, dest)?;
+    }
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
-    for (rel, content) in files {
-        if adopt && !ADOPT_FILES.contains(rel) {
-            continue;
-        }
-        let dest = o.dir.join(subst(rel, o, &module, plan, version));
-        n += usize::from(write_file(
-            &dest,
-            &subst(content, o, &module, plan, version),
-            o.force,
-        )?);
+    for (dest, content, exec) in &outputs {
+        n += usize::from(write_file_mode(&o.dir, dest, content, o.force, *exec)?);
+    }
+    if let Some(why) = &ci_skip {
+        super::output::warn(&super::po::tf(
+            "CI files not written: {why}",
+            &[("why", why)],
+        ));
     }
     // The manifest mounts `./tls`, so the certificate has to exist before the
     // first `stack apply` — with or without `--up`.
@@ -555,6 +767,39 @@ fn render_planned(
 
 /// Writes a file, refusing to destroy work without `--force`.
 fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
+    let root = path.parent().unwrap_or(Path::new("."));
+    write_file_mode(root, path, content, force, false)
+}
+
+/// Refuses a destination reached through a symlink: in an adopted directory a
+/// `.github` or `Delonixfile` that is a link would otherwise send the write
+/// somewhere outside the project — `Path::exists` follows links, and a
+/// dangling one even reads as "absent, go ahead".
+fn refuse_symlinks(root: &Path, path: &Path) -> Result<()> {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    let mut cur = root.to_path_buf();
+    for comp in rel.components() {
+        cur.push(comp);
+        if std::fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(Error::Invalid(super::po::tf(
+                "{path} is a symbolic link — refusing to write through it",
+                &[("path", &cur.display().to_string())],
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// [`write_file`] inside the project root `root`, never through a symlink,
+/// with the executable bit when the template file had it.
+fn write_file_mode(
+    root: &Path,
+    path: &Path,
+    content: &str,
+    force: bool,
+    exec: bool,
+) -> Result<bool> {
+    refuse_symlinks(root, path)?;
     if path.exists() && !force {
         eprintln!(
             "{}",
@@ -574,6 +819,10 @@ fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
             super::po::tf("writing {path}", &[("path", &path.display().to_string())])
         ))
     })?;
+    if exec {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    }
     eprintln!(
         "{}",
         super::po::tf(
@@ -671,8 +920,14 @@ fn cert_line(source: CertSource, hosts: &[String]) -> String {
 /// What `--up` prints once the project answers: where to open it, what the
 /// certificate is, the credentials when the template declares any, and the
 /// three commands that come next. Pure, so the promise is testable.
-fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) -> Vec<String> {
-    let (_, health, _) = template_meta(tname);
+fn up_summary(
+    tname: &str,
+    name: &str,
+    plan: &Plan,
+    cert: Option<CertSource>,
+    created_secret: Option<&str>,
+) -> Vec<String> {
+    let health = template_meta(tname).health;
     let port = plan.port.as_str();
     let open = meta_kv(tname, "open").unwrap_or(health);
     let mut out = vec![format!(
@@ -700,6 +955,15 @@ fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) ->
             super::po::t("these are the image's factory credentials — change them before anyone else can reach the port (see README.md)")
         ));
     }
+    if let Some(secret) = created_secret {
+        out.push(format!(
+            "   {}",
+            super::po::tf(
+                "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project",
+                &[("secret", secret)],
+            )
+        ));
+    }
     out.push(format!("   health:  http://localhost:{port}{health}"));
     out.push(format!("   logs:    delonix container logs -f {name}"));
     out.push(format!(
@@ -709,11 +973,71 @@ fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) ->
     out
 }
 
+/// A secret the template's manifest references and that `--up` creates when
+/// it does not exist yet, from `up_secret=<suffix> <KEY>=<value>` in the
+/// template's meta. `{random32}` in the value is 32 random bytes in base64.
+///
+/// The manifest names the secret `<project>-<suffix>`; without it `stack
+/// apply` stops at `no such secret`, and `--up` would end on an error for a
+/// project nobody has touched yet. The key goes to the secret store only —
+/// never into a file of the project — and an existing secret is left alone.
+/// Returns the secret's name when this call created it.
+fn ensure_up_secret(exe: &Path, name: &str, spec: &str) -> Result<Option<String>> {
+    use std::io::{Read, Write};
+    let invalid = || Error::Invalid(format!("template.meta: up_secret={spec}"));
+    let (suffix, pair) = spec.split_once(' ').ok_or_else(invalid)?;
+    let (key, value) = pair.split_once('=').ok_or_else(invalid)?;
+    let secret = format!("{name}-{suffix}");
+    let exists = std::process::Command::new(exe)
+        .args(["secret", "inspect", &secret])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if exists {
+        return Ok(None);
+    }
+    let value = if value.contains("{random32}") {
+        // No fallback: a key that is not random is worse than no key.
+        let mut bytes = [0u8; 32];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+        use base64::Engine;
+        value.replace(
+            "{random32}",
+            &base64::engine::general_purpose::STANDARD.encode(bytes),
+        )
+    } else {
+        value.to_string()
+    };
+    // Through stdin, so the key never appears on a command line.
+    let mut child = std::process::Command::new(exe)
+        .args(["secret", "create", &secret, "--from-env-file", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        writeln!(stdin, "{key}={value}")?;
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if !out.status.success() {
+        return Err(Error::Invalid(super::po::tf(
+            "`delonix {args}` failed:\n{stderr}",
+            &[
+                ("args", &format!("secret create {secret}")),
+                ("stderr", String::from_utf8_lossy(&out.stderr).trim()),
+            ],
+        )));
+    }
+    Ok(Some(secret))
+}
+
 /// Seconds `--up` waits for the health path: the template's `wait=`, or 120.
 fn wait_secs(tname: &str) -> u64 {
-    meta_kv(tname, "wait")
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(120)
+    template_meta(tname).wait_secs
 }
 
 /// A port this project is about to publish that something else already holds.
@@ -761,7 +1085,7 @@ fn build_and_up(
     plan: &Plan,
     cert: Option<CertSource>,
 ) -> Result<()> {
-    let (_, health, _) = template_meta(tname);
+    let health = template_meta(tname).health;
     let port = plan.port.as_str();
     refuse_busy_ports(plan)?;
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
@@ -783,6 +1107,11 @@ fn build_and_up(
         ));
     }
 
+    let created_secret = match meta_kv(tname, "up_secret") {
+        Some(spec) => ensure_up_secret(&exe, name, spec)?,
+        None => None,
+    };
+
     let mut p = super::output::Progress::new();
     p.step(&format!("Applying the stack ({name})"), "🚀");
     run_quiet(&exe, dir, &["stack", "apply"])?;
@@ -794,7 +1123,7 @@ fn build_and_up(
     drop(p);
 
     println!();
-    for line in up_summary(tname, name, plan, cert) {
+    for line in up_summary(tname, name, plan, cert, created_secret.as_deref()) {
         println!("{line}");
     }
     Ok(())
@@ -893,6 +1222,11 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
             )
             .into(),
         ));
+    }
+    // The generic container/stack scaffold writes the name into a manifest and
+    // an image tag too; a VM/cluster scaffold keeps its own naming rules.
+    if templates_apply {
+        check_project_name(&o.name)?;
     }
     // A template (via flag or menu) → complete project; optionally an animated
     // build+run (`--up`, or the interactive question).
@@ -1499,32 +1833,6 @@ mod tests {
         );
     }
 
-    /// CI/CD (workflows, SonarQube, CONTRIBUTING.md, commitlint) does not
-    /// assume the demo's file layout — only the language's own commands,
-    /// already read from the template's real `package.json` — so it is
-    /// included in adopt mode too, unlike the Delonixfile/manifest.
-    #[test]
-    fn adopcao_tambem_recebe_o_ci_cd_generico() {
-        let (_tmp, dir) = scratch();
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("package.json"), "{}").unwrap();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "app".into(),
-            image: None,
-            force: false,
-            template: Some("node".into()),
-            template_version: None,
-            up: false,
-        };
-        render_template("node", &o, false).unwrap();
-        assert!(dir.join(".github/workflows/ci.yml").exists());
-        assert!(dir.join(".gitlab-ci.yml").exists());
-        assert!(dir.join("sonar-project.properties").exists());
-        assert!(dir.join("CONTRIBUTING.md").exists());
-        assert!(dir.join("commitlint.config.js").exists());
-    }
-
     /// Re-correr `init` sobre o SEU PRÓPRIO scaffold anterior (agora não-vazio)
     /// tem de mudar para adopção — nunca voltar a despejar o código de exemplo
     /// por cima de edições que o utilizador já tenha feito.
@@ -1558,7 +1866,7 @@ mod tests {
     /// whatever future template doesn't.
     #[test]
     fn v_recusa_num_template_sem_versao() {
-        let err = resolve_version("future-template", Some("1.2.3"), "").unwrap_err();
+        let err = resolve_version("future-template", Some("1.2.3"), "", "").unwrap_err();
         assert!(
             err.to_string().contains("has no version parameter"),
             "erro inesperado: {err}"
@@ -1569,7 +1877,10 @@ mod tests {
     /// no refusal, because nothing was explicitly asked for.
     #[test]
     fn sem_v_e_sem_default_nao_e_erro() {
-        assert_eq!(resolve_version("future-template", None, "").unwrap(), "");
+        assert_eq!(
+            resolve_version("future-template", None, "", "").unwrap(),
+            ""
+        );
     }
 
     /// `-v` with NO `-t`/`--template` at all — no real template to apply it
@@ -1669,26 +1980,29 @@ mod tests {
     /// something different would be a second template under a misleading name.
     #[test]
     fn the_python_alias_renders_the_fastapi_template() {
+        // Every file of the two renders, path and content: the template may
+        // change its layout, the alias may not change what it produces.
         let render = |t: &str| {
-            let (tmp, dir) = scratch();
-            let o = InitOpts {
-                dir: dir.clone(),
-                name: "myapi".into(),
-                image: None,
-                force: false,
-                template: Some(t.into()),
-                template_version: None,
-                up: false,
-            };
-            render_template(t, &o, false).unwrap();
-            let py = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-            let main = std::fs::read_to_string(dir.join("src/myapi/main.py")).unwrap();
-            drop(tmp);
-            (py, main)
+            let (_tmp, dir) = scratch();
+            render_template(t, &opts(dir.clone(), "myapi", t, None), false).unwrap();
+            let mut files = std::collections::BTreeMap::new();
+            let mut stack = vec![dir.clone()];
+            while let Some(d) = stack.pop() {
+                for e in std::fs::read_dir(&d).unwrap() {
+                    let p = e.unwrap().path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else {
+                        let rel = p.strip_prefix(&dir).unwrap().to_path_buf();
+                        files.insert(rel, std::fs::read(&p).unwrap());
+                    }
+                }
+            }
+            files
         };
         let (fastapi, alias) = (render("fastapi"), render("python"));
+        assert!(fastapi.contains_key(Path::new("pyproject.toml")));
         assert_eq!(fastapi, alias);
-        assert!(fastapi.0.contains("\"fastapi==0.142.*\""), "{}", fastapi.0);
         assert!(template_names().contains(&"fastapi"));
         assert!(
             !template_names().contains(&"python"),
@@ -1696,237 +2010,30 @@ mod tests {
         );
     }
 
-    /// `-v` on the `django` template pins `pyproject.toml`'s dependency as
-    /// `django==<version>.*` — a bare major (`5`) or major.minor (`5.2`), the
-    /// same token substituted into the README so the generated project
-    /// documents what it was actually pinned to.
-    #[test]
-    fn django_com_v_fixa_a_dependencia_como_wildcard() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: Some("5.2".into()),
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.2.*\""),
-            "pyproject.toml não fixou a versão pedida:\n{pyproject}"
-        );
-        assert!(
-            !pyproject.contains("__TEMPLATE_VERSION__"),
-            "token não substituído"
-        );
-        let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
-        assert!(readme.contains("django==5.2.*"));
-    }
-
-    /// Without `-v`, `django` falls back to `template.meta`'s own default
-    /// (`5.1`) — never a literal `>=5.1` again (that let a future major in
-    /// unannounced) and never the raw token surviving into the file.
-    #[test]
-    fn django_sem_v_usa_a_versao_por_omissao() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: None,
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.1.*\""),
-            "sem -v, devia cair no default do template.meta:\n{pyproject}"
-        );
-        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// A bare major (`-v 5`, no minor) is a valid form too — it pins
-    /// `django==5.*`, i.e. "any 5.x", not a specific minor.
-    #[test]
-    fn django_com_v_major_nu_fixa_qualquer_5x() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("django".into()),
-            template_version: Some("5".into()),
-            up: false,
-        };
-        render_template("django", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"django==5.*\""),
-            "um major nu devia fixar `==5.*`, não uma versão específica:\n{pyproject}"
-        );
-    }
-
-    /// `-v` on `fastapi` pins `pyproject.toml`'s FastAPI dependency the same
-    /// way `django` pins its own — `==X.Y.*`, not an unbounded `>=X.Y`.
-    #[test]
-    fn fastapi_with_v_pins_fastapi_as_a_wildcard() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("fastapi".into()),
-            template_version: Some("0.116".into()),
-            up: false,
-        };
-        render_template("fastapi", &o, false).unwrap();
-        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
-        assert!(
-            pyproject.contains("\"fastapi==0.116.*\""),
-            "pyproject.toml não fixou o fastapi pedido:\n{pyproject}"
-        );
-        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `go` has no framework to pin — it fixes the TOOLCHAIN, in
-    /// BOTH `go.mod` (what `go build` enforces) and the Delonixfile's `FROM`
-    /// (what actually builds it). The two must never disagree.
-    #[test]
-    fn go_com_v_fixa_o_toolchain_no_gomod_e_no_delonixfile() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("go".into()),
-            template_version: Some("1.22".into()),
-            up: false,
-        };
-        render_template("go", &o, false).unwrap();
-        let gomod = std::fs::read_to_string(dir.join("go.mod")).unwrap();
-        assert!(
-            gomod.contains("go 1.22"),
-            "go.mod não fixou a versão:\n{gomod}"
-        );
-        let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
-        assert!(
-            delonixfile.contains("FROM golang:1.22-alpine"),
-            "Delonixfile não fixou o toolchain:\n{delonixfile}"
-        );
-    }
-
-    /// `-v` on `laravel` pins `composer.json`'s `laravel/framework` — the PHP
-    /// version stays independent (it tracks the FrankenPHP base image, not `-v`).
-    #[test]
-    fn laravel_com_v_fixa_o_framework_sem_tocar_no_php() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("laravel".into()),
-            template_version: Some("11".into()),
-            up: false,
-        };
-        render_template("laravel", &o, false).unwrap();
-        let composer = std::fs::read_to_string(dir.join("composer.json")).unwrap();
-        assert!(
-            composer.contains("\"laravel/framework\": \"^11\""),
-            "composer.json não fixou o framework pedido:\n{composer}"
-        );
-        assert!(
-            composer.contains("\"php\": \"^8.2\""),
-            "a versão do PHP não devia mexer com -v:\n{composer}"
-        );
-        assert!(!composer.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `node` pins `package.json`'s `fastify` dependency.
-    #[test]
-    fn node_com_v_fixa_o_fastify() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("node".into()),
-            template_version: Some("5.1.0".into()),
-            up: false,
-        };
-        render_template("node", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        assert!(
-            pkg.contains("\"fastify\": \"^5.1.0\""),
-            "package.json não fixou o fastify pedido:\n{pkg}"
-        );
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `nextjs` pins `package.json`'s `next` dependency.
-    #[test]
-    fn nextjs_com_v_fixa_o_next() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("nextjs".into()),
-            template_version: Some("14.2.0".into()),
-            up: false,
-        };
-        render_template("nextjs", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        assert!(
-            pkg.contains("\"next\": \"^14.2.0\""),
-            "package.json não fixou o next pedido:\n{pkg}"
-        );
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
-    /// `-v` on `nestjs` pins EVERY `@nestjs/*` package to the SAME version —
-    /// core, common, platform-express and the CLI move together, never a
-    /// mixed-major install.
-    #[test]
-    fn nestjs_com_v_fixa_todos_os_pacotes_nestjs_juntos() {
-        let (_tmp, dir) = scratch();
-        let o = InitOpts {
-            dir: dir.clone(),
-            name: "myapp".into(),
-            image: None,
-            force: false,
-            template: Some("nestjs".into()),
-            template_version: Some("10.0.0".into()),
-            up: false,
-        };
-        render_template("nestjs", &o, false).unwrap();
-        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        for pkg_name in [
-            "@nestjs/common",
-            "@nestjs/core",
-            "@nestjs/platform-express",
-            "@nestjs/cli",
-        ] {
-            assert!(
-                pkg.contains(&format!("\"{pkg_name}\": \"^10.0.0\"")),
-                "{pkg_name} não ficou fixado à mesma versão:\n{pkg}"
-            );
-        }
-        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-    }
-
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
     /// upstream image tag, the same idiom as `odoo` — never a dependency file.
+    /// A directory is named for people: the derived project name is the
+    /// nearest usable one. An explicit `--name` comes back untouched, so the
+    /// check that follows can refuse it.
+    #[test]
+    fn a_directory_name_is_turned_into_a_usable_project_name() {
+        for (dir, want) in [
+            ("My App", "my-app"),
+            ("Shop_API", "shop-api"),
+            ("/srv/Weird", "weird"),
+            ("fine-name", "fine-name"),
+        ] {
+            let got = project_name(None, Path::new(dir));
+            assert_eq!(got, want, "{dir}");
+            assert!(check_project_name(&got).is_ok(), "{got}");
+        }
+        assert_eq!(
+            project_name(Some("Bad_Name".into()), Path::new("x")),
+            "Bad_Name"
+        );
+        assert!(check_project_name("Bad_Name").is_err());
+    }
+
     #[test]
     fn nginx_httpd_haproxy_com_v_fixam_a_tag_da_imagem() {
         for (tpl, from_prefix) in [
@@ -1957,7 +2064,236 @@ mod tests {
         }
     }
 
-    fn opts(dir: &Path, template: &str) -> InitOpts {
+    fn opts(dir: PathBuf, name: &str, template: &str, v: Option<&str>) -> InitOpts {
+        InitOpts {
+            dir,
+            name: name.into(),
+            image: None,
+            force: false,
+            template: Some(template.into()),
+            template_version: v.map(String::from),
+            up: false,
+        }
+    }
+
+    /// The name lands in package.json, go.mod, composer.json, YAML and an image
+    /// tag at once; before this check `My App"x` produced an unparsable
+    /// package.json with exit 0.
+    #[test]
+    fn a_project_name_must_be_a_dns_label_and_the_error_suggests_one() {
+        for ok in ["a", "my-svc", "svc2", &"x".repeat(63)] {
+            assert!(check_project_name(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "My App",
+            "my_app",
+            "-a",
+            "a-",
+            "caf\u{e9}",
+            "a\"b",
+            &"x".repeat(64),
+        ] {
+            assert!(check_project_name(bad).is_err(), "{bad:?} accepted");
+        }
+        assert_eq!(slug("My App\"x"), "my-app-x");
+        assert_eq!(slug("___"), "app");
+        let (_tmp, dir) = scratch();
+        let err = render_template("go", &opts(dir.clone(), "Weird Go", "go", None), false);
+        assert!(
+            err.is_err() && !dir.exists(),
+            "a refused name must write nothing"
+        );
+    }
+
+    /// `-v` is copied into manifests; only a plain version inside the
+    /// template's validated range passes.
+    #[test]
+    fn a_version_must_be_plain_and_inside_the_declared_range() {
+        assert!(check_version("t", "5", "").is_ok());
+        assert!(check_version("t", "5.2.3", "").is_ok());
+        for bad in [
+            "",
+            "5.",
+            ".5",
+            "5.2.3.4",
+            "v5",
+            "5.2.*\", \"evil==1",
+            "latest",
+            "1234567",
+        ] {
+            assert!(check_version("t", bad, "").is_err(), "{bad:?} accepted");
+        }
+        assert!(check_version("t", "5.2", "5.2,6.0").is_ok());
+        assert!(
+            check_version("t", "5.2.7", "5.2,6.0").is_ok(),
+            "a patch of a listed minor"
+        );
+        assert!(
+            check_version("t", "5.20", "5.2,6.0").is_err(),
+            "5.20 is not 5.2"
+        );
+        let e = check_version("t", "4.2", "5.2,6.0")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("5.2,6.0"), "{e}");
+    }
+
+    /// A symlink among the destinations refuses the whole render before the
+    /// first file is written.
+    #[test]
+    fn a_symlinked_destination_refuses_the_render_and_writes_nothing() {
+        let (tmp, dir) = scratch();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        let outside = tmp.path().join("outside");
+        std::os::unix::fs::symlink(&outside, dir.join("Delonixfile")).unwrap();
+        let before: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        let err = render_template("go", &opts(dir.clone(), "sl", "go", None), false);
+        assert!(err.unwrap_err().to_string().contains("symbolic link"));
+        let after: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "a file was written before the refusal"
+        );
+        assert!(!outside.exists(), "the write went through the link");
+    }
+
+    #[test]
+    fn an_executable_template_file_stays_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_tmp, dir) = scratch();
+        let f = dir.join("run.sh");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_file_mode(&dir, &f, "#!/bin/sh\n", false, true).unwrap();
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
+    /// Adoption writes CI only into a project that has none and uses the
+    /// template's package manager.
+    #[test]
+    fn adopted_ci_needs_no_existing_ci_and_the_templates_lock() {
+        let (_tmp, dir) = scratch();
+        std::fs::create_dir_all(dir.join(".github/workflows")).unwrap();
+        assert!(
+            adopt_ci_skip_reason(&dir, "pnpm-lock.yaml").is_some(),
+            "no lock"
+        );
+        std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        assert!(adopt_ci_skip_reason(&dir, "pnpm-lock.yaml").is_none());
+        std::fs::write(dir.join(".github/workflows/test.yml"), "").unwrap();
+        assert!(
+            adopt_ci_skip_reason(&dir, "pnpm-lock.yaml").is_some(),
+            "own CI"
+        );
+        assert!(adopt_ci_skip_reason(&dir, "").is_some());
+    }
+
+    /// Every embedded template, for every `-v` it declares: renders, leaves
+    /// no placeholder, every JSON and YAML file parses, and the version shows
+    /// up in what was written. One test for all templates, so a new template
+    /// (or a new accepted version) is covered the day it is added.
+    #[test]
+    fn every_template_renders_valid_files_for_each_declared_version() {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+        for tpl in template_names() {
+            let meta = template_meta(tpl);
+            let versions: Vec<&str> = if meta.versions.is_empty() {
+                vec![meta.version]
+            } else {
+                assert!(
+                    meta.versions.split(',').any(|v| v.trim() == meta.version),
+                    "{tpl}: the default version {} is not in versions={}",
+                    meta.version,
+                    meta.versions
+                );
+                meta.versions.split(',').map(str::trim).collect()
+            };
+            for v in versions {
+                let (_tmp, dir) = scratch();
+                let v_opt = (!v.is_empty()).then_some(v);
+                render_template(tpl, &opts(dir.clone(), "my-svc", tpl, v_opt), false)
+                    .unwrap_or_else(|e| panic!("{tpl} -v {v}: {e}"));
+                let mut files = Vec::new();
+                walk(&dir, &mut files);
+                let mut version_seen = v.is_empty();
+                for f in &files {
+                    let Ok(text) = std::fs::read_to_string(f) else {
+                        continue;
+                    };
+                    for token in ["__NAME__", "__MODULE__", "__PORT__", "__TEMPLATE_VERSION__"] {
+                        assert!(!text.contains(token), "{tpl} -v {v}: {token} left in {f:?}");
+                    }
+                    version_seen |= text.contains(v);
+                    match f.extension().and_then(|e| e.to_str()) {
+                        Some("json") => {
+                            serde_json::from_str::<serde_json::Value>(&text)
+                                .unwrap_or_else(|e| panic!("{tpl} -v {v}: {f:?}: {e}"));
+                        }
+                        Some("yaml" | "yml") => {
+                            for doc in serde_yaml::Deserializer::from_str(&text) {
+                                <serde_yaml::Value as serde::Deserialize>::deserialize(doc)
+                                    .unwrap_or_else(|e| panic!("{tpl} -v {v}: {f:?}: {e}"));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(version_seen, "{tpl}: -v {v} appears in no generated file");
+            }
+            if !meta.versions.is_empty() {
+                let (_tmp, dir) = scratch();
+                let err =
+                    render_template(tpl, &opts(dir.clone(), "my-svc", tpl, Some("0.0.1")), false);
+                assert!(
+                    err.is_err() && !dir.exists(),
+                    "{tpl}: -v 0.0.1 was accepted"
+                );
+            }
+        }
+    }
+
+    /// Adoption writes the template's CI into a project that uses the
+    /// template's package manager and has no CI of its own.
+    #[test]
+    fn adoption_writes_the_ci_when_the_project_can_run_it() {
+        let (_tmp, dir) = scratch();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
+        render_template("node", &opts(dir.clone(), "app", "node", None), false).unwrap();
+        assert!(dir.join(".github/workflows/ci.yml").exists());
+        assert!(dir.join(".gitlab-ci.yml").exists());
+        assert!(dir.join("CONTRIBUTING.md").exists());
+        // The same project with npm's lock instead: glue yes, CI no.
+        let (_tmp2, dir2) = scratch();
+        std::fs::create_dir_all(&dir2).unwrap();
+        std::fs::write(dir2.join("package-lock.json"), "{}").unwrap();
+        render_template("node", &opts(dir2.clone(), "app", "node", None), false).unwrap();
+        assert!(dir2.join("Delonixfile").exists());
+        assert!(!dir2.join(".github/workflows/ci.yml").exists());
+    }
+
+    fn edge_opts(dir: &Path, template: &str) -> InitOpts {
         InitOpts {
             dir: dir.to_path_buf(),
             name: "edge".into(),
@@ -1993,7 +2329,7 @@ mod tests {
                 tls_port: Some("18443".into()),
                 hosts: vec!["localhost".into(), "127.0.0.1".into()],
             };
-            let cert = render_planned(tpl, &opts(&dir, tpl), false, &plan).unwrap();
+            let cert = render_planned(tpl, &edge_opts(&dir, tpl), false, &plan).unwrap();
             assert_eq!(cert, Some(CertSource::SelfSigned), "{tpl}");
             let mut files = Vec::new();
             all_files(&dir, &mut files);
@@ -2038,7 +2374,9 @@ mod tests {
     #[test]
     fn the_tls_token_and_the_tls_meta_key_go_together() {
         for (name, files) in TEMPLATES {
-            let uses = files.iter().any(|(_, body)| body.contains("__TLS_PORT__"));
+            let uses = files
+                .iter()
+                .any(|(_, body, _)| body.contains("__TLS_PORT__"));
             assert_eq!(uses, meta_kv(name, "tls").is_some(), "{name}");
         }
     }
@@ -2088,17 +2426,44 @@ mod tests {
             "edge",
             &Plan::defaults("nginx"),
             Some(CertSource::SelfSigned),
+            None,
         )
         .join("\n");
         assert!(nginx.contains("https://localhost:8443/"), "{nginx}");
         assert!(nginx.contains("self-signed"), "{nginx}");
         assert!(!nginx.contains("pass:"), "{nginx}");
 
-        let odoo = up_summary("odoo", "erp", &Plan::defaults("odoo"), None).join("\n");
+        let odoo = up_summary("odoo", "erp", &Plan::defaults("odoo"), None, None).join("\n");
         assert!(odoo.contains("http://localhost:8069/web"), "{odoo}");
         assert!(odoo.contains("user:    admin"), "{odoo}");
         assert!(odoo.contains("pass:    admin"), "{odoo}");
         assert!(odoo.contains("change them"), "{odoo}");
+    }
+
+    /// The Laravel manifest references `<name>-app`; `--up` is told how to
+    /// create it, and says so when it did.
+    #[test]
+    fn a_template_declares_the_secret_up_creates() {
+        assert_eq!(
+            meta_kv("laravel", "up_secret"),
+            Some("app APP_KEY=base64:{random32}")
+        );
+        let manifest = TEMPLATES
+            .iter()
+            .find(|(n, _)| *n == "laravel")
+            .and_then(|(_, f)| f.iter().find(|(rel, _, _)| *rel == "delonix-manifest.yaml"))
+            .map(|(_, body, _)| *body)
+            .unwrap();
+        assert!(manifest.contains("- __NAME__-app"), "{manifest}");
+        let said = up_summary(
+            "laravel",
+            "shop",
+            &Plan::defaults("laravel"),
+            None,
+            Some("shop-app"),
+        )
+        .join("\n");
+        assert!(said.contains("shop-app was created"), "{said}");
     }
 
     /// `wait=` is read: Odoo declares 300 s, a template that says nothing gets 120.

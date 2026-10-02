@@ -2979,6 +2979,7 @@ os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
 que os utilizadores usam), mas nunca num host de produção partilhado sem ser
 esse o pedido explícito.
 
+
 ## Os templates de edge nascem com HTTPS e dimensionados para carga (2026-10-01)
 
 `nginx`, `httpd` e `haproxy` tinham o TLS só em comentário, 128M/0,5 CPU, e limites de
@@ -3200,6 +3201,7 @@ o separa dos outros dez.
   substituído. A primeira reprodução «falhou» por isso. Para medir, copiar o binário para um
   caminho estável e nunca o sobrescrever enquanto algo dele corre (o holder também o usa: `cp`
   sobre ele dá `Text file busy`).
+
 
 ## Templates de infraestrutura e ERP contra o prompt master (2026-10-01)
 
@@ -8435,3 +8437,94 @@ se mediram sob carga dizem-no.
 - **Um processo em estado D depois do SIGKILL não é um bug do motor**: `wb_wait_for_completion` é
   a saída à espera do writeback do disco. O `stop` desiste ao fim de 30 s e diz 0; o processo sai
   minutos depois num host saturado.
+
+## Os templates do `delonix init` têm contrato, e o gerador verifica o que substitui (ADR-0061, 2026-10-01)
+
+Medido com o binário de `9eb2a14d`, gerando cada template num directório vazio e correndo os
+comandos do README e da CI de cada um: a CI documentada **falhava num projecto novo** (django
+`ruff check` rc=1, node `pnpm lint` rc=1 por não ter ESLint, django `pytest` rc=5), o `-v` e o
+nome do projecto eram copiados sem verificação para manifestos (`-v '5.2.*", "evil==1'`
+acrescentou uma dependência ao `pyproject.toml`; um directório `My App"x` deu um `package.json`
+ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
+
+- **O contrato** (`docs/adr/0061-init-template-contract.md`): os sete templates de aplicação
+  (`go`, `node`, `nestjs`, `nextjs`, `fastapi`, `django`, `laravel`) geram um serviço pequeno e
+  completo — uma capacidade (notas) do transporte ao porto, uma forma de erro, configuração
+  validada no arranque, prontidão `starting → ready → draining`, encerramento limitado,
+  Standard Webhooks nos dois sentidos, OpenTelemetry, contrato OpenAPI com teste de deriva, teste
+  de direcção das dependências e teste de um-só-trace. `odoo` e `nginx`/`httpd`/`haproxy` têm
+  outro contrato (deployment de ERP; infra-estrutura).
+- **O `template.meta` é a interface entre um template e o gerador**: `port=`, `health=`,
+  `version=`, `versions=` (os `-v` aceites), `lock=` (o lock do gestor de pacotes, lido pelo modo
+  adopt) e `wait=` (segundos que o `--up` espera pela saúde). Um template novo declara-se aí; o
+  teste `every_template_renders_valid_files_for_each_declared_version` renderiza-o para cada
+  versão e faz parse do JSON/YAML que escreveu, sem precisar de teste próprio.
+- **Locks**: só o `go.sum` é embebido (o `go.mod` fixa versões exactas, logo os hashes são
+  função do manifesto). Para uv/pnpm/Composer um lock embebido ficaria obsoleto a cada `-v`; o
+  primeiro install gera-o, a CI recusa correr sem ele, e o Delonixfile usa-o quando existe.
+- **O gerador nunca corre um gestor de pacotes** nem vai à rede.
+
+**Armadilhas medidas, para quem mexer num template:**
+
+- **O comprimento do nome do projecto muda o comprimento das linhas.** Um `format:check` que
+  passa com `my-svc` pode chumbar com um nome de 63 caracteres. Os tokens `__NAME__`/`__PORT__`
+  ficam num ficheiro de constantes, e o formatador corre só sobre código (nunca sobre Markdown).
+  Testa-se com um nome longo.
+- **`| grep -q` mata o gerador a meio.** Um pipe que fecha cedo entrega SIGPIPE ao `delonix init`
+  e deixa o projecto por metade — parece um bug de escrita parcial e é do teste. Captura-se a
+  saída e compara-se depois.
+- **Uma porta ocupada por outro serviço faz um smoke passar ou falhar pelo serviço errado.** Foi
+  assim que apareceu que o `smoke.sh` não aceitava `"id": "…"` com espaço (o JSON de outro
+  framework). Confirma-se o dono da porta antes de medir.
+- **Um esqueleto vazio é pior que um directório em falta.** O primeiro `.dockerignore` deste
+  motor descia a todo o directório excluído assim que houvesse uma regra `!`, e deixava a
+  árvore de pastas vazia: um `.venv` vazio fazia o `uv sync` recusar («not a valid Python
+  environment»). Só a build real o mostrou — o teste unitário não tinha excepção nenhuma.
+- **Uma lista vazia de processadores não é «sem exportação»** no SDK OpenTelemetry de Node: o
+  provider não é registado e os `trace_id` saem a zeros. Usa-se um processador nulo.
+- **Os erros de exportação do SDK saem em texto livre no stderr** se ninguém instalar um
+  handler — fora do formato JSON dos logs. Cada template encaminha-os para o logger.
+- **O `delonix build` não é o `docker build`**: até esta série não lia `.dockerignore`, deitava
+  fora as fontes do meio de um `COPY a b dst/` e seguia symlinks dentro de uma árvore copiada
+  (um `node_modules` do pnpm não se conseguia copiar entre estágios). Uma imagem «validada com
+  docker» não está validada.
+
+**Segunda passagem (2026-10-01): os pendentes fechados em rootless, e o que só a execução mostrou.**
+
+- **As sete imagens correm sem root.** Cada Delonixfile acaba em `USER` (`app`, uid 10001, criado
+  na imagem; `node`, uid 1000, nos três de Node) e cada manifesto nomeia-o com `user:` — o motor
+  só aplica o USER de uma imagem quando o manifesto o pede (ADR-0062). O utilizador não é dono de
+  nada na imagem a não ser o ponto de montagem de um volume. Medido nos dois motores (este ramo
+  só, e com o P1 do ADR-0062): `id` é o utilizador sem privilégio, `CapEff` 0, `/etc/passwd`
+  continua `0:0` e a escrita é recusada.
+- **O CI gerado é EXECUTADO, não só lido** (`scripts/init-ci.sh`): gera cada template e corre, num
+  container rootless limpo com a imagem que o `.gitlab-ci.yml` nomeia, a criação do lock, o
+  trabalho do GitLab tal como está escrito e cada passo `run:` do workflow do GitHub. Só as
+  acções `uses:` ficam por executar. Foi esta corrida — e não a leitura do YAML, que já passava —
+  que encontrou quatro defeitos:
+  - o `prettier --check .` do `nestjs` chumbava no `.pnpm-store`, que o pnpm cria DENTRO do
+    projecto quando este está num mount próprio (um runner);
+  - o trabalho GitLab do `laravel` corre como root, e o Composer aborta um script que precise de
+    um plugin sem `COMPOSER_ALLOW_SUPERUSER=1`;
+  - o perfil seccomp por omissão negava `fchmodat2`, por isso o `tar` do GNU não conseguia pôr o
+    modo a nenhum directório (579 × «Cannot change mode») e nenhum `docker-php-ext-install`
+    compilava num container. Era também a razão de o `pcntl` não compilar no `delonix build`,
+    que a primeira passagem atribuiu, por leitura, à posse dos ficheiros;
+  - o `ENV` do último estágio era empacotado duas vezes, a segunda por expandir: `ENV
+    PATH=/app/.venv/bin:$PATH` dava uma imagem cujo PATH era essa cadeia literal. O serviço
+    corria (o comando vive no único directório que restava) e `exec <c> id` saía 127 calado.
+- **«Validado» com a imagem a responder não é validado.** Os quatro passavam o smoke. O PATH
+  partido só apareceu ao correr `id` lá dentro, e o `exec` de um comando inexistente não dizia
+  nada — agora diz o mesmo que o init (`delonix: exec <programa>: <errno>`).
+- **Um directório com maiúsculas ou espaços dá um nome derivado, dito na saída**; um `--name`
+  explícito continua a ser usado ou recusado, nunca reescrito.
+- **O `django` migra no arranque** quando `MIGRATE_ON_START=true` (o manifesto define-o: uma
+  réplica em SQLite). O gunicorn nunca migra.
+- **Dois `target` para duas árvores.** Um `CARGO_TARGET_DIR` partilhado entre este ramo e o de
+  validação (com o P1) reutilizou o `delonix-compute` da outra árvore e a compilação falhou em
+  símbolos que existiam no código — a armadilha já escrita em «duas cópias do mesmo repo não são
+  dois builds».
+- **Com o disco do host saturado, o `stop` e o `rm -f` de um container mantido demoram ou dão
+  DX-8101** (o PID 1 fica em `D`, `wb_wait_for_completion`): é o ADR-0056 D4, não é dos
+  templates. Medido aqui com um `sleep` que não escreveu nada, enquanto outra corrida enchia o
+  disco. Repetir o comando resolve.

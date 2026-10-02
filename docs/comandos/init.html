@@ -152,16 +152,24 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <code>vm init</code> faz o mesmo para uma VM. O que faltava era o passo ANTES desses: saber qual
 deles chamar, e com qual dos onze templates. É esse o trabalho todo aqui — detectar,
 <strong>dizer o que detectou e porquê</strong>, e delegar. Não gera nada de seu.<br><br>
-A detecção é uma função pura sobre os nomes de ficheiro presentes, ordenada do mais específico
-para o mais genérico (um projecto Django também tem <code>.py</code>, e um Next.js também tem
-<code>package.json</code> — a regra mais larga não pode ganhar só por ter sido verificada
-primeiro). E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
+A detecção lê os <strong>manifestos</strong> do projecto — as dependências declaradas em
+<code>package.json</code>, <code>composer.json</code>, <code>pyproject.toml</code> ou
+<code>requirements.txt</code> — porque o nome de um ficheiro não diz que framework o projecto
+usa. Um manifesto que não nomeia nenhum framework com template é <em>desconhecido</em>: recebe o
+scaffold genérico, com a razão escrita, nunca o template que sobrou. Um <code>-t</code> explícito
+ganha sempre à detecção. E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
 corrige com <code>-t</code>; um palpite errado em silêncio produz um projecto que não bate certo
 com o código ao lado.<br><br>
 Há um caso em que a resposta certa é <strong>não gerar nada</strong>: um directório com
 <code>docker-compose.yml</code> já corre nativamente com <code>delonix compose up</code>, e um
 segundo manifesto deixaria o projecto com duas fontes de verdade. O comando di-lo, em vez de
-gerar na mesma.</p><p class='lang-en'><code>stack init</code> already generates a complete, filled-in project, and
+gerar na mesma.<br><br>
+O que é substituído nos ficheiros é verificado antes de se escrever o primeiro: o nome do
+projecto tem de ser um rótulo DNS (minúsculas, dígitos e hífens interiores — vira nome de
+container, tag de imagem e nome de pacote; <code>--name</code> dá-lhe outro), e o <code>-v</code>
+tem de ser uma versão simples dentro da gama que o template declara. Num projecto já existente
+só entra a cola do Delonix; a CI do template só é escrita se o projecto não tiver CI própria e
+usar o mesmo gestor de pacotes.</p><p class='lang-en'><code>stack init</code> already generates a complete, filled-in project, and
 <code>vm init</code> does the same for a VM. What was missing is the step BEFORE those: knowing
 which one to call, and with which of the eleven templates. That is the whole job here — detect,
 <strong>say what was detected and why</strong>, and dispatch. It generates nothing of its own.<br><br>
@@ -184,6 +192,9 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Project name (default: the directory&#x27;s name). Lowercase letters, digits and inner hyphens, because it becomes a container name, an image tag and a package name
 
   -t, --template &lt;TEMPLATE&gt;
           Force a template instead of the detected one (`stack init -t list` shows them)
@@ -226,7 +237,15 @@ EXAMPLES:
   delonix init -t laravel -v 12.5 myapp
 
   # ...or a Go toolchain version — this template has no framework to pin
-  delonix init -t go -v 1.22 myapp
+  delonix init -t go -v 1.27 myapp
+
+  # choose the project name — without --name it comes from the directory,
+  # lowercased and hyphenated when needed (the run says which)
+  delonix init --name billing-api ./Billing_API
+
+  # a manifest that names no supported framework gets the generic scaffold,
+  # with the reason — force a template to override
+  delonix init -t node
 
 SEE ALSO:
   delonix stack init · delonix vm init · delonix stack apply · delonix compose
@@ -236,7 +255,7 @@ SEE ALSO:
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">Detecta e gera — a saída diz sempre qual foi a prova</div><pre><code>delonix init</code></pre><div class="out"><pre><code>detected go.mod → stack init --template go
   created: ./Delonixfile
   created: ./delonix-manifest.yaml
-  already exists, skipped: ./go.mod  (use --force to overwrite)</code></pre></div></div><div class="ex"><div class="cap">Forçar um template em vez do detectado</div><pre><code>delonix init -t django</code></pre></div><div class="ex"><div class="cap">Ver os templates que existem</div><pre><code>delonix stack init -t list</code></pre></div><div class="ex"><div class="cap">Um `VMfile` presente manda para o outro gerador</div><pre><code>delonix init</code></pre></div><div class="ex"><div class="cap">Um projecto compose não é reescrito — é assinalado</div><pre><code>delonix init</code></pre><div class="out"><pre><code>warning found docker-compose.yml — this project already runs natively with `delonix compose up`; generating a second manifest would give it two sources of truth</code></pre></div></div>
+  already exists, skipped: ./go.mod  (use --force to overwrite)</code></pre></div></div><div class="ex"><div class="cap">Forçar um template em vez do detectado</div><pre><code>delonix init -t django</code></pre></div><div class="ex"><div class="cap">Dar nome ao projecto quando o do directório não serve</div><pre><code>delonix init --name billing-api ./Billing_API</code></pre></div><div class="ex"><div class="cap">Um nome ou uma versão inválidos são recusados sem escrever nada</div><pre><code>delonix init -t django -v 4.2 app</code></pre><div class="out"><pre><code>error[DX-1000] invalid argument: template &#x27;django&#x27; is validated with -v 5.2,6.0,6.1; &#x27;4.2&#x27; is outside that range</code></pre></div></div><div class="ex"><div class="cap">Ver os templates que existem</div><pre><code>delonix stack init -t list</code></pre></div><div class="ex"><div class="cap">Um `VMfile` presente manda para o outro gerador</div><pre><code>delonix init</code></pre></div><div class="ex"><div class="cap">Um projecto compose não é reescrito — é assinalado</div><pre><code>delonix init</code></pre><div class="out"><pre><code>warning found docker-compose.yml — this project already runs natively with `delonix compose up`; generating a second manifest would give it two sources of truth</code></pre></div></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

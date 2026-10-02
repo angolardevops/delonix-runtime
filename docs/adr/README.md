@@ -85,3 +85,7 @@ never rewritten — supersede them with a new one.
   foundation** (`checkpoint_container` is a stub, zero CRIU); real checkpoint needs CRIU, gated on a
   **rootless-CRIU GO/NO-GO spike** + security audit, run only behind a concrete need. Recommends
   keeping the stub and not scheduling the spike yet.
+- **0061** — What a `delonix init` template promises: one capability end to end, webhooks both
+  ways, OpenTelemetry, contract and architecture gates as tests; locks shipped only when they are a
+  function of the manifest (Go); the generator checks the name and `-v` it substitutes; detection
+  reads manifests and says «unknown». *Proposed*.

@@ -1,6 +1,11 @@
+.venv/
 __pycache__/
 *.py[cod]
-.venv/
+.pytest_cache/
+.ruff_cache/
 .env
-db.sqlite3
-staticfiles/
+*.sqlite3
+*.sqlite3-journal
+.audit-requirements.txt
+*.log
+.DS_Store

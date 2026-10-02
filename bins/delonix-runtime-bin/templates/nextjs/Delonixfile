@@ -1,16 +1,38 @@
-# Delonixfile — Next.js (App Router) + TypeScript, pnpm-managed.
-# Build with:  delonix build -t __NAME__:dev .
-FROM node:20-slim
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
+#
+# Two stages: the first installs every dependency and runs `next build`; the
+# second carries only .next/standalone — server.js, the traced production
+# node_modules and the browser assets (`pnpm build` copies .next/static into
+# it). No package manager and no source reach the runtime image. The build
+# context is filtered by .dockerignore (node_modules, .next, .env, .git).
+#
+# Dependencies come from pnpm-lock.yaml when the project has one (commit it:
+# that is what makes two builds of the same commit install the same thing).
+# A fresh project has no lock yet, so the build resolves and says so.
+FROM node:24-slim AS build
+ENV NEXT_TELEMETRY_DISABLED=1 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
 RUN corepack enable
-COPY package.json ./
-COPY tsconfig.json ./
-COPY next.config.mjs ./
-COPY app ./app
-# --prod=false: devDeps (typescript/@types) are needed to build.
-RUN pnpm install --prod=false && pnpm build
+COPY . .
+RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; \
+    else echo "WARNING: no pnpm-lock.yaml - resolving versions now; run 'pnpm install' and commit the lock" && pnpm install --no-frozen-lockfile; fi
+RUN pnpm build
+
+FROM node:24-slim
+# NEXT_MANUAL_SIG_HANDLE: the service's own ordered shutdown handles SIGTERM
+# (docs/adr/0003-shutdown.md). HOSTNAME: server.js binds to it, and a
+# container runtime otherwise sets it to the container's own name.
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 NEXT_MANUAL_SIG_HANDLE=true HOSTNAME=0.0.0.0 PORT=__PORT__
+WORKDIR /app
+COPY --from=build /app/.next/standalone ./
+ARG VERSION=dev
+ENV APP_VERSION=${VERSION}
 EXPOSE __PORT__
-# Delonix extension: the runtime probes this to mark the container healthy.
-HEALTHCHECK CMD node -e "require('http').get('http://127.0.0.1:__PORT__/api/v1/health/live',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-CMD ["/app/node_modules/.bin/next", "start", "-p", "__PORT__"]
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:__PORT__/api/v1/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+STOPSIGNAL SIGTERM
+# node:24-slim ships this unprivileged user (uid 1000); it owns nothing in the
+# image and writes only to the manifest's tmpfs.
+USER node
+CMD ["node", "server.js"]
