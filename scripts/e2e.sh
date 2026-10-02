@@ -4585,6 +4585,14 @@ check "a chave não entra na imagem nem no git (.dockerignore e .gitignore)" ok 
   "grep -qx 'tls/' '$SCAFDIR/$SCAFN/.dockerignore' && grep -qx 'tls/' '$SCAFDIR/$SCAFN/.gitignore'"
 check "nenhum token por substituir no projecto gerado" ok bash -c \
   "! grep -rqE '__(PORT|TLS_PORT|NAME|TEMPLATE_VERSION)__' '$SCAFDIR/$SCAFN'"
+# As portas e os nomes do certificado respondem-se por flag, sem terminal.
+check "init --port/--tls-port/--hostname entram no projecto e no certificado" ok bash -c \
+  "'$BIN' stack init -t nginx --port 19080 --tls-port 19443 --hostname shop.test '$SCAFDIR/flags-$PFX' >/dev/null 2>&1 \
+   && grep -q '\"19080:19080\"' '$SCAFDIR/flags-$PFX/delonix-manifest.yaml' && grep -q '\"19443:19443\"' '$SCAFDIR/flags-$PFX/delonix-manifest.yaml' \
+   && grep -q 'listen      19443 ssl' '$SCAFDIR/flags-$PFX/nginx.conf' \
+   && { ! command -v openssl >/dev/null || openssl x509 -in '$SCAFDIR/flags-$PFX/tls/tls.crt' -noout -ext subjectAltName | grep -q 'shop.test'; }"
+check "--tls-port num template sem TLS é recusado e não escreve nada" ok bash -c \
+  "! '$BIN' stack init -t go --tls-port 19443 '$SCAFDIR/noflags-$PFX' >/dev/null 2>&1 && [ ! -e '$SCAFDIR/noflags-$PFX' ]"
 if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
     >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
   check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \

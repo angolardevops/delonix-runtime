@@ -116,6 +116,9 @@ of it, not this project.
 port of it, and on `localhost` that would force every other local service to
 HTTPS. Turn it on in `nginx.conf` once this serves a real domain.
 
+To generate the project on other ports or with your own name on the certificate:
+`delonix init -t nginx --port 9080 --tls-port 9443 --hostname shop.test`.
+
 To serve on the standard ports, publish `"80:__PORT__"` and `"443:__TLS_PORT__"` in
 `delonix-manifest.yaml` (a rootless host needs `install.sh --low-ports`
 first) and drop `:__TLS_PORT__` from the redirect in `nginx.conf`. A published
