@@ -15025,6 +15025,20 @@ msgstr "{name} existe mas não está a correr — a recriá-lo"
 msgid "networkzone/{name}: the last run was {why} — applying again; the provider discards what it left staged"
 msgstr "networkzone/{name}: a última execução ficou {why} — a aplicar de novo; o provider descarta o que ela deixou preparado"
 
+# ---- ADR-0059 F5a: NAT on a NetworkGateway ----
+
+msgid "nat rule '{description}': kind '{kind}' has to be snat or dnat"
+msgstr "regra de nat '{description}': o kind '{kind}' tem de ser snat ou dnat"
+
+msgid "nat rule '{description}' is declared twice — the description is how a rule is found"
+msgstr "a regra de nat '{description}' está declarada duas vezes — é pela descrição que uma regra é encontrada"
+
+msgid "NetworkGateway/{name}: provider '{provider}' is not registered for the nat role — drop `nat:` from the document, or use a provider that has it (`delonix provider ls`)"
+msgstr "NetworkGateway/{name}: o provider '{provider}' não está registado para o papel de nat — tira o `nat:` do documento, ou usa um provider que o tenha (`delonix provider ls`)"
+
+msgid "networkgateway/{name}: {n} nat rule(s) on '{provider}'"
+msgstr "networkgateway/{name}: {n} regra(s) de nat em '{provider}'"
+
 # init: delonix-tunnel.yaml (kind: Gateway) nos templates
 msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"
 msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endereço https público, sem IP público (README.md)"

@@ -79,9 +79,11 @@
 
 pub mod capabilities;
 mod error;
+mod nat;
 
 pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
+pub use nat::OpnsenseNatProvider;
 
 use delonix_networking::gateway::{
     AliasKind, EnsureOutcome, GatewayAction, GatewayAlias, GatewayObserved, GatewayProvider,
@@ -858,11 +860,15 @@ impl Client {
     /// Refuses ([`Error::ForeignPending`]) when anything staged on the
     /// appliance is not in `staging`.
     pub fn check_no_foreign_pending(&self, staging: &Staging) -> Result<()> {
-        let foreign: Vec<PendingChange> = self
+        let mut foreign: Vec<PendingChange> = self
             .pending_changes()?
             .into_iter()
             .filter(|p| !staging.covers(p))
             .collect();
+        // The same apply loads the NAT tables too (measured: `filter/apply`
+        // loaded a staged source NAT rule), so a NAT rule someone else staged
+        // is as foreign here as a filter rule.
+        foreign.extend(self.nat_pending_not_owned_by(staging.claimed().as_ref())?);
         if foreign.is_empty() {
             return Ok(());
         }
@@ -1025,9 +1031,23 @@ impl StagedChange {
 /// changes from everybody else's. Separate from [`Client`] on purpose: the
 /// client is shared by every provider value the registry builds.
 #[derive(Debug, Default)]
-pub struct Staging(std::sync::Mutex<Vec<StagedChange>>);
+pub struct Staging(
+    std::sync::Mutex<Vec<StagedChange>>,
+    /// The owner mark this caller writes under, once it has used one. A NAT
+    /// rule staged under the same mark is this caller's document too (its
+    /// NAT half commits right after), so it is not foreign here.
+    std::sync::Mutex<Option<OwnerMark>>,
+);
 
 impl Staging {
+    fn claim(&self, owner: &OwnerMark) {
+        *self.1.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner.clone());
+    }
+
+    fn claimed(&self) -> Option<OwnerMark> {
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     fn record(&self, change: StagedChange) {
         self.0
             .lock()
@@ -1431,23 +1451,46 @@ pub const ID: &str = "opnsense";
 /// failure: an appliance that was down when first selected must not stay
 /// "down" for the rest of the process.
 pub fn register_with(target: Target) -> delonix_model::Result<()> {
-    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    // One connection for both roles: the gateway and the NAT provider of an
+    // appliance are the same client, and each value keeps its own staging.
+    let shared: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let connect = {
+        let shared = shared.clone();
+        move || -> delonix_networking::Result<std::sync::Arc<Client>> {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(c.clone());
+            }
+            let c = std::sync::Arc::new(
+                Client::connect(&target)
+                    .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+            );
+            *slot = Some(c.clone());
+            Ok(c)
+        }
+    };
+    let connect = std::sync::Arc::new(connect);
+    {
+        let connect = connect.clone();
+        delonix_networking::nat::register_nat_provider(
+            delonix_networking::nat::NatProviderRegistration {
+                id: ID,
+                aliases: &[],
+                new: Box::new(move || {
+                    Ok(Box::new(nat::OpnsenseNatProvider::sharing(connect()?))
+                        as Box<dyn delonix_networking::nat::NatProvider>)
+                }),
+            },
+        )?;
+    }
     delonix_networking::gateway::register_gateway_provider(
         delonix_networking::gateway::GatewayProviderRegistration {
             id: ID,
             aliases: &[],
             new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(c) = slot.as_ref() {
-                    return Ok(Box::new(OpnsenseGatewayProvider::sharing(c.clone()))
-                        as Box<dyn GatewayProvider>);
-                }
-                let c = std::sync::Arc::new(
-                    Client::connect(&target)
-                        .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
-                );
-                *slot = Some(c.clone());
-                Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)
+                Ok(Box::new(OpnsenseGatewayProvider::sharing(connect()?))
+                    as Box<dyn GatewayProvider>)
             }),
         },
     )?;
@@ -1483,12 +1526,14 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         alias: &GatewayAlias,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_alias(alias, owner, &self.staging)
             .map_err(delonix_model::Error::from)
     }
 
     fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_alias(name, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1499,6 +1544,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         rule: &GatewayRule,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_rule(rule, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1509,6 +1555,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         description: &str,
         owner: &OwnerMark,
     ) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_rule(description, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1527,6 +1574,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     }
 
     fn owned_rule_ids(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
         self.client
             .owned_rule_ids(owner)
             .map_err(delonix_model::Error::from)
@@ -1537,6 +1585,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         owner: &OwnerMark,
         removed_ids: &[String],
     ) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
         self.client
             .adopt_pending(owner, removed_ids, &self.staging)
             .map_err(delonix_model::Error::from)

@@ -42,7 +42,10 @@ pub fn capability_report(configured: bool) -> ProviderReport {
                 evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields",
             },
             C::NetGatewayMultiWan | C::NetGatewayVpn => S::NotImplemented,
-            C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
+            C::NetNatSnat | C::NetNatDnat => S::Supported {
+                evidence: "live:crates/providers/delonix-opnsense/tests/live.rs::a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed",
+            },
+            C::NetNatOneToOne | C::NetNatNpt => S::NotImplemented,
             C::NetLbL4 | C::NetLbHealthCheck => S::RequiresExternalComponent {
                 component: "the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API",
             },
@@ -233,6 +236,8 @@ mod tests {
                 "net.gateway.alias",
                 "net.gateway.filter",
                 "net.gateway.rule-order",
+                "net.nat.dnat",
+                "net.nat.snat",
                 "net.observe",
                 "net.ownership-marker"
             ]

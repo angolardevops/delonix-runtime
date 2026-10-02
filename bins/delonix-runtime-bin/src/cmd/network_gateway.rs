@@ -49,6 +49,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
+use delonix_networking::nat::{NatKind, NatProvider, NatRule};
 use delonix_sdn::gateway::{AliasKind, GatewayAlias, GatewayProvider, GatewayRule};
 use delonix_sdn::ownership::{OwnerMark, RemoveOutcome};
 use delonix_state::JsonStore;
@@ -71,6 +72,42 @@ pub struct NetworkGatewaySpec {
     /// the policy IR (ADR-0059 F3d/F3e).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<GatewayPolicySpec>,
+    /// Address translation on the appliance (ADR-0059 F5): source NAT for a
+    /// network leaving through an interface, destination NAT forwarding a
+    /// port of an interface to a host. Served by the document's provider,
+    /// which has to be registered for the NAT role too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nat: Vec<GatewayNatSpec>,
+}
+
+/// One NAT rule. IPv4 only.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayNatSpec {
+    /// The rule's identity on the appliance, as a filter rule's is.
+    pub description: String,
+    /// `snat` (source NAT) or `dnat` (destination NAT, a port forward).
+    pub kind: String,
+    /// The appliance's own name for the interface (`lan`, `wan`, `opt1`).
+    pub interface: String,
+    /// `snat`: the network translated, at its network address
+    /// (`10.77.0.0/24`), required. `dnat`: who may use the forward, a
+    /// network or `any` (the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// `dnat` only: `tcp` or `udp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    /// `dnat` only: the port on the interface's address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// `snat`: `interface-address` (the default) or an address. `dnat`: the
+    /// address forwarded to, required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// `dnat` only: the port on the target. Defaults to `port`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_port: Option<u16>,
 }
 
 /// One direction of the policy for one target (an alias name, a prefix or
@@ -158,7 +195,8 @@ pub struct GatewayRuleSpec {
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
 /// spec uses).
-pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules", "policies"];
+pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] =
+    &["provider", "aliases", "rules", "policies", "nat"];
 
 /// Fields the reconciler compares.
 ///
@@ -168,7 +206,7 @@ pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] = &["provider", "aliases", "rules
 /// changed or deleted on the appliance by hand is drift (`stack plan
 /// --detailed-exitcode` answers 2, `delonix drift` names it).
 pub const RECONCILED_NETWORK_GATEWAY_FIELDS: &[&str] = &[
-    "provider", "aliases", "rules", "policies", "remote", "applied",
+    "provider", "aliases", "rules", "policies", "nat", "remote", "applied",
 ];
 
 /// The `remote` field of a record that matches the appliance.
@@ -193,6 +231,9 @@ struct NetworkGatewayRecord {
     /// from them on teardown.
     #[serde(default)]
     policies: Vec<GatewayPolicySpec>,
+    /// The NAT rules last declared.
+    #[serde(default)]
+    nat: Vec<GatewayNatSpec>,
     /// The steps of the last apply or teardown, each written before it ran
     /// and settled after (ADR-0059 D4). An unsettled one is where a process
     /// died.
@@ -346,6 +387,77 @@ fn all_policy_rules(policies: &[GatewayPolicySpec]) -> Result<Vec<GatewayRule>> 
     Ok(out)
 }
 
+/// A declared NAT rule as the port's, with its defaults filled in, and
+/// validated: each refusal names the field.
+fn to_nat(spec: &GatewayNatSpec) -> Result<NatRule> {
+    let kind = match spec.kind.as_str() {
+        "snat" => NatKind::Source,
+        "dnat" => NatKind::Destination,
+        other => {
+            return Err(Error::Invalid(super::po::tf(
+                "nat rule '{description}': kind '{kind}' has to be snat or dnat",
+                &[("description", &spec.description), ("kind", other)],
+            )))
+        }
+    };
+    let rule = match kind {
+        NatKind::Source => NatRule {
+            description: spec.description.clone(),
+            kind,
+            interface: spec.interface.clone(),
+            source: spec.source.clone().unwrap_or_default(),
+            protocol: spec.protocol.clone(),
+            port: spec.port,
+            target: spec
+                .target
+                .clone()
+                .unwrap_or_else(|| delonix_networking::nat::INTERFACE_ADDRESS.to_string()),
+            target_port: spec.target_port,
+        },
+        NatKind::Destination => NatRule {
+            description: spec.description.clone(),
+            kind,
+            interface: spec.interface.clone(),
+            source: spec.source.clone().unwrap_or_else(|| "any".to_string()),
+            protocol: spec.protocol.clone(),
+            port: spec.port,
+            target: spec.target.clone().unwrap_or_default(),
+            target_port: spec.target_port.or(spec.port),
+        },
+    };
+    rule.validate()?;
+    Ok(rule)
+}
+
+fn all_nat(specs: &[GatewayNatSpec]) -> Result<Vec<NatRule>> {
+    let rules = specs.iter().map(to_nat).collect::<Result<Vec<_>>>()?;
+    for (i, r) in rules.iter().enumerate() {
+        if rules[..i].iter().any(|o| o.description == r.description) {
+            return Err(Error::Invalid(super::po::tf(
+                "nat rule '{description}' is declared twice — the description is how a rule is found",
+                &[("description", &r.description)],
+            )));
+        }
+    }
+    Ok(rules)
+}
+
+/// The NAT provider of a document: the one registered under the id of the
+/// provider that serves it. One that is not registered for the NAT role
+/// does not have it (ADR-0059 D1 rule 2).
+fn resolve_nat(name: &str, provider_id: &str) -> Result<Box<dyn NatProvider>> {
+    match delonix_networking::nat::nat_provider_for(provider_id) {
+        Some(built) => built.map_err(|e| at(provider_id, "resolve_nat_provider")(Error::from(e))),
+        None => Err(Error::from(
+            delonix_networking::Error::ProviderNotRegistered(super::po::tf(
+                "NetworkGateway/{name}: provider '{provider}' is not registered for the nat role — \
+                 drop `nat:` from the document, or use a provider that has it (`delonix provider ls`)",
+                &[("name", name), ("provider", provider_id)],
+            )),
+        )),
+    }
+}
+
 /// The provider id records written before ADR-0059 F2b may carry. That
 /// provider refused every alias and rule, so such a record owns nothing
 /// remote and [`remove_for_replace`] drops it locally.
@@ -434,12 +546,23 @@ fn policies_field(policies: &[GatewayPolicySpec]) -> String {
     items.join(";")
 }
 
+/// A NAT list as one comparable string, sorted by description.
+fn nat_field(nat: &[GatewayNatSpec]) -> String {
+    let mut items: Vec<String> = nat
+        .iter()
+        .map(|n| serde_json::to_string(n).unwrap_or_default())
+        .collect();
+    items.sort();
+    items.join(";")
+}
+
 fn record_fields(rec: &NetworkGatewayRecord) -> BTreeMap<String, String> {
     let mut f = BTreeMap::new();
     f.insert("provider".into(), rec.provider.clone());
     f.insert("aliases".into(), aliases_field(&rec.aliases));
     f.insert("rules".into(), rules_field(&rec.rules));
     f.insert("policies".into(), policies_field(&rec.policies));
+    f.insert("nat".into(), nat_field(&rec.nat));
     f
 }
 
@@ -456,6 +579,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     fields.insert("aliases".into(), aliases_field(&spec.aliases));
     fields.insert("rules".into(), rules_field(&spec.rules));
     fields.insert("policies".into(), policies_field(&spec.policies));
+    fields.insert("nat".into(), nat_field(&spec.nat));
     fields.insert("remote".into(), IN_SYNC.into());
     fields.insert("applied".into(), COMPLETE.into());
     Ok(super::reconcile::Desired {
@@ -525,7 +649,16 @@ fn remote_field(rec: &NetworkGatewayRecord) -> Result<String> {
     let observed = provider
         .observe(&owner)
         .map_err(at(provider_id, "observe"))?;
-    let drift = delonix_sdn::gateway::gateway_drift(&aliases, &rules, &observed);
+    let mut drift = delonix_sdn::gateway::gateway_drift(&aliases, &rules, &observed);
+    if !rec.nat.is_empty() {
+        let observed = resolve_nat(&rec.name, provider_id)?
+            .observe(&owner)
+            .map_err(at(provider_id, "observe_nat"))?;
+        drift.extend(delonix_networking::nat::nat_drift(
+            &all_nat(&rec.nat)?,
+            &observed,
+        ));
+    }
     Ok(if drift.is_empty() {
         IN_SYNC.to_string()
     } else {
@@ -555,6 +688,12 @@ fn required_capabilities(
     }
     if policy_rules.iter().any(|r| !r.stateful) {
         used.push(C::FirewallStateless);
+    }
+    if spec.nat.iter().any(|n| n.kind == "snat") {
+        used.push(C::NetNatSnat);
+    }
+    if spec.nat.iter().any(|n| n.kind == "dnat") {
+        used.push(C::NetNatDnat);
     }
     used
 }
@@ -598,9 +737,25 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
     // The constant the reconciler compares against is not part of the intent.
     intent.remove("remote");
     intent.remove("applied");
+    let mut fingerprint = delonix_networking::plan::gateway_fingerprint(&observed);
+    // A document with no NAT, declared or recorded, keeps the fingerprint it
+    // had before NAT existed.
+    if !spec.nat.is_empty() || !rec.nat.is_empty() {
+        let nat = if rec.owner.is_empty() {
+            Default::default()
+        } else {
+            match delonix_networking::nat::nat_provider_for(provider_id) {
+                Some(built) => built?
+                    .observe(&OwnerMark::new(&rec.owner)?)
+                    .map_err(at(provider_id, "observe_nat"))?,
+                None => Default::default(),
+            }
+        };
+        fingerprint["nat"] = delonix_networking::plan::nat_fingerprint(&nat);
+    }
     Ok(Some(delonix_networking::plan::plan_digest(
         &intent,
-        &delonix_networking::plan::gateway_fingerprint(&observed),
+        &fingerprint,
         provider_id,
         CATALOG_VERSION,
         &states,
@@ -700,6 +855,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         .map(to_alias)
         .collect::<Result<Vec<_>>>()?;
     let policy_rules = all_policy_rules(&spec.policies)?;
+    let nat_rules = all_nat(&spec.nat)?;
 
     let name = doc.metadata.name.clone();
     let s = store()?;
@@ -719,19 +875,59 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         &provider.capabilities(),
         &required_capabilities(&spec, &policy_rules),
     )?;
+    // The NAT provider is needed when the document declares NAT, and when
+    // the record still holds some an interrupted run may have staged.
+    let nat = if nat_rules.is_empty() && rec.nat.is_empty() {
+        None
+    } else {
+        Some(resolve_nat(&name, provider_id)?)
+    };
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
     rec.aliases = union_by(&rec.aliases, &spec.aliases, |a| a.name.as_str());
     rec.rules = union_by(&rec.rules, &spec.rules, |r| r.description.as_str());
     rec.policies = union_by(&rec.policies, &spec.policies, |p| p.name.as_str());
+    rec.nat = union_by(&rec.nat, &spec.nat, |n| n.description.as_str());
     s.save(&name, &rec)?;
 
     resume_interrupted(&rec, provider_id, provider.as_ref(), &owner)?;
+    if let (Some(nat), true) = (&nat, rec.ledger.is_interrupted()) {
+        nat.adopt_pending(&owner)
+            .map_err(at(provider_id, "adopt_pending_nat"))?;
+    }
     rec.ledger = Default::default();
-    provider
-        .check_no_foreign_pending()
-        .map_err(at(provider_id, "check_no_foreign_pending"))?;
+    // A document with only NAT stages nothing on the filter, so the gateway
+    // has nothing to check or commit; its commit would only push what
+    // someone else staged.
+    let gateway_used = nat.is_none()
+        || !rec.aliases.is_empty()
+        || !rec.rules.is_empty()
+        || !rec.policies.is_empty();
+    // The pre-checks are ledger steps: a refusal here leaves the record
+    // written ahead and nothing on the appliance, and the plan has to say the
+    // run stopped (so a plain apply retries) rather than that the rules
+    // went missing (which would ask for a replace).
+    if gateway_used {
+        step(
+            &s,
+            &mut rec,
+            provider_id,
+            "check_no_foreign_pending",
+            "",
+            || provider.check_no_foreign_pending(),
+        )?;
+    }
+    if let Some(nat) = &nat {
+        step(
+            &s,
+            &mut rec,
+            provider_id,
+            "check_no_foreign_pending_nat",
+            "",
+            || nat.check_no_foreign_pending(),
+        )?;
+    }
     for a in &aliases {
         step(&s, &mut rec, provider_id, "ensure_alias", &a.name, || {
             provider.ensure_alias(a, &owner)
@@ -752,15 +948,49 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             || provider.ensure_rule(&r, &owner),
         )?;
     }
-    step(&s, &mut rec, provider_id, "commit", "", || {
-        provider.commit()
-    })?;
+    if let Some(nat) = &nat {
+        for r in &nat_rules {
+            step(
+                &s,
+                &mut rec,
+                provider_id,
+                "ensure_nat",
+                &r.description,
+                || nat.ensure_nat(r, &owner),
+            )?;
+        }
+    }
+    // The gateway's commit first: the appliance's apply pushes everything
+    // staged, so it loads the NAT rules too. The NAT commit then proves
+    // them in the running packet filter.
+    if gateway_used {
+        step(&s, &mut rec, provider_id, "commit", "", || {
+            provider.commit()
+        })?;
+    }
+    if let Some(nat) = &nat {
+        step(&s, &mut rec, provider_id, "commit_nat", "", || nat.commit())?;
+    }
 
     rec.ledger.finish();
     rec.aliases = spec.aliases.clone();
     rec.rules = spec.rules.clone();
     rec.policies = spec.policies.clone();
+    rec.nat = spec.nat.clone();
     s.save(&name, &rec)?;
+    if !spec.nat.is_empty() {
+        println!(
+            "{}",
+            super::po::tf(
+                "networkgateway/{name}: {n} nat rule(s) on '{provider}'",
+                &[
+                    ("name", &name),
+                    ("n", &spec.nat.len().to_string()),
+                    ("provider", provider_id),
+                ],
+            )
+        );
+    }
     println!(
         "{}",
         super::po::tf(
@@ -865,8 +1095,17 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         descriptions.extend(policy_rules(p)?.into_iter().map(|r| r.description));
     }
     let (provider_id, provider) = resolve_provider(None, &rec.provider)?;
+    let nat = if rec.nat.is_empty() {
+        None
+    } else {
+        Some(resolve_nat(name, provider_id)?)
+    };
     let mut rec = rec;
     resume_interrupted(&rec, provider_id, provider.as_ref(), &owner)?;
+    if let (Some(nat), true) = (&nat, rec.ledger.is_interrupted()) {
+        nat.adopt_pending(&owner)
+            .map_err(at(provider_id, "adopt_pending_nat"))?;
+    }
     // The ids about to be deleted, saved BEFORE the first deletion: once a
     // rule is deleted it no longer carries a mark, and a teardown that dies
     // after staging the deletion is recognized by these.
@@ -885,9 +1124,28 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         removing,
     };
     s.save(name, &rec)?;
-    provider
-        .check_no_foreign_pending()
-        .map_err(at(provider_id, "check_no_foreign_pending"))?;
+    let gateway_used = nat.is_none() || !descriptions.is_empty() || !rec.aliases.is_empty();
+    if gateway_used {
+        provider
+            .check_no_foreign_pending()
+            .map_err(at(provider_id, "check_no_foreign_pending"))?;
+    }
+    if let Some(nat) = &nat {
+        nat.check_no_foreign_pending()
+            .map_err(at(provider_id, "check_no_foreign_pending_nat"))?;
+        for n in rec.nat.clone() {
+            if let RemoveOutcome::NotOwned(who) = step(
+                &s,
+                &mut rec,
+                provider_id,
+                "remove_nat",
+                &n.description,
+                || nat.remove_nat(&n.description, &owner),
+            )? {
+                report_left(name, "nat rule", &n.description, &who.describe());
+            }
+        }
+    }
     for d in &descriptions {
         if let RemoveOutcome::NotOwned(who) =
             step(&s, &mut rec, provider_id, "remove_rule", d, || {
@@ -906,9 +1164,14 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
             report_left(name, "alias", &a.name, &who.describe());
         }
     }
-    step(&s, &mut rec, provider_id, "commit", "", || {
-        provider.commit()
-    })?;
+    if gateway_used {
+        step(&s, &mut rec, provider_id, "commit", "", || {
+            provider.commit()
+        })?;
+    }
+    if let Some(nat) = &nat {
+        step(&s, &mut rec, provider_id, "commit_nat", "", || nat.commit())?;
+    }
     // The owner mark's own object (an OPNsense category) goes last; the
     // appliance refuses while anything still carries it, and that is said,
     // not forced.
@@ -1026,6 +1289,22 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                     r.source,
                     r.destination,
                     r.protocol.as_deref().unwrap_or("any")
+                ),
+            );
+        }
+        d.field("Nat", rec.nat.len().to_string());
+        for n in &rec.nat {
+            d.field(
+                "  Nat",
+                format!(
+                    "{}: {} on {}{}",
+                    n.description,
+                    n.kind,
+                    n.interface,
+                    n.target
+                        .as_deref()
+                        .map(|t| format!(" -> {t}"))
+                        .unwrap_or_default()
                 ),
             );
         }
@@ -1182,5 +1461,49 @@ mod tests {
         };
         assert!(msg.contains("this-does-not-exist-at-all"), "{msg}");
         assert!(msg.contains("known: "), "{msg}");
+    }
+
+    fn nat_spec(yaml: &str) -> GatewayNatSpec {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    /// The defaults a `nat:` entry gets, and the refusals that name a field.
+    #[test]
+    fn a_nat_entry_gets_its_defaults_and_is_refused_by_field() {
+        let snat = to_nat(&nat_spec(
+            "{ description: out, kind: snat, interface: wan, source: 10.77.0.0/24 }",
+        ))
+        .unwrap();
+        assert_eq!(snat.target, delonix_networking::nat::INTERFACE_ADDRESS);
+        let dnat = to_nat(&nat_spec(
+            "{ description: web, kind: dnat, interface: wan, protocol: tcp, port: 8443, target: 10.77.0.10 }",
+        ))
+        .unwrap();
+        assert_eq!(
+            (dnat.source.as_str(), dnat.target_port),
+            ("any", Some(8443))
+        );
+
+        let e = to_nat(&nat_spec("{ description: x, kind: masq, interface: wan }")).unwrap_err();
+        assert!(e.to_string().contains("snat or dnat"), "{e}");
+        let e = to_nat(&nat_spec(
+            "{ description: x, kind: dnat, interface: wan, protocol: tcp, port: 80 }",
+        ))
+        .unwrap_err();
+        assert!(e.to_string().contains("target"), "{e}");
+        let twice = [
+            nat_spec("{ description: a, kind: snat, interface: wan, source: 10.1.0.0/24 }"),
+            nat_spec("{ description: a, kind: snat, interface: wan, source: 10.2.0.0/24 }"),
+        ];
+        let e = all_nat(&twice).unwrap_err();
+        assert!(e.to_string().contains("declared twice"), "{e}");
+    }
+
+    /// A NAT list compares the same whatever order the manifest lists it in.
+    #[test]
+    fn the_nat_field_does_not_depend_on_order() {
+        let a = nat_spec("{ description: a, kind: snat, interface: wan, source: 10.1.0.0/24 }");
+        let b = nat_spec("{ description: b, kind: snat, interface: wan, source: 10.2.0.0/24 }");
+        assert_eq!(nat_field(&[a.clone(), b.clone()]), nat_field(&[b, a]));
     }
 }

@@ -1024,3 +1024,107 @@ What F4d adds:
 - **Not in this slice**:
   - Ten minutes is a long wait for a node that never forks its reload. The timeout is the
     client's task timeout and was not changed here.
+
+## Addendum 2026-10-01 — F5a, part 1: the NAT role, and OPNsense as its first provider
+
+The port, its registry and the provider, with a live case. No Kind reaches it yet; that is
+part 2.
+
+**Measured first, on the lab appliance (OPNsense 26.1.2_5):**
+
+- **The two controllers are two models.** `firewall/source_nat` is flat, like the filter
+  (`source_net`, `description`, `enabled`, `categories` as uuids). `firewall/d_nat` is the older
+  shape: nested `source`/`destination`, `descr`, `disabled`. Its mark is written in `category`
+  **by name**; a read then answers the uuid under `categories`, like the other tables.
+  `categories` written directly to `d_nat` is ignored.
+- **Any apply pushes everything.** A source NAT rule added and not applied was loaded by
+  `firewall/filter/apply`. `source_nat/apply` loaded two destination NAT rules that were only
+  staged.
+- **A NAT rule has no label in pf.** A filter rule carries its uuid as a label; a NAT rule does
+  not. It is recognized by the text of its line in `pf_statistics/rules`, section `nat rules`:
+
+  ```text
+  nat on vtnet0 inet from 10.77.0.0/24 to any -> (vtnet0:0) port 1024:65535
+  rdr on vtnet0 inet proto tcp from any to (vtnet0:1) port = 8443 -> 10.77.0.10 port 443
+  ```
+
+What part 1 adds:
+
+- **`delonix_networking::nat`**: `NatRule` (source or destination), `NatRule::validate`,
+  `NatObserved`, `nat_drift`, the `NatProvider` port (every method required) and its registry.
+- **The model is what can be read back from pf, and nothing more.** A source NAT rule always
+  has a source network, at its network address. A destination NAT rule always has `tcp` or
+  `udp`, a port, a target address and a target port. IPv4 only. Anything else is refused by
+  `validate`, naming the field.
+- **`delonix_opnsense::OpnsenseNatProvider`**, registered with the gateway provider from the
+  same `providers.yaml` entry. The two share one connection; each keeps its own staging.
+- **The commit** refuses when anything staged is not its own. That includes the filter's and
+  the aliases' pending changes, because the same apply would push them. After the apply it
+  reads pf: a rule it created has to be loaded, and one it removed has to be gone.
+- **The OPNsense report**: `net.nat.snat` and `net.nat.dnat` are `supported`, citing the live
+  case. `net.nat.one-to-one` and `net.nat.npt` stay `not-implemented`.
+- **Live** (`a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed`):
+  - both rules staged, and neither line in pf before the commit;
+  - both lines in pf after it; observe equals the declaration;
+  - another mark is refused with DX-5389, and removes nothing;
+  - a rule staged by hand refuses the next commit, nothing is loaded, and what the engine had
+    created is deleted again;
+  - an owned rule disabled by hand is drift, named;
+  - after the removal both lines are gone, and the appliance has nothing staged.
+
+  The case fails with the foreign-pending check removed.
+- **What the commit does not see**, said here:
+  - a NAT rule someone else deleted and did not apply;
+  - a staged rule whose line cannot be derived (a source that is an alias, a target that is
+    not an address);
+  - two rules with the same source network, or the same protocol, target and target port,
+    read as one line.
+- **Not in part 1**:
+  - a manifest field. Part 2 adds `nat:` to `NetworkGateway`, with the plan, the digest and
+    the ledger.
+  - `networkDefaults.nat` still refuses every value.
+  - a gateway-only commit does not look at staged NAT rules of others, and pushes them.
+  - the appliance in the lab has one interface (`lan`); no packet was translated.
+
+## Addendum 2026-10-02 — F5a, part 2: `nat:` on a `NetworkGateway`
+
+- **The manifest field.** `spec.nat` is a list of `{ description, kind: snat|dnat, interface,
+  source, protocol, port, target, targetPort }`. A `snat` defaults its target to
+  `interface-address`; a `dnat` defaults `source` to `any` and `targetPort` to `port`. Each
+  entry is validated before any provider is reached, and a description declared twice is
+  refused.
+- **The provider is the document's.** NAT rules are served by the NAT provider registered
+  under the same id as the gateway provider that serves the document. A provider that is not
+  registered for the NAT role is refused (`ProviderNotRegistered`), naming the role.
+  `networkDefaults.nat` stays refused: there is no separate choice to make.
+- **The lifecycle is the gateway's.** The NAT rules are part of the record, the `remote`
+  field, the plan digest and the step ledger (`ensure_nat`, `remove_nat`, `commit_nat`). A
+  change to `nat` plans a replace, like `aliases`, `rules` and `policies`. Validate adds
+  `net.nat.snat`/`net.nat.dnat` to the capabilities the document needs.
+- **One apply loads everything, and the two halves account for it.** The gateway commits
+  first, then the NAT commit proves its rules in pf.
+  - The gateway's foreign check now counts staged NAT rules that do not carry the document's
+    owner mark. Before this, a document with only filter rules pushed a NAT rule someone else
+    had staged (the gap part 1 named).
+  - A document with only `nat:` runs no gateway check and no gateway commit: it stages nothing
+    on the filter.
+- **A pre-check refusal is a ledger step.** Before this, a refused pre-check left the record
+  written ahead with an empty ledger, and the next plan read the rules as missing and asked
+  for `--replace`. Now the plan says `applied: interrupted: step 1 (check_no_foreign_pending)
+  failed`, and a plain `stack apply` retries. This was a defect of the gateway path before
+  NAT; it showed in this slice's live run.
+- **Live** (lab OPNsense 26.1.2_5, binary of this branch):
+  - a source and a destination NAT rule: apply 0, both lines in pf, plan 0;
+  - the owned source rule disabled by hand: plan 2, `remote: nat rule 'f5 out' is disabled
+    on the provider`, and `drift` names it; an apply with the old digest refused (DX-5390);
+    `--replace` converged; delete left no row and no line;
+  - killed (`kill -9`) after both NAT rules were staged and before the commit: nothing in pf,
+    plan 2 with `applied: interrupted: step 3 (commit)`; the next plain apply adopted and
+    loaded both; plan 0;
+  - one document with an alias, a filter rule and a source NAT rule: apply 0, plan 0, delete
+    clean;
+  - a filter-only document with a NAT rule staged by hand: refused with DX-5389 naming the
+    NAT rule, nothing loaded; plan 2 with `interrupted`; after the hand rule was removed, a
+    plain apply answered 0 and the plan 0.
+- **Not in this slice**: one-to-one NAT and NPT; a NAT rule whose source is an alias; a
+  second interface on the lab appliance, so no packet was translated.

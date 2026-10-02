@@ -843,6 +843,70 @@
       ],
       "type": "object"
     },
+    "GatewayNatSpec": {
+      "description": "One NAT rule. IPv4 only.",
+      "properties": {
+        "description": {
+          "description": "The rule's identity on the appliance, as a filter rule's is.",
+          "type": "string"
+        },
+        "interface": {
+          "description": "The appliance's own name for the interface (`lan`, `wan`, `opt1`).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`snat` (source NAT) or `dnat` (destination NAT, a port forward).",
+          "type": "string"
+        },
+        "port": {
+          "description": "`dnat` only: the port on the interface's address.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "protocol": {
+          "description": "`dnat` only: `tcp` or `udp`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "`snat`: the network translated, at its network address\n(`10.77.0.0/24`), required. `dnat`: who may use the forward, a\nnetwork or `any` (the default).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "`snat`: `interface-address` (the default) or an address. `dnat`: the\naddress forwarded to, required.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetPort": {
+          "description": "`dnat` only: the port on the target. Defaults to `port`.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "description",
+        "kind",
+        "interface"
+      ],
+      "type": "object"
+    },
     "GatewayPolicyRuleSpec": {
       "description": "One rule of a [`GatewayPolicySpec`]: the `NetworkPolicy` rule shape, plus\nthe two fields a perimeter appliance holds and the node's chain does not.",
       "properties": {
@@ -1422,6 +1486,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/GatewayAliasSpec"
+          },
+          "type": "array"
+        },
+        "nat": {
+          "description": "Address translation on the appliance (ADR-0059 F5): source NAT for a\nnetwork leaving through an interface, destination NAT forwarding a\nport of an interface to a host. Served by the document's provider,\nwhich has to be registered for the NAT role too.",
+          "items": {
+            "$ref": "#/$defs/GatewayNatSpec"
           },
           "type": "array"
         },
