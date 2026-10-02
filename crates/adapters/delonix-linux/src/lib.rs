@@ -420,6 +420,20 @@ fn install_filter_privileged(prog: &seccompiler::BpfProgram) -> std::result::Res
     Ok(())
 }
 
+/// `fchmodat2` (Linux 6.6): `fchmodat` with a working `flags` argument. glibc
+/// 2.39 and musl 1.2.5 call it first for `fchmodat(…, AT_SYMLINK_NOFOLLOW)` and
+/// fall back only on ENOSYS, so a filter that answers EPERM makes the call
+/// fail. Measured: GNU tar 1.35 could not set the mode of any directory it
+/// extracted (`Cannot change mode to rwxr-xr-x: Operation not permitted`, 579
+/// times for the PHP source), which broke `docker-php-ext-install` and every
+/// other build-from-source step in a container. It grants nothing `fchmodat`
+/// does not, and Docker's default profile allows it.
+///
+/// A literal because the `libc` crate does not name it on every architecture
+/// this crate builds for; syscalls added since Linux 5.x share one number
+/// across architectures.
+const SYS_FCHMODAT2: i64 = 452;
+
 /// Allowlist of safe syscalls (based on Docker's default profile, for
 /// x86_64). `clone` is handled separately (conditional). The dangerous ones (mount, ptrace,
 /// bpf, kexec, init_module, setns, unshare, …) are LEFT OUT = denied.
@@ -472,6 +486,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_readlinkat,
         SYS_fchmod,
         SYS_fchmodat,
+        SYS_FCHMODAT2,
         SYS_fchown,
         SYS_fchownat,
         SYS_umask,
@@ -1214,33 +1229,71 @@ fn mount_target_safe(target: &str) -> bool {
 }
 
 /// Resolves `target` (an in-container path, already lexically validated by
-/// `mount_target_safe`) against `rootfs`, component-by-component, refusing to
-/// descend through any symlink an image layer may have planted along the
-/// way. `mount_target_safe`'s lexical `..` check is not enough on its own:
-/// `create_dir_all`/`OpenOptions::open` (called on the joined path right
-/// after this) FOLLOW symlinks, and `bind_volume` runs BEFORE `pivot_root`
-/// while `/` is still the real host filesystem — an absolute symlink at ANY
-/// path component (a malicious image shipping e.g. `/etc -> /root`, or the
-/// final mount-target component itself already existing as one) redirects
-/// the destination to an arbitrary real host path, and the subsequent
-/// create/open then create real directories/files on the host, as the
-/// engine's own uid. Mirrors the confinement technique `cmd::build::
-/// confine_to` already uses for the build's COPY (a sibling of this exact
-/// bug class, fixed there first) — this is the engine-side equivalent.
+/// `mount_target_safe`) against `rootfs`, the way the container itself would:
+/// a symlink is followed, and it can never lead out of `rootfs`.
+///
+/// `bind_volume` runs BEFORE `pivot_root`, while `/` is still the real host
+/// filesystem, and `create_dir_all`/`open` on the joined path FOLLOW symlinks.
+/// So a link an image ships (`/etc -> /root`, or the final component itself)
+/// would, taken literally, send the mount and the directories created for it
+/// to a real host path. Each component is therefore resolved by hand: an
+/// absolute link restarts at `rootfs`, and `..` stops at `rootfs` — the scoped
+/// resolution runc does.
+///
+/// It used to REFUSE any symlink on the way. That was safe and wrong: Alpine
+/// and Debian ship `/var/run -> /run`, and the kubelet mounts every pod's
+/// service-account token at `/var/run/secrets/…`, so on a Kubernetes node each
+/// pod from such an image failed with `failed to prepare the rootfs: EINVAL`
+/// (measured on a kubeadm node, k8s 1.36).
+///
+/// `None` only for a link chain too long to be anything but a loop.
 fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
-    let mut current = std::path::PathBuf::from(rootfs);
-    for comp in std::path::Path::new(target).components() {
-        let std::path::Component::Normal(c) = comp else {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Component;
+    const MAX_LINKS: u32 = 40;
+    let root = std::path::PathBuf::from(rootfs);
+    let parts = |p: &std::path::Path| -> Vec<OsString> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut pending: VecDeque<OsString> = parts(std::path::Path::new(target)).into();
+    // The resolved path so far, relative to `root`: real components only.
+    let mut resolved: Vec<OsString> = Vec::new();
+    let mut links = 0;
+    while let Some(c) = pending.pop_front() {
+        if c == ".." {
+            resolved.pop(); // never above `root`
             continue;
-        };
-        current.push(c);
-        if let Ok(meta) = std::fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return None;
-            }
+        }
+        let mut here = root.clone();
+        here.extend(&resolved);
+        here.push(&c);
+        let is_link = std::fs::symlink_metadata(&here).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            resolved.push(c);
+            continue;
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return None;
+        }
+        let dest = std::fs::read_link(&here).ok()?;
+        if dest.is_absolute() {
+            resolved.clear();
+        }
+        for part in parts(&dest).into_iter().rev() {
+            pending.push_front(part);
         }
     }
-    Some(current)
+    let mut out = root;
+    out.extend(&resolved);
+    Some(out)
 }
 
 /// The mount flags the kernel LOCKS on a mount that a user namespace merely
@@ -2105,6 +2158,47 @@ fn have_subid_helpers() -> bool {
         && ["/usr/bin/newgidmap", "/bin/newgidmap"]
             .iter()
             .any(|p| std::path::Path::new(p).exists())
+}
+
+/// Can a container on this host hold a user other than uid 0?
+///
+/// Real root maps any id. Rootless needs the `newuidmap`/`newgidmap` helpers and
+/// a subordinate range for this account in BOTH `/etc/subuid` and `/etc/subgid`:
+/// the helpers refuse a map the files do not grant, and without a range the user
+/// namespace holds a single uid.
+pub fn can_map_id_range() -> bool {
+    if !is_rootless() {
+        return true;
+    }
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let name = std::env::var("USER").ok().or_else(|| {
+        let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+        passwd.lines().find_map(|l| {
+            let mut f = l.split(':');
+            let (name, _, id) = (f.next()?, f.next()?, f.next()?);
+            (id.parse::<u32>().ok()? == uid).then(|| name.to_string())
+        })
+    });
+    let granted = |file: &str| {
+        std::fs::read_to_string(file)
+            .map(|body| subid_file_grants(&body, uid, name.as_deref()))
+            .unwrap_or(false)
+    };
+    have_subid_helpers() && granted("/etc/subuid") && granted("/etc/subgid")
+}
+
+/// Does a `/etc/subuid`-format body grant `uid` (by number or by `name`) a range
+/// wide enough for the engine's map? PURE.
+fn subid_file_grants(body: &str, uid: u32, name: Option<&str>) -> bool {
+    body.lines().any(|line| {
+        let mut f = line.trim().split(':');
+        let (Some(who), Some(_start), Some(count)) = (f.next(), f.next(), f.next()) else {
+            return false;
+        };
+        let mine = who == uid.to_string() || name.is_some_and(|n| n == who);
+        mine && count.parse::<u32>().is_ok_and(|c| c >= USERNS_RANGE - 1)
+    })
 }
 
 /// Runs `newuidmap`/`newgidmap <pid> <map...>` (the map args are triplets
@@ -3455,8 +3549,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         }
     }
     let err = execvp(&argv[0], argv).unwrap_err();
-    let reason = format!("exec {}: {err}", argv[0].to_string_lossy());
-    eprintln!("delonix: {reason}");
+    let reason = report_exec_failure(&argv[0], err);
     if let Some(w) = exec_w {
         // SAFETY: our end of the pipe created in `spawn`; the reason goes to the
         // parent, which is waiting for it on a detached start. SIGPIPE ignored
@@ -4177,6 +4270,16 @@ fn parse_mem_bytes(s: &str) -> u64 {
 /// `cluster create`), instead of letting each node re-exec repeat the same warning.
 pub fn cgroup_limits_apply() -> bool {
     if is_rootless() {
+        // **Uncover the cgroup2 first, as `setup_cgroup` does.** The 2nd pass of
+        // `--net <custom>`/`--pod` runs under `ip netns exec`, whose fresh sysfs
+        // leaves `/sys/fs/cgroup` EMPTY. Asked from there, this probe answered «no
+        // delegation» on a session that has it, and the `-m`/`--cpus` preflight
+        // refused the container (exit 69) — while the very same request, run with
+        // the escape hatch, got `memory.max`/`cpu.max` applied by `spawn`, which
+        // uncovers before it looks. Measured 2026-09-30: every container with a
+        // limit on a custom network was refused, the `odoo` template's stack among
+        // them. No-op wherever the cgroup2 is already visible.
+        reveal_cgroup2_if_masked();
         // BUG FIXED HERE: this only ever tested `delonix.slice`, the ROOT-mode
         // base. In rootless — the normal mode — `setup_cgroup_delegated` uses the
         // CURRENT cgroup instead, so the probe was answering about a path the
@@ -4605,6 +4708,9 @@ pub fn leaf_controllers() -> Vec<String> {
         .map(|t| parse_controller_list(&t))
         .unwrap_or_default();
     }
+    // Same blind spot as `cgroup_limits_apply`: under `ip netns exec` the
+    // cgroup2 is covered, and every controller would read as absent.
+    reveal_cgroup2_if_masked();
     let Some(cur) = current_cgroup_v2() else {
         return Vec::new();
     };
@@ -5891,6 +5997,15 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
     outcome
 }
 
+/// Says on stderr why an `execvp` failed and returns the reason. One function
+/// for the container's init and for `exec`, so the two cannot word the same
+/// failure differently — or one of them say nothing at all, which `exec` did.
+fn report_exec_failure(program: &std::ffi::CStr, err: nix::errno::Errno) -> String {
+    let reason = format!("exec {}: {err}", program.to_string_lossy());
+    eprintln!("delonix: {reason}");
+    reason
+}
+
 /// How long a detached `run` waits for its command's `execvp` once the mount
 /// namespace is final. Long enough for the common case, short enough that a
 /// one-off chown of a large rootfs does not hold `run -d` hostage.
@@ -6072,6 +6187,13 @@ fn spawn(
         }
         _ => None,
     };
+    // The READ end is the shim's alone, and the shim is a `fork` that never
+    // execs. Close-on-exec keeps it out of everything that does exec while this
+    // start holds it — the container's own command had it as a stray fd 3.
+    if let Some((r, _)) = log_pipe {
+        // SAFETY: our own descriptor, just created.
+        unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
     let log_fd = log_pipe.map(|(_, w)| w); // the container writes to the write end
                                            // SECOND pipe, for stderr, and ONLY in CRI mode. The CRI log line carries a
                                            // stream tag (`<ts> stdout|stderr F <line>`) and the kubelet — and
@@ -6094,6 +6216,10 @@ fn spawn(
         }
         _ => None,
     };
+    if let Some((r, _)) = log_err_pipe {
+        // SAFETY: our own descriptor, just created; see the stdout pipe above.
+        unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
     let log_err_fd = log_err_pipe.map(|(_, w)| w);
 
     // Socketpair of the *console socket* (runc): the init allocates the pty in the container's
@@ -7532,7 +7658,13 @@ pub fn exec_with(
                             }
                         }
                     }
-                    let _ = execvp(&cargv[0], &cargv);
+                    // `execvp` only returns when it failed. Say why, as the
+                    // container's own init does: a bare 127 with nothing on
+                    // stderr (measured: `exec <c> id` in an image whose PATH
+                    // had lost /usr/bin) reads as the command having run and
+                    // printed nothing.
+                    let Err(err) = execvp(&cargv[0], &cargv);
+                    report_exec_failure(&cargv[0], err);
                     // SAFETY: `_exit` in the forked child: it must not run the parent's
                     // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(127) };
@@ -9024,6 +9156,10 @@ fn remove_waiting(
                         cur.short_id()
                     )));
                 }
+                // The intent goes into the record BEFORE the signal, as `stop`'s
+                // does: past the wait below the record is kept, and its
+                // supervisor reads it when the process exits at last.
+                record_removal_intent(store, &cur.id)?;
                 let _ = kill(Pid::from_raw(pid), signal);
                 if !wait_until_gone(pid, st, exit_ticks) {
                     return Err(Error::StillExiting(format!(
@@ -9053,6 +9189,35 @@ fn remove_waiting(
          the container is kept",
         cur.short_id()
     )))
+}
+
+/// Marks the container as one its operator wants gone, before a forced removal
+/// signals it: `stopped_by_user`, the desired state a `--restart` supervisor
+/// consults before it restarts.
+///
+/// **A removal that gives up is still a removal that was asked for.** `rm -f`
+/// keeps the record when the exit outlives its wait ([`Error::StillExiting`]),
+/// and the record said nothing about why the process had died: its supervisor
+/// read a dead container nobody had stopped and restarted it (measured twice on
+/// 2026-10-02, `--restart always` on a saturated disk: DX-8101, then `Up` with
+/// RESTARTS 1 once the exit came). With the mark the supervisor records
+/// `Stopped` and leaves; the container stays, stopped, for the `rm` the error
+/// asks for — or for a `start`, which clears the mark like after any `stop`.
+///
+/// A record already gone is the removal's own business a few lines below; any
+/// other failure stops the removal before anything was signalled.
+fn record_removal_intent(store: &impl StateRepository<Container>, id: &str) -> Result<()> {
+    let marked = store.update(id, |cur| {
+        if cur.stopped_by_user {
+            return false;
+        }
+        cur.stopped_by_user = true;
+        true
+    });
+    match marked {
+        Err(e) if !e.is_not_found() => Err(e.into()),
+        _ => Ok(()),
+    }
 }
 
 /// How many incarnations one `rm -f` stops before it gives up — see
@@ -9248,6 +9413,52 @@ mod remove_tests {
             "names what the process is doing: {msg}"
         );
         assert!(store.0.borrow().is_some(), "the record must survive: {msg}");
+    }
+
+    /// **A forced removal that gave up is still a removal the operator asked for.**
+    ///
+    /// Measured twice on 2026-10-02, `run -d --restart always` then `rm -f` on a
+    /// saturated disk: the SIGKILL was sent, the exit took minutes, `rm -f`
+    /// answered DX-8101 and kept the record — and when the process exited at
+    /// last its supervisor restarted it (`Up`, RESTARTS 1). The record said
+    /// nothing about the removal, so the supervisor read a dead container nobody
+    /// had stopped. `stop` records its intent before it signals; `rm -f` did not.
+    ///
+    /// This test is the supervisor: the parent of the process, running the same
+    /// `wait_and_record` and asking the same `resume_restart`. SIGWINCH stands in
+    /// for the SIGKILL whose exit outlives the budget.
+    #[test]
+    fn a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let mut c = record_of(&child);
+        c.restart_policy = Some("always".into());
+        let store = OneRecord(RefCell::new(Some(c.clone())));
+        let err = remove_waiting(&store, &c, true, Signal::SIGWINCH, 2).unwrap_err();
+        assert!(matches!(err, Error::StillExiting(_)), "{err}");
+
+        // The exit comes at last, and the supervisor reaps and records it.
+        let _ = child.kill();
+        let status = wait_and_record(&store, &mut c).expect("the supervisor's wait");
+        // `wait_and_record` reaped it: `child` must not be waited on again.
+        std::mem::forget(child);
+        assert!(
+            delonix_compute::launch::should_restart("always", &status, 0),
+            "the policy alone would restart it ({status:?}) — the record has to say no"
+        );
+        let rec = store.0.borrow().clone().expect("the record is kept");
+        assert!(
+            !crate::supervise::resume_restart(Some(&rec)),
+            "the supervisor would restart a container `rm -f` was asked to remove"
+        );
+        assert_eq!(
+            rec.status,
+            Status::Stopped,
+            "a kill the operator asked for is not a crash"
+        );
+        assert_eq!(rec.pid, None);
     }
 
     /// **A start that fails after the `clone` reaps its child before it returns.**
@@ -9742,6 +9953,23 @@ mod tests {
         assert_eq!(container_id_of(33, 1000), 33);
     }
 
+    /// A subordinate range counts only when it is this account's and wide
+    /// enough for the engine's map; a comment, a short range or another user's
+    /// line grants nothing.
+    #[test]
+    fn a_subid_file_grants_only_this_accounts_wide_range() {
+        let body = "# comment\nother:100000:65536\nwalter:165536:65536\n";
+        assert!(subid_file_grants(body, 1000, Some("walter")));
+        assert!(subid_file_grants("1000:100000:65536\n", 1000, None));
+        assert!(!subid_file_grants(body, 1001, Some("ana")));
+        assert!(!subid_file_grants(
+            "walter:100000:1000\n",
+            1000,
+            Some("walter")
+        ));
+        assert!(!subid_file_grants("", 1000, Some("walter")));
+    }
+
     #[test]
     fn mount_point_follows_the_source_shape() {
         let tmp = tempfile::tempdir().unwrap();
@@ -9917,45 +10145,45 @@ mod tests {
         );
     }
 
+    /// A symlink on the way to a mount target is followed INSIDE the rootfs,
+    /// never out of it: an absolute link restarts at the rootfs, `..` stops
+    /// there, and a loop is refused.
     #[test]
-    fn safe_bind_target_recusa_symlink_plantado_pela_imagem() {
-        // HIGH fixed here: `mount_target_safe` only rejects lexical `..` —
-        // it never resolves symlinks, and `create_dir_all`/`OpenOptions::open`
-        // (called on the joined path right after, before `pivot_root`) FOLLOW
-        // them. A malicious image shipping e.g. `/etc -> /root` inside its
-        // rootfs redirects a `-v vol:/etc/pwned` mount target to a real host
-        // path. `safe_bind_target` must refuse to descend through ANY
-        // symlink component, whether in the middle of the path or as the
-        // final target itself.
+    fn a_bind_target_through_a_symlink_stays_inside_the_rootfs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         let rootfs = base.join("rootfs");
-        std::fs::create_dir_all(&rootfs).unwrap();
+        std::fs::create_dir_all(rootfs.join("run")).unwrap();
+        std::fs::create_dir_all(rootfs.join("var")).unwrap();
+        let root = rootfs.to_string_lossy().into_owned();
+        let resolve = |t: &str| safe_bind_target(&root, t);
 
-        // Case 1: an intermediate path component is a symlink escaping rootfs.
+        // What Alpine and Debian ship, both spellings.
+        std::os::unix::fs::symlink("/run", rootfs.join("var/run")).unwrap();
+        assert_eq!(
+            resolve("/var/run/secrets/token"),
+            Some(rootfs.join("run/secrets/token"))
+        );
+        std::os::unix::fs::symlink("../run", rootfs.join("var/run2")).unwrap();
+        assert_eq!(resolve("/var/run2/x"), Some(rootfs.join("run/x")));
+
+        // A link to a real HOST path: the result is that path under the rootfs.
         let outside = base.join("outside-victim");
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, rootfs.join("etc")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/etc/pwned").is_none(),
-            "um symlink a meio do caminho deve ser recusado"
-        );
+        let got = resolve("/etc/pwned").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
+        assert!(!got.starts_with(&outside));
 
-        // Case 2: the FINAL target component itself is already a symlink.
-        let victim_file = base.join("victim-file");
-        std::fs::write(&victim_file, b"secret").unwrap();
-        std::fs::create_dir_all(rootfs.join("app")).unwrap();
-        std::os::unix::fs::symlink(&victim_file, rootfs.join("app").join("data")).unwrap();
-        assert!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/app/data").is_none(),
-            "um symlink no próprio componente final deve ser recusado"
-        );
+        // The final component itself a link, and `..` trying to climb out.
+        std::os::unix::fs::symlink("../../../../etc/shadow", rootfs.join("data")).unwrap();
+        let got = resolve("/data").unwrap();
+        assert!(got.starts_with(&rootfs), "{got:?} left the rootfs");
 
-        // Legitimate case: no symlinks anywhere, real target resolves normally.
-        assert_eq!(
-            safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
-            Some(rootfs.join("data").join("inside"))
-        );
+        // No link at all resolves to itself; a loop is refused.
+        assert_eq!(resolve("/srv/inside"), Some(rootfs.join("srv/inside")));
+        std::os::unix::fs::symlink("loop", rootfs.join("loop")).unwrap();
+        assert_eq!(resolve("/loop/x"), None);
     }
 
     #[test]
@@ -10565,6 +10793,16 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         assert_eq!(bpf_insn(0xb7, 0, 0, 0, 1), 0xb7 | (1u64 << 32));
         // LDX r2 = *(u32*)(r1+0): dst=2 (bits 8-11), src=1 (bits 12-15).
         assert_eq!(bpf_insn(0x61, 2, 1, 0, 0), 0x61 | (2 << 8) | (1 << 12));
+    }
+
+    /// `fchmodat2` is what libc calls for `fchmodat(…, AT_SYMLINK_NOFOLLOW)`;
+    /// denied, GNU tar cannot set a directory's mode. The literal must be the
+    /// number the kernel uses, checked against `libc` where it names it.
+    #[test]
+    fn seccomp_allowlist_includes_fchmodat2() {
+        assert!(allowed_syscalls().contains(&SYS_FCHMODAT2));
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(SYS_FCHMODAT2, libc::SYS_fchmodat2);
     }
 
     #[test]

@@ -52,6 +52,14 @@ pub fn unpack_recording<R: Read>(
     archive: &mut tar::Archive<R>,
     dst: &Path,
 ) -> io::Result<Vec<Owner>> {
+    // The mode the image recorded, special bits included. `tar` drops setuid,
+    // setgid and sticky unless told otherwise: measured, `/tmp` came out `777`
+    // instead of `1777` (any user could delete another's files there) and
+    // `/usr/bin/su` came out without setuid, so it could not switch user. The
+    // files are owned by whoever runs the engine, so on the host a setuid bit
+    // grants nothing that user lacks; inside the container that owner is root,
+    // which is what the image meant.
+    archive.set_preserve_permissions(true);
     if dst.symlink_metadata().is_err() {
         std::fs::create_dir_all(dst)?;
     }
@@ -76,12 +84,46 @@ pub fn unpack_recording<R: Read>(
 
 /// The non-root owners of a layer, from its headers alone — for a layer that
 /// was unpacked before the engine recorded them.
-pub fn scan<R: Read>(archive: &mut tar::Archive<R>) -> io::Result<Vec<Owner>> {
+///
+/// Such a layer was also unpacked WITHOUT its setuid, setgid and sticky bits.
+/// When `unpacked` is given, the entries that carry one get their mode back in
+/// that directory, so an image pulled by an older engine does not need a
+/// re-pull to have a working `su` or a sticky `/tmp`.
+pub fn scan<R: Read>(
+    archive: &mut tar::Archive<R>,
+    unpacked: Option<&Path>,
+) -> io::Result<Vec<Owner>> {
     let mut owners = Vec::new();
     for entry in archive.entries()? {
-        owners.extend(owner_of(&entry?));
+        let entry = entry?;
+        owners.extend(owner_of(&entry));
+        if let Some(dir) = unpacked {
+            restore_special_mode(&entry, dir);
+        }
     }
     Ok(owners)
+}
+
+/// Gives an unpacked entry its setuid/setgid/sticky bits back. Best-effort, and
+/// never through a symlink: a link has no mode, and `chmod` would follow it out
+/// of the layer.
+fn restore_special_mode<R: Read>(entry: &tar::Entry<'_, R>, dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(mode) = entry.header().mode() else {
+        return;
+    };
+    let kind = entry.header().entry_type();
+    if mode & 0o7000 == 0 || !(kind.is_file() || kind.is_dir()) {
+        return;
+    }
+    let Some(rel) = entry.path().ok().and_then(|p| relative(&p)) else {
+        return;
+    };
+    let path = dir.join(rel);
+    let real = std::fs::symlink_metadata(&path).is_ok_and(|m| !m.file_type().is_symlink());
+    if real {
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode & 0o7777));
+    }
 }
 
 /// The owners of the image as a container sees it: for each path, the TOPMOST
@@ -171,7 +213,47 @@ mod tests {
         assert!(tmp.path().join("etc/passwd").is_file());
         assert!(tmp.path().join("var/lib/app/data").is_file());
         // The header-only scan of the same layer agrees with the unpack.
-        assert_eq!(scan(&mut tar::Archive::new(&data[..])).unwrap(), owners);
+        assert_eq!(
+            scan(&mut tar::Archive::new(&data[..]), None).unwrap(),
+            owners
+        );
+    }
+
+    /// A tar with one file and one directory, with the given modes.
+    fn tar_with_modes(file_mode: u32, dir_mode: u32) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Directory);
+        h.set_mode(dir_mode);
+        h.set_size(0);
+        b.append_data(&mut h, "tmp/", &[][..]).unwrap();
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(file_mode);
+        h.set_size(1);
+        b.append_data(&mut h, "bin-su", &b"x"[..]).unwrap();
+        b.into_inner().unwrap()
+    }
+
+    /// Unpacking keeps setuid, setgid and sticky; and a layer unpacked without
+    /// them gets them back from its headers.
+    #[test]
+    fn special_mode_bits_survive_the_unpack_and_are_healed() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let data = tar_with_modes(0o4755, 0o1777);
+
+        let tmp = tempfile::tempdir().unwrap();
+        unpack_recording(&mut tar::Archive::new(&data[..]), tmp.path()).unwrap();
+        assert_eq!(mode(&tmp.path().join("bin-su")), 0o4755);
+        assert_eq!(mode(&tmp.path().join("tmp")), 0o1777);
+
+        // What an older engine left on disk: the bits gone.
+        let old = tempfile::tempdir().unwrap();
+        tar::Archive::new(&data[..]).unpack(old.path()).unwrap();
+        assert_eq!(mode(&old.path().join("bin-su")) & 0o7000, 0);
+        scan(&mut tar::Archive::new(&data[..]), Some(old.path())).unwrap();
+        assert_eq!(mode(&old.path().join("bin-su")), 0o4755);
+        assert_eq!(mode(&old.path().join("tmp")), 0o1777);
     }
 
     /// The topmost layer that holds a path decides its owner: a higher layer

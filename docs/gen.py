@@ -246,16 +246,24 @@ GROUPS = {
 <code>vm init</code> faz o mesmo para uma VM. O que faltava era o passo ANTES desses: saber qual
 deles chamar, e com qual dos onze templates. É esse o trabalho todo aqui — detectar,
 <strong>dizer o que detectou e porquê</strong>, e delegar. Não gera nada de seu.<br><br>
-A detecção é uma função pura sobre os nomes de ficheiro presentes, ordenada do mais específico
-para o mais genérico (um projecto Django também tem <code>.py</code>, e um Next.js também tem
-<code>package.json</code> — a regra mais larga não pode ganhar só por ter sido verificada
-primeiro). E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
+A detecção lê os <strong>manifestos</strong> do projecto — as dependências declaradas em
+<code>package.json</code>, <code>composer.json</code>, <code>pyproject.toml</code> ou
+<code>requirements.txt</code> — porque o nome de um ficheiro não diz que framework o projecto
+usa. Um manifesto que não nomeia nenhum framework com template é <em>desconhecido</em>: recebe o
+scaffold genérico, com a razão escrita, nunca o template que sobrou. Um <code>-t</code> explícito
+ganha sempre à detecção. E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
 corrige com <code>-t</code>; um palpite errado em silêncio produz um projecto que não bate certo
 com o código ao lado.<br><br>
 Há um caso em que a resposta certa é <strong>não gerar nada</strong>: um directório com
 <code>docker-compose.yml</code> já corre nativamente com <code>delonix compose up</code>, e um
 segundo manifesto deixaria o projecto com duas fontes de verdade. O comando di-lo, em vez de
-gerar na mesma.""",
+gerar na mesma.<br><br>
+O que é substituído nos ficheiros é verificado antes de se escrever o primeiro: o nome do
+projecto tem de ser um rótulo DNS (minúsculas, dígitos e hífens interiores — vira nome de
+container, tag de imagem e nome de pacote; <code>--name</code> dá-lhe outro), e o <code>-v</code>
+tem de ser uma versão simples dentro da gama que o template declara. Num projecto já existente
+só entra a cola do Delonix; a CI do template só é escrita se o projecto não tiver CI própria e
+usar o mesmo gestor de pacotes.""",
         "subs": {},
         "examples": [
             ("Detecta e gera — a saída diz sempre qual foi a prova",
@@ -265,6 +273,11 @@ gerar na mesma.""",
              "  created: ./delonix-manifest.yaml\n"
              "  already exists, skipped: ./go.mod  (use --force to overwrite)"),
             ("Forçar um template em vez do detectado", "delonix init -t django"),
+            ("Dar nome ao projecto quando o do directório não serve", "delonix init --name billing-api ./Billing_API"),
+            ("Um nome ou uma versão inválidos são recusados sem escrever nada",
+             "delonix init -t django -v 4.2 app",
+             "error[DX-1000] invalid argument: template 'django' is validated with -v 5.2,6.0,6.1; "
+             "'4.2' is outside that range"),
             ("Ver os templates que existem", "delonix stack init -t list"),
             ("Um `VMfile` presente manda para o outro gerador", "delonix init"),
             ("Um projecto compose não é reescrito — é assinalado",
@@ -819,7 +832,7 @@ mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">Gi
                  'delonix stack ls')]},
             "init": {"examples": [
                 ("Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes",
-                 "delonix stack init myapi --template python"),
+                 "delonix stack init myapi --template fastapi"),
                 ("Ver os templates disponíveis", "delonix stack init --template list"),
             ], "notes": """<p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
 linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
@@ -2371,12 +2384,12 @@ isn't that driver physically realized in rootless?</p>"""},
     "stack": {
         "lab": {"pt": """<p>Gera um projecto COMPLETO já pronto (código + Delonixfile +
 manifesto) a partir de um template, e aplica-o.</p>
-<pre><code>delonix stack init minha-api --template python
+<pre><code>delonix stack init minha-api --template fastapi
 cd minha-api
 delonix stack apply</code></pre>""",
                 "en": """<p>Generate a COMPLETE, ready-to-run project (code + Delonixfile +
 manifest) from a template, and apply it.</p>
-<pre><code>delonix stack init my-api --template python
+<pre><code>delonix stack init my-api --template fastapi
 cd my-api
 delonix stack apply</code></pre>"""},
         "challenge": {"pt": """<p>Corre <code>stack apply --dry-run</code> e compara o YAML

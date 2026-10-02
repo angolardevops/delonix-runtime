@@ -57,7 +57,7 @@ metadata:
   name: __NAME__-db
   labels: { app: __NAME__, tier: db }
 spec:
-  image: postgres:16
+  image: postgres:16            # Odoo 20 refuses anything older (MIN_PG_VERSION = 16)
   restart: always
   network: __NAME__-net
   networkAlias: [db]          # Odoo reaches PostgreSQL at host `db`
@@ -78,6 +78,7 @@ metadata:
   labels: { app: __NAME__, tier: web }
 spec:
   image: __NAME__:dev
+  user: odoo                    # the image's own user, stated: it does not depend on the default
   restart: always
   network: __NAME__-net
   ports:

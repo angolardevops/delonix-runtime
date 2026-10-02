@@ -88,7 +88,7 @@ pub enum StackCmd {
         /// Overwrites already existing files.
         #[arg(long)]
         force: bool,
-        /// Generates a complete PROJECT for a stack (e.g. `python`) with best practices,
+        /// Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices,
         /// instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -101,6 +101,8 @@ pub enum StackCmd {
         /// After generating, builds the image, starts it and waits for it to become healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Applies all the manifest Kinds (Network → Volume → Image → Vm → Container).
     Apply {
@@ -307,6 +309,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return init_for(
@@ -318,6 +321,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     match action {
@@ -3255,22 +3259,9 @@ pub(crate) fn init_for(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, use the DIRECTORY name. `canonicalize` cannot be used:
-        // the directory does not exist yet (it is `init` that creates it) and it would
-        // always fail, falling into the fallback — every project would be named "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
+    let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
         target,
         &super::scaffold::InitOpts {
@@ -3281,6 +3272,7 @@ pub(crate) fn init_for(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }

@@ -26,9 +26,9 @@ Every commit message follows <https://www.conventionalcommits.org/>:
 `build`, `ci`, `chore`. A `!` after the type/scope (`feat!: ...`) or a
 `BREAKING CHANGE:` footer marks a breaking change.
 
-`commitlint.config.js` already extends `@commitlint/config-conventional` — it
+`commitlint.config.mjs` already extends `@commitlint/config-conventional` — it
 just needs `pnpm add -D @commitlint/cli @commitlint/config-conventional`
-before `npx commitlint` (or a `commit-msg` hook) can enforce it.
+before `pnpm exec commitlint` (or a `commit-msg` hook) can enforce it.
 
 ## Versioning (SemVer)
 
@@ -46,14 +46,14 @@ a package manager step you have not run; add one when you are ready.
 
 ```bash
 corepack enable
-pnpm install
-pnpm build
+pnpm install            # writes pnpm-lock.yaml the first time — commit it
+pnpm check              # format check, lint, typecheck, tests, production build
+pnpm smoke:production   # starts the built server, smoke test, SIGTERM must exit 0
 ```
 
-The same commands `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
-every push/PR (`next build` type-checks by default). No `test` script ships
-yet — add one (Vitest/Jest + React Testing Library are the common choices)
-and wire `pnpm test` into both pipelines next to `pnpm build`.
+These are what `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on every
+push/PR, after `pnpm install --frozen-lockfile`, followed by
+`pnpm audit --prod --audit-level high`.
 
 ## Static analysis (SonarQube)
 

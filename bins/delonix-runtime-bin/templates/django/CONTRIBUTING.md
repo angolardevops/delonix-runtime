@@ -41,16 +41,13 @@ a package manager step you have not run; add one when you are ready.
 ## Running the checks locally
 
 ```bash
-uv sync
-uv run ruff check .
-uv run python manage.py check
+make install   # uv sync (commit uv.lock after the first run)
+make check     # ruff format --check, ruff check, migration drift, deploy checklist, pytest
+make vuln      # pip-audit over the locked dependencies (needs network)
 ```
 
-These are the same commands `.github/workflows/ci.yml` and `.gitlab-ci.yml`
-run on every push/PR. `manage.py check` is Django's project-wide sanity
-check — this scaffold ships no app/model code yet, so there is nothing for
-`pytest` to collect; add `uv run pytest` once you have real apps and tests
-(`pytest-django` is already in the `dev` dependency group).
+These are the targets `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR (with `UV_LOCKED=1`, so a missing or stale `uv.lock` fails).
 
 ## Static analysis (SonarQube)
 

@@ -1,12 +1,27 @@
+# Honoured by `delonix build` and `docker build` alike: nothing listed here
+# reaches the image.
+.git
+.github
+.gitlab-ci.yml
+.env
+.env.*
+!.env.example
 /vendor
 /node_modules
-.env
-.git
-.gitignore
-database/*.sqlite
-database/*.sqlite-journal
-storage/logs/*.log
-storage/framework/cache/data/*
-storage/framework/sessions/*
-storage/framework/views/*.php
-bootstrap/cache/*.php
+/database/*.sqlite
+/database/*.sqlite-*
+/storage/logs/*.log
+/storage/framework/cache/data
+/storage/framework/sessions/*
+/storage/framework/views/*.php
+/bootstrap/cache/*.php
+/tests
+/docs
+*.md
+/coverage
+/.phpunit.cache
+/.phpunit.result.cache
+/phpstan.neon
+/pint.json
+/phpunit.xml
+/deploy

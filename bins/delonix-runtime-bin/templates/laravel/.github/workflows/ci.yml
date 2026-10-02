@@ -5,16 +5,34 @@ on:
     branches: [main, develop]
   pull_request:
 
+# Read-only token: this workflow builds and tests, it publishes nothing.
+permissions:
+  contents: read
+
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: "8.3"
-      - run: composer install --no-interaction --prefer-dist
-      - run: cp .env.example .env
-      - run: php artisan key:generate
-      - run: touch database/database.sqlite
-      - run: php artisan test
+          php-version: "8.4"
+          extensions: pdo_sqlite, pcntl
+          coverage: none
+          tools: composer:v2
+      - name: composer.lock must be committed
+        run: |
+          test -f composer.lock || {
+            echo "::error::composer.lock is missing. Run 'composer install' once and commit composer.lock (README, Quickstart)."
+            exit 1
+          }
+      - run: composer validate --strict
+      # Installs exactly what composer.lock records; never resolves.
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: composer format-check
+      - run: composer lint
+      - run: composer analyse
+      - run: composer test
+      - run: composer audit-deps

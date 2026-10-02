@@ -77,6 +77,7 @@ use delonix_linux as runtime;
 use delonix_model::{Error, Result};
 use delonix_node::generate_id;
 use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
+use delonix_oci::dockerignore::DockerIgnore;
 use delonix_oci::{Image, ImageStore};
 use delonix_state::Store;
 use sha2::{Digest, Sha256};
@@ -324,6 +325,7 @@ fn resolve_stage_base(
     } else {
         let img = resolve_or_pull_platform(images, from, platform)?;
         let rootfs = prepare_rootfs_flat(images, &img, new_id)?;
+        apply_base_owners(images, &img, &rootfs);
         let workdir = if img.config.working_dir.is_empty() {
             "/".to_string()
         } else {
@@ -350,30 +352,67 @@ fn resolve_stage_base(
 /// (`/bin -> usr/bin`, …) that a naive recursive copy would wrongly dereference.
 fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<String> {
     let dst = images.root().join("containers").join(id).join("rootfs");
-    std::fs::create_dir_all(&dst)
-        .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
-    let status = std::process::Command::new("cp")
-        .arg("-a")
-        .arg("--reflink=auto")
-        .arg(format!("{}/.", src_rootfs.trim_end_matches('/')))
-        .arg(&dst)
-        .status()
-        .map_err(|e| {
-            Error::Invalid(format!(
-                "{}: {e}",
-                super::po::tf("cp of stage '{src}'", &[("src", src_rootfs)])
-            ))
-        })?;
-    if !status.success() {
+    if !copy_tree(Path::new(src_rootfs), &dst) {
         return Err(Error::Invalid(super::po::tf(
             "cp of stage '{src}' failed",
             &[("src", src_rootfs)],
         )));
     }
-    if runtime::is_rootless() {
-        super::util::chown_tree(&dst, runtime::USERNS_UID_BASE)?;
-    }
     Ok(dst.to_string_lossy().into_owned())
+}
+
+/// Copies a rootfs tree with its owners, modes and links: inside the mapped
+/// user namespace when there is one (see `mapped::cptree` for why a plain
+/// `cp -a` lost the owners a `RUN chown` had written), directly otherwise.
+fn copy_tree(src: &Path, dst: &Path) -> bool {
+    let (s, d) = (src.to_string_lossy(), dst.to_string_lossy());
+    match runtime::reexec_mapped(&["__cptree", &s, &d]) {
+        Some(ok) => ok,
+        None => super::mapped::cptree(src, dst).is_ok(),
+    }
+}
+
+/// Gives a freshly exported base rootfs the owners its image records, so a
+/// `RUN` that executes as the image's user finds its own directories its own.
+/// Best-effort: without it the build behaves as it did before (ADR-0062).
+fn apply_base_owners(images: &ImageStore, img: &Image, rootfs: &str) {
+    let Ok(owners) = images.image_owners(img) else {
+        return;
+    };
+    if owners.is_empty() {
+        return;
+    }
+    let index = Path::new(rootfs).with_file_name("base-owners");
+    if std::fs::write(&index, delonix_compute::owners::encode(&owners)).is_err() {
+        return;
+    }
+    let (r, i) = (rootfs.to_string(), index.to_string_lossy().into_owned());
+    if runtime::reexec_mapped(&["__chownidx", &r, &i]).is_none() && !runtime::is_rootless() {
+        let _ = super::mapped::chownidx(Path::new(rootfs), &index);
+    }
+    let _ = std::fs::remove_file(&index);
+}
+
+/// The uid/gid a `RUN` executes as, or `None` for root.
+///
+/// `user` is the `USER` in effect, resolved against the rootfs as it is NOW —
+/// an earlier `RUN adduser app` is what makes `USER app` resolvable. A host
+/// that cannot hold a second uid (rootless with no subordinate range) runs the
+/// step as root, as it always did.
+fn run_as(rootfs: &str, user: &str) -> Result<Option<(u32, Option<u32>)>> {
+    if !delonix_compute::run::image_user_is_non_root(user) || !runtime::can_map_id_range() {
+        return Ok(None);
+    }
+    let ids = delonix_oci::rootfs_user::resolve_user(Path::new(rootfs), user).map_err(|e| {
+        use delonix_oci::rootfs_user::UserLookupError as E;
+        let why = match e {
+            E::EmptyUser => "the user is empty".to_string(),
+            E::NoSuchUser(u) => format!("no user '{u}' in the image at this step"),
+            E::NoSuchGroup(g) => format!("no group '{g}' in the image at this step"),
+        };
+        Error::Invalid(format!("USER {user}: {why}"))
+    })?;
+    Ok((ids.0 != 0).then_some(ids))
 }
 
 /// Builds ONE stage end to end: resolves its base (image or earlier stage),
@@ -423,7 +462,7 @@ fn step_title(step: &Step) -> Option<String> {
         // devolvem no mesmo instante. Um passo para elas seria um lampejo de
         // cromagem sobre trabalho que ninguém esperou, o mesmo argumento que
         // levou o `step_after` a existir.
-        Step::Env { .. } | Step::Workdir(_) => return None,
+        Step::Env { .. } | Step::Workdir(_) | Step::User(_) => return None,
     };
     let mut out: String = raw.chars().take(MAX).collect();
     if raw.chars().count() > MAX {
@@ -455,6 +494,10 @@ fn build_one_stage(
     // sandbox can't even exercise live, root mode simply never caches (always
     // executes for real, exactly as before caching existed).
     let use_cache = use_cache && rootless;
+    // What `COPY` from the context never sees, read once per stage. Only the
+    // context is filtered: a `COPY --from=<stage>` reads an image's rootfs,
+    // which no `.dockerignore` describes.
+    let ignore = DockerIgnore::load(context);
     let id = generate_id();
     all_ids.push(id.clone());
     let mut base = match resolve_stage_base(images, from, stages, &id, platform) {
@@ -467,6 +510,8 @@ fn build_one_stage(
     let mut container: Option<Container> = None;
     let mut cur_env = base.env.clone();
     let mut cur_workdir = base.workdir.clone();
+    // The user a `RUN` executes as: the base image's, until a `USER` changes it.
+    let mut cur_user = base.user.clone();
     let mut chain_hash = base.chain_hash.clone();
 
     let result = (|| -> Result<()> {
@@ -506,6 +551,12 @@ fn build_one_stage(
                     // it is what actually changed the environment.
                     chain_hash = hash_link(&chain_hash, &format!("ENV:{key}={val}"));
                 }
+                Step::User(user) => {
+                    cur_user = user.clone();
+                    // Like ENV: no change to the rootfs, but every later RUN
+                    // runs differently, so the cache chain has to move.
+                    chain_hash = hash_link(&chain_hash, &format!("USER:{cur_user}"));
+                }
                 Step::Workdir(dir) => {
                     cur_workdir = if dir.starts_with('/') {
                         dir.clone()
@@ -521,11 +572,19 @@ fn build_one_stage(
                 } => {
                     let (hash_src_path, src_root, stage_rel) =
                         resolve_copy_source(context, stages, src, copy_from)?;
+                    let filter = copy_from.is_none().then_some(&ignore);
+                    if filter.is_some_and(|ig| ig.is_excluded(&stage_rel)) {
+                        return Err(Error::Invalid(super::po::tf(
+                            "COPY {src}: the source is excluded by .dockerignore",
+                            &[("src", src)],
+                        )));
+                    }
                     // Cache key includes the ACTUAL bytes being copied, not just
                     // the src/dst strings — a file whose content changed must
-                    // invalidate the cache from here on, same as Docker.
-                    let content_hash =
-                        hash_path_content(&hash_src_path).unwrap_or_else(|_| "unreadable".into());
+                    // invalidate the cache from here on, same as Docker. An
+                    // ignored file is not copied, so it does not move the key.
+                    let content_hash = hash_path_content(&hash_src_path, &stage_rel, filter)
+                        .unwrap_or_else(|_| "unreadable".into());
                     let new_hash = hash_link(
                         &chain_hash,
                         &format!("COPY:{stage_rel}:{dst}:{content_hash}"),
@@ -554,7 +613,7 @@ fn build_one_stage(
                         from,
                         rootless,
                     )?;
-                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir)?;
+                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir, filter)?;
                     if use_cache {
                         save_to_cache(&new_hash, &cur_rootfs);
                     }
@@ -620,10 +679,40 @@ fn build_one_stage(
                         }
                     }
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
-                    let shell =
-                        format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
-                    let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
-                    let exec_result = runtime::exec(c, &argv, false);
+                    let exec_result: Result<i32> = match run_as(&cur_rootfs, &cur_user) {
+                        Err(e) => Err(e),
+                        // Root: as before, one shell that makes the WORKDIR and runs.
+                        Ok(None) => {
+                            let shell = format!(
+                                "mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}"
+                            );
+                            let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
+                            runtime::exec(c, &argv, false).map_err(Into::into)
+                        }
+                        // The `USER` in effect (the base image's, or the last
+                        // `USER` above this line), as Docker runs it. The
+                        // WORKDIR is made by root first: a user cannot create
+                        // `/app`, and Docker makes it as root too.
+                        Ok(Some(ids)) => {
+                            let mk = vec![
+                                "/bin/sh".to_string(),
+                                "-c".to_string(),
+                                format!("mkdir -p {cur_workdir}"),
+                            ];
+                            runtime::exec(c, &mk, false)
+                                .map_err(Error::from)
+                                .and_then(|_| {
+                                    let shell = format!("cd {cur_workdir}; {exports}{cmdline}");
+                                    let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
+                                    let overrides = runtime::ExecOverrides {
+                                        user: Some(ids),
+                                        ..Default::default()
+                                    };
+                                    runtime::exec_with(c, &argv, false, &overrides)
+                                        .map_err(Into::into)
+                                })
+                        }
+                    };
                     // Always unmount — success OR failure — same discipline as
                     // `retire_container`: a secret or cache bind-mount left
                     // attached when a `RUN` fails would otherwise leak into
@@ -657,6 +746,7 @@ fn build_one_stage(
             base.rootfs = cur_rootfs;
             base.env = cur_env;
             base.workdir = cur_workdir;
+            base.user = cur_user;
             base.chain_hash = chain_hash;
             (all_ids, Ok(base))
         }
@@ -1122,10 +1212,13 @@ pub fn build_from_spec(
             } else {
                 df.entrypoint.clone()
             };
-            let mut env = final_state.env.clone();
-            if !targeting_intermediate {
-                env.extend(df.env.iter().cloned());
-            }
+            // `final_state.env` is the base image's environment plus every
+            // `ENV` the built stage executed, each already expanded and
+            // replacing its key. Appending `df.env` on top (as this did)
+            // added the RAW values a second time, and the later duplicate
+            // wins: `ENV PATH=/app/.venv/bin:$PATH` packaged an image whose
+            // PATH was that literal string.
+            let env = final_state.env.clone();
             let workdir = if targeting_intermediate {
                 final_state.workdir.clone()
             } else {
@@ -1382,13 +1475,21 @@ fn hash_link(chain: &str, repr: &str) -> String {
 /// filenames) — deliberately hashes BYTES rather than mtime/size, so
 /// rewriting a file with identical content is still a cache hit, and any real
 /// content change always invalidates, regardless of timestamps.
-fn hash_path_content(path: &Path) -> Result<String> {
+/// `rel` is `path` relative to the build context; with `ignore`, entries the
+/// context's `.dockerignore` excludes are left out of the hash, exactly as
+/// they are left out of the copy.
+fn hash_path_content(path: &Path, rel: &str, ignore: Option<&DockerIgnore>) -> Result<String> {
     let mut h = Sha256::new();
-    hash_path_into(path, &mut h)?;
+    hash_path_into(path, rel, ignore, &mut h)?;
     Ok(format!("{:x}", h.finalize()))
 }
 
-fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
+fn hash_path_into(
+    path: &Path,
+    rel: &str,
+    ignore: Option<&DockerIgnore>,
+    h: &mut Sha256,
+) -> Result<()> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| {
         Error::Invalid(format!(
             "{}: {e}",
@@ -1419,9 +1520,17 @@ fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
             .collect();
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
+            let child = join_rel(rel, &e.file_name().to_string_lossy());
+            if ignored(
+                ignore,
+                &child,
+                e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            ) {
+                continue;
+            }
             h.update(e.file_name().to_string_lossy().as_bytes());
             h.update(b"\0");
-            hash_path_into(&e.path(), h)?;
+            hash_path_into(&e.path(), &child, ignore, h)?;
         }
     } else {
         let mut f = std::fs::File::open(path).map_err(|e| {
@@ -1516,19 +1625,11 @@ fn save_to_cache(hash: &str, rootfs: &str) {
     if std::fs::create_dir_all(&tmp_rootfs).is_err() {
         return;
     }
-    let status = std::process::Command::new("cp")
-        .arg("-a")
-        .arg("--reflink=auto")
-        .arg(format!("{}/.", rootfs.trim_end_matches('/')))
-        .arg(&tmp_rootfs)
-        .status();
-    match status {
-        Ok(s) if s.success() => {
-            let _ = std::fs::rename(&tmp_dir, &final_dir);
-        }
-        _ => {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-        }
+    if copy_tree(Path::new(rootfs), &tmp_rootfs) {
+        let _ = std::fs::rename(&tmp_dir, &final_dir);
+    } else if std::fs::remove_dir_all(&tmp_dir).is_err() {
+        // A half-written copy can hold files of mapped users.
+        runtime::remove_tree_mapped(&tmp_dir);
     }
 }
 
@@ -1616,12 +1717,44 @@ fn canonical_base(p: &Path) -> Result<PathBuf> {
     })
 }
 
+/// `COPY` into a stage's work tree.
+///
+/// The plain copy runs first, as this process. It cannot replace a file the
+/// base image gives to another user: since the work tree carries the image's
+/// owners, such a file belongs to a subordinate id, and the invoking user is
+/// neither its owner nor root over it. Measured with `httpd:2.4-alpine`, whose
+/// `htdocs/index.html` belongs to uid 501 — `COPY public …/htdocs` failed with
+/// `Permission denied`. So a failed copy is repeated inside the mapped user
+/// namespace, where this user is root over the whole range. What it writes
+/// there is owned by uid 0 of the namespace, as a `COPY` is in Docker.
 fn copy_into_rootfs(
     context: &Path,
     rootfs: &str,
     src: &str,
     dst: &str,
     workdir: &str,
+    ignore: Option<&DockerIgnore>,
+) -> Result<()> {
+    let direct = copy_into_rootfs_here(context, rootfs, src, dst, workdir, ignore);
+    let Err(e) = direct else { return Ok(()) };
+    let ctx = context.to_string_lossy();
+    // The rules are a property of the context: the retry reloads them there
+    // rather than carrying them across the re-exec.
+    let filtered = if ignore.is_some() { "1" } else { "0" };
+    match runtime::reexec_mapped(&["__copyin", &ctx, rootfs, src, dst, workdir, filtered]) {
+        Some(true) => Ok(()),
+        _ => Err(e),
+    }
+}
+
+/// The copy itself, in whatever user namespace the caller is in.
+pub(crate) fn copy_into_rootfs_here(
+    context: &Path,
+    rootfs: &str,
+    src: &str,
+    dst: &str,
+    workdir: &str,
+    ignore: Option<&DockerIgnore>,
 ) -> Result<()> {
     let canon_context = canonical_base(context)?;
     let canon_rootfs = canonical_base(Path::new(rootfs))?;
@@ -1640,7 +1773,14 @@ fn copy_into_rootfs(
     let mut dst_path = safe_join(Path::new(rootfs), abs_dst.trim_start_matches('/'))?;
     if src_path.is_dir() {
         let dst_path = confine_to(&canon_rootfs, &dst_path)?;
-        copy_dir_all(&src_path, &dst_path, &canon_context, &canon_rootfs)
+        copy_dir_all(
+            &src_path,
+            &dst_path,
+            &canon_context,
+            &canon_rootfs,
+            src,
+            ignore,
+        )
     } else {
         if dir_dest || dst_path.is_dir() {
             if let Some(name) = src_path.file_name() {
@@ -1652,7 +1792,7 @@ fn copy_into_rootfs(
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
         }
-        std::fs::copy(&src_path, &dst_path).map_err(|e| {
+        replace_file(&src_path, &dst_path).map_err(|e| {
             Error::Invalid(format!(
                 "COPY {} -> {}: {e}",
                 src_path.display(),
@@ -1663,7 +1803,45 @@ fn copy_into_rootfs(
     }
 }
 
-fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Path) -> Result<()> {
+/// Copies one file over `dst`, REPLACING what is there rather than writing
+/// into it. A copy into an existing file keeps that file's owner, so a `COPY`
+/// over a file the base image gives to another user would hand the new
+/// content to that user; a `COPY` makes the file root's, as in Docker.
+fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(dst).is_ok_and(|m| !m.is_dir()) {
+        // Best-effort: where it cannot be removed, the copy below reports why.
+        let _ = std::fs::remove_file(dst);
+    }
+    std::fs::copy(src, dst).map(|_| ())
+}
+
+/// Joins a context-relative path and a child name (`"."`/`""` is the root).
+fn join_rel(rel: &str, name: &str) -> String {
+    let base = rel.trim_end_matches('/');
+    if base.is_empty() || base == "." {
+        name.to_string()
+    } else {
+        format!("{base}/{name}")
+    }
+}
+
+/// Should the walk leave `rel` out? An excluded directory is still walked
+/// when a `!` rule can re-include something inside it — and only then.
+fn ignored(ignore: Option<&DockerIgnore>, rel: &str, is_dir: bool) -> bool {
+    match ignore {
+        Some(ig) if ig.is_excluded(rel) => !(is_dir && ig.may_reinclude_under(rel)),
+        _ => false,
+    }
+}
+
+fn copy_dir_all(
+    src: &Path,
+    dst: &Path,
+    canon_context: &Path,
+    canon_rootfs: &Path,
+    rel: &str,
+    ignore: Option<&DockerIgnore>,
+) -> Result<()> {
     std::fs::create_dir_all(dst)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
     for entry in
@@ -1673,15 +1851,50 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
         let ty = entry
             .file_type()
             .map_err(|e| Error::Invalid(e.to_string()))?;
-        // A NESTED entry can itself be a symlink escaping the tree, even though the
-        // top-level src/dst of this COPY already passed `confine_to` — validate every
-        // entry, not just the root.
+        let child = join_rel(rel, &entry.file_name().to_string_lossy());
+        if ignored(ignore, &child, ty.is_dir()) {
+            continue;
+        }
+        // A symlink inside a copied tree is copied AS A LINK, like Docker does,
+        // never followed: following made a link to a directory fail the whole
+        // COPY (a pnpm `node_modules` is built of them, so `COPY --from=build
+        // /app/node_modules` could not work), and turned an absolute link in a
+        // stage's rootfs into a read of the HOST path it names. The link is
+        // not dereferenced here, so nothing outside the tree is read; a later
+        // step that writes through it is still confined by `confine_to`.
+        if ty.is_symlink() {
+            let link =
+                std::fs::read_link(entry.path()).map_err(|e| Error::Invalid(e.to_string()))?;
+            let target = dst.join(entry.file_name());
+            match std::fs::symlink_metadata(&target) {
+                Ok(m) if m.is_dir() => {
+                    return Err(Error::Invalid(super::po::tf(
+                        "COPY: cannot replace the directory {path} with a symbolic link",
+                        &[("path", &target.display().to_string())],
+                    )))
+                }
+                Ok(_) => {
+                    std::fs::remove_file(&target).map_err(|e| Error::Invalid(e.to_string()))?
+                }
+                Err(_) => {}
+            }
+            std::os::unix::fs::symlink(&link, &target)
+                .map_err(|e| Error::Invalid(format!("symlink {}: {e}", target.display())))?;
+            continue;
+        }
         let entry_path = confine_to(canon_context, &entry.path())?;
         let target = confine_to(canon_rootfs, &dst.join(entry.file_name()))?;
         if ty.is_dir() {
-            copy_dir_all(&entry_path, &target, canon_context, canon_rootfs)?;
+            copy_dir_all(
+                &entry_path,
+                &target,
+                canon_context,
+                canon_rootfs,
+                &child,
+                ignore,
+            )?;
         } else {
-            std::fs::copy(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
+            replace_file(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
         }
     }
     Ok(())
@@ -2008,5 +2221,115 @@ mod progresso_tests {
         .expect("COPY abre passo");
         assert!(t.chars().count() <= 61, "cortado a 60 + reticências: {t}");
         assert!(t.ends_with('…'), "o corte tem de se ver: {t}");
+    }
+}
+
+#[cfg(test)]
+mod dockerignore_tests {
+    use super::{copy_into_rootfs, hash_path_content, DockerIgnore};
+    use std::fs;
+
+    /// A context with a secret, a dependency tree and the code, plus the
+    /// `.dockerignore` that names the first two.
+    fn context() -> tempfile::TempDir {
+        let ctx = tempfile::tempdir().unwrap();
+        let root = ctx.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(root.join("src/app.ts"), "export {}\n").unwrap();
+        fs::write(root.join(".env"), "TOKEN=secret\n").unwrap();
+        fs::write(root.join(".env.example"), "TOKEN=\n").unwrap();
+        fs::write(root.join("node_modules/pkg/index.js"), "x\n").unwrap();
+        // The exception is the case that used to leave `node_modules/` behind
+        // as an empty skeleton.
+        fs::write(
+            root.join(".dockerignore"),
+            "node_modules\n.env\n.env.*\n!.env.example\n",
+        )
+        .unwrap();
+        ctx
+    }
+
+    /// `COPY . .` used to take the whole context into the layer, `.env`
+    /// included, whatever the `.dockerignore` next to it said.
+    #[test]
+    fn copy_of_the_context_leaves_out_what_dockerignore_names() {
+        let ctx = context();
+        let rootfs = tempfile::tempdir().unwrap();
+        let ig = DockerIgnore::load(ctx.path());
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs.path().to_str().unwrap(),
+            ".",
+            "/app/",
+            "/",
+            Some(&ig),
+        )
+        .unwrap();
+        let app = rootfs.path().join("app");
+        assert!(app.join("src/app.ts").exists());
+        assert!(app.join(".env.example").exists());
+        assert!(!app.join(".env").exists(), "the secret reached the layer");
+        assert!(!app.join("node_modules").exists());
+        // Without a filter (`COPY --from`), nothing is left out.
+        let rootfs2 = tempfile::tempdir().unwrap();
+        copy_into_rootfs(
+            ctx.path(),
+            rootfs2.path().to_str().unwrap(),
+            ".",
+            "/app/",
+            "/",
+            None,
+        )
+        .unwrap();
+        assert!(rootfs2.path().join("app/.env").exists());
+    }
+
+    /// A link inside a copied tree arrives as a link. Before, a link to a
+    /// directory failed the COPY ("neither a regular file nor a symlink to a
+    /// regular file") — the shape of every pnpm `node_modules`.
+    #[test]
+    fn a_symlink_inside_a_copied_tree_is_copied_as_a_link() {
+        let ctx = tempfile::tempdir().unwrap();
+        let root = ctx.path();
+        fs::create_dir_all(root.join("nm/.store/pkg")).unwrap();
+        fs::write(root.join("nm/.store/pkg/index.js"), "x\n").unwrap();
+        std::os::unix::fs::symlink(".store/pkg", root.join("nm/pkg")).unwrap();
+        std::os::unix::fs::symlink("/etc/hostname", root.join("nm/abs")).unwrap();
+        let rootfs = tempfile::tempdir().unwrap();
+        copy_into_rootfs(
+            root,
+            rootfs.path().to_str().unwrap(),
+            "nm",
+            "/app/nm",
+            "/",
+            None,
+        )
+        .unwrap();
+        let out = rootfs.path().join("app/nm");
+        assert_eq!(
+            fs::read_link(out.join("pkg")).unwrap().to_str(),
+            Some(".store/pkg")
+        );
+        assert_eq!(fs::read_to_string(out.join("pkg/index.js")).unwrap(), "x\n");
+        // An absolute link is kept as written, not resolved against the host.
+        assert_eq!(
+            fs::read_link(out.join("abs")).unwrap().to_str(),
+            Some("/etc/hostname")
+        );
+    }
+
+    /// An ignored file is never copied, so editing it must not invalidate the
+    /// build cache — and editing a copied one still must.
+    #[test]
+    fn an_ignored_file_does_not_move_the_cache_key() {
+        let ctx = context();
+        let ig = DockerIgnore::load(ctx.path());
+        let key = || hash_path_content(ctx.path(), ".", Some(&ig)).unwrap();
+        let before = key();
+        fs::write(ctx.path().join(".env"), "TOKEN=rotated\n").unwrap();
+        assert_eq!(before, key());
+        fs::write(ctx.path().join("src/app.ts"), "export const x = 1\n").unwrap();
+        assert_ne!(before, key());
     }
 }

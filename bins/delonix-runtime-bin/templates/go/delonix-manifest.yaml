@@ -1,4 +1,4 @@
-# Delonix manifest — declarative deploy. Apply with:
+# Delonix manifest — the service as it runs. Apply with:
 #   delonix build -t __NAME__:dev .
 #   delonix stack apply
 apiVersion: delonix.io/v1
@@ -10,8 +10,21 @@ metadata:
 spec:
   image: __NAME__:dev
   restart: always
+  # The unprivileged user the image creates (uid 10001). Named here because
+  # the engine applies an image's USER only when the manifest asks for it.
+  user: "app"
   ports:
     - "__PORT__:__PORT__"
+  env:
+    - "APP_ENV=production"
+    - "LOG_LEVEL=info"
+    - "SHUTDOWN_TIMEOUT=15s"
+  # Webhook secrets come from a Delonix secret, never from this file:
+  #   delonix secret create __NAME__-webhooks --from-literal WEBHOOK_INBOUND_SECRET=whsec_...
+  # then add under env (grouped form):
+  #   env:
+  #     vars: ["APP_ENV=production"]
+  #     secrets: [__NAME__-webhooks]
   memory: 256M
   cpus: "1.0"
   readOnly: true

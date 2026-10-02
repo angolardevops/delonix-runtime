@@ -505,7 +505,7 @@ pub enum VmCmd {
         /// this is the same verb for both: `init` starts a project either way.
         #[arg(long)]
         vmfile: bool,
-        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -4446,6 +4446,7 @@ pub(crate) fn init_for(
             template,
             template_version,
             up,
+            edge: Default::default(),
         },
     )
 }

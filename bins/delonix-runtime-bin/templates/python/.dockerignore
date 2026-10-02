@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-.venv/
-.git/
-.env
-tests/
-.pytest_cache/
-.ruff_cache/
-*.md

@@ -1,11 +1,11 @@
-image: golang:1.23
+# Same gate as .github/workflows/ci.yml.
+image: golang:__TEMPLATE_VERSION__
 
 stages:
-  - test
+  - check
 
-test:
-  stage: test
+check:
+  stage: check
   script:
-    - go build ./...
-    - go vet ./...
-    - go test ./...
+    - go mod verify
+    - make fmt-check vet race build vuln

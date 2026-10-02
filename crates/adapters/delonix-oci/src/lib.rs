@@ -9,6 +9,7 @@ pub mod build;
 pub mod buildpack;
 pub mod cas;
 pub mod detect;
+pub mod dockerignore;
 mod error;
 pub mod image;
 pub mod internal_registry;

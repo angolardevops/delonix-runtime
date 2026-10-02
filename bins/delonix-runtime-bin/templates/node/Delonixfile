@@ -1,20 +1,34 @@
-# Delonixfile — same grammar as a Dockerfile, with Delonix extensions.
-# Build with:  delonix build -t __NAME__:dev .
+# Delonixfile — same grammar as a Dockerfile. Build with:
+#   delonix build -t __NAME__:dev .
 #
-# pnpm-native (via corepack) + TypeScript. Single-stage (`delonix build` is
-# single-stage). No non-root USER: in Delonix's rootless model uid 0 is already
-# an unprivileged host uid, and a `chown` would make the flat rootfs unpackable.
-FROM node:20-slim
+# Two stages: the first installs every dependency and compiles TypeScript, the
+# second carries production dependencies and the compiled output only. The
+# build context is filtered by .dockerignore (node_modules, dist, .env, .git).
+#
+# Dependencies come from pnpm-lock.yaml when the project has one (commit it:
+# that is what makes two builds of the same commit install the same thing).
+# A fresh project has no lock yet, so the build resolves and says so.
+FROM node:24-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY . .
+RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; \
+    else echo "WARNING: no pnpm-lock.yaml - resolving versions now; run 'pnpm install' and commit the lock" && pnpm install; fi
+RUN pnpm build && pnpm prune --prod
+
+FROM node:24-slim
 ENV NODE_ENV=production
 WORKDIR /app
-# corepack ships with node and provisions the pnpm from package.json#packageManager.
-RUN corepack enable
-COPY package.json ./
-COPY tsconfig.json ./
-COPY src ./src
-# install (incl. dev for the build) → compile TS → drop dev deps.
-RUN pnpm install --prod=false && pnpm build && pnpm prune --prod
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+ARG VERSION=dev
+ENV SERVICE_VERSION=${VERSION}
 EXPOSE __PORT__
-# Delonix extension: the runtime probes this to mark the container healthy.
-HEALTHCHECK CMD node -e "require('http').get('http://127.0.0.1:__PORT__/api/v1/health/live',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-CMD ["node", "dist/index.js"]
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:__PORT__/api/v1/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+STOPSIGNAL SIGTERM
+# node:24-slim ships this unprivileged user (uid 1000); it owns nothing in the
+# image and writes only to the manifest's tmpfs.
+USER node
+CMD ["node", "--import", "./dist/instrumentation.js", "dist/index.js"]

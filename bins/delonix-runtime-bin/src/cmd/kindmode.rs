@@ -1668,9 +1668,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
             continue;
         };
-        if delonix_linux::reconcile_status(&mut c) {
-            let _ = store.update(&c.id, delonix_linux::reconcile_status);
-        }
+        super::container::reconcile_and_persist(store, &mut c);
         clusters.entry(name).or_default().push(c);
     }
     // ------------------------------------------------------------------

@@ -1,0 +1,25 @@
+# FrankenPHP (Caddy + PHP) configuration of the image. Started by
+# docker/entrypoint.sh as `frankenphp run --config /app/Caddyfile`.
+{
+	frankenphp
+	# No admin API and no automatic TLS: TLS terminates in front of the
+	# container, and nothing should reconfigure the server at runtime.
+	admin off
+	auto_https off
+	# SIGTERM: keep serving (readiness 503 "draining") for DRAIN_DELAY, then
+	# stop accepting and let in-flight requests finish within SHUTDOWN_TIMEOUT.
+	shutdown_delay {$DRAIN_DELAY:0s}
+	grace_period {$SHUTDOWN_TIMEOUT:15s}
+}
+
+:{$PORT:__PORT__} {
+	root * /app/public
+	# Outer bound; the application enforces HTTP_MAX_BODY_BYTES itself.
+	request_body {
+		max_size 8MB
+	}
+	# Tells /api/v1/health/ready that a shutdown has begun. Set by the
+	# server on every request, so a client cannot fake "not draining".
+	request_header X-Server-Draining {http.shutting_down}
+	php_server
+}

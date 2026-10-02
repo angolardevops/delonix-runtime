@@ -832,8 +832,8 @@ msgstr "delonix: falha a preparar o rootfs: {e}"
 msgid "delonix: confinement NOT verified ({e}); aborting the container"
 msgstr "delonix: confinamento NÃO verificado ({e}); a abortar o container"
 
-msgid "delonix: warning — image '{image}' declares USER {user}, which is not applied: the process runs as root (uid 0) inside the container. Pass -u {user} to run as that user."
-msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não é aplicado: o processo corre como root (uid 0) dentro do container. Passa -u {user} para correr como esse utilizador."
+msgid "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container."
+msgstr "delonix: aviso — a imagem '{image}' declara USER {user}, que não pode ser aplicado neste host: esta conta não tem intervalo de uid/gid subordinados (/etc/subuid, /etc/subgid, newuidmap), por isso não pode existir um segundo utilizador. O processo corre como root (uid 0) dentro do container."
 
 msgid "delonix: warning — failed to enter WORKDIR {w}"
 msgstr "delonix: aviso — falha a entrar no WORKDIR {w}"
@@ -1986,8 +1986,8 @@ msgstr "Segundos a esperar por cada VM ficar alcançável por SSH."
 msgid "Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot."
 msgstr "Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou `--once` para um snapshot de texto."
 
-msgid "Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generate a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, build the image, start it, and wait until it's healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -2190,8 +2190,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "Overwrites already existing files."
 msgstr "Substitui ficheiros já existentes."
 
-msgid "Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
-msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+msgid "Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `fastapi`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
 
 msgid "After generating, builds the image, starts it and waits for it to become healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
@@ -3051,8 +3051,8 @@ msgstr "  criado: {path}"
 msgid "`delonix {args}` failed:\n{stderr}"
 msgstr "`delonix {args}` falhou:\n{stderr}"
 
-msgid "the container started but did not become healthy in 40s — see `delonix container logs`"
-msgstr "o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`"
+msgid "the container started but did not become healthy in {secs}s — see `delonix container logs`"
+msgstr "o container arrancou mas não ficou saudável em {secs}s — vê `delonix container logs`"
 
 msgid "done. Now:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
 msgstr "pronto. Agora:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply"
@@ -3498,14 +3498,14 @@ msgstr "o container não arrancou (ver o erro acima)"
 msgid "ingress infra is down — no holder to enter"
 msgstr "infra de ingress em baixo — não há holder onde entrar"
 
-msgid "the container did not start inside the network '{netns}' (exit {code})"
-msgstr "o container não arrancou dentro da rede '{netns}' (exit {code})"
+msgid "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "recurso de que o container precisa dentro da rede '{network}' — a razão está na linha acima (exit {code})"
+
+msgid "the container did not start inside network '{network}' — the reason is on the line above (exit {code})"
+msgstr "o container não arrancou dentro da rede '{network}' — a razão está na linha acima (exit {code})"
 
 msgid "warning: firewall/isolation of '{name}' not reapplied on start: {e}"
 msgstr "aviso: firewall/isolamento de '{name}' não reaplicado no start: {e}"
-
-msgid "the container did not restart inside the network '{netns}' (exit {code})"
-msgstr "o container não rearrancou dentro da rede '{netns}' (exit {code})"
 
 msgid "'{name}' has no rootfs on disk — it was removed, or the container never got to start"
 msgstr "'{name}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar"
@@ -6647,8 +6647,8 @@ msgstr "o que mudaria, antes de mudar seja o que for"
 msgid "a complete project, files already filled in"
 msgstr "um projecto completo, com os ficheiros já preenchidos"
 
-msgid "a complete Python project — Delonixfile, manifest and README, runnable without editing anything"
-msgstr "um projecto Python completo — Delonixfile, manifesto e README, executável sem editar nada"
+msgid "a complete FastAPI project — Delonixfile, manifest and README, runnable without editing anything"
+msgstr "um projecto FastAPI completo — Delonixfile, manifesto e README, executável sem editar nada"
 
 msgid "which templates exist"
 msgstr "que templates existem"
@@ -11031,8 +11031,8 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
 
-msgid "pick the template's version — an image tag for `odoo`"
-msgstr "escolhe a versão do template — uma tag de imagem para o `odoo`"
+msgid "pick the template's version — an image tag for `odoo` (Odoo 20 when omitted)"
+msgstr "escolhe a versão do template — uma tag de imagem para o `odoo` (Odoo 20 quando omitida)"
 
 msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
 msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"
@@ -14884,6 +14884,141 @@ msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede 
 
 msgid "networkgateway/{name}: the last run was {why} — resuming, with {n} staged change(s) of it adopted"
 msgstr "networkgateway/{name}: a última execução ficou {why} — a retomar, com {n} alteração(ões) preparada(s) por ela adoptada(s)"
+msgid "COPY {src}: the source is excluded by .dockerignore"
+msgstr "COPY {src}: a origem está excluída pelo .dockerignore"
+
+msgid "COPY: cannot replace the directory {path} with a symbolic link"
+msgstr "COPY: não posso substituir o directório {path} por uma ligação simbólica"
+msgid "project name '{name}' is not usable: it becomes a container name, an image tag and a package name, so it must be lowercase letters, digits and inner hyphens (at most 63) — pass --name {suggestion}"
+msgstr "o nome de projecto '{name}' não serve: vira nome de container, tag de imagem e nome de pacote, por isso só pode ter minúsculas, dígitos e hífens interiores (no máximo 63) — passa --name {suggestion}"
+
+msgid "directory '{dir}' is not usable as a project name; using '{name}' (choose another with --name)"
+msgstr "o directório '{dir}' não serve como nome de projecto; a usar '{name}' (escolhe outro com --name)"
+
+msgid "-v '{v}' is not a plain version (1, 1.2 or 1.2.3)"
+msgstr "-v '{v}' não é uma versão simples (1, 1.2 ou 1.2.3)"
+
+msgid "template '{tname}' is validated with -v {accepted}; '{v}' is outside that range"
+msgstr "o template '{tname}' está validado com -v {accepted}; '{v}' fica fora dessa gama"
+
+msgid "CI files not written: {why}"
+msgstr "ficheiros de CI não escritos: {why}"
+
+msgid "the project already has its own CI"
+msgstr "o projecto já tem a sua própria CI"
+
+msgid "the project has no {lock}, so it does not use the package manager the template's CI runs"
+msgstr "o projecto não tem {lock}, logo não usa o gestor de pacotes que a CI do template corre"
+
+msgid "{path} is a symbolic link — refusing to write through it"
+msgstr "{path} é uma ligação simbólica — recuso escrever através dela"
+
+msgid "found {evidence}, but -t {t} was given: generating the {t} template anyway — the project now has two descriptions to keep in step"
+msgstr "encontrei {evidence}, mas foi dado -t {t}: gero o template {t} na mesma — o projecto passa a ter duas descrições para manter alinhadas"
+
+msgid "using -t {t} → stack init --template {t}"
+msgstr "a usar -t {t} → stack init --template {t}"
+
+msgid "found {evidence} — no template exists for this project's framework; writing the generic scaffold (pass -t <template> to choose one)"
+msgstr "encontrei {evidence} — não há template para o framework deste projecto; escrevo o scaffold genérico (passa -t <template> para escolher um)"
+
+msgid "Project name (default: the directory's name). Lowercase letters, digits and inner hyphens, because it becomes a container name, an image tag and a package name"
+msgstr "Nome do projecto (por omissão: o nome do directório). Minúsculas, dígitos e hífens interiores, porque vira nome de container, tag de imagem e nome de pacote"
+
+msgid "choose the project name — without --name it comes from the directory, lowercased and hyphenated when needed (the run says which)"
+msgstr "escolhe o nome do projecto — sem --name vem do directório, em minúsculas e com hífens quando preciso (o comando diz qual usou)"
+
+msgid "a manifest that names no supported framework gets the generic scaffold, with the reason — force a template to override"
+msgstr "um manifesto que não nomeia nenhum framework suportado recebe o scaffold genérico, com a razão — força um template para o contornar"
+
+
+# ---- init: edge templates with TLS, ports and the --up summary ----
+
+msgid "{what} port {port} is already in use on this host — the project is generated with it anyway; port {free} is free"
+msgstr "a porta {what} {port} já está em uso neste host — o projecto é gerado com ela na mesma; a porta {free} está livre"
+
+msgid "{what} port {port} is already in use. Which port instead?"
+msgstr "A porta {what} {port} já está em uso. Que porta usar em vez dela?"
+
+msgid "port {port} is not usable — pick a free one"
+msgstr "a porta {port} não serve — escolhe uma livre"
+
+msgid "Extra host names for the TLS certificate, space-separated (localhost is always included)"
+msgstr "Nomes de host adicionais para o certificado TLS, separados por espaço (localhost entra sempre)"
+
+msgid "'{host}' is not a host name or an address — left out of the certificate"
+msgstr "'{host}' não é um nome de host nem um endereço — ficou fora do certificado"
+
+msgid "certificate: ./tls, issued by this machine's mkcert CA for {names} — browsers here trust it once `mkcert -install` has been run"
+msgstr "certificado: ./tls, emitido pela CA do mkcert desta máquina para {names} — os browsers daqui confiam nele depois de correr `mkcert -install`"
+
+msgid "certificate: ./tls, self-signed for {names} — HTTPS works and browsers will warn; install mkcert and run `sh scripts/tls.sh` for one this machine trusts"
+msgstr "certificado: ./tls, auto-assinado para {names} — o HTTPS funciona e os browsers avisam; instala o mkcert e corre `sh scripts/tls.sh` para ter um em que esta máquina confia"
+
+msgid "certificate: ./tls already had one — kept as it is"
+msgstr "certificado: ./tls já tinha um — ficou como estava"
+
+msgid "another process"
+msgstr "outro processo"
+
+msgid "port {port} is already in use on this host (by {owner}) — free it, or change the port in the generated files and in delonix-manifest.yaml, then run `delonix stack apply`"
+msgstr "a porta {port} já está em uso neste host (por {owner}) — liberta-a, ou muda a porta nos ficheiros gerados e no delonix-manifest.yaml, e corre `delonix stack apply`"
+
+msgid "Building image {tag} 🔨"
+msgstr "A construir a imagem {tag} 🔨"
+
+msgid "`delonix build` failed — the step that failed is shown above"
+msgstr "o `delonix build` falhou — o passo que falhou está acima"
+
+msgid "{name} is UP"
+msgstr "{name} está de pé"
+
+msgid "http://localhost:{port} redirects there"
+msgstr "http://localhost:{port} redirecciona para lá"
+
+msgid "these are the image's factory credentials — change them before anyone else can reach the port (see README.md)"
+msgstr "estas são as credenciais de fábrica da imagem — muda-as antes de mais alguém chegar à porta (ver README.md)"
+
+msgid "(tears down everything the stack owns)"
+msgstr "(desmonta tudo o que a stack possui)"
+
+msgid "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project"
+msgstr "secret:  {secret} foi criado com uma chave gerada — vive no cofre de segredos (`delonix secret inspect {secret}`), não no projecto"
+
+# ---- init: --port / --tls-port / --hostname ----
+
+msgid "Host and container port of the service, instead of the template's own."
+msgstr "Porta do serviço no host e no container, em vez da do template."
+
+msgid "HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)."
+msgstr "Porta HTTPS, num template que serve TLS (nginx, httpd, haproxy)."
+
+msgid "Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)."
+msgstr "Nome de host ou endereço adicional para o certificado TLS gerado (repetível; localhost entra sempre)."
+
+msgid "template '{tname}' does not serve TLS — drop --tls-port/--hostname"
+msgstr "o template '{tname}' não serve TLS — tira --tls-port/--hostname"
+
+msgid "the HTTP and the HTTPS port are both {port} — they must differ"
+msgstr "a porta HTTP e a HTTPS são ambas {port} — têm de ser diferentes"
+
+msgid "--hostname {host}: not a host name or an address"
+msgstr "--hostname {host}: não é um nome de host nem um endereço"
+
+msgid "--port/--tls-port/--hostname need a template to apply them to — pass -t/--template"
+msgstr "--port/--tls-port/--hostname precisam de um template a que se apliquem — passa -t/--template"
+
+msgid "an HTTPS edge on ports of your choice, with a certificate that also covers your own name"
+msgstr "um edge HTTPS nas portas que escolheres, com um certificado que também cobre o teu próprio nome"
+
+msgid "the delonix container {name}"
+msgstr "o container delonix {name}"
+
+msgid "{name} is running the previous build of {tag} — recreating it"
+msgstr "{name} está a correr o build anterior de {tag} — a recriá-lo"
+
+msgid "{name} exists but is not running — recreating it"
+msgstr "{name} existe mas não está a correr — a recriá-lo"
 
 # ---- ADR-0059 F4d: NetworkZone ----
 

@@ -1,5 +1,20 @@
-node_modules/
-dist/
-.git/
+# Honoured by `delonix build` and `docker build` alike: nothing listed here
+# reaches the image.
+.git
+.github
+.gitlab-ci.yml
 .env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+.tmp
 *.md
+docs
+deploy
+test
+scripts
+*.log
+# pnpm keeps its store here when the project sits on its own mount (a CI runner).
+.pnpm-store
