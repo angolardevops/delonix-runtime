@@ -4141,31 +4141,64 @@ fn host_io_max_bps() -> u64 {
         .unwrap_or(500_000_000)
 }
 
-/// `MAJ:MIN` of the block device backing the Delonix store (where the
-/// overlays/images live). Needed for the slice's `io.max`. The cgroup-v2
-/// `io.max` requires the WHOLE disk (not a partition: a partition gives ENODEV),
-/// so we resolve the parent device when what contains the store is a partition.
+/// `MAJ:MIN` of the device for the slice's AGGREGATE `io.max` ceiling.
+///
+/// Known gap, left as it was: this probes the ROOT store's paths even in
+/// rootless mode and ignores `DELONIX_ROOT`, so the aggregate ceiling can name
+/// a disk the containers never write to. The per-container `--device-*` limits
+/// no longer come from here — they resolve [`io_device_of`] against the
+/// container's own rootfs.
 fn slice_io_device() -> Option<String> {
-    // The store lives under /var/lib/delonix (root) — use the device that contains it.
-    let probe = ["/var/lib/delonix", "/var/lib", "/"];
-    for p in probe {
-        if let Ok(st) = nix::sys::stat::stat(p) {
-            let dev = st.st_dev;
-            let (maj, min) = (libc::major(dev), libc::minor(dev));
-            if maj == 0 {
-                continue; // virtual device (overlay/tmpfs) — no useful io.max
-            }
-            // If it is a partition, go up to the parent disk (`/sys/dev/block/M:m/../dev`).
-            let sysfs = format!("/sys/dev/block/{maj}:{min}");
-            if std::path::Path::new(&format!("{sysfs}/partition")).exists() {
-                if let Ok(parent) = std::fs::read_to_string(format!("{sysfs}/../dev")) {
-                    return Some(parent.trim().to_string());
-                }
-            }
-            return Some(format!("{maj}:{min}"));
-        }
+    ["/var/lib/delonix", "/var/lib", "/"]
+        .into_iter()
+        .find_map(|p| io_device_of(std::path::Path::new(p)))
+}
+
+/// `MAJ:MIN` of the WHOLE disk behind `path` — the form cgroup-v2 `io.max`
+/// takes — or `None` when there is no such disk to name.
+///
+/// `io.max` caps I/O to ONE named block device. A line naming any other disk is
+/// accepted by the kernel and caps nothing the container does: measured
+/// 2026-09-27 as root, a store on `nvme1n1p1` got `io.max 259:2 wbps=5242880`
+/// (`nvme0n1`, the disk of `/var/lib/delonix`) and `dd` wrote at 1.9 GB/s under
+/// `--device-write-bps 5mb`, exit 0. So the device is resolved from the path the
+/// writes actually land on, and a path with no nameable disk answers `None` —
+/// which callers must treat as «this limit cannot exist», never as «skip it».
+///
+/// `None` when the filesystem reports an anonymous device (major 0: btrfs,
+/// overlayfs, tmpfs — none of them is one disk `io.max` can name), when `path`
+/// cannot be stat'ed, or when it sits on a partition whose parent disk cannot be
+/// read from sysfs (`io.max` on a partition fails with ENODEV).
+pub fn io_device_of(path: &std::path::Path) -> Option<String> {
+    let st = nix::sys::stat::stat(path).ok()?;
+    let (maj, min) = (libc::major(st.st_dev), libc::minor(st.st_dev));
+    let sysfs = format!("/sys/dev/block/{maj}:{min}");
+    whole_disk_device(
+        maj,
+        min,
+        std::path::Path::new(&format!("{sysfs}/partition")).exists(),
+        || std::fs::read_to_string(format!("{sysfs}/../dev")).ok(),
+    )
+}
+
+/// The decision inside [`io_device_of`], without `stat` or sysfs.
+fn whole_disk_device(
+    maj: libc::c_uint,
+    min: libc::c_uint,
+    is_partition: bool,
+    parent_dev: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if maj == 0 {
+        return None;
     }
-    None
+    if is_partition {
+        // The partition's own `MAJ:MIN` is not a fallback: the kernel refuses
+        // it with ENODEV, and that refusal was being discarded.
+        return parent_dev()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
+    }
+    Some(format!("{maj}:{min}"))
 }
 
 /// Host 1-minute load average (`/proc/loadavg`).
@@ -4977,12 +5010,12 @@ fn user_service_base(cur_abs: &str) -> Option<String> {
 /// is not delegated/clean (e.g. shared scope without `cpu`), the caller falling back to
 /// current behavior (no regression). Requires the engine in a delegated cgroup
 /// (`systemd-run --user --scope -p Delegate=yes` or a user service).
-fn setup_cgroup_delegated(c: &Container, pid: i32) -> Option<String> {
+fn setup_cgroup_delegated(c: &Container, pid: i32, io_dev: Option<&str>) -> Option<String> {
     let cur = current_cgroup_v2()?;
     // Candidate 1: the CURRENT cgroup as base (works when delonix runs in a
     // `Delegate=yes` DEDICATED scope, e.g. `systemd-run --user --scope`). Moves
     // our process to a `dlx-mgr` to free the base.
-    if try_delegated_base(&cur, c, pid, true) {
+    if try_delegated_base(&cur, c, pid, true, io_dev) {
         return Some(cur);
     }
     // Candidate 2 (escape): the session's cgroup is POPULATED (the
@@ -4998,7 +5031,7 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> Option<String> {
             // so it holds from the first allocation — same reasoning as the
             // per-leaf limits. See `apply_aggregate_ceiling`.
             apply_aggregate_ceiling(&base);
-            if try_delegated_base(&base, c, pid, false) {
+            if try_delegated_base(&base, c, pid, false, io_dev) {
                 return Some(base);
             }
         }
@@ -5011,7 +5044,13 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> Option<String> {
 /// leaf. `move_self`: move our own process to `<base>/dlx-mgr` (needed
 /// when the base is the CURRENT cgroup — otherwise our processes block the
 /// subtree_control; unnecessary on the escape-base, which starts empty).
-fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> bool {
+fn try_delegated_base(
+    base: &str,
+    c: &Container,
+    pid: i32,
+    move_self: bool,
+    io_dev: Option<&str>,
+) -> bool {
     if std::fs::metadata(format!("{base}/cgroup.subtree_control")).is_err() {
         return false; // base not writable/delegated
     }
@@ -5139,11 +5178,7 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     // delegates `cpu memory pids` and NOT `io`, so no unprivileged engine —
     // Podman included — can write `io.max`. The CLI says so at parse time
     // instead of accepting a flag it cannot honour.
-    if let Some(limits) = &c.io_max {
-        if let Some(dev) = slice_io_device() {
-            let _ = std::fs::write(format!("{leaf}/io.max"), format!("{dev} {limits}"));
-        }
-    }
+    write_io_max(&leaf, c, io_dev);
     warn_unapplied_limits(&leaf, c);
     // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
@@ -5152,6 +5187,57 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
         return false;
     }
     true
+}
+
+/// The four flags that set `io.max`, as the warnings name them.
+const IO_MAX_FLAGS: &str =
+    "--device-read-bps/--device-write-bps/--device-read-iops/--device-write-iops";
+
+/// The `io.max` line for a container's `--device-*` limits, or why there is none.
+#[derive(Debug, PartialEq, Eq)]
+enum IoMaxLine {
+    /// No `--device-*` flag was given.
+    NotAsked,
+    /// `MAJ:MIN <limits>`, ready for the cgroup's `io.max`.
+    Line(String),
+    /// Asked for, and no disk to name: the limit cannot exist.
+    NoDevice,
+}
+
+/// The decision [`write_io_max`] acts on, pure so the `NoDevice` case is tested
+/// without a cgroup2 tree or a btrfs mount.
+fn io_max_line(limits: Option<&str>, dev: Option<&str>) -> IoMaxLine {
+    match (limits, dev) {
+        (None, _) => IoMaxLine::NotAsked,
+        (Some(limits), Some(dev)) => IoMaxLine::Line(format!("{dev} {limits}")),
+        (Some(_), None) => IoMaxLine::NoDevice,
+    }
+}
+
+/// Writes the container's `--device-*` limits to `<dir>/io.max`, on `io_dev`
+/// (from [`io_device_of`] on the container's rootfs).
+///
+/// `container run` refuses these flags before the spawn when no device
+/// resolves (exit 69). This is the backstop for the ways past that refusal:
+/// `DELONIX_ALLOW_UNENFORCED_LIMITS`, and a rootfs on a different filesystem
+/// than the store the refusal probed. It used to skip the write in silence on a
+/// `None` device, and `warn_unapplied_limits` — which looks for the `io.max`
+/// FILE, present whenever `io` is delegated — said nothing either.
+fn write_io_max(dir: &str, c: &Container, io_dev: Option<&str>) {
+    match io_max_line(c.io_max.as_deref(), io_dev) {
+        IoMaxLine::NotAsked => {}
+        // A write that does not take (no `io` controller here) is reported by
+        // `warn_unapplied_limits`, which looks for the file afterwards.
+        IoMaxLine::Line(line) => {
+            let _ = std::fs::write(format!("{dir}/io.max"), line);
+        }
+        IoMaxLine::NoDevice => warn_limit_not_in_place(
+            IO_MAX_FLAGS,
+            "no block device could be resolved for this container's rootfs (btrfs, overlayfs \
+             and tmpfs have none that io.max can name)",
+            "",
+        ),
+    }
 }
 
 /// Says which requested limits did NOT land, after the fact.
@@ -5184,16 +5270,25 @@ fn warn_unapplied_limits(leaf: &str, c: &Container) {
         missing.push("--io-weight");
     }
     if c.io_max.is_some() && !std::path::Path::new(&format!("{leaf}/io.max")).exists() {
-        missing.push("--device-read-bps/--device-write-bps/--device-read-iops/--device-write-iops");
+        missing.push(IO_MAX_FLAGS);
     }
     if missing.is_empty() {
         return;
     }
+    warn_limit_not_in_place(
+        &missing.join(", "),
+        "this cgroup does not delegate the controller they need",
+        " A `systemd-run --user --scope` does not fix it when user@.service lacks the \
+         controller; `delonix system setup` shows the drop-in that does.",
+    );
+}
+
+/// The one wording for «a limit the operator asked for is not in place», so the
+/// two causes (a controller not delegated, a disk `io.max` cannot name) read the
+/// same way and the engine has one print for it, not two.
+fn warn_limit_not_in_place(flags: &str, why: &str, remedy: &str) {
     eprintln!(
-        "delonix: warning: {} had no effect — this cgroup does not delegate the controller they \
-         need, so the limit is NOT in place. A `systemd-run --user --scope` does not fix it when \
-         user@.service lacks the controller; `delonix system setup` shows the drop-in that does.",
-        missing.join(", ")
+        "delonix: warning: {flags} had no effect — {why}, so the limit is NOT in place.{remedy}"
     );
 }
 
@@ -5382,7 +5477,7 @@ fn aggregate_io_max_value() -> Option<String> {
     Some(format!("{dev} rbps={cap_bps} wbps={cap_bps}"))
 }
 
-fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
+fn setup_cgroup(c: &Container, pid: i32, io_dev: Option<&str>) -> Result<()> {
     // A limit this engine cannot read is REFUSED here, before a single cgroup
     // file is touched — and here, because `setup_cgroup` is the one entry every
     // caller passes through (CLI, CRI, `kind: Pod`, the Docker API).
@@ -5459,7 +5554,7 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
         // best-effort and idempotent: with the cgroup2 already visible — the normal
         // case, no re-exec — it returns without doing anything.
         reveal_cgroup2_if_masked();
-        if let Some(base) = setup_cgroup_delegated(c, pid) {
+        if let Some(base) = setup_cgroup_delegated(c, pid, io_dev) {
             // The leaf's parent IS the base — that is where the aggregate
             // ceiling lives (or does not).
             warn_if_unprotected_memory(c, Some(&base));
@@ -5538,11 +5633,7 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // Same absolute ceiling on the non-delegated (root) path — see the delegated
     // twin in `try_delegated_base`. Here `io` IS available, so this is the path
     // where `--device-read-bps` actually bites.
-    if let Some(limits) = &c.io_max {
-        if let Some(dev) = slice_io_device() {
-            let _ = std::fs::write(format!("{cg}/io.max"), format!("{dev} {limits}"));
-        }
-    }
+    write_io_max(cg, c, io_dev);
     std::fs::write(format!("{cg}/cgroup.procs"), pid.to_string())?;
     Ok(())
 }
@@ -6107,6 +6198,16 @@ fn spawn(
         return Err(Error::EmptyCommand("empty command".into()));
     }
 
+    // The disk `--device-*` caps is the one this container writes to: its
+    // directory in the store, which holds the writable `upper/` (or the flat
+    // copy). Not `rootfs` itself — as root that is the overlay's `merged/`,
+    // already mounted in the host's namespace here and anonymous to `stat`
+    // (measured 2026-09-27: `merged` 0:161, `upper` 259:1). Only when asked:
+    // nothing asked, nothing probed.
+    let io_dev = container.io_max.as_ref().and_then(|_| {
+        let rootfs = std::path::Path::new(rootfs);
+        io_device_of(rootfs.parent().unwrap_or(rootfs))
+    });
     let rootfs_owned = rootfs.to_string();
     let detach = spec.detach;
     let mounts = spec.mounts.clone();
@@ -6504,7 +6605,7 @@ fn spawn(
         // returned 0, i.e. 32x the ceiling. The children showed up in the
         // invoking shell's `cgroup.procs`. Registered as ACH-016 in
         // `scripts/e2e.sh`, which fails on it until this lands.
-        if let Err(e) = setup_cgroup(container, pid.as_raw()) {
+        if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev.as_deref()) {
             // SAFETY: same teardown as the userns-map failure just above.
             unsafe {
                 libc::close(w);
@@ -6685,7 +6786,7 @@ fn spawn(
         // descriptors its caller waits on — a `run -d` hung forever on exactly this
         // (measured 2026-09-15, a cgroupfs pod parent with no controllers enabled). Same
         // teardown the userns path already does above.
-        if let Err(e) = setup_cgroup(container, pid.as_raw()) {
+        if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev.as_deref()) {
             discard_child(container, pid);
             return Err(e);
         }
@@ -10426,7 +10527,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             base.to_str().unwrap(),
             &c,
             std::process::id() as i32,
-            false
+            false,
+            None
         ));
         let leaf = base.join(format!("dlx-{}", c.id));
         assert_eq!(
@@ -10472,7 +10574,13 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             vec!["sh".into()],
             "64M".into(),
         );
-        let ok = try_delegated_base(base.to_str().unwrap(), &c, std::process::id() as i32, false);
+        let ok = try_delegated_base(
+            base.to_str().unwrap(),
+            &c,
+            std::process::id() as i32,
+            false,
+            None,
+        );
         let leaf = base.join(format!("dlx-{}", c.id));
         if ok {
             // Root ignora os bits de permissão — declara-o em vez de passar por
@@ -10621,6 +10729,93 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         );
     }
 
+    /// An anonymous device (major 0 — btrfs, overlayfs, tmpfs) has no disk for
+    /// `io.max` to name, and neither does a partition whose parent is unknown:
+    /// the partition's own `MAJ:MIN` is refused by the kernel with ENODEV.
+    #[test]
+    fn whole_disk_device_names_a_disk_or_nothing() {
+        assert_eq!(whole_disk_device(0, 51, false, || None), None);
+        assert_eq!(
+            whole_disk_device(0, 51, true, || Some("8:0\n".into())),
+            None
+        );
+        assert_eq!(whole_disk_device(8, 0, false, || None), Some("8:0".into()));
+        assert_eq!(
+            whole_disk_device(259, 1, true, || Some("259:0\n".into())),
+            Some("259:0".into())
+        );
+        assert_eq!(whole_disk_device(259, 1, true, || None), None);
+        assert_eq!(whole_disk_device(259, 1, true, || Some(" \n".into())), None);
+    }
+
+    /// The same answer from the real `stat`: procfs is anonymous everywhere,
+    /// and a path that does not exist has no device at all.
+    #[test]
+    fn io_device_of_answers_none_for_an_anonymous_filesystem() {
+        assert_eq!(io_device_of(std::path::Path::new("/proc")), None);
+        assert_eq!(
+            io_device_of(std::path::Path::new("/nonexistent/delonix-io-device")),
+            None
+        );
+    }
+
+    /// THE regression: `--device-*` with no device used to be skipped without
+    /// a word. `NoDevice` is what makes `write_io_max` warn instead; reverting to
+    /// «no device → nothing to do» turns this into `NotAsked` and fails.
+    #[test]
+    fn io_max_line_without_a_device_is_not_nothing_to_do() {
+        assert_eq!(io_max_line(Some("wbps=5242880"), None), IoMaxLine::NoDevice);
+        assert_eq!(
+            io_max_line(Some("wbps=5242880"), Some("259:0")),
+            IoMaxLine::Line("259:0 wbps=5242880".into())
+        );
+        assert_eq!(io_max_line(None, None), IoMaxLine::NotAsked);
+        assert_eq!(io_max_line(None, Some("259:0")), IoMaxLine::NotAsked);
+    }
+
+    /// The leaf's `io.max` names the device the CALLER resolved from the
+    /// container's rootfs — not whatever disk `/var/lib/delonix` is on, which
+    /// is how a store on another disk got a cap that capped nothing.
+    #[test]
+    fn try_delegated_base_writes_io_max_on_the_device_it_is_given() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
+        let mut c = Container::new(
+            "iodev01".into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        );
+        c.io_max = Some("wbps=5242880".into());
+        let base_str = base.to_str().unwrap();
+        let leaf = base.join(format!("dlx-{}", c.id));
+
+        assert!(try_delegated_base(
+            base_str,
+            &c,
+            std::process::id() as i32,
+            false,
+            Some("7:42")
+        ));
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("io.max")).unwrap(),
+            "7:42 wbps=5242880"
+        );
+
+        // No device: nothing written — and `write_io_max` warns, see above.
+        std::fs::remove_file(leaf.join("io.max")).unwrap();
+        assert!(try_delegated_base(
+            base_str,
+            &c,
+            std::process::id() as i32,
+            false,
+            None
+        ));
+        assert!(!leaf.join("io.max").exists());
+    }
+
     #[test]
     fn try_delegated_base_aplica_cpu_weight_cpuset_e_io_weight_na_leaf() {
         let tmp = tempfile::tempdir().unwrap();
@@ -10643,7 +10838,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             base_str,
             &c,
             std::process::id() as i32,
-            false
+            false,
+            None
         ));
 
         let leaf = base.join(format!("dlx-{}", c.id));

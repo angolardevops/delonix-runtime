@@ -14393,6 +14393,12 @@ msgstr "não é possível impor {flags}: ao cgroup onde este container correria 
 msgid "{flags} cannot be enforced: delonix.slice does not hand down the `{controllers}` controller — the limit would not exist while this command reports success. Check that /sys/fs/cgroup/cgroup.controllers lists them (the kernel may be built without them), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
 msgstr "não é possível impor {flags}: o delonix.slice não passa para baixo o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. Confirma que /sys/fs/cgroup/cgroup.controllers os lista (o kernel pode ter sido compilado sem eles), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
 
+msgid "warning: {flags} cannot be enforced: no block device could be resolved for the container store at {store}, so the kernel will not see the limit — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: não é possível impor {flags}: não foi possível determinar um dispositivo de bloco para a store de containers em {store}, por isso o kernel não verá o limite — a continuar sem imposição porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "{flags} cannot be enforced: no block device could be resolved for the container store at {store} — io.max caps one named disk, and this filesystem reports none (btrfs, overlayfs and tmpfs do not have one) — so the limit would not exist while this command reports success. Put the store (DELONIX_ROOT) on a filesystem backed by a block device, or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: não foi possível determinar um dispositivo de bloco para a store de containers em {store} — o io.max limita um disco com nome, e este sistema de ficheiros não reporta nenhum (btrfs, overlayfs e tmpfs não têm) — por isso o limite não existiria enquanto este comando reporta sucesso. Põe a store (DELONIX_ROOT) num sistema de ficheiros assente num dispositivo de bloco, ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
 msgid "← a Kubernetes node boots without them"
 msgstr "← um nó Kubernetes arranca sem eles"
 
