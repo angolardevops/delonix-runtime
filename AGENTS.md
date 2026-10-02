@@ -3039,6 +3039,21 @@ answers at …») e os checks negativos exigem primeiro uma resposta. E no templ
 vez antes de o ficheiro existir respondia 404 com o ficheiro já lá (medido três vezes
 seguidas); `open_file_cache off` nesse `location`, e o smoke tem um check que o reproduz.
 
+**Um segundo `--up` sobre o próprio projecto (2026-10-02)**. Dois defeitos, o primeiro meu:
+a verificação de portas do `--up` recusava um projecto que JÁ estava de pé, a nomear o
+`slirp4netns` dele como «outro processo» — agora uma porta do container do próprio projecto
+(`port_owner`) não é conflito, e a de outro container delonix é dita pelo nome. E, passada
+essa, um projecto alterado e reconstruído ficava «is UP» com o container antigo: o manifesto
+nomeia a TAG, a tag não muda, o plano não tem nada a fazer. O `--up` compara o que a imagem É
+antes e depois do build e recria o container quando mudou. **Compara layers + config, não o
+id**: o id é o digest de um config que leva a hora do build, muda sempre, e recriaria o
+container a cada `--up`. Um container da tag que não esteja a correr também é recriado (o
+`apply` deixa um registo `Dead` como está). A remoção repete até dois minutos, porque com o
+disco ocupado um `rm -f` devolve DX-8101 e mantém o registo.
+**`--force` NÃO regenera um projecto já gerado**: uma pasta com conteúdo é ADOPÇÃO (ADR-0061
+D5) e só se escrevem `Delonixfile`, manifesto e `.dockerignore`. Para receber um template
+actualizado gera-se noutra pasta.
+
 **As flags existem desde 2026-10-02**: `--port`, `--tls-port` e `--hostname` (repetível), num
 só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template — `delonix init`,
 `stack init` e `container init` — para não crescerem flags diferentes em cada um. Uma flag é

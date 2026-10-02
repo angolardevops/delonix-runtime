@@ -15010,3 +15010,12 @@ msgstr "--port/--tls-port/--hostname precisam de um template a que se apliquem �
 
 msgid "an HTTPS edge on ports of your choice, with a certificate that also covers your own name"
 msgstr "um edge HTTPS nas portas que escolheres, com um certificado que também cobre o teu próprio nome"
+
+msgid "the delonix container {name}"
+msgstr "o container delonix {name}"
+
+msgid "{name} is running the previous build of {tag} — recreating it"
+msgstr "{name} está a correr o build anterior de {tag} — a recriá-lo"
+
+msgid "{name} exists but is not running — recreating it"
+msgstr "{name} existe mas não está a correr — a recriá-lo"
