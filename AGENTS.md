@@ -5814,8 +5814,18 @@ checklist para quem mexer aqui do que como lista de correcções:
   pelo pipe E pelo supervisor — morto o supervisor, o que está no pipe é tudo o que haverá.
   **Regra: quem lança um processo que sobrevive ao chamador passa-lhe os descritores pelo
   nome, e quem espera por EOF num pipe espera também pelo processo que o devia fechar.**
-  Gate: `scripts/e2e_slirp_lifecycle.sh` (quatro cenários, no `e2e.sh`) e os testes
-  `tests_detached_helper` / `supervise::tests`;
+  Gate: `scripts/e2e_slirp_lifecycle.sh` (cinco cenários, no `e2e.sh`) e os testes
+  `tests_detached_helper` / `supervise::tests`. **Fechado no mesmo dia o que tinha ficado de
+  fora**: o pin, o pin adoptado e o plano de controlo também eram lançados com os descritores
+  do chamador (só o stderr fora corrigido a 2026-08-15) — `leave_callers_descriptors`,
+  registado ANTES do `pre_exec` que entrega os dois descritores de sincronização ao pin,
+  porque correm pela ordem de registo; cenário `infra` (um fd 9 do chamador aparecia no
+  `netns pin` e no `netns control`). E o `container stats` e a listagem de clusters kind
+  gravavam a morte sem soltar o slirp — passaram os dois pelo `reconcile_and_persist`, que
+  agora o solta; teste `a_recorded_death_releases_the_containers_own_slirp` (um `sleep` com o
+  nome `slirp4netns` e o pid morto no lugar do alvo). Um cenário e2e para isto NÃO discrimina:
+  desde que o slirp deixou de herdar descritores, sai sozinho em menos de 1 s com o host calmo
+  (medido), e o cenário passava também no binário anterior;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
@@ -5905,7 +5915,20 @@ checklist para quem mexer aqui do que como lista de correcções:
   simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste
   de «espera pela saída», o sujeito tem de demorar a sair. **Para reproduzir ao vivo, um `dd`
   isolado não chega** (6 GB acabam em 3 s, antes das remoções, e o binário antigo passou);
-  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda;
+  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda.
+  **E manter o registo não chega: tem de dizer PORQUÊ o processo vai morrer** (2026-10-02, visto
+  duas vezes com o disco saturado): `run -d --restart always` + `rm -f` devolveu `DX-8101`,
+  manteve o registo como a regra manda — e quando o processo saiu por fim o supervisor
+  reiniciou-o (`Up`, RESTARTS 1). O `stop` marca `stopped_by_user` antes de sinalizar; o `rm -f`
+  não marcava nada, e o supervisor leu «morto e ninguém o parou». Agora o `remove_waiting`
+  regista a intenção antes do sinal (`record_removal_intent`), e um `start` recusado com
+  «already running» deixou de limpar a marca pelo caminho — o processo que ainda está a sair é
+  exactamente um container que lê `Running`. O container fica `Stopped` à espera do `rm` que o
+  erro pede; um `start` posterior traz-o de volta como depois de qualquer `stop`. **Gates**:
+  `a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor` (o teste É o supervisor: pai
+  do processo, o mesmo `wait_and_record` e o mesmo `resume_restart`) e
+  `a_refused_start_keeps_the_stop_the_operator_asked_for`, ambos vermelhos com a correcção
+  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**;
 - **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
   registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
   os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,

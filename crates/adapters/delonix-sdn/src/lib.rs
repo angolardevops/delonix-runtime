@@ -2007,7 +2007,30 @@ pub(crate) fn spawn_holding_only(
     cmd.spawn()
 }
 
-/// Marks every descriptor from 3 up close-on-exec, except `keep`.
+/// Makes `cmd` leave ALL of its caller's descriptors behind at the `exec`,
+/// stdio aside — for a long-lived process that sets its own stdio and is handed
+/// nothing else, or is handed it by a later `pre_exec` (they run in the order
+/// they were registered, so one that clears close-on-exec on the descriptors
+/// the child needs still wins).
+///
+/// The netns pin and the control plane live for as long as the infra does, and
+/// were spawned with whatever the invocation that happened to start them had
+/// open. Their stderr was fixed on 2026-08-15, after it hung a caller reading a
+/// pipe; every other descriptor the caller held went the same way and stayed.
+pub(crate) fn leave_callers_descriptors(cmd: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: as in `spawn_holding_only` — the closure runs in the forked child
+    // before `exec`, makes only async-signal-safe calls and allocates nothing.
+    unsafe {
+        cmd.pre_exec(|| {
+            cloexec_all_but(2);
+            Ok(())
+        })
+    }
+}
+
+/// Marks every descriptor from 3 up close-on-exec, except `keep` (a `keep` of
+/// 2 or less excepts nothing).
 ///
 /// # Safety
 ///
@@ -3538,6 +3561,46 @@ mod tests_detached_helper {
             fds.iter().filter(|l| l.starts_with("pipe:")).count(),
             1,
             "exactly the kept pipe: {fds:?}"
+        );
+    }
+
+    /// **A long-lived child with nothing to keep gets nothing**, and a later
+    /// `pre_exec` can still hand it a descriptor — the order the netns pin
+    /// depends on for its sync pipes.
+    #[test]
+    fn a_long_lived_child_leaves_its_callers_descriptors_behind() {
+        use std::os::unix::process::CommandExt;
+        let (rd, wr) = plain_pipe();
+        let (given_rd, given_wr) = plain_pipe();
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30").stdin(Stdio::null()).stdout(Stdio::null());
+        leave_callers_descriptors(&mut cmd);
+        // SAFETY: runs in the forked child before `exec`; one `fcntl`.
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::fcntl(given_wr, libc::F_SETFD, 0);
+                Ok(())
+            });
+        }
+        let mut child = cmd.spawn().expect("spawn sleep");
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(wr);
+            libc::close(given_wr);
+        }
+        let callers_pipe_closed = infra::wait_readable(rd, 3000);
+        let given_is_held = !infra::wait_readable(given_rd, 300);
+        let _ = child.kill();
+        let _ = child.wait();
+        // SAFETY: our own ends, closed once.
+        unsafe {
+            libc::close(rd);
+            libc::close(given_rd);
+        }
+        assert!(callers_pipe_closed, "the child kept its caller's pipe open");
+        assert!(
+            given_is_held,
+            "a later pre_exec must still hand a descriptor over"
         );
     }
 

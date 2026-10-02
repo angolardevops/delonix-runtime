@@ -3949,18 +3949,24 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
 fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
-    // `start` reasserts the desired state = running (clears the user's `stop`).
-    let _ = store.update(&c.id, |cur| {
-        cur.stopped_by_user = false;
-        true
-    });
-    c.stopped_by_user = false;
     if matches!(
         c.status,
         delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
+    // `start` reasserts the desired state = running (clears the user's `stop`).
+    //
+    // AFTER the refusal above, not before it: a `start` that starts nothing
+    // must not withdraw what a `stop` or an `rm -f` asked for. A process still
+    // exiting past their wait (DX-8101) is exactly a container that reads
+    // `Running` here, and clearing the mark on the way to «already running» let
+    // its supervisor restart it once the exit came.
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = false;
+        true
+    });
+    c.stopped_by_user = false;
 
     // Custom network: the SAME two-pass re-exec as `cmd_run` (see
     // `reexec_into_netns`). It was forgotten on the old `join_netns` path — which
@@ -5813,9 +5819,17 @@ fn cpu_usage_usec(pid: i32) -> Option<u64> {
 /// «died, no pid» of the incarnation before, which is how a running process drops
 /// out of the record and survives `rm -f` (#377/#378 are the same loss by other
 /// writers). `update` re-reads under the lock and reconciles THAT.
-fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+///
+/// The slirp of a container found dead goes here too, for the reason
+/// `reconcile_with_diagnostics` gives: after this write the record has no pid,
+/// and the pid was what named the slirp.
+pub(crate) fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -6354,6 +6368,36 @@ mod discard_tests {
         let dir = leftover(&images, &c.id);
         discard_unstarted(&images, &store, &c.id);
         assert!(dir.exists(), "a real container's directory was purged");
+    }
+
+    /// **A `start` that is refused changes nothing.** A container still exiting
+    /// after a `stop` or an `rm -f` gave up on it (DX-8101) reads `Running`, and
+    /// the refused start used to clear `stopped_by_user` on its way out — the mark
+    /// that keeps the `--restart` supervisor from bringing it back. This test
+    /// process stands in for the init that has not exited.
+    #[test]
+    fn a_refused_start_keeps_the_stop_the_operator_asked_for() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let me = std::process::id() as i32;
+        let mut c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "dying".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(me);
+        c.pid_starttime = delonix_node::proc_starttime(me);
+        c.status = Status::Running;
+        c.stopped_by_user = true;
+        store.save(&c).unwrap();
+        let e = start_container(&images, &store, &c.id).unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(
+            store.load(&c.id).unwrap().stopped_by_user,
+            "a start that started nothing withdrew the requested stop"
+        );
     }
 
     /// A record that cannot be READ is not a record that does not exist: purging
@@ -7675,6 +7719,65 @@ restartPolicy: OnFailure
             rec.status,
             delonix_model::records::Status::Running
         ));
+    }
+
+    /// **A reconciliation that records a death releases the dead container's
+    /// slirp.** After the write the record has no pid, and the pid was what
+    /// named the slirp: `container stats` and the kind cluster listing recorded
+    /// the death and left it. A `sleep` under the name `slirp4netns`, with the
+    /// dead pid where the target goes, stands in for the slirp — it is found
+    /// the way the real one is, by its argv.
+    #[test]
+    fn a_recorded_death_releases_the_containers_own_slirp() {
+        use std::os::unix::process::CommandExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
+        let dead = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut ch| {
+                let id = ch.id() as i32;
+                ch.wait().map(|_| id)
+            })
+            .unwrap();
+        let mut slirp = std::process::Command::new("sleep")
+            .arg0("slirp4netns")
+            .args(["30", &dead.to_string()])
+            .spawn()
+            .expect("the stand-in slirp");
+        let mut c = delonix_compute::Container::new(
+            "abc123def4560001".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        c.pid = Some(dead);
+        c.pid_starttime = None;
+        c.ports = vec!["18000:80".into()];
+        store.save(&c).unwrap();
+        // The argv is the stand-in's own only after its `exec`.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(super::reconcile_and_persist(&store, &mut c));
+        let mut exited = false;
+        for _ in 0..30 {
+            if slirp.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = slirp.kill();
+        let _ = slirp.wait();
+        assert_eq!(
+            store.load(&c.id).unwrap().pid,
+            None,
+            "the death is recorded"
+        );
+        assert!(
+            exited,
+            "the record forgot pid {dead} and its slirp was left running"
+        );
     }
 
     #[test]
