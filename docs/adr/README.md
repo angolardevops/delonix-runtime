@@ -94,3 +94,8 @@ never rewritten — supersede them with a new one.
   spike, observed through its own API), gateways and ranges changed in place with a repair of the
   IPAM's gateway entry after a failed transaction, and a reservation that owns its MAC so a VM
   created after it gets the reserved address. *Proposed*; the reservation fixes are in #654.
+- **0064** — The DNS role sets a zone's DNS settings (`spec.dns` on a NetworkZone: a controller
+  the cluster's administrator registered, a domain, a reverse controller) and the node writes the
+  records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
+  refused, the field is hot and read from the node, the controller's credential is never held, and
+  the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.

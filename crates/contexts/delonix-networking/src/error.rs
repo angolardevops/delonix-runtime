@@ -63,6 +63,12 @@ pub enum Error {
     #[error("{0}")]
     PolicyNotRepresentable(String),
 
+    /// The intent names an object the provider's administrator has to
+    /// register first and the engine never creates — a DNS controller, which
+    /// holds a third-party server's credential (ADR-0059 F5c).
+    #[error("{0}")]
+    RemotePrerequisiteMissing(String),
+
     // ---- conflict ----------------------------------------------------------
     /// An object with the identity a remote provider (OPNsense, the SDN of a
     /// Proxmox cluster) was asked to ensure or remove already exists there
@@ -141,7 +147,8 @@ impl Error {
             Error::NoNetworkZoneProviderConfigured(_)
             | Error::AmbiguousNetworkZoneProvider(_)
             | Error::NoProviderForRole(_)
-            | Error::PolicyNotRepresentable(_) => Reason::InvalidIntent,
+            | Error::PolicyNotRepresentable(_)
+            | Error::RemotePrerequisiteMissing(_) => Reason::InvalidIntent,
             Error::UnsupportedByGatewayProvider(_)
             | Error::CapabilityUnmet(_)
             | Error::ProviderNotRegistered(_)
@@ -211,6 +218,7 @@ mod tests {
             Error::ProviderNotRegistered("no gateway provider named 'x' is registered".into()),
             Error::NoProviderForRole("kind: NetworkZone names no segment provider".into()),
             Error::PolicyNotRepresentable("firewall rule #1: peer '::1' is IPv6".into()),
+            Error::RemotePrerequisiteMissing("DNS controller 'x' on provider 'proxmox'".into()),
             Error::DefaultProviderNotRegistered("networkDefaults.segment names 'x'".into()),
             Error::RecordedProviderNotRegistered("this NetworkZone was created on 'x'".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),

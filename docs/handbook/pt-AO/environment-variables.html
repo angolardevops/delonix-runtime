@@ -1242,6 +1242,34 @@ variável quando o programa corre.</p>
 <td>Sem ela, a metade do controlador desse teste é saltada; o resto continua a correr.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_CONTROLLER</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>O id de um controlador PowerDNS que o administrador do cluster registou (<code>/cluster/sdn/dns</code>) — o caso ao vivo do ADR-0064 dá-o à zona e nunca cria nenhum.</td>
+<td>Um id de controlador (<code>pdnslab</code> no lab).</td>
+<td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>O domínio em que o caso ao vivo regista o seu guest, sem o ponto final; ele e o <code>10.in-addr.arpa.</code> têm de existir no servidor DNS.</td>
+<td>Um domínio, p. ex. <code>f5c.lab</code>.</td>
+<td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>A base da API do servidor DNS (<code>http:/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>), alcançada a partir deste host para o TESTE ler os registos; o motor nunca a chama.</td>
+<td>Um URL http(s).</td>
+<td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>Um ficheiro com a chave da API do servidor DNS, para as leituras e a limpeza do próprio teste.</td>
+<td>O caminho de um ficheiro com a chave.</td>
+<td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>A bridge do nó onde o container de sistema do teste de firewall é ligado: a firewall precisa de um <code>net0</code> onde pôr <code>firewall=1</code>.</td>

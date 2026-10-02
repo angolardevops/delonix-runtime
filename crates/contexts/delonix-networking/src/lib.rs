@@ -9,6 +9,7 @@
 //! native dataplane, and `delonix-sdn` re-exports the three modules under
 //! their old paths.
 
+pub mod dns;
 mod error;
 pub mod gateway;
 pub mod ipam;

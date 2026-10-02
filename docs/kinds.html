@@ -3817,7 +3817,27 @@ metadata: { name: lab }
 spec:
   vnets:
     - { name: labnet1, alias: &quot;lab network 1&quot; }
-    - { name: labnet2 }</code></pre>
+    - { name: labnet2 }
+#
+# Addressing and DNS (ADR-0059 F5b/F5c), on a vnet:
+#
+#   spec:
+#     dns: { server: pdns, zone: lab.example, reverseServer: pdns }
+#     vnets:
+#       - name: labnet1
+#         subnets:
+#           - cidr: 10.80.0.0/24
+#             gateway: 10.80.0.1
+#             dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
+#             reservations: [{ ip: 10.80.0.20, mac: &quot;BC:24:11:00:00:20&quot; }]
+#
+# `dns.server` and `dns.reverseServer` name DNS controllers registered on the
+# cluster by its administrator; the engine never creates one. The node writes
+# the records: an A and a PTR for each guest that gets an address from a DHCP
+# range (named after the guest), and `&lt;vnet&gt;-gw` for each subnet&#x27;s gateway. A
+# zone with `dns` and no `dhcpRange` is refused (it would register nobody).
+# Changing `dns` converges live; the records already written stay. A teardown
+# names the gateway records the node leaves on the DNS server.</code></pre>
 <h2 id='networkgateway'>NetworkGateway</h2>
 <p class='lang-pt'>Aliases e regras de filtro numa firewall de perímetro (ADR-0051), hoje o OPNsense, registado por <code>DELONIX_OPNSENSE_URL</code> e um par key/secret de API. Aliases entram antes das regras e saem depois delas; a identidade de uma regra é a sua <code>description</code>. Uma alteração ao spec é remover e voltar a aplicar.</p><p class='lang-en'>Aliases and filter rules on a perimeter firewall (ADR-0051), today OPNsense, registered through <code>DELONIX_OPNSENSE_URL</code> and an API key/secret pair. Aliases go in before rules and come out after them; a rule's identity is its <code>description</code>. A spec change is a remove and re-apply.</p>
 <pre><code># kind: NetworkGateway — aliases and filter rules on a perimeter firewall

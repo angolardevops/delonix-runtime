@@ -100,7 +100,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 ## network
 
 - **linux**: 8 of 47 — 8 supported, 14 partial, 18 unsupported-by-provider, 1 requires-external-component, 6 not-implemented
-- **proxmox**: 6 of 47 — 6 supported, 7 partial, 19 unsupported-by-provider, 2 requires-external-component, 13 not-implemented
+- **proxmox**: 7 of 47 — 7 supported, 7 partial, 20 unsupported-by-provider, 13 not-implemented
 - **opnsense (gateway)**: 10 of 47 — 10 supported, 23 unsupported-by-provider, 2 requires-external-component, 12 not-implemented
 
 | domain | capability | linux | proxmox | opnsense (gateway) |
@@ -133,8 +133,8 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `net.nat.npt` | unsupported-by-provider — IPv6 is disabled in the SDN (net.ipv6) | unsupported-by-provider — the SDN has source NAT on a subnet (`snat`) and nothing else | not-implemented |
 |  | `net.lb.l4` | not-implemented | unsupported-by-provider — PVE has no load balancer | requires-external-component — the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API |
 |  | `net.lb.health-check` | not-implemented | unsupported-by-provider — PVE has no load balancer | requires-external-component — the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API |
-|  | `net.dns.records` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | requires-external-component — a PowerDNS server — the only DNS plugin of PVE 9.2.2 | not-implemented |
-|  | `net.dns.authoritative` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | requires-external-component — a PowerDNS server — the only DNS plugin of PVE 9.2.2 | not-implemented |
+|  | `net.dns.records` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_dns_provider_registers_a_guest_in_the_zones_dns_server | not-implemented |
+|  | `net.dns.authoritative` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | unsupported-by-provider — the SDN writes records into a PowerDNS server it does not run; it serves no zone itself | not-implemented |
 |  | `net.ipam.provider` | unsupported-by-provider — a local provider: its addresses come from the engine's own IPAM (net.ipam) | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | unsupported-by-provider — the appliance has no IPAM beyond its DHCP servers (net.ipam.dhcp) |
 |  | `net.ipam.reservation` | unsupported-by-provider — a VM's address is derived from its MAC, not reserved in a ledger | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | not-implemented |
 |  | `net.ipam.dhcp` | partial — the holder's DHCP hands a Cloud Hypervisor tap the address derived from its MAC, outside the IPAM ledger (audit 62 §3) | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | not-implemented |

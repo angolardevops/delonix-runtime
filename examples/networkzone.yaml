@@ -24,3 +24,23 @@ spec:
   vnets:
     - { name: labnet1, alias: "lab network 1" }
     - { name: labnet2 }
+#
+# Addressing and DNS (ADR-0059 F5b/F5c), on a vnet:
+#
+#   spec:
+#     dns: { server: pdns, zone: lab.example, reverseServer: pdns }
+#     vnets:
+#       - name: labnet1
+#         subnets:
+#           - cidr: 10.80.0.0/24
+#             gateway: 10.80.0.1
+#             dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
+#             reservations: [{ ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }]
+#
+# `dns.server` and `dns.reverseServer` name DNS controllers registered on the
+# cluster by its administrator; the engine never creates one. The node writes
+# the records: an A and a PTR for each guest that gets an address from a DHCP
+# range (named after the guest), and `<vnet>-gw` for each subnet's gateway. A
+# zone with `dns` and no `dhcpRange` is refused (it would register nobody).
+# Changing `dns` converges live; the records already written stay. A teardown
+# names the gateway records the node leaves on the DNS server.

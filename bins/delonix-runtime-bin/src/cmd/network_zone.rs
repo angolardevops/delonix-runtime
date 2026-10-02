@@ -57,6 +57,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
+use delonix_networking::dns::{DnsProvider, ZoneDns};
 use delonix_networking::ipam::{
     normalize_mac, DhcpRange, IpamObserved, IpamProvider, IpamReservation, IpamSubnet,
 };
@@ -69,6 +70,40 @@ use delonix_state::JsonStore;
 pub struct NetworkZoneSpecDoc {
     #[serde(default)]
     pub vnets: Vec<VNetSpecInput>,
+    /// The DNS server the provider registers the zone's guests in (ADR-0059
+    /// F5c). Hot: a change converges live; the records the provider already
+    /// wrote stay as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns: Option<DnsInput>,
+}
+
+/// `spec.dns` of a zone: a DNS controller the provider's administrator
+/// registered, and the domain the guests' records go under. The provider
+/// writes the records — an A and a PTR for each guest that gets an address
+/// from a DHCP range, and for each subnet's gateway (`<vnet>-gw`).
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsInput {
+    /// The DNS controller (its id on the provider) the A records go to.
+    pub server: String,
+    /// The domain, without the trailing dot.
+    pub zone: String,
+    /// The controller the PTR records go to; none when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverse_server: Option<String>,
+}
+
+impl DnsInput {
+    fn port(&self) -> ZoneDns {
+        ZoneDns {
+            server: self.server.trim().to_string(),
+            // DNS names do not distinguish case.
+            zone: self.zone.trim().to_ascii_lowercase(),
+            reverse_server: self.reverse_server.as_ref().map(|r| r.trim().to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -113,7 +148,7 @@ pub struct ReservationInput {
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
 /// spec uses).
-pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets"];
+pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets", "dns"];
 
 /// Fields the reconciler compares.
 ///
@@ -121,10 +156,18 @@ pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets"];
 /// mark, observed on every plan (ADR-0059 D4): `in sync`, or each difference
 /// from what the record declared. The manifest always wants `in sync`.
 ///
-/// `subnets` is cold (a change replaces the document); `reservations` is hot:
-/// an apply removes the ones no longer declared and makes the new ones.
-pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] =
-    &["vnets", "subnets", "reservations", "remote", "applied"];
+/// `subnets` is cold (a change replaces the document); `reservations` and
+/// `dns` are hot: an apply removes the reservations no longer declared and
+/// makes the new ones, and writes the zone's DNS settings. Both are read from
+/// the provider, not the record, so a change made by hand converges too.
+pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &[
+    "vnets",
+    "subnets",
+    "dns",
+    "reservations",
+    "remote",
+    "applied",
+];
 
 /// The `remote` field of a record that matches the cluster.
 const IN_SYNC: &str = "in sync";
@@ -168,6 +211,9 @@ struct NetworkZoneRecord {
     /// apply compares the declared ones with (ADR-0059 F5b).
     #[serde(default)]
     reservations: Vec<ReservationRec>,
+    /// The DNS settings this engine gave the zone (ADR-0059 F5c).
+    #[serde(default)]
+    dns: Option<DnsInput>,
 }
 
 /// One reservation this engine holds.
@@ -229,6 +275,84 @@ fn declared_reservations(vnets: &[VNetSpecInput]) -> Vec<ReservationRec> {
 
 /// Every subnet and reservation of a spec checked before anything is
 /// touched; two reservations of one address are refused.
+/// Refuses a `dns:` the provider would refuse or that would register
+/// nobody: the node writes records only for addresses it hands out from a
+/// DHCP range, so a zone with `dns` needs a subnet with one.
+fn validate_dns(name: &str, spec: &NetworkZoneSpecDoc) -> Result<()> {
+    let Some(dns) = &spec.dns else {
+        return Ok(());
+    };
+    dns.port().validate(name)?;
+    if !declared_subnets(&spec.vnets)
+        .iter()
+        .any(|s| !s.dhcp_ranges.is_empty())
+    {
+        return Err(Error::Invalid(super::po::tf(
+            "NetworkZone/{name}: dns: no subnet declares a dhcpRange, and the provider registers \
+             only the guests that get an address from one — add a dhcpRange, or drop `dns:`",
+            &[("name", name)],
+        )));
+    }
+    Ok(())
+}
+
+/// The `dns` field: `server|zone|reverse`, empty when the zone has none.
+fn dns_field(dns: Option<&DnsInput>) -> String {
+    dns_field_of(dns.map(DnsInput::port).as_ref())
+}
+
+fn dns_field_of(dns: Option<&ZoneDns>) -> String {
+    dns.map(|p| {
+        format!(
+            "{}|{}|{}",
+            p.server,
+            p.zone.to_ascii_lowercase(),
+            p.reverse_server.as_deref().unwrap_or("")
+        )
+    })
+    .unwrap_or_default()
+}
+
+/// The `dns` field as the provider runs it for the record's zone: what a
+/// plan compares the declared settings with. Settings put on the zone by hand
+/// read as a hot change the next apply converges. A record that cannot be
+/// observed (interrupted, no mark, provider without the role) keeps what it
+/// recorded.
+fn dns_held(rec: &NetworkZoneRecord) -> Result<String> {
+    if rec.ledger.is_interrupted() || rec.owner.is_empty() {
+        return Ok(dns_field(rec.dns.as_ref()));
+    }
+    let (provider_id, _) = resolve_provider(&rec.provider)?;
+    let Some(dns) = dns_provider(provider_id)? else {
+        return Ok(dns_field(rec.dns.as_ref()));
+    };
+    let observed = dns
+        .observe(&rec.name)
+        .map_err(at(provider_id, "observe_dns"))?;
+    Ok(dns_field_of(observed.as_ref()))
+}
+
+/// The DNS provider of the zone's segment provider, or `None` when that
+/// provider does not have the role.
+fn dns_provider(provider_id: &str) -> Result<Option<Box<dyn DnsProvider>>> {
+    delonix_networking::dns::dns_provider_for(provider_id)
+        .transpose()
+        .map_err(Error::from)
+}
+
+/// The DNS provider a zone that declares `dns:` needs. One without the role
+/// cannot carry it.
+fn resolve_dns(provider_id: &str) -> Result<Box<dyn DnsProvider>> {
+    dns_provider(provider_id)?.ok_or_else(|| {
+        delonix_networking::Error::ProviderNotRegistered(super::po::tf(
+            "the segment provider '{provider}' has no dns role: a NetworkZone on it cannot \
+             declare dns",
+            &[("provider", provider_id)],
+        ))
+        .into()
+    })
+}
+
 fn validate_addressing(vnets: &[VNetSpecInput]) -> Result<()> {
     let subnets = declared_subnets(vnets);
     for s in &subnets {
@@ -352,6 +476,7 @@ fn record_fields(rec: &NetworkZoneRecord) -> BTreeMap<String, String> {
     f.insert("vnets".into(), vnets_field(&rec.vnets));
     f.insert("subnets".into(), subnets_field(&rec.vnets));
     f.insert("reservations".into(), reservations_field(&rec.reservations));
+    f.insert("dns".into(), dns_field(rec.dns.as_ref()));
     f
 }
 
@@ -363,6 +488,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let mut fields = BTreeMap::new();
     fields.insert("vnets".into(), vnets_field(&spec.vnets));
     fields.insert("subnets".into(), subnets_field(&spec.vnets));
+    fields.insert("dns".into(), dns_field(spec.dns.as_ref()));
     fields.insert(
         "reservations".into(),
         reservations_field(&declared_reservations(&spec.vnets)),
@@ -387,6 +513,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|rec| {
             let mut fields = record_fields(&rec);
             fields.insert("reservations".into(), reservations_held(&rec)?);
+            fields.insert("dns".into(), dns_held(&rec)?);
             fields.insert("remote".into(), remote_field(&rec)?);
             fields.insert(
                 "applied".into(),
@@ -411,7 +538,10 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// The capabilities a zone needs from its provider: what its apply uses, and
 /// what its plan digest covers (ADR-0059 D4) — the IPAM ones only when the
 /// zone declares subnets, reservations or a DHCP range.
-fn required_capabilities(vnets: &[VNetSpecInput]) -> Vec<delonix_compute::capability::Capability> {
+fn required_capabilities(
+    spec: &NetworkZoneSpecDoc,
+) -> Vec<delonix_compute::capability::Capability> {
+    let vnets = &spec.vnets;
     use delonix_compute::capability::Capability as C;
     let mut out = vec![
         C::NetSegmentRemote,
@@ -428,6 +558,9 @@ fn required_capabilities(vnets: &[VNetSpecInput]) -> Vec<delonix_compute::capabi
     }
     if subnets.iter().any(|s| !s.dhcp_ranges.is_empty()) {
         out.push(C::NetIpamDhcp);
+    }
+    if spec.dns.is_some() {
+        out.push(C::NetDnsRecords);
     }
     out
 }
@@ -543,7 +676,7 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
             .map_err(at(provider_id, "observe"))?
     };
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
-    let used = required_capabilities(&spec.vnets);
+    let used = required_capabilities(&spec);
     let states: BTreeMap<String, String> = provider
         .capabilities()
         .capabilities
@@ -558,6 +691,16 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
     if uses_ipam(&spec.vnets, &rec) && !rec.owner.is_empty() {
         let ipam = delonix_networking::plan::ipam_fingerprint(&observe_ipam(provider_id, &rec)?);
         fingerprint = serde_json::json!({ "segment": fingerprint, "ipam": ipam });
+    }
+    // The same reading the `dns` field makes (`dns_held`): every zone of a
+    // provider with the role, declared or not.
+    if !rec.owner.is_empty() {
+        if let Some(dns) = dns_provider(provider_id)? {
+            let observed = dns
+                .observe(&doc.metadata.name)
+                .map_err(at(provider_id, "observe_dns"))?;
+            fingerprint = serde_json::json!({ "zone": fingerprint, "dns": observed });
+        }
     }
     Ok(Some(delonix_networking::plan::plan_digest(
         &intent,
@@ -590,6 +733,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
     validate_addressing(&spec.vnets)?;
+    validate_dns(&name, &spec)?;
 
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
@@ -598,7 +742,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     delonix_networking::resolve::require_capabilities(
         &format!("NetworkZone/{name}"),
         &provider.capabilities(),
-        &required_capabilities(&spec.vnets),
+        &required_capabilities(&spec),
     )?;
     let subnets = declared_subnets(&spec.vnets);
     let declared = declared_reservations(&spec.vnets);
@@ -607,6 +751,34 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     } else {
         Some(resolve_ipam(provider_id)?)
     };
+    let wanted_dns = spec.dns.as_ref().map(DnsInput::port);
+    // Declared: the role is required. Not declared: settings left by an
+    // earlier apply, or put on the zone by hand, are cleared when the
+    // provider has the role.
+    let dns = if wanted_dns.is_some() {
+        Some(resolve_dns(provider_id)?)
+    } else {
+        dns_provider(provider_id)?
+    };
+    // Compared as the plan compares them: a change of case only is no change.
+    let dns_changed =
+        !rec.vnets.is_empty() && dns_field(rec.dns.as_ref()) != dns_field(spec.dns.as_ref());
+    // The controllers are the cluster administrator's (the engine never
+    // creates one): one the cluster does not have is refused before any write.
+    if let (Some(dns), Some(want)) = (&dns, &wanted_dns) {
+        let registered = dns
+            .controllers()
+            .map_err(at(provider_id, "dns_controllers"))?;
+        let missing = delonix_networking::dns::missing_controllers(want, &registered);
+        if !missing.is_empty() {
+            return Err(delonix_networking::Error::RemotePrerequisiteMissing(super::po::tf(
+                "DNS controller '{id}' on provider '{provider}' — the engine does not create DNS \
+                 controllers: register it on the cluster (it holds the DNS server's credential)",
+                &[("id", &missing.join("', '")), ("provider", provider_id)],
+            ))
+            .into());
+        }
+    }
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
@@ -682,6 +854,14 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             let dhcp = delonix_networking::ipam::zone_serves_dhcp(&subnets, !declared.is_empty());
             ipam.prepare_zone(&name, dhcp)
                 .map_err(at(provider_id, "prepare_zone"))?;
+        }
+        // DNS before the subnets: the node registers a subnet's gateway when
+        // the subnet is created (ADR-0059 F5c). It writes only what differs.
+        if let Some(dns) = &dns {
+            dns.prepare_zone(&name, wanted_dns.as_ref())
+                .map_err(at(provider_id, "prepare_dns"))?;
+        }
+        if let (Some(ipam), false) = (&ipam, subnets.is_empty()) {
             for subnet in &subnets {
                 ipam.ensure_subnet(&name, subnet, &owner)
                     .map_err(at(provider_id, "ensure_subnet"))?;
@@ -714,7 +894,21 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         rec.zone_owned = true;
     }
     rec.vnets = spec.vnets.clone();
+    rec.dns = spec.dns.clone();
     s.save(&name, &rec)?;
+    if dns_changed {
+        // Measured on PVE 9.2.2: the node writes records when it hands out an
+        // address or creates a subnet, and never rewrites them.
+        println!(
+            "{}",
+            super::po::tf(
+                "networkzone/{name}: dns changed — the records the provider already wrote (each \
+                 subnet gateway's and each guest's) stay as they are; a guest is registered \
+                 under the new settings when it next gets an address",
+                &[("name", &name)],
+            )
+        );
+    }
 
     // Reservations are immediate and need the subnet RUNNING: after the
     // transaction, one ledger step each, the record updated after every one.
@@ -893,6 +1087,26 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     for (kind, object, why) in &left {
         report_left(name, kind, object, why);
     }
+    // The node writes a subnet gateway's A and PTR and no node API removes
+    // them (measured on PVE 9.2.2, ADR-0064): said out loud, never left
+    // silently in someone's DNS.
+    if let Some(dns) = rec.dns.as_ref().map(DnsInput::port) {
+        let gateways: Vec<(String, String)> = subnets
+            .iter()
+            .filter_map(|s| s.gateway.clone().map(|g| (s.vnet.clone(), g)))
+            .collect();
+        for record in delonix_networking::dns::gateway_record_names(&dns, &gateways) {
+            println!(
+                "{}",
+                super::po::tf(
+                    "networkzone/{name}: dns record '{record}' and its PTR left on DNS server \
+                     '{server}': the provider writes a subnet gateway's records and never \
+                     removes them",
+                    &[("name", name), ("record", &record), ("server", &dns.server)],
+                )
+            );
+        }
+    }
     s.remove(name).map_err(Into::into)
 }
 
@@ -1010,6 +1224,17 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
         for r in &rec.reservations {
             d.field("  Reservation", format!("{} {} ({})", r.ip, r.mac, r.vnet));
         }
+        if let Some(dns) = &rec.dns {
+            d.field(
+                "DNS",
+                format!(
+                    "{} on '{}' (reverse: {})",
+                    dns.zone,
+                    dns.server,
+                    dns.reverse_server.as_deref().unwrap_or("-")
+                ),
+            );
+        }
         d.field_opt("Stack", rec.labels.get(super::reconcile::STACK_LABEL));
         d.field_opt("Managed by", rec.labels.get(super::reconcile::MANAGED_BY));
         d.print();
@@ -1074,11 +1299,57 @@ mod tests {
         reversed.reverse();
         assert_eq!(reservations_field(&r), reservations_field(&reversed));
         use delonix_compute::capability::Capability as C;
-        let caps = required_capabilities(&v);
+        let spec = |vnets: &[VNetSpecInput]| NetworkZoneSpecDoc {
+            vnets: vnets.to_vec(),
+            dns: None,
+        };
+        let caps = required_capabilities(&spec(&v));
         for c in [C::NetIpamProvider, C::NetIpamReservation, C::NetIpamDhcp] {
             assert!(caps.contains(&c), "{c:?}");
         }
-        assert_eq!(required_capabilities(&v[1..]).len(), 4);
+        assert!(!caps.contains(&C::NetDnsRecords));
+        assert_eq!(required_capabilities(&spec(&v[1..])).len(), 4);
+    }
+
+    fn with_dns(vnets: Vec<VNetSpecInput>) -> NetworkZoneSpecDoc {
+        NetworkZoneSpecDoc {
+            vnets,
+            dns: Some(DnsInput {
+                server: "pdnslab".into(),
+                zone: "f5c.lab".into(),
+                reverse_server: Some("pdnslab".into()),
+            }),
+        }
+    }
+
+    #[test]
+    fn dns_reads_from_the_manifest_shape_and_is_compared_without_case() {
+        let spec: NetworkZoneSpecDoc = serde_yaml::from_str(
+            "vnets: []\ndns: {server: pdnslab, zone: f5c.lab, reverseServer: rev}\n",
+        )
+        .unwrap();
+        assert_eq!(dns_field(spec.dns.as_ref()), "pdnslab|f5c.lab|rev");
+        assert_eq!(dns_field(None), "");
+        let mut upper = spec.dns.clone().unwrap();
+        upper.zone = "F5C.Lab".into();
+        assert_eq!(dns_field(Some(&upper)), "pdnslab|f5c.lab|rev");
+        assert!(RECONCILED_NETWORK_ZONE_FIELDS.contains(&"dns"));
+        assert!(NETWORK_ZONE_SPEC_FIELDS.contains(&"dns"));
+        use delonix_compute::capability::Capability as C;
+        assert!(required_capabilities(&with_dns(addressed())).contains(&C::NetDnsRecords));
+    }
+
+    #[test]
+    fn dns_without_a_dhcp_range_is_refused_because_it_registers_nobody() {
+        assert!(validate_dns("z", &with_dns(addressed())).is_ok());
+        let mut v = addressed();
+        v[0].subnets[0].dhcp_range.clear();
+        let e = validate_dns("z", &with_dns(v)).unwrap_err().to_string();
+        assert!(e.contains("dhcpRange"), "{e}");
+        let mut bad = with_dns(addressed());
+        bad.dns.as_mut().unwrap().zone = "f5c.lab.".into();
+        let e = validate_dns("z", &bad).unwrap_err().to_string();
+        assert!(e.contains("not a domain name"), "{e}");
     }
 
     #[test]

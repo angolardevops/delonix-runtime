@@ -15052,6 +15052,22 @@ msgstr "o provider de segmentos '{provider}' não tem o papel ipam: uma NetworkZ
 msgid "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reservation(s) on '{provider}'"
 msgstr "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reserva(s) em '{provider}'"
 
+# ADR-0059 F5c: the DNS role on a NetworkZone
+msgid "NetworkZone/{name}: dns: no subnet declares a dhcpRange, and the provider registers only the guests that get an address from one — add a dhcpRange, or drop `dns:`"
+msgstr "NetworkZone/{name}: dns: nenhuma subnet declara um dhcpRange, e o provider só regista os guests que recebem um endereço de um — acrescenta um dhcpRange, ou tira o `dns:`"
+
+msgid "the segment provider '{provider}' has no dns role: a NetworkZone on it cannot declare dns"
+msgstr "o provider de segmentos '{provider}' não tem o papel dns: uma NetworkZone nele não pode declarar dns"
+
+msgid "DNS controller '{id}' on provider '{provider}' — the engine does not create DNS controllers: register it on the cluster (it holds the DNS server's credential)"
+msgstr "controlador DNS '{id}' no provider '{provider}' — o motor não cria controladores DNS: regista-o no cluster (é ele que guarda a credencial do servidor DNS)"
+
+msgid "networkzone/{name}: dns record '{record}' and its PTR left on DNS server '{server}': the provider writes a subnet gateway's records and never removes them"
+msgstr "networkzone/{name}: o registo dns '{record}' e o seu PTR ficaram no servidor DNS '{server}': o provider escreve os registos da gateway de uma subnet e nunca os remove"
+
+msgid "networkzone/{name}: dns changed — the records the provider already wrote (each subnet gateway's and each guest's) stay as they are; a guest is registered under the new settings when it next gets an address"
+msgstr "networkzone/{name}: o dns mudou — os registos que o provider já escreveu (os de cada gateway de subnet e os de cada guest) ficam como estão; um guest é registado com as novas definições quando voltar a receber um endereço"
+
 # init: delonix-tunnel.yaml (kind: Gateway) nos templates
 msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"
 msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endereço https público, sem IP público (README.md)"

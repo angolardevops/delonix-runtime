@@ -1208,3 +1208,33 @@ What part 1 adds:
 - **Not in this slice, decided in ADR-0063**: other IPAM plugins (phpIPAM refused, NetBox after a
   spike), a subnet changed in place (with the gateway-entry repair a failed transaction needs), and
   a reservation that names an engine VM instead of a MAC. DNS is F5c.
+
+## Addendum 2026-10-02 — F5c: the DNS role, and Proxmox's SDN DNS as its first provider
+
+- **What was built**: the `DnsProvider` port (`delonix_networking::dns`: `ZoneDns`, `dns_drift`,
+  `gateway_record_names`, the registry by id), `ProxmoxDnsProvider` on the zone's `dns`/
+  `dnszone`/`reversedns`, and `spec.dns` on `kind: NetworkZone`. The decisions and every measured
+  fact are in **ADR-0064**: the node writes the records (a guest's, a subnet gateway's), the
+  engine never creates a DNS controller nor holds its key, `dns` without a DHCP range is refused,
+  the field is hot and read from the node, and the gateway records the node leaves on a teardown
+  are named. `net.dns.records` → supported; `net.dns.authoritative` → unsupported-by-provider.
+- **Found by a review from another session, fixed in this slice**: the client's general parser
+  quotes 160 characters of a body it cannot decode, which for `GET /cluster/sdn/dns` (and the
+  IPAM controllers) carries a third-party API key; those routes now use a parser that never
+  quotes the body. The digest and the plan read DNS under the same condition. A domain is
+  compared without case.
+- **Proven live** (PVE 9.2.2 lab, a PowerDNS 4.9.17 on `pve2`, controller `pdnslab` registered by
+  hand as the administrator would):
+  - provider case `the_dns_provider_registers_a_guest_in_the_zones_dns_server`: zone, vnet,
+    IPAM, DNS and subnet in one transaction; the gateway record written at subnet create; a
+    container's A and PTR written when it got an address and removed by its destroy; observe in
+    sync; the teardown leaves the gateway's A and PTR on the server (asserted, then removed by the
+    test); a `Drop` guard undoes everything on any exit;
+  - CLI cycle: `dns` without a range refused (DX-1000) and an unknown controller refused
+    (DX-1380), both before any write; create, plan 0; `dnszone` changed by hand on the cluster →
+    plan `~ dns`, a plain apply converged, plan 0; `reverseServer` dropped in the manifest → hot,
+    with the «records already written stay» notice; a container on the vnet answered by `dig` (A
+    and PTR); delete named the gateway record left on the DNS server.
+- **Not in this slice, decided in ADR-0064 D6**: removing the records the node leaves, through
+  the DNS server's API with a credential given to the engine in `providers.yaml`. F5 (NAT, IPAM,
+  DNS) is complete with this slice; F6 is next.

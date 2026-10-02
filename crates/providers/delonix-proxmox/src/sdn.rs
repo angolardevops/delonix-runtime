@@ -130,7 +130,9 @@
 //! a real node, and that `zone`/`vnet` reached the URL path unmangled —
 //! nothing about the dataplane.
 
-use crate::{parse, Client, ClusterNode, Error, Ledger, Result, TaskKind, Wrapped};
+use crate::{
+    parse, parse_secret_bearing, Client, ClusterNode, Error, Ledger, Result, TaskKind, Wrapped,
+};
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Instant;
@@ -325,6 +327,58 @@ impl Client {
                 let z = self.sdn_zone(zone)?;
                 Ok(z.get("ipam").and_then(|v| v.as_str()) == Some(ipam)
                     && (z.get("dhcp").and_then(|v| v.as_str()) == Some("dnsmasq")) == dhcp)
+            }),
+        )
+    }
+
+    /// Sets or clears a zone's DNS settings (ADR-0059 F5c), staged:
+    /// `PUT /cluster/sdn/zones/{zone}` with `dns`, `dnszone` and `reversedns`
+    /// in ONE request — measured on PVE 9.2.2, a `dnszone` sent without `dns`
+    /// is refused ("dnszone: missing dns server") even when the zone already
+    /// has one. `None` deletes the three.
+    pub fn set_sdn_zone_dns(
+        &self,
+        ledger: &Ledger,
+        zone: &str,
+        dns: Option<(&str, &str, Option<&str>)>,
+    ) -> Result<()> {
+        validate_sdn_id(zone)?;
+        let mut form: Vec<(&str, &str)> = Vec::new();
+        match dns {
+            Some((server, domain, reverse)) => {
+                // A DNS controller id is PVE's `pve-sdn-dns-id` (mixed case,
+                // no length cap), not the zone/vnet id format.
+                for id in std::iter::once(server).chain(reverse) {
+                    validate_dns_controller_id(id)?;
+                }
+                if !delonix_networking::dns::valid_domain(domain) {
+                    return Err(Error::InvalidSdnId(format!(
+                        "'{domain}' is not a DNS domain (labels of letters, digits and '-', no \
+                         trailing dot)"
+                    )));
+                }
+                form.push(("dns", server));
+                form.push(("dnszone", domain));
+                match reverse {
+                    Some(r) => form.push(("reversedns", r)),
+                    None => form.push(("delete", "reversedns")),
+                }
+            }
+            None => form.push(("delete", "dns,dnszone,reversedns")),
+        }
+        let want = dns.map(|(s, d, r)| (s.to_string(), d.to_string(), r.map(str::to_string)));
+        let path = format!("/cluster/sdn/zones/{zone}");
+        self.task_or_done(
+            ledger,
+            SDN_VMID,
+            TaskKind::UpdateSdnZone,
+            || self.put_form(&path, &form),
+            Some(&|| {
+                let z = self.sdn_zone(zone)?;
+                let get = |k: &str| z.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                let have =
+                    get("dns").map(|s| (s, get("dnszone").unwrap_or_default(), get("reversedns")));
+                Ok(have == want)
             }),
         )
     }
@@ -1011,7 +1065,7 @@ impl Client {
     /// `pve` entry is always among them.
     pub fn sdn_ipams(&self) -> Result<Vec<serde_json::Value>> {
         let body = self.get("/cluster/sdn/ipams")?;
-        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "/cluster/sdn/ipams")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse_secret_bearing(&body, "/cluster/sdn/ipams")?;
         Ok(w.data)
     }
 
@@ -1020,7 +1074,8 @@ impl Client {
         validate_sdn_id(ipam)?;
         let path = format!("/cluster/sdn/ipams/{ipam}");
         let body = self.get(&path)?;
-        let w: Wrapped<serde_json::Value> = parse(&body, "GET /cluster/sdn/ipams/{ipam}")?;
+        let w: Wrapped<serde_json::Value> =
+            parse_secret_bearing(&body, "GET /cluster/sdn/ipams/{ipam}")?;
         Ok(w.data)
     }
 
@@ -1143,16 +1198,17 @@ impl Client {
     /// Every DNS controller entry (`GET /cluster/sdn/dns`).
     pub fn sdn_dns_controllers(&self) -> Result<Vec<serde_json::Value>> {
         let body = self.get("/cluster/sdn/dns")?;
-        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "/cluster/sdn/dns")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse_secret_bearing(&body, "/cluster/sdn/dns")?;
         Ok(w.data)
     }
 
     /// One DNS controller entry (`GET /cluster/sdn/dns/{dns}`).
     pub fn sdn_dns(&self, dns: &str) -> Result<serde_json::Value> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let path = format!("/cluster/sdn/dns/{dns}");
         let body = self.get(&path)?;
-        let w: Wrapped<serde_json::Value> = parse(&body, "GET /cluster/sdn/dns/{dns}")?;
+        let w: Wrapped<serde_json::Value> =
+            parse_secret_bearing(&body, "GET /cluster/sdn/dns/{dns}")?;
         Ok(w.data)
     }
 
@@ -1168,7 +1224,7 @@ impl Client {
         key: &str,
         ttl: Option<u32>,
     ) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let ttl_text = ttl.map(|t| t.to_string());
         let mut form: Vec<(&str, &str)> = vec![
             ("dns", dns),
@@ -1202,7 +1258,7 @@ impl Client {
         key: Option<&str>,
         ttl: Option<u32>,
     ) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let ttl_text = ttl.map(|t| t.to_string());
         let mut form: Vec<(&str, &str)> = Vec::new();
         if let Some(u) = url {
@@ -1231,7 +1287,7 @@ impl Client {
 
     /// Removes a DNS controller entry (`DELETE /cluster/sdn/dns/{dns}`).
     pub fn delete_sdn_dns(&self, ledger: &Ledger, dns: &str) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let path = format!("/cluster/sdn/dns/{dns}");
         self.task_or_done(
             ledger,
@@ -1858,12 +1914,40 @@ fn network_reload_entries(tasks: &[serde_json::Value]) -> Vec<(String, u64)> {
         .collect()
 }
 
+/// Refuses a DNS controller id that is not PVE's `pve-sdn-dns-id` (a letter
+/// then letters or digits, at least 2 — mixed case, no length cap), which is
+/// not the zone/vnet id format [`validate_sdn_id`] checks.
+fn validate_dns_controller_id(id: &str) -> Result<()> {
+    if delonix_networking::dns::valid_controller_id(id) {
+        Ok(())
+    } else {
+        Err(Error::InvalidSdnId(format!(
+            "invalid Proxmox SDN DNS controller id '{id}': expected a letter then letters or \
+             digits, at least 2"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         network_reload_entries, sdn_subnet_id, subnet_option_fields, validate_cidr,
-        validate_fabric_id, validate_ip, validate_mac, validate_sdn_id, DhcpRange, SubnetOptions,
+        validate_dns_controller_id, validate_fabric_id, validate_ip, validate_mac, validate_sdn_id,
+        DhcpRange, SubnetOptions,
     };
+
+    /// A DNS controller id follows PVE's `pve-sdn-dns-id`, not the zone/vnet
+    /// format: every DNS controller route accepts what the administrator can
+    /// register (mixed case, longer than 8).
+    #[test]
+    fn a_dns_controller_id_is_not_held_to_the_zone_id_format() {
+        assert!(validate_dns_controller_id("PdnsLab").is_ok());
+        assert!(validate_dns_controller_id("alongcontrollerid").is_ok());
+        assert!(validate_sdn_id("PdnsLab").is_err());
+        assert!(validate_dns_controller_id("p").is_err());
+        assert!(validate_dns_controller_id("pdns-lab").is_err());
+        assert!(validate_dns_controller_id("1pdns").is_err());
+    }
 
     #[test]
     fn only_network_reloads_are_taken_from_a_task_list() {
