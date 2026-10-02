@@ -3571,6 +3571,18 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
+    # D6 (docs/discovery/65_PLANO_MATURIDADE.md): a `--wait` that runs out of
+    # time is an ERROR. The disk is empty, so the guest never answers; the
+    # create must say so with exit 124 (DX-8503) and leave the VM running.
+    # Before, it printed a warning and exited 0 — a script's next step ran
+    # against a guest that never booted.
+    WVM="$CVM-w"
+    check "CH: vm create --wait que esgota o tempo sai com 124" 124 \
+      "$BIN" vm create "$WVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M \
+      --wait --boot-timeout 5
+    check "CH: e a VM fica a correr" ok bash -c \
+      "'$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$WVM' and v['status']=='Running' for v in json.load(sys.stdin)) else 1)\""
+    "$BIN" delete vm "$WVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1

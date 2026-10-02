@@ -1525,8 +1525,8 @@ msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
 msgid "After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)."
 msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-D para sair)."
 
-msgid "After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout."
-msgstr "Depois de arrancar, espera (com spinner) até a VM ter IP, até ao --boot-timeout."
+msgid "After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running."
+msgstr "Depois de arrancar, espera (com spinner) até a VM responder, até ao --boot-timeout; se nunca responder, sai com 124 (DX-8503) e deixa a VM a correr."
 
 msgid "Seconds to wait with --wait (default 120)."
 msgstr "Segundos a esperar com --wait (default 120)."
@@ -12392,6 +12392,15 @@ msgstr "O nó continuou a recusar porque o lock de configuração da VM estava t
 
 msgid "Check the node's task log for this VM; something is still holding the lock."
 msgstr "Verifica o registo de tasks do nó para esta VM; algo ainda está a segurar o lock."
+
+msgid "VM did not come up before the boot timeout"
+msgstr "a VM não ficou de pé antes do tempo de arranque"
+
+msgid "`--wait` gave the VM the whole `--boot-timeout` and never saw it answer: no address yet, or an address that never replied. The VM is left as it is, still running."
+msgstr "O `--wait` deu à VM o `--boot-timeout` inteiro e nunca a viu responder: ainda sem endereço, ou com um endereço que nunca respondeu. A VM fica como está, a correr."
+
+msgid "Watch the boot with `delonix vm console <name>`; raise `--boot-timeout` for a slow guest, or `delonix vm rm` it if it will not boot."
+msgstr "Acompanha o arranque com `delonix vm console <name>`; sobe o `--boot-timeout` para um convidado lento, ou `delonix vm rm` se não arrancar."
 
 msgid "Proxmox request failed"
 msgstr "pedido ao Proxmox falhou"
