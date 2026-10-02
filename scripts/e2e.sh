@@ -586,8 +586,26 @@ if [[ -x "$NODEBIN" ]]; then
   # respondia a QUALQUER caminho desconhecido com 200 + `grpc-status: 12` e corpo
   # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um
   # google.rpc.Status (code 5); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
-  check "GET /v1/node (sem handler ainda) é 404 com code 5, nunca um 200 vazio" ok bash -c \
-    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/node) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/node | grep -q '\"code\":5'"
+  check "um caminho sem handler é 404 com code 5, nunca um 200 vazio" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/nada) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/nada | grep -q '\"code\":5'"
+  # ADR-0042 passo C: GetNodeInfo/GetHealth/GetCapacity pelas rotas JSON, e o
+  # OpenAPI publicado. Cada resposta é comparada com o que a CLI diz no mesmo
+  # host; os valores passam às asserções por variáveis de ambiente.
+  check "GET /v1/node: a versão e o commit são os do delonix version" ok env \
+    NODE_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1/node)" \
+    WANT_VERSION="$("$BIN" version | head -1 | awk '{print $2}')" \
+    WANT_COMMIT="$("$BIN" version | grep -o 'commit: [0-9a-f]*' | awk '{print $2}')" \
+    python3 -c 'import json,os; d=json.loads(os.environ["NODE_JSON"]); assert d["api_version"]=="delonix.node.v1", d; assert d["engine_version"]==os.environ["WANT_VERSION"], d; assert d["engine_commit"]==os.environ["WANT_COMMIT"], d'
+  check "GET /v1/node/health: quatro condições, e a do cgroup concorda com o system info" ok env \
+    HEALTH_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1/node/health)" \
+    SYSINFO="$("$BIN" --l18n=en system info 2>/dev/null | grep 'cgroup2 delegated')" \
+    python3 -c 'import json,os; d=json.loads(os.environ["HEALTH_JSON"]); c={x["type"]:x["status"] for x in d["conditions"]}; assert list(c)==["NetworkReady","StoreWritable","CgroupDelegated","ProvidersAvailable"], d; want="CONDITION_STATUS_TRUE" if "yes" in os.environ["SYSINFO"] else "CONDITION_STATUS_FALSE"; assert c["CgroupDelegated"]==want, (c, os.environ["SYSINFO"])'
+  check "GET /v1/node/capacity: cada número é medido ou está em unmeasured, nunca um zero calado" ok env \
+    CAP_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1/node/capacity)" \
+    python3 -c 'import json,os; d=json.loads(os.environ["CAP_JSON"]); u=set(d["unmeasured"]); bad=[k for k in ("cpu_millis_total","cpu_millis_allocatable","memory_bytes_total","memory_bytes_allocatable","pids_allocatable") if int(d[k])<=0 and k not in u]; assert not bad, (bad, d)'
+  check "GET /openapi.json serve o documento gerado, com as rotas do NodeService" ok env \
+    DOC_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/openapi.json)" \
+    python3 -c 'import json,os; d=json.loads(os.environ["DOC_JSON"]); assert d["openapi"].startswith("3"); assert {"/v1/node","/v1/node/health","/v1/node/capacity","/v1/providers"} <= set(d["paths"])'
   kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
 else
   skip "node API pelo contrato (ADR-0050 D5)" "sem delonix-node-api ao lado de $BIN (cargo build -p delonix-node-api-bin)"

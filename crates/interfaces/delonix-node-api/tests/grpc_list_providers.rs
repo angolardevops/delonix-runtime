@@ -3,7 +3,10 @@
 //! the one `delonix serve node-api` runs, not a test double.
 
 use delonix_node_api::proto::v1::node_service_client::NodeServiceClient;
-use delonix_node_api::proto::v1::{GetNodeInfoRequest, ListProvidersRequest};
+use delonix_node_api::proto::v1::{
+    ConditionStatus, GetCapacityRequest, GetHealthRequest, GetNodeInfoRequest,
+    ListProvidersRequest, WatchEventsRequest,
+};
 
 /// A SHORT socket path (`sun_path` is 108 bytes): a `TempDir` in `/tmp`
 /// itself, removed on every exit, a failed assert included.
@@ -86,13 +89,129 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .expect_err("an unknown kind is refused, not an empty list");
     assert_eq!(bad.code(), tonic::Code::InvalidArgument);
 
-    // What is not served says so — and says with which step it arrives.
+    // ADR-0042 step C: what this node is, its health and its room.
     let info = cli
         .get_node_info(GetNodeInfoRequest::default())
         .await
-        .expect_err("GetNodeInfo is not served yet");
-    assert_eq!(info.code(), tonic::Code::Unimplemented);
-    assert!(info.message().contains("ADR-0042"), "{}", info.message());
+        .expect("GetNodeInfo")
+        .into_inner();
+    assert_eq!(info.api_version, "delonix.node.v1");
+    assert_eq!(info.engine_version, env!("CARGO_PKG_VERSION"));
+    assert!(!info.engine_commit.is_empty() && !info.arch.is_empty());
+    assert_eq!(info.cgroup_driver, "cgroupfs");
+
+    let health = cli
+        .get_health(GetHealthRequest::default())
+        .await
+        .expect("GetHealth")
+        .into_inner();
+    let types: Vec<&str> = health
+        .conditions
+        .iter()
+        .map(|c| c.r#type.as_str())
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "NetworkReady",
+            "StoreWritable",
+            "CgroupDelegated",
+            "ProvidersAvailable"
+        ]
+    );
+    assert_ne!(health.overall, ConditionStatus::Unspecified as i32);
+    assert!(health.conditions.iter().all(|c| !c.reason.is_empty()));
+
+    let cap = cli
+        .get_capacity(GetCapacityRequest::default())
+        .await
+        .expect("GetCapacity")
+        .into_inner();
+    // Measured or named as unmeasured — never a silent zero.
+    for (field, value) in [
+        ("cpu_millis_total", cap.cpu_millis_total),
+        ("cpu_millis_allocatable", cap.cpu_millis_allocatable),
+        ("memory_bytes_total", cap.memory_bytes_total),
+        ("memory_bytes_allocatable", cap.memory_bytes_allocatable),
+        ("pids_allocatable", cap.pids_allocatable),
+    ] {
+        assert!(
+            value > 0 || cap.unmeasured.iter().any(|u| u == field),
+            "{field} is 0 and not in unmeasured: {cap:?}"
+        );
+    }
+    assert!(cap.cpu_millis_allocatable <= cap.cpu_millis_total);
+    assert!(cap.memory_bytes_allocatable <= cap.memory_bytes_total);
+
+    // What is not served says so — and says with which step it arrives.
+    let watch = cli
+        .watch_events(WatchEventsRequest::default())
+        .await
+        .expect_err("WatchEvents is not served yet");
+    assert_eq!(watch.code(), tonic::Code::Unimplemented);
+    assert!(
+        watch.message().contains("ADR-0040 P5"),
+        "{}",
+        watch.message()
+    );
+}
+
+/// The JSON routes of `GetNodeInfo`/`GetHealth`/`GetCapacity` answer with the
+/// same messages, proto field names included, and `/openapi.json` serves the
+/// generated document with a handler behind each `NodeService` GET it lists.
+#[tokio::test]
+async fn node_service_answers_as_json_and_publishes_its_openapi() {
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let app = delonix_node_api::router();
+    let get = |path: &'static str| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    axum::http::Request::get(path)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = res.status();
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            )
+        }
+    };
+    let (s, v) = get("/v1/node").await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["api_version"], "delonix.node.v1");
+    assert!(v.get("supported_workload_types").is_some(), "{v}");
+    let (s, v) = get("/v1/node/health").await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v["overall"].is_string(), "enum as its name: {v}");
+    assert_eq!(v["conditions"].as_array().map(Vec::len), Some(4), "{v}");
+    let (s, v) = get("/v1/node/capacity").await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v.get("unmeasured").is_some(), "{v}");
+
+    let (s, doc) = get("/openapi.json").await;
+    assert_eq!(s, 200);
+    assert!(
+        doc["openapi"].as_str().unwrap_or_default().starts_with('3'),
+        "{doc}"
+    );
+    let paths = doc["paths"].as_object().expect("paths");
+    for path in [
+        "/v1/node",
+        "/v1/node/health",
+        "/v1/node/capacity",
+        "/v1/providers",
+    ] {
+        assert!(paths.contains_key(path), "{path} missing from the OpenAPI");
+        let (s, _) = get(path).await;
+        assert_eq!(s, 200, "{path} is in the OpenAPI and has no handler");
+    }
 }
 
 #[tokio::test]

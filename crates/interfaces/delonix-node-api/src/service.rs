@@ -12,21 +12,49 @@ use crate::proto::v1::{
     Capacity, Event, GetCapacityRequest, GetHealthRequest, GetNodeInfoRequest, Health,
     ListProvidersRequest, ListProvidersResponse, NodeInfo, WatchEventsRequest,
 };
-use crate::providers;
+use crate::{node, providers};
 
 /// The service. Stateless: every answer is computed from the engine's
 /// declarations and this host's probes at call time.
 #[derive(Clone, Default)]
 pub struct NodeApi;
 
-/// The RPCs the contract has and this server does not serve yet answer with
-/// the step that brings them — a refusal a client can read, never a default
-/// body that looks like an answer.
+/// The RPC the contract has and this server does not serve yet answers with
+/// the step that brings it — a refusal a client can read, never a default body
+/// that looks like an answer.
 fn not_yet(rpc: &str) -> Status {
     Status::unimplemented(format!(
-        "{rpc} is not served yet: it lands with ADR-0042 step C (health/info/capacity) and \
-         ADR-0040 P5 (WatchEvents); ListProviders is what this socket serves today"
+        "{rpc} is not served yet: it lands with ADR-0040 P5"
     ))
+}
+
+/// Runs a host probe off the runtime's workers: every `NodeService` answer
+/// reads files, cgroups and provider probes, which block.
+async fn blocking<T: Send + 'static>(
+    what: &'static str,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Status> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| Status::internal(format!("{what} panicked: {e}")))
+}
+
+/// `GetNodeInfo`, the one function both encodings call.
+pub async fn node_info() -> Result<NodeInfo, Status> {
+    blocking("node info", || {
+        node::node_info(&providers::measured_reports())
+    })
+    .await
+}
+
+/// `GetHealth`, the one function both encodings call.
+pub async fn health() -> Result<Health, Status> {
+    blocking("health", || node::health(&providers::measured_reports())).await
+}
+
+/// `GetCapacity`, the one function both encodings call.
+pub async fn capacity() -> Result<Capacity, Status> {
+    blocking("capacity", node::capacity).await
 }
 
 /// `ListProviders`, the one function both encodings call (ADR-0050 D5).
@@ -62,21 +90,21 @@ impl NodeService for NodeApi {
         &self,
         _req: Request<GetNodeInfoRequest>,
     ) -> Result<Response<NodeInfo>, Status> {
-        Err(not_yet("GetNodeInfo"))
+        Ok(Response::new(node_info().await?))
     }
 
     async fn get_health(
         &self,
         _req: Request<GetHealthRequest>,
     ) -> Result<Response<Health>, Status> {
-        Err(not_yet("GetHealth"))
+        Ok(Response::new(health().await?))
     }
 
     async fn get_capacity(
         &self,
         _req: Request<GetCapacityRequest>,
     ) -> Result<Response<Capacity>, Status> {
-        Err(not_yet("GetCapacity"))
+        Ok(Response::new(capacity().await?))
     }
 
     async fn list_providers(
@@ -110,6 +138,10 @@ pub fn router() -> axum::Router {
     // keeps that answer for gRPC callers and gives HTTP callers a 404.
     axum::Router::new()
         .route("/v1/providers", axum::routing::get(http_list_providers))
+        .route("/v1/node", axum::routing::get(|| json(node_info())))
+        .route("/v1/node/health", axum::routing::get(|| json(health())))
+        .route("/v1/node/capacity", axum::routing::get(|| json(capacity())))
+        .route("/openapi.json", axum::routing::get(openapi_json))
         .route_service(
             &format!("/{}/*rest", NodeServiceServer::<NodeApi>::NAME),
             NodeServiceServer::new(NodeApi),
@@ -140,6 +172,35 @@ async fn fallback(req: axum::extract::Request) -> axum::response::Response {
         req.method(),
         req.uri().path()
     )))
+}
+
+/// One RPC's answer as its `google.api.http` JSON: the message, or the error
+/// as `google.rpc.Status`.
+async fn json<T: serde::Serialize>(
+    answer: impl std::future::Future<Output = Result<T, Status>>,
+) -> axum::response::Response {
+    match answer.await {
+        Ok(msg) => (hyper::StatusCode::OK, axum::Json(msg)).into_response(),
+        Err(status) => rpc_error(status),
+    }
+}
+
+/// The published OpenAPI document — the one the contract gate generates from
+/// `proto/` and keeps committed (`docs/api/openapi.yaml`), embedded at build
+/// time and served as JSON (ADR-0042 D3). Never written by hand here.
+pub const OPENAPI_YAML: &str = include_str!("../../../../docs/api/openapi.yaml");
+
+/// `OPENAPI_YAML` as JSON, converted once.
+pub fn openapi_document() -> &'static serde_json::Value {
+    static DOC: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    DOC.get_or_init(|| {
+        serde_yaml::from_str(OPENAPI_YAML)
+            .expect("docs/api/openapi.yaml is the generated contract and parses")
+    })
+}
+
+async fn openapi_json() -> axum::response::Response {
+    (hyper::StatusCode::OK, axum::Json(openapi_document())).into_response()
 }
 
 /// `GET /v1/providers[?kind=]` — the `google.api.http` mapping of
