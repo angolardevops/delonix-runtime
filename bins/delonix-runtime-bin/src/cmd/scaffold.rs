@@ -2500,6 +2500,54 @@ mod tests {
     /// The three edge templates come up with HTTPS: every token is replaced
     /// (the TLS port included), the manifest publishes both ports and mounts
     /// `./tls`, and the key that was generated is private.
+    /// Every edge template offers Let's Encrypt by DNS-01 (the only challenge
+    /// that works when port 80 of the public address does not reach the host),
+    /// and HAProxy, which has no webroot, says so instead of issuing a local
+    /// certificate named after the arguments.
+    #[test]
+    fn the_edge_templates_offer_lets_encrypt_by_dns() {
+        for tpl in ["nginx", "httpd", "haproxy"] {
+            let (_tmp, dir) = scratch();
+            let plan = Plan {
+                port: "18080".into(),
+                tls_port: Some("18443".into()),
+                hosts: vec!["localhost".into()],
+            };
+            render_planned(tpl, &edge_opts(&dir, tpl), false, &plan).unwrap();
+            let run = |args: &[&str]| {
+                std::process::Command::new("sh")
+                    .arg("scripts/tls.sh")
+                    .args(args)
+                    .current_dir(&dir)
+                    .output()
+                    .unwrap()
+            };
+            let syntax = std::process::Command::new("sh")
+                .args(["-n", "scripts/tls.sh"])
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(syntax.status.success(), "{tpl}: {syntax:?}");
+            // One argument short: the usage line, before certbot is looked for.
+            let usage = run(&["letsencrypt-dns", "example.org"]);
+            assert_eq!(usage.status.code(), Some(2), "{tpl}: {usage:?}");
+            assert!(
+                String::from_utf8_lossy(&usage.stderr).contains("letsencrypt-dns <domain> <email>"),
+                "{tpl}: {usage:?}"
+            );
+            if tpl == "haproxy" {
+                let before = std::fs::read(dir.join("tls/tls.crt")).unwrap();
+                let http01 = run(&["letsencrypt", "example.org", "-"]);
+                assert_eq!(http01.status.code(), Some(2), "{http01:?}");
+                assert!(
+                    String::from_utf8_lossy(&http01.stderr).contains("letsencrypt-dns"),
+                    "{http01:?}"
+                );
+                assert_eq!(std::fs::read(dir.join("tls/tls.crt")).unwrap(), before);
+            }
+        }
+    }
+
     #[test]
     fn the_edge_templates_render_with_tls_and_no_token_left() {
         use std::os::unix::fs::PermissionsExt;

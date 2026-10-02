@@ -86,6 +86,7 @@ image.
 | Browsers on this machine to trust it | install [mkcert](https://github.com/FiloSottile/mkcert), `mkcert -install` once, then `sh scripts/tls.sh` |
 | To use a certificate you already have | `sh scripts/tls.sh install fullchain.pem privkey.pem` |
 | A publicly trusted certificate | `sh scripts/tls.sh letsencrypt example.org you@example.org` |
+| The same, with no port 80 reaching this host | `sh scripts/tls.sh letsencrypt-dns example.org you@example.org` |
 
 `tls.sh` reloads the running server; no restart, no dropped connection.
 
@@ -103,6 +104,17 @@ loaded. It needs certbot on this host, the domain's DNS pointing at this host,
 and port 80 of the host reaching the container (`"0.0.0.0:80:__PORT__"`).
 Everything certbot keeps goes to `./letsencrypt`, so no root is involved. The
 script prints the `certbot renew` line to put in cron.
+
+Behind NAT or CGNAT, where port 80 of the public address cannot reach this
+host, use DNS-01 instead: `sh scripts/tls.sh letsencrypt-dns <domain> <email>`.
+The script prints one TXT record (`_acme-challenge.<domain>`), you create it
+at your DNS provider, and it carries on by itself once the zone's own name
+servers answer with it — nothing has to reach this host, and `<domain>` may be
+a wildcard. A certificate issued this way is renewed by running the command
+again (the CA asks for a new record each time); set `DNS_AUTH_HOOK=<command>`
+(and `DNS_CLEANUP_HOOK`) to have a script create the record through your
+provider's API, and renewal then needs nobody. It needs certbot and one of
+`dig`, `host` or `nslookup`.
 
 Try it first with `LETSENCRYPT_STAGING=1 sh scripts/tls.sh letsencrypt …`: the
 staging CA exercises the whole path without counting against the domain's
