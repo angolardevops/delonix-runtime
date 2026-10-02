@@ -3107,6 +3107,42 @@ DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` s
 passou, o `slirp4netns` do container ficou vivo a segurar as portas publicadas — o `apply`
 seguinte respondia «port 8080 is already in use by slirp4netns».
 
+## Os templates trazem um túnel para a internet sem IP público (`delonix-tunnel.yaml`, 2026-10-02)
+
+Os 11 templates do `init` geram `delonix-tunnel.yaml`: um `kind: Gateway` FORA do manifesto
+principal, por isso o `stack apply` nunca o abre. `delonix stack apply -f delonix-tunnel.yaml`
+abre-o, `delonix get gateways` dá o URL, `delonix delete gateways <nome>-tunnel` fecha-o (o
+`stack destroy` não lhe toca: um túnel não tem etiqueta de posse). O README de cada template
+tem a secção «On the internet without a public IP», e o fim do `--up` aponta para ela.
+
+- **Cloudflare é o provider dos templates, e a escolha foi medida.** Cobre os dois modos com o
+  mesmo agente: túnel rápido sem conta (`*.trycloudflare.com`, aleatório) e túnel com nome no
+  domínio do utilizador (DNS no Cloudflare, token num `kind: Secret` por `tokenSecretRef`).
+  Não mostra página de aviso a browsers e envia `X-Forwarded-Proto` com o esquema real. O
+  ngrok gratuito também não mostra aviso, dá um nome FIXO por conta (`*.ngrok-free.dev`, o
+  mesmo nas três aberturas medidas) e envia `X-Forwarded-Proto`; o pinggy gratuito mostra uma
+  página de aviso de 15 KB a qualquer agente `Mozilla/…`; o `localhost.run` não envia
+  `X-Forwarded-Proto` e sai quando o stdin chega ao fim (só aguenta com um stdin que nunca
+  acaba, por isso não está no motor).
+- **Nos templates de edge o túnel aponta para a porta TLS** (`insecureSkipTlsVerify: true`): a
+  porta HTTP redirecciona para `https://<host>:<porta TLS>`, que o endereço público não tem. O
+  certificado local (mkcert ou auto-assinado) não se pode verificar no salto agente→localhost;
+  o visitante recebe o do provider. O servidor TLS dos três redirecciona para
+  `https://<host>/` quando o túnel diz `X-Forwarded-Proto: http` (um cliente directo que mande
+  o cabeçalho só se redirecciona a si próprio).
+- **O Django só responde aos nomes do `ALLOWED_HOSTS`**: tal como gerado, o túnel dá 400. O
+  README manda acrescentar `.trycloudflare.com` (ou o domínio) e `TRUSTED_PROXY=*`, e **recriar
+  o container** (`container rm -f` e `stack apply`): uma mudança de `env` não se aplica a um
+  container que já existe, e o `--replace Container/<nome>` que a condição do plano sugere não
+  faz nada, porque o plano não vê a mudança (registado para corrigir à parte).
+- **Medido ao vivo** (raiz isolada, túnel rápido): nginx, httpd e haproxy servem HTTPS pelo
+  endereço público e mandam o visitante de HTTP para `https://<host>/`, com o redirect local
+  para a porta TLS intacto e os três `smoke.sh` a passar; a API Go e a do Django (depois dos
+  dois ajustes) criaram e listaram uma nota pelo túnel, com `Origin` de browser.
+- **Não validado**: o túnel com nome num domínio próprio (precisa de um domínio com DNS no
+  Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
+  ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
+
 ## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
 
 Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).

@@ -15019,3 +15019,10 @@ msgstr "{name} está a correr o build anterior de {tag} — a recriá-lo"
 
 msgid "{name} exists but is not running — recreating it"
 msgstr "{name} existe mas não está a correr — a recriá-lo"
+
+# init: delonix-tunnel.yaml (kind: Gateway) nos templates
+msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"
+msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endereço https público, sem IP público (README.md)"
+
+msgid "internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")"
+msgstr "internet: delonix stack apply -f delonix-tunnel.yaml — um endereço https público sem IP público (README.md, \"On the internet without a public IP\")"

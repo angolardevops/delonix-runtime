@@ -640,9 +640,10 @@ fn adopt_ci_skip_reason(dir: &Path, lock: &str) -> Option<String> {
     None
 }
 
-const ADOPT_FILES: [&str; 9] = [
+const ADOPT_FILES: [&str; 10] = [
     "Delonixfile",
     "delonix-manifest.yaml",
+    "delonix-tunnel.yaml",
     ".dockerignore",
     ".github/workflows/ci.yml",
     ".gitlab-ci.yml",
@@ -822,6 +823,15 @@ fn render_planned(
                 ],
             )
         );
+        if has_tunnel(tname) {
+            println!(
+                "{}",
+                super::po::tf(
+                    "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)",
+                    &[("cd", &cd)],
+                )
+            );
+        }
     }
     Ok(cert)
 }
@@ -1026,12 +1036,31 @@ fn up_summary(
         ));
     }
     out.push(format!("   health:  http://localhost:{port}{health}"));
+    if has_tunnel(tname) {
+        out.push(format!(
+            "   {}",
+            super::po::t("internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")")
+        ));
+    }
     out.push(format!("   logs:    delonix container logs -f {name}"));
     out.push(format!(
         "   stop:    delonix stack destroy   {}",
         super::po::t("(tears down everything the stack owns)")
     ));
     out
+}
+
+/// Whether the template ships `delonix-tunnel.yaml`, the opt-in `kind: Gateway`
+/// that puts the project on the internet through an outbound tunnel.
+fn has_tunnel(tname: &str) -> bool {
+    TEMPLATES
+        .iter()
+        .find(|(n, _)| *n == tname)
+        .is_some_and(|(_, files)| {
+            files
+                .iter()
+                .any(|(path, _, _)| *path == "delonix-tunnel.yaml")
+        })
 }
 
 /// A secret the template's manifest references and that `--up` creates when
@@ -2383,6 +2412,46 @@ mod tests {
     /// no placeholder, every JSON and YAML file parses, and the version shows
     /// up in what was written. One test for all templates, so a new template
     /// (or a new accepted version) is covered the day it is added.
+    /// Every template ships `delonix-tunnel.yaml`: one `kind: Gateway` the
+    /// engine's loader accepts, opt-in (the main manifest has no Gateway, so
+    /// `stack apply` never opens it), aimed at the port that serves the site —
+    /// the HTTPS one on an edge template, whose plain-HTTP port redirects to a
+    /// port the public address does not have.
+    #[test]
+    fn every_template_ships_an_opt_in_tunnel() {
+        for tpl in template_names() {
+            let (_tmp, dir) = scratch();
+            render_template(tpl, &opts(dir.clone(), "my-svc", tpl, None), false)
+                .unwrap_or_else(|e| panic!("{tpl}: {e}"));
+            let docs = super::super::manifest::load(&dir.join("delonix-tunnel.yaml"))
+                .unwrap_or_else(|e| panic!("{tpl}: delonix-tunnel.yaml: {e}"));
+            assert_eq!(docs.len(), 1, "{tpl}");
+            let doc = &docs[0];
+            assert_eq!(doc.kind, super::super::kinds::GATEWAY, "{tpl}");
+            assert_eq!(doc.metadata.name, "my-svc-tunnel", "{tpl}");
+            let spec = &doc.spec;
+            assert_eq!(spec["provider"].as_str(), Some("cloudflare"), "{tpl}");
+            let edge = meta_kv(tpl, "tls");
+            let want: u64 = edge.unwrap_or(template_meta(tpl).port).parse().unwrap();
+            assert_eq!(spec["localPort"].as_u64(), Some(want), "{tpl}");
+            assert_eq!(
+                spec["insecureSkipTlsVerify"].as_bool().unwrap_or(false),
+                edge.is_some(),
+                "{tpl}"
+            );
+            let main = std::fs::read_to_string(dir.join("delonix-manifest.yaml")).unwrap();
+            assert!(
+                !main.contains("kind: Gateway"),
+                "{tpl}: the tunnel must stay opt-in"
+            );
+            let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
+            assert!(
+                readme.contains("## On the internet without a public IP"),
+                "{tpl}: README has no tunnel section"
+            );
+        }
+    }
+
     #[test]
     fn every_template_renders_valid_files_for_each_declared_version() {
         fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
