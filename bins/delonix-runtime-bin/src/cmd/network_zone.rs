@@ -760,7 +760,9 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     } else {
         dns_provider(provider_id)?
     };
-    let dns_changed = !rec.vnets.is_empty() && rec.dns != spec.dns;
+    // Compared as the plan compares them: a change of case only is no change.
+    let dns_changed =
+        !rec.vnets.is_empty() && dns_field(rec.dns.as_ref()) != dns_field(spec.dns.as_ref());
     // The controllers are the cluster administrator's (the engine never
     // creates one): one the cluster does not have is refused before any write.
     if let (Some(dns), Some(want)) = (&dns, &wanted_dns) {

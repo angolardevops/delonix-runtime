@@ -349,12 +349,7 @@ impl Client {
                 // A DNS controller id is PVE's `pve-sdn-dns-id` (mixed case,
                 // no length cap), not the zone/vnet id format.
                 for id in std::iter::once(server).chain(reverse) {
-                    if !delonix_networking::dns::valid_controller_id(id) {
-                        return Err(Error::InvalidSdnId(format!(
-                            "invalid Proxmox SDN DNS controller id '{id}': expected a letter then \
-                             letters or digits, at least 2"
-                        )));
-                    }
+                    validate_dns_controller_id(id)?;
                 }
                 if !delonix_networking::dns::valid_domain(domain) {
                     return Err(Error::InvalidSdnId(format!(
@@ -1209,7 +1204,7 @@ impl Client {
 
     /// One DNS controller entry (`GET /cluster/sdn/dns/{dns}`).
     pub fn sdn_dns(&self, dns: &str) -> Result<serde_json::Value> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let path = format!("/cluster/sdn/dns/{dns}");
         let body = self.get(&path)?;
         let w: Wrapped<serde_json::Value> =
@@ -1229,7 +1224,7 @@ impl Client {
         key: &str,
         ttl: Option<u32>,
     ) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let ttl_text = ttl.map(|t| t.to_string());
         let mut form: Vec<(&str, &str)> = vec![
             ("dns", dns),
@@ -1263,7 +1258,7 @@ impl Client {
         key: Option<&str>,
         ttl: Option<u32>,
     ) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let ttl_text = ttl.map(|t| t.to_string());
         let mut form: Vec<(&str, &str)> = Vec::new();
         if let Some(u) = url {
@@ -1292,7 +1287,7 @@ impl Client {
 
     /// Removes a DNS controller entry (`DELETE /cluster/sdn/dns/{dns}`).
     pub fn delete_sdn_dns(&self, ledger: &Ledger, dns: &str) -> Result<()> {
-        validate_sdn_id(dns)?;
+        validate_dns_controller_id(dns)?;
         let path = format!("/cluster/sdn/dns/{dns}");
         self.task_or_done(
             ledger,
@@ -1919,12 +1914,40 @@ fn network_reload_entries(tasks: &[serde_json::Value]) -> Vec<(String, u64)> {
         .collect()
 }
 
+/// Refuses a DNS controller id that is not PVE's `pve-sdn-dns-id` (a letter
+/// then letters or digits, at least 2 — mixed case, no length cap), which is
+/// not the zone/vnet id format [`validate_sdn_id`] checks.
+fn validate_dns_controller_id(id: &str) -> Result<()> {
+    if delonix_networking::dns::valid_controller_id(id) {
+        Ok(())
+    } else {
+        Err(Error::InvalidSdnId(format!(
+            "invalid Proxmox SDN DNS controller id '{id}': expected a letter then letters or \
+             digits, at least 2"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         network_reload_entries, sdn_subnet_id, subnet_option_fields, validate_cidr,
-        validate_fabric_id, validate_ip, validate_mac, validate_sdn_id, DhcpRange, SubnetOptions,
+        validate_dns_controller_id, validate_fabric_id, validate_ip, validate_mac, validate_sdn_id,
+        DhcpRange, SubnetOptions,
     };
+
+    /// A DNS controller id follows PVE's `pve-sdn-dns-id`, not the zone/vnet
+    /// format: every DNS controller route accepts what the administrator can
+    /// register (mixed case, longer than 8).
+    #[test]
+    fn a_dns_controller_id_is_not_held_to_the_zone_id_format() {
+        assert!(validate_dns_controller_id("PdnsLab").is_ok());
+        assert!(validate_dns_controller_id("alongcontrollerid").is_ok());
+        assert!(validate_sdn_id("PdnsLab").is_err());
+        assert!(validate_dns_controller_id("p").is_err());
+        assert!(validate_dns_controller_id("pdns-lab").is_err());
+        assert!(validate_dns_controller_id("1pdns").is_err());
+    }
 
     #[test]
     fn only_network_reloads_are_taken_from_a_task_list() {
