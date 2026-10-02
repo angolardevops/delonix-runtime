@@ -99,3 +99,9 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0068** — VM hotplug: a new `vm update` verb (like `container update`; `vm resize` stays cold)
+  grows vCPUs and memory and adds/removes disks and NICs on a running VM, within a ceiling
+  declared at create (`vcpusMax`/`memoryMax`; omitted = no headroom). The truth is read back from
+  the live VM, a change waiting on the guest is reported as pending, and every hot change reaches
+  the record. Spike measured on Cloud Hypervisor v53 and libvirt 10 (session). *Proposed*; written
+  in pt-AO on request.
