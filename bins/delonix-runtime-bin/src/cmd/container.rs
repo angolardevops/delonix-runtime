@@ -5819,9 +5819,17 @@ fn cpu_usage_usec(pid: i32) -> Option<u64> {
 /// «died, no pid» of the incarnation before, which is how a running process drops
 /// out of the record and survives `rm -f` (#377/#378 are the same loss by other
 /// writers). `update` re-reads under the lock and reconciles THAT.
-fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+///
+/// The slirp of a container found dead goes here too, for the reason
+/// `reconcile_with_diagnostics` gives: after this write the record has no pid,
+/// and the pid was what named the slirp.
+pub(crate) fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -7711,6 +7719,65 @@ restartPolicy: OnFailure
             rec.status,
             delonix_model::records::Status::Running
         ));
+    }
+
+    /// **A reconciliation that records a death releases the dead container's
+    /// slirp.** After the write the record has no pid, and the pid was what
+    /// named the slirp: `container stats` and the kind cluster listing recorded
+    /// the death and left it. A `sleep` under the name `slirp4netns`, with the
+    /// dead pid where the target goes, stands in for the slirp — it is found
+    /// the way the real one is, by its argv.
+    #[test]
+    fn a_recorded_death_releases_the_containers_own_slirp() {
+        use std::os::unix::process::CommandExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
+        let dead = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut ch| {
+                let id = ch.id() as i32;
+                ch.wait().map(|_| id)
+            })
+            .unwrap();
+        let mut slirp = std::process::Command::new("sleep")
+            .arg0("slirp4netns")
+            .args(["30", &dead.to_string()])
+            .spawn()
+            .expect("the stand-in slirp");
+        let mut c = delonix_compute::Container::new(
+            "abc123def4560001".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        c.pid = Some(dead);
+        c.pid_starttime = None;
+        c.ports = vec!["18000:80".into()];
+        store.save(&c).unwrap();
+        // The argv is the stand-in's own only after its `exec`.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(super::reconcile_and_persist(&store, &mut c));
+        let mut exited = false;
+        for _ in 0..30 {
+            if slirp.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = slirp.kill();
+        let _ = slirp.wait();
+        assert_eq!(
+            store.load(&c.id).unwrap().pid,
+            None,
+            "the death is recorded"
+        );
+        assert!(
+            exited,
+            "the record forgot pid {dead} and its slirp was left running"
+        );
     }
 
     #[test]

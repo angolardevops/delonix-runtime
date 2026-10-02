@@ -5796,8 +5796,18 @@ checklist para quem mexer aqui do que como lista de correcções:
   pelo pipe E pelo supervisor — morto o supervisor, o que está no pipe é tudo o que haverá.
   **Regra: quem lança um processo que sobrevive ao chamador passa-lhe os descritores pelo
   nome, e quem espera por EOF num pipe espera também pelo processo que o devia fechar.**
-  Gate: `scripts/e2e_slirp_lifecycle.sh` (quatro cenários, no `e2e.sh`) e os testes
-  `tests_detached_helper` / `supervise::tests`;
+  Gate: `scripts/e2e_slirp_lifecycle.sh` (cinco cenários, no `e2e.sh`) e os testes
+  `tests_detached_helper` / `supervise::tests`. **Fechado no mesmo dia o que tinha ficado de
+  fora**: o pin, o pin adoptado e o plano de controlo também eram lançados com os descritores
+  do chamador (só o stderr fora corrigido a 2026-08-15) — `leave_callers_descriptors`,
+  registado ANTES do `pre_exec` que entrega os dois descritores de sincronização ao pin,
+  porque correm pela ordem de registo; cenário `infra` (um fd 9 do chamador aparecia no
+  `netns pin` e no `netns control`). E o `container stats` e a listagem de clusters kind
+  gravavam a morte sem soltar o slirp — passaram os dois pelo `reconcile_and_persist`, que
+  agora o solta; teste `a_recorded_death_releases_the_containers_own_slirp` (um `sleep` com o
+  nome `slirp4netns` e o pid morto no lugar do alvo). Um cenário e2e para isto NÃO discrimina:
+  desde que o slirp deixou de herdar descritores, sai sozinho em menos de 1 s com o host calmo
+  (medido), e o cenário passava também no binário anterior;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
