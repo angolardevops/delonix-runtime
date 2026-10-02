@@ -640,9 +640,10 @@ fn adopt_ci_skip_reason(dir: &Path, lock: &str) -> Option<String> {
     None
 }
 
-const ADOPT_FILES: [&str; 9] = [
+const ADOPT_FILES: [&str; 10] = [
     "Delonixfile",
     "delonix-manifest.yaml",
+    "delonix-tunnel.yaml",
     ".dockerignore",
     ".github/workflows/ci.yml",
     ".gitlab-ci.yml",
@@ -822,6 +823,15 @@ fn render_planned(
                 ],
             )
         );
+        if has_tunnel(tname) {
+            println!(
+                "{}",
+                super::po::tf(
+                    "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)",
+                    &[("cd", &cd)],
+                )
+            );
+        }
     }
     Ok(cert)
 }
@@ -1026,12 +1036,31 @@ fn up_summary(
         ));
     }
     out.push(format!("   health:  http://localhost:{port}{health}"));
+    if has_tunnel(tname) {
+        out.push(format!(
+            "   {}",
+            super::po::t("internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")")
+        ));
+    }
     out.push(format!("   logs:    delonix container logs -f {name}"));
     out.push(format!(
         "   stop:    delonix stack destroy   {}",
         super::po::t("(tears down everything the stack owns)")
     ));
     out
+}
+
+/// Whether the template ships `delonix-tunnel.yaml`, the opt-in `kind: Gateway`
+/// that puts the project on the internet through an outbound tunnel.
+fn has_tunnel(tname: &str) -> bool {
+    TEMPLATES
+        .iter()
+        .find(|(n, _)| *n == tname)
+        .is_some_and(|(_, files)| {
+            files
+                .iter()
+                .any(|(path, _, _)| *path == "delonix-tunnel.yaml")
+        })
 }
 
 /// A secret the template's manifest references and that `--up` creates when
@@ -2383,6 +2412,46 @@ mod tests {
     /// no placeholder, every JSON and YAML file parses, and the version shows
     /// up in what was written. One test for all templates, so a new template
     /// (or a new accepted version) is covered the day it is added.
+    /// Every template ships `delonix-tunnel.yaml`: one `kind: Gateway` the
+    /// engine's loader accepts, opt-in (the main manifest has no Gateway, so
+    /// `stack apply` never opens it), aimed at the port that serves the site —
+    /// the HTTPS one on an edge template, whose plain-HTTP port redirects to a
+    /// port the public address does not have.
+    #[test]
+    fn every_template_ships_an_opt_in_tunnel() {
+        for tpl in template_names() {
+            let (_tmp, dir) = scratch();
+            render_template(tpl, &opts(dir.clone(), "my-svc", tpl, None), false)
+                .unwrap_or_else(|e| panic!("{tpl}: {e}"));
+            let docs = super::super::manifest::load(&dir.join("delonix-tunnel.yaml"))
+                .unwrap_or_else(|e| panic!("{tpl}: delonix-tunnel.yaml: {e}"));
+            assert_eq!(docs.len(), 1, "{tpl}");
+            let doc = &docs[0];
+            assert_eq!(doc.kind, super::super::kinds::GATEWAY, "{tpl}");
+            assert_eq!(doc.metadata.name, "my-svc-tunnel", "{tpl}");
+            let spec = &doc.spec;
+            assert_eq!(spec["provider"].as_str(), Some("cloudflare"), "{tpl}");
+            let edge = meta_kv(tpl, "tls");
+            let want: u64 = edge.unwrap_or(template_meta(tpl).port).parse().unwrap();
+            assert_eq!(spec["localPort"].as_u64(), Some(want), "{tpl}");
+            assert_eq!(
+                spec["insecureSkipTlsVerify"].as_bool().unwrap_or(false),
+                edge.is_some(),
+                "{tpl}"
+            );
+            let main = std::fs::read_to_string(dir.join("delonix-manifest.yaml")).unwrap();
+            assert!(
+                !main.contains("kind: Gateway"),
+                "{tpl}: the tunnel must stay opt-in"
+            );
+            let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
+            assert!(
+                readme.contains("## On the internet without a public IP"),
+                "{tpl}: README has no tunnel section"
+            );
+        }
+    }
+
     #[test]
     fn every_template_renders_valid_files_for_each_declared_version() {
         fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -2500,6 +2569,99 @@ mod tests {
     /// The three edge templates come up with HTTPS: every token is replaced
     /// (the TLS port included), the manifest publishes both ports and mounts
     /// `./tls`, and the key that was generated is private.
+    /// Every edge template offers Let's Encrypt by DNS-01 (the only challenge
+    /// that works when port 80 of the public address does not reach the host),
+    /// and HAProxy, which has no webroot, says so instead of issuing a local
+    /// certificate named after the arguments.
+    #[test]
+    fn the_edge_templates_offer_lets_encrypt_by_dns() {
+        for tpl in ["nginx", "httpd", "haproxy"] {
+            let (_tmp, dir) = scratch();
+            let plan = Plan {
+                port: "18080".into(),
+                tls_port: Some("18443".into()),
+                hosts: vec!["localhost".into()],
+            };
+            render_planned(tpl, &edge_opts(&dir, tpl), false, &plan).unwrap();
+            let run = |args: &[&str]| {
+                std::process::Command::new("sh")
+                    .arg("scripts/tls.sh")
+                    .args(args)
+                    .current_dir(&dir)
+                    .output()
+                    .unwrap()
+            };
+            let syntax = std::process::Command::new("sh")
+                .args(["-n", "scripts/tls.sh"])
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(syntax.status.success(), "{tpl}: {syntax:?}");
+            // One argument short: the usage line, before certbot is looked for.
+            let usage = run(&["letsencrypt-dns", "example.org"]);
+            assert_eq!(usage.status.code(), Some(2), "{tpl}: {usage:?}");
+            assert!(
+                String::from_utf8_lossy(&usage.stderr).contains("letsencrypt-dns <domain> <email>"),
+                "{tpl}: {usage:?}"
+            );
+            // A certificate this project already holds from ANOTHER CA (staging
+            // first, then production) is replaced: certbot alone answers "not
+            // yet due for renewal" and keeps it. A stand-in certbot records
+            // the options it was given.
+            let bin = dir.join("fakebin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let fake = bin.join("certbot");
+            std::fs::write(&fake, "#!/bin/sh\necho \"$@\" > certbot.args\nexit 1\n").unwrap();
+            std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            let asked = |staging: bool| {
+                let mut cmd = std::process::Command::new("sh");
+                cmd.args(["scripts/tls.sh", "letsencrypt-dns", "example.org", "-"])
+                    .current_dir(&dir)
+                    .env("PATH", &path)
+                    .env("DNS_AUTH_HOOK", "true")
+                    .env_remove("ACME_SERVER")
+                    .env_remove("LETSENCRYPT_STAGING");
+                if staging {
+                    cmd.env("LETSENCRYPT_STAGING", "1");
+                }
+                cmd.output().unwrap();
+                std::fs::read_to_string(dir.join("certbot.args")).unwrap()
+            };
+            let first = asked(false);
+            assert!(
+                first.contains("--server https://acme-v02.api.letsencrypt.org/directory"),
+                "{tpl}: {first}"
+            );
+            assert!(!first.contains("--force-renewal"), "{tpl}: {first}");
+            std::fs::create_dir_all(dir.join("letsencrypt/renewal")).unwrap();
+            std::fs::write(
+                dir.join("letsencrypt/renewal/example.org.conf"),
+                "[renewalparams]\nserver = https://acme-staging-v02.api.letsencrypt.org/directory\n",
+            )
+            .unwrap();
+            let same_ca = asked(true);
+            assert!(!same_ca.contains("--force-renewal"), "{tpl}: {same_ca}");
+            let other_ca = asked(false);
+            assert!(other_ca.contains("--force-renewal"), "{tpl}: {other_ca}");
+            if tpl == "haproxy" {
+                let before = std::fs::read(dir.join("tls/tls.crt")).unwrap();
+                let http01 = run(&["letsencrypt", "example.org", "-"]);
+                assert_eq!(http01.status.code(), Some(2), "{http01:?}");
+                assert!(
+                    String::from_utf8_lossy(&http01.stderr).contains("letsencrypt-dns"),
+                    "{http01:?}"
+                );
+                assert_eq!(std::fs::read(dir.join("tls/tls.crt")).unwrap(), before);
+            }
+        }
+    }
+
     #[test]
     fn the_edge_templates_render_with_tls_and_no_token_left() {
         use std::os::unix::fs::PermissionsExt;
