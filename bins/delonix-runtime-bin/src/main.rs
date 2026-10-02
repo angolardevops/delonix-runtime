@@ -109,6 +109,8 @@ enum Cmd {
         /// Overwrite files that already exist.
         #[arg(long)]
         force: bool,
+        #[command(flatten)]
+        edge: cmd::scaffold::EdgeArgs,
     },
     // A subcommand as well as a flag because `<tool> version` is what people type first —
     // git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
@@ -676,7 +678,8 @@ fn run() -> Result<()> {
             template,
             template_version,
             force,
-        } => cmd::init::run(dir, name, template, template_version, force),
+            edge,
+        } => cmd::init::run(dir, name, template, template_version, force, edge),
         Cmd::Version => {
             // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
             // and the binary clap names is `delonix`. Caught by diffing the two outputs —

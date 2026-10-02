@@ -284,6 +284,7 @@ pub fn run(
     template: Option<String>,
     template_version: Option<String>,
     force: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
     let dir = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
     let d = &dir;
@@ -314,6 +315,7 @@ pub fn run(
             template,
             template_version,
             false,
+            edge.clone(),
         );
     }
 
@@ -379,6 +381,7 @@ pub fn run(
         chosen,
         template_version,
         false,
+        edge,
     )
 }
 

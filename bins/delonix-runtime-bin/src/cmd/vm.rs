@@ -4446,6 +4446,7 @@ pub(crate) fn init_for(
             template,
             template_version,
             up,
+            edge: Default::default(),
         },
     )
 }

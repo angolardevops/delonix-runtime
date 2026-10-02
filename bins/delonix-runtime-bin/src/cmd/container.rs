@@ -1033,6 +1033,8 @@ pub enum ContainerCmd {
         /// After generating, build the image, start it, and wait until it's healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Run a container from an image (pulls it if missing).
     Run {
@@ -1610,6 +1612,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return cmd_init(
@@ -1621,6 +1624,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     let (images, store) = open_stores()?;
@@ -6068,6 +6072,7 @@ fn cmd_init(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
     let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
@@ -6080,6 +6085,7 @@ fn cmd_init(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }

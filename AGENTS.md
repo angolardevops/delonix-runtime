@@ -3030,9 +3030,14 @@ em `./tls` e carregado com o MESMO pid. Contra o staging REAL, com `le-test.ngol
 `Timeout during connect`: a porta 80 pública não chega a esta máquina (router ou operador).
 O script ganhou `LETSENCRYPT_STAGING=1`, `ACME_SERVER=<url>` e o email `-`. O template
 `httpd` usa o mesmo script e só tem o caminho ACME provado pelo smoke.
-**Não validado**: uma emissão pela CA real do Let's Encrypt, e as
-flags equivalentes às perguntas (`--hostname`, `--port`) — não existem; ficam para depois
-do #634, que reescreve os quatro pontos de entrada do `init`.
+**As flags existem desde 2026-10-02**: `--port`, `--tls-port` e `--hostname` (repetível), num
+só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template — `delonix init`,
+`stack init` e `container init` — para não crescerem flags diferentes em cada um. Uma flag é
+uma resposta: substitui a pergunta do terminal e não é adivinhada. `--tls-port`/`--hostname`
+num template sem TLS, as duas portas iguais, um nome que não é host, ou qualquer das três sem
+template são RECUSADOS antes de escrever seja o que for.
+**Não validado**: uma emissão pela CA real do Let's Encrypt (a porta 80 pública não chega a
+este host).
 
 **Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
 DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte

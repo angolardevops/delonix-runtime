@@ -42,6 +42,29 @@ pub(crate) enum Target {
     Stack,
 }
 
+/// What the person generating may settle on the command line instead of at
+/// the prompt: the ports the project publishes and the names its certificate
+/// covers. One struct, flattened into every `init` that takes a template, so
+/// the three entry points cannot grow different flags.
+#[derive(clap::Args, Clone, Debug, Default)]
+pub(crate) struct EdgeArgs {
+    /// Host and container port of the service, instead of the template's own.
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// HTTPS port, on a template that serves TLS (nginx, httpd, haproxy).
+    #[arg(long = "tls-port")]
+    pub tls_port: Option<u16>,
+    /// Extra host name or address for the generated TLS certificate (repeatable; localhost is always included).
+    #[arg(long)]
+    pub hostname: Vec<String>,
+}
+
+impl EdgeArgs {
+    fn is_empty(&self) -> bool {
+        self.port.is_none() && self.tls_port.is_none() && self.hostname.is_empty()
+    }
+}
+
 pub(crate) struct InitOpts {
     pub dir: PathBuf,
     pub name: String,
@@ -65,6 +88,8 @@ pub(crate) struct InitOpts {
     /// `version=` in its `template.meta` — a version flag that is silently
     /// ignored would be worse than one that does not exist yet.
     pub template_version: Option<String>,
+    /// `--port`/`--tls-port`/`--hostname`.
+    pub edge: EdgeArgs,
 }
 
 /// Names of the available templates, for `--help`/errors.
@@ -419,35 +444,71 @@ fn valid_cert_host(h: &str) -> bool {
 
 /// Settles what a template leaves to the person generating the project.
 /// Nothing is asked off a terminal: the defaults are the answer there.
-fn plan_for(tname: &str, interactive: bool) -> Plan {
+fn plan_for(tname: &str, interactive: bool, edge: &EdgeArgs) -> Result<Plan> {
     let mut plan = Plan::defaults(tname);
-    plan.port = settle_port("HTTP", &plan.port, &[], interactive);
-    if let Some(tls) = plan.tls_port.clone() {
-        let taken: Vec<u16> = plan.port.parse().into_iter().collect();
-        plan.tls_port = Some(settle_port("HTTPS", &tls, &taken, interactive));
-        if interactive {
-            let answer = prompt_line(
-                super::po::t(
-                    "Extra host names for the TLS certificate, space-separated (localhost is always included)",
-                ),
-                "none",
+    // A flag is an answer: what it settles is neither asked nor second-guessed.
+    plan.port = match edge.port {
+        Some(p) => p.to_string(),
+        None => settle_port("HTTP", &plan.port, &[], interactive),
+    };
+    let Some(tls) = plan.tls_port.clone() else {
+        if edge.tls_port.is_some() || !edge.hostname.is_empty() {
+            return Err(Error::Invalid(super::po::tf(
+                "template '{tname}' does not serve TLS — drop --tls-port/--hostname",
+                &[("tname", tname)],
+            )));
+        }
+        return Ok(plan);
+    };
+    let taken: Vec<u16> = plan.port.parse().into_iter().collect();
+    let tls = match edge.tls_port {
+        Some(p) => p.to_string(),
+        None => settle_port("HTTPS", &tls, &taken, interactive),
+    };
+    if tls == plan.port {
+        return Err(Error::Invalid(super::po::tf(
+            "the HTTP and the HTTPS port are both {port} — they must differ",
+            &[("port", &tls)],
+        )));
+    }
+    plan.tls_port = Some(tls);
+    let mut add = |h: &str, strict: bool| -> Result<()> {
+        if !valid_cert_host(h) {
+            let msg = super::po::tf(
+                "'{host}' is not a host name or an address — left out of the certificate",
+                &[("host", h)],
             );
-            for h in answer
-                .split([' ', ','])
-                .filter(|h| !h.is_empty() && *h != "none")
-            {
-                if !valid_cert_host(h) {
-                    super::output::warn(&super::po::tf(
-                        "'{host}' is not a host name or an address — left out of the certificate",
-                        &[("host", h)],
-                    ));
-                } else if !plan.hosts.iter().any(|x| x == h) {
-                    plan.hosts.push(h.to_string());
-                }
+            if strict {
+                return Err(Error::Invalid(super::po::tf(
+                    "--hostname {host}: not a host name or an address",
+                    &[("host", h)],
+                )));
             }
+            super::output::warn(&msg);
+        } else if !plan.hosts.iter().any(|x| x == h) {
+            plan.hosts.push(h.to_string());
+        }
+        Ok(())
+    };
+    if !edge.hostname.is_empty() {
+        for h in &edge.hostname {
+            add(h, true)?;
+        }
+    } else if interactive {
+        let answer = prompt_line(
+            super::po::t(
+                "Extra host names for the TLS certificate, space-separated (localhost is always included)",
+            ),
+            "none",
+        );
+        for h in answer
+            .split([' ', ','])
+            .filter(|h| !h.is_empty() && *h != "none")
+        {
+            add(h, false)?;
         }
     }
-    plan
+    Ok(plan)
 }
 
 /// Where a project's certificate came from.
@@ -1215,6 +1276,14 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     // template to apply it to (no `-t`, and none picked from the interactive
     // menu either) would otherwise be silently swallowed right here, never
     // reaching `resolve_version` at all.
+    if chosen.is_none() && !o.edge.is_empty() {
+        return Err(Error::Invalid(
+            super::po::t(
+                "--port/--tls-port/--hostname need a template to apply them to — pass -t/--template",
+            )
+            .into(),
+        ));
+    }
     if chosen.is_none() && o.template_version.is_some() {
         return Err(Error::Invalid(
             super::po::t(
@@ -1240,7 +1309,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         // terminal, before anything is written: a port that is taken, the
         // names the certificate must cover, whether to start it now.
         let interactive = stdin_is_tty();
-        let plan = plan_for(tname, interactive);
+        let plan = plan_for(tname, interactive, &o.edge)?;
         let do_up = o.up || (interactive && prompt_yes("Build and start it now?", true));
         let cert = render_planned(t, o, !do_up, &plan)?;
         if do_up {
@@ -1781,6 +1850,7 @@ mod tests {
             template: Some("node".into()),
             template_version: None,
             up: false,
+            edge: Default::default(),
         };
         render_template("node", &o, false).unwrap();
         assert!(dir.join("Delonixfile").exists());
@@ -1813,6 +1883,7 @@ mod tests {
             template: Some("node".into()),
             template_version: None,
             up: false,
+            edge: Default::default(),
         };
         render_template("node", &o, false).unwrap();
         assert!(dir.join("Delonixfile").exists());
@@ -1847,6 +1918,7 @@ mod tests {
             template: Some("node".into()),
             template_version: None,
             up: false,
+            edge: Default::default(),
         };
         render_template("node", &o, false).unwrap();
         std::fs::remove_dir_all(dir.join("src")).unwrap();
@@ -1900,6 +1972,7 @@ mod tests {
             template: None,
             template_version: Some("1.2.3".into()),
             up: false,
+            edge: Default::default(),
         };
         let err = init(Target::Container, &o).unwrap_err();
         assert!(
@@ -1924,6 +1997,7 @@ mod tests {
             template: Some("odoo".into()),
             template_version: Some("18.0".into()),
             up: false,
+            edge: Default::default(),
         };
         render_template("odoo", &o, false).unwrap();
         let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
@@ -1952,6 +2026,7 @@ mod tests {
             template: Some("odoo".into()),
             template_version: None,
             up: false,
+            edge: Default::default(),
         };
         render_template("odoo", &o, false).unwrap();
         let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
@@ -2050,6 +2125,7 @@ mod tests {
                 template: Some(tpl.into()),
                 template_version: Some("9.9".into()),
                 up: false,
+                edge: Default::default(),
             };
             render_template(tpl, &o, false).unwrap();
             let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
@@ -2073,6 +2149,7 @@ mod tests {
             template: Some(template.into()),
             template_version: v.map(String::from),
             up: false,
+            edge: Default::default(),
         }
     }
 
@@ -2302,6 +2379,7 @@ mod tests {
             template: Some(template.into()),
             template_version: None,
             up: false,
+            edge: Default::default(),
         }
     }
 
@@ -2471,5 +2549,51 @@ mod tests {
     fn the_health_wait_comes_from_the_template() {
         assert_eq!(wait_secs("odoo"), 300);
         assert_eq!(wait_secs("nginx"), 120);
+    }
+
+    /// A flag is an answer: it replaces the template's port without a prompt,
+    /// and what it cannot mean is refused instead of being dropped.
+    #[test]
+    fn the_port_and_hostname_flags_settle_the_plan() {
+        let edge = EdgeArgs {
+            port: Some(18080),
+            tls_port: Some(18443),
+            hostname: vec!["shop.test".into()],
+        };
+        let plan = plan_for("nginx", false, &edge).unwrap();
+        assert_eq!(plan.port, "18080");
+        assert_eq!(plan.tls_port.as_deref(), Some("18443"));
+        assert!(plan.hosts.iter().any(|h| h == "shop.test"));
+        assert!(plan.hosts.iter().any(|h| h == "localhost"));
+
+        // A template with no TLS takes --port and refuses the other two.
+        let only_port = EdgeArgs {
+            port: Some(18000),
+            ..Default::default()
+        };
+        assert_eq!(plan_for("go", false, &only_port).unwrap().port, "18000");
+        let tls_on_go = EdgeArgs {
+            tls_port: Some(18443),
+            ..Default::default()
+        };
+        assert!(plan_for("go", false, &tls_on_go).is_err());
+        let host_on_go = EdgeArgs {
+            hostname: vec!["a.test".into()],
+            ..Default::default()
+        };
+        assert!(plan_for("go", false, &host_on_go).is_err());
+
+        // The same port twice, and a name that is not one.
+        let same = EdgeArgs {
+            port: Some(18443),
+            tls_port: Some(18443),
+            ..Default::default()
+        };
+        assert!(plan_for("nginx", false, &same).is_err());
+        let bad = EdgeArgs {
+            hostname: vec!["a b;c".into()],
+            ..Default::default()
+        };
+        assert!(plan_for("nginx", false, &bad).is_err());
     }
 }

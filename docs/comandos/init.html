@@ -205,6 +205,15 @@ Options:
       --force
           Overwrite files that already exist
 
+      --port &lt;PORT&gt;
+          Host and container port of the service, instead of the template&#x27;s own
+
+      --tls-port &lt;TLS_PORT&gt;
+          HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)
+
+      --hostname &lt;HOSTNAME&gt;
+          Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -235,6 +244,10 @@ EXAMPLES:
 
   # ...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`
   delonix init -t laravel -v 12.5 myapp
+
+  # an HTTPS edge on ports of your choice, with a certificate that also covers
+  # your own name
+  delonix init -t nginx --port 9080 --tls-port 9443 --hostname shop.test edge
 
   # ...or a Go toolchain version — this template has no framework to pin
   delonix init -t go -v 1.27 myapp

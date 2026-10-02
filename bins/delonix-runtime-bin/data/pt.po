@@ -14984,3 +14984,29 @@ msgstr "(desmonta tudo o que a stack possui)"
 
 msgid "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project"
 msgstr "secret:  {secret} foi criado com uma chave gerada — vive no cofre de segredos (`delonix secret inspect {secret}`), não no projecto"
+
+# ---- init: --port / --tls-port / --hostname ----
+
+msgid "Host and container port of the service, instead of the template's own."
+msgstr "Porta do serviço no host e no container, em vez da do template."
+
+msgid "HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)."
+msgstr "Porta HTTPS, num template que serve TLS (nginx, httpd, haproxy)."
+
+msgid "Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)."
+msgstr "Nome de host ou endereço adicional para o certificado TLS gerado (repetível; localhost entra sempre)."
+
+msgid "template '{tname}' does not serve TLS — drop --tls-port/--hostname"
+msgstr "o template '{tname}' não serve TLS — tira --tls-port/--hostname"
+
+msgid "the HTTP and the HTTPS port are both {port} — they must differ"
+msgstr "a porta HTTP e a HTTPS são ambas {port} — têm de ser diferentes"
+
+msgid "--hostname {host}: not a host name or an address"
+msgstr "--hostname {host}: não é um nome de host nem um endereço"
+
+msgid "--port/--tls-port/--hostname need a template to apply them to — pass -t/--template"
+msgstr "--port/--tls-port/--hostname precisam de um template a que se apliquem — passa -t/--template"
+
+msgid "an HTTPS edge on ports of your choice, with a certificate that also covers your own name"
+msgstr "um edge HTTPS nas portas que escolheres, com um certificado que também cobre o teu próprio nome"

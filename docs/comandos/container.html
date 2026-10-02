@@ -842,6 +842,15 @@ Options:
       --up
           After generating, build the image, start it, and wait until it&#x27;s healthy
 
+      --port &lt;PORT&gt;
+          Host and container port of the service, instead of the template&#x27;s own
+
+      --tls-port &lt;TLS_PORT&gt;
+          HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)
+
+      --hostname &lt;HOSTNAME&gt;
+          Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

@@ -101,6 +101,8 @@ pub enum StackCmd {
         /// After generating, builds the image, starts it and waits for it to become healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Applies all the manifest Kinds (Network → Volume → Image → Vm → Container).
     Apply {
@@ -307,6 +309,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return init_for(
@@ -318,6 +321,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     match action {
@@ -3254,6 +3258,7 @@ pub(crate) fn init_for(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
     let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
@@ -3266,6 +3271,7 @@ pub(crate) fn init_for(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }
