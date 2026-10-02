@@ -5774,6 +5774,30 @@ checklist para quem mexer aqui do que como lista de correcções:
   correcção feita e o chamador ao lado deixado para trás. **Nota de método**: um `timeout` na
   bateria teria matado a corrida sem explicar nada; o que deu a resposta foi seguir o pipe até
   ao dono (`readlink /proc/*/fd/*`);
+- **o alvo de um `slirp4netns` ter morrido não é o slirp ter saído**, e é a **terceira
+  ocorrência** de «detached não é sem os fds do chamador». O slirp de um container (`-p` sem
+  rede própria) só sai quando o kernel desmonta a netns: medido 13 s e 17 s num host calmo e
+  **mais de uma hora** com o disco saturado (2026-10-01, dois deles à escuta na porta
+  publicada). E era lançado por um `Command::spawn` no meio do arranque, por isso herdava os
+  `pipe()` simples que o `spawn` do container tem abertos — `readlink /proc/<slirp>/fd/*`: as
+  duas pontas do pipe de logs e a ponta de escrita do handshake do supervisor. Três
+  consequências, todas medidas: o shim de logs nunca via EOF e ficava para trás depois do
+  `rm -f`; um container que saía sozinho (ou muito depois de um `stop` que desistira com
+  DX-8101) deixava a porta ocupada, porque o registo perde o pid com a saída e o pid era a
+  única coisa que nomeava o slirp; e o `container start` seguinte **pendurava para sempre** —
+  o `add_hostfwd` do slirp novo era recusado, o supervisor dizia-o e saía, e o pai continuava
+  a ler o handshake à espera de um EOF que só o slirp novo (deixado vivo por um
+  `mem::forget`) podia dar. Corrigido nas quatro pontas: `spawn_holding_only` marca tudo
+  close-on-exec menos o `--ready-fd` (marca, não fecha — o `Command` reporta o `exec`
+  falhado por um pipe seu); o supervisor solta o slirp no instante em que colhe o processo
+  (`Supervision::on_exit`), o `reconcile_with_diagnostics` quando dá pela morte, e o
+  teardown sem pid varre os slirps NOSSOS de alvo morto; um `add_hostfwd` recusado ceifa os
+  órfãos e tenta outra vez, e se falhar mata o slirp que lançou; e o `read_handshake` espera
+  pelo pipe E pelo supervisor — morto o supervisor, o que está no pipe é tudo o que haverá.
+  **Regra: quem lança um processo que sobrevive ao chamador passa-lhe os descritores pelo
+  nome, e quem espera por EOF num pipe espera também pelo processo que o devia fechar.**
+  Gate: `scripts/e2e_slirp_lifecycle.sh` (quatro cenários, no `e2e.sh`) e os testes
+  `tests_detached_helper` / `supervise::tests`;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a

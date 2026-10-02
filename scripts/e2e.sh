@@ -2757,6 +2757,27 @@ check "stop: PÁRA mesmo um container --restart always (o supervisor não o ress
 "
 "$BIN" container rm -f "$TSTOP" "$TWAIT" "$THC" "$TZ" "$TALW" >/dev/null 2>&1
 
+# --- o slirp de um container acaba com ele, e não segura o arranque ---------
+#
+# Um `slirp4netns` não sai quando o processo que serve morre, e era lançado com
+# todos os descritores de quem o lançava. Os quatro cenários — e o que cada um
+# media antes da correcção — estão no cabeçalho do `e2e_slirp_lifecycle.sh`,
+# que corre sozinho contra qualquer binário. 77 = o host não deixa medir.
+declare -A SLIRP_CHECKS=(
+  [fds]="slirp: não herda os pipes do arranque, nem o comando do container"
+  [exit]="slirp: um container que sai sozinho leva o slirp, a porta e o shim de logs"
+  [start]="slirp: container start não pendura com o slirp antigo na porta (supervisor morto)"
+  [listed]="slirp: rm de um container já saído e listado ceifa o slirp dele"
+)
+for _sc in fds exit start listed; do
+  _out=$(bash "$(dirname "$0")/e2e_slirp_lifecycle.sh" "$_sc" "$BIN" "$IMG" "sl$PFX" 2>&1); _rc=$?
+  if [[ $_rc -eq 77 ]]; then
+    skip "${SLIRP_CHECKS[$_sc]}" "$_out"
+  else
+    check "${SLIRP_CHECKS[$_sc]}" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+  fi
+done
+
 ########################################
 section "schema gerado + explain + init"
 ########################################

@@ -2460,6 +2460,7 @@ pub(crate) fn with_host_workload<R>(
         delonix_sdn::slirp_attach(pid, ports)
             .map_err(|e| delonix_linux::Error::Engine(delonix_model::Error::from(e)))
     };
+    let detach_slirp = |c: &Container, pid: i32| delonix_sdn::run_network::reap_own_slirp(c, pid);
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
             spawn_health_monitor(c.id.clone(), cfg);
@@ -2473,6 +2474,7 @@ pub(crate) fn with_host_workload<R>(
         state_root: &state_root,
         addresses: &addresses,
         attach_slirp: &attach_slirp,
+        detach_slirp: &detach_slirp,
         on_first_start: &on_first_start,
         silent_death: super::po::t(
             "the container did not start, and the supervisor died before saying why",
@@ -3124,8 +3126,16 @@ pub(crate) fn workload_describe(name: &str) -> Result<()> {
 /// wasted work, not wrong — the guard below only fires once per crash regardless of
 /// which caller happens to be first.
 fn reconcile_with_diagnostics(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    // The process is gone and the record is about to forget its pid — the one
+    // thing that names the slirp that served it. A container with no supervisor
+    // has nobody else to release it: the slirp does not exit with its target,
+    // and it went on holding the host port, so the next `start` was refused.
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -4273,8 +4283,18 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
     if let Err(e) = runtime::stop(store, &mut c, time) {
         if e.is_not_running() {
+            // Not running, but what it published may still be held: a container
+            // that exited on its own left its slirp behind (see `stop_ports`).
+            stop_ports(&c, None);
             println!("{}", c.name);
             return Ok(());
+        }
+        // A stop that gave up on a process still exiting has ALREADY signalled
+        // it: nothing is coming back through its ports. Release them now — the
+        // record keeps the process (DX-8101), and by the time it exits there
+        // may be no command left to do this.
+        if matches!(e, runtime::Error::StillExiting(_)) {
+            stop_ports(&c, pid);
         }
         return Err(e.into());
     }
