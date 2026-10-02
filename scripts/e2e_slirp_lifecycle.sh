@@ -28,6 +28,18 @@
 #             herdara e ficara para trás — podia dar.
 #   listed  — sem supervisor, o primeiro `container ps` regista a morte e apaga
 #             o pid; o `rm` a seguir já não tinha por onde chegar ao slirp.
+#   stats   — o `container stats` também regista a morte e apaga o pid, e não
+#   kind      soltava o slirp; a listagem de clusters (`cluster ls`) idem.
+#
+# Como se prova que foi o COMANDO a soltar o slirp (`exit`, `stats`, `kind`):
+# «o slirp desapareceu» não discrimina — ele acaba por sair sozinho, em menos
+# de 1 s ou em 17 s conforme o binário e o host (medido com a netns segura por
+# um descritor: saiu na mesma). Por isso o slirp é PARADO (SIGSTOP) antes de o
+# container sair: parado não sai sozinho, e um SIGTERM que lhe mandem fica
+# pendente e lê-se em `/proc/<slirp>/status`. Pendente = alguém o soltou;
+# depois o SIGCONT deixa-o morrer. (Outro `delonix` neste host a varrer órfãos
+# no mesmo segundo também o deixaria pendente; só pode fazer passar, nunca
+# chumbar.)
 #   infra   — o pin e o plano de controlo da rede vivem enquanto a infra viver,
 #             e eram lançados com os descritores de quem calhasse arrancá-la
 #             (aqui um fd 9 aberto pelo chamador). Corre em roots SEUS: subir e
@@ -38,7 +50,11 @@ name="$PFX-$scenario"
 
 die() { echo "$*"; cleanup; exit 1; }
 cannot() { echo "$*"; cleanup; exit 77; }
-cleanup() { timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1; }
+cleanup() {
+  # Um slirp que o cenário parou não fica parado para trás.
+  [[ -n "${slirp:-}" ]] && { kill -CONT "$slirp"; kill "$slirp"; } 2>/dev/null
+  timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
+}
 
 free_port() {
   python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'
@@ -70,6 +86,27 @@ wait_for() {
   "$@"
 }
 gone() { [[ ! -e /proc/$1 ]]; }
+# Verdadeiro se o processo $1 tem um SIGTERM (bit 15) por entregar.
+term_pending() {
+  local a b
+  a=$(awk '/^SigPnd:/{print $2}' "/proc/$1/status" 2>/dev/null) || return 1
+  b=$(awk '/^ShdPnd:/{print $2}' "/proc/$1/status" 2>/dev/null) || return 1
+  [[ -n "$a" && -n "$b" ]] && (( (0x$a | 0x$b) & 0x4000 ))
+}
+# O container sai sozinho com o slirp parado: ninguém o soltou ainda.
+exit_with_slirp_stopped() {
+  kill -STOP "$slirp" || die "não consegui parar o slirp4netns $slirp"
+  timeout 60 "$BIN" container exec "$name" touch /go >/dev/null 2>&1 || die "exec touch /go falhou"
+  wait_for 120 gone "$pid" || cannot "o container ainda está a sair ao fim de 120s (disco saturado?)"
+}
+# O slirp parado recebeu o SIGTERM de quem o soltou; acordado, morre.
+released() { # released <segundos> <quem>
+  wait_for "$1" term_pending "$slirp" ||
+    die "$2 e ninguém soltou o slirp4netns $slirp (nenhum SIGTERM pendente)"
+  kill -CONT "$slirp" 2>/dev/null
+  wait_for 5 gone "$slirp" || die "o slirp4netns $slirp recebeu o SIGTERM e não saiu"
+  wait_for 5 not_listening "$port" || die "a porta $port continua à escuta"
+}
 not_listening() { ! listening "$1"; }
 no_shims() { [[ -z "$(shims_of "$1")" ]]; }
 
@@ -116,18 +153,34 @@ fds)
   [[ -z "$extra" ]] || die "o comando do container herdou descritores do arranque: $extra($(ls -l "/proc/$pid/fd" | awk '$9 > 2 {print $9 $10 $11}' | tr '\n' ' '))"
   ;;
 exit)
-  # `on-failure` e uma saída com 0: há supervisor, e ele não reinicia.
+  # `on-failure` e uma saída com 0: há supervisor, e ele não reinicia. Quem
+  # tem de soltar o slirp é ele, no instante em que colhe o processo.
   run --restart on-failure
   listening "$port" || die "a porta $port não ficou publicada"
-  timeout 60 "$BIN" container exec "$name" touch /go >/dev/null 2>&1 || die "exec touch /go falhou"
-  wait_for 120 gone "$pid" || cannot "o container ainda está a sair ao fim de 120s (disco saturado?)"
-  # 5s, e não mais: o slirp acaba por dar pela netns desaparecida, mas quando
-  # o kernel a desmontar — medido 13 s, 17 s e «nunca» (uma hora) no binário
-  # anterior. Quem o tem de soltar é o supervisor, no instante em que colhe o
-  # processo.
-  wait_for 5 gone "$slirp" || die "o container saiu sozinho e o slirp4netns $slirp ficou vivo"
-  wait_for 5 not_listening "$port" || die "a porta $port continua à escuta depois de o container sair"
+  exit_with_slirp_stopped
+  released 5 "o container saiu sozinho"
   wait_for 15 no_shims "$id" || die "o shim de logs ficou vivo depois de o container sair: $(shims_of "$id" | tr '\n' ' ')"
+  ;;
+stats|kind)
+  # Um `run -d` tem SEMPRE supervisor, e é ele que regista a saída e solta o
+  # slirp (cenário `exit`). O caminho destes comandos é o de quem ficou sem
+  # ele: morto o supervisor, o registo continua a dizer «a correr» com um pid
+  # que já não existe, e é o comando que dá pela morte.
+  if [[ $scenario == kind ]]; then run --label "io.x-k8s.kind.cluster=$PFX"; else run; fi
+  sup=$(awk '{print $4}' "/proc/$pid/stat")
+  kill -9 "$sup" 2>/dev/null
+  exit_with_slirp_stopped
+  sleep 1
+  term_pending "$slirp" && cannot "o slirp já tinha um SIGTERM antes do comando — outro delonix varreu-o"
+  if [[ $scenario == kind ]]; then
+    timeout 60 "$BIN" cluster ls >/dev/null 2>&1
+  else
+    timeout 60 "$BIN" container stats "$name" >/dev/null 2>&1
+  fi
+  # Antes de qualquer `inspect`: esse também reconcilia, e soltaria o slirp
+  # por conta própria.
+  released 2 "o comando correu"
+  [[ -z "$(field "$name" pid)" ]] || die "o comando não registou a saída do container"
   ;;
 start)
   run --restart always
@@ -161,7 +214,7 @@ listed)
   wait_for 5 not_listening "$port" || die "a porta $port continua à escuta depois do rm"
   ;;
 *)
-  echo "cenário desconhecido: $scenario (fds|exit|start|listed|infra)"; exit 2 ;;
+  echo "cenário desconhecido: $scenario (fds|exit|start|listed|stats|kind|infra)"; exit 2 ;;
 esac
 cleanup
 exit 0
