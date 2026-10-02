@@ -1,0 +1,26 @@
+# FreePBX 17 + Asterisk 22 (LTS) on Debian 12 — built by the repository's appliance builder.
+#
+#   delonix vm build -f images/freepbx/vm.yaml
+#
+# This image is not described as edits to a cloud image: the vendor's installer has
+# to RUN. So the recipe names a BUILDER, not a script path — `builder: X` runs
+# scripts/appliances/build-X.sh from this repository, with an isolated OUT_DIR,
+# and registers the disk it leaves there. Nothing outside that directory can be
+# reached from this file.
+version: 1
+
+images:
+  freepbx:
+    tag: "freepbx-17-asterisk${ASTERISK_MAJOR:-22}-r${IMAGE_REV:-1}"
+    distro: debian
+    release: "12"
+    vcpus: 2
+    memory: 4G
+    appliance:
+      builder: freepbx
+      env:
+        ASTERISK_MAJOR: "${ASTERISK_MAJOR:-22}"
+        IMAGE_REV: "${IMAGE_REV:-1}"
+      # false: a true appliance, no cloud-init. true: a cloud image with software installed.
+      # true here: the NoCloud seed is how a platform hands the first boot its admin password.
+      cloud_init: true
