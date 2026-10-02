@@ -6187,6 +6187,13 @@ fn spawn(
         }
         _ => None,
     };
+    // The READ end is the shim's alone, and the shim is a `fork` that never
+    // execs. Close-on-exec keeps it out of everything that does exec while this
+    // start holds it — the container's own command had it as a stray fd 3.
+    if let Some((r, _)) = log_pipe {
+        // SAFETY: our own descriptor, just created.
+        unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
     let log_fd = log_pipe.map(|(_, w)| w); // the container writes to the write end
                                            // SECOND pipe, for stderr, and ONLY in CRI mode. The CRI log line carries a
                                            // stream tag (`<ts> stdout|stderr F <line>`) and the kubelet — and
@@ -6209,6 +6216,10 @@ fn spawn(
         }
         _ => None,
     };
+    if let Some((r, _)) = log_err_pipe {
+        // SAFETY: our own descriptor, just created; see the stdout pipe above.
+        unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
     let log_err_fd = log_err_pipe.map(|(_, w)| w);
 
     // Socketpair of the *console socket* (runc): the init allocates the pty in the container's

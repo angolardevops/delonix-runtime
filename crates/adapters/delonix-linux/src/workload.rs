@@ -32,6 +32,9 @@ pub struct HostWorkload<'a> {
     pub addresses: &'a LaunchAddressesHook<'a>,
     /// Wires the container's own slirp to its init, with the ports it publishes.
     pub attach_slirp: &'a dyn Fn(i32, &[String]) -> Result<()>,
+    /// Releases the slirp that served the incarnation with this pid, once it
+    /// has exited.
+    pub detach_slirp: &'a dyn Fn(&Container, i32),
     /// Called once in the supervisor, after the first start was reported.
     pub on_first_start: &'a dyn Fn(&Container),
     /// The error when the supervisor died before saying why the start failed.
@@ -65,6 +68,7 @@ impl WorkloadRuntime for HostWorkload<'_> {
                 on_first_start: self.on_first_start,
                 silent_death: self.silent_death,
                 discard: self.discard,
+                on_exit: self.detach_slirp,
             },
         )?;
         (self.on_supervised)(c);

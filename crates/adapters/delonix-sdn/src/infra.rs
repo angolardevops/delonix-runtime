@@ -1875,8 +1875,11 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
         });
     }
     let (rd, wr) = (fds[0], fds[1]);
-    let spawned = Command::new("slirp4netns")
-        .args([
+    // Only the ready fd goes with it: this slirp lives for the whole life of
+    // the infra, and whoever happens to be the invocation that starts it must
+    // not have its descriptors held open that long (see `spawn_holding_only`).
+    let spawned = crate::spawn_holding_only(
+        Command::new("slirp4netns").args([
             "--configure",
             "--mtu=65520",
             "--disable-host-loopback",
@@ -1884,11 +1887,9 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             &format!("--api-socket={}", sock.display()),
             &holder_pid.to_string(),
             "tap0",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        ]),
+        wr,
+    );
     // SAFETY: the parent closes its write copy; only the slirp keeps it open.
     unsafe { libc::close(wr) };
     match spawned {
