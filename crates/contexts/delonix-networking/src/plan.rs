@@ -143,6 +143,37 @@ pub fn segment_fingerprint(o: &crate::segment::SegmentObserved) -> serde_json::V
     serde_json::json!({ "zonePresent": o.zone_present, "vnets": vnets, "foreignVnets": foreign })
 }
 
+/// What an IPAM provider holds for a zone, as the fingerprint a digest
+/// covers: subnets by vnet and CIDR, entries by vnet and address, ranges
+/// sorted, and the zone's own IPAM/DHCP options.
+pub fn ipam_fingerprint(o: &crate::ipam::IpamObserved) -> serde_json::Value {
+    let mut subnets: Vec<serde_json::Value> = o
+        .subnets
+        .iter()
+        .map(|s| {
+            let mut ranges: Vec<String> = s
+                .dhcp_ranges
+                .iter()
+                .map(|r| format!("{}-{}", r.start, r.end))
+                .collect();
+            ranges.sort();
+            serde_json::json!({
+                "vnet": s.vnet, "cidr": s.cidr, "gateway": s.gateway, "dhcpRanges": ranges,
+            })
+        })
+        .collect();
+    subnets.sort_by_key(|s| format!("{}|{}", s["vnet"], s["cidr"]));
+    let mut entries: Vec<serde_json::Value> = o
+        .entries
+        .iter()
+        .map(|e| serde_json::json!({ "vnet": e.vnet, "ip": e.ip, "mac": e.mac }))
+        .collect();
+    entries.sort_by_key(|e| format!("{}|{}", e["vnet"], e["ip"]));
+    serde_json::json!({
+        "zoneIpam": o.zone_ipam, "zoneDhcp": o.zone_dhcp, "subnets": subnets, "entries": entries,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

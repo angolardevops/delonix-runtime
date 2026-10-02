@@ -43,6 +43,7 @@
 
 pub mod cluster;
 mod error;
+mod ipam;
 pub mod lxc;
 mod network_zone;
 mod sdn;
@@ -61,6 +62,7 @@ pub use sdn_routing::{
     VnetFirewallOptions,
 };
 
+pub use ipam::ProxmoxIpamProvider;
 pub use network_zone::{ProxmoxSegmentProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
 use delonix_compute::Vm;
@@ -6644,30 +6646,53 @@ pub fn register_segment_provider(
     validate_target_url(&target.base_url)?;
     validate_node_name(&target.node)?;
 
-    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    // ONE client for the two roles: the IPAM provider's staged writes run
+    // inside the segment provider's transaction and carry the SDN lock token
+    // the client holds (ADR-0059 F5b).
+    type Slot = std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>>;
+    let shared: Slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let connect = move |slot: &Slot| -> delonix_networking::Result<std::sync::Arc<Client>> {
+        let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = slot.as_ref() {
+            return Ok(c.clone());
+        }
+        // A failed connect is NOT cached — same reasoning as
+        // `registration`: a node down on the first selection must not stay
+        // "down" for the rest of the process.
+        let c = std::sync::Arc::new(
+            Client::connect_with(&target, opts.clone())
+                .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+        );
+        *slot = Some(c.clone());
+        Ok(c)
+    };
+    let connect = std::sync::Arc::new(connect);
+    let (ipam_slot, ipam_connect, ipam_ledger) =
+        (shared.clone(), connect.clone(), ledger_dir.clone());
+    delonix_networking::ipam::register_ipam_provider(
+        delonix_networking::ipam::IpamProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
+            aliases: &["pve"],
+            new: Box::new(move || {
+                Ok(Box::new(ProxmoxIpamProvider::new(
+                    ipam_connect(&ipam_slot)?,
+                    Ledger::at(&ipam_ledger),
+                ))
+                    as Box<dyn delonix_networking::ipam::IpamProvider>)
+            }),
+        },
+    )
+    .map_err(delonix_model::Error::from)?;
     delonix_networking::segment::register_segment_provider(
         delonix_networking::segment::SegmentProviderRegistration {
             id: NETWORK_ZONE_PROVIDER_ID,
             aliases: &["pve"],
             new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                let client = if let Some(c) = slot.as_ref() {
-                    c.clone()
-                } else {
-                    // A failed connect is NOT cached — same reasoning as
-                    // `registration`: a node down on the first selection
-                    // must not stay "down" for the rest of the process.
-                    let c = std::sync::Arc::new(
-                        Client::connect_with(&target, opts.clone())
-                            .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
-                    );
-                    *slot = Some(c.clone());
-                    c
-                };
-                Ok(
-                    Box::new(ProxmoxSegmentProvider::new(client, Ledger::at(&ledger_dir)))
-                        as Box<dyn delonix_networking::segment::SegmentProvider>,
-                )
+                Ok(Box::new(ProxmoxSegmentProvider::new(
+                    connect(&shared)?,
+                    Ledger::at(&ledger_dir),
+                ))
+                    as Box<dyn delonix_networking::segment::SegmentProvider>)
             }),
         },
     )
@@ -6762,7 +6787,11 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             C::NetDnsRecords | C::NetDnsAuthoritative => S::RequiresExternalComponent {
                 component: "a PowerDNS server — the only DNS plugin of PVE 9.2.2",
             },
-            C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp => S::NotImplemented,
+            // ADR-0059 F5b: `kind: NetworkZone` subnets, DHCP ranges and
+            // reservations, proven by a guest that gets the reserved address.
+            C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp",
+            },
             C::NetSegmentRemote => S::Partial {
                 detail: "`kind: NetworkZone` creates a simple zone and its VNets in one SDN transaction, live in the e2e section «providers remotos» (S6); the other five zone types are not created",
             },

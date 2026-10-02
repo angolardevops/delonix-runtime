@@ -15039,6 +15039,13 @@ msgstr "NetworkGateway/{name}: o provider '{provider}' não está registado para
 msgid "networkgateway/{name}: {n} nat rule(s) on '{provider}'"
 msgstr "networkgateway/{name}: {n} regra(s) de nat em '{provider}'"
 
+# ADR-0059 F5b: the IPAM role on a NetworkZone
+msgid "the segment provider '{provider}' has no ipam role: a NetworkZone on it cannot declare subnets"
+msgstr "o provider de segmentos '{provider}' não tem o papel ipam: uma NetworkZone nele não pode declarar subnets"
+
+msgid "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reservation(s) on '{provider}'"
+msgstr "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reserva(s) em '{provider}'"
+
 # init: delonix-tunnel.yaml (kind: Gateway) nos templates
 msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"
 msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endereço https público, sem IP público (README.md)"

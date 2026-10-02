@@ -89,3 +89,8 @@ never rewritten — supersede them with a new one.
   ways, OpenTelemetry, contract and architecture gates as tests; locks shipped only when they are a
   function of the manifest (Go); the generator checks the name and `-v` it substitutes; detection
   reads manifests and says «unknown». *Proposed*.
+- **0063** — IPAM beyond Proxmox's own: an external controller is named by the zone and registered
+  on the cluster (phpIPAM refused while PVE cannot map a MAC to an address; NetBox after a live
+  spike, observed through its own API), gateways and ranges changed in place with a repair of the
+  IPAM's gateway entry after a failed transaction, and a reservation that owns its MAC so a VM
+  created after it gets the reserved address. *Proposed*; the reservation fixes are in #654.
