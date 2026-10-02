@@ -258,9 +258,14 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 <td><code>delonix-mgmt-bin</code></td>
 <td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-mgmt</code></td>
 </tr>
+<tr>
+<td><code>delonix-node-api</code></td>
+<td><code>delonix-node-api-bin</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-node-api</code></td>
+</tr>
 </tbody>
 </table></div>
-<p>The release workflow builds exactly these four packages. If you set <code>CARGO_TARGET_DIR</code>, binaries
+<p>The release workflow builds exactly these five packages. If you set <code>CARGO_TARGET_DIR</code>, binaries
 land there instead of <code>target/</code>.</p>
 <p>Two practical notes:</p>
 <ul>
@@ -282,8 +287,9 @@ command -v delonix                  # which `delonix` your shell would run inste
 <code>DELONIX_GIT_SINCE</code>). Between releases every build carries the same version number, so the commit
 is the only way to tell your build from the released one.</p>
 <h3 id="how-delonix-finds-its-server-binaries">How <code>delonix</code> finds its server binaries<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
-<p><code>delonix serve cri</code>, <code>delonix serve api</code> and <code>delonix mcp</code> do not contain the servers: they <code>exec</code>
-<code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code> (<code>exec_server</code> in
+<p><code>delonix serve cri</code>, <code>delonix serve api</code>, <code>delonix serve node-api</code> and <code>delonix mcp</code> do not contain
+the servers: they <code>exec</code> <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> and <code>delonix-mcp</code>
+(<code>exec_server</code> in
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). The lookup is:</p>
 <ol>
 <li>the file of that name <strong>next to the running <code>delonix</code></strong>;</li>
@@ -293,14 +299,15 @@ is the only way to tell your build from the released one.</p>
 different release refuses to start. It also passes itself in <code>DELONIX_BIN</code>, so the server calls back
 the same CLI. A server started directly (for example by a unit) finds the CLI through
 <code>DELONIX_BIN</code>, then a <code>delonix</code> next to itself, then <code>PATH</code> (<code>cli_bin</code> in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Keep the four binaries of one build
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Keep the five binaries of one build
 together</strong>; a mix of your build and a release is refused, or runs code you did not mean to test.</p>
 <p><code>delonix cluster kubeadm</code> and <code>delonix image vm build</code> look for <code>delonix-cri</code> in their own order
 (<code>resolve_cri_bin</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>): <code>--cri-bin</code>, then next to
 <code>delonix</code>, then a <code>cargo build --release -p delonix-cri</code> if the current directory is inside a
 source checkout, and only then a download of the released asset.</p>
-<p>Build the four before installing them:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+<p>Build the five before installing them:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 </code></pre></div>
 <h3 id="option-a-run-it-from-the-worktree-safest">Option A — run it from the worktree (safest)<a class="hanchor" href="#option-a-run-it-from-the-worktree-safest" aria-label="#">#</a></h3>
 <p>Nothing is copied, so nothing outside your checkout can pick it up by accident:</p>
@@ -313,7 +320,7 @@ needs its own AppArmor profile (see
 <h3 id="option-b-install-for-your-user-in-localbin">Option B — install for your user in <code>~/.local/bin</code><a class="hanchor" href="#option-b-install-for-your-user-in-localbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix &amp;&amp; delonix --version
 </code></pre></div>
@@ -338,7 +345,7 @@ delonix man --dir ~/.local/share/man
 </code></pre></div>
 <h3 id="option-c-system-install-in-usrlocalbin">Option C — system install in <code>/usr/local/bin</code><a class="hanchor" href="#option-c-system-install-in-usrlocalbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 </code></pre></div>
 <p><strong>Only on a machine where no Delonix workload is in use.</strong> The installed binary is not just a
 command:</p>
@@ -444,7 +451,8 @@ volumes as the release. Export <code>DELONIX_ROOT</code> and <code>DELONIX_NET_R
 <a href="environment-variables.html">Environment variables</a> for every other variable your build reads.</p>
 <h3 id="uninstall-and-roll-back">Uninstall and roll back<a class="hanchor" href="#uninstall-and-roll-back" aria-label="#">#</a></h3>
 <p>There is no uninstall flag in <code>install.sh</code>. Remove what you copied:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 </code></pre></div>

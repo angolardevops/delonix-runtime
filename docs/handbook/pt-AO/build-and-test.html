@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a class="on" aria-current="page" href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Preparar e compilar</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/build-and-test.html">Ler a página em inglês</a></span></div><h1 id="clone-build-and-test">Clonar, compilar e testar</h1>
+<h1 id="clone-build-and-test">Clonar, compilar e testar</h1>
 <p><strong>Antes de leres:</strong> <a href="environment.html">Preparar o teu ambiente</a>: a toolchain fixada, o <code>protoc</code>, e um host que passa nas suas verificações.</p>
 <p>Esta página assume o host de <a href="environment.html">Preparar o teu ambiente</a>: a toolchain de Rust
 fixada e o <code>protoc</code>. Depois dela consegues compilar e instalar a tua árvore, correr cada gate
@@ -258,9 +258,14 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 <td><code>delonix-mgmt-bin</code></td>
 <td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-mgmt</code></td>
 </tr>
+<tr>
+<td><code>delonix-node-api</code></td>
+<td><code>delonix-node-api-bin</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-node-api</code></td>
+</tr>
 </tbody>
 </table></div>
-<p>O workflow de release compila exactamente estes quatro pacotes. Se definires <code>CARGO_TARGET_DIR</code>, os
+<p>O workflow de release compila exactamente estes cinco pacotes. Se definires <code>CARGO_TARGET_DIR</code>, os
 binários vão para lá em vez de <code>target/</code>.</p>
 <p>Duas notas práticas:</p>
 <ul>
@@ -283,8 +288,9 @@ command -v delonix                  # which `delonix` your shell would run inste
 <code>DELONIX_GIT_SINCE</code>). Entre releases todas as builds levam o mesmo número de versão, por isso o
 commit é a única forma de distinguir a tua build da publicada.</p>
 <h3 id="how-delonix-finds-its-server-binaries">Como o <code>delonix</code> encontra os seus binários de servidor<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
-<p><code>delonix serve cri</code>, <code>delonix serve api</code> e <code>delonix mcp</code> não contêm os servidores: fazem <code>exec</code> de
-<code>delonix-cri</code>, <code>delonix-mgmt</code> e <code>delonix-mcp</code> (<code>exec_server</code> em
+<p><code>delonix serve cri</code>, <code>delonix serve api</code>, <code>delonix serve node-api</code> e <code>delonix mcp</code> não contêm os
+servidores: fazem <code>exec</code> de <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> e <code>delonix-mcp</code>
+(<code>exec_server</code> em
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). A procura é:</p>
 <ol>
 <li>o ficheiro com esse nome <strong>ao lado do <code>delonix</code> em execução</strong>;</li>
@@ -294,15 +300,16 @@ commit é a única forma de distinguir a tua build da publicada.</p>
 outra release recusa-se a arrancar. Passa-se também a si próprio em <code>DELONIX_BIN</code>, para que o
 servidor volte a chamar a mesma CLI. Um servidor arrancado directamente (por exemplo por uma unit)
 encontra a CLI através de <code>DELONIX_BIN</code>, depois de um <code>delonix</code> ao seu lado, depois do <code>PATH</code>
-(<code>cli_bin</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Mantém juntos os quatro
+(<code>cli_bin</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Mantém juntos os cinco
 binários de uma mesma build</strong>; uma mistura da tua build com uma release é recusada, ou corre código
 que não querias testar.</p>
 <p><code>delonix cluster kubeadm</code> e <code>delonix image vm build</code> procuram o <code>delonix-cri</code> pela sua própria ordem
 (<code>resolve_cri_bin</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>): <code>--cri-bin</code>, depois ao lado
 do <code>delonix</code>, depois um <code>cargo build --release -p delonix-cri</code> se o directório actual estiver dentro
 de uma checkout do código-fonte, e só então um download do asset publicado.</p>
-<p>Compila os quatro antes de os instalares:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+<p>Compila os cinco antes de os instalares:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 </code></pre></div>
 <h3 id="option-a-run-it-from-the-worktree-safest">Opção A — corrê-la a partir do worktree (a mais segura)<a class="hanchor" href="#option-a-run-it-from-the-worktree-safest" aria-label="#">#</a></h3>
 <p>Nada é copiado, por isso nada fora da tua checkout a pode apanhar por acidente:</p>
@@ -315,7 +322,7 @@ caminho precisa do seu próprio perfil AppArmor (ver
 <h3 id="option-b-install-for-your-user-in-localbin">Opção B — instalar para o teu utilizador em <code>~/.local/bin</code><a class="hanchor" href="#option-b-install-for-your-user-in-localbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix &amp;&amp; delonix --version
 </code></pre></div>
@@ -343,7 +350,7 @@ delonix man --dir ~/.local/share/man
 </code></pre></div>
 <h3 id="option-c-system-install-in-usrlocalbin">Opção C — instalação de sistema em <code>/usr/local/bin</code><a class="hanchor" href="#option-c-system-install-in-usrlocalbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 </code></pre></div>
 <p><strong>Só numa máquina onde nenhum workload Delonix esteja em uso.</strong> O binário instalado não é só um
 comando:</p>
@@ -453,7 +460,8 @@ que a release. Exporta primeiro <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RU
 build lê.</p>
 <h3 id="uninstall-and-roll-back">Desinstalar e reverter<a class="hanchor" href="#uninstall-and-roll-back" aria-label="#">#</a></h3>
 <p>Não há flag de desinstalação no <code>install.sh</code>. Remove o que copiaste:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 </code></pre></div>
@@ -617,6 +625,11 @@ correspondem ao que tocaste antes de fazeres push; corre todos antes de pedires 
 <td><code>test</code></td>
 <td><code>cargo build --workspace --locked &amp;&amp; cargo test --workspace --locked --no-fail-fast</code></td>
 <td>qualquer teste falha</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td><code>mkdir -p /<wbr>tmp/<wbr>t &amp;&amp; TMPDIR=/<wbr>tmp/<wbr>t cargo test --workspace --locked --no-fail-fast &amp;&amp; python3 scripts/<wbr>tmp_roots_gate.<wbr>py --dir /<wbr>tmp/<wbr>t --list</code></td>
+<td>os testes deixam no seu directório temporário algo que não é a dívida conhecida em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> — uma fuga nova, mais de uma conhecida, ou menos de uma sem baixar a linha de base (<code>--update</code>). A linha de base é o que o runner alojado deixa, e uma fuga pode depender do host (um teste que retornava cedo quando faltava o <code>qemu-img</code> saltava a sua limpeza). A linha de base está vazia desde que a dívida foi paga: um teste guarda o seu directório temporário num guarda que o remove no <code>Drop</code> (<code>tempfile::TempDir</code>), de modo que a remoção corre também num <code>return</code> antecipado e num assert falhado; por isso compara uma corrida local com <code>--list</code></td>
 </tr>
 <tr>
 <td><code>deny</code></td>

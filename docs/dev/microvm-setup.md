@@ -142,10 +142,12 @@ VM also refuses up front when `<root>/vms/<name>.sock` would not fit in `sun_pat
 
 ### The port and the registry
 
-`VmBackend` (`crates/adapters/delonix-vm/src/lib.rs`) is the port every hypervisor implements:
+`VmBackend` (`crates/contexts/delonix-compute/src/vm_backend.rs`, re-exported by `delonix-vm`) is the port every hypervisor implements:
 `id`, `available`, `boot`, `is_running`, `ip`, `stop`, plus defaulted methods (`destroy`, `pause`,
 `unpause`, `resume`, `snapshot`/`restore`/`snapshots`/`delete_snapshot`, `preserve_snapshots`,
-`ip_is_predicted`, `manages_own_storage`, `auto_selectable`, `disk_health`). A default that cannot
+`ip_is_predicted`, `manages_own_storage`, `auto_selectable`, `disk_health`, and the
+newer `current_handle`, `resize_cold`, `guest_info`, `move_to_node`,
+`update_cloud_init`, `apply_firewall`/`read_firewall`). A default that cannot
 be honoured **fails closed** with a message, never a silent no-op.
 
 Backends live in a registry (`BACKENDS`), not a `match`:
@@ -164,14 +166,23 @@ recorded backend and an unknown name is an **error** (it used to fall back to CH
 
 ### Selection precedence for a new VM
 
-From `delonix_vm::create_with` and `resolve_vm_defaults` (`cmd/vm.rs`), first match wins:
+From `resolve_vm_defaults` (`cmd/vm.rs`) and `select_for_create`
+(`crates/adapters/delonix-vm/src/lib.rs`, which the VM use case reaches through
+`VmBackends::select`), first match wins:
 
 1. `--backend` (or `backend:` in the manifest).
 2. The image's `HYPERVISOR` (recorded by a VMfile build), when `--disk` names a local image.
 3. `DELONIX_VM_BACKEND` (session-wide).
-4. `delonix vm default-backend --set <backend>` (machine-wide, stored in
-   `<DELONIX_ROOT>/vm-default-backend`).
-5. Capability heuristic: `volumes` present ⇒ `libvirt` (only libvirt does virtio-9p); a cloud image
+4. `defaultProvider` in the node's providers file (`providers.yaml`, ADR-0054), which
+   `delonix vm default-backend --set <backend>` writes. The file is found at
+   `DELONIX_PROVIDERS_CONFIG`, else `$XDG_CONFIG_HOME/delonix/providers.yaml` (or
+   `~/.config/…`), else `/etc/delonix/providers.yaml`; the first one wins. A file that cannot be
+   read makes a VM request without `--backend` fail instead of guessing, and a default this
+   process cannot serve (`proxmox` without its target) fails naming it rather than falling back to
+   a local hypervisor.
+5. The legacy per-root default `<DELONIX_ROOT>/vm-default-backend`, from before the providers
+   file; `vm default-backend` says when the answer comes from it, and `--set` moves it into the file.
+6. Capability heuristic: `volumes` present ⇒ `libvirt` (only libvirt does virtio-9p); a cloud image
    with no `--kernel` ⇒ `libvirt` **if libvirt is available**; otherwise auto-detection — the first
    auto-selectable registered backend that is installed (CH, then libvirt).
 
@@ -182,23 +193,36 @@ So on a host with both hypervisors, a plain `vm create` of a cloud image lands o
 $ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+error[DX-1503] invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 ```
+
+`delonix provider config validate` checks the file and what it points at (a token file readable
+only by its owner, a CA that exists) without contacting anything, and
+`delonix provider config schema` prints its JSON Schema.
 
 ### Proxmox VE (remote)
 
 `bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured` registers the Proxmox backend
-at startup when configured through the environment (a misconfiguration is a warning, never fatal
-for unrelated commands):
+at startup when configured — by a `type: proxmox` entry in the providers file, or by the
+environment below (a misconfiguration is a warning, never fatal for unrelated commands). The
+complete list of `DELONIX_PROXMOX_*` variables, including the file-based credentials
+(`DELONIX_PROXMOX_TOKEN_FILE`, `DELONIX_PROXMOX_PASSWORD_FILE`) and the storages a local image is
+uploaded to (`DELONIX_PROXMOX_IMPORT_STORAGE`, `DELONIX_PROXMOX_DISK_STORAGE`), is in
+[Environment variables § Proxmox VE](environment-variables.md#proxmox-ve):
 
 | Variable | Meaning |
 |---|---|
 | `DELONIX_PROXMOX_URL` | API base URL, e.g. `https://pve.example:8006`. Unset = backend not registered. |
-| `DELONIX_PROXMOX_NODE` | Required. The one node this backend addresses (as `GET /nodes` names it). |
+| `DELONIX_PROXMOX_NODE` | Required. The node this backend connects through (as `GET /nodes` names it); each VM is then addressed on the node of the cluster it actually runs on (ADR-0053). |
 | `DELONIX_PROXMOX_SECRET` | Preferred credential: name of a `kind: Secret` with `tokenId`+`tokenSecret` (or `username`+`password`). |
 | `DELONIX_PROXMOX_TOKEN_ID` + `DELONIX_PROXMOX_TOKEN` | API token from the environment. |
 | `DELONIX_PROXMOX_USER` + `DELONIX_PROXMOX_PASSWORD` | Password login (ticket, re-authenticated on 401). |
@@ -208,7 +232,8 @@ for unrelated commands):
 
 Without configuration, `--backend proxmox` answers that the backend "is not available in this build"
 and says what to set (*run*). The backend owns its storage (`manages_own_storage`), so no local
-overlay or NoCloud seed is made; `--hostname`/`--ssh-key` go to the node's cloud-init, and
+overlay or NoCloud seed is made; a `--disk` that names an image of the engine's own store is
+uploaded to the node's import storage and the VM is created from it (ADR-0057); `--hostname`/`--ssh-key` go to the node's cloud-init, and
 `--user-data` is refused. Design and limits: [ADR-0008](../adr/0008-proxmox-vm-backend.md). An
 OpenStack backend is **proposed only** ([ADR-0039](../adr/0039-openstack-vm-backend.md)); there is no
 code for it.
@@ -293,7 +318,8 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 ```
 
-What happens (`cmd/vm.rs` → `delonix_vm::create_with`):
+What happens (`cmd/vm.rs` → `delonix_vm::create_with`, a wrapper that builds a
+`delonix_compute::vm::VmEngine` over this node's ports and calls its `create_with`):
 
 1. **Node policy** is enforced before any image is resolved (`policy::enforce`).
 2. **Disk resolution** (`resolve_image_ref`): `--url-img` wins (downloaded, cached, verified against
@@ -307,8 +333,10 @@ What happens (`cmd/vm.rs` → `delonix_vm::create_with`):
 5. **Backend** chosen (section 2); an admission check refuses when the host lacks RAM;
    `--namespace` other than `default` is refused on libvirt (the VM lives on `virbr0`, outside the
    Delonix SDN).
-6. **Overlay**: `<root>/vms/<name>.qcow2`, a thin qcow2 over the base (`prepare_local_overlay`);
-   `--disk-size <GiB>` grows it and cannot be smaller than the base.
+6. **Overlay**: `<root>/vms/<name>.qcow2`, a thin qcow2 over the base (the `LocalDiskImages`
+   port, implemented by `QemuImgDisks` → `prepare_local_overlay` in
+   `crates/adapters/delonix-vm/src/local_ports.rs`; skipped for a backend that manages its own
+   storage); `--disk-size <GiB>` grows it and cannot be smaller than the base.
 7. **Boot**: the backend's `boot`. `create` is idempotent: an existing, running VM is returned as is.
 
 The published images set no password on any account (see `--root-password` above), so pass
@@ -443,7 +471,10 @@ dry-run without `--apply`). This is the one deliberate exception to rootless in 
 
 | Area | Path |
 |---|---|
-| Port, registry, CH and libvirt backends, `create_with`, snapshots, firmware lookup | `crates/adapters/delonix-vm/src/lib.rs` |
+| Port | `crates/contexts/delonix-compute/src/vm_backend.rs` |
+| VM use cases (`VmEngine`: create, stop, start, status, list, remove, snapshots, day-2 verbs) and their ports (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) | `crates/contexts/delonix-compute/src/vm.rs`, `ports.rs` |
+| Registry, CH and libvirt backends, backend selection, firmware lookup, the public wrappers (`create_with`, `stop`, …) | `crates/adapters/delonix-vm/src/lib.rs` |
+| The adapter's implementations of the VM ports (`RegistryBackends`, `QemuImgDisks`, `CloudLocaldsSeed`) | `crates/adapters/delonix-vm/src/local_ports.rs` |
 | NoCloud seed generation | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Proxmox backend | `crates/providers/delonix-proxmox/` |
 | `vm` CLI, `kind: VirtualMachine`, `vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |
@@ -479,6 +510,10 @@ Read [ADR-0008](../adr/0008-proxmox-vm-backend.md) first; it is the template. In
   parser/scaffold tests in `cmd/vmfile.rs`. Run `cargo test -p delonix-vm` and
   `cargo test -p delonix-runtime-bin vmfile` (see [Clone, build and test](build-and-test.md) for `protoc` and the
   target directory).
+- **Use-case tests against fake ports** — the orchestration (`VmEngine`) is tested in
+  `delonix-compute` (`vm::tests`) with an in-memory store, a backend that records its calls and a
+  fake disk and seed, so a change to what `create`, `stop` or `status` decides needs no
+  hypervisor: `cargo test -p delonix-compute vm::`.
 - **`scripts/e2e.sh`** — the `vm` sections run without a hypervisor (listing, refusals) and, when
   available, exercise snapshots across stop/start on libvirt (needs `virsh`, `qemu-img` and a usable
   `qemu:///system`) and on Cloud Hypervisor. It isolates both state roots by default; the CH section

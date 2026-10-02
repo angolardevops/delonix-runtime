@@ -395,8 +395,9 @@ JSON depuis <code>/etc/cni/net.d</code>. Les runtimes Kubernetes l’utilisent p
 <li>Sortie et redirection de ports : <code>slirp_attach</code> et <code>slirp_add_hostfwd</code> dans
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> (qui démarrent <code>slirp4netns</code>) ; la publication à
   l’intérieur du holder dans <code>publish_port</code>/<code>do_publish</code> (<code>infra.rs</code>).</li>
-<li>Pare-feu : <code>table ip dlxing</code> avec les base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwcont</code> et la verdict map
-  <code>fwmap</code> (<code>FWMAP</code>), générée dans <code>infra.rs</code> (<code>do_firewall</code>, <code>apply_firewall_all</code>, <code>ns_set_join</code>
+<li>Pare-feu : <code>table ip dlxing</code> avec les base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwout</code> (par source) et
+  <code>fwcont</code> (par destination), qui consultent toutes deux la verdict map <code>fwmap</code> (<code>FWMAP</code>), générée
+  dans <code>infra.rs</code> (<code>fw_dispatch_chains</code>, <code>do_firewall</code>, <code>apply_firewall_all</code>, <code>ns_set_join</code>
   pour les sets d’isolement de namespace).</li>
 <li>DNS interne (nom standard <code>&lt;name&gt;.&lt;namespace&gt;.svc.delonix.internal</code>, l’ancien
   <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code> répond toujours ; <code>service_fqdn</code>, <code>parse_internal_name</code>) :
@@ -464,8 +465,9 @@ est un petit ISO étiqueté <code>cidata</code> contenant <code>user-data</code>
 <code>network-config</code>.</p>
 <p><strong>Dans Delonix</strong></p>
 <ul>
-<li>Le port est <code>VmBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, implémenté par
-  <code>CloudHypervisorBackend</code> et <code>LibvirtBackend</code> là, et par <code>ProxmoxBackend</code> dans
+<li>Le port est <code>VmBackend</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> (réexporté par
+  <code>delonix-vm</code>), implémenté par <code>CloudHypervisorBackend</code> et <code>LibvirtBackend</code> dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, et par <code>ProxmoxBackend</code> dans
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>).</li>
 <li>Ordre de recherche du firmware Cloud Hypervisor : <code>DEFAULT_CH_FIRMWARES</code> (EDK2 <code>CLOUDHV.fd</code>
   avant <code>hypervisor-fw</code>) ; la ligne de commande du VMM est construite dans <code>boot_ch</code>.</li>

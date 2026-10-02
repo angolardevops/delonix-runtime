@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:b386f534ba4f3a6df4c7e43ccb89095987972faa8be57403b9127c8a62dd2551 -->
+<!-- translated-from: architecture.md sha256:8971e6d8e948183d79f2bbe407c6ab968e80aeb06a1bfa68a7149c83768b66e9 -->
 # 架构
 
 **阅读之前：** [项目结构](project-structure.md)（各部分位于何处）、[IaaS 与云原生](iaas-and-cloud-native.md)（引擎的位置与原则），以及[云原生入门](cloud-native-primer.md)（各图所命名的机制）。
@@ -44,13 +44,19 @@ crate 如何分层并相互调用，以及状态在磁盘上位于何处。它�
 - **各个 provider 都位于端口（port）之后。** Linux 内核、Cloud Hypervisor 与 libvirt、Proxmox VE
   以及 Kubernetes 的 CRI，都是通过一个 trait 来访问的，绝不会在代码中散布
   `if provider == …` 这样的分支。今天已有的端口：`VmBackend`
-  （`crates/adapters/delonix-vm/src/lib.rs`），以及
+  （`crates/contexts/delonix-compute/src/vm_backend.rs`，由 `delonix-vm` 重新导出，后端注册表仍在
+  `delonix-vm` 里）、VM provider 端口（`vm_provider.rs` 里的 `VmProvider`，ADR-0044）、
+  系统容器端口（`system_container.rs` 里的 `SystemContainerProvider`，ADR-0058）、
   `crates/contexts/delonix-compute/src/ports.rs` 和 `launch.rs` 中的计算端口
   （`ImageStore`、`StorageProvider`、`DeviceResolver`、`RunHost`、`NetworkProvider`、
-  `VmNetwork`、`WorkloadRuntime`）。一个 OpenStack 后端已经设计好
+  `VmNetwork`、`WorkloadRuntime`，以及供 VM 用例使用的 `VmBackends`、`LocalDiskImages`、
+  `SeedBuilder`），以及 `delonix-sdn` 里的两个远程网络端口：`GatewayProvider`
+  （`src/gateway.rs`，ADR-0051）和 `NetworkZoneProvider`（`src/network_zone.rs`，ADR-0049）。
+  每个 provider 能做什么，都对照同一份版本化的能力目录来回答
+  （`crates/contexts/delonix-compute/src/capability.rs`，ADR-0050；`delonix provider ls`）。一个 OpenStack 后端已经设计好
   （[ADR-0039](../../adr/0039-openstack-vm-backend.md)，*Proposed*），但还没有对应的 crate。
 - **一套操作，多个接口** —— CLI、CRI、本地管理 API、MCP，以及 Docker Engine API 的一个切片，
-  节点契约是预期中唯一的 API（见[下文](#one-set-of-operations-several-interfaces)）；
+  节点契约（现在已由 `delonix-node-api` 部分提供服务）是预期中唯一的 API（见[下文](#one-set-of-operations-several-interfaces)）；
   可观测性通过 `crates/adapters/delonix-telemetry` 实现。
 - **无守护进程与无根优先决定了进程模型** —— 必须持久化的东西属于 systemd，或者属于一个有明确
   归属者的按工作负载进程（容器的 supervisor、网络的 pin），特权是显式的可选项
@@ -69,7 +75,7 @@ crate 如何分层并相互调用，以及状态在磁盘上位于何处。它�
 | 一个 crate 必须位于其所属层的目录中 | `LAYER_DIR`、`misplaced` |
 | 在 `crates/`、`bins/`、`proto/` 下任何位置出现消费者的名字（包括注释）即失败 | `CONSUMER_NAMES`、`consumer_mentions` |
 | 依赖版本只能存在于根目录的 `[workspace.dependencies]` 中 | `inline_versions` |
-| 只能下降、不能上升的 ratchet（见下文）——例如库 crate 重新运行引擎自己的二进制文件、库中出现 `println!`、进程环境写入、适配器把共享的 `Error` 当作自己的来导入 | ratchet 的各个模式（`SELF_EXEC`、`PRINTS`、`ENV_WRITES`、`SHARED_ERROR`……），基线在 `scripts/arch_baseline.json` 中 |
+| 只能下降、不能上升的 ratchet（见下文）——例如库 crate 重新运行引擎自己的二进制文件、库中出现 `println!`、进程环境写入、适配器把共享的 `Error` 当作自己的来导入、上下文 crate 运行外部程序（`crates/contexts/` 下的 `Command::new`，基线为 0） | ratchet 的各个模式（`SELF_EXEC`、`PRINTS`、`ENV_WRITES`、`SHARED_ERROR`、`CONTEXT_SPAWNS`……），基线在 `scripts/arch_baseline.json` 中 |
 
 <!-- dev-docs:begin ratchets -->
 `scripts/arch_fitness.py` 维护 **6 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：
@@ -103,12 +109,12 @@ flowchart LR
   SYSD["systemd<br/><small>user or system manager</small>"]
   REG["OCI registries<br/><small>public or private</small>"]
   HV["local hypervisors<br/><small>Cloud Hypervisor, libvirt/QEMU</small>"]
-  RMT["remote management APIs<br/><small>one Proxmox VE node, TrueNAS SCALE</small>"]
+  RMT["remote management APIs<br/><small>a Proxmox VE node and its cluster, OPNsense, TrueNAS SCALE</small>"]
   SSH["remote hosts<br/><small>kubeadm cluster nodes</small>"]
   OBS["observability backends<br/><small>OTLP collector, Prometheus</small>"]
   OP -->|"argv, exit classes"| ENG
   KL -->|"CRI runtime.v1: gRPC on a unix socket"| ENG
-  LC -->|"HTTP+JSON on a unix socket, same uid"| ENG
+  LC -->|"HTTP+JSON or gRPC on a unix socket, same uid"| ENG
   AI -->|"MCP: JSON-RPC over stdio"| ENG
   ENG -->|"syscalls; ip, nft, nsenter"| KER
   ENG -->|"units, timers, transient scopes"| SYSD
@@ -134,19 +140,19 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 |---|---|
 | 操作者 → 引擎 | `bins/delonix-runtime-bin/src/main.rs`（`main`、`run`）；退出类别在 `crates/foundation/delonix-model/src/exitcode.rs` 中 |
 | kubelet → 引擎 | `crates/interfaces/delonix-cri/src/lib.rs`（`serve_blocking`） |
-| 本地程序 → 引擎 | `crates/interfaces/delonix-mgmt/src/lib.rs`（`serve_blocking`，`axum` 路由器） |
+| 本地程序 → 引擎 | `crates/interfaces/delonix-mgmt/src/lib.rs`（`serve_blocking`，`axum` 路由器）；`crates/interfaces/delonix-node-api/src/lib.rs`（`serve_blocking`，节点契约） |
 | AI 客户端 → 引擎 | `crates/interfaces/delonix-mcp/src/lib.rs`（`serve_stdio`） |
 | 引擎 → 内核 | `crates/adapters/delonix-linux/src/lib.rs`（`spawn`、`container_init`）；`crates/adapters/delonix-sdn/src/infra.rs`（`ip`、`nft`、`nsenter` 子进程） |
 | 引擎 → systemd | `crates/adapters/delonix-linux/src/lib.rs` 中的 `busctl` 临时作用域（transient scope）；`bins/delonix-runtime-bin/src/cmd/boot.rs` 中的启动 unit |
 | 引擎 → 镜像仓库 | `crates/adapters/delonix-oci/src/registry.rs`（`resolve_or_pull`、`push_to_registry`） |
 | 引擎 → hypervisor | `crates/adapters/delonix-vm/src/lib.rs`（`CloudHypervisorBackend`、`LibvirtBackend`） |
-| 引擎 → 远程管理 API | `crates/providers/delonix-proxmox/src/lib.rs`、`crates/providers/delonix-truenas/src/lib.rs` |
+| 引擎 → 远程管理 API | `crates/providers/delonix-proxmox/src/lib.rs`、`crates/providers/delonix-opnsense/src/lib.rs`、`crates/providers/delonix-truenas/src/lib.rs` |
 | 引擎 → 远程主机 | `bins/delonix-runtime-bin/src/cmd/remote.rs`（`ssh`、`scp`），由 `cmd/cluster.rs` 使用 |
 | 引擎 ↔ 可观测性 | `crates/adapters/delonix-telemetry/src/telemetry.rs`（OTLP）、`delonix-mgmt` 和 `delonix-cri` 中的 `/metrics` 路由 |
 
 ## 第 2 层——容器：可执行文件与进程
 
-在 C4 中，*容器（container）*是指会运行的东西。构建产物包含四个可执行文件（数量见
+在 C4 中，*容器（container）*是指会运行的东西。构建产物包含五个可执行文件（数量见
 [手册 README](README.md)中生成的统计）；此外还会出现更多**进程**，按每个工作负载或每个节点计，
 每一个都有明确的归属者。下面三张图按关注点拆分这幅图景：谁进入引擎、一个容器要付出多少进程的
 成本，以及无根网络基础设施。
@@ -164,8 +170,9 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 | 虚线箭头 | 进程的 `exec` 或启动 |
 | 带边框的区域 | 进程边界 |
 
-有四扇门通向引擎，但只有一次性（one-shot）的 `delonix` 进程会创建容器：多线程服务器为此
-会反过来运行 CLI。
+有五扇门通向引擎，但只有一次性（one-shot）的 `delonix` 进程会创建容器：多线程服务器为此
+会反过来运行 CLI。（`delonix-node-api` 目前还不创建任何东西：它唯一提供服务的 RPC
+`ListProviders` 只做读取。）
 
 ```mermaid
 flowchart LR
@@ -179,6 +186,7 @@ flowchart LR
       CRI["delonix-cri<br/><small>CRI server, long-lived</small>"]
       MGMT["delonix-mgmt<br/><small>management API, long-lived</small>"]
       MCP["delonix-mcp<br/><small>MCP server, one per session</small>"]
+      NAPI["delonix-node-api<br/><small>node contract, long-lived</small>"]
     end
     ST[("state root<br/><small>DELONIX_ROOT</small>")]
   end
@@ -186,12 +194,13 @@ flowchart LR
   KL -->|"gRPC, SO_PEERCRED"| CRI
   LC -->|"HTTP+JSON, SO_PEERCRED"| MGMT
   AI -->|"JSON-RPC over stdio"| MCP
-  CLI -.->|"exec: serve cri, serve api, mcp"| SRV
+  LC -->|"gRPC or HTTP/JSON, SO_PEERCRED"| NAPI
+  CLI -.->|"exec: serve cri, serve api, serve node-api, mcp"| SRV
   SRV -.->|"spawn: delonix __apirun, stop, rm, net netns attach"| CLI
   CLI -->|"records under flock"| ST
   SRV -->|"reads records"| ST
   class OP,KL,LC,AI person
-  class CLI,CRI,MGMT,MCP block
+  class CLI,CRI,MGMT,MCP,NAPI block
   class ST store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -331,6 +340,7 @@ pin、control 与 uplink 分别是 `crates/adapters/delonix-sdn/src/infra.rs` �
 | `delonix-cri` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs` → `delonix_cri::serve_blocking` | 一个服务（通常是一个 systemd unit）。`delonix serve cri` 会对它执行 `exec`（`cmd/serve.rs::exec_server`） |
 | `delonix-mgmt` | `bins/delonix-mgmt-bin/src/main.rs` → `delonix_mgmt::serve_blocking` | 一个服务；`delonix serve api` 会对它执行 `exec` |
 | `delonix-mcp` | `bins/delonix-mcp-bin/src/main.rs` → `delonix_mcp::serve_stdio` | 一个 AI 客户端会话（stdio 上的一个子进程）；`delonix mcp` 会对它执行 `exec` |
+| `delonix-node-api` | `bins/delonix-node-api-bin/src/main.rs` → `delonix_node_api::serve_blocking` | 一个服务；`delonix serve node-api` 会对它执行 `exec` |
 | Docker API 切片 | `cmd/serve.rs` → `cmd::dockerapi::run`，**在** `delonix` 进程**内部** | `delonix serve docker-api` 运行期间 |
 | supervisor | `delonix_linux::supervise::run_supervised`，由 `delonix_compute::launch::start` 为调用者能够 fork 的每一次后台启动选定 | 容器的整个生命周期；它是真正的父进程，因此由它收集退出状态并施加 `--restart` |
 | container init | `delonix_linux::spawn` → `clone` → `container_init` | 容器本身 |
@@ -356,7 +366,7 @@ pin、control 与 uplink 分别是 `crates/adapters/delonix-sdn/src/infra.rs` �
 | 管理 API | 基于 unix socket 的 HTTP+JSON，仅限相同 uid | `delonix_mgmt::serve_blocking`（如 `/v1/containers`、`/v1/volumes`、`/metrics` 等路由） | 仅限本地（[ADR-0010](../../adr/0010-remote-management-api.md) 否决了远程 API）；将被节点契约取代 |
 | MCP | stdio | `delonix_mcp::serve_stdio` | 本地，无租户（[ADR-0025](../../adr/0025-mcp-local-ai-control-surface.md)） |
 | Docker Engine API 切片 | 基于 unix socket 的 HTTP | `cmd::dockerapi::run` | 一个兼容性切片，位于 `delonix` 内部 |
-| **节点契约** `delonix.node.v1` | 同一个 unix socket 上的 gRPC **与** HTTP/JSON | `proto/delonix/node/v1/` | **仅契约**——尚无服务器 |
+| **节点契约** `delonix.node.v1` | 同一个 unix socket 上的 gRPC **与** HTTP/JSON，`0600` + `SO_PEERCRED` | `proto/delonix/node/v1/`；由 `delonix_node_api::serve_blocking`（`delonix serve node-api`）提供服务 | **部分提供服务**——只有 `NodeService.ListProviders`（也作为 `GET /v1/providers`）；`NodeService` 的其余 RPC 都回答 `UNIMPLEMENTED`，并点名会带来它们的那一步 |
 
 节点契约是预期中唯一的 API（[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)
 D4，[ADR-0042](../../adr/0042-one-engine-api-maturity-and-docs.md)）。`.proto` 文件是权威来源；
@@ -445,10 +455,9 @@ P3 适配器与二进制文件 → P4 providers → P5 节点 API → P6 CRI →
 
 - **P0 已完成。** 每个 crate 都位于其所属层的目录中，版本统一在 workspace 层级管理，
   且 fitness 门禁会在 CI 中运行。
-- **P1 作为一份契约已经完成，但还不是一台服务器。** `proto/delonix/node/v1/*.proto` 已存在，
-  OpenAPI 文档 `docs/api/openapi.yaml` 由它生成，`scripts/contract_gate.py` 同时守护这两者。
-  **目前还没有任何东西为这份契约提供服务**——没有任何 crate 引用 `delonix.node.v1`
-  （[ADR-0042](../../adr/0042-one-engine-api-maturity-and-docs.md) D1 也是这么说的）。
+- **P1 作为一份契约已经完成。** `proto/delonix/node/v1/*.proto` 已存在，OpenAPI 文档
+  `docs/api/openapi.yaml` 由它生成，`scripts/contract_gate.py` 同时守护这两者。服务器随 P5 到来
+  （见下文）。
 - **P2 已经开始。** `delonix-model`（共享的 `Error` 及其 `DX_*` 代码、生成的名称、退出类别、
   编号的代码字典、密钥模型，以及自 #405 起的纯数据记录 `Status`、`ContainerFw`/`FwRule` 及其
   校验器、`default_namespace` 和生命周期的 `typestate`）、`delonix-stack`（Kind 表、三路协调器、
@@ -471,15 +480,30 @@ P3 适配器与二进制文件 → P4 providers → P5 节点 API → P6 CRI →
   写入文件的适配器（`delonix-linux`、`delonix-vm`、`delonix-sdn`、`delonix-oci`、
   `delonix-volume`）被声明为例外，直到 P4 为它们提供一个 `StateRepository` 端口
   （`scripts/arch_fitness.py`）。
-- **P4 正在进行中；P5–P7 尚未开始。** ADR-0044（于 2026-09-24 被接受）决定了 P4 如何完成。
+- **P4 和 P5 正在进行中；P6–P7 尚未开始。** ADR-0044（于 2026-09-24 被接受）决定了 P4 如何完成。
   **#420** 落地了 `StateRepository<T>` 端口（`crates/foundation/delonix-model/src/ports.rs`），
   `delonix-linux` 已经在 `wait_and_record`/`stop`/`persist_stop`/`remove` 中使用它，这也是为什么
   它在 `scripts/arch_fitness.py` 中的例外只标注了阶段 `P4a`，并且只列出仍然开放的那些位置。
   **#486** 新增了 VM provider 端口（`crates/contexts/delonix-compute/src/vm_provider.rs` 中的
   `VmSpec`、`Extensions`、`Provider`、`VmProvider`，P4b 切片 1），`delonix-vm` 为两个本地后端
   实现了它（`LocalVmProvider`，`crates/adapters/delonix-vm/src/provider.rs`），做法是复用其已有的
-  `create_with`/`stop`/`start`，而不是搞第二套编排；把每个后端各自移入自己的 provider crate
-  是 P4b 切片 2。上表中其余的例外，都各自注明了移除自己的那个阶段。
+  `create_with`/`stop`/`start`，而不是搞第二套编排。**#517**（P4b 切片 2）把 `VmBackend` 端口及其
+  类型挪进了计算上下文（`vm_backend.rs`、`vm_error.rs`、`vm_firewall.rs`）；`delonix-vm` 重新导出
+  每一个名字，而 `delonix-proxmox` 现在依赖 `delonix-compute` 而不是 `delonix-vm`：它把一个
+  `BackendRegistration`（`registration()`）交给组合根，由 `bins/delonix-runtime-bin/src/cmd/vmbackends.rs`
+  注册。**#596**（P4b.3a）把后端知识从 VM 编排中拿了出来，放到三个端口之后，这三个端口声明在
+  `crates/contexts/delonix-compute/src/ports.rs` 中 —— `VmBackends`（用例眼中的注册表）、
+  `LocalDiskImages`（`qemu-img` overlay）、`SeedBuilder`（`cloud-localds` seed）——
+  并在 `crates/adapters/delonix-vm/src/local_ports.rs` 中实现；在线磁盘备份变成了
+  `VmBackend::backup_disk_live`。**#597**（P4b.3b）把用例本身挪进了
+  `crates/contexts/delonix-compute/src/vm.rs`，成为 `VmEngine` 的方法，对一个
+  `StateRepository<Vm>` 和上述端口泛型化；`delonix-vm` 每次调用都在它的 `JsonStore` 之上组装一个
+  engine，并把自己的公开函数保留为包装器，因此没有任何调用方需要改动。注册表、两个本地后端，以及
+  `delonix-vm` → `delonix-state` 这个例外，都留在适配器里，直到 P4b.4
+  （`docs/discovery/61_P4B_PLANO_MEDIDO.md`）。上表中其余的例外，都各自注明了移除自己的那个阶段。
+- **P5 已经开始。** `delonix-node-api`（#525，ADR-0050 D5）在一个 unix socket 上提供节点契约，
+  用同一批 `.proto` 文件同时提供 gRPC 和 HTTP/JSON；目前只有 `NodeService.ListProviders` 会回答。
+  `scripts/arch_fitness.py` 把它登记为取代 `delonix-mgmt` 的那个接口。
 
 ### #406 之后的记录、节点辅助函数与持久化状态
 
@@ -535,20 +559,22 @@ record::*`）；`crates/contexts/delonix-node/src/lib.rs` 与 `host.rs`；
 > 带边框的区域：上下文 crate · 实线箭头：一次经过指定端口的调用。
 
 `container run` 是参考路径：上下文通过端口做决定，而二进制文件选择由哪个适配器来响应
-每一个端口。
+每一个端口。VM 用例遵循同样的形态，只是隔了一步：`delonix-vm` 每次调用都构建一个 `VmEngine`，
+并把它自己对 VM 端口的实现交给它。
 
 ```mermaid
 flowchart LR
   CMD["delonix binary<br/><small>cmd_run and run(): composition root</small>"]
   subgraph CX["delonix-compute — context"]
     UC["use cases<br/><small>resolve_run, build_record, wire_network, launch::start</small>"]
+    VE["VM use cases<br/><small>vm::VmEngine</small>"]
   end
   HI["HostImages<br/><small>delonix-oci</small>"]
   HV["HostVolumes<br/><small>delonix-volume</small>"]
   HD["HostDevices, HostRuntime<br/><small>delonix-linux</small>"]
   HW["HostWorkload<br/><small>delonix-linux</small>"]
   HN["HostNetwork<br/><small>delonix-sdn</small>"]
-  VM["delonix-vm<br/><small>VmBackend registry</small>"]
+  VM["delonix-vm<br/><small>registry, local backends, local_ports</small>"]
   HVN["HostVmNetwork<br/><small>delonix-sdn</small>"]
   CMD -->|"calls with the adapters"| UC
   UC -->|"ImageStore"| HI
@@ -556,9 +582,11 @@ flowchart LR
   UC -->|"DeviceResolver, RunHost"| HD
   UC -->|"NetworkProvider"| HN
   UC -->|"WorkloadRuntime"| HW
-  CMD -->|"set_network, register_backend"| VM
-  VM -->|"VmNetwork"| HVN
-  class CMD,UC,HI,HV,HD,HW,HN,VM,HVN block
+  CMD -->|"set_network, register_backend, create_with…"| VM
+  VM -->|"builds per call"| VE
+  VE -->|"VmBackends, LocalDiskImages, SeedBuilder"| VM
+  VE -->|"VmNetwork"| HVN
+  class CMD,UC,VE,HI,HV,HD,HW,HN,VM,HVN block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -567,7 +595,9 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 
 端口：`crates/contexts/delonix-compute/src/ports.rs`（`ImageStore`、`StorageProvider`、
-`DeviceResolver`、`RunHost`、`VmNetwork`、`NetworkProvider`）与 `launch.rs`（`WorkloadRuntime`）。
+`DeviceResolver`、`RunHost`、`VmNetwork`、`NetworkProvider`、`VmBackends`、`LocalDiskImages`、
+`SeedBuilder`）与 `launch.rs`（`WorkloadRuntime`）。VM 用例：`vm.rs`（`VmEngine`）；它们的适配器
+一侧：`crates/adapters/delonix-vm/src/local_ports.rs` 以及 `src/lib.rs` 中的 `engine`。
 实现：`delonix-oci/src/run_images.rs`、`delonix-volume/src/lib.rs`、
 `delonix-linux/src/{cdi,run_host,workload}.rs`、`delonix-sdn/src/{run_network,vm_network}.rs`。
 接线：`bins/delonix-runtime-bin/src/cmd/container.rs::cmd_run` 与
@@ -590,9 +620,13 @@ flowchart TB
   MG["delonix-mgmt<br/><small>HTTP router, dashstats</small>"]
   MC["delonix-mcp<br/><small>MCP tools, audit log</small>"]
   CX["contexts<br/><small>compute, stack, security-runtime</small>"]
-  AD["adapters and providers<br/><small>linux, oci, sdn, vm, volume, scanner, proxmox, truenas</small>"]
+  NB["delonix-node-api-bin<br/><small>executable delonix-node-api</small>"]
+  NA["delonix-node-api<br/><small>gRPC + HTTP/JSON of delonix.node.v1</small>"]
+  AD["adapters and providers<br/><small>linux, oci, sdn, vm, volume, scanner, proxmox, opnsense, truenas</small>"]
   ST["delonix-state<br/><small>Store, SecretStore</small>"]
   MB -->|"serve_blocking"| MG
+  NB -->|"serve_blocking"| NA
+  NA -->|"provider reports for ListProviders"| AD
   PB -->|"serve_stdio"| MC
   RB -->|"dashstats::collect for dashboard"| MG
   MC -->|"dashstats — declared exception until P5"| MG
@@ -604,7 +638,7 @@ flowchart TB
   MC -->|"reads VMs, volumes, networks"| AD
   CRI -->|"container records"| ST
   MG -->|"container records, secret count"| ST
-  class RB,MB,PB,CRI,MG,MC,CX,AD,ST block
+  class RB,MB,PB,NB,CRI,MG,MC,NA,CX,AD,ST block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -861,8 +895,8 @@ flowchart TB
    （`delonix-sdn`）、`newuidmap`/`newgidmap`（`delonix-linux`、`pin_userns`）、
    `qemu-img`、`virsh`、`cloud-localds`（`delonix-vm`）、用于 systemd 临时作用域的
    `busctl`（`delonix-linux`）、`ssh`/`scp`（`cmd/remote.rs`）。
-6. **面向远程管理系统的 HTTP 只存在于 providers 中。** `delonix-proxmox` 和
-   `delonix-truenas` 为此依赖 `reqwest`。另有两个适配器出于其他原因也会说 HTTP：
+6. **面向远程管理系统的 HTTP 只存在于 providers 中。** `delonix-proxmox`、
+   `delonix-opnsense` 和 `delonix-truenas` 为此依赖 `reqwest`。另有两个适配器出于其他原因也会说 HTTP：
    `delonix-oci` 有自己的 OCI 镜像仓库客户端（`src/registry.rs`，其 `Cargo.toml` 中有
    `reqwest`），`delonix-telemetry` 通过 HTTP 导出 OTLP。没有任何上下文 crate 会这样做。
 
@@ -1011,8 +1045,11 @@ sequenceDiagram
 
 ## 已知限制
 
-> **注意——节点契约尚未被提供服务。** `proto/delonix/node/v1` 已经有门禁并会生成 OpenAPI，
-> 但没有任何进程会响应它。今天的各种集成使用的是 CLI、CRI、本地管理 API 或 MCP。
+> **注意——节点契约只部分提供了服务。** `delonix-node-api` 会回答 `NodeService.ListProviders`
+> （gRPC，以及作为 HTTP/JSON 的 `GET /v1/providers`）；`NodeService` 的其余每个 RPC 都回答
+> `UNIMPLEMENTED`，契约里的其他服务也没有注册在这个 socket 上。HTTP 路由目前是按 RPC 手写的；
+> 一个基于 `google.api.http` 注解的通用转码器是 ADR-0042 的下一步。其余一切，今天的各种集成
+> 使用的仍是 CLI、CRI、本地管理 API 或 MCP。
 
 > **注意——服务器仍然依靠运行 CLI。** `delonix-cri`、`delonix-mgmt` 和 `delonix-mcp` 都是
 > 通过重新执行 `delonix` 来启动工作负载的。这样做把 `clone` 挡在了多线程进程之外，代价是
@@ -1020,9 +1057,11 @@ sequenceDiagram
 
 > **注意——适配器仍然直接访问状态文件。** `delonix-linux`、`delonix-vm`、`delonix-sdn`、
 > `delonix-oci` 和 `delonix-volume` 作为已声明的例外依赖 `delonix-state`。移除这些例外所需的
-> `StateRepository` 端口自 #420 起就已存在（`delonix-model/src/ports.rs`，ADR-0044 D6），
-> 但到目前为止，只有 `delonix-linux` 在其生命周期的一部分中通过它访问；其余四个在各自的
-> P4 切片落地之前，仍然直接打开这些 store。
+> `StateRepository` 端口自 #420 起就已存在（`delonix-model/src/ports.rs`，ADR-0044 D6）。
+> `delonix-linux` 在其生命周期的一部分中通过它访问，而 `delonix-compute` 中的 VM 用例只看得到一个
+> `StateRepository<Vm>` —— 但 `delonix-vm` 仍然自己打开交给它们的那个 `JsonStore`（并自己写
+> libvirt XML 和默认后端文件），所以它的例外要保留到 P4b.4。其余三个在各自的 P4 切片落地之前，
+> 仍然直接打开这些 store。
 
 > **注意——`macvlan`/`ipvlan` 只是被声明，并未被实现。** `network create` 会记录它们，并报告
 > `Realized=False`，原因是 `DriverNotImplemented`
@@ -1052,12 +1091,14 @@ sequenceDiagram
 | 进程创建、命名空间、rootfs、seccomp、cgroup | `delonix-linux/src/lib.rs`（`spawn`、`container_init`、`setup_rootfs`、`setup_cgroup`）、`supervise.rs`、`launch_spec.rs` |
 | 无根网络 | `delonix-sdn/src/infra.rs`（`ensure_up`、`control_main`、`attach_container`、`publish_port`、`ingress_table_ruleset`、`fw_chain_body`）、`pin_userns.rs`、`ipam.rs` |
 | 镜像 | `delonix-oci/src/{registry,cas,image,overlay,build}.rs` |
-| 虚拟机 | `delonix-vm/src/lib.rs`（`VmBackend`、`builtin_backends`、`register_backend`、`select_backend`）、`cloudinit.rs`；`cmd/vm.rs`、`cmd/vmimage.rs` |
+| 虚拟机 | `delonix-compute/src/vm.rs`（`VmEngine`，即用例）、`vm_backend.rs`（`VmBackend`）、`ports.rs`（`VmBackends`、`LocalDiskImages`、`SeedBuilder`）；`delonix-vm/src/lib.rs`（`builtin_backends`、`register_backend`、`select_backend`、`select_for_create`、`engine`）、`local_ports.rs`、`cloudinit.rs`；`cmd/vm.rs`、`cmd/vmimage.rs`、`cmd/vmbackends.rs` |
+| 远程节点上的系统容器 | `delonix-compute/src/system_container.rs`（`SystemContainerProvider`）；`delonix-proxmox/src/lxc.rs`；`cmd/system_container.rs` |
 | 声明式 apply | `delonix-stack/src/{kinds,reconcile}.rs`；`cmd/stack.rs`、`cmd/manifest.rs` |
 | 记录、错误、持久化状态 | `delonix-compute/src/record.rs`（`Container`、`Vm`）、`delonix-model/src/{records,error,exitcode}.rs`、`delonix-state/src/{store,secret}.rs` |
 | CRI | `delonix-cri/src/lib.rs::serve_blocking`、`runtime_svc.rs`、`runtime_svc/lifecycle.rs` |
 | 管理 API / MCP | `delonix-mgmt/src/lib.rs`、`delonix-mcp/src/lib.rs` |
-| 节点契约 | `proto/delonix/node/v1/`、`scripts/contract_gate.py`、`docs/api/openapi.yaml` |
+| 节点契约 | `proto/delonix/node/v1/`、`scripts/contract_gate.py`、`docs/api/openapi.yaml`；服务器在 `delonix-node-api/src/{lib,service,providers}.rs` |
+| Provider 及其能力 | `delonix-compute/src/capability.rs`（目录）、`cmd/provider.rs`（`provider ls/describe/matrix`）、`cmd/providers_config.rs`（`providers.yaml`，ADR-0054） |
 | 架构规则 | `scripts/arch_fitness.py`、ADR-0040 |
 
 ---

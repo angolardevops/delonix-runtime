@@ -12,7 +12,7 @@ delonix vm build -f images/<folder>/vm.yaml -t <version>
 |---|---|---|
 | [`ubuntu`](ubuntu/README.md) · [`debian`](debian/README.md) · [`rocky`](rocky/README.md) · [`fedora`](fedora/README.md) | a cloud image with a user, a file, an env var, removals and cleanup | custom recipe, builds **offline** |
 | [`opnsense`](opnsense/README.md) · [`proxmox`](proxmox/README.md) · [`truenas`](truenas/README.md) | vendor appliances (no cloud-init) | runs a builder from `scripts/appliances/` |
-| [`openstack`](openstack/README.md) · [`monitoring`](monitoring/README.md) · [`carbonio`](carbonio/README.md) · [`glpi`](glpi/README.md) · [`wazuh`](wazuh/README.md) | a cloud image with software installed | runs a builder from `scripts/appliances/` |
+| [`openstack`](openstack/README.md) · [`monitoring`](monitoring/README.md) · [`carbonio`](carbonio/README.md) · [`glpi`](glpi/README.md) · [`wazuh`](wazuh/README.md) · [`freepbx`](freepbx/README.md) | a cloud image with software installed | runs a builder from `scripts/appliances/` |
 
 `vm.yaml` is to `vm build` what a `compose.yaml` is to `docker compose`; a
 `VMfile` is the `Dockerfile`. The schema and its rules are in
@@ -69,6 +69,7 @@ but cannot prove the recipe acted.
 | `carbonio` | 6 GiB | 50 GiB | the build allows 90 minutes |
 | `glpi` | 4 GiB | 12 GiB | |
 | `wazuh` | 6 GiB | 30 GiB | |
+| `freepbx` | 4 GiB | 20 GiB | the build allows 60 minutes; per-clone secrets on first boot |
 
 A host that does not have the RAM or disk gets a **skip with the numbers**, not
 a half-built image. Appliance builds download vendor media and verify its

@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:f470b9ea6a07512b9a9ee765fca92576da6b3cd2821a717e16d245a31ad5caff -->
 # IaaS e cloud native — onde o motor encaixa
 
 **Antes de leres:** [Começa aqui](start-here.md#what-delonix-is-5-minutes) (as quatro frases sobre o que é o Delonix). Ainda não precisas de conhecimento de kernel nem de Rust.
@@ -132,9 +132,11 @@ Onde cada elemento vive no código:
   (`cas.rs`).
 - **Kernel** — `crates/adapters/delonix-linux` (processos, namespaces, cgroups, mounts) e
   `crates/adapters/delonix-sdn` (bridges, nftables, DNS).
-- **Hipervisores** — o trait `VmBackend` em `crates/adapters/delonix-vm/src/lib.rs`.
-- **Providers remotos** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted e implementado)
-  e `crates/providers/delonix-truenas` (ADR-0009, Accepted). Um backend OpenStack é ainda só uma
+- **Hipervisores** — o trait `VmBackend` em `crates/contexts/delonix-compute/src/vm_backend.rs`,
+  implementado pelos backends locais em `crates/adapters/delonix-vm/src/lib.rs`.
+- **Providers remotos** — `crates/providers/delonix-proxmox` (ADR-0008, Accepted e implementado),
+  `crates/providers/delonix-opnsense` (ADR-0051) e `crates/providers/delonix-truenas` (ADR-0009,
+  Accepted). Um backend OpenStack é ainda só uma
   proposta (ADR-0039, Proposed, condicionado a um spike).
 - **Registo** — `crates/adapters/delonix-oci/src/registry.rs`.
 
@@ -162,11 +164,13 @@ O Delonix Runtime é a **camada de execução de nó** da figura acima. Num nó,
   suas regras já são impostas por `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
 - expõe as **mesmas operações através de várias portas**: a CLI, o contrato de nó, o CRI e o MCP.
 
-Uma ressalva sobre o contrato de nó, para não ires à procura de um servidor que não existe:
+Uma ressalva sobre o contrato de nó, para não esperares do servidor mais do que ele responde:
 `proto/delonix/node/v1/node.proto` está marcado como *DRAFT contract for ADR-0040*. O contrato, o
 `docs/api/openapi.yaml` gerado a partir dele, e o seu gate de CI (`scripts/contract_gate.py`)
-existem; nenhum crate serve ainda o `NodeService`. O ADR-0042 (**Accepted**, passos A e B
-entregues) fixa como essa API é versionada e documentada quando o servidor chegar.
+existem, e o `delonix serve node-api` (`crates/interfaces/delonix-node-api`) serve-o num socket
+local — mas hoje só o `NodeService.ListProviders` responde; os outros RPCs respondem
+`UNIMPLEMENTED`. O ADR-0042 (**Accepted**; passos A e B entregues, passo C começado com este
+servidor) fixa como essa API é versionada e documentada à medida que mais dela é servida.
 
 ### O que deliberadamente não faz
 
@@ -255,7 +259,7 @@ comando não é uma capacidade de plataforma.
 **No Delonix.** As mesmas operações são expostas pela CLI, pelo CRI (`delonix serve cri`,
 `crates/interfaces/delonix-cri`), pelo socket de gestão local (`crates/interfaces/delonix-mgmt`),
 pelo servidor MCP (`delonix mcp serve`, `crates/interfaces/delonix-mcp`) e pelo contrato de nó
-(`proto/delonix/node/v1/`, rascunho). O contrato é a fonte de verdade tanto para as suas
+(`proto/delonix/node/v1/`, rascunho, servido em parte por `crates/interfaces/delonix-node-api`). O contrato é a fonte de verdade tanto para as suas
 codificações gRPC como HTTP/JSON, e o `docs/api/openapi.yaml` é gerado a partir dele, nunca editado
 à mão (`scripts/contract_gate.py`). O ADR-0040 (**Proposed**) regista honestamente a lacuna de
 hoje: várias destas portas ainda voltam a correr o binário da CLI como subprocesso em vez de
@@ -313,7 +317,8 @@ providers, interfaces e binários, e o directório é a camada (`crates/foundati
 `crates/contexts/`, `crates/adapters/`, `crates/providers/`, `crates/interfaces/`, `bins/`). A
 direcção permitida está escrita uma vez, em `ALLOWED` em `scripts/arch_fitness.py`, e a CI
 impõe-na. As portas são traits em `crates/contexts/delonix-compute/src/ports.rs` e `VmBackend` em
-`delonix-vm`; o ADR-0008 (**Accepted**) tornou os backends de VM registáveis, que é como um nó
+`vm_backend.rs` do mesmo crate; os casos de uso de VM que as chamam são o `VmEngine` em `vm.rs`, e
+o `delonix-vm` implementa as portas para este nó. O ADR-0008 (**Accepted**) tornou os backends de VM registáveis, que é como um nó
 Proxmox remoto se tornou mais um backend.
 
 **O que te pede.** Um provider novo entra como implementação de uma porta. Um crate novo entra na

@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/project-structure.html">Lire la page en anglais</a></span></div><h1 id="project-structure">Structure du projet</h1>
+<h1 id="project-structure">Structure du projet</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html">Cloner, compiler et tester</a> — vous avez un checkout qui compile, et vous savez quels gates existent.</p>
 <p>Cette page est la carte du dépôt : ce qu’est chaque fichier et répertoire de premier niveau, qui le
 modifie et quand, et quelles parties sont <strong>générées</strong> et ne doivent jamais être éditées à la main.
@@ -254,7 +254,7 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
 │   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
@@ -448,7 +448,7 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Contextes bornés avec les cas d’usage : Compute, avec les enregistrements <code>Container</code> et <code>Vm</code> (<code>delonix-compute</code>), les propres assistants du nœud — journal d’événements, vérifications d’hôte et de processus, répartition serveur (<code>delonix-node</code>) —, Stack — Kinds, réconciliateur, révisions (<code>delonix-stack</code>) — et les décisions de sécurité du nœud (<code>delonix-security-runtime</code>).</td>
+<td>Contextes bornés avec les cas d’usage : Compute, avec les enregistrements <code>Container</code> et <code>Vm</code>, le cas d’usage <code>container run</code> et les cas d’usage des VM (<code>delonix-compute</code>), les propres assistants du nœud — journal d’événements, vérifications d’hôte et de processus, répartition serveur (<code>delonix-node</code>) —, Stack — Kinds, réconciliateur, révisions (<code>delonix-stack</code>) — et les décisions de sécurité du nœud (<code>delonix-security-runtime</code>).</td>
 <td>Fonctionnalités qui changent ce que le moteur décide.</td>
 <td><a href="crates.html">Les crates</a></td>
 </tr>
@@ -460,8 +460,8 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>Systèmes distants derrière un port : un nœud Proxmox VE en tant que <code>VmBackend</code> (<code>delonix-proxmox</code>) et le provisionnement TrueNAS (<code>delonix-truenas</code>).</td>
-<td>Changements à une intégration de provider ; un nouveau provider entre ici comme implémentation d’un port.</td>
+<td>Systèmes distants derrière un port : un nœud Proxmox VE en tant que <code>VmBackend</code> et <code>SystemContainerProvider</code>, son pare-feu par invité et son SDN (<code>delonix-proxmox</code>), une appliance OPNsense en tant que <code>GatewayProvider</code> (<code>delonix-opnsense</code>), et le provisionnement TrueNAS (<code>delonix-truenas</code>).</td>
+<td>Changements à une intégration de provider ; un nouveau provider entre ici comme implémentation d’un port.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
 <tr>
@@ -612,9 +612,9 @@ par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/m
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>, le JSON Schema du manifeste, <strong>généré</strong> depuis le code (ADR-0007).</td>
-<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> quand un type de manifeste change.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
+<td><code>v1/delonix.json</code>, le JSON Schema du manifeste, <strong>généré</strong> depuis le code (ADR-0007), et <code>v1/providers.json</code>, le JSON Schema du fichier des providers du nœud (ADR-0054).</td>
+<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> quand un type de manifeste change ; <code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code> quand le fichier des providers change.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0054-provider-configuration-file.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -631,7 +631,7 @@ par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/m
 <tbody>
 <tr>
 <td><code>scripts/</code></td>
-<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>) avec leurs bases de référence (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>), des générateurs (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), des harnais (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), l’installateur <code>install.sh</code>, des builds d’images d’appliance dans <code>appliances/</code>, et des sondes de spike dans <code>spikes/</code>.</td>
+<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>, <code>tmp_roots_gate.py</code>) avec leurs bases de référence (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>, <code>tmp_roots_baseline.json</code>), des générateurs (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), des harnais (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), l’installateur <code>install.sh</code>, des builds d’images d’appliance dans <code>appliances/</code>, et des sondes de spike dans <code>spikes/</code>.</td>
 <td>Quiconque a un changement qui déplace un ratchet (abaisse la base de référence dans le même commit) ; les mainteneurs pour le reste.</td>
 <td><a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
@@ -711,6 +711,18 @@ les deux — et attendez-vous à ce que la CI échoue si vous éditez la sortie 
 <td>job <code>test</code>, test <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
 </tr>
 <tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
+<td><code>v1/providers.json</code></td>
+<td><code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code></td>
+<td>job <code>test</code>, test <code>the_published_providers_schema_is_the_generated_one</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>providers_config.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/providers" target="_blank" rel="noopener"><code>docs/providers/</code></a></td>
+<td><code>capability-matrix.md</code></td>
+<td><code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code></td>
+<td>job <code>test</code>, test <code>the_published_matrix_is_the_generated_one</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/provider.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>provider.<wbr>rs</code></a></td>
+</tr>
+<tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
 <td>chaque page</td>
 <td><code>python3 docs/gen.py</code> (nécessite <code>cargo build --release -p delonix-runtime-bin</code>)</td>
@@ -748,9 +760,9 @@ les deux — et attendez-vous à ce que la CI échoue si vous éditez la sortie 
 </tr>
 <tr>
 <td><code>scripts/</code></td>
-<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code></td>
-<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code></td>
-<td>jobs <code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code></td>
+<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>tmp_roots_baseline.json</code></td>
+<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code>, <code>tmp_roots_gate.<wbr>py --dir &lt;dir&gt; --update</code></td>
+<td>jobs <code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code> ; le job <code>test</code> pour <code>tmp_roots_gate.py</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>

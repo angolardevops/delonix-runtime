@@ -604,7 +604,9 @@ Kubernetes API compatibility.</p>
   convergence, teardown). Reconciler: <code>src/reconcile.rs</code>.</li>
 <li>Published schema: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>.</li>
 <li>Node contract: <code>proto/delonix/node/v1/*.proto</code>, with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> generated and
-  checked by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>.</li>
+  checked by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>. Served in part by <code>delonix serve node-api</code>
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>): <code>NodeService.ListProviders</code> as gRPC and as
+  <code>GET /v1/providers</code>; the other RPCs answer <code>UNIMPLEMENTED</code>.</li>
 </ul>
 <p><strong>Conformance status / gaps.</strong> Gated by CI (the schema test, <code>contract_gate.py</code>), not by an
 external suite. See <a href="architecture.html">Architecture</a> and <a href="system-design-interview.html">System design</a>.</p>

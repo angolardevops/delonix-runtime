@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:40e8ce16ae06683b26d6f4cd83f6266c6b58c55570381c2f91aee3bb1d09acc5 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
 # Delonixfile et VMfile
 
 **Avant de lire :** [Cloner, construire et tester](build-and-test.md) (un binaire et une racine d'état isolée) et [Images OCI, stockage adressé par contenu et overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) dans le manuel de cloud native.
@@ -403,8 +403,9 @@ rien à hériter, et le code refuse de deviner).
 
 `vm create` applique les valeurs par défaut enregistrées uniquement là où l'appelant n'a pas décidé :
 les options `--vcpus`/`--memory` l'emportent sur `VCPUS`/`MEMORY` ; pour le backend, `--backend` >
-le `HYPERVISOR` de l'image > `DELONIX_VM_BACKEND` > `vm default-backend` > auto-détection
-(`resolve_vm_defaults` dans `cmd/vm.rs`, et `delonix_vm::create_with`).
+le `HYPERVISOR` de l'image > `DELONIX_VM_BACKEND` > le `defaultProvider` du nœud (fichier des
+providers, que `vm default-backend --set` écrit) > l'ancien défaut par racine > auto-détection
+(`resolve_vm_defaults` dans `cmd/vm.rs`, et `delonix_vm::standing_backend_choice`).
 
 **Hors ligne par défaut, et pourquoi.** Un `RUN` qui accède à Internet produit une image différente
 selon le moment où il s'est exécuté. `--network` est opt-in, car la chose la plus courante que veut

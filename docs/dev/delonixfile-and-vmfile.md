@@ -383,8 +383,9 @@ code refuses to guess).
 
 `vm create` applies the recorded defaults only where the caller did not decide: `--vcpus`/`--memory`
 flags win over `VCPUS`/`MEMORY`; for the backend, `--backend` > the image's `HYPERVISOR` >
-`DELONIX_VM_BACKEND` > `vm default-backend` > auto-detection (`resolve_vm_defaults` in `cmd/vm.rs`,
-and `delonix_vm::create_with`).
+`DELONIX_VM_BACKEND` > the node's `defaultProvider` (providers file, which `vm default-backend --set`
+writes) > the legacy per-root default > auto-detection (`resolve_vm_defaults` in `cmd/vm.rs`, and
+`delonix_vm::standing_backend_choice`).
 
 **Offline by default, and why.** A `RUN` that reaches the internet produces a different image
 depending on when it ran. `--network` is opt-in because the most common thing a VMfile wants is to

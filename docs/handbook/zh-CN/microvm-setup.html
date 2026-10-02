@@ -343,11 +343,12 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot; &quot;$T
 <hr />
 <h2 id="2-backends-and-how-one-is-chosen">2. 后端及其选取方式<a class="hanchor" href="#2-backends-and-how-one-is-chosen" aria-label="#">#</a></h2>
 <h3 id="the-port-and-the-registry">端口与注册表<a class="hanchor" href="#the-port-and-the-registry" aria-label="#">#</a></h3>
-<p><code>VmBackend</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）是每一个 hypervisor 都要实现的端口：
+<p><code>VmBackend</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>，由 <code>delonix-vm</code> 重新导出）是每一个 hypervisor 都要实现的端口：
 <code>id</code>、<code>available</code>、<code>boot</code>、<code>is_running</code>、<code>ip</code>、<code>stop</code>，再加上一批有默认实现的方法
 （<code>destroy</code>、<code>pause</code>、<code>unpause</code>、<code>resume</code>、<code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>、
 <code>preserve_snapshots</code>、<code>ip_is_predicted</code>、<code>manages_own_storage</code>、<code>auto_selectable</code>、
-<code>disk_health</code>）。一个无法兑现的默认实现会带着一条消息 <strong>fail closed</strong>（失败即拒绝），
+<code>disk_health</code>，以及较新的 <code>current_handle</code>、<code>resize_cold</code>、<code>guest_info</code>、<code>move_to_node</code>、
+<code>update_cloud_init</code>、<code>apply_firewall</code>/<code>read_firewall</code>）。一个无法兑现的默认实现会带着一条消息 <strong>fail closed</strong>（失败即拒绝），
 而绝不会悄悄地什么都不做。</p>
 <p>各个后端存放在一个注册表（<code>BACKENDS</code>）里，而不是一个 <code>match</code> 里：</p>
 <div class="tablewrap"><table>
@@ -386,14 +387,22 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot; &quot;$T
 对一台已存在的虚拟机，<code>backend_for</code> 会解析出记录下来的那个后端，一个未知的名字是一个
 <strong>错误</strong>（它以前会回退到 CH）。</p>
 <h3 id="selection-precedence-for-a-new-vm">新建虚拟机时的选取优先级<a class="hanchor" href="#selection-precedence-for-a-new-vm" aria-label="#">#</a></h3>
-<p>来自 <code>delonix_vm::create_with</code> 和 <code>resolve_vm_defaults</code>（<code>cmd/vm.rs</code>），第一个命中的生效：</p>
+<p>来自 <code>resolve_vm_defaults</code>（<code>cmd/vm.rs</code>）和 <code>select_for_create</code>
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>，VM 用例经由 <code>VmBackends::select</code> 调用到它），
+第一个命中的生效：</p>
 <ol>
 <li><code>--backend</code>（或者清单里的 <code>backend:</code>）。</li>
 <li>镜像自己的 <code>HYPERVISOR</code>（由一次 VMfile 构建记录下来），前提是 <code>--disk</code> 指向的是一个本地
    镜像。</li>
 <li><code>DELONIX_VM_BACKEND</code>（整个会话范围）。</li>
-<li><code>delonix vm default-backend --set &lt;backend&gt;</code>（整台机器范围，存放在
-   <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>）。</li>
+<li>节点 providers 文件（<code>providers.yaml</code>，ADR-0054）里的 <code>defaultProvider</code>，由
+   <code>delonix vm default-backend --set &lt;backend&gt;</code> 写入。查找顺序是 <code>DELONIX_PROVIDERS_CONFIG</code>，
+   否则 <code>$XDG_CONFIG_HOME/delonix/providers.yaml</code>（或 <code>~/.config/…</code>），否则
+   <code>/etc/delonix/providers.yaml</code>；第一个找到的胜出。一个读不了的文件会让不带 <code>--backend</code> 的 VM
+   请求失败，而不是去猜；一个本进程无法提供的默认值（没有目标的 <code>proxmox</code>）会点名失败，而不是
+   退回到一个本地 hypervisor。</li>
+<li>旧的按根目录保存的默认值 <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>，来自 providers 文件出现之前；
+   <code>vm default-backend</code> 会说明答案何时来自它，而 <code>--set</code> 会把它挪进文件。</li>
 <li>能力启发式规则：有 <code>volumes</code> ⇒ <code>libvirt</code>（只有 libvirt 支持 virtio-9p）；一个没有
    <code>--kernel</code> 的云镜像 ⇒ <strong>如果 libvirt 可用</strong>就选 <code>libvirt</code>；否则走自动检测——选中第一个
    已安装、且标记为可自动选取的已注册后端（先 CH，再 libvirt）。</li>
@@ -404,15 +413,26 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot; &quot;$T
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">$ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+error[DX-1503] invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 </code></pre></div>
+<p><code>delonix provider config validate</code> 在不联系任何东西的前提下，检查这个文件以及它指向的东西（一个只有
+属主可读的 token 文件、一个确实存在的 CA）；<code>delonix provider config schema</code> 打印它的 JSON Schema。</p>
 <h3 id="proxmox-ve-remote">Proxmox VE（远程）<a class="hanchor" href="#proxmox-ve-remote" aria-label="#">#</a></h3>
-<p>当通过环境变量做了配置时，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a>
-会在启动时注册 Proxmox 后端（配置有误只是一条警告，绝不会让无关的命令因此失败）：</p>
+<p>当做了配置时——通过 providers 文件里的一个 <code>type: proxmox</code> 条目，或者通过下面的环境变量——
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> 会在启动时注册 Proxmox 后端
+（配置有误只是一条警告，绝不会让无关的命令因此失败）。<code>DELONIX_PROXMOX_*</code> 变量的完整列表，包括
+基于文件的凭据（<code>DELONIX_PROXMOX_TOKEN_FILE</code>、<code>DELONIX_PROXMOX_PASSWORD_FILE</code>）以及本地镜像
+上传到的存储（<code>DELONIX_PROXMOX_IMPORT_STORAGE</code>、<code>DELONIX_PROXMOX_DISK_STORAGE</code>），见
+<a href="environment-variables.html#proxmox-ve">环境变量 § Proxmox VE</a>：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -427,7 +447,7 @@ default backend cleared (falls back to auto-detection)
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_NODE</code></td>
-<td>必填。这个后端所对应的那唯一一个节点（就是 <code>GET /nodes</code> 里给它起的名字）。</td>
+<td>必填。这个后端通过它连接的那个节点（就是 <code>GET /nodes</code> 里给它起的名字）；之后每台 VM 都在它实际运行所在的集群节点上被寻址（ADR-0053）。</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_SECRET</code></td>
@@ -457,9 +477,10 @@ default backend cleared (falls back to auto-detection)
 </table></div>
 <p>没有配置的情况下，<code>--backend proxmox</code> 会回答说这个后端"在这次构建里不可用"，并说明该
 设置什么（<em>已运行</em>）。这个后端拥有自己的存储（<code>manages_own_storage</code>），所以不会生成本地
-overlay 或 NoCloud seed；<code>--hostname</code>/<code>--ssh-key</code> 会被送到节点自己的 cloud-init 里，而
-<code>--user-data</code> 会被拒绝。设计与限制：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>。一个
-OpenStack 后端<strong>仅仅是提议阶段</strong>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）；还没有
+overlay 或 NoCloud seed；一个指向引擎自己存储里某个镜像的 <code>--disk</code> 会被上传到节点的导入存储，
+并以它创建 VM（ADR-0057）；<code>--hostname</code>/<code>--ssh-key</code> 会被送到节点自己的 cloud-init 里，而
+<code>--user-data</code> 会被拒绝。设计与限制：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>。一个
+OpenStack 后端<strong>仅仅是提议阶段</strong>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>）；还没有
 任何代码。</p>
 <hr />
 <h2 id="3-images">3. 镜像<a class="hanchor" href="#3-images" aria-label="#">#</a></h2>
@@ -524,7 +545,7 @@ build 两部分，例如 <code>42-1.1</code>）、<code>--k8s-version</code>、<
 <code>vm.yaml</code>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> 会在一个隔离的 <code>DELONIX_ROOT</code> 里构建它们，并把 qcow2
 读回来做核实（<code>--self-test</code> 证明它的检查确实能失败）。软件包安装、黄金配方的各个
 profile、启动构建出来的镜像，以及 appliance 构建器，都<strong>还没有被验证过</strong>（v4.2.0 发布
-说明）。镜像构建只支持 amd64（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>）。</p>
+说明）。镜像构建只支持 amd64（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>）。</p>
 <h3 id="converting-and-importing">转换与导入<a class="hanchor" href="#converting-and-importing" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
 delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
@@ -540,7 +561,8 @@ delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 
   --backend cloud-hypervisor --vcpus 2 --memory 2G \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 </code></pre></div>
-<p>发生了什么（<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>）：</p>
+<p>发生了什么（<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>，一个包装器：它在本节点的端口之上构建一个
+<code>delonix_compute::vm::VmEngine</code>，并调用其 <code>create_with</code>）：</p>
 <ol>
 <li>在解析任何镜像之前，先强制执行<strong>节点策略</strong>（<code>policy::enforce</code>）。</li>
 <li><strong>磁盘解析</strong>（<code>resolve_image_ref</code>）：<code>--url-img</code> 优先（下载、缓存，并在提供了
@@ -555,7 +577,9 @@ delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 
    除 <code>default</code> 以外的 <code>--namespace</code> 会被拒绝（这台虚拟机活在 <code>virbr0</code> 上，在 Delonix SDN
    之外）。</li>
 <li><strong>Overlay</strong>：<code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>，一个叠在 base 之上的瘦身 qcow2
-   （<code>prepare_local_overlay</code>）；<code>--disk-size &lt;GiB&gt;</code> 可以把它撑大，但不能比 base 还小。</li>
+   （<code>LocalDiskImages</code> 端口，由 <code>QemuImgDisks</code> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>
+   里的 <code>prepare_local_overlay</code> 实现；对于自己管理存储的后端会跳过这一步）；<code>--disk-size &lt;GiB&gt;</code>
+   可以把它撑大，但不能比 base 还小。</li>
 <li><strong>启动</strong>：调用该后端的 <code>boot</code>。<code>create</code> 是幂等的：一台已存在且正在运行的虚拟机会被原样
    返回。</li>
 </ol>
@@ -610,7 +634,7 @@ delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 
 </tr>
 <tr>
 <td><code>delonix vm migrate &lt;name&gt; --host &lt;h&gt; --network &lt;n&gt;</code></td>
-<td>通过 SSH 对另一台宿主机做 stop-copy-start；有真实停机时间（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> 说明了为什么实时迁移不在范围内）</td>
+<td>通过 SSH 对另一台宿主机做 stop-copy-start；有真实停机时间（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> 说明了为什么实时迁移不在范围内）</td>
 </tr>
 <tr>
 <td><code>delonix vm prune</code></td>
@@ -654,7 +678,7 @@ define 它都会变）。</p>
 <p><code>kind: VirtualMachine</code>（<code>compute.delonix.io/v1alpha1</code>）映照着 <code>vm create</code>；一份带完整注释
 的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>。带 <code>type: microvm</code> 的 <code>kind: Workload</code> 会降解为一个
 <code>VirtualMachine</code>，后端被<strong>强制</strong>为 <code>cloud-hypervisor</code>；要求换成别的后端是一个错误
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>）。下面两个都在一个临时根目录里
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>）。下面两个都在一个临时根目录里
 <em>运行过</em>：</p>
 <div class="code"><div class="code-head"><span class="lang">yaml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-yaml">apiVersion: compute.delonix.io/v1alpha1
 kind: VirtualMachine
@@ -837,8 +861,20 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 </thead>
 <tbody>
 <tr>
-<td>端口、注册表、CH 和 libvirt 后端、<code>create_with</code>、快照、固件查找</td>
+<td>端口</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>VM 用例（<code>VmEngine</code>：create、stop、start、status、list、remove、快照、day-2 动词）及其端口（<code>VmBackends</code>、<code>LocalDiskImages</code>、<code>SeedBuilder</code>）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a>、<code>ports.rs</code></td>
+</tr>
+<tr>
+<td>注册表、CH 和 libvirt 后端、后端选择、固件查找、公开的包装器（<code>create_with</code>、<code>stop</code>……）</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>适配器对 VM 端口的实现（<code>RegistryBackends</code>、<code>QemuImgDisks</code>、<code>CloudLocaldsSeed</code>）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>NoCloud seed 的生成</td>
@@ -879,7 +915,7 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 </tbody>
 </table></div>
 <h3 id="adding-a-backend">新增一个后端<a class="hanchor" href="#adding-a-backend" aria-label="#">#</a></h3>
-<p>先读 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>；它就是模板。简单说：</p>
+<p>先读 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>；它就是模板。简单说：</p>
 <ul>
 <li>如果要对接一个远程 API，就把 <code>VmBackend</code> 实现在<strong>它自己的 crate</strong> 里（这样引擎 crate 就
   不会沾上 HTTP 客户端），放在它所属层的目录下，并登记进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>
@@ -892,7 +928,7 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 <li>不支持的动词就让它们停留在 fail-closed 的默认实现上；在创建任何东西之前，先按名字拒绝
   不支持的 <code>VmConfig</code> 字段。</li>
 <li>不要发布一个从没被人看着它启动过虚拟机的后端。新的后端和 hypervisor 边界都要走一份 ADR
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr" target="_blank" rel="noopener">docs/adr/</a>）。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>）。</li>
 </ul>
 <h3 id="testing">测试<a class="hanchor" href="#testing" aria-label="#">#</a></h3>
 <ul>
@@ -902,6 +938,10 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
   <code>cmd/vmfile.rs</code> 里的解析器/脚手架测试。运行 <code>cargo test -p delonix-vm</code> 和
   <code>cargo test -p delonix-runtime-bin vmfile</code>（关于 <code>protoc</code> 和目标目录，见
   <a href="build-and-test.html">克隆、构建与测试</a>）。</li>
+<li><strong>针对假端口的用例测试</strong>——编排（<code>VmEngine</code>）在 <code>delonix-compute</code>（<code>vm::tests</code>）里测试，
+  用的是一个内存中的 store、一个会记录自己收到的调用的后端，以及一个假的磁盘和 seed，所以对
+  <code>create</code>、<code>stop</code> 或 <code>status</code> 的决定所做的改动不需要任何 hypervisor：
+  <code>cargo test -p delonix-compute vm::</code>。</li>
 <li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong>——<code>vm</code> 相关的几个部分不需要 hypervisor 就能跑（列出、拒绝场景），
   在条件具备时还会在 libvirt 上（需要 <code>virsh</code>、<code>qemu-img</code> 和一个可用的 <code>qemu:///system</code>）
   和 Cloud Hypervisor 上跑一遍跨 stop/start 的快照。它默认会隔离两个状态根目录；如果只

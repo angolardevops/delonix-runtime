@@ -379,8 +379,9 @@ where changes are copied up, and a <code>workdir</code>. Many containers can sha
 <li>Outbound and port forwarding: <code>slirp_attach</code> and <code>slirp_add_hostfwd</code> in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> (which spawn <code>slirp4netns</code>); in-holder publishing in
   <code>publish_port</code>/<code>do_publish</code> (<code>infra.rs</code>).</li>
-<li>Firewall: <code>table ip dlxing</code> with base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwcont</code> and the <code>fwmap</code>
-  verdict map (<code>FWMAP</code>), generated in <code>infra.rs</code> (<code>do_firewall</code>, <code>apply_firewall_all</code>,
+<li>Firewall: <code>table ip dlxing</code> with base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwout</code> (by source) and
+  <code>fwcont</code> (by destination), both looking up the <code>fwmap</code> verdict map (<code>FWMAP</code>), generated in
+  <code>infra.rs</code> (<code>fw_dispatch_chains</code>, <code>do_firewall</code>, <code>apply_firewall_all</code>,
   <code>ns_set_join</code> for namespace isolation sets).</li>
 <li>Internal DNS (standard name <code>&lt;name&gt;.&lt;namespace&gt;.svc.delonix.internal</code>, the older
   <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code> still answers; <code>service_fqdn</code>, <code>parse_internal_name</code>):
@@ -442,8 +443,9 @@ from <strong>cloud-init</strong>, which reads a datasource. The <strong>NoCloud<
 <code>cidata</code> holding <code>user-data</code>, <code>meta-data</code> and optionally <code>network-config</code>.</p>
 <p><strong>In Delonix</strong></p>
 <ul>
-<li>The port is <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, implemented by
-  <code>CloudHypervisorBackend</code> and <code>LibvirtBackend</code> there and by <code>ProxmoxBackend</code> in
+<li>The port is <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> (re-exported by
+  <code>delonix-vm</code>), implemented by <code>CloudHypervisorBackend</code> and <code>LibvirtBackend</code> in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> and by <code>ProxmoxBackend</code> in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>).</li>
 <li>Cloud Hypervisor firmware search order: <code>DEFAULT_CH_FIRMWARES</code> (EDK2 <code>CLOUDHV.fd</code> before
   <code>hypervisor-fw</code>); the VMM command line is built in <code>boot_ch</code>.</li>

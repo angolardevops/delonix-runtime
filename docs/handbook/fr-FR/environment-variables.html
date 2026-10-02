@@ -281,7 +281,7 @@ script et dans <a href="build-and-test.html">Cloner, compiler et tester</a>, pas
 </tr>
 <tr>
 <td>Backend de VM</td>
-<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du fichier de providers (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; détection automatique (seulement sans fichier de providers)</td>
+<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du fichier de providers (ADR-0054 ; <code>vm default-backend --set</code> l’écrit) &gt; l’ancien <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; détection automatique. Un fichier de providers illisible fait échouer le choix au lieu de passer au suivant</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -382,7 +382,7 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Filtre des logs de <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> et <code>delonix-mcp</code>.</td>
+<td>Filtre des logs de <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> et <code>delonix-mcp</code>.</td>
 <td>Une expression de filtre <code>tracing</code> (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Se rabat sur <code>RUST_LOG</code>, puis <code>info</code>.</td>
 <td>Les logs vont sur stderr ; stdout est réservé à la sortie des commandes.</td>
 </tr>
@@ -660,7 +660,7 @@ existe déjà tant qu’il n’est pas redémarré.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (le verdict est <code>admission_verdict</code> ; <code>MemAvailable</code> vient de <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Mémoire gardée libre pour l’hôte lors de l’admission d’une VM : une VM est refusée si sa mémoire plus cette réserve dépasse <code>MemAvailable</code>.</td>
 <td>MiB ; défaut <code>2048</code> ; une valeur non analysable se rabat sur 2048.</td>
 <td>La baisser expose l’hôte à des OOM-kills.</td>
@@ -992,6 +992,13 @@ sont des paramètres de test — voir <a href="#test-only">Tests uniquement</a>.
 <td>Définit combien de workers utilise le parcours de répertoire parallèle.</td>
 <td>Un entier positif ; <code>1</code> → le parcours séquentiel. Non définie → le nombre de CPU, plafonné.</td>
 <td>Les parcours parallèle et séquentiel donnent le MÊME total (testé avec des hardlinks vus par des workers différents) ; la variable existe pour le prouver sur un hôte donné, et comme échappatoire si un système de fichiers se comporte mal sous <code>readdir</code> concurrent.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, appelée au démarrage par les processus qui restent en vie (le pin et le control du réseau, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, la tranche d’API Docker, le proxy d’ingress L7)</td>
+<td>Le plafond propre à la glibc sur les arènes de malloc. Non définie, ces processus la plafonnent eux-mêmes à 2, car le défaut de la glibc réserve un tas de 64 MiB par thread en contention.</td>
+<td>Un entier positif ; lu par la glibc, pas par le moteur.</td>
+<td>Définissez-la et le moteur n’y touche pas : la valeur de l’opérateur l’emporte.</td>
 </tr>
 </tbody>
 </table></div>

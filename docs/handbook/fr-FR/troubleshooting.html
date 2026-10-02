@@ -266,13 +266,18 @@ reconnaissiez pas encore.</p>
 <td><a href="#the-node-contract-gate">Le gate du contrat du nœud</a></td>
 </tr>
 <tr>
+<td><code>FAIL  new leak: &lt;name&gt; (N left) — a test no longer cleans up after itself</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_gate.<wbr>py</code></a></td>
+<td><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">Les tests ont laissé quelque chose dans le répertoire temporaire</a></td>
+</tr>
+<tr>
 <td><code>unshare()</code> échoue, <code>EPERM</code></td>
 <td>AppArmor + user namespaces</td>
 <td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Préparer votre environnement § AppArmor</a></td>
 </tr>
 <tr>
-<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> refusés, code de sortie <code>69</code></td>
-<td>délégation de cgroup</td>
+<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code>, ou <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code>, refusés, code de sortie <code>69</code></td>
+<td>délégation de cgroup (les contrôleurs <code>cpuset</code>/<code>io</code> pour le second groupe)</td>
 <td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Préparer votre environnement § Délégation de cgroup</a></td>
 </tr>
 <tr>
@@ -375,6 +380,35 @@ préalable, comme tout changement à un contrat de nœud stable — voir <a href
 sortie du générateur (un nouveau champ, un nouveau RPC), <code>python3 scripts/contract_gate.py
 --update</code> régénère <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> ; commitez-le dans le même commit que le changement
 du <code>.proto</code>.</p>
+<h3 id="the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">Les tests ont laissé quelque chose dans le répertoire temporaire (<code>tmp_roots_gate.py</code>)<a class="hanchor" href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy" aria-label="#">#</a></h3>
+<p>Le job <code>test</code> exécute <code>cargo test --workspace</code> avec <code>TMPDIR</code> pointant vers un répertoire vide qui lui
+est propre, puis juge ce qui y reste par rapport à <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/tmp_roots_baseline.json</code></a>. Les noms sont
+normalisés (chaque suite de chiffres devient <code>N</code>), donc la même fuite porte le même nom à chaque
+exécution :</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="nohighlight">FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+</code></pre></div>
+<p>La ligne de base est vide, donc la moindre entrée est une nouvelle fuite. Les deux autres messages
+(<code>more of a known leak</code>, <code>fixed or reduced … — lower the baseline</code>) n’apparaissent que si de la dette
+est de nouveau enregistrée.</p>
+<p>Le même job exécute le gate une seconde fois sur <code>/tmp</code> lui-même : un test qui lie un socket Unix a
+besoin d’un chemin court (<code>sun_path</code> fait 108 octets) et le met là, où le recensement du <code>TMPDIR</code> ne
+regarde jamais. <code>/tmp</code> n’est pas vide sur un runner, il est donc listé juste avant <code>cargo test</code> et
+seul ce qui est nouveau ensuite est jugé (<code>--before</code>), contre la même ligne de base vide. Les deux
+recensements s’exécutent aussi quand un test a <strong>échoué</strong> — c’est précisément là qu’un nettoyage
+placé sur la dernière ligne d’un test ne s’exécute jamais — si bien qu’un test rouge peut venir avec
+son propre rapport de fuite. Reproduisez en local avec un répertoire neuf qui vous est propre, et
+listez ce qui s’y trouve au lieu de le juger — une fuite peut dépendre de l’hôte (un test qui
+retourne tôt quand un outil manque) :</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">mkdir -p &quot;$PWD/target/test-tmp&quot; &amp;&amp; ls -A /tmp &gt; &quot;$PWD/target/tmp-before.txt&quot;
+TMPDIR=&quot;$PWD/target/test-tmp&quot; cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir &quot;$PWD/target/test-tmp&quot; --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before &quot;$PWD/target/tmp-before.txt&quot; --list
+</code></pre></div>
+<p>La correction est dans le test, pas dans la ligne de base : gardez le répertoire dans un
+<code>tempfile::TempDir</code>, pour que la suppression s’exécute aussi sur un <code>return</code> anticipé et sur un
+assert échoué — pour un socket,
+<code>tempfile::tempdir_in("/tmp")</code> plutôt qu’un chemin <code>/tmp</code> littéral avec le pid — voir <a href="coding-conventions.html">Conventions de code</a> (<em>Un test supprime son répertoire
+temporaire à chaque sortie</em>).</p>
 <h2 id="a-shared-or-stale-build-cache">Un cache de build partagé ou obsolète<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
 <p><a href="build-and-test.html#build">Cloner, compiler et tester § Compiler</a> nomme déjà le compromis :
 pointer plusieurs worktrees vers un seul <code>CARGO_TARGET_DIR</code> partagé économise de l'espace disque,
@@ -409,6 +443,7 @@ compromis que <a href="build-and-test.html#build">Cloner, compiler et tester</a>
 <li><a href="#a-consumer-name-leaked-into-the-engine">Un nom de consommateur s'est glissé dans le moteur</a></li>
 <li><a href="#the-version-gate-refuses-your-branch">Le gate de version refuse votre branche</a></li>
 <li><a href="#the-node-contract-gate">Le gate du contrat du nœud</a></li>
+<li><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">Les tests ont laissé quelque chose dans le répertoire temporaire (tmp_roots_gate.py)</a></li>
 </ul>
 </li>
 <li><a href="#a-shared-or-stale-build-cache">Un cache de build partagé ou obsolète</a></li>

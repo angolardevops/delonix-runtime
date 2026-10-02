@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:e9205b57d61260f2d44b7c78c60bc5ee9e79f9781fa0948ce1738e55a800ee77 -->
+<!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
 # Delonix Runtime — 贡献者手册
 
 本手册面向想要**修改引擎**的人：你今天克隆了本仓库，想在不破坏你的宿主机或引擎的前提下发出第一个
@@ -15,7 +15,7 @@ pull request。读完本页后，你会知道本手册的编排顺序，以及�
 Delonix Runtime 是**单个节点**上的执行抽象：它运行**容器和微虚拟机（microVM）**，
 并管理它们所需的网络和存储。它是声明式的（拥有自己的 Kind，按
 `apiVersion` 分组——见 `delonix api-resources`），并且只通过端口（port）与各 provider
-（Linux 内核、libvirt、Cloud Hypervisor、Proxmox VE、Kubernetes 的 CRI）通信，绝不会在代码中
+（Linux 内核、libvirt、Cloud Hypervisor、Proxmox VE、OPNsense、Kubernetes 的 CRI）通信，绝不会在代码中
 散布 `if provider == …` 这样的分支。
 
 几乎每一条你会收到的评审意见，都由以下三条原则塑造：

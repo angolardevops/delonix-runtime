@@ -282,7 +282,7 @@ script and in <a href="build-and-test.html">Clone, build and test</a>, not here.
 </tr>
 <tr>
 <td>VM backend</td>
-<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>defaultProvider</code> in the providers file (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; auto-detection (only with no providers file)</td>
+<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>defaultProvider</code> in the providers file (ADR-0054; <code>vm default-backend --set</code> writes it) &gt; the legacy <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; auto-detection. A providers file that cannot be read makes the choice fail instead of falling through</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -383,7 +383,7 @@ and how to tear the isolated infra down, is in
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Log filter for <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code>.</td>
+<td>Log filter for <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> and <code>delonix-mcp</code>.</td>
 <td>A <code>tracing</code> filter expression (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Falls back to <code>RUST_LOG</code>, then <code>info</code>.</td>
 <td>Logs go to stderr; stdout is kept for command output.</td>
 </tr>
@@ -661,7 +661,7 @@ already exists until it is booted again.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (the verdict is <code>admission_verdict</code>; <code>MemAvailable</code> comes from <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Memory kept free for the host when admitting a VM: a VM is refused if its memory plus this reserve exceeds <code>MemAvailable</code>.</td>
 <td>MiB; default <code>2048</code>; an unparsable value falls back to 2048.</td>
 <td>Lowering it risks the host OOM-killing things.</td>
@@ -993,6 +993,13 @@ are test settings — see <a href="#test-only">Test-only</a>.</p>
 <td>Sets how many workers the parallel directory walk uses.</td>
 <td>A positive integer; <code>1</code> → the sequential walk. Unset → the number of CPUs, capped.</td>
 <td>The parallel and sequential walks give the SAME total (tested with hardlinks seen by different workers); the variable exists to prove it on a given host, and as the escape hatch if a filesystem misbehaves under concurrent <code>readdir</code>.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, called at start-up by the processes that stay up (the network pin and control, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, the Docker API slice, the L7 ingress proxy)</td>
+<td>glibc's own cap on malloc arenas. Unset, those processes cap it at 2 themselves, because the glibc default reserves a 64 MiB heap per contending thread.</td>
+<td>A positive integer; read by glibc, not by the engine.</td>
+<td>Set it and the engine leaves it alone: the operator's value wins.</td>
 </tr>
 </tbody>
 </table></div>

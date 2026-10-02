@@ -407,7 +407,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
     Q --&gt;|images, registry, build| OCI[delonix-oci&lt;br/&gt;+ cmd/build.rs, cmd/image.rs]
     Q --&gt;|VMs| VM{local or remote?}
     VM --&gt;|Cloud Hypervisor / libvirt / cloud-init| DVM[delonix-vm]
-    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements VmBackend]
+    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements a port]
     Q --&gt;|what the kubelet sees| CRI[delonix-cri]
     Q --&gt;|a new crate| CRATE[LAYERS in arch_fitness.py&lt;br/&gt;+ crates/LAYER/ + root Cargo.toml]
     PROV --&gt; ADR
@@ -454,13 +454,13 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>这个节点上的 VM 行为</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>VmBackend</code> trait 和 backend 的注册表）、<code>cloudinit.rs</code>；CLI 在 <code>cmd/vm.rs</code>、<code>cmd/vmimage.rs</code>、<code>cmd/vmfile.rs</code></td>
+<td>一次操作决定什么：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a> 里的用例（<code>VmEngine</code>）。在这里怎么做：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a>（各个 backend 及其注册表）、<code>local_ports.rs</code>、<code>cloudinit.rs</code>；<code>VmBackend</code> trait 本身在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a>；CLI 在 <code>cmd/vm.rs</code>、<code>cmd/vmimage.rs</code>、<code>cmd/vmfile.rs</code></td>
 <td><a href="microvm-setup.html">构建 microVM</a>，<a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">作为端口（port）的 trait</a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>（backend 是可注册的）</td>
 </tr>
 <tr>
 <td><strong>一个新的 VM backend 或存储 provider，在一个远端 API 之后</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> 下的一个新 crate，实现一个端口（port）；在组合根（composition root）注册（<code>cmd/vmbackends.rs</code>）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> 下的一个新 crate，实现一个端口（port）；在组合根（composition root）注册（<code>cmd/vmbackends.rs</code>、<code>cmd/gatewayproviders.rs</code>），从 providers 文件配置（<code>cmd/providers_config.rs</code>），并用一份能力报告回答能力目录，这份报告同时列在 <code>cmd/provider.rs</code> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/providers.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>providers.<wbr>rs</code></a> 里（有一个测试保证两者一致）</td>
 <td><a href="crates.html#providers">Provider</a>，<a href="architecture.html#layers-and-the-allowed-direction">层（Layer）</a></td>
 <td>先写 ADR（<a href="contributing-workflow.html#when-to-write-an-adr">什么时候要写 ADR</a>）；<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
 </tr>

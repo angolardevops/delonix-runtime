@@ -216,8 +216,8 @@ aí fora (o <code>delonix api-resources</code> lista-os todos). Acrescentar um t
 braço de <code>match</code>: a tabela que descreve o que o Kind É, o código que o aplica, e a fiação do
 reconciliador que deixa o <code>stack plan</code>/<code>apply</code> tratá-lo como qualquer outro Kind. Esta página
 percorre isso pela ordem, com um Kind real — <strong><code>Service</code></strong> (ADR-0032) — como exemplo trabalhado do
-princípio ao fim. Não é o Kind mais recente (o <code>IPPool</code>, o <code>NetworkGateway</code>, o <code>NetworkZone</code> e o
-<code>RuntimePolicy</code> vieram depois), mas é o que exercita todos os caminhos de uma vez: primário,
+princípio ao fim. Não é o Kind mais recente (o <code>IPPool</code>, o <code>NetworkGateway</code>, o <code>NetworkZone</code>, o
+<code>RuntimePolicy</code> e o <code>SystemContainer</code> vieram depois), mas é o que exercita todos os caminhos de uma vez: primário,
 convergente, removível, com namespace e com registo próprio. Todo o ficheiro citado abaixo é lido
 da árvore, não da memória de uma disposição antiga.</p>
 <h2 id="the-one-table-a-kind-has-to-answer">A única tabela a que um Kind tem de responder<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
@@ -425,6 +425,13 @@ chama "estritamente pior do que declarar o replace à cabeça". O <code>Service<
 precisar de reiniciar nada — nada num <code>Service</code> é frio. Um campo deixado fora de <code>hot_fields</code>
 continua a aparecer no plano; só força <code>Action::Replace</code> (recusado sem <code>--replace &lt;Kind&gt;/&lt;nome&gt;</code>)
 em vez de <code>Action::Update</code>.</p>
+<p>Alguns campos convergem ao vivo <strong>só num sentido</strong>. O volume de raiz de um container de sistema
+pode crescer com o container a correr e nunca encolher, por isso o <code>SystemContainer.rootfs</code> está
+listado em <code>grow_only_fields</code>, não em <code>hot_fields</code>: o <code>is_hot_change</code> trata um campo só-a-crescer
+como quente quando os dois lados são números e o novo não é menor, e como frio no resto dos casos,
+pelo que encolher planeia um <code>Replace</code>. Se o próprio apply do teu Kind também decide se uma
+mudança exige recriar, pergunta à mesma função — como faz o <code>cold_changes</code> em
+<code>cmd/system_container.rs</code> — ou o <code>plan</code> e o <code>apply</code> vão discordar.</p>
 <p>Três testes em <code>cmd/stack.rs</code> mantêm esta tabela honesta contra a tabela de <code>kinds.rs</code> e umas
 contra as outras:</p>
 <ul>

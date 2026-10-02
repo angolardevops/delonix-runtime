@@ -349,15 +349,20 @@ binário, subir a toolchain ou mudar um job de CI, corre <code>python3 scripts/d
 do resultado com ele.</p>
 <h2 id="what-happens-at-release-time">O que acontece na altura da release<a class="hanchor" href="#what-happens-at-release-time" aria-label="#">#</a></h2>
 <p>O workflow de release (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) corre quando alguém o pede
-(<code>gh workflow run release.yml -f tag=v4.4.0</code>) — uma tag empurrada sozinha não faz nada. Para
+(<code>gh workflow run release.yml -f tag=v4.5.0</code>) — uma tag empurrada sozinha não faz nada. Para
 a documentação, ele:</p>
 <ol>
 <li>regenera o site do utilizador contra a build de release e <strong>falha</strong> se <code>docs/</code> diferir;</li>
 <li>publica a GitHub Release com <code>docs/releases/&lt;tag&gt;.md</code> como notas (ou notas geradas quando esse
    ficheiro não existe);</li>
-<li>faz checkout da <code>main</code>, corre <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> (o apêndice <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>) e
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (os factos do manual), e faz commit dos dois na <code>main</code> com <code>[skip ci]</code>
-   quando mudaram.</li>
+<li>faz checkout da <code>main</code>, corre <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> (o apêndice <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>),
+   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (os factos do manual) e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a> (o site do manual,
+   com <code>markdown</code> num virtualenv), e faz commit do que mudou na <code>main</code> com <code>[skip ci]</code>. Os
+   geradores correm em Python 3.12 (<code>actions/setup-python</code>, só a partir desse passo), porque o
+   próprio runner do job traz um Python sem <code>tomllib</code>. Se um gerador falha, o passo faz commit na
+   mesma do que foi regenerado e depois <strong>falha</strong>, a nomear o gerador — uma corrida de release
+   verde já não quer dizer que o manual foi regenerado a não ser que este passo também esteja
+   verde.</li>
 </ol>
 <p>A <strong>narrativa</strong> do manual não é regenerada pela CI. Depois de uma release ter sido publicada e
 validada, um passo de revisão corrido por um maintainer lê as mudanças entre a tag anterior e a

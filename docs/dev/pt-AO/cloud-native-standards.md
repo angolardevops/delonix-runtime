@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-standards.md sha256:b42da13e7ba332edc815ba25d93934d6e2e59b6827868ca6f84561249d2e8d4c -->
+<!-- translated-from: cloud-native-standards.md sha256:f44ace1187e1f3e99b620e7efca82fb47e35f5889bfd9e831a924bf7ea7c4c24 -->
 # Padrões cloud native, camada a camada
 
 **Antes de leres:** [Introdução ao cloud native](cloud-native-primer.md) (como o motor usa cada mecanismo) e [Arquitectura](architecture.md) (os crates nomeados abaixo). Esta é uma página de referência: lê a secção do padrão que te toca.
@@ -442,7 +442,9 @@ a API do Kubernetes.
   convergência e o teardown de cada Kind). Reconciliador: `src/reconcile.rs`.
 - Schema publicado: `docs/schema/v1/delonix.json`.
 - Contrato de nó: `proto/delonix/node/v1/*.proto`, com `docs/api/openapi.yaml` gerado e verificado
-  por `scripts/contract_gate.py`.
+  por `scripts/contract_gate.py`. Servido em parte pelo `delonix serve node-api`
+  (`crates/interfaces/delonix-node-api`): `NodeService.ListProviders` em gRPC e como
+  `GET /v1/providers`; os outros RPCs respondem `UNIMPLEMENTED`.
 
 **Estado de conformidade / lacunas.** Garantido por gates de CI (o teste do schema,
 `contract_gate.py`), não por uma suite externa. Vê [Arquitectura](architecture.md) e

@@ -1,0 +1,172 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the FreePBX 17 image (stock FreePBX 17 + Asterisk on
+#  Debian 12). Consumed ONLY by build-freepbx.sh, inside
+#  QEMU, never by a deployed VM.
+# ===========================================================================
+# `@FREEPBX_INSTALLER_COMMIT@`/`@FREEPBX_INSTALLER_SHA256@`/`@FREEPBX_KEY_FPR@`/
+# `@ASTERISK_MAJOR@`/`@DEBIAN_BUILD@`/`@IMAGE_REV@` are substituted by the
+# script, and `@FREEPBX_FIRST_BOOT@` is replaced by freepbx-first-boot.
+#
+# One script, not a list of `runcmd` entries: cloud-init keeps going after a
+# failed `runcmd` element, and a half-installed PBX still looks like a server
+# that boots.
+
+# The vendor installer refuses to run without a fully qualified name.
+fqdn: freepbx-build.localdomain
+manage_etc_hosts: true
+
+write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  # Per-clone secrets, once, on the clone's first boot -- see the file itself.
+  - path: /usr/local/sbin/delonix-freepbx-first-boot
+    permissions: "0700"
+    content: |
+@FREEPBX_FIRST_BOOT@
+  - path: /etc/systemd/system/delonix-freepbx-first-boot.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Delonix FreePBX: per-clone admin and AMI secrets
+      # After cloud-config: the given password (write_files) and the clone's
+      # hostname must be in place before this runs.
+      After=network-online.target mariadb.service freepbx.service cloud-config.service
+      Wants=network-online.target
+      ConditionPathExists=!/var/lib/delonix/freepbx-first-boot.done
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/delonix-freepbx-first-boot
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-freepbx-build.log) 2>&1
+      echo "=== delonix freepbx build: FreePBX 17 + Asterisk @ASTERISK_MAJOR@ (installer @FREEPBX_INSTALLER_COMMIT@) ==="
+      export DEBIAN_FRONTEND=noninteractive
+
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      retry "timeout 600 apt-get install -y curl ca-certificates gnupg openssl"
+
+      # ------------------------------------------------------------------
+      #  The vendor's installer, pinned by commit, checked by sha256.
+      #  Nothing runs before it matches.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL --max-time 120 -o /root/sng_freepbx_debian_install.sh https://raw.githubusercontent.com/FreePBX/sng_freepbx_debian_install/@FREEPBX_INSTALLER_COMMIT@/sng_freepbx_debian_install.sh"
+      echo "@FREEPBX_INSTALLER_SHA256@  /root/sng_freepbx_debian_install.sh" | sha256sum -c - \
+        || { echo "!! FreePBX installer checksum mismatch"; exit 1; }
+
+      # The installer runs as the vendor ships it: no patches, and no
+      # --opensourceonly. That flag was measured on 2026-09-30 and is not
+      # reproducible at this commit: it aborts on oracle_connector's
+      # uninstaller, later steps put six ionCube-encoded commercial modules
+      # back, and even after removing them FreePBX re-downloaded sysadmin and
+      # firewall as "missing dependencies" (cos -> sysadmin -> firewall) at the
+      # next refreshsignatures. So this image is stock FreePBX 17, like any
+      # FreePBX install: the ionCube loader and the commercial modules are in
+      # it, unlicensed. --skipversion: the installer would otherwise fetch a
+      # newer copy of itself, which is the pin undone.
+      if ! ASTVERSION=@ASTERISK_MAJOR@ bash /root/sng_freepbx_debian_install.sh --skipversion; then
+        echo "!! the FreePBX installer failed. Its own log:"
+        tail -80 /var/log/pbx/freepbx17-install-*.log || true
+        exit 1
+      fi
+
+      # The installer fetched the repository key over plain http. It is only
+      # trusted if it is the key we pinned.
+      FPR=$(gpg --show-keys --with-colons /etc/apt/trusted.gpg.d/freepbx.gpg 2>/dev/null | awk -F: '/^fpr/ {print $10; exit}')
+      if [ "$FPR" != "@FREEPBX_KEY_FPR@" ]; then
+        echo "!! the FreePBX apt key is $FPR, not the pinned @FREEPBX_KEY_FPR@"; exit 1
+      fi
+      echo "==> FreePBX apt key matches the pinned fingerprint"
+
+      # ------------------------------------------------------------------
+      #  What was installed -- read from the running system, not assumed.
+      # ------------------------------------------------------------------
+      for i in $(seq 1 60); do asterisk -rx "core show version" >/dev/null 2>&1 && break; sleep 2; done
+      AST_VER=$(asterisk -rx "core show version" | awk '/^Asterisk/ {print $2; exit}')
+      case "$AST_VER" in
+        @ASTERISK_MAJOR@.*) echo "==> Asterisk $AST_VER" ;;
+        *) echo "!! Asterisk is '$AST_VER', not @ASTERISK_MAJOR@.x"; exit 1 ;;
+      esac
+      FW_VER=$(fwconsole ma list 2>/dev/null | awk -F'|' '$2 ~ /^ *framework *$/ {gsub(/ /,"",$3); print $3; exit}')
+      [ -n "$FW_VER" ] || { echo "!! could not read the FreePBX framework version"; exit 1; }
+      mkdir -p /etc/delonix
+
+      # Module signatures must verify -- the step the vendor lets fail
+      # silently into a background job.
+      fwconsole ma refreshsignatures || { echo "!! fwconsole ma refreshsignatures failed"; exit 1; }
+      echo "==> module signatures refreshed"
+      fwconsole ma list > /etc/delonix/freepbx-modules.txt 2>&1 || true
+
+      # The AMI secret and the admin login are rotated on each clone's first
+      # boot. Keep a hash of the build's AMI secret so verify-freepbx.sh can
+      # prove the rotation happened -- the hash, never the secret.
+      # ...and of every private key the install left, for the same proof.
+      keysha() { [ -f "$1" ] && sha256sum "$1" | cut -d' ' -f1 || echo absent; }
+      KEYS_BUILD="ca=$(keysha /etc/asterisk/keys/ca.key) default=$(keysha /etc/asterisk/keys/default.key) api=$(keysha /etc/asterisk/keys/api_oauth.key) snakeoil=$(keysha /etc/ssl/private/ssl-cert-snakeoil.key)"
+      AMI_BUILD_SHA=$(mysql -N asterisk -e "SELECT value FROM freepbx_settings WHERE keyword='AMPMGRPASS'" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)
+      systemctl enable delonix-freepbx-first-boot.service
+
+      {
+        echo "{"
+        echo "  \"freepbx_framework\": \"$FW_VER\","
+        echo "  \"asterisk_version\": \"$AST_VER\","
+        echo "  \"installer_commit\": \"@FREEPBX_INSTALLER_COMMIT@\","
+        echo "  \"apt_key_fingerprint\": \"@FREEPBX_KEY_FPR@\","
+        echo "  \"debian_build\": \"@DEBIAN_BUILD@\","
+        echo "  \"modules\": \"stock FreePBX 17: open-source and commercial (unlicensed); ionCube loader present\","
+        echo "  \"web_port\": 80,"
+        echo "  \"ami_build_secret_sha256\": \"$AMI_BUILD_SHA\","
+        echo "  \"baked_keys_sha256\": \"$KEYS_BUILD\","
+        echo "  \"image_revision\": @IMAGE_REV@"
+        echo "}"
+      } > /etc/delonix/freepbx-image.json
+      cat /etc/delonix/freepbx-image.json
+      # What key material the install left behind, for the first real build
+      # to decide on (a key baked here is shared by every clone).
+      echo "==> key material under /etc/asterisk/keys:"; ls -la /etc/asterisk/keys 2>/dev/null || echo "   (none)"
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+      rm -f /root/sng_freepbx_debian_install.sh
+
+      # No build identity in a golden image: hostname, machine-id, SSH host keys.
+      echo localhost > /etc/hostname
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  # The marker, and only the marker, is what the build script believes.
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-FREEPBX-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-FREEPBX-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-freepbx-build.log > /dev/console
+    fi
+    sync
+    poweroff
