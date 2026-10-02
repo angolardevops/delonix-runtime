@@ -1,118 +1,137 @@
-# ADR-0066: Balanceamento L4 no motor — um VIP por `Service`, DNAT nftables no holder, saúde pelo supervisor que já existe
+# ADR-0066: An L4 load balancer in the engine — a VIP per `Service`, nftables DNAT in the holder, readiness-gated backends
 
-- **Estado:** Proposto (2026-10-02). Nada implementado; a evidência é o spike da secção
-  «Medições», corrido num namespace descartável sem privilégio.
-- **Data:** 2026-10-02
-- **Decisores:** Walter Angolar
-- **Relaciona-se com:** ADR-0032 (estende-o: o VIP que ele adiou), plano de maturidade
-  (`docs/discovery/65_PLANO_MATURIDADE.md`, decisão **D3** aprovada: «balanceamento L4 no
-  motor»; e **D5**, recusar o que o `br_netfilter` não impõe), células `net.lb.l4` e
-  `net.lb.health-check` da matriz de capacidades (hoje `not-implemented` no provider `linux`),
-  guarda-rios 1 (daemonless), 5 (spike antes de privilégio) e 6 (sem falha silenciosa) da
+- **Status:** Proposed (2026-10-02). Nothing implemented; the evidence is the spike in
+  «Measurements», run in a throwaway unprivileged namespace. The owner's answers of 2026-10-02 are
+  recorded as decided (D2, D8, D9, «Owner decisions»).
+- **Date:** 2026-10-02
+- **Deciders:** Walter Angolar
+- **Relates to:** ADR-0032 (extends it: the VIP it deferred), the maturity plan
+  (`docs/discovery/65_PLANO_MATURIDADE.md`, decision **D3** approved: «L4 load balancing in the
+  engine»; and **D5**, refuse what `br_netfilter` does not enforce), the capability-matrix cells
+  `net.lb.l4` and `net.lb.health-check` (today `not-implemented` on the `linux` provider),
+  guard-rails 1 (daemonless), 5 (spike before privilege) and 6 (no silent failure) of
   `delonix-adr`.
+- **Review copy:** `0066-l4-load-balancer.pt-AO.md` (Portuguese, internal review). This file is
+  canonical; the two carry the same decisions.
 
-## Contexto
+## Context
 
-O ADR-0032 deu ao `kind: Service` um conjunto de backends resolvido por DNS (vários registos
-`A`, ordem rodada) e deixou o VIP para quando houvesse uma necessidade concreta: uma ligação
-longa que o DNS não reequilibra, ou um cliente que guarda o endereço. A D3 do plano de
-maturidade é essa decisão: o dono aprovou o balanceamento L4 **no motor**, e não num
-componente externo. As restrições que não mudam:
+ADR-0032 gave `kind: Service` a backend set resolved by DNS (several `A` records, order rotated)
+and deferred the VIP until there was a concrete need: a long-lived connection DNS cannot
+rebalance, or a client that keeps the address. Plan decision D3 is that need: the owner approved
+L4 load balancing **in the engine**, not in an external component. The constraints that do not
+move:
 
-- **Daemonless.** Não há processo residente por omissão; um daemon novo precisa de ADR próprio
-  com a evidência do que a alternativa não resolve. O holder (pin + plano de controlo) e o slirp
-  já são infra persistente, e só existem enquanto há trabalho de rede.
-- **Rootless.** O dataplane vive no netns do holder (`unshare --user --net`), só nftables, sem
-  `CAP_NET_ADMIN` no host.
-- **Sem consumidor.** O motor não sabe quem lhe pede um VIP.
+- **Daemonless.** No resident process by default; a new daemon needs its own ADR with evidence of
+  what the alternative does not solve. The holder (pin + control plane) and slirp are already
+  persistent infrastructure, and exist only while there is network work.
+- **Rootless.** The dataplane lives in the holder's netns (`unshare --user --net`), nftables only,
+  no `CAP_NET_ADMIN` on the host.
+- **No consumer.** The engine does not know who asks it for a VIP.
 
-### O que já existe (lido no código, `origin/main` `b269c46e`)
+### What already exists (read in the code, `origin/main` `b269c46e`)
 
-1. **Um par `lbset`/`lbclear` sem um único chamador** — `crates/adapters/delonix-sdn/src/infra.rs`:
-   `do_lbset`/`do_lbclear` (verbos do socket de controlo) e as funções públicas
-   `set_service_lb`, `set_service_lb_algo`, `clear_service_lb`. `grep` no workspace: zero
-   chamadores. Três defeitos, todos **por leitura**:
-   - **Não podem funcionar com o VIP que o próprio crate calcula.** `do_lbset` recusa um VIP
-     fora de `is_ingress_ip` (o espaço de workloads, `10.200`–`10.254`), e o
-     `delonix_net_rules::service_vip` devolve sempre `10.90.a.b` — fora desse espaço *de
-     propósito*, diz o doc-comment dele, porque um VIP dentro da subrede seria entregue
-     directamente. O par só aceita o VIP que não serve.
-   - **Não é atómico.** `do_lbset` chama `do_lbclear` (um `nft list` + um `nft delete` por
-     handle) e depois um `nft add rule` noutra invocação: entre as duas o VIP não tem regra, e o
-     tráfego segue a rota por omissão do holder (o `tap0`, para fora).
-   - **`numgen inc` por omissão** — medido abaixo (E10), um contador por regra recomeça em 0 a
-     cada reescrita, e com reescritas frequentes enviesa para os primeiros índices.
-2. **`service_vip` (hash FNV de 16 bits em `10.90.0.0/16`)** — sem registo, logo sem detecção
-   de colisão. Com *k* serviços a probabilidade de colisão é ≈ 1 − e^(−k²/2·65536): **7 % com
-   100 serviços, 50 % com 300**. Dois serviços com o mesmo VIP trocam tráfego em silêncio.
-3. **O índice DNS** (`build_dns_index`) já resolve o selector de cada `Service` contra os
-   containers vivos (mesma namespace, `matches_labels`), dentro do processo de controlo do
-   holder, com TTL de 2 s.
-4. **O monitor de saúde** (`health_monitor_loop`, `bins/delonix-runtime-bin/src/cmd/container.rs`)
-   corre no supervisor que todo o `run -d` já tem, executa o `--health-cmd` (ou o `HEALTHCHECK`
-   da imagem) dentro do container, grava `health_state` no registo com `Store::update`, e emite
-   o evento `container/health_status` **só nas transições**. O próprio comentário regista a
-   decisão: «this engine is daemonless, so there is nobody resident to poll. The supervisor is
-   the honest answer».
-5. **O IPAM** (`ipam::allocate`/`reserve`/`release`, por prefixo, sob `IpamLock`) e o seu
-   ceifador `reap_orphan_leases`, cuja vivacidade sai de `prune::lease_owners`. Um lease
-   chaveado por algo que não é um container é reclamado se `lease_owners` não o conhecer — a
-   lição já paga com os pods (`pod-<nome>`).
+1. **An `lbset`/`lbclear` pair with no caller** — `crates/adapters/delonix-sdn/src/infra.rs`:
+   `do_lbset`/`do_lbclear` (control-socket verbs) and the public functions `set_service_lb`,
+   `set_service_lb_algo`, `clear_service_lb`. `grep` over the workspace: zero callers. Three
+   defects, all **by reading**:
+   - **They cannot work with the VIP the crate itself computes.** `do_lbset` refuses a VIP
+     outside `is_ingress_ip` (the workload space, `10.200`–`10.254`), and
+     `delonix_net_rules::service_vip` always returns `10.90.a.b` — outside that space *on
+     purpose*, says its doc comment, because a VIP inside the subnet would be delivered directly.
+     The pair only accepts the VIP that does not work.
+   - **Not atomic.** `do_lbset` calls `do_lbclear` (one `nft list` + one `nft delete` per handle)
+     and then an `nft add rule` in another invocation: in between the VIP has no rule, and its
+     traffic follows the holder's default route (`tap0`, out).
+   - **`numgen inc` by default** — measured below (E10), a per-rule counter restarts at 0 on every
+     rewrite and, with frequent rewrites, skews towards the first indices.
+2. **`service_vip` (16-bit FNV hash into `10.90.0.0/16`)** — no record, so no collision
+   detection. With *k* services the collision probability is ≈ 1 − e^(−k²/2·65536): **7 % at
+   100 services, 50 % at 300**. Two services with the same VIP silently swap traffic.
+3. **The DNS index** (`build_dns_index`) already resolves each `Service` selector against the live
+   containers (same namespace, `matches_labels`), inside the holder's control process, with a 2 s
+   TTL.
+4. **The health monitor** (`health_monitor_loop`, `bins/delonix-runtime-bin/src/cmd/container.rs`)
+   runs in the supervisor every `run -d` already has, executes `--health-cmd` (or the image's
+   `HEALTHCHECK`) inside the container, writes `health_state` with `Store::update`, and emits the
+   `container/health_status` event **only on transitions**.
+5. **IPAM** (`ipam::allocate`/`reserve`/`release`, per prefix, under `IpamLock`) and its reaper
+   `reap_orphan_leases`, whose liveness comes from `prune::lease_owners`. A lease keyed by
+   something other than a container is reclaimed if `lease_owners` does not know it — the lesson
+   already paid for with pods (`pod-<name>`).
 
-## Medições (spike, 2026-10-02)
+## Measurements (spike, 2026-10-02)
 
-Kernel 7.0.0-34, nftables 1.0.9. Tudo dentro de
-`unshare --user --map-root-user --net --mount --pid --fork --mount-proc` (o holder é exactamente
-isto), sem tocar no host. Topologia: `br0` `10.233.0.1/16` com três backends (`b1..b3`,
-`10.233.0.11-13`, um servidor TCP em Python que responde `<nome> <ip-do-par>` a cada ligação e a
-cada linha), um cliente `c1` **na mesma bridge** (`10.233.0.50`), um cliente `c2` noutra bridge
-(`br1`, `10.234.0.50`, encaminhado pelo «holder»), e o VIP `10.90.0.10:80`. Os scripts
-(`setup.sh`, `backend.py`, `client.py`, `e0`–`e3.sh`) ficaram no scratchpad da sessão; o
-essencial está aqui.
+Kernel 7.0.0-34, nftables 1.0.9. Everything inside
+`unshare --user --map-root-user --net --mount --pid --fork --mount-proc` (which is exactly what the
+holder is), without touching the host. Topology: `br0` `10.233.0.1/16` with three backends
+(`b1..b3`, `10.233.0.11-13`, a Python TCP server answering `<name> <peer-ip>` per connection and per
+line), a client `c1` **on the same bridge** (`10.233.0.50`), a client `c2` on another bridge
+(`br1`, `10.234.0.50`, routed through the «holder»), and the VIP `10.90.0.10:80` (a lab address;
+see D2). The scripts (`setup.sh`, `backend.py`, `client.py`, `probe.py`, `e0`–`e4.sh`) stayed in the
+session scratchpad; the essentials are here.
 
-A regra medida:
+The rule measured:
 
 ```
 table ip lb {
   chain pre { type nat hook prerouting priority -100;
     ip daddr 10.90.0.10 tcp dport 80 dnat ip to numgen random mod 3 map { 0 : 10.233.0.11 . 80, 1 : 10.233.0.12 . 80, 2 : 10.233.0.13 . 80 }
   }
-  chain out { type nat hook output priority -100;   # o mesmo, para clientes do próprio holder
+  chain out { type nat hook output priority -100;   # the same, for clients in the holder itself
     ...
   }
 }
 ```
 
-| # | O quê | Resultado |
+| # | What | Result |
 |---|---|---|
-| E0 | O `nft` monta a regra dentro do userns | `rc=0`. O `nft_numgen` **não estava carregado** no host e o kernel carregou-o (autoload) a pedido do userns — ficou carregado; foi o único efeito fora do namespace. O `jhash` (`nft_hash`) **não foi medido de propósito**, para não carregar outro módulo |
-| E1 | `numgen random`, `c2`, 5 × 300 ligações | `99/97/104`, `114/86/100`, `112/100/88`, `106/101/93`, `102/88/110` (desvio máximo 14 % de 100) |
-| E1 | `numgen random`, 3000 ligações | `996/975/1029` (±2,5 %) |
-| E2 | `numgen inc`, 300 ligações | `100/100/100` |
-| E3 | Hairpin: cliente `c1` na mesma bridge, `bridge-nf-call-iptables=1` | `20/20/20`, e o backend vê o **IP real do cliente** (`10.233.0.50`) |
-| E3 | O mesmo com `bridge-nf-call-iptables=0` | **60/60 `TimeoutError`** (60 s): o backend responde directamente pela bridge com o seu IP, o cliente esperava o VIP |
-| E3 | `=0` + `iifname br0 oifname br0 ct status dnat masquerade` | `20/20/20`, mas o backend vê **`10.233.0.1`** (o gateway) — o IP do cliente perde-se |
-| E3 | O sysctl é por netns e gravável pelo root do userns | `sysctl -w net.bridge.bridge-nf-call-iptables=0` funcionou; num netns novo vale `1` |
-| E4 | Cliente no próprio holder (cadeia `nat output`), sem rota para o VIP | `Errno 101 Network is unreachable` (a decisão de rota precede o NAT de saída) |
-| E4 | Com rota por omissão (o holder real tem uma, pelo `tap0`) | `2/2/2`, origem `10.233.0.1` |
-| E5 | Um `drop` em `forward` (prioridade −5) sobre `daddr` do b1 | b1 recebe **0**; 20 de 60 ligações dão timeout, b2/b3 respondem 20/20; contador da regra `packets 20` — o filtro por container vê o backend real, **depois** do DNAT |
-| E6 | Backend b2 morto mas ainda no mapa, 300 ligações | `ConnectionRefused` 100, b1 100, b3 100 — um terço falha |
-| E7 | Ejectar b2: reescrever a regra num só `nft -f` | 18 ms; 300 ligações → `150/150`, zero erros. Cinco reescritas: 26/19/25/23/24 ms (inclui arrancar o processo `nft`) |
-| E8 | Uma ligação longa cujo backend sai do mapa | Aterrou no b1; b1 tirado do mapa; as 5 linhas seguintes **na mesma ligação** responderam `b1` (o conntrack guarda o DNAT); 200 ligações novas → `b2:100, b3:100` |
-| E9 | Porta publicada: um `tap0` simulado (`10.0.2.100`) com `ip daddr 10.0.2.100 tcp dport 8080 dnat … map` ao mesmo conjunto | `30/30/30` |
-| E10 | 50 reescritas atómicas (`flush chain svc` + `add rule`, um `nft -f`) **durante** 3000 ligações, a alternar 3 e 2 backends, com `numgen inc` | **zero erros**; `b1:1266, b2:486, b3:1248` — o enviesamento do `inc` com reescritas |
-| E11 | Uma transacção a reescrever 200 serviços × 3 backends (30 KB de script) | 44/47/48 ms; 200 regras na cadeia |
-| E12 | Uma transacção com um passo inválido | `rc=1` e nada aplicado (a regra válida do mesmo script não ficou) |
+| E0 | `nft` builds the rule inside the userns | `rc=0`. `nft_numgen` **was not loaded** on the host and the kernel autoloaded it at the userns's request — it stayed loaded; this was the only effect outside the namespace. `jhash` (`nft_hash`) **was deliberately not measured**, to avoid loading another module |
+| E1 | `numgen random`, `c2`, 5 × 300 connections | `99/97/104`, `114/86/100`, `112/100/88`, `106/101/93`, `102/88/110` (worst deviation 14 % of 100) |
+| E1 | `numgen random`, 3000 connections | `996/975/1029` (±2.5 %) |
+| E2 | `numgen inc`, 300 connections | `100/100/100` |
+| E3 | Hairpin: client `c1` on the backends' bridge, `bridge-nf-call-iptables=1` | `20/20/20`, and the backend sees the **client's real IP** (`10.233.0.50`) |
+| E3 | The same with `bridge-nf-call-iptables=0` | **60/60 `TimeoutError`** (60 s): the backend answers straight over the bridge with its own IP, the client expected the VIP |
+| E3 | `=0` + `iifname br0 oifname br0 ct status dnat masquerade` | `20/20/20`, but the backend sees **`10.233.0.1`** (the gateway) — the client's IP is lost |
+| E3 | The sysctl is per netns and writable by the userns root | `sysctl -w net.bridge.bridge-nf-call-iptables=0` worked; a fresh netns has `1` |
+| E4 | Client in the holder itself (`nat output` chain), no route to the VIP | `Errno 101 Network is unreachable` (the routing decision precedes output NAT) |
+| E4 | With a default route (the real holder has one, via `tap0`) | `2/2/2`, source `10.233.0.1` |
+| E5 | A `drop` in `forward` (priority −5) on the b1 `daddr` | b1 gets **0**; 20 of 60 connections time out, b2/b3 answer 20/20; rule counter `packets 20` — the per-container filter sees the real backend, **after** the DNAT |
+| E6 | Backend b2 dead but still in the map, 300 connections | `ConnectionRefused` 100, b1 100, b3 100 — one third fails |
+| E7 | Eject b2: rewrite the rule in one `nft -f` | 18 ms; 300 connections → `150/150`, zero errors. Five rewrites: 26/19/25/23/24 ms (includes starting the `nft` process) |
+| E8 | A long connection whose backend leaves the map | Landed on b1; b1 removed; the next 5 lines **on the same connection** answered `b1` (conntrack keeps the DNAT); 200 new connections → `b2:100, b3:100` |
+| E9 | Published port: a simulated `tap0` (`10.0.2.100`) with `ip daddr 10.0.2.100 tcp dport 8080 dnat … map` to the same set | `30/30/30` |
+| E10 | 50 atomic rewrites (`flush chain svc` + `add rule`, one `nft -f`) **during** 3000 connections, alternating 3 and 2 backends, with `numgen inc` | **zero errors**; `b1:1266, b2:486, b3:1248` — `inc`'s skew under rewrites |
+| E11 | One transaction rewriting 200 services × 3 backends (30 KB script) | 44/47/48 ms; 200 rules in the chain |
+| E12 | A transaction with an invalid step | `rc=1` and nothing applied (the valid rule in the same script did not land) |
+| E13 | TCP readiness probe from the holder netns, 500 ms timeout, 200 rounds | listening backend: 200 × `ready`, < 0.1 ms each; process gone: 200 × `ECONNREFUSED`, < 0.1 ms; port dropped by a filter in the backend's netns: `timeout`, 500 ms each |
+| E14 | VIP with **no** DNAT rule (no ready backend), filter `ip daddr <pool> meta l4proto tcp reject with tcp reset` + `reject with icmp type port-unreachable` at forward −20 | TCP: 5/5 `ConnectionRefused` (first one 166 ms, including neighbour resolution); UDP: `ConnectionRefused` in 0 ms |
+| E14 | The same without the filter, holder with a default route (a dummy standing in for `tap0`) | client `TimeoutError` after 3 s; the leak counter on the default route: **3 SYN packets left the holder** |
+| E15 | A served VIP port next to the reject filter | port 80 (DNATed): 3/3 answered; port 81 (not served): 3/3 `ConnectionRefused` |
 
-Lições do spike que entram nas decisões: (a) o mecanismo funciona inteiro sem privilégio no
-host; (b) o hairpin **depende** do `br_netfilter` ou perde o IP de origem; (c) a reescrita
-completa e atómica custa dezenas de milissegundos, por isso não precisa de ser incremental;
-(d) `numgen inc` e reescritas frequentes não combinam; (e) um backend morto no mapa custa 1/N
-das ligações, e é por isso que a saúde é parte do L4 e não um extra.
+What the spike feeds into the decisions: (a) the mechanism works entirely without host privilege;
+(b) hairpin **depends** on `br_netfilter` or loses the source IP; (c) a full atomic rewrite costs
+tens of milliseconds, so it need not be incremental; (d) `numgen inc` and frequent rewrites do not
+mix; (e) a dead backend in the map costs 1/N of the connections, which is why readiness is part of
+L4 and not an extra; (f) a VIP with nothing behind it must be refused explicitly, or its traffic
+leaves the holder through the default route.
 
-## Decisão
+## Owner decisions (2026-10-02)
 
-### D1 — Não é um Kind novo: `kind: Service` ganha `spec.type`
+Recorded as decided, and applied below:
+
+1. **The VIP pool is configurable.** `10.90.0.0/16` appears only as a lab example, never as an
+   automatic universal reservation. The configuration and its validation are D2.
+2. **`Starting` is out of rotation.** Admission depends on readiness; being alive is not being
+   ready (D8).
+3. **No probe defined → an explicit minimum criterion**, never «healthy because the process
+   started». The TCP readiness probe moves from «conditional phase 4» into the main plan (D8).
+4. **No ready backend → predictable unavailability**: TCP reset / ICMP port-unreachable, never
+   forwarding to containers still starting (D3).
+
+## Decision
+
+### D1 — Not a new Kind: `kind: Service` gains `spec.type`
 
 ```yaml
 apiVersion: networking.delonix.io/v1alpha1
@@ -120,232 +139,298 @@ kind: Service
 metadata: { name: web, namespace: teamA }
 spec:
   selector: { matchLabels: { app: web } }
-  port: 8080            # porta do container E do VIP (v1)
-  type: VirtualIP       # DNS (omissão) | VirtualIP
-  vip: 10.90.4.20       # opcional; sem ele o IPAM escolhe
-  publish: [18080]      # opcional; portas do host que levam ao VIP (D6)
+  port: 8080            # the container port AND the VIP port (v1; open question 1)
+  type: VirtualIP       # DNS (default) | VirtualIP
+  vip: 10.90.4.20       # optional; must be inside the configured pool; without it IPAM picks
+  publish: [18080]      # optional; host ports leading to the VIP (D6)
+  readiness:            # optional; the TCP check is always on, these are its knobs (D8)
+    tcp: { intervalSeconds: 2, timeoutMilliseconds: 500, successThreshold: 1, failureThreshold: 2 }
 ```
 
-- `type: DNS` (omissão) é o ADR-0032 **byte a byte**: nenhum manifesto existente muda.
-- `type: VirtualIP`: o nome `<svc>.<ns>.delonix.internal` passa a resolver para **um** `A`, o
-  VIP, com a mesma regra de namespace do ADR-0032.
-- **Porquê não um Kind `LoadBalancer`:** o selector, a namespace, o nome DNS e a posse por
-  `delonix.io/stack` seriam os mesmos; dois Kinds com o mesmo selector são duas leituras do
-  mesmo `matchLabels` a divergir — o que o ADR-0032 já recusou para o `FirewallPolicy`. O que o
-  `type` muda é **como** o conjunto é servido, não **qual** é.
-- No reconciliador, `type`, `vip`, `publish`, `selector` e `port` são campos **quentes**: mudar
-  qualquer um reescreve o dataplane e o registo, sem estado a perder. Mudar o `vip` di-lo em voz
-  alta (quem guardou o endereço antigo deixa de chegar).
+- `type: DNS` (default) is ADR-0032 **byte for byte**: no existing manifest changes.
+- `type: VirtualIP`: the name `<svc>.<ns>.delonix.internal` resolves to **one** `A`, the VIP, with
+  ADR-0032's namespace rule.
+- **Why not a `LoadBalancer` Kind:** selector, namespace, DNS name and `delonix.io/stack` ownership
+  would be the same; two Kinds with the same selector are two readings of the same `matchLabels`
+  drifting apart — what ADR-0032 already refused for `FirewallPolicy`. `type` changes **how** the
+  set is served, not **which** set.
+- In the reconciler, `type`, `vip`, `publish`, `selector`, `port` and `readiness` are **hot**
+  fields: changing any of them rewrites the dataplane and the record, with no state to lose.
+  Changing `vip` says so out loud (whoever kept the old address stops reaching it).
 
-### D2 — O VIP vem do IPAM, de um pool próprio, e fica no registo
+### D2 — The VIP comes from IPAM, from a pool the operator configures
 
-- Pool **`10.90.0.0/16`**, fora do espaço de workloads (é o que faz o tráfego passar pelo
-  gateway, onde está o DNAT — E4/E5). Lease chaveado `svc:<namespace>/<name>`, guardado em
-  `ServiceDef.vip`, libertado no `delete`/`--prune`/`destroy`.
-- `spec.vip` explícito é **reservado** (`ipam::reserve`) ou recusado: fora do pool → DX novo de
-  classe *invalid*; já usado por outro serviço → `Conflict` (exit 5).
-- `prune::lease_owners` passa a contar os serviços declarados como donos — sem isso o ceifador
-  do IPAM reclama o VIP e entrega-o ao serviço seguinte (a armadilha dos pods).
-- Uma rede declarada (`network create`, `cidr=`) que se sobreponha ao pool é recusada, e o pool
-  recusa-se a nascer sobre uma rede existente.
-- **Rejeitado:** o VIP derivado por hash (`service_vip`) — 50 % de colisão aos 300 serviços, sem
-  registo onde a ver.
+**No default pool.** On a node without one, `type: VirtualIP` is refused with class 69
+(`EX_UNAVAILABLE`, a host precondition), and the message names the command that sets it. A
+universal reservation would silently take a range away from every host this engine runs on.
 
-### D3 — Dataplane: uma cadeia `svc`, reescrita inteira e atómica
+**Where it is configured** — a node setting, not a field of each `Service` (every Service on the
+node draws from the same address space):
 
-- Ruleset base do holder ganha `chain svc` (nat, sem hook), um `jump svc` no `pre` e uma cadeia
-  `out` (`type nat hook output priority -100; jump svc`) para os clientes do próprio holder (o
-  proxy L7 pode ter um `Service` como backend). O holder já tem rota por omissão pelo `tap0`, o
-  que o E4 mostrou ser necessário.
-- Por VIP e porta: `ip daddr <vip> tcp dport <port> dnat ip to numgen random mod <N> map { … }`.
-  **`numgen random` e não `inc`**: o `random` não tem estado, e o `inc` recomeça a cada reescrita
-  (E10). A distribuição medida (E1) é a de um gerador uniforme.
-- **Conjunto vazio → `reject with tcp reset`** na mesma cadeia, para o cliente falhar já e não
-  ao fim de um timeout. **Por medir.**
-- **Porta não servida de um VIP não sai pelo `tap0`.** Um VIP não está em interface nenhuma:
-  sem uma regra, um pacote para `10.90.x.y:<outra porta>` seguiria a rota por omissão e o
-  masquerade levava-o ao host. Fica um `ip daddr 10.90.0.0/16 reject` no `fwguard` (filtro,
-  depois do NAT, logo só apanha o que nenhum DNAT reescreveu). **Por medir.**
-- **A reescrita é sempre total**: `flush chain ip dlxing svc` + todas as regras num só
-  `nft -f` (E10: zero erros com tráfego; E12: um script inválido não aplica nada). Não há
-  operações incrementais sobre mapas, e por isso não há a classe de bug de ordem do `@netpair`.
-  Custo: ~50 ms para 200 × 3 (E11).
-- TCP e UDP: o `port` do v1 é TCP; `protocol: udp` entra com o mesmo mecanismo quando houver um
-  uso concreto (o mapa é o mesmo, muda o `dport`).
+- `delonix network vip-pool set <cidr>[,<cidr>...]` / `clear` / `show`, persisted in
+  `<root>/ingress/vip-pool` (one CIDR per line, written atomically) — the same shape as
+  `vm default-backend`'s `<root>/vm-default-backend`.
+- `DELONIX_SERVICE_VIP_CIDR` (comma list) overrides it for a process (CI, labs). `show` says which
+  source is in effect.
+- Lab example: `delonix network vip-pool set 10.90.0.0/16`.
 
-### D4 — Alcance e isolamento não mudam
+**What a pool must be:** IPv4, inside RFC 1918 or `100.64.0.0/10`, prefix between `/16` and `/29`
+(a public range would shadow real Internet addresses for every container).
 
-O DNAT corre em `prerouting`; as cadeias por container (`fwout` −6, `fwcont` −5) correm no
-`forward`, **depois**, sobre o backend real (E5). Logo o isolamento de namespace, o
-`NetworkPolicy`, o `Dependency` e o `NetworkAccessRule` aplicam-se como se o cliente tivesse
-usado o IP do backend. Um VIP não fura nenhuma fronteira: um cliente de outra namespace
-chega ao VIP e é recusado pela cadeia de cada backend, exactamente como chegaria ao IP directo.
+**What it must not overlap, and how each is detected** (checked at `vip-pool set`, at every VIP
+allocation or reservation, and on every `stack plan`/`apply` that holds a `VirtualIP` Service):
 
-### D5 — Hairpin: exige `br_netfilter`, e recusa sem ele
+| Must not overlap | Detected by |
+|---|---|
+| Declared engine networks | the `NetworkStore` records (`base=`, `cidr=`) and the holder's `NetDef` registry under `<root>/ingress/` — files, no holder needed |
+| Pod networks | the CNI configs the CRI reads (the same conf dir `cni::readiness` reads): `ipam.subnet` and every `ipam.ranges[][].subnet`; and each kind-mode cluster's `podSubnet` in `<root>/clusters/<name>/kubeadm.conf` |
+| Service subnets | each kind-mode cluster's `serviceSubnet` in the same file; the other Services' VIPs are already excluded by the pool's own IPAM |
+| The host's addresses and routes | `ip -4 -o addr show` and `ip -4 route show table all`, run by the CLI in the **host** netns before it talks to the holder; every address and route prefix except the default route. This catches the LAN, `docker0`/`virbr0`, and any VPN that installs routes |
+| VPN / overlay ranges | the engine's overlays from the `NetworkStore` (`wg_ip` networks and peer node IPs); host WireGuard interfaces by `ip -4 -o addr show type wireguard` and the routes through them (what `wg-quick` installs for `AllowedIPs`) |
+| The holder's own plumbing | the slirp subnet `10.0.2.0/24` and the holder's bridge addresses |
 
-Com o cliente na mesma bridge dos backends — o caso comum — o hairpin só funciona com
-`bridge-nf-call-iptables=1` (E3: 60/60 timeouts sem ele). A alternativa, um `masquerade` do
-tráfego DNAT que volta à mesma bridge, funciona mas faz o backend ver o gateway e não o cliente
-(E3), o que tira à aplicação o IP de origem. Decisão: **sem masquerade**; o `type: VirtualIP` é
-recusado com classe 69 (`EX_UNAVAILABLE`) quando o holder não tem
-`/proc/sys/net/bridge/bridge-nf-call-iptables` a `1` — a mesma pré-condição e a mesma classe da
-D5 do plano. O holder põe-no a `1` no seu netns (é gravável pelo root do userns, E3); só recusa
-quando o módulo não existe no host.
+Known limit of the detection, written down: a WireGuard peer whose `AllowedIPs` are **not** routed
+(`Table = off`) is invisible — `wg show allowed-ips` needs `CAP_NET_ADMIN` on the host, which the
+engine does not have. Kubernetes clusters bootstrapped over SSH (`mode: ssh`) keep their subnets in
+the manifest, not on this node; they matter here only if routed here, which the route check sees.
 
-### D6 — Publicar o VIP no host: o caminho do `-p` que já existe
+**When an overlap appears later** (a VPN brought up after the VIP was allocated): the next
+`plan`/`apply` refuses with a conflict (exit 5) naming the VIP and the overlapping source. The
+dataplane is **not** withdrawn silently — removing a VIP under its clients is a decision the
+operator makes by moving the pool or the VIP.
 
-`spec.publish: [<hostPort>]` usa o `slirp_add_hostfwd` de sempre (bind por omissão a
-`127.0.0.1`, `DELONIX_PUBLISH_ADDR` para alargar) e põe na cadeia `svc` a regra
-`ip daddr 10.0.2.100 tcp dport <hostPort> dnat ip to numgen random mod N map { … }` — o mesmo
-conjunto, outra porta de entrada (E9). **Não há duplo DNAT** (para o VIP e depois para o
-backend): um DNAT em `prerouting` é terminal, por isso a regra aponta directamente aos backends.
-A origem chega intacta para clientes encaminháveis e como `10.0.2.2` para os de loopback (a
-regra já documentada no AGENTS.md).
+**Allocation:** the lease is keyed `svc:<namespace>/<name>`, kept in `ServiceDef.vip`, released on
+`delete`/`--prune`/`destroy`. An explicit `spec.vip` is **reserved** (`ipam::reserve`) or refused:
+outside the pool → a new DX of class *invalid*; taken by another service → `Conflict` (exit 5).
+`prune::lease_owners` counts declared services as owners — without it the IPAM reaper reclaims the
+VIP and hands it to the next service.
 
-### D7 — O conjunto mantém-se actual sem daemon
+**Rejected:** the hash-derived VIP (`service_vip`) — 50 % collision at 300 services, with no record
+to see it in.
 
-- **Uma função, dois consumidores:** `service_backends(def, containers)` passa a ser a única
-  avaliação do selector (mesma namespace, `matches_labels`, workload vivo por pid + `starttime`,
-  com IP numa rede, porta de saúde da D8). O índice DNS e a reescrita do dataplane usam-na; não
-  há segunda leitura do `matchLabels`.
-- **Quem reescreve:** o processo de controlo do holder, num verbo novo `svcsync` — o mesmo
-  processo que já constrói o índice DNS a partir dos mesmos registos. Só existe enquanto a infra
-  existe, que é exactamente quando há VIPs para servir.
-- **Quando:** (1) `apply`/`delete` de um `Service` (CLI → `svcsync`); (2) no fim do `do_attach`
-  e do `do_detach` (já correm dentro do holder — chamada directa); (3) quando o supervisor grava
-  a morte de um container (`Crashed`/`Exited`), porque uma morte sem `detach` deixaria o IP no
-  mapa; (4) nas transições de saúde (D8); (5) no arranque do plano de controlo — cobre o
-  reinício do controlo (o pin guarda o ruleset, mas uma mudança feita enquanto o controlo estava
-  em baixo só se vê aqui) e a reconstrução completa.
-- **Sem reconciliação periódica.** Uma mudança que nenhum dos cinco caminhos vê (um registo
-  editado à mão) fica até ao próximo evento. Fica escrito, não escondido.
-- Um container em primeiro plano não tem supervisor: a morte dele é vista pelo `detach` do
-  próprio `run`, que é o caminho (2).
+### D3 — Dataplane: a `svc` chain, rewritten whole and atomically; an explicit reject for the rest
 
-### D8 — Saúde: o monitor do supervisor decide quem está em rotação
+- The holder's base ruleset gains `chain svc` (nat, no hook), a `jump svc` in `pre`, and an `out`
+  chain (`type nat hook output priority -100; jump svc`) for clients in the holder itself (the L7
+  proxy may have a `Service` as a backend). The holder already has a default route through
+  `tap0`, which E4 showed is needed.
+- Per VIP and port **with at least one ready backend**:
+  `ip daddr <vip> tcp dport <port> dnat ip to numgen random mod <N> map { … }` over the ready
+  backends only. **`numgen random`, not `inc`**: `random` has no state, `inc` restarts on every
+  rewrite (E10). The measured distribution (E1) is a uniform generator's.
+- **No ready backend → predictable unavailability.** The VIP has no DNAT rule, and a filter chain
+  `vipguard` (`type filter hook forward priority -20` and the same at `output`) rejects every
+  address of the configured pools that no DNAT rewrote: `meta l4proto tcp reject with tcp reset`,
+  everything else `reject with icmp type port-unreachable`. Measured (E14): the client gets
+  `ConnectionRefused` at once, TCP and UDP. **Never** a backend that is still starting, never a
+  timeout, and never the default route: without this filter the SYNs leave the holder through
+  `tap0` (E14, 3 packets counted) and the client waits for a timeout.
+- The same filter rejects a VIP port that is not served (E15), for the same leak reason.
+- **The rewrite is always whole**: `flush chain ip dlxing svc` + every rule in one `nft -f` (E10:
+  zero errors under traffic; E12: an invalid script applies nothing). No incremental map edits, so
+  no `@netpair`-style ordering bugs. Cost: ~50 ms for 200 × 3 (E11).
+- TCP only in v1. A UDP VIP needs a readiness signal the TCP probe cannot give (D8), and enters
+  when there is a concrete use.
 
-Opções avaliadas (o custo de cada uma é o que decide):
+### D4 — Reachability and isolation do not change
 
-| Opção | Custo | Veredicto |
+DNAT runs at `prerouting`; the per-container chains (`fwout` −6, `fwcont` −5) run at `forward`,
+**after**, on the real backend (E5). Namespace isolation, `NetworkPolicy`, `Dependency` and
+`NetworkAccessRule` apply as if the client had used the backend's IP. A VIP crosses no boundary:
+a client from another namespace reaches the VIP and is refused by each backend's chain, exactly as
+it would be at the direct IP.
+
+### D5 — Hairpin requires `br_netfilter`, and is refused without it
+
+With the client on the backends' bridge — the common case — hairpin only works with
+`bridge-nf-call-iptables=1` (E3: 60/60 timeouts without it). The alternative, a `masquerade` of
+DNAT traffic returning to the same bridge, works but makes the backend see the gateway instead of
+the client (E3), taking the source IP away from the application. Decision: **no masquerade**;
+`type: VirtualIP` is refused with class 69 when the holder does not have
+`/proc/sys/net/bridge/bridge-nf-call-iptables` at `1` — the same precondition and class as plan
+D5. The holder sets it to `1` in its own netns (writable by the userns root, E3); it refuses only
+when the module is absent from the host.
+
+### D6 — Publishing the VIP on the host: the existing `-p` path
+
+`spec.publish: [<hostPort>]` uses the usual `slirp_add_hostfwd` (bound to `127.0.0.1` by default,
+`DELONIX_PUBLISH_ADDR` to widen) and puts in the `svc` chain
+`ip daddr 10.0.2.100 tcp dport <hostPort> dnat ip to numgen random mod N map { … }` — the same set,
+another entry (E9). **No double DNAT** (to the VIP, then to the backend): a DNAT at `prerouting` is
+terminal, so the rule points straight at the backends. With no ready backend the published port
+gets the same reject. The source reaches the backend intact for routable clients and as `10.0.2.2`
+for loopback ones (the rule already in AGENTS.md).
+
+### D7 — The set stays current without a daemon
+
+- **One function, two consumers:** `service_backends(def, containers)` becomes the only evaluation
+  of the selector (same namespace, `matches_labels`, workload live by pid + `starttime`, with an IP
+  on a network). The DNS index and the dataplane rewrite use it; readiness (D8) narrows its output
+  for the dataplane. There is no second reading of `matchLabels`.
+- **Who rewrites:** the holder's control process, in a new `svcsync` verb — the same process that
+  already builds the DNS index from the same records. It exists only while the infrastructure
+  exists, which is exactly when there are VIPs to serve.
+- **When:** (1) `apply`/`delete` of a `Service` (CLI → `svcsync`); (2) at the end of `do_attach` and
+  `do_detach` (already inside the holder — a direct call); (3) when the supervisor records a
+  container's death, since a death without `detach` would leave the IP in the map; (4) on readiness
+  transitions (D8); (5) at control-plane start — covers a control restart and a full rebuild.
+- **No periodic reconcile of membership.** A change none of the five paths sees (a record edited
+  by hand) waits for the next event. Written down, not hidden.
+
+### D8 — Readiness: what admits a backend into rotation
+
+**Admission = (a) AND (b):**
+
+- **(a) The declared port accepts a TCP connection from inside the holder** — always, for every
+  backend, probe or no probe. This is the explicit minimum criterion: it proves something listens
+  where the VIP will send the traffic. It is **not** called «healthy»: `get services` reports it as
+  `ready (tcp)`, and a container is never reported healthy because its process started.
+- **(b) When the container has a `HealthConfig`** (`--health-cmd` or a monitored `HEALTHCHECK`):
+  `health_state.health == Healthy`. `Starting` is out; `Unhealthy` is out.
+
+A container without a health probe is admitted on (a) alone; one whose port does not accept is
+out, whatever its process state. With nothing admitted, D3's reject applies.
+
+**Who runs (a):** a probe thread in the holder's control process — the process that already runs
+the DNS, RA and DHCP servers as threads and lives exactly as long as the infrastructure. It starts
+only when at least one `VirtualIP` Service exists. No new process, no lifecycle of its own. It is,
+written down plainly, a new **periodic** activity inside an existing resident process; that is
+what the owner's decision 3 requires, and it is the least resident way to satisfy it.
+
+- Defaults: every 2 s, 500 ms timeout, 1 success to admit, 2 failures to eject; overridable per
+  Service in `spec.readiness.tcp`.
+- Probes run in parallel with a cap, so a filtered backend's 500 ms timeout (E13) does not delay
+  the others; a refused or accepted connect costs < 0.1 ms (E13).
+- State lives in memory. **After a control restart every backend starts NOT ready** and is admitted
+  on its first success (fail-closed): the cost is up to one interval of `ConnectionRefused` on the
+  VIP — measured in the chaos scenario, not assumed.
+- The probe originates in the holder (output hook), so the per-container forward chains do not
+  filter it: it measures «the application listens», not «this client is allowed» — which D4 leaves
+  to the backend's own chain, unchanged.
+
+**Who runs (b):** the existing supervisor monitor. On a transition, `health_monitor_loop` sends
+`svcsync` right after emitting the `health_status` event (best effort: holder down = nothing to
+rewrite).
+
+**Open connections to an ejected backend continue** (E8): conntrack keeps the DNAT and an
+in-flight request finishes. Conntrack is not flushed on ejection. On a container's death there is
+nothing to flush.
+
+| Option evaluated | Cost | Verdict |
 |---|---|---|
-| **A. O monitor de saúde do supervisor** (`--health-cmd` / `HEALTHCHECK`), já existente | Zero processos novos; a sonda corre dentro do container e mede o que o autor da aplicação definiu; a transição já é detectada (emite `health_status`). Latência de ejecção = `interval × retries` (omissões do Docker: 30 s × 3 = 90 s). Só cobre containers com monitor (`run -d`, que é o caminho do `stack apply`) e imagens com shell | **Escolhida** |
-| B. Sonda TCP numa thread do processo de controlo do holder | Sem processo novo, mas um temporizador residente no controlo, e estado perdido em cada reinício do controlo; testa só «a porta abre», não «a aplicação está pronta» | Fase 4, condicional (imagens sem shell, *distroless*) |
-| C. Timer de systemd por serviço | Depende de uma sessão systemd de utilizador; um processo por tick; granularidade grosseira por omissão (`AccuracySec=1min`); rootless e root com caminhos diferentes | Rejeitada |
-| D. Sondar só nos eventos (`stack`/`container`) | Nenhum processo; um backend pendurado nunca é ejectado | Rejeitada como mecanismo único (é o D7) |
-| E. Um processo supervisor por `Service` | Um daemon por serviço, com ciclo de vida, guarda de identidade de pid e reaping próprios | Rejeitada: é o que o guarda-rio 1 proíbe sem necessidade provada, e A cobre o caso |
-| F. Nada | O E6 mede o custo: 1/N das ligações recusadas enquanto um backend morto está no mapa | Rejeitada |
+| Supervisor's health monitor alone | Zero new activity; but a container without a probe would be admitted «because it started», which decision 3 forbids | Kept as (b), not sufficient alone |
+| **TCP probe thread in the holder's control process** | A periodic task in an existing resident process; state lost on control restart (fail-closed); tests «listens», not «ready» | **Kept as (a), in the main plan** |
+| systemd timer per Service | Depends on a user systemd session; a process per tick; coarse default granularity (`AccuracySec=1min`); different root/rootless paths | Rejected |
+| Probe only on events (`stack`/`container`) | No process; a hung backend is never ejected | Rejected as sole mechanism (it is D7) |
+| A supervisor process per Service | A daemon per service, with its own lifecycle, pid-identity guard and reaping | Rejected: what guard-rail 1 forbids without proven need |
+| Nothing | E6: 1/N of connections refused while a dead backend is in the map | Rejected |
 
-Regras da A:
+### D9 — The `lbset`/`lbclear` pair and `service_vip` go
 
-- Container **com** `HealthConfig`: em rotação só quando `health_state.health == Healthy`.
-  `Starting` fica **fora** (prontidão, não vivacidade): um backend que ainda arranca não recebe
-  tráfego.
-- Container **sem** monitor: em rotação enquanto vivo (o ADR-0032 inalterado). O `get services`
-  diz quantos backends não têm sonda.
-- Na transição, o `health_monitor_loop` envia `svcsync` logo a seguir a emitir o evento
-  `health_status` (best-effort: holder em baixo = nada a reescrever).
-- **As ligações já abertas a um backend ejectado continuam** (E8): o conntrack guarda o DNAT, e
-  um pedido a meio acaba. Não se apaga o conntrack na ejecção por saúde. Na morte do container
-  não há nada a apagar (o outro lado já não existe).
-- **Todos os backends não saudáveis → conjunto vazio → `reject`** (D3), e o `get services` di-lo.
-  Não se cai para «todos, mesmo os doentes»; seria uma degradação silenciosa.
+`do_lbset`, `do_lbclear`, the socket verbs `lbset`/`lbclear`, `set_service_lb`,
+`set_service_lb_algo`, `clear_service_lb`, `delonix_net_rules::service_vip` and
+`Error::InvalidLbSpec` are retired. They have no callers, the pair does not accept the VIP the hash
+produces, and the rewrite is not atomic. This breaks users of the `delonix-sdn` **library** (the
+same note the removal of `Net` left); it goes in the release notes. Whether they go at once or
+after one release with `#[deprecated]` is open question 2.
 
-### D9 — O par `lbset`/`lbclear` e o `service_vip` saem
+## Alternatives considered
 
-`do_lbset`, `do_lbclear`, os verbos `lbset`/`lbclear` do socket, `set_service_lb`,
-`set_service_lb_algo`, `clear_service_lb`, o `delonix_net_rules::service_vip` e o
-`Error::InvalidLbSpec` saem na fase 1. Não têm chamadores, o par não aceita o VIP que o hash
-produz, e a reescrita não é atómica. É quebra para um utilizador **da biblioteca**
-`delonix-sdn` (a mesma nota que a remoção do `Net` deixou): sobe no CHANGELOG da release.
+- **DNS only (ADR-0032).** Does not rebalance a long connection nor serve a client that keeps the
+  IP, and the approved D3 asks for L4.
+- **IPVS.** Needs the `ip_vs` module and, for most of its configuration, `CAP_NET_ADMIN` in the
+  initial user namespace; **by reading, not measured**. Adds nothing `numgen` does not give for a
+  node's small sets, and puts a second dataplane next to nftables.
+- **Userspace proxy** (extending the L7 proxy to TCP). Copies bytes, a resident process per port,
+  and the source IP arrives as the proxy's. L7 stays the answer for HTTP; L4 belongs to the kernel.
+- **eBPF/XDP.** `CAP_BPF` does not exist in an unprivileged userns; the engine already degrades
+  `net flow` for the same reason.
+- **`jhash ip saddr` affinity by default.** Proposed as an optional `sessionAffinity: ClientIP`
+  field (phase F2b), not the default: it remaps whenever N changes, and was not measured in this
+  spike (to avoid loading `nft_hash` on the host).
+- **Masquerading hairpin** instead of requiring `br_netfilter` — rejected in D5 (loses the source
+  IP, E3).
+- **A default pool** (`10.90.0.0/16` reserved everywhere) — rejected by the owner (decision 1).
+- **No reject; let an empty VIP fall through** — rejected: E14 measured the leak through the
+  default route and the client's timeout.
 
-## Alternativas consideradas
+## Phased plan
 
-- **Ficar só com o DNS (ADR-0032).** Não reequilibra uma ligação longa nem serve um cliente
-  que guarda o IP, e a D3 aprovada pede o L4.
-- **IPVS.** Exige o módulo `ip_vs` e `CAP_NET_ADMIN` no namespace do utilizador inicial
-  para a maior parte da configuração; **por leitura, não medido**. Não acrescenta nada que o
-  `numgen` não dê para o conjunto pequeno de um nó, e mete um segundo plano de dados ao lado das
-  nftables.
-- **Proxy em espaço de utilizador** (alargar o proxy L7 a TCP). Copia bytes, é um processo
-  residente por porta, e o IP de origem chega como o do proxy. O L7 continua a ser a resposta para
-  HTTP; o L4 é do kernel.
-- **eBPF/XDP.** `CAP_BPF` não existe num userns sem privilégio; o motor já degrada o `net flow`
-  pela mesma razão.
-- **Afinidade por `jhash ip saddr` por omissão.** O ADR propõe `sessionAffinity: ClientIP`
-  como campo opcional (Fase 2b), não como omissão: muda o mapeamento sempre que N muda, e não foi
-  medido neste spike (para não carregar o `nft_hash` no host).
-- **Masquerade do hairpin** em vez de exigir o `br_netfilter` — rejeitado na D5 (perde o IP de
-  origem, E3).
-
-## Plano por fases
-
-| Fase | O quê | Ficheiros |
+| Phase | What | Files |
 |---|---|---|
-| F1 — modelo e limpeza | `ServiceDef.{type, vip, publish}` (`#[serde(default)]`); pool de VIPs no IPAM; `lease_owners` conta os serviços; recusas de sobreposição; schema e `explain`; `hot_fields` do `Service`; saem o `lbset`/`lbclear`/`service_vip` (D9); DX novos no dicionário e `pt.po` | `crates/adapters/delonix-sdn/src/{infra.rs,ipam.rs,error.rs}`, `crates/foundation/delonix-net-rules/src/lib.rs`, `crates/foundation/delonix-model/src/codes.rs`, `bins/delonix-runtime-bin/src/cmd/{service.rs,prune.rs,schema.rs}`, `crates/contexts/delonix-stack/src/reconcile.rs`, `docs/schema/v1/delonix.json`, `data/pt.po` |
-| F2 — dataplane | cadeias `svc`/`out` no ruleset base (criadas também por um `svcsync` contra um holder antigo, sem duplicar o `jump`); `service_backends` partilhada com o índice DNS; verbo `svcsync` e os cinco gatilhos da D7; DNS de um `VirtualIP`; `publish` (D6); recusa sem `br_netfilter` (D5); `reject` do vazio e da porta não servida | `crates/adapters/delonix-sdn/src/infra.rs`, `bins/delonix-runtime-bin/src/cmd/{service.rs,container.rs}`, `crates/adapters/delonix-linux/src/supervise.rs` |
-| F3 — saúde | porta de saúde em `service_backends`; `svcsync` no `health_monitor_loop`; `get/describe services` com `READY/TOTAL` e quantos sem sonda | `bins/delonix-runtime-bin/src/cmd/{container.rs,service.rs}` |
-| F4 — condicional | sonda TCP no controlo (opção B) — só se aparecer uma imagem sem shell que precise de ser ejectada | — |
+| F1 — model and cleanup | `ServiceDef.{type, vip, publish, readiness}` (`#[serde(default)]`); `network vip-pool` command and `<root>/ingress/vip-pool`; the overlap detection of D2 as a pure function over the collected sources plus a thin collector; VIP allocation in IPAM; `lease_owners` counts services; schema and `explain`; `hot_fields` for `Service`; D9 retirement; new DX codes and `pt.po` | `crates/adapters/delonix-sdn/src/{infra.rs,ipam.rs,cni.rs,error.rs}`, `crates/foundation/delonix-net-rules/src/lib.rs`, `crates/foundation/delonix-model/src/codes.rs`, `bins/delonix-runtime-bin/src/cmd/{service.rs,network.rs,prune.rs,schema.rs}`, `crates/contexts/delonix-stack/src/reconcile.rs`, `docs/schema/v1/delonix.json`, `data/pt.po` |
+| F2 — dataplane | `svc`/`out` chains and `vipguard` in the base ruleset (also created by a `svcsync` against an older holder, without duplicating the `jump`); `service_backends` shared with the DNS index; the `svcsync` verb and D7's five triggers; DNS of a `VirtualIP`; `publish` (D6); refusal without `br_netfilter` (D5) | `crates/adapters/delonix-sdn/src/infra.rs`, `bins/delonix-runtime-bin/src/cmd/{service.rs,container.rs}`, `crates/adapters/delonix-linux/src/supervise.rs` |
+| F3 — readiness | the TCP probe thread in the control process (D8 a); the health gate (D8 b) and `svcsync` from `health_monitor_loop`; `get/describe services` with `READY/TOTAL`, `ready (tcp)` vs `healthy` per backend, and the reject state | `crates/adapters/delonix-sdn/src/infra.rs`, `bins/delonix-runtime-bin/src/cmd/{container.rs,service.rs}` |
 
-A matriz passa `net.lb.l4` a `partial` no fim da F2 e a `supported` quando os checks abaixo
-existirem e passarem; `net.lb.health-check` idem no fim da F3. A evidência citada é o título do
-check, como manda o ADR-0050.
+The matrix moves `net.lb.l4` to `partial` at the end of F2 and to `supported` when the checks below
+exist and pass; `net.lb.health-check` likewise at the end of F3. The evidence cited is the check's
+title, as ADR-0050 requires. **No phase ships a VIP without F3's readiness gate enabled**: F2 alone
+behind a hidden flag for the battery, so a released VIP never forwards to a container still
+starting.
 
 ### Gates
 
-Testes puros (sem holder): a renderização do script `nft` (vazio → `reject`; N backends → mapa
-de N; `publish` → segunda regra; nomes e IPs validados antes do argv); `service_backends` (a
-porta de saúde, `Starting` fora, namespace); a recusa de VIP fora do pool e duplicado; o
-`lease_owners` com um lease `svc:`.
+Pure tests (no holder): the `nft` script render (no ready backend → no DNAT and the pool in
+`vipguard`; N backends → map of N; `publish` → second rule; names and IPs validated before the
+argv); the pool validation against each source of D2 (one fixture per source, including a host
+route listing and a WireGuard interface); `service_backends` with readiness (`Starting` out, no
+probe → TCP only, namespace); the VIP refusals (outside the pool, duplicate); `lease_owners` with an
+`svc:` lease.
 
-Bateria (`scripts/e2e.sh`, secção nova «kind: Service type VirtualIP», raiz isolada com os dois
+Battery (`scripts/e2e.sh`, new section «kind: Service type VirtualIP», isolated root with both
 roots):
 
-- «um VIP reparte as ligações por todos os backends» — 300 ligações de um container de outra rede,
-  cada backend com pelo menos 20 %;
-- «um cliente na mesma rede dos backends chega ao VIP e o backend vê o IP dele» (hairpin, D5);
-- «o nome do serviço resolve para o VIP»;
-- «um backend removido (`container rm`) deixa de receber ligações novas» — zero ligações a ele em
-  200, sem `stack apply`;
-- «um backend não saudável sai de rotação e volta quando recupera» (`--health-cmd` que lê um
-  ficheiro; apagar e repor o ficheiro);
-- «um VIP sem backends recusa em vez de pendurar» (`ConnectionRefused` em < 1 s);
-- «uma porta não servida do VIP não sai do holder»;
-- «um cliente de outra namespace não passa do VIP» (D4);
-- «a porta publicada leva ao mesmo conjunto»;
-- «sem `br_netfilter` o `type: VirtualIP` é recusado com classe 69» (só onde o módulo falta;
-  senão `SKIP` audível);
-- «o pool recusa um VIP duplicado (exit 5) e fora do pool».
+- «without a VIP pool, type VirtualIP is refused with class 69»;
+- «a VIP pool overlapping a declared network, a CNI pod range or a host route is refused, naming
+  the source»;
+- «a VIP spreads connections over every ready backend» — 300 connections from a container on
+  another network, each backend at least 20 %;
+- «a client on the backends' network reaches the VIP and the backend sees its IP» (hairpin, D5);
+- «the service name resolves to the VIP»;
+- «a removed backend (`container rm`) gets no new connections» — zero of 200, no `stack apply`;
+- «a backend whose port does not accept stays out of rotation» (no probe defined: the TCP minimum);
+- «a starting backend gets no traffic until its health probe passes» (`--health-cmd` reading a
+  file; `Starting` → out, file present → in, file removed → out);
+- «a VIP with no ready backend refuses at once» (`ConnectionRefused` in < 1 s, nothing on the
+  holder's default route);
+- «an unserved port of the VIP is refused»;
+- «a client from another namespace does not get past the VIP» (D4);
+- «the published port leads to the same set»;
+- «without `br_netfilter` type VirtualIP is refused with class 69» (only where the module is
+  missing; otherwise an audible `SKIP`);
+- «the pool refuses a duplicate VIP (exit 5) and one outside it».
 
-Caos (`scripts/chaos.sh`, cenário novo `service_lb`): três backends e um cliente em ciclo
-contínuo; (1) `kill -9` a um backend com `--restart no` — o cliente vê no máximo as ligações até
-ao supervisor gravar a morte, e depois zero erros; (2) sonda de saúde a falhar num segundo
-backend — ejectado em ≤ `interval × retries` + 2 s; (3) `kill -9` ao plano de controlo do
-holder — o pin guarda o ruleset, o tráfego **não pára**, e o conjunto reescrito no reinício é
-igual ao anterior; (4) `netns down`/`up` (morte do pin) — o VIP volta com o mesmo endereço
-(vem do registo, não de um hash). O cenário compara as contagens por backend e não só «o cliente
-recebeu respostas», porque um VIP que só servisse um backend também responderia.
+Chaos (`scripts/chaos.sh`, new scenario `service_lb`): three backends and a client in a continuous
+loop; (1) `kill -9` of a backend with `--restart no` — the client sees errors at most until the
+supervisor records the death, then zero; (2) a failing health probe on a second backend — ejected
+within `interval × retries` + 2 s; (3) a backend that closes its port while its process stays up —
+ejected within the TCP probe's `failureThreshold × interval` + 1 s; (4) `kill -9` of the holder's
+control plane — the pin keeps the ruleset, traffic **does not stop** for the backends already in
+the map until the restarted control rewrites; the scenario measures the refusals in the window when
+every backend restarts not ready; (5) `netns down`/`up` (the pin dies) — the VIP comes back with
+the same address (from the record). The scenario compares per-backend counts, not just «the client
+got answers», because a VIP that served one backend would answer too.
 
-## Consequências
+## Consequences
 
-- O `Service` passa a ter duas formas de serviço sob o mesmo Kind; a omissão não muda.
-- O holder ganha uma responsabilidade nova (reescrever a cadeia `svc`), sem processo novo.
-- A saúde depende do monitor do supervisor, logo de um `--health-cmd` ou de um `HEALTHCHECK`
-  e de uma imagem com shell. Um backend sem sonda é servido enquanto vive, e isso é dito.
-- A ejecção é tão rápida quanto o `interval × retries` do container: com as omissões do Docker,
-  90 s. A documentação do `Service` tem de recomendar valores curtos.
-- O pool `10.90.0.0/16` passa a ser reservado; uma rede do utilizador nessa gama é recusada.
-- Sai uma API pública da biblioteca `delonix-sdn` (D9).
-- IPv6 fica de fora (D4 do plano trata a `table inet`); o VIP é IPv4 como o resto do dataplane.
+- `Service` has two ways of being served under one Kind; the default does not change.
+- The holder gains a responsibility (rewriting the `svc` chain) and a periodic task (the TCP
+  readiness probe), with no new process.
+- A node without a configured pool has no VIPs, by design; the error says how to configure one.
+- The pool's overlap check depends on what the engine can see without host privilege; the
+  unrouted-WireGuard gap is documented.
+- Ejection speed is the probe's: 2 × 2 s for the TCP check by default, `interval × retries` for a
+  health command (Docker's defaults: 90 s; the `Service` documentation recommends short values).
+- A public API of the `delonix-sdn` library goes (D9).
+- IPv6 is out (plan D4 handles `table inet`); the VIP is IPv4 like the rest of the dataplane.
 
-## Questões para o dono
+## Open questions for the owner
 
-1. **O pool `10.90.0.0/16`** é o certo, ou deve ser configurável (por exemplo
-   `DELONIX_SERVICE_VIP_CIDR`)? Um host cuja LAN use `10.90/16` perde o acesso dos containers a
-   esses endereços **só** quando um deles for VIP.
-2. **`port` único no v1**, ou já `ports: [{port, targetPort, protocol}]` à Kubernetes? O ADR
-   propõe o único e uma fase própria para a lista.
-3. **`Starting` fora de rotação** — confirma a semântica de prontidão (um backend acabado de
-   arrancar não recebe tráfego até à primeira sonda boa)?
-4. **D9 — remover a API `set_service_lb*`/`service_vip`** da biblioteca: aceitável na próxima
-   release, ou fica uma release com `#[deprecated]`?
-5. **A sonda TCP (opção B)** fica condicional, ou entra já na F3 para cobrir imagens sem shell?
+1. **A single `port` in v1, or `ports: [{port, targetPort, protocol}]` straight away?**
+   Recommendation: the single `port` in v1 (one rule, one probe target, the battery above), with
+   `ports[]` in its own phase — the reject, the readiness state and the publish all become per
+   port, and that deserves its own measurements.
+2. **D9 — remove `set_service_lb*`/`service_vip` at once, or one release with `#[deprecated]`?**
+   Recommendation: remove at once. They have no caller in the workspace and cannot work (the pair
+   refuses the hash's VIP), so a deprecation period would only keep a broken API visible; the break
+   is named in the release notes.
