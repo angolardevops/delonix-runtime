@@ -2500,6 +2500,99 @@ mod tests {
     /// The three edge templates come up with HTTPS: every token is replaced
     /// (the TLS port included), the manifest publishes both ports and mounts
     /// `./tls`, and the key that was generated is private.
+    /// Every edge template offers Let's Encrypt by DNS-01 (the only challenge
+    /// that works when port 80 of the public address does not reach the host),
+    /// and HAProxy, which has no webroot, says so instead of issuing a local
+    /// certificate named after the arguments.
+    #[test]
+    fn the_edge_templates_offer_lets_encrypt_by_dns() {
+        for tpl in ["nginx", "httpd", "haproxy"] {
+            let (_tmp, dir) = scratch();
+            let plan = Plan {
+                port: "18080".into(),
+                tls_port: Some("18443".into()),
+                hosts: vec!["localhost".into()],
+            };
+            render_planned(tpl, &edge_opts(&dir, tpl), false, &plan).unwrap();
+            let run = |args: &[&str]| {
+                std::process::Command::new("sh")
+                    .arg("scripts/tls.sh")
+                    .args(args)
+                    .current_dir(&dir)
+                    .output()
+                    .unwrap()
+            };
+            let syntax = std::process::Command::new("sh")
+                .args(["-n", "scripts/tls.sh"])
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(syntax.status.success(), "{tpl}: {syntax:?}");
+            // One argument short: the usage line, before certbot is looked for.
+            let usage = run(&["letsencrypt-dns", "example.org"]);
+            assert_eq!(usage.status.code(), Some(2), "{tpl}: {usage:?}");
+            assert!(
+                String::from_utf8_lossy(&usage.stderr).contains("letsencrypt-dns <domain> <email>"),
+                "{tpl}: {usage:?}"
+            );
+            // A certificate this project already holds from ANOTHER CA (staging
+            // first, then production) is replaced: certbot alone answers "not
+            // yet due for renewal" and keeps it. A stand-in certbot records
+            // the options it was given.
+            let bin = dir.join("fakebin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let fake = bin.join("certbot");
+            std::fs::write(&fake, "#!/bin/sh\necho \"$@\" > certbot.args\nexit 1\n").unwrap();
+            std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            let asked = |staging: bool| {
+                let mut cmd = std::process::Command::new("sh");
+                cmd.args(["scripts/tls.sh", "letsencrypt-dns", "example.org", "-"])
+                    .current_dir(&dir)
+                    .env("PATH", &path)
+                    .env("DNS_AUTH_HOOK", "true")
+                    .env_remove("ACME_SERVER")
+                    .env_remove("LETSENCRYPT_STAGING");
+                if staging {
+                    cmd.env("LETSENCRYPT_STAGING", "1");
+                }
+                cmd.output().unwrap();
+                std::fs::read_to_string(dir.join("certbot.args")).unwrap()
+            };
+            let first = asked(false);
+            assert!(
+                first.contains("--server https://acme-v02.api.letsencrypt.org/directory"),
+                "{tpl}: {first}"
+            );
+            assert!(!first.contains("--force-renewal"), "{tpl}: {first}");
+            std::fs::create_dir_all(dir.join("letsencrypt/renewal")).unwrap();
+            std::fs::write(
+                dir.join("letsencrypt/renewal/example.org.conf"),
+                "[renewalparams]\nserver = https://acme-staging-v02.api.letsencrypt.org/directory\n",
+            )
+            .unwrap();
+            let same_ca = asked(true);
+            assert!(!same_ca.contains("--force-renewal"), "{tpl}: {same_ca}");
+            let other_ca = asked(false);
+            assert!(other_ca.contains("--force-renewal"), "{tpl}: {other_ca}");
+            if tpl == "haproxy" {
+                let before = std::fs::read(dir.join("tls/tls.crt")).unwrap();
+                let http01 = run(&["letsencrypt", "example.org", "-"]);
+                assert_eq!(http01.status.code(), Some(2), "{http01:?}");
+                assert!(
+                    String::from_utf8_lossy(&http01.stderr).contains("letsencrypt-dns"),
+                    "{http01:?}"
+                );
+                assert_eq!(std::fs::read(dir.join("tls/tls.crt")).unwrap(), before);
+            }
+        }
+    }
+
     #[test]
     fn the_edge_templates_render_with_tls_and_no_token_left() {
         use std::os::unix::fs::PermissionsExt;
