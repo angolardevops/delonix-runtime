@@ -101,7 +101,7 @@ A métrica de célula é a honesta: uma capacidade provada no Proxmox e só
 | Compose, por serviço | 28 servidas, 12 recusadas, **49 em falta**, de 89 | 2026-10-02 |
 | Compose, topo | 7 servidas, 1 recusada, de 8 | 2026-10-02 |
 | Contrato de nó | 1 RPC servido (`ListProviders`) | 2026-10-02 |
-| CLI executada pela bateria | 25 % das folhas na `main` (2026-08-12); 63 % no ramo `auditoria-cobertura`, por integrar | **por remedir** |
+| CLI executada pela bateria | **37 %** (91 de 244 folhas; medido no cabeçalho do `scripts/e2e.sh`); 63 % no ramo `auditoria-cobertura`, por integrar | 2026-09-09, v3.0.0 — **por remedir** |
 | Checks na bateria E2E | 735 linhas `check` | 2026-10-02 |
 | Cenários de caos | 25 | 2026-10-02 |
 | Testes no workspace | 2658 | 2026-10-02 |
@@ -139,7 +139,7 @@ Sem isto, nenhuma percentagem posterior é confiável.
 | # | Item | Tamanho | Critério de saída | M |
 |---|---|---|---|---|
 | F0.1 | `delonix provider matrix` passa a imprimir a **métrica de célula** (N2 / aplicáveis, por domínio e por provider) e o gate falha se ela descer sem a linha de base baixar no mesmo commit (ratchet nos dois sentidos, como o `lang_ratchet`) | P | número no topo do `capability-matrix.md`; teste que chumba com uma célula `supported` rebaixada | M13 |
-| F0.2 | **Ratchet de execução da CLI**: contador de folhas executadas pela bateria contra o total, ratchet nos dois sentidos. Integrar primeiro o ramo `auditoria-cobertura` (63 %) | M | `scripts/cli_exec_ratchet.py` no CI; número na matriz de rastreabilidade | M13 |
+| F0.2 | **Ratchet de execução da CLI**: contador de folhas executadas pela bateria contra o total, ratchet nos dois sentidos. Integrar primeiro o ramo `auditoria-cobertura` (63 % contra os 37 % da `main`) | M | `scripts/cli_exec_ratchet.py` no CI; número na matriz de rastreabilidade | M13 |
 | F0.3 | **Laboratório que executa de facto**: runner self-hosted com KVM, userns não privilegiados, cgroup delegado (`cpu cpuset io memory pids`) e `br_netfilter`. Corre `e2e.sh` completo, `chaos.sh` e o `bench_gate.py` todas as noites; o job **falha** se um cenário saltar sem razão aceite | G | 3 corridas nocturnas seguidas com 0 `skipped` inesperados; log publicado | M13, M11 |
 | F0.4 | **Imagem de convidado de teste**: qcow2 mínimo (< 100 MiB) que arranca em libvirt **e** CH, corre cloud-init, `qemu-guest-agent` e consola série, e responde num porto. Construída pelo próprio `vm build`, publicada no ghcr | M | `vm create --wait` → login por SSH → `hostname` igual ao pedido, nos dois backends | M09 |
 | F0.5 | **Remedir o CRI** com `critest` v1.36 contra o motor actual; classificar as falhas restantes (bug / não aplicável / recusa) | P | `docs/cri-conformance.md` com data e motor de hoje | M02 |
