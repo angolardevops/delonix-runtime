@@ -144,13 +144,37 @@ fn teardown(c: &Container, slirp_pid: Option<i32>, leases: Leases) {
                 }
             }
         }
-        PortHome::OwnSlirp => {
-            if let Some(pid) = slirp_pid {
+        PortHome::OwnSlirp => match slirp_pid {
+            Some(pid) => {
                 crate::reap_slirp_for(pid);
             }
-        }
+            // No pid to go by: the container exited on its own, and the record
+            // dropped the pid with it — the one thing that named its slirp.
+            // This used to do nothing, on the strength of «the slirp dies with
+            // the netns»; it does not (see `forward_reaping_orphans`), so a
+            // `rm` of such a container left its slirp listening on the host
+            // port, with nothing in any record pointing at it. A dead target is
+            // what such a slirp still has, and the sweep goes by that.
+            None => {
+                crate::reap_orphan_slirp();
+            }
+        },
         // With no published ports there's no slirp with an api-socket holding anything.
         PortHome::Nowhere => {}
+    }
+}
+
+/// Reaps the slirp of an incarnation that has EXITED — `pid` is the init it
+/// served — when the container has one of its own. Nothing else is touched:
+/// the leases and the record are the caller's.
+///
+/// For the two places that learn of an exit nobody asked for while they still
+/// hold the pid: the supervisor that reaped the process, and the reconcile that
+/// found it gone. After them the record says `pid: None` and the slirp can
+/// only be found by its dead target.
+pub fn reap_own_slirp(c: &Container, pid: i32) {
+    if port_home(c.network.is_some(), c.pod.is_some(), !c.ports.is_empty()) == PortHome::OwnSlirp {
+        crate::reap_slirp_for(pid);
     }
 }
 

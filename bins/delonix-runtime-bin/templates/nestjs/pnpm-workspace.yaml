@@ -1,0 +1,17 @@
+# pnpm settings for this project (pnpm 11 reads them here, not from .npmrc).
+#
+# Dependencies do not run install scripts unless listed as `true`. None of
+# these is needed: each ships prebuilt binaries or only prints a notice.
+# A new dependency with a build script fails `pnpm install` until it is
+# reviewed and added here.
+allowBuilds:
+  "@parcel/watcher": false
+  "@scarf/scarf": false
+  protobufjs: false
+  unrs-resolver: false
+
+# @nestjs/swagger 11 pins js-yaml 5.3.0, which has a moderate advisory
+# (GHSA-r3ph-w7gj-g6xm, fixed in 5.4.1). Drop this once `pnpm audit --prod`
+# passes without it.
+overrides:
+  "js-yaml@>=5.0.0 <5.4.1": "^5.4.1"

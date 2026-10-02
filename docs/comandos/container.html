@@ -834,13 +834,22 @@ Options:
           Overwrite existing files
 
   -t, --template &lt;TEMPLATE&gt;
-          Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
+          Generate a complete PROJECT for a stack (e.g. `fastapi`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
 
   -v, --template-version &lt;TEMPLATE_VERSION&gt;
           Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template&#x27;s own README. Refused with a clear error on a template that has none
 
       --up
           After generating, build the image, start it, and wait until it&#x27;s healthy
+
+      --port &lt;PORT&gt;
+          Host and container port of the service, instead of the template&#x27;s own
+
+      --tls-port &lt;TLS_PORT&gt;
+          HTTPS port, on a template that serves TLS (nginx, httpd, haproxy)
+
+      --hostname &lt;HOSTNAME&gt;
+          Extra host name or address for the generated TLS certificate (repeatable; localhost is always included)
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

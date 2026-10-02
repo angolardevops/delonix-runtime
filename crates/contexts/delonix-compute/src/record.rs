@@ -638,6 +638,10 @@ pub struct Container {
     /// restart it; only a `start` brings it back). Without this, `stop` and supervisor
     /// go to war: the container comes back on its own and the user cannot
     /// stop it. Cleared by `run`/`start`.
+    ///
+    /// A forced removal sets it too, before it signals: `rm -f` keeps the record
+    /// when the exit outlives its wait (DX-8101), and a removal that gave up is
+    /// still not a container to restart.
     #[serde(default)]
     pub stopped_by_user: bool,
     /// Mounted volumes/binds (persisted so the **zero-downtime update** can

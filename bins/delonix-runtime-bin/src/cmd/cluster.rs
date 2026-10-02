@@ -3002,6 +3002,7 @@ fn cmd_init(
             template: None,
             template_version: None,
             up: false,
+            edge: Default::default(),
         },
     )
 }

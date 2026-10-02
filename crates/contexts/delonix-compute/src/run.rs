@@ -117,24 +117,31 @@ where
                 .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?,
         );
     }
-    let run_user = match &o.user {
-        Some(u) => Some(images.resolve_user(&rootfs, u)?),
-        None => None,
-    };
-
+    // The user: `--user` when given, otherwise the one the IMAGE declares
+    // (ADR-0062 D1). `--user 0` is the explicit way to stay root in the container.
+    //
+    // One case cannot honour the image: a rootless host with no subordinate id
+    // range can map a single uid, so a second user does not exist. There the run
+    // continues as uid 0 and says why, rather than refusing every image that
+    // declares a user. An explicit `--user` on such a host is not softened: the
+    // caller asked, and the spawn reports what is missing.
+    let image_user = image_user_is_non_root(&config.user).then_some(config.user.as_str());
     let mut notices = edits.notices;
-    // The image's `USER` is read and NOT applied: without `--user` the process
-    // runs as uid 0 inside the container whatever the image declares. Accepting a
-    // declaration and ignoring it in silence is what this engine refuses
-    // everywhere else, so until the default changes (ADR-0062) the run says so.
-    // Only on the first pass: the re-exec into a custom network resolves again.
-    if o.user.is_none() && !second_pass && image_user_is_non_root(&config.user) {
-        notices.push(Notice::new(
-            "delonix: warning — image '{image}' declares USER {user}, which is not applied: \
-             the process runs as root (uid 0) inside the container. Pass -u {user} to run as that user.",
-            &[("image", &o.image), ("user", &config.user)],
-        ));
-    }
+    let run_user = match (&o.user, image_user) {
+        (Some(u), _) => Some(images.resolve_user(&rootfs, u)?),
+        (None, Some(u)) if host.can_map_id_range() => Some(images.resolve_user(&rootfs, u)?),
+        (None, Some(u)) => {
+            // Only on the first pass: the re-exec into a custom network resolves again.
+            if !second_pass {
+                notices.push(Notice::new(
+                    "delonix: warning — image '{image}' declares USER {user}, which cannot be applied on this host: it has no subordinate uid/gid range for this account (/etc/subuid, /etc/subgid, newuidmap), so a second user cannot exist. The process runs as root (uid 0) inside the container.",
+                    &[("image", &o.image), ("user", u)],
+                ));
+            }
+            None
+        }
+        (None, None) => None,
+    };
     let security = parse_security_opts(&o.security_opt)?;
     let mut seccomp = security
         .seccomp_unconfined
@@ -601,6 +608,8 @@ mod tests {
     struct Fake {
         calls: RefCell<Vec<String>>,
         image_user: String,
+        /// A rootless host with no subordinate id range.
+        single_uid: bool,
     }
 
     impl Fake {
@@ -608,6 +617,7 @@ mod tests {
             Fake {
                 calls: RefCell::new(Vec::new()),
                 image_user: String::new(),
+                single_uid: false,
             }
         }
         fn with_image_user(user: &str) -> Self {
@@ -693,6 +703,9 @@ mod tests {
         fn rootless(&self) -> bool {
             true
         }
+        fn can_map_id_range(&self) -> bool {
+            !self.single_uid
+        }
         fn load_seccomp_profile(
             &self,
             path: &str,
@@ -732,33 +745,62 @@ mod tests {
         )
     }
 
-    /// An image's USER that is read and not applied is SAID, once: on the first
-    /// pass, only when no `--user` was given, and only when it names someone
-    /// other than root.
+    /// The image's USER is the default user (ADR-0062 D1): applied when `--user`
+    /// is absent, overridden by `--user` (root included), never invented for an
+    /// image that declares none or root. On a host that cannot hold a second
+    /// uid it is not applied, and the run says so once.
     #[test]
-    fn an_unapplied_image_user_is_announced_once() {
-        let warned = |r: &Resolved| {
+    fn the_images_user_is_the_default_user() {
+        let said = |r: &Resolved| {
             r.notices
                 .iter()
-                .any(|n| n.template.contains("declares USER") && n.render().contains("odoo"))
+                .any(|n| n.template.contains("declares USER"))
+        };
+        let asked = |f: &Fake| {
+            f.calls
+                .borrow()
+                .iter()
+                .find(|c| c.starts_with("user "))
+                .cloned()
         };
         let o = opts();
+
         let f = Fake::with_image_user("odoo");
-        assert!(
-            warned(&run(&o, &f, false).unwrap()),
-            "first pass must say it"
+        let r = run(&o, &f, false).unwrap();
+        assert_eq!(r.record.run_user, Some((101, Some(101))));
+        assert_eq!(asked(&f).as_deref(), Some("user odoo in /roots/id1"));
+        assert!(!said(&r), "an applied USER needs no warning");
+        // The re-exec pass resolves the same user.
+        let f = Fake::with_image_user("odoo");
+        assert_eq!(
+            run(&o, &f, true).unwrap().record.run_user,
+            Some((101, Some(101)))
         );
-        assert!(
-            !warned(&run(&o, &f, true).unwrap()),
-            "the re-exec pass must not repeat it"
-        );
+
+        // `--user` wins, and is what gets resolved.
         let mut with_user = opts();
-        with_user.user = Some("odoo".into());
-        assert!(!warned(&run(&with_user, &f, false).unwrap()));
+        with_user.user = Some("0".into());
+        let f = Fake::with_image_user("odoo");
+        run(&with_user, &f, false).unwrap();
+        assert_eq!(asked(&f).as_deref(), Some("user 0 in /roots/id1"));
+
         for root in ["", "0", "root", "0:0", "root:root"] {
             let f = Fake::with_image_user(root);
-            assert!(!warned(&run(&o, &f, false).unwrap()), "{root:?} is root");
+            let r = run(&o, &f, false).unwrap();
+            assert_eq!(r.record.run_user, None, "{root:?} is root");
+            assert_eq!(asked(&f), None);
         }
+
+        // No subordinate range: uid 0, said on the first pass only.
+        let single = || Fake {
+            single_uid: true,
+            ..Fake::with_image_user("odoo")
+        };
+        let r = run(&o, &single(), false).unwrap();
+        assert_eq!(r.record.run_user, None);
+        assert!(said(&r));
+        assert!(!said(&run(&o, &single(), true).unwrap()));
+
         assert!(image_user_is_non_root("101:101"));
         assert!(image_user_is_non_root("haproxy"));
     }

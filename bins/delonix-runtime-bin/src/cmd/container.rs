@@ -1020,7 +1020,7 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
@@ -1033,6 +1033,8 @@ pub enum ContainerCmd {
         /// After generating, build the image, start it, and wait until it's healthy.
         #[arg(long)]
         up: bool,
+        #[command(flatten)]
+        edge: super::scaffold::EdgeArgs,
     },
     /// Run a container from an image (pulls it if missing).
     Run {
@@ -1610,6 +1612,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         template,
         template_version,
         up,
+        edge,
     } = action
     {
         return cmd_init(
@@ -1621,6 +1624,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             template,
             template_version,
             up,
+            edge,
         );
     }
     let (images, store) = open_stores()?;
@@ -2456,6 +2460,7 @@ pub(crate) fn with_host_workload<R>(
         delonix_sdn::slirp_attach(pid, ports)
             .map_err(|e| delonix_linux::Error::Engine(delonix_model::Error::from(e)))
     };
+    let detach_slirp = |c: &Container, pid: i32| delonix_sdn::run_network::reap_own_slirp(c, pid);
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
             spawn_health_monitor(c.id.clone(), cfg);
@@ -2469,6 +2474,7 @@ pub(crate) fn with_host_workload<R>(
         state_root: &state_root,
         addresses: &addresses,
         attach_slirp: &attach_slirp,
+        detach_slirp: &detach_slirp,
         on_first_start: &on_first_start,
         silent_death: super::po::t(
             "the container did not start, and the supervisor died before saying why",
@@ -3120,8 +3126,16 @@ pub(crate) fn workload_describe(name: &str) -> Result<()> {
 /// wasted work, not wrong — the guard below only fires once per crash regardless of
 /// which caller happens to be first.
 fn reconcile_with_diagnostics(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    // The process is gone and the record is about to forget its pid — the one
+    // thing that names the slirp that served it. A container with no supervisor
+    // has nobody else to release it: the slirp does not exit with its target,
+    // and it went on holding the host port, so the next `start` was refused.
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -3658,7 +3672,16 @@ fn reexec_into_netns(
     // inside the netns, recursively. An explicit internal form doesn't depend on
     // who called it.
     let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
-    let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
+    // A relative bind source (`./addons:/mnt/extra-addons`) is resolved against
+    // the CWD, and the 2nd pass does not run in the caller's CWD: every relative
+    // bind on a custom network or pod failed with `no such bind path ./addons`.
+    // Measured with the `odoo` template's dev manifest, whose two bind mounts are
+    // the whole point of it. Anchored here, where the CWD is still the caller's.
+    let mut anchored = opts.clone();
+    if let Ok(cwd) = std::env::current_dir() {
+        anchored.volumes = anchor_relative_binds(&opts.volumes, &cwd);
+    }
+    let json = serde_json::to_string(&anchored).map_err(|e| Error::Invalid(e.to_string()))?;
     // BUG FOUND: `std::fs::write` creates the file at the ambient umask
     // (typically 0644, world-readable). `opts.env` carries the raw `-e
     // KEY=VALUE` pairs the user passed — commonly credentials — and for a
@@ -3706,12 +3729,66 @@ fn reexec_into_netns(
         if !opts.detach {
             propagate_exit_status(&Status::Failed(status.code().unwrap_or(1)));
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not start inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Name the network the user wrote (`--net myodoo-net`), not the netns id
+        // (a hash that appears nowhere in their manifest), and hand back the
+        // class the inner pass already decided.
+        let label = if opts.net.is_empty() || opts.pod.is_some() {
+            netns
+        } else {
+            opts.net.as_str()
+        };
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
+}
+
+/// Makes every relative bind source (`./x`, `../x`, `.`) absolute against
+/// `cwd`, leaving named volumes and absolute paths untouched. The same test
+/// `VolumeStore::resolve_spec` uses to tell a bind from a named volume: the
+/// source starts with `.` or `/`.
+fn anchor_relative_binds(specs: &[String], cwd: &std::path::Path) -> Vec<String> {
+    specs
+        .iter()
+        .map(|spec| match spec.split_once(':') {
+            Some((src, rest)) if src.starts_with('.') => {
+                format!("{}:{rest}", cwd.join(src).display())
+            }
+            _ => spec.clone(),
+        })
+        .collect()
+}
+
+/// The error of a `--net <custom>`/`--pod` start whose 2nd pass failed.
+///
+/// The 2nd pass is a separate process: it has already printed the real reason
+/// on stderr and exited with that reason's class (69 for a capability this host
+/// lacks, 4 for something missing…). This used to be one `Invalid` for every
+/// case, so the command exited 1 and the last line on screen read `(exit
+/// Some(69))` — measured on the `odoo` template, whose stack stopped there while
+/// the actual cause scrolled past one line above. The class maps back so a
+/// reconciler reading the exit code sees what the inner pass decided.
+fn netns_start_error(network: &str, code: Option<i32>) -> Error {
+    use delonix_model::exitcode as x;
+    let msg = super::po::tf(
+        "the container did not start inside network '{network}' — the reason is on the line above (exit {code})",
+        &[
+            ("network", network),
+            ("code", &code.map_or_else(|| "signal".to_string(), |c| c.to_string())),
+        ],
+    );
+    match code {
+        // `NotFound` prints as «no such {0}», so it gets a noun of its own.
+        Some(x::NOT_FOUND) => Error::NotFound(super::po::tf(
+            "resource the container needs inside network '{network}' — the reason is on the line above (exit {code})",
+            &[("network", network), ("code", &x::NOT_FOUND.to_string())],
+        )),
+        Some(x::NOT_RUNNING) => Error::NotRunning(msg),
+        Some(x::CONFLICT) => Error::Conflict(msg),
+        Some(x::UNAVAILABLE) => Error::Unavailable(msg),
+        Some(x::NO_PERMISSION) => Error::PermissionDenied(msg),
+        Some(x::TIMEOUT) => Error::Timeout(msg),
+        _ => Error::Invalid(msg),
+    }
 }
 
 /// The 2nd re-exec pass (`delonix netns run <spec.json>`, hidden — not a public
@@ -3872,18 +3949,24 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
 fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
-    // `start` reasserts the desired state = running (clears the user's `stop`).
-    let _ = store.update(&c.id, |cur| {
-        cur.stopped_by_user = false;
-        true
-    });
-    c.stopped_by_user = false;
     if matches!(
         c.status,
         delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
+    // `start` reasserts the desired state = running (clears the user's `stop`).
+    //
+    // AFTER the refusal above, not before it: a `start` that starts nothing
+    // must not withdraw what a `stop` or an `rm -f` asked for. A process still
+    // exiting past their wait (DX-8101) is exactly a container that reads
+    // `Running` here, and clearing the mark on the way to «already running» let
+    // its supervisor restart it once the exit came.
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = false;
+        true
+    });
+    c.stopped_by_user = false;
 
     // Custom network: the SAME two-pass re-exec as `cmd_run` (see
     // `reexec_into_netns`). It was forgotten on the old `join_netns` path — which
@@ -3901,7 +3984,7 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             if let Some(port) = c.expose {
                 let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
             }
-            return reexec_start(&c.id, &netns, &ip, true);
+            return reexec_start(&c.id, &netns, &n, &ip, true);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
         if let Some(ip) = c.ip.clone() {
@@ -4007,7 +4090,7 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
                 super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace)?;
             }
             let ip = infra::container_ip(&pn);
-            return reexec_start(&c.id, &pn, &ip, false);
+            return reexec_start(&c.id, &pn, &pn, &ip, false);
         }
         // Deliberately NOT setting `c.ip` here: `cmd_run` leaves a pod member's
         // record without one (the address belongs to the pod's netns, not to the
@@ -4144,7 +4227,10 @@ fn reexec_env(id: &str, ip: &str) -> Vec<(String, std::ffi::OsString)> {
 /// netns is the pod's and is shared with its peers — tearing it down on one
 /// member's failed start would take the whole pod's network with it. Same
 /// contract `cmd_run`'s `--pod` branch already states.
-fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()> {
+/// `label` is what a failure names: the network the user wrote for a custom
+/// network (the netns is a hash that appears in no manifest), the pod's netns
+/// for a pod member.
+fn reexec_start(id: &str, netns: &str, label: &str, ip: &str, owns_netns: bool) -> Result<()> {
     // BUG FIXED HERE: this used `join_argv(id)` and never read its own `netns`
     // parameter. It worked only because the sole caller passed a netns equal to
     // the id (the custom-network case), so the two were the same string. A pod
@@ -4181,10 +4267,9 @@ fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()>
             // does its lease (see `detach_container_keep_lease`).
             infra::detach_container_keep_lease(id, ip);
         }
-        return Err(Error::Invalid(super::po::tf(
-            "the container did not restart inside the network '{netns}' (exit {code})",
-            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
-        )));
+        // Same error as a failed `run` on a custom network: the user's network
+        // name and the class the inner pass decided, not a hash and `Some(1)`.
+        return Err(netns_start_error(label, status.code()));
     }
     Ok(())
 }
@@ -4204,8 +4289,18 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
     if let Err(e) = runtime::stop(store, &mut c, time) {
         if e.is_not_running() {
+            // Not running, but what it published may still be held: a container
+            // that exited on its own left its slirp behind (see `stop_ports`).
+            stop_ports(&c, None);
             println!("{}", c.name);
             return Ok(());
+        }
+        // A stop that gave up on a process still exiting has ALREADY signalled
+        // it: nothing is coming back through its ports. Release them now — the
+        // record keeps the process (DX-8101), and by the time it exits there
+        // may be no command left to do this.
+        if matches!(e, runtime::Error::StillExiting(_)) {
+            stop_ports(&c, pid);
         }
         return Err(e.into());
     }
@@ -4722,12 +4817,17 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             Vec::new(),
             c.env.clone(),
             c.workdir.clone().unwrap_or_default(),
-            String::new(),
+            // The base image's USER survives a commit: it was an empty string
+            // here, so a committed image silently lost the user its base declared.
+            base.config.user.clone(),
             tag,
             &base.config.architecture,
             // `container commit` herda o health check da base, tal como o
             // caminho overlay (`commit_container`) já fazia.
             base.config.healthcheck.clone(),
+            // Packed from the host side: owners go into the layer as the
+            // container sees them, not as host uids (see `pack_rootfs_tar`).
+            &runtime::container_ids,
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS
@@ -5719,9 +5819,17 @@ fn cpu_usage_usec(pid: i32) -> Option<u64> {
 /// «died, no pid» of the incarnation before, which is how a running process drops
 /// out of the record and survives `rm -f` (#377/#378 are the same loss by other
 /// writers). `update` re-reads under the lock and reconciles THAT.
-fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+///
+/// The slirp of a container found dead goes here too, for the reason
+/// `reconcile_with_diagnostics` gives: after this write the record has no pid,
+/// and the pid was what named the slirp.
+pub(crate) fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+    let pid = c.pid;
     if !runtime::reconcile_status(c) {
         return false;
+    }
+    if let (Some(pid), None) = (pid, c.pid) {
+        delonix_sdn::run_network::reap_own_slirp(c, pid);
     }
     *c = store
         .update(&c.id, runtime::reconcile_status)
@@ -5998,22 +6106,9 @@ fn cmd_init(
     template: Option<String>,
     template_version: Option<String>,
     up: bool,
+    edge: super::scaffold::EdgeArgs,
 ) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
-        // the directory doesn't exist yet (it's `init` that creates it) and would
-        // always fail, falling into the fallback — every project would be called "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
+    let name = super::scaffold::project_name(name, &dir);
     super::scaffold::init(
         target,
         &super::scaffold::InitOpts {
@@ -6024,6 +6119,7 @@ fn cmd_init(
             template,
             template_version,
             up,
+            edge,
         },
     )
 }
@@ -6272,6 +6368,36 @@ mod discard_tests {
         let dir = leftover(&images, &c.id);
         discard_unstarted(&images, &store, &c.id);
         assert!(dir.exists(), "a real container's directory was purged");
+    }
+
+    /// **A `start` that is refused changes nothing.** A container still exiting
+    /// after a `stop` or an `rm -f` gave up on it (DX-8101) reads `Running`, and
+    /// the refused start used to clear `stopped_by_user` on its way out — the mark
+    /// that keeps the `--restart` supervisor from bringing it back. This test
+    /// process stands in for the init that has not exited.
+    #[test]
+    fn a_refused_start_keeps_the_stop_the_operator_asked_for() {
+        let root = tempfile::tempdir().unwrap();
+        let (images, store) = stores(root.path());
+        let me = std::process::id() as i32;
+        let mut c = Container::new(
+            "a1b2c3d4e5f60718".into(),
+            "dying".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(me);
+        c.pid_starttime = delonix_node::proc_starttime(me);
+        c.status = Status::Running;
+        c.stopped_by_user = true;
+        store.save(&c).unwrap();
+        let e = start_container(&images, &store, &c.id).unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(
+            store.load(&c.id).unwrap().stopped_by_user,
+            "a start that started nothing withdrew the requested stop"
+        );
     }
 
     /// A record that cannot be READ is not a record that does not exist: purging
@@ -6574,6 +6700,65 @@ mod runspec_single_builder_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Relative bind sources are anchored to the caller's CWD before the 2nd
+    /// pass (which runs elsewhere); named volumes and absolute paths are not
+    /// touched, and neither is the rest of the spec (`:ro`).
+    #[test]
+    fn relative_binds_are_anchored_before_the_reexec() {
+        let cwd = std::path::Path::new("/work/proj");
+        let got = super::anchor_relative_binds(
+            &[
+                "./addons:/mnt/extra-addons".into(),
+                "../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ],
+            cwd,
+        );
+        assert_eq!(
+            got,
+            vec![
+                "/work/proj/./addons:/mnt/extra-addons".to_string(),
+                "/work/proj/../shared:/s:ro".into(),
+                "data:/var/lib/data".into(),
+                "/abs:/abs".into(),
+            ]
+        );
+        let nf = super::netns_start_error("od20-net", Some(4)).to_string();
+        assert!(nf.starts_with("no such resource"), "{nf}");
+    }
+
+    /// A failed 2nd pass keeps the class the inner process decided, names the
+    /// network the user wrote, and never prints a Rust `Option` at them.
+    #[test]
+    fn a_failed_netns_start_keeps_the_inner_class() {
+        use delonix_model::exitcode as x;
+        let e = super::netns_start_error("myodoo-net", Some(x::UNAVAILABLE));
+        assert_eq!(x::for_error(&e), x::UNAVAILABLE);
+        let text = e.to_string();
+        assert!(text.contains("'myodoo-net'"), "{text}");
+        assert!(!text.contains("Some("), "{text}");
+        for code in [
+            x::NOT_FOUND,
+            x::NOT_RUNNING,
+            x::CONFLICT,
+            x::NO_PERMISSION,
+            x::TIMEOUT,
+        ] {
+            assert_eq!(
+                x::for_error(&super::netns_start_error("n", Some(code))),
+                code
+            );
+        }
+        assert_eq!(
+            x::for_error(&super::netns_start_error("n", Some(42))),
+            x::GENERIC
+        );
+        assert!(super::netns_start_error("n", None)
+            .to_string()
+            .contains("exit signal"));
+    }
+
     /// `--env-file0`: byte-exact values (multi-line, `=` inside the value),
     /// before `-e` (which wins), and an entry without `KEY=` is refused rather
     /// than silently dropped.
@@ -7534,6 +7719,65 @@ restartPolicy: OnFailure
             rec.status,
             delonix_model::records::Status::Running
         ));
+    }
+
+    /// **A reconciliation that records a death releases the dead container's
+    /// slirp.** After the write the record has no pid, and the pid was what
+    /// named the slirp: `container stats` and the kind cluster listing recorded
+    /// the death and left it. A `sleep` under the name `slirp4netns`, with the
+    /// dead pid where the target goes, stands in for the slirp — it is found
+    /// the way the real one is, by its argv.
+    #[test]
+    fn a_recorded_death_releases_the_containers_own_slirp() {
+        use std::os::unix::process::CommandExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
+        let dead = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut ch| {
+                let id = ch.id() as i32;
+                ch.wait().map(|_| id)
+            })
+            .unwrap();
+        let mut slirp = std::process::Command::new("sleep")
+            .arg0("slirp4netns")
+            .args(["30", &dead.to_string()])
+            .spawn()
+            .expect("the stand-in slirp");
+        let mut c = delonix_compute::Container::new(
+            "abc123def4560001".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        c.pid = Some(dead);
+        c.pid_starttime = None;
+        c.ports = vec!["18000:80".into()];
+        store.save(&c).unwrap();
+        // The argv is the stand-in's own only after its `exec`.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(super::reconcile_and_persist(&store, &mut c));
+        let mut exited = false;
+        for _ in 0..30 {
+            if slirp.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = slirp.kill();
+        let _ = slirp.wait();
+        assert_eq!(
+            store.load(&c.id).unwrap().pid,
+            None,
+            "the death is recorded"
+        );
+        assert!(
+            exited,
+            "the record forgot pid {dead} and its slirp was left running"
+        );
     }
 
     #[test]

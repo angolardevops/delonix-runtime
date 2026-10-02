@@ -1,10 +1,15 @@
-# Delonixfile — production-ready HAProxy (L7 load balancer / reverse proxy).
+# Delonixfile — HAProxy __TEMPLATE_VERSION__: L7 reverse proxy / load balancer, HTTPS on.
 # Build with:  delonix build -t __NAME__:dev .
 FROM haproxy:__TEMPLATE_VERSION__-alpine
 COPY haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
-# Validate the config at build time — fail fast on a typo.
-RUN haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
-EXPOSE __PORT__
+# Validate the config at build time — fail fast on a typo. The certificate is
+# mounted at run time and never enters the image, so the check runs on a copy
+# without the TLS `bind` line; everything else is checked as written.
+RUN sed '/ ssl crt /d' /usr/local/etc/haproxy/haproxy.cfg > /tmp/check.cfg && \
+    haproxy -c -f /tmp/check.cfg && rm /tmp/check.cfg
+EXPOSE __PORT__ __TLS_PORT__
 # Delonix extension: the runtime probes this to mark the container healthy.
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/healthz || exit 1
+# The image's entrypoint runs this in master-worker mode, so `SIGUSR2` reloads
+# the configuration and the certificate without dropping connections.
 CMD ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]

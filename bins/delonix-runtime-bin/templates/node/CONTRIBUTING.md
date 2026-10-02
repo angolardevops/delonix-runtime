@@ -46,13 +46,12 @@ a package manager step you have not run; add one when you are ready.
 
 ```bash
 corepack enable
-pnpm install
-pnpm build
-pnpm test
+pnpm install          # writes pnpm-lock.yaml the first time — commit it
+pnpm check            # format check, lint, typecheck, tests, build
 ```
 
-These are the same commands `.github/workflows/ci.yml` and `.gitlab-ci.yml`
-run on every push/PR.
+`pnpm check` is what `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR, after `pnpm install --frozen-lockfile`.
 
 ## Static analysis (SonarQube)
 

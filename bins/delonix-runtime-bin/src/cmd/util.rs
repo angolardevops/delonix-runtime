@@ -2,7 +2,7 @@
 //! `build`) — state root, opening the stores, image resolution, and the
 //! rootless-flat vs root-overlay logic for preparing the rootfs.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use delonix_compute::Container;
 use delonix_linux::{self as runtime};
@@ -112,16 +112,6 @@ pub(crate) use delonix_compute::run::compose_command;
 /// Like [`compose_command`], but from the image's config.
 pub(crate) fn effective_command(img: &Image, user: &[String]) -> Vec<String> {
     compose_command(&img.config.entrypoint, &img.config.cmd, user)
-}
-
-/// `chown -R <uid>:<uid>` of a FLAT rootfs (rootless): without this, the files
-/// belong to the host's uid 0, which ends up unmapped inside the user namespace.
-/// Delegates to `delonix_linux::lchown_tree` (uses `lchown`, never follows symlinks —
-/// see the security note there; don't reimplement this locally with
-/// `std::os::unix::fs::chown`, which follows symlinks).
-pub(crate) fn chown_tree(path: &Path, uid: u32) -> Result<()> {
-    delonix_linux::lchown_tree(path, uid, uid);
-    Ok(())
 }
 
 /// Locates a container by ID prefix or by exact name.

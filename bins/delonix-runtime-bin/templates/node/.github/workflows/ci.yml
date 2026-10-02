@@ -5,15 +5,24 @@ on:
     branches: [main, develop]
   pull_request:
 
+# Read-only token: this workflow builds and tests, it publishes nothing.
+permissions:
+  contents: read
+
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      - run: corepack enable
-      - run: pnpm install
-      - run: pnpm build
-      - run: pnpm test
+          cache: pnpm
+      - name: The lock file must be committed
+        run: test -f pnpm-lock.yaml || { echo "::error::pnpm-lock.yaml is missing - run 'pnpm install' and commit it"; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm audit --prod --audit-level high

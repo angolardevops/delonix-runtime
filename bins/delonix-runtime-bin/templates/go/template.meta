@@ -1,1 +1,4 @@
-version=1.23
+port=8000
+health=/api/v1/health/live
+version=1.26
+versions=1.26,1.27

@@ -41,13 +41,12 @@ a package manager step you have not run; add one when you are ready.
 ## Running the checks locally
 
 ```bash
-go build ./...
-go vet ./...
-go test ./...
+make check     # gofmt check, go vet, tests with -race, build
+make vuln      # govulncheck (needs network)
 ```
 
-These are the same three commands `.github/workflows/ci.yml` and
-`.gitlab-ci.yml` run on every push/PR.
+These are the targets `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR.
 
 ## Static analysis (SonarQube)
 

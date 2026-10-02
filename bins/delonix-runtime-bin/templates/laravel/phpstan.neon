@@ -1,0 +1,12 @@
+# Static analysis (Larastan = PHPStan with Laravel knowledge). `composer analyse`.
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - app
+        - config
+        - database
+        - routes
+        - tests

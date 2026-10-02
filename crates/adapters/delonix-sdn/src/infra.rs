@@ -1452,7 +1452,10 @@ fn start_control(pin: i32) -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    let child = Command::new("nsenter")
+    let mut cmd = Command::new("nsenter");
+    // Restartable and long-lived: it must not keep the descriptors of
+    // whichever CLI happened to start it (see `leave_callers_descriptors`).
+    let child = crate::leave_callers_descriptors(&mut cmd)
         .args([
             "-t",
             &pin.to_string(),
@@ -1607,6 +1610,10 @@ fn start_pin() -> Result<i32> {
     let pipes = crate::pin_userns::SyncPipes::new()?;
     let child_fds = [pipes.child_read.as_raw_fd(), pipes.child_write.as_raw_fd()];
     let mut cmd = Command::new(&exe);
+    // Registered BEFORE the `pre_exec` below that hands the two sync
+    // descriptors over: this one marks everything close-on-exec, that one
+    // clears the mark on exactly those two.
+    crate::leave_callers_descriptors(&mut cmd);
     cmd.args(["netns", "pin"])
         .env(crate::pin_userns::SYNC_ENV, pipes.env_value())
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
@@ -1762,7 +1769,8 @@ fn adopt_pin(control: i32) -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    let child = Command::new("nsenter")
+    let mut cmd = Command::new("nsenter");
+    let child = crate::leave_callers_descriptors(&mut cmd)
         .args([
             "-t",
             &control.to_string(),
@@ -1875,8 +1883,11 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
         });
     }
     let (rd, wr) = (fds[0], fds[1]);
-    let spawned = Command::new("slirp4netns")
-        .args([
+    // Only the ready fd goes with it: this slirp lives for the whole life of
+    // the infra, and whoever happens to be the invocation that starts it must
+    // not have its descriptors held open that long (see `spawn_holding_only`).
+    let spawned = crate::spawn_holding_only(
+        Command::new("slirp4netns").args([
             "--configure",
             "--mtu=65520",
             "--disable-host-loopback",
@@ -1884,11 +1895,9 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             &format!("--api-socket={}", sock.display()),
             &holder_pid.to_string(),
             "tap0",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        ]),
+        wr,
+    );
     // SAFETY: the parent closes its write copy; only the slirp keeps it open.
     unsafe { libc::close(wr) };
     match spawned {

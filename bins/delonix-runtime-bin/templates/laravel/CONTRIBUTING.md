@@ -41,17 +41,16 @@ a package manager step you have not run; add one when you are ready.
 ## Running the checks locally
 
 ```bash
-composer install
-cp .env.example .env && php artisan key:generate
-touch database/database.sqlite
-php artisan test
+composer check        # lock present, Pint (format), syntax lint, PHPStan, PHPUnit
+composer audit-deps   # known vulnerabilities in the locked dependencies (network)
 ```
 
-These are the same steps `.github/workflows/ci.yml` and `.gitlab-ci.yml` run
-on every push/PR.
+These are the scripts `.github/workflows/ci.yml` and `.gitlab-ci.yml` run on
+every push/PR (each step separately, so a failure names its gate).
+`composer format` rewrites files to the Pint (Laravel preset) style.
 
 ## Static analysis (SonarQube)
 
 `sonar-project.properties` is ready for a `sonar-scanner` run (local or via a
-SonarQube/SonarCloud CI step) — widen `sonar.sources` once you add your own
-`app/`/`config/` code.
+SonarQube/SonarCloud CI step) — nothing extra to configure for this project's
+layout.
