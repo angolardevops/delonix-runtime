@@ -332,8 +332,261 @@ fn vm_volumes(doc: &ManifestDoc) -> Vec<Condition> {
     }
 }
 
+/// The annotation that records, when a resource is CREATED by a stack apply,
+/// the declared values of the spec fields the reconciler does not compare.
+///
+/// The plan cannot compare those fields against the machine (the record holds
+/// `env` merged with the image's, `user` as a resolved uid, …), so it used to
+/// name every one of them on every existing resource as «declared but NOT
+/// applied» — including right after a recreate that had just applied them all,
+/// and including fields that had not changed at all. Creation applies the
+/// whole spec, so what was declared AT CREATION is what the resource has; the
+/// manifest compared against that says exactly which of them changed since.
+///
+/// Written only on a create (`+` or `-/+`), never on a converge: an apply that
+/// leaves the resource alone must not move this, or a changed `env` would be
+/// recorded as applied while the old one keeps running.
+pub(crate) const CREATED_SPEC: &str = "delonix.io/created-spec";
+
+/// The uncompared fields of one manifest document, in the two forms the
+/// comparison needs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Declared {
+    /// Every uncompared field with its value AFTER the Kind's defaults are
+    /// filled in — what the resource is created with. Comparing these is what
+    /// makes `env: []` and an absent `env`, or a rendered manifest replayed by
+    /// `stack rollback` and the one the user wrote, the same declaration.
+    pub values: std::collections::BTreeMap<String, String>,
+    /// The uncompared fields the manifest actually WRITES — what gets named
+    /// when there is nothing to compare against. Naming every defaulted field
+    /// would turn the warning into a list of the whole struct.
+    pub written: std::collections::BTreeSet<String>,
+}
+
+impl Declared {
+    /// `raw` is the spec as written, `filled` the same spec with defaults
+    /// (`spec_with_defaults`); a Kind that cannot fill passes `raw` twice.
+    pub(crate) fn of(
+        raw: &serde_yaml::Value,
+        filled: &serde_yaml::Value,
+        compared: &[&str],
+        aliases: &[(&str, &str)],
+        ignored: &[&str],
+    ) -> Self {
+        Declared {
+            values: uncompared_values(filled, compared, aliases, ignored),
+            written: uncompared_values(raw, compared, aliases, ignored)
+                .into_keys()
+                .collect(),
+        }
+    }
+}
+
+/// The values of the spec fields outside `compared`, keyed by the field's
+/// canonical name (an alias of a compared field IS that field — a manifest
+/// saying `restart:` was told `restartPolicy` was not compared).
+pub(crate) fn uncompared_values(
+    spec: &serde_yaml::Value,
+    compared: &[&str],
+    aliases: &[(&str, &str)],
+    ignored: &[&str],
+) -> std::collections::BTreeMap<String, String> {
+    let Some(m) = spec.as_mapping() else {
+        return Default::default();
+    };
+    m.iter()
+        .filter_map(|(key, v)| {
+            let key = key.as_str()?;
+            let key = aliases
+                .iter()
+                .find(|(a, _)| *a == key)
+                .map(|(_, c)| *c)
+                .unwrap_or(key);
+            if compared.contains(&key) || ignored.contains(&key) {
+                return None;
+            }
+            Some((key.to_string(), canonical_json(v).to_string()))
+        })
+        .collect()
+}
+
+/// A YAML value as JSON with its mapping keys sorted, so the same declaration
+/// written in a different key order is the same string on both sides.
+fn canonical_json(v: &serde_yaml::Value) -> serde_json::Value {
+    match v {
+        serde_yaml::Value::Mapping(m) => {
+            let mut pairs: Vec<(String, serde_json::Value)> = m
+                .iter()
+                .map(|(k, v)| {
+                    let k = k.as_str().map(str::to_string).unwrap_or_else(|| {
+                        serde_yaml::to_string(k)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string()
+                    });
+                    (k, canonical_json(v))
+                })
+                .collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            serde_json::Value::Object(pairs.into_iter().collect())
+        }
+        serde_yaml::Value::Sequence(s) => {
+            serde_json::Value::Array(s.iter().map(canonical_json).collect())
+        }
+        serde_yaml::Value::Tagged(t) => canonical_json(&t.value),
+        other => serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
+    }
+}
+
+/// What can be said about the uncompared fields of an EXISTING resource.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Uncompared {
+    /// Nothing declared outside the compared set, or all of it exactly as it
+    /// was when the resource was created — there is nothing to say.
+    Unchanged,
+    /// These changed since the resource was created, and an apply does not
+    /// carry them to it.
+    Changed(Vec<String>),
+    /// The resource has no [`CREATED_SPEC`] (created by hand, or by an older
+    /// version): whether these match is unknown.
+    Unverifiable(Vec<String>),
+}
+
+/// Compares the manifest's uncompared fields against the creation record.
+///
+/// Both sides carry defaults, so a field removed from the manifest compares
+/// its default against what the resource was created with — a change, because
+/// nothing removes it short of a recreate.
+///
+/// A field only ONE side knows about and the manifest does not write is a
+/// field the engine added or dropped between the version that created the
+/// resource and this one. It is not something the user changed, and an
+/// upgrade must not make every existing container warn.
+pub(crate) fn uncompared_state(
+    declared: &Declared,
+    created: Option<&std::collections::BTreeMap<String, String>>,
+) -> Uncompared {
+    match created {
+        None if declared.written.is_empty() => Uncompared::Unchanged,
+        None => Uncompared::Unverifiable(declared.written.iter().cloned().collect()),
+        Some(created) => {
+            let changed: Vec<String> = declared
+                .values
+                .keys()
+                .filter(|f| created.contains_key(*f))
+                .chain(declared.written.iter())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .filter(|f| declared.values.get(*f) != created.get(*f))
+                .cloned()
+                .collect();
+            if changed.is_empty() {
+                Uncompared::Unchanged
+            } else {
+                Uncompared::Changed(changed)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    const COMPARED: &[&str] = &["image", "restartPolicy"];
+    const ALIASES: &[(&str, &str)] = &[("restart", "restartPolicy")];
+
+    /// A stand-in for `spec_with_defaults`: `env` and `user` always present.
+    fn decl(yaml: &str) -> Declared {
+        let raw: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let mut filled = raw.clone();
+        let m = filled.as_mapping_mut().unwrap();
+        for (k, default) in [("env", "[]"), ("user", "''")] {
+            m.entry(k.into())
+                .or_insert_with(|| serde_yaml::from_str(default).unwrap());
+        }
+        Declared::of(&raw, &filled, COMPARED, ALIASES, &["detach"])
+    }
+
+    /// `restart:` is the legacy spelling of `restartPolicy`, which IS
+    /// compared: the warning used to list it as not compared.
+    #[test]
+    fn an_alias_of_a_compared_field_is_that_field() {
+        let d = decl("image: a\nrestart: always\ndetach: true\nenv: [A=1]\n");
+        assert_eq!(d.written.iter().collect::<Vec<_>>(), ["env"]);
+    }
+
+    /// The same declaration in another key order is the same value — or every
+    /// reordered manifest would read as a change.
+    #[test]
+    fn key_order_inside_a_value_does_not_count() {
+        assert_eq!(decl("tmpfs: {a: 1, b: 2}\n"), decl("tmpfs: {b: 2, a: 1}\n"));
+    }
+
+    /// Measured 2026-10-02: right after `--replace` recreated the container
+    /// with the new env, the plan still said «declared but NOT applied: env».
+    #[test]
+    fn unchanged_since_creation_says_nothing() {
+        let d = decl("image: a\nenv: [A=new]\ncommand: [sleep, '1']\n");
+        assert_eq!(uncompared_state(&d, Some(&d.values)), Uncompared::Unchanged);
+    }
+
+    /// Measured 2026-10-02: `stack rollback` replays the RENDERED manifest
+    /// (every default written out), and against a record of the raw one the
+    /// warning named 31 fields nobody had touched. Defaults on both sides.
+    #[test]
+    fn a_rendered_manifest_is_the_same_declaration_as_the_written_one() {
+        let written = decl("env: [A=1]\n");
+        let rendered = decl("env: [A=1]\nuser: ''\n");
+        assert_eq!(
+            uncompared_state(&rendered, Some(&written.values)),
+            Uncompared::Unchanged
+        );
+    }
+
+    /// A field the engine gained after the resource was created is not a
+    /// change the user made: an upgrade must not make every container warn.
+    /// Unless the manifest writes it — then it is new, and not applied.
+    #[test]
+    fn a_field_the_engine_added_since_creation_is_not_a_change() {
+        let mut created = decl("env: [A=1]\n").values;
+        created.remove("user");
+        assert_eq!(
+            uncompared_state(&decl("env: [A=1]\n"), Some(&created)),
+            Uncompared::Unchanged
+        );
+        assert_eq!(
+            uncompared_state(&decl("env: [A=1]\nuser: app\n"), Some(&created)),
+            Uncompared::Changed(vec!["user".into()])
+        );
+    }
+
+    /// Only what changed is named — `command` was listed beside `env` although
+    /// only `env` had been edited.
+    #[test]
+    fn only_the_fields_that_changed_are_named() {
+        let created = decl("env: [A=old]\ncommand: [sleep, '1']\nuser: app\n").values;
+        let now = decl("env: [A=new]\ncommand: [sleep, '1']\n");
+        assert_eq!(
+            uncompared_state(&now, Some(&created)),
+            Uncompared::Changed(vec!["env".into(), "user".into()]),
+            "a field dropped from the manifest is still on the resource"
+        );
+    }
+
+    #[test]
+    fn without_a_creation_record_it_is_unverifiable_not_unapplied() {
+        let d = decl("env: [A=1]\n");
+        assert_eq!(
+            uncompared_state(&d, None),
+            Uncompared::Unverifiable(vec!["env".into()])
+        );
+        // Defaults alone are nothing to name: only what the manifest writes.
+        assert_eq!(
+            uncompared_state(&decl("image: a\n"), None),
+            Uncompared::Unchanged
+        );
+    }
+
     use super::*;
     use crate::cmd::manifest::{ManifestDoc, Metadata};
 

@@ -462,14 +462,22 @@ não a meio. É o que permite pôr <code>stack plan --detailed-exitcode</code> n
 detector de desvio de configuração.</p>
 <h3 id="o-que-o-reconciliador-compara-e-o-que-nao">O que o reconciliador compara — e o que não</h3>
 <p>O motor <strong>diz-lho</strong>, em vez de deixar descobrir:</p>
-<pre><code>Vm 'lab-nas': Converged=False (FieldsNotCompared) — declared but NOT applied to an
-existing VM: extraNics, libvirtXmlOverlay, netMode — the reconciler compares only
-disk, vcpus, memory, network, backend.
+<pre><code>VirtualMachine 'lab-nas': Converged=False (FieldsNotCompared) — changed since it was
+created and NOT applied to the existing VM: extraNics, netMode — the reconciler
+compares only disk, vcpus, memory, network, backend. Recreate it
+(`--replace VirtualMachine/lab-nas`, which discards the disk) …
 </code></pre>
 <p>Mudar placas de rede, XML injectado ou modo de rede num manifesto <strong>não altera uma
-VM que já existe</strong>. Ou se recria (<code>--replace</code>, que deita fora o disco), ou se usa
-<code>vm create</code>. Vale a pena repetir porque é silencioso na prática: o <code>apply</code> diz
-<code>ensured</code> e a VM continua como estava.</p>
+VM que já existe</strong>. Ou se recria (<code>--replace VirtualMachine/lab-nas</code>, que deita fora o
+disco), ou se usa <code>vm create</code>. Vale a pena repetir porque é silencioso na prática: o
+<code>apply</code> diz <code>ensured</code> e a VM continua como estava.</p>
+<p>O aviso compara o manifesto com o que a VM recebeu <strong>ao ser criada</strong> (a anotação
+<code>delonix.io/created-spec</code>, escrita por <code>stack apply</code> em cada criação ou recriação):
+nomeia só o que mudou desde então, e cala-se quando nada mudou. Numa VM sem esse
+registo — criada à mão ou por uma versão anterior — diz «declared and not
+verifiable» e lista o que o manifesto declara. O <code>--replace</code> tem de levar o
+<code>Kind/nome</code>: um nome solto (ou <code>all</code>) só autoriza o que o plano já propõe, e um
+campo não comparado nunca o propõe.</p>
 <h3 id="campos-que-valem-a-pena-conhecer">Campos que valem a pena conhecer</h3>
 <table>
 <thead>

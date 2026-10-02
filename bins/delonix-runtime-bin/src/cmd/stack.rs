@@ -490,6 +490,12 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
     // for mount helpers and a hypervisor, and doing it per resource would make a
     // plan of twenty volumes twenty times slower for twenty identical answers.
     let env = super::conditions::Env::probe();
+    // What each existing container/VM was CREATED with, read once for the whole
+    // plan (see `conditions::CREATED_SPEC`). A store that cannot be read degrades
+    // to «no record», which only makes the warning say «not verifiable» — the
+    // conservative side; it never hides one.
+    let created_containers = super::container::created_specs().unwrap_or_default();
+    let created_vms = super::vm::created_specs().unwrap_or_default();
     for c in changes.iter_mut() {
         // A deletion candidate is not in the manifest at all — there is no
         // document to derive prerequisites from, and it is on its way out.
@@ -515,8 +521,17 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // (see the ADR on the reboot class): converging these means rebooting
         // the VM, which is a capability, whereas saying so is honesty. The
         // engine ships the honesty first.
-        if c.kind == k::VM && c.action != reconcile::Action::Create {
-            if let Some(cond) = super::vm::unconverged_fields_condition(doc) {
+        //
+        // Nor on a `Replace`: the recreate applies the whole spec too, so after
+        // it the warning would be false the moment it was printed.
+        let recreated = matches!(
+            c.action,
+            reconcile::Action::Create | reconcile::Action::Replace
+        );
+        if c.kind == k::VM && !recreated {
+            if let Some(cond) =
+                super::vm::unconverged_fields_condition(doc, created_vms.get(&c.name))
+            {
                 c.conditions.push(cond);
             }
         }
@@ -526,8 +541,10 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // `--detailed-exitcode` 0, ou seja um gate de deriva em CI verde por cima
         // de deriva real. O raciocínio já estava escrito aqui em cima e aplicava-se
         // só ao `Vm`; era o Container que precisava dele mais.
-        if c.kind == k::CONTAINER && c.action != reconcile::Action::Create {
-            if let Some(cond) = super::container::unconverged_fields_condition(doc) {
+        if c.kind == k::CONTAINER && !recreated {
+            if let Some(cond) =
+                super::container::unconverged_fields_condition(doc, created_containers.get(&c.name))
+            {
                 c.conditions.push(cond);
             }
         }
@@ -1495,6 +1512,10 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
         c.action = Action::Replace;
         // English, like every `reason`: it is part of the `-o json` payload.
         c.reason = Some("recreate requested by --replace".to_string());
+        // The recreate applies the whole spec: «not applied to the existing
+        // container» would be false by the end of this very apply, which is
+        // when the conditions are printed.
+        c.conditions.retain(|x| x.reason != "FieldsNotCompared");
     }
     Ok(changes)
 }
@@ -1882,7 +1903,9 @@ fn salvage_ownership(docs: &[manifest::ManifestDoc], stack: &str, changes: &[Cha
             &[("n", &present.len().to_string())],
         )
     );
-    if let Err(e) = stamp_all(docs, stack, Some(&present)) {
+    // Everything in `present` was CREATED by this apply (`Action::Create`), so
+    // it is also what gets the creation record.
+    if let Err(e) = stamp_all(docs, stack, Some(&present), &present) {
         eprintln!(
             "{}",
             super::po::tf(
@@ -2401,8 +2424,29 @@ fn converge_and_stamp(
     // Re-derive the desired fields from the manifest (not from the plan): the
     // stamp must record what was ASKED for, which is also what the next run will
     // compare against.
-    stamp_all(docs, stack, None)?;
+    // What this apply CREATED — fresh, or destroyed and rebuilt — is the only
+    // thing whose creation record may be (re)written.
+    let created: std::collections::BTreeSet<(String, String)> = changes
+        .iter()
+        .filter(|c| matches!(c.action, Action::Create | Action::Replace))
+        .map(|c| (c.kind.clone(), c.name.clone()))
+        .collect();
+    stamp_all(docs, stack, None, &created)?;
     Ok(())
+}
+
+/// The manifest document of a resource this apply created, if it did.
+fn created_doc<'a>(
+    docs: &'a [manifest::ManifestDoc],
+    created: &std::collections::BTreeSet<(String, String)>,
+    kind: &str,
+    name: &str,
+) -> Option<&'a manifest::ManifestDoc> {
+    if !created.contains(&(kind.to_string(), name.to_string())) {
+        return None;
+    }
+    docs.iter()
+        .find(|d| d.kind == kind && d.metadata.name == name)
 }
 
 /// Stamps ownership + last-applied on what the manifest declares.
@@ -2410,10 +2454,15 @@ fn converge_and_stamp(
 /// `only` restricts it to a set of `(kind, name)`. `None` means «everything the
 /// manifest declares», which is the successful path: every layer ran, so every
 /// declared resource is on the machine with the spec that was asked for.
+///
+/// `created` is what this apply created; only those get the creation record
+/// ([`super::conditions::CREATED_SPEC`]) — a resource left alone keeps the one
+/// it was created with, which is what makes it worth comparing against.
 fn stamp_all(
     docs: &[manifest::ManifestDoc],
     stack: &str,
     only: Option<&std::collections::BTreeSet<(String, String)>>,
+    created: &std::collections::BTreeSet<(String, String)>,
 ) -> Result<()> {
     for d in desired_of(docs)? {
         if !super::kinds::converges(&d.kind) {
@@ -2425,7 +2474,11 @@ fn stamp_all(
             }
         }
         let r = match d.kind.as_str() {
-            k::CONTAINER => super::container::stamp(&d.name, stack, &d.fields),
+            k::CONTAINER => {
+                let spec = created_doc(docs, created, &d.kind, &d.name)
+                    .and_then(super::container::created_spec_of);
+                super::container::stamp(&d.name, stack, &d.fields, spec.as_ref())
+            }
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
@@ -2438,7 +2491,11 @@ fn stamp_all(
                 super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
             }
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
-            k::VM => super::vm::stamp(&d.name, stack, &d.fields),
+            k::VM => {
+                let spec =
+                    created_doc(docs, created, &d.kind, &d.name).map(super::vm::created_spec_of);
+                super::vm::stamp(&d.name, stack, &d.fields, spec.as_ref())
+            }
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
@@ -3468,6 +3525,21 @@ mod tests {
             explain(&out[0]).as_deref(),
             Some("recreate requested with `--replace`")
         );
+    }
+
+    /// The recreate applies the whole spec, and the apply prints the plan's
+    /// conditions at its END — so «not applied to the existing container» on
+    /// a promoted change would be false by the time anyone read it.
+    #[test]
+    fn a_named_replace_drops_the_fields_not_compared_warning() {
+        let mut c = with_action(a_change("Container", "web"), Action::NoOp);
+        c.conditions = vec![
+            super::super::conditions::Condition::bad("Converged", "FieldsNotCompared", "env"),
+            super::super::conditions::Condition::bad("Mounted", "NfsHelperMissing", "nfs"),
+        ];
+        let out = promote_named_replaces(vec![c], &["Container/web".to_string()]).unwrap();
+        let reasons: Vec<_> = out[0].conditions.iter().map(|x| x.reason).collect();
+        assert_eq!(reasons, ["NfsHelperMissing"], "only the moot one goes");
     }
 
     #[test]

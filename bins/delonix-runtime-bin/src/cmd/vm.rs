@@ -1198,33 +1198,71 @@ pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "n
 /// **Derived from `RECONCILED_VM_FIELDS`, never a second list.** A field added
 /// to the reconciled set drops out of this warning automatically. Two lists
 /// that have to agree is how this repo already broke `CONVERGING_KINDS` once.
+///
+/// **Compared against what was declared at creation** — the same record and
+/// the same three answers as `container::unconverged_fields_condition`: say
+/// nothing when nothing changed since the VM was created, name only what did,
+/// and call the fields unverifiable when the VM carries no record. The advice
+/// names the resource (`--replace VirtualMachine/<name>`): a bare `--replace`
+/// only authorises a recreate the plan already proposes.
 pub(crate) fn unconverged_fields_condition(
     doc: &ManifestDoc,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Option<super::conditions::Condition> {
-    let mapping = doc.spec.as_mapping()?;
-    let mut fields: Vec<String> = mapping
-        .keys()
-        .filter_map(|k| k.as_str())
-        // `name` is not a spec field here; the alias pairs collapse because the
-        // user only ever writes one of the two spellings.
-        .filter(|k| !RECONCILED_VM_FIELDS.contains(k))
-        .map(|k| k.to_string())
-        .collect();
-    if fields.is_empty() {
-        return None;
-    }
-    fields.sort();
+    use super::conditions::Uncompared;
+    let declared = declared_uncompared(doc);
+    let (msgid, fields) = match super::conditions::uncompared_state(&declared, created) {
+        Uncompared::Unchanged => return None,
+        Uncompared::Changed(f) => (
+            "changed since it was created and NOT applied to the existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) or change it with `vm create`/`vm stop`+`start`",
+            f,
+        ),
+        Uncompared::Unverifiable(f) => (
+            "declared and not verifiable on an existing VM: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) to be sure, or change it with `vm create`/`vm stop`+`start`",
+            f,
+        ),
+    };
     Some(super::conditions::Condition::bad(
         "Converged",
         "FieldsNotCompared",
         super::po::tf(
-            "declared but NOT applied to an existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace`, which discards the disk) or change it with `vm create`/`vm stop`+`start`",
+            msgid,
             &[
                 ("fields", &fields.join(", ")),
                 ("compared", &RECONCILED_VM_FIELDS.join(", ")),
+                ("name", &doc.metadata.name),
             ],
         ),
     ))
+}
+
+/// What to record as [`super::conditions::CREATED_SPEC`] when a stack apply
+/// creates this VM.
+pub(crate) fn created_spec_of(doc: &ManifestDoc) -> std::collections::BTreeMap<String, String> {
+    declared_uncompared(doc).values
+}
+
+/// The uncompared fields, compared with the defaults filled in — so the
+/// manifest the user wrote and the rendered one `stack rollback` replays are
+/// one declaration.
+fn declared_uncompared(doc: &ManifestDoc) -> super::conditions::Declared {
+    let filled = spec_with_defaults(doc).unwrap_or_else(|_| doc.spec.clone());
+    super::conditions::Declared::of(&doc.spec, &filled, RECONCILED_VM_FIELDS, &[], &[])
+}
+
+/// Every VM's [`super::conditions::CREATED_SPEC`], by name.
+pub(crate) fn created_specs(
+) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
+        delonix_state::JsonStore::open(state_root().join("vms"))?;
+    Ok(st
+        .list()?
+        .into_iter()
+        .filter_map(|vm| {
+            let raw = vm.annotations.get(super::conditions::CREATED_SPEC)?;
+            Some((vm.name.clone(), super::reconcile::decode_last_applied(raw)?))
+        })
+        .collect())
 }
 
 /// **The same resolution `apply` performs, or four of the five fields read as
@@ -1702,15 +1740,18 @@ fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Records that this stack owns the VM, and what it last applied.
+/// Records that this stack owns the VM, and what it last applied — and, when
+/// this apply CREATED it, what it was created with (`created`).
 pub(crate) fn stamp(
     name: &str,
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<()> {
     let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(state_root().join("vms"))?;
     let encoded = super::reconcile::encode_last_applied(fields);
+    let created = created.map(super::reconcile::encode_last_applied);
     st.update(name, |vm| {
         vm.labels
             .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
@@ -1718,6 +1759,10 @@ pub(crate) fn stamp(
             .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
         vm.annotations
             .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        if let Some(created) = &created {
+            vm.annotations
+                .insert(super::conditions::CREATED_SPEC.into(), created.clone());
+        }
         true
     })?;
     Ok(())
@@ -4694,10 +4739,10 @@ mod tests {
     }
 
     use super::{
-        antispoof_describe, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime, looks_like_address, manifest,
-        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, resolve_vm_defaults,
-        unconverged_fields_condition, vm_cluster_member, vm_role, vm_spec_of, ManifestDoc, VmSpec,
-        RECONCILED_VM_FIELDS, VM_SPEC_FIELDS,
+        antispoof_describe, created_spec_of, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
+        looks_like_address, manifest, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
+        resolve_vm_defaults, unconverged_fields_condition, vm_cluster_member, vm_role, vm_spec_of,
+        ManifestDoc, VmSpec, RECONCILED_VM_FIELDS, VM_SPEC_FIELDS,
     };
     use delonix_model::records::Status;
 
@@ -4960,7 +5005,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
             "disk: d\nvcpus: 2\nmemory: 2G\nnetwork: ingress\nbackend: libvirt\n\
              tpm: true\nvnc: true\nmachine: q35\n",
         );
-        let c = unconverged_fields_condition(&doc).expect("tinha de assinalar");
+        let c = unconverged_fields_condition(&doc, None).expect("tinha de assinalar");
         assert_eq!(c.reason, "FieldsNotCompared");
         for esperado in ["tpm", "vnc", "machine"] {
             assert!(
@@ -4993,7 +5038,33 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     #[test]
     fn uma_vm_so_com_campos_convergidos_nao_avisa() {
         let doc = vm_doc("disk: d\nvcpus: 2\nmemory: 2G\nnetwork: ingress\nbackend: libvirt\n");
-        assert!(unconverged_fields_condition(&doc).is_none());
+        assert!(unconverged_fields_condition(&doc, None).is_none());
+    }
+
+    /// The VM sibling of the container's creation-record test: nothing to say
+    /// when the uncompared fields are as created, only the changed one named
+    /// otherwise, and the advice in the form that forces the recreate (a bare
+    /// `--replace` only authorises one the plan already proposes).
+    #[test]
+    fn against_the_creation_record_only_what_changed_is_named() {
+        let base = "disk: d\nvcpus: 2\nmemory: 2G\nnetwork: ingress\nbackend: libvirt\n";
+        let created = created_spec_of(&vm_doc(&format!("{base}tpm: true\nvnc: true\n")));
+        let same = vm_doc(&format!("{base}vnc: true\ntpm: true\n"));
+        assert!(unconverged_fields_condition(&same, Some(&created)).is_none());
+        let edited = vm_doc(&format!("{base}tpm: true\nvnc: false\n"));
+        let c = unconverged_fields_condition(&edited, Some(&created)).expect("vnc changed");
+        let listed = c
+            .message
+            .split(": ")
+            .nth(1)
+            .and_then(|s| s.split(" — ").next())
+            .unwrap();
+        assert_eq!(listed, "vnc", "{}", c.message);
+        assert!(
+            c.message.contains("--replace VirtualMachine/"),
+            "{}",
+            c.message
+        );
     }
 
     #[test]

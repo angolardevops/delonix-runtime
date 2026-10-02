@@ -1938,6 +1938,7 @@ spec:
   image: $IMG
   command: ["sleep", "600"]
   network: host
+  restart: "no"
   env: ["RP_MARK=old"]
 YAML
   if "$BIN" stack apply -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1; then
@@ -1957,8 +1958,37 @@ YAML
       exit 0"
     check "... e a seguir o plano não tem nada a propor" 0 \
       "$BIN" stack plan -f "$RPW/delonix-manifest.yaml" --detailed-exitcode
+    # A condição dizia «declared but NOT applied: command, env, restart» logo
+    # depois da recriação que os tinha aplicado — e o `restart` é o alias do
+    # `restartPolicy`, que É comparado. Com o registo da criação
+    # (`delonix.io/created-spec`) o plano compara o manifesto com o que o
+    # container recebeu ao nascer: nada mudou, nada a dizer.
+    check "... e o plano já não diz «não aplicado» do que a recriação aplicou" ok bash -c "
+      out=\$('$BIN' stack plan -f '$RPW/delonix-manifest.yaml' -o json 2>/dev/null) || exit 1
+      printf '%s' \"\$out\" | grep -q FieldsNotCompared && { printf '%s\n' \"\$out\"; exit 1; }
+      exit 0"
+    sed -i 's/RP_MARK=new/RP_MARK=newer/' "$RPW/delonix-manifest.yaml"
+    # E quando muda outra vez, nomeia SÓ o que mudou (o `command` aparecia ao
+    # lado do `env` sem ter mexido) e o conselho traz o nome deste container.
+    check "uma nova mudança de env nomeia só o env, e o --replace com o nome" ok bash -c "
+      '$BIN' stack plan -f '$RPW/delonix-manifest.yaml' -o json 2>/dev/null | python3 -c '
+import json, sys
+msgs = [c[\"message\"] for ch in json.load(sys.stdin) for c in ch.get(\"conditions\", [])
+        if c.get(\"reason\") == \"FieldsNotCompared\"]
+print(msgs)
+assert len(msgs) == 1 and \": env — \" in msgs[0] and \"Container/$RPC\" in msgs[0]
+'"
     check "--replace com o Kind em minúsculas também é aceite (não é um typo)" ok \
       "$BIN" stack apply -f "$RPW/delonix-manifest.yaml" --replace "container/$RPC"
+    # Um rollback É um apply (ADR-0019) e passa pelo mesmo `--replace`. Mas
+    # re-aplica o manifesto RENDERIZADO (todos os defaults escritos), e contra
+    # um registo do manifesto cru o aviso nomeava 31 campos que ninguém tinha
+    # mexido — medido a 2026-10-02. Os dois lados comparam-se com defaults.
+    check "stack rollback --replace repõe o env da revisão 1, e o aviso nomeia só o env" ok bash -c "
+      out=\$('$BIN' stack rollback -f '$RPW/delonix-manifest.yaml' --to 1 --replace 'Container/$RPC' 2>&1) || { printf '%s\n' \"\$out\"; exit 1; }
+      printf '%s\n' \"\$out\"
+      printf '%s' \"\$out\" | grep FieldsNotCompared | grep -qv ': env — ' && { echo 'o aviso nomeou mais do que o env'; exit 1; }
+      '$BIN' container inspect '$RPC' | grep -q 'RP_MARK=old' || { echo 'o rollback não repôs o env'; exit 1; }"
     "$BIN" stack destroy -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1
   else
     skip "stack apply --replace nomeado: o apply do container de teste não passou neste host"

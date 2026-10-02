@@ -237,35 +237,100 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
 /// **Derivado do `RECONCILED_CONTAINER_FIELDS`, nunca uma segunda lista.** Um
 /// campo acrescentado ao conjunto comparado sai deste aviso sozinho. Duas listas
 /// que têm de concordar é como este repo já partiu o `CONVERGING_KINDS` uma vez.
+///
+/// **Compared against what was declared at creation, not just listed.** Listing
+/// every declared field on every existing container said «NOT applied» right
+/// after a `--replace` had applied them all, and named `command` beside an
+/// edited `env` it had nothing to do with (measured 2026-10-02). A container
+/// created by a stack apply carries [`super::conditions::CREATED_SPEC`]; the
+/// manifest compared against it names only what changed since, and says
+/// nothing when nothing did. Without the record (created by hand or by an older
+/// version) the fields are named as unverifiable, which is what they are.
 pub(crate) fn unconverged_fields_condition(
     doc: &ManifestDoc,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Option<super::conditions::Condition> {
-    let mapping = doc.spec.as_mapping()?;
-    let mut fields: Vec<String> = mapping
-        .keys()
-        .filter_map(|k| k.as_str())
-        .filter(|k| !RECONCILED_CONTAINER_FIELDS.contains(k))
-        // `detach` não é estado do recurso, é o modo de invocação de quem cria —
-        // um container a correr não «tem» um detach para divergir. Listá-lo faria
-        // TODOS os manifestos avisarem, e um aviso que sai sempre deixa de se ler.
-        .filter(|k| *k != "detach")
-        .map(|k| k.to_string())
-        .collect();
-    if fields.is_empty() {
-        return None;
-    }
-    fields.sort();
+    use super::conditions::Uncompared;
+    let declared = declared_uncompared(doc);
+    let (msgid, fields) = match super::conditions::uncompared_state(&declared, created) {
+        Uncompared::Unchanged => return None,
+        Uncompared::Changed(f) => (
+            "changed since it was created and NOT applied to the existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) or change it with `container update` where that field is hot",
+            f,
+        ),
+        Uncompared::Unverifiable(f) => (
+            "declared and not verifiable on an existing container: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) to be sure, or change it with `container update` where that field is hot",
+            f,
+        ),
+    };
     Some(super::conditions::Condition::bad(
         "Converged",
         "FieldsNotCompared",
         super::po::tf(
-            "declared but NOT applied to an existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/<name>`) or change it with `container update` where that field is hot",
+            msgid,
             &[
                 ("fields", &fields.join(", ")),
                 ("compared", &RECONCILED_CONTAINER_FIELDS.join(", ")),
+                ("name", &doc.metadata.name),
             ],
         ),
     ))
+}
+
+/// The legacy spellings of compared fields. `restart:` IS `restartPolicy`, and
+/// the warning used to list it as not compared.
+const CONTAINER_FIELD_ALIASES: &[(&str, &str)] = &[("restart", "restartPolicy")];
+
+/// The declared values of the fields [`RECONCILED_CONTAINER_FIELDS`] leaves
+/// out. `detach` is not resource state but the creator's invocation mode — a
+/// running container does not «have» a detach to diverge, and listing it would
+/// make EVERY manifest warn.
+///
+/// The values are compared with the defaults filled in (the same
+/// `spec_with_defaults` the `--dry-run` renders), so the manifest the user
+/// wrote and the rendered one `stack rollback` replays are one declaration.
+fn declared_uncompared(doc: &ManifestDoc) -> super::conditions::Declared {
+    let filled = if doc.spec.get("containers").is_some() {
+        pod_spec_with_defaults(doc)
+    } else {
+        spec_with_defaults(doc)
+    }
+    .unwrap_or_else(|_| doc.spec.clone());
+    super::conditions::Declared::of(
+        &doc.spec,
+        &filled,
+        RECONCILED_CONTAINER_FIELDS,
+        CONTAINER_FIELD_ALIASES,
+        &["detach"],
+    )
+}
+
+/// What to record as [`super::conditions::CREATED_SPEC`] when a stack apply
+/// creates this container. `None` for the Pod-shaped form (`spec.containers[]`):
+/// its one top-level key holds compared fields too (a live `memory` update
+/// would read as a change), so it is never recorded and stays unverifiable.
+pub(crate) fn created_spec_of(
+    doc: &ManifestDoc,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    if doc.spec.get("containers").is_some() {
+        return None;
+    }
+    Some(declared_uncompared(doc).values)
+}
+
+/// Every container's [`super::conditions::CREATED_SPEC`], by name — read once
+/// per plan, not once per container.
+pub(crate) fn created_specs(
+) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    let (_, store) = open_stores()?;
+    Ok(store
+        .list()?
+        .into_iter()
+        .filter_map(|c| {
+            let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
+            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+        })
+        .collect())
 }
 
 /// Renders a persisted [`Mount`] back into the `source:/target[:ro]` form the
@@ -544,15 +609,18 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     cmd_update(&store, name, o)
 }
 
-/// Records that this stack owns the container, and what it last applied.
+/// Records that this stack owns the container, and what it last applied —
+/// and, when this apply CREATED it, what it was created with (`created`).
 pub(crate) fn stamp(
     name: &str,
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
+    created: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<()> {
     let (_, store) = open_stores()?;
     let c = find(&store, name)?;
     let encoded = super::reconcile::encode_last_applied(fields);
+    let created = created.map(super::reconcile::encode_last_applied);
     store.update(&c.id, |cur| {
         cur.labels
             .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
@@ -560,6 +628,10 @@ pub(crate) fn stamp(
             .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
         cur.annotations
             .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        if let Some(created) = &created {
+            cur.annotations
+                .insert(super::conditions::CREATED_SPEC.into(), created.clone());
+        }
         true
     })?;
     Ok(())
@@ -6601,9 +6673,10 @@ mod unconverged_container_tests {
     /// honesto e um que diz «no changes» sobre um `env` mudado à mão.
     #[test]
     fn nomeia_os_campos_declarados_que_nao_sao_comparados() {
-        let c = unconverged_fields_condition(&doc(
-            "image: alpine\nenv: [A=1]\nuser: '1000'\ncapAdd: [NET_ADMIN]\n",
-        ))
+        let c = unconverged_fields_condition(
+            &doc("image: alpine\nenv: [A=1]\nuser: '1000'\ncapAdd: [NET_ADMIN]\n"),
+            None,
+        )
         .expect("um manifesto com env/user/capAdd tem de avisar");
         for esperado in ["env", "user", "capAdd"] {
             assert!(
@@ -6628,7 +6701,7 @@ mod unconverged_container_tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-        let c = unconverged_fields_condition(&doc(&spec)).expect("o env tem de avisar");
+        let c = unconverged_fields_condition(&doc(&spec), None).expect("o env tem de avisar");
         // Só a PRIMEIRA lista (a dos não-aplicados). A mensagem traz as duas de
         // propósito — a segunda diz o que É comparado — e olhar para a frase
         // inteira faria este teste falhar sobre o texto que existe para ajudar.
@@ -6652,8 +6725,52 @@ mod unconverged_container_tests {
     /// de quem cria, não estado que um container a correr possa ter divergido.
     #[test]
     fn um_manifesto_so_com_campos_comparados_nao_avisa() {
-        assert!(unconverged_fields_condition(&doc("image: alpine\nports: ['80:80']\n")).is_none());
-        assert!(unconverged_fields_condition(&doc("image: alpine\ndetach: true\n")).is_none());
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\nports: ['80:80']\n"), None).is_none()
+        );
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\ndetach: true\n"), None).is_none()
+        );
+        // `restart:` is the legacy spelling of `restartPolicy`, which IS compared.
+        assert!(
+            unconverged_fields_condition(&doc("image: alpine\nrestart: always\n"), None).is_none()
+        );
+    }
+
+    /// Measured 2026-10-02: right after `stack apply --replace Container/<n>`
+    /// recreated the container with the new env, the warning still said
+    /// «declared but NOT applied: command, env». With the creation record the
+    /// unchanged manifest has nothing to say, and an edit names only itself —
+    /// and the advice names THIS container, in the form that forces a recreate.
+    #[test]
+    fn against_the_creation_record_only_what_changed_is_named() {
+        let created = created_spec_of(&doc("image: alpine\nenv: [A=old]\ncommand: [sleep, '9']\n"))
+            .expect("the flat form is recorded");
+        let same = doc("image: alpine\nenv: [A=old]\ncommand: [sleep, '9']\n");
+        assert!(unconverged_fields_condition(&same, Some(&created)).is_none());
+
+        let edited = doc("image: alpine\nenv: [A=new]\ncommand: [sleep, '9']\n");
+        let c = unconverged_fields_condition(&edited, Some(&created)).expect("env changed");
+        assert_eq!(c.reason, "FieldsNotCompared");
+        let listed = c
+            .message
+            .split("container: ")
+            .nth(1)
+            .and_then(|s| s.split(" — ").next())
+            .unwrap();
+        assert_eq!(listed, "env", "{}", c.message);
+        assert!(
+            c.message.contains("`--replace Container/c`"),
+            "{}",
+            c.message
+        );
+    }
+
+    /// The Pod-shaped form is never recorded: its single top-level key also
+    /// holds compared fields, so a live `memory` update would read as a change.
+    #[test]
+    fn the_pod_shaped_form_has_no_creation_record() {
+        assert!(created_spec_of(&doc("containers: [{name: a, image: alpine}]\n")).is_none());
     }
 }
 
