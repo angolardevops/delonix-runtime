@@ -267,6 +267,56 @@ dependencies, the actions and the base image.
 `pyproject.toml`, run `make lock check`, and `make openapi` if the generated
 contract changed. Tested with FastAPI 0.141 and 0.142.
 
+## On the internet without a public IP
+
+`delonix-tunnel.yaml` opens an OUTBOUND tunnel: __NAME__ gets an `https`
+address on the internet with no public IP, nothing opened on the router, and
+no certificate to manage — the provider serves HTTPS with its own. It runs
+only when applied; `stack apply` on `delonix-manifest.yaml` does not touch it.
+Anyone on the internet can then reach the service.
+
+### Just a tunnel (no account, no domain)
+
+1. Install `cloudflared` ([releases](https://github.com/cloudflare/cloudflared/releases),
+   or your distribution's package) somewhere on `PATH`.
+2. `delonix stack apply -f delonix-tunnel.yaml`
+3. `delonix get gateways` — the address is in `PUBLIC URL`.
+
+The address is random (`https://<words>.trycloudflare.com`) and changes every
+time the tunnel opens; Cloudflare offers these quick tunnels for testing,
+without an uptime guarantee. Close it with
+`delonix delete gateways __NAME__-tunnel`.
+
+### Your own domain (a stable address)
+
+The domain's DNS has to be on Cloudflare (a free account is enough: point the
+domain's name servers, at your registrar, to the two Cloudflare gives you).
+
+1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → **Create a
+   tunnel** → Cloudflared. Name it and copy the token from the install
+   command it shows (`--token eyJ…`).
+2. In the tunnel, add a **public hostname**: `app.example.org` → service
+   `http://localhost:__PORT__`. Cloudflare creates the DNS record.
+3. Keep the token in a Delonix secret, typed in so it lands in no file and
+   no shell history: run `delonix secret create __NAME__-tunnel --from-env-file -`,
+   type `token=<the token>`, then Enter and Ctrl-D.
+4. In `delonix-tunnel.yaml`, uncomment `tokenSecretRef` and `hostname`, then
+   `delonix stack apply -f delonix-tunnel.yaml`.
+
+Visitors get Cloudflare's certificate for `app.example.org`. To change the
+route later, change it in the dashboard: with a token the tunnel takes its
+routes from there, not from this file.
+
+### Other providers
+
+`provider:` also takes:
+
+- `ngrok`: the ngrok agent on `PATH` and an account
+  (`ngrok config add-authtoken <token>`). A free account has one fixed name
+  (`<words>.ngrok-free.dev`): a stable address without a domain of your own.
+  One ngrok tunnel at a time per machine.
+- `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
+
 ## Troubleshooting
 
 | Symptom | Cause |
