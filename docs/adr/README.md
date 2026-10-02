@@ -103,5 +103,5 @@ never rewritten — supersede them with a new one.
   adds vCPUs, memory, disks and NICs on a running VM within a maximum declared at create (default
   maximum = boot size). Initial, maximum and assigned are kept apart, and the maximum is not
   consumption. An operation is complete only when the guest uses the resource; otherwise it is
-  `Partial` (DX-8503, exit 124). Removal is a separate capability, out of the first phases. The
+  `Partial` (DX-8504, exit 124). Removal is a separate capability, out of the first phases. The
   Delonix base images online added CPUs and memory. *Proposed*; a pt-AO review copy sits next to it.

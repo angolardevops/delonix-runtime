@@ -152,9 +152,10 @@ Uma operação a quente tem três desfechos, e só o primeiro é sucesso:
   memória online, o disco/NIC presente no convidado);
 - **parcial** — o hipervisor atribuiu-o e o convidado não o activou dentro do prazo (`--wait`,
   60 s por omissão), ou o backend não consegue ver dentro do convidado. Reportado como o estado
-  `Partial`, com o que falta no convidado, sob um código novo **`DX-8503 vm.hotplug_partial`**
+  `Partial`, com o que falta no convidado, sob um código novo **`DX-8504 vm.hotplug_partial`**
   (classe *timeout*, domínio *vm*, **saída 124**: «o prazo passou com o trabalho por acabar»; o
-  número livre a seguir a DX-8501/8502, atribuído na implementação pelo gate do dicionário).
+  número livre na tabela viva e no `RETIRED` a seguir a DX-8501–8503 — o 8503 é o
+  `vm.wait_timeout`, PR #661 —, verificado de novo pelo gate do dicionário na implementação).
   **Nunca** é reportado como sucesso, e o `-o json` leva `"state": "partial"` com o atribuído e o
   activo no convidado;
 - **recusada** — um erro com a sua classe, nada mudou.
@@ -278,12 +279,12 @@ Os checks de `scripts/e2e.sh` (e o caso `live.rs` do Proxmox) lêem o hipervisor
 **nunca** o que o `delonix` imprimiu — e, para `supported` e para `complete`, lêem também DENTRO
 do convidado (`nproc`, `/proc/meminfo`, `lsblk`, `ip link`) pela consola série ou pelo agente,
 com uma imagem da D8. Cada campo tem o seu check de persistência (D6), e um caso `partial` exige
-a saída 124 e o `DX-8503` numa imagem sem a política da D8.
+a saída 124 e o `DX-8504` numa imagem sem a política da D8.
 
 ## Fases
 
 1. Campos do registo + tecto na criação + `vm update` para **acrescentar** CPU/memória nos três
-   backends, com as três quantidades da D2 na saída e o `partial` da D4 (DX-8503).
+   backends, com as três quantidades da D2 na saída e o `partial` da D4 (DX-8504).
 2. Imagens base que põem online (D8), com o check por distro.
 3. Acrescentar disco.
 4. Acrescentar NIC em libvirt/Proxmox.
@@ -311,7 +312,7 @@ a saída 124 e o `DX-8503` numa imagem sem a política da D8.
 - O `vm start` deixa de perder os `extraDisks`/`extraNics` declarados (efeito colateral da D6).
 - O reconciliador ganha o primeiro Kind cujos campos «só a crescer» não são números crus
   (memória normalizada).
-- Um código novo, DX-8503, e um estado `Partial` novo na saída de VM.
+- Um código novo, DX-8504, e um estado `Partial` novo na saída de VM.
 - As receitas do vm-image mudam para as quatro distros (D8), e as imagens publicadas são
   reconstruídas.
 

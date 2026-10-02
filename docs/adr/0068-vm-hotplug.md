@@ -154,10 +154,10 @@ A hot operation has three outcomes, and only the first is success:
   memory blocks online, the disk/NIC present in the guest);
 - **partial** — the hypervisor assigned it and the guest has not activated it within the deadline
   (`--wait`, default 60 s), or the backend cannot see into the guest. Reported as the state
-  `Partial`, with what is missing in the guest, under a new code **`DX-8503
+  `Partial`, with what is missing in the guest, under a new code **`DX-8504
   vm.hotplug_partial`** (class *timeout*, domain *vm*, **exit 124**: "the deadline passed with the
-  work unfinished"; the next free number after DX-8501/8502, assigned at implementation through the
-  dictionary gate). It is **never** reported as success, and `-o json` carries `"state":
+  work unfinished"; the next number free in both the live table and `RETIRED` after DX-8501–8503 —
+  8503 is `vm.wait_timeout`, PR #661 —, checked again by the dictionary gate at implementation). It is **never** reported as success, and `-o json` carries `"state":
   "partial"` with the assigned and the guest-active quantities;
 - **refused** — an error with its class, nothing changed.
 
@@ -278,12 +278,12 @@ The checks in `scripts/e2e.sh` (and the Proxmox `live.rs` case) read the hypervi
 table, **never** what `delonix` printed — and, for `supported` and for `complete`, also read INSIDE
 the guest (`nproc`, `/proc/meminfo`, `lsblk`, `ip link`) over the serial console or the agent,
 using a D8 image. Each field has its persistence check (D6), and a `partial` case asserts exit 124
-and `DX-8503` on an image without the D8 policy.
+and `DX-8504` on an image without the D8 policy.
 
 ## Phases
 
 1. Record fields + ceiling at create + `vm update` for CPU/memory **add** on the three backends,
-   with D2's three quantities in the output and D4's `partial` (DX-8503).
+   with D2's three quantities in the output and D4's `partial` (DX-8504).
 2. Base images that online (D8), with their per-distro check.
 3. Disk add.
 4. NIC add on libvirt/Proxmox.
@@ -310,7 +310,7 @@ and `DX-8503` on an image without the D8 policy.
   ports) — the existing XML checks have to cover it.
 - `vm start` stops losing the declared `extraDisks`/`extraNics` (side effect of D6).
 - The reconciler gets the first Kind whose grow-only fields are not raw numbers (normalised memory).
-- A new code, DX-8503, and a new `Partial` state in the VM output.
+- A new code, DX-8504, and a new `Partial` state in the VM output.
 - The vm-image recipes change for the four distros (D8), and published images are rebuilt.
 
 ## Open questions (not answered by the owner; recommendation given)
