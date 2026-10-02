@@ -11,6 +11,7 @@
 
 mod error;
 pub mod gateway;
+pub mod ipam;
 pub mod ledger;
 pub mod nat;
 pub mod ownership;

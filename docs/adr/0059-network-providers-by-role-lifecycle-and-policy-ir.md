@@ -1128,3 +1128,73 @@ What part 1 adds:
     plain apply answered 0 and the plan 0.
 - **Not in this slice**: one-to-one NAT and NPT; a NAT rule whose source is an alias; a
   second interface on the lab appliance, so no packet was translated.
+
+## Addendum 2026-10-02 — F5b: the IPAM role, and Proxmox's SDN IPAM as its first provider
+
+- **The port.** `delonix_networking::ipam`: `IpamSubnet` (vnet, CIDR at its network address,
+  gateway, DHCP ranges), `IpamReservation` (vnet, address, MAC), `IpamObserved`, `ipam_drift`,
+  `held_reservations`, and `trait IpamProvider: Provider` with `prepare_zone`,
+  `ensure_subnet`/`remove_subnet`, `ensure_reservation`/`remove_reservation` and `observe`. A
+  registry by id like the NAT one: a zone's addressing is served by the IPAM provider registered
+  under the id of the segment provider that serves the zone, and one without the role is refused
+  (`ProviderNotRegistered`). The error context keeps `role: segment`, as F5a's NAT steps keep
+  `gateway`: the step name (`ensure_subnet`, `remove_reservation`) says what it was.
+- **Two kinds of write, measured on PVE 9.2.2, and they fix the order.**
+  - The zone's `ipam`/`dhcp` options and the subnets are STAGED: they run inside the segment
+    provider's transaction, after the zone and its vnets, with the lock token the shared client
+    holds. The IPAM provider is registered with the SAME client as the segment provider.
+  - A reservation is IMMEDIATE and is refused until its subnet is running ("can't find any
+    subnet for ip"): made after the transaction, one ledger step each, the record updated after
+    every one.
+  - A teardown releases the reservations first: the node refuses to delete a subnet that still
+    holds one ("cannot delete subnet …, not empty") and a vnet that still holds a subnet.
+- **What the node does that the schema does not say** (each one measured):
+  - a zone without `ipam` takes a reservation with a success answer and stores nothing — every
+    reservation is read back after it is made;
+  - the `ipam` of a zone cannot change once a subnet exists; `dhcp` can;
+  - the per-zone `dnsmasq` serves only the MACs in its `ethers` file
+    (`dhcp-ignore=tag:!known`); the node writes there, when a guest starts, the address its IPAM
+    holds for the guest's MAC;
+  - a guest created on a vnet whose zone serves DHCP already holds an address of the range for
+    its MAC. A reservation that ADDED a second address for that MAC was accepted, and the guest
+    then held two — the first live run left the reserved one gone and the allocated one in place
+    after the destroy. So a reservation for a MAC that already holds an address in the vnet MOVES
+    it (`PUT …/ips`, which moves a MAC), and the MAC ends with exactly one;
+  - destroying the guest releases the address its MAC holds, reservation included.
+- **The manifest.** A `NetworkZone` vnet gains
+  `subnets: [{ cidr, gateway, dhcpRange: [{start, end}], reservations: [{ip, mac}] }]`. Each
+  subnet and reservation is validated before anything is touched (an address outside every
+  subnet of its vnet, the gateway, or an address reserved twice is refused). A declared range
+  makes the zone serve DHCP.
+- **The lifecycle.** `subnets` is cold (a change plans a replace, like `vnets`).
+  `reservations` is hot: an apply removes the ones no longer declared, then ensures every
+  declared one. The `reservations` field of the actual side is what the node HOLDS: one released
+  by hand, or by a guest's destroy, plans `~` and the next plain apply makes it again, instead of
+  being drift that would replace the zone. `remote` covers the zone's options and the subnets.
+  The plan digest covers the IPAM entries of the zone's vnets, so someone's allocation appearing
+  after a plan makes it stale. Validate adds `net.ipam.provider`, `net.ipam.reservation` and
+  `net.ipam.dhcp` when the document uses them.
+- **The node's own firewall.** With the datacenter firewall on and the default input policy,
+  every DHCPDISCOVER reached the vnet's bridge and died in `PVEFW-HOST-IN`: the DHCP server is
+  the node. One inbound udp/67 rule and the guest got its reserved address. The engine neither
+  writes nor reads the node's firewall rules (D3); `prepare_zone` warns when the datacenter
+  switch is on and the input policy is not ACCEPT. The lab carries `IN ACCEPT -p udp -dport 67`
+  on each node as a precondition, like the `management` IPSet of ADR-0052.
+- **Live** (lab PVE 9.2.2, binary of this branch):
+  - provider case: zone, vnet, `ipam=pve`/`dhcp=dnsmasq` and subnet with a range in one
+    transaction; a reservation for a system container's MAC made, made again (present) and
+    refused for another MAC; the container started on the vnet got the RESERVED address by DHCP;
+    its destroy released it; the teardown left no zone and no IPAM entry;
+  - CLI cycle (`stack plan`/`apply`/`delete`, a `providers.yaml` pointing at the lab):
+    - a zone with one subnet, a range and two reservations: plan 2, apply 0, plan 0; the zone
+      running with `ipam=pve`, `dhcp=dnsmasq`; `describe` lists the subnet and reservations;
+    - `.21` dropped, `.20` given another MAC, `.30` added: plan `~ reservations`, apply
+      «updating 1 field(s) live», plan 0, the IPAM exactly as declared;
+    - `.30` released by hand on the node: plan 2 with `~ reservations` (not a replace);
+      someone's allocation `.40` made after that plan: the apply with the old digest refused
+      (DX-5390), nothing changed; a plain apply made `.30` again and left `.40` alone; plan 0;
+    - delete with `.40` still in the subnet: refused at `remove_subnet` with the node's «not
+      empty», the record kept; with `.40` gone, delete 0, no zone running, no IPAM entry.
+- **Not in this slice**: the other IPAM plugins (NetBox, phpIPAM); a subnet change in place
+  (the node has an update route; the field stays cold); DNS (F5c); a guest that is not a system
+  container (a VM uses the same node path, `add_dhcp_mapping`, and was not run).

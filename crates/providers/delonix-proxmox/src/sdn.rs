@@ -292,6 +292,43 @@ impl Client {
         )
     }
 
+    /// Stages a zone's addressing options (`PUT /cluster/sdn/zones/{zone}`):
+    /// the IPAM its subnets allocate from, and whether it serves DHCP
+    /// through `dnsmasq` (`dhcp=dnsmasq`, or the field deleted).
+    ///
+    /// Measured on PVE 9.2.2: a zone created without `ipam` takes a
+    /// reservation with a success answer and stores NOTHING; the `ipam` of a
+    /// zone that already holds a subnet cannot be changed ("can't change ipam
+    /// if a subnet is already defined in this zone"), while `dhcp` can.
+    pub fn set_sdn_zone_addressing(
+        &self,
+        ledger: &Ledger,
+        zone: &str,
+        ipam: &str,
+        dhcp: bool,
+    ) -> Result<()> {
+        validate_sdn_id(zone)?;
+        validate_sdn_id(ipam)?;
+        let mut form: Vec<(&str, &str)> = vec![("ipam", ipam)];
+        if dhcp {
+            form.push(("dhcp", "dnsmasq"));
+        } else {
+            form.push(("delete", "dhcp"));
+        }
+        let path = format!("/cluster/sdn/zones/{zone}");
+        self.task_or_done(
+            ledger,
+            SDN_VMID,
+            TaskKind::UpdateSdnZone,
+            || self.put_form(&path, &form),
+            Some(&|| {
+                let z = self.sdn_zone(zone)?;
+                Ok(z.get("ipam").and_then(|v| v.as_str()) == Some(ipam)
+                    && (z.get("dhcp").and_then(|v| v.as_str()) == Some("dnsmasq")) == dhcp)
+            }),
+        )
+    }
+
     /// Stages a new `simple` SDN zone (`POST /cluster/sdn/zones`).
     ///
     /// `simple` only — see the module doc comment for why. Changes nothing on
@@ -432,6 +469,19 @@ impl Client {
         let body = self.get(&path)?;
         let w: Wrapped<Vec<serde_json::Value>> =
             parse(&body, "GET /cluster/sdn/vnets/{vnet}/subnets")?;
+        Ok(w.data)
+    }
+
+    /// The subnets of `vnet` the cluster is RUNNING
+    /// (`GET /cluster/sdn/vnets/{vnet}/subnets?running=1`). Measured on PVE
+    /// 9.2.2: a subnet staged and never applied is in
+    /// [`Self::sdn_vnet_subnets`] and not here.
+    pub fn sdn_vnet_subnets_running(&self, vnet: &str) -> Result<Vec<serde_json::Value>> {
+        validate_sdn_id(vnet)?;
+        let path = format!("/cluster/sdn/vnets/{vnet}/subnets?running=1");
+        let body = self.get(&path)?;
+        let w: Wrapped<Vec<serde_json::Value>> =
+            parse(&body, "GET /cluster/sdn/vnets/{vnet}/subnets?running=1")?;
         Ok(w.data)
     }
 
@@ -937,7 +987,7 @@ pub struct SubnetOptions<'a> {
     pub snat: Option<bool>,
 }
 
-fn dhcp_ranges_of(obj: &serde_json::Value) -> Vec<DhcpRange> {
+pub(crate) fn dhcp_ranges_of(obj: &serde_json::Value) -> Vec<DhcpRange> {
     obj.get("dhcp-range")
         .and_then(|v| v.as_array())
         .map(|ranges| {

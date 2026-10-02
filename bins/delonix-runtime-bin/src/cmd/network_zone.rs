@@ -57,6 +57,9 @@ use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
+use delonix_networking::ipam::{
+    normalize_mac, DhcpRange, IpamObserved, IpamProvider, IpamReservation, IpamSubnet,
+};
 use delonix_sdn::ownership::{OwnerMark, RemoveOutcome};
 use delonix_sdn::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 use delonix_state::JsonStore;
@@ -73,6 +76,39 @@ pub struct VNetSpecInput {
     pub name: String,
     #[serde(default)]
     pub alias: Option<String>,
+    /// The vnet's subnets, allocated from the provider's IPAM (ADR-0059
+    /// F5b). Cold: a change replaces the document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subnets: Vec<SubnetInput>,
+}
+
+/// A subnet inside a vnet.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubnetInput {
+    /// `a.b.c.d/len`, at its network address.
+    pub cidr: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<String>,
+    /// The ranges the zone's DHCP server hands out. Declaring one makes the
+    /// zone serve DHCP.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dhcp_range: Vec<DhcpRangeInput>,
+    /// Addresses reserved per MAC. Hot: a change converges live.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reservations: Vec<ReservationInput>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct DhcpRangeInput {
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ReservationInput {
+    pub ip: String,
+    pub mac: String,
 }
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
@@ -84,7 +120,11 @@ pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets"];
 /// `remote` is what the cluster holds for the zone under the record's owner
 /// mark, observed on every plan (ADR-0059 D4): `in sync`, or each difference
 /// from what the record declared. The manifest always wants `in sync`.
-pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &["vnets", "remote", "applied"];
+///
+/// `subnets` is cold (a change replaces the document); `reservations` is hot:
+/// an apply removes the ones no longer declared and makes the new ones.
+pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] =
+    &["vnets", "subnets", "reservations", "remote", "applied"];
 
 /// The `remote` field of a record that matches the cluster.
 const IN_SYNC: &str = "in sync";
@@ -123,6 +163,137 @@ struct NetworkZoneRecord {
     /// died.
     #[serde(default)]
     ledger: delonix_networking::ledger::StepLedger,
+    /// The reservations this engine holds on the provider, updated after
+    /// each one is made or removed: what a teardown releases, and what an
+    /// apply compares the declared ones with (ADR-0059 F5b).
+    #[serde(default)]
+    reservations: Vec<ReservationRec>,
+}
+
+/// One reservation this engine holds.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct ReservationRec {
+    vnet: String,
+    ip: String,
+    mac: String,
+}
+
+impl ReservationRec {
+    fn port(&self) -> IpamReservation {
+        IpamReservation {
+            vnet: self.vnet.clone(),
+            ip: self.ip.clone(),
+            mac: self.mac.clone(),
+        }
+    }
+}
+
+/// The declared subnets of `vnets`, as the port's type.
+fn declared_subnets(vnets: &[VNetSpecInput]) -> Vec<IpamSubnet> {
+    vnets
+        .iter()
+        .flat_map(|v| {
+            v.subnets.iter().map(|s| IpamSubnet {
+                vnet: v.name.clone(),
+                cidr: s.cidr.trim().to_string(),
+                gateway: s.gateway.clone(),
+                dhcp_ranges: s
+                    .dhcp_range
+                    .iter()
+                    .map(|r| DhcpRange {
+                        start: r.start.clone(),
+                        end: r.end.clone(),
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// The declared reservations of `vnets`, MAC in the node's form (an invalid
+/// MAC is kept as written; validation names it).
+fn declared_reservations(vnets: &[VNetSpecInput]) -> Vec<ReservationRec> {
+    vnets
+        .iter()
+        .flat_map(|v| {
+            v.subnets.iter().flat_map(|s| {
+                s.reservations.iter().map(|r| ReservationRec {
+                    vnet: v.name.clone(),
+                    ip: r.ip.trim().to_string(),
+                    mac: normalize_mac(&r.mac).unwrap_or_else(|| r.mac.clone()),
+                })
+            })
+        })
+        .collect()
+}
+
+/// Every subnet and reservation of a spec checked before anything is
+/// touched; two reservations of one address are refused.
+fn validate_addressing(vnets: &[VNetSpecInput]) -> Result<()> {
+    let subnets = declared_subnets(vnets);
+    for s in &subnets {
+        s.validate()?;
+    }
+    let reservations = declared_reservations(vnets);
+    for (i, r) in reservations.iter().enumerate() {
+        r.port().validate(&subnets)?;
+        if reservations[..i].iter().any(|o| o.ip == r.ip) {
+            return Err(Error::Invalid(format!(
+                "address {} is reserved twice in this zone",
+                r.ip
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn subnets_field(vnets: &[VNetSpecInput]) -> String {
+    let mut items: Vec<String> = declared_subnets(vnets)
+        .iter()
+        .map(|s| {
+            let mut ranges: Vec<String> = s
+                .dhcp_ranges
+                .iter()
+                .map(|r| format!("{}-{}", r.start, r.end))
+                .collect();
+            ranges.sort();
+            format!(
+                "{}|{}|{}|{}",
+                s.vnet,
+                s.cidr,
+                s.gateway.as_deref().unwrap_or(""),
+                ranges.join(",")
+            )
+        })
+        .collect();
+    items.sort();
+    items.join(";")
+}
+
+fn reservations_field(rs: &[ReservationRec]) -> String {
+    let mut items: Vec<String> = rs
+        .iter()
+        .map(|r| format!("{}|{}|{}", r.vnet, r.ip, r.mac))
+        .collect();
+    items.sort();
+    items.join(";")
+}
+
+/// The IPAM provider of the zone's segment provider (ADR-0059 D1 rule 2:
+/// the role is served by the provider that serves the zone). One without
+/// the role cannot carry subnets.
+fn resolve_ipam(provider_id: &str) -> Result<Box<dyn IpamProvider>> {
+    match delonix_networking::ipam::ipam_provider_for(provider_id) {
+        Some(built) => built.map_err(Error::from),
+        None => Err(
+            delonix_networking::Error::ProviderNotRegistered(super::po::tf(
+                "the segment provider '{provider}' has no ipam role: a NetworkZone on it cannot \
+             declare subnets",
+                &[("provider", provider_id)],
+            ))
+            .into(),
+        ),
+    }
 }
 
 fn store() -> Result<JsonStore<NetworkZoneRecord>> {
@@ -179,6 +350,8 @@ fn vnets_field(vnets: &[VNetSpecInput]) -> String {
 fn record_fields(rec: &NetworkZoneRecord) -> BTreeMap<String, String> {
     let mut f = BTreeMap::new();
     f.insert("vnets".into(), vnets_field(&rec.vnets));
+    f.insert("subnets".into(), subnets_field(&rec.vnets));
+    f.insert("reservations".into(), reservations_field(&rec.reservations));
     f
 }
 
@@ -189,6 +362,11 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let mut fields = BTreeMap::new();
     fields.insert("vnets".into(), vnets_field(&spec.vnets));
+    fields.insert("subnets".into(), subnets_field(&spec.vnets));
+    fields.insert(
+        "reservations".into(),
+        reservations_field(&declared_reservations(&spec.vnets)),
+    );
     fields.insert("remote".into(), IN_SYNC.into());
     fields.insert("applied".into(), COMPLETE.into());
     Ok(super::reconcile::Desired {
@@ -208,6 +386,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .into_iter()
         .map(|rec| {
             let mut fields = record_fields(&rec);
+            fields.insert("reservations".into(), reservations_held(&rec)?);
             fields.insert("remote".into(), remote_field(&rec)?);
             fields.insert(
                 "applied".into(),
@@ -230,16 +409,44 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 }
 
 /// The capabilities a zone needs from its provider: what its apply uses, and
-/// what its plan digest covers (ADR-0059 D4).
-const REQUIRED: [delonix_compute::capability::Capability; 4] = {
+/// what its plan digest covers (ADR-0059 D4) — the IPAM ones only when the
+/// zone declares subnets, reservations or a DHCP range.
+fn required_capabilities(vnets: &[VNetSpecInput]) -> Vec<delonix_compute::capability::Capability> {
     use delonix_compute::capability::Capability as C;
-    [
+    let mut out = vec![
         C::NetSegmentRemote,
         C::NetApplyStaged,
         C::NetOwnershipMarker,
         C::NetObserve,
-    ]
-};
+    ];
+    let subnets = declared_subnets(vnets);
+    if !subnets.is_empty() {
+        out.push(C::NetIpamProvider);
+    }
+    if !declared_reservations(vnets).is_empty() {
+        out.push(C::NetIpamReservation);
+    }
+    if subnets.iter().any(|s| !s.dhcp_ranges.is_empty()) {
+        out.push(C::NetIpamDhcp);
+    }
+    out
+}
+
+/// Whether a zone's addressing is part of what is observed: it declares
+/// subnets, or the record holds some.
+fn uses_ipam(vnets: &[VNetSpecInput], rec: &NetworkZoneRecord) -> bool {
+    !declared_subnets(vnets).is_empty()
+        || !declared_subnets(&rec.vnets).is_empty()
+        || !rec.reservations.is_empty()
+}
+
+/// What the IPAM holds for the record's zone, in the record's vnets.
+fn observe_ipam(provider_id: &str, rec: &NetworkZoneRecord) -> Result<IpamObserved> {
+    let vnets: Vec<String> = rec.vnets.iter().map(|v| v.name.clone()).collect();
+    resolve_ipam(provider_id)?
+        .observe(&rec.name, &vnets)
+        .map_err(at(provider_id, "observe_ipam"))
+}
 
 /// The record's vnets as the port's type, in this zone.
 fn declared_vnets(rec: &NetworkZoneRecord) -> Vec<VNetSpec> {
@@ -271,12 +478,45 @@ fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
     let observed = provider
         .observe(&rec.name, &owner)
         .map_err(at(provider_id, "observe"))?;
-    let drift = delonix_sdn::segment::segment_drift(&rec.name, &declared_vnets(rec), &observed);
+    let mut drift = delonix_sdn::segment::segment_drift(&rec.name, &declared_vnets(rec), &observed);
+    if uses_ipam(&[], rec) {
+        // Reservations are compared in their own (hot) field; here only the
+        // zone's options and the subnets, which are cold.
+        drift.extend(delonix_networking::ipam::ipam_drift(
+            &declared_subnets(&rec.vnets),
+            &[],
+            &observe_ipam(provider_id, rec)?,
+        ));
+    }
     Ok(if drift.is_empty() {
         IN_SYNC.to_string()
     } else {
         drift.join("; ")
     })
+}
+
+/// The `reservations` field as the provider holds it: the record's
+/// reservations that the node still holds for their MAC. One released on the
+/// node (by hand, or by destroying the guest that held the MAC) drops out, so
+/// the plan reads it as a hot change and the next apply makes it again — not
+/// as drift that would replace the zone. A record that cannot be observed
+/// (interrupted, no mark, no addressing) keeps what it recorded.
+fn reservations_held(rec: &NetworkZoneRecord) -> Result<String> {
+    if rec.ledger.is_interrupted() || rec.owner.is_empty() || rec.reservations.is_empty() {
+        return Ok(reservations_field(&rec.reservations));
+    }
+    let (provider_id, _) = resolve_provider(&rec.provider)?;
+    let wanted: Vec<IpamReservation> = rec.reservations.iter().map(ReservationRec::port).collect();
+    let held: Vec<ReservationRec> =
+        delonix_networking::ipam::held_reservations(&wanted, &observe_ipam(provider_id, rec)?)
+            .into_iter()
+            .map(|r| ReservationRec {
+                vnet: r.vnet,
+                ip: r.ip,
+                mac: r.mac,
+            })
+            .collect();
+    Ok(reservations_field(&held))
 }
 
 /// The digest of this document's plan (ADR-0059 D4): what the manifest
@@ -296,7 +536,8 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
             .observe(&doc.metadata.name, &OwnerMark::new(&rec.owner)?)
             .map_err(at(provider_id, "observe"))?
     };
-    let used = REQUIRED;
+    let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
+    let used = required_capabilities(&spec.vnets);
     let states: BTreeMap<String, String> = provider
         .capabilities()
         .capabilities
@@ -307,9 +548,14 @@ pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
     let mut intent = desired(doc)?.fields;
     intent.remove("remote");
     intent.remove("applied");
+    let mut fingerprint = delonix_networking::plan::segment_fingerprint(&observed);
+    if uses_ipam(&spec.vnets, &rec) && !rec.owner.is_empty() {
+        let ipam = delonix_networking::plan::ipam_fingerprint(&observe_ipam(provider_id, &rec)?);
+        fingerprint = serde_json::json!({ "segment": fingerprint, "ipam": ipam });
+    }
     Ok(Some(delonix_networking::plan::plan_digest(
         &intent,
-        &delonix_networking::plan::segment_fingerprint(&observed),
+        &fingerprint,
         provider_id,
         CATALOG_VERSION,
         &states,
@@ -337,6 +583,7 @@ fn owner_mark(rec: &mut NetworkZoneRecord) -> Result<OwnerMark> {
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
+    validate_addressing(&spec.vnets)?;
 
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
@@ -345,8 +592,15 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     delonix_networking::resolve::require_capabilities(
         &format!("NetworkZone/{name}"),
         &provider.capabilities(),
-        &REQUIRED,
+        &required_capabilities(&spec.vnets),
     )?;
+    let subnets = declared_subnets(&spec.vnets);
+    let declared = declared_reservations(&spec.vnets);
+    let ipam = if subnets.is_empty() && rec.reservations.is_empty() {
+        None
+    } else {
+        Some(resolve_ipam(provider_id)?)
+    };
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
@@ -415,6 +669,18 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 )
                 .map_err(at(provider_id, "ensure_vnet"))?;
         }
+        // The addressing rides the same transaction (ADR-0059 F5b): the zone's
+        // IPAM/DHCP options first — the node refuses an IPAM change once a
+        // subnet exists — then each subnet.
+        if let (Some(ipam), false) = (&ipam, subnets.is_empty()) {
+            let dhcp = subnets.iter().any(|s| !s.dhcp_ranges.is_empty());
+            ipam.prepare_zone(&name, dhcp)
+                .map_err(at(provider_id, "prepare_zone"))?;
+            for subnet in &subnets {
+                ipam.ensure_subnet(&name, subnet, &owner)
+                    .map_err(at(provider_id, "ensure_subnet"))?;
+            }
+        }
         Ok(())
     });
     rec.ledger.settle(
@@ -441,16 +707,63 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     if created_zone {
         rec.zone_owned = true;
     }
-    rec.ledger.finish();
     rec.vnets = spec.vnets.clone();
+    s.save(&name, &rec)?;
+
+    // Reservations are immediate and need the subnet RUNNING: after the
+    // transaction, one ledger step each, the record updated after every one.
+    // The ones no longer declared go first, so an address can move to
+    // another MAC in one apply.
+    if let Some(ipam) = &ipam {
+        let gone: Vec<ReservationRec> = rec
+            .reservations
+            .iter()
+            .filter(|r| !declared.contains(r))
+            .cloned()
+            .collect();
+        for r in gone {
+            let step = rec.ledger.open("remove_reservation", &r.ip);
+            s.save(&name, &rec)?;
+            let done = ipam
+                .remove_reservation(&name, &r.port())
+                .map_err(at(provider_id, "remove_reservation"));
+            rec.ledger
+                .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+            if done.is_ok() {
+                rec.reservations.retain(|o| o != &r);
+            }
+            s.save(&name, &rec)?;
+            done?;
+        }
+        // Every declared one, not only the new ones: ensuring is idempotent,
+        // and one released on the node (by hand, or by destroying the guest
+        // that held the MAC) comes back on the next apply.
+        for r in declared.clone() {
+            let step = rec.ledger.open("ensure_reservation", &r.ip);
+            s.save(&name, &rec)?;
+            let done = ipam
+                .ensure_reservation(&name, &r.port())
+                .map_err(at(provider_id, "ensure_reservation"));
+            rec.ledger
+                .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+            if done.is_ok() && !rec.reservations.contains(&r) {
+                rec.reservations.push(r);
+            }
+            s.save(&name, &rec)?;
+            done?;
+        }
+    }
+    rec.ledger.finish();
     s.save(&name, &rec)?;
     println!(
         "{}",
         super::po::tf(
-            "networkzone/{name}: {vnets} vnet(s) on '{provider}'",
+            "networkzone/{name}: {vnets} vnet(s), {subnets} subnet(s), {reservations} reservation(s) on '{provider}'",
             &[
                 ("name", &name),
                 ("vnets", &spec.vnets.len().to_string()),
+                ("subnets", &subnets.len().to_string()),
+                ("reservations", &rec.reservations.len().to_string()),
                 ("provider", provider_id),
             ],
         )
@@ -503,7 +816,7 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 /// by the node, and the whole teardown is rolled back.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let s = store()?;
-    let Ok(rec) = s.load(name) else {
+    let Ok(mut rec) = s.load(name) else {
         return Ok(());
     };
     if rec.owner.is_empty() {
@@ -520,9 +833,36 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     }
     let owner = OwnerMark::new(&rec.owner)?;
     let (provider_id, provider) = resolve_provider(&rec.provider)?;
+    let subnets = declared_subnets(&rec.vnets);
+    let ipam = if subnets.is_empty() && rec.reservations.is_empty() {
+        None
+    } else {
+        Some(resolve_ipam(provider_id)?)
+    };
+    // Reservations first, outside the transaction (they are immediate): the
+    // node refuses to delete a subnet that still holds one. The record drops
+    // each one as it goes, so a teardown that stops resumes where it was.
+    if let Some(ipam) = &ipam {
+        for r in rec.reservations.clone() {
+            if let RemoveOutcome::NotOwned(_) = ipam
+                .remove_reservation(name, &r.port())
+                .map_err(at(provider_id, "remove_reservation"))?
+            {
+                report_left(name, "reservation", &r.ip, "now held for another MAC");
+            }
+            rec.reservations.retain(|o| o != &r);
+            s.save(name, &rec)?;
+        }
+    }
     let mut left: Vec<(String, String, String)> = Vec::new();
     provider.transaction(&mut || {
         left.clear();
+        if let Some(ipam) = &ipam {
+            for subnet in &subnets {
+                ipam.remove_subnet(name, subnet, &owner)
+                    .map_err(at(provider_id, "remove_subnet"))?;
+            }
+        }
         for v in &rec.vnets {
             if let RemoveOutcome::NotOwned(who) = provider
                 .remove_vnet(&v.name, &owner)
@@ -640,6 +980,29 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 "  Vnet",
                 format!("{} ({})", v.name, v.alias.as_deref().unwrap_or("-")),
             );
+            for sn in &v.subnets {
+                let ranges: Vec<String> = sn
+                    .dhcp_range
+                    .iter()
+                    .map(|r| format!("{}-{}", r.start, r.end))
+                    .collect();
+                d.field(
+                    "    Subnet",
+                    format!(
+                        "{} gw {} dhcp {}",
+                        sn.cidr,
+                        sn.gateway.as_deref().unwrap_or("-"),
+                        if ranges.is_empty() {
+                            "-".to_string()
+                        } else {
+                            ranges.join(",")
+                        }
+                    ),
+                );
+            }
+        }
+        for r in &rec.reservations {
+            d.field("  Reservation", format!("{} {} ({})", r.ip, r.mac, r.vnet));
         }
         d.field_opt("Stack", rec.labels.get(super::reconcile::STACK_LABEL));
         d.field_opt("Managed by", rec.labels.get(super::reconcile::MANAGED_BY));
@@ -658,15 +1021,70 @@ mod tests {
             VNetSpecInput {
                 name: "b".into(),
                 alias: None,
+                subnets: vec![],
             },
             VNetSpecInput {
                 name: "a".into(),
                 alias: Some("Prod".into()),
+                subnets: vec![],
             },
         ];
         let mut v2 = v.clone();
         v2.reverse();
         assert_eq!(vnets_field(&v), vnets_field(&v2));
+    }
+
+    fn addressed() -> Vec<VNetSpecInput> {
+        serde_yaml::from_str(
+            r#"
+- name: v1
+  subnets:
+    - cidr: 10.78.0.0/24
+      gateway: 10.78.0.1
+      dhcpRange: [{start: 10.78.0.100, end: 10.78.0.150}]
+      reservations:
+        - {ip: 10.78.0.20, mac: "bc:24:11:00:00:20"}
+        - {ip: 10.78.0.21, mac: "BC:24:11:00:00:21"}
+- name: v2
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn subnets_and_reservations_read_from_the_manifest_shape() {
+        let v = addressed();
+        validate_addressing(&v).unwrap();
+        let s = declared_subnets(&v);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].dhcp_ranges.len(), 1);
+        let r = declared_reservations(&v);
+        assert_eq!(r[0].mac, "BC:24:11:00:00:20", "the MAC in the node's form");
+        assert_eq!(
+            subnets_field(&v),
+            "v1|10.78.0.0/24|10.78.0.1|10.78.0.100-10.78.0.150"
+        );
+        let mut reversed = r.clone();
+        reversed.reverse();
+        assert_eq!(reservations_field(&r), reservations_field(&reversed));
+        use delonix_compute::capability::Capability as C;
+        let caps = required_capabilities(&v);
+        for c in [C::NetIpamProvider, C::NetIpamReservation, C::NetIpamDhcp] {
+            assert!(caps.contains(&c), "{c:?}");
+        }
+        assert_eq!(required_capabilities(&v[1..]).len(), 4);
+    }
+
+    #[test]
+    fn an_address_reserved_twice_or_outside_its_subnet_is_refused() {
+        let mut v = addressed();
+        v[0].subnets[0].reservations[1].ip = "10.78.0.20".into();
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("reserved twice"), "{e}");
+        let mut v = addressed();
+        v[0].subnets[0].reservations[1].ip = "10.79.0.5".into();
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("no subnet declared"), "{e}");
     }
 
     #[test]

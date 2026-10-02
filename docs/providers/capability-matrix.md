@@ -100,7 +100,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 ## network
 
 - **linux**: 8 of 47 — 8 supported, 14 partial, 18 unsupported-by-provider, 1 requires-external-component, 6 not-implemented
-- **proxmox**: 3 of 47 — 3 supported, 7 partial, 19 unsupported-by-provider, 2 requires-external-component, 16 not-implemented
+- **proxmox**: 6 of 47 — 6 supported, 7 partial, 19 unsupported-by-provider, 2 requires-external-component, 13 not-implemented
 - **opnsense (gateway)**: 10 of 47 — 10 supported, 23 unsupported-by-provider, 2 requires-external-component, 12 not-implemented
 
 | domain | capability | linux | proxmox | opnsense (gateway) |
@@ -135,9 +135,9 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `net.lb.health-check` | not-implemented | unsupported-by-provider — PVE has no load balancer | requires-external-component — the os-haproxy plugin — OPNsense 26.1.2 ships no load-balancer API |
 |  | `net.dns.records` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | requires-external-component — a PowerDNS server — the only DNS plugin of PVE 9.2.2 | not-implemented |
 |  | `net.dns.authoritative` | unsupported-by-provider — the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role | requires-external-component — a PowerDNS server — the only DNS plugin of PVE 9.2.2 | not-implemented |
-|  | `net.ipam.provider` | unsupported-by-provider — a local provider: its addresses come from the engine's own IPAM (net.ipam) | not-implemented | unsupported-by-provider — the appliance has no IPAM beyond its DHCP servers (net.ipam.dhcp) |
-|  | `net.ipam.reservation` | unsupported-by-provider — a VM's address is derived from its MAC, not reserved in a ledger | not-implemented | not-implemented |
-|  | `net.ipam.dhcp` | partial — the holder's DHCP hands a Cloud Hypervisor tap the address derived from its MAC, outside the IPAM ledger (audit 62 §3) | not-implemented | not-implemented |
+|  | `net.ipam.provider` | unsupported-by-provider — a local provider: its addresses come from the engine's own IPAM (net.ipam) | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | unsupported-by-provider — the appliance has no IPAM beyond its DHCP servers (net.ipam.dhcp) |
+|  | `net.ipam.reservation` | unsupported-by-provider — a VM's address is derived from its MAC, not reserved in a ledger | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | not-implemented |
+|  | `net.ipam.dhcp` | partial — the holder's DHCP hands a Cloud Hypervisor tap the address derived from its MAC, outside the IPAM ledger (audit 62 §3) | supported — live:crates/providers/delonix-proxmox/tests/live.rs::the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp | not-implemented |
 |  | `net.segment.remote` | unsupported-by-provider — a local provider: its segments are the holder's bridges (net.bridge) | partial — `kind: NetworkZone` creates a simple zone and its VNets in one SDN transaction, live in the e2e section «providers remotos» (S6); the other five zone types are not created | unsupported-by-provider — creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns |
 |  | `net.apply.staged` | unsupported-by-provider — `nft -f` replaces a ruleset atomically in one step; nothing is staged to activate later | supported — live:crates/providers/delonix-proxmox/tests/live.rs::network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change | supported — live:crates/providers/delonix-opnsense/tests/live.rs::ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance |
 |  | `net.apply.rollback` | not-implemented | supported — live:crates/providers/delonix-proxmox/tests/live.rs::network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change | not-implemented |

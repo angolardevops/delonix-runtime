@@ -544,6 +544,21 @@
       ],
       "type": "object"
     },
+    "DhcpRangeInput": {
+      "properties": {
+        "end": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
     "Entrypoint": {
       "description": "An entry point (proxy listen port).",
       "properties": {
@@ -2118,6 +2133,21 @@
       },
       "type": "object"
     },
+    "ReservationInput": {
+      "properties": {
+        "ip": {
+          "type": "string"
+        },
+        "mac": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip",
+        "mac"
+      ],
+      "type": "object"
+    },
     "RouteRule": {
       "description": "A routing rule: matches by `host` (optional — empty = any Host) and\ndispatches by path prefix to a backend.",
       "properties": {
@@ -3145,6 +3175,39 @@
       },
       "type": "object"
     },
+    "SubnetInput": {
+      "description": "A subnet inside a vnet.",
+      "properties": {
+        "cidr": {
+          "description": "`a.b.c.d/len`, at its network address.",
+          "type": "string"
+        },
+        "dhcpRange": {
+          "description": "The ranges the zone's DHCP server hands out. Declaring one makes the\nzone serve DHCP.",
+          "items": {
+            "$ref": "#/$defs/DhcpRangeInput"
+          },
+          "type": "array"
+        },
+        "gateway": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reservations": {
+          "description": "Addresses reserved per MAC. Hot: a change converges live.",
+          "items": {
+            "$ref": "#/$defs/ReservationInput"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cidr"
+      ],
+      "type": "object"
+    },
     "SystemContainerNetDoc": {
       "properties": {
         "bridge": {
@@ -3393,6 +3456,13 @@
         },
         "name": {
           "type": "string"
+        },
+        "subnets": {
+          "description": "The vnet's subnets, allocated from the provider's IPAM (ADR-0059\nF5b). Cold: a change replaces the document.",
+          "items": {
+            "$ref": "#/$defs/SubnetInput"
+          },
+          "type": "array"
         }
       },
       "required": [
