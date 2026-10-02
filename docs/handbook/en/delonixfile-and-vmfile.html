@@ -745,8 +745,9 @@ file; <code>cloud_init: true</code>; <code>built_by: "delonix &lt;version&gt;"</
 code refuses to guess).</p>
 <p><code>vm create</code> applies the recorded defaults only where the caller did not decide: <code>--vcpus</code>/<code>--memory</code>
 flags win over <code>VCPUS</code>/<code>MEMORY</code>; for the backend, <code>--backend</code> &gt; the image's <code>HYPERVISOR</code> &gt;
-<code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-detection (<code>resolve_vm_defaults</code> in <code>cmd/vm.rs</code>,
-and <code>delonix_vm::create_with</code>).</p>
+<code>DELONIX_VM_BACKEND</code> &gt; the node's <code>defaultProvider</code> (providers file, which <code>vm default-backend --set</code>
+writes) &gt; the legacy per-root default &gt; auto-detection (<code>resolve_vm_defaults</code> in <code>cmd/vm.rs</code>, and
+<code>delonix_vm::standing_backend_choice</code>).</p>
 <p><strong>Offline by default, and why.</strong> A <code>RUN</code> that reaches the internet produces a different image
 depending on when it ran. <code>--network</code> is opt-in because the most common thing a VMfile wants is to
 install a package. With <code>--network</code>, libguestfs's appliance gets its network from <code>passt</code>, which has

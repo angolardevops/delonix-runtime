@@ -744,8 +744,9 @@ cloud-init 文件、产出物和一份 README。</p>
 一个本地镜像时才会被<strong>继承</strong>（一个 URL 没有什么可继承的，代码也拒绝去猜）。</p>
 <p><code>vm create</code> 只会在调用者没有自己决定的地方应用记录下来的默认值：<code>--vcpus</code>/<code>--memory</code>
 参数优先于 <code>VCPUS</code>/<code>MEMORY</code>；对后端来说，<code>--backend</code> &gt; 镜像自己的 <code>HYPERVISOR</code> &gt;
-<code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; 自动检测（<code>cmd/vm.rs</code> 里的
-<code>resolve_vm_defaults</code>，以及 <code>delonix_vm::create_with</code>）。</p>
+<code>DELONIX_VM_BACKEND</code> &gt; 节点的 <code>defaultProvider</code>（providers 文件，由 <code>vm default-backend --set</code>
+写入） &gt; 旧的按根目录保存的默认值 &gt; 自动检测（<code>cmd/vm.rs</code> 里的 <code>resolve_vm_defaults</code>，以及
+<code>delonix_vm::standing_backend_choice</code>）。</p>
 <p><strong>默认离线，以及为什么。</strong> 一条能联网的 <code>RUN</code>，会因为运行的时间不同而产出不同的镜像。
 <code>--network</code> 是可选加入的，因为一个 VMfile 最常见的诉求就是装一个软件包。带上
 <code>--network</code> 时，libguestfs 的 appliance 会从 <code>passt</code> 那里拿到网络，而它的宿主机陷阱记录
@@ -857,7 +858,7 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <td><code>--platform</code></td>
 <td>支持</td>
 <td><code>linux/&lt;arch&gt;</code>，需要宿主机的 binfmt</td>
-<td>不支持（镜像只有 amd64 —— <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>）</td>
+<td>不支持（镜像只有 amd64 —— <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>）</td>
 </tr>
 <tr>
 <td>层缓存</td>

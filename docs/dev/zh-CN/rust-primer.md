@@ -1,4 +1,4 @@
-<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
+<!-- translated-from: rust-primer.md sha256:7df531761d748651535cf66218ca9ae3a61dd2cf269836df4a757ba7df96b431 -->
 # 本代码库的 Rust 入门
 
 **阅读之前：** [云原生入门](cloud-native-primer.md)（示例用到其中的词汇），以及基础 Rust（[The Rust Programming Language](https://doc.rust-lang.org/book/) 第 1–10 章）。
@@ -90,7 +90,7 @@ Rust by Example ——[定义一个错误类型](https://doc.rust-lang.org/rust-
 
 ## 3.3 作为端口的 trait：`VmBackend` 与后端注册表
 
-引擎通过 **trait**（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 `crates/adapters/delonix-vm/src/lib.rs` 里的 `VmBackend`：
+引擎通过 **trait**（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 `crates/contexts/delonix-compute/src/vm_backend.rs` 里的 `VmBackend`（它是从 `delonix-vm` 挪过去的，`delonix-vm` 会重新导出它，这样一个 provider crate 不必依赖某个适配器就能实现它）：
 
 ```rust
 pub trait VmBackend {
@@ -104,16 +104,17 @@ pub trait VmBackend {
 }
 ```
 
-实现有：同一个文件里的 `CloudHypervisorBackend` 和 `LibvirtBackend`，以及
+实现有：`crates/adapters/delonix-vm/src/lib.rs` 里的 `CloudHypervisorBackend` 和 `LibvirtBackend`，以及
 `crates/providers/delonix-proxmox/src/lib.rs` 里的 `ProxmoxBackend`。trait 里带有**默认实现体**的方法（比如 `auto_selectable`）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。
 
 后端是在运行时挑选出来的，所以它们被当作 **trait 对象**来处理，也就是
 `Box<dyn VmBackend>`。它们是通过一个工厂（factory）注册表创建出来的：
 
 ```rust
-// crates/adapters/delonix-vm/src/lib.rs
+// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>> =
     std::sync::OnceLock::new();
 ```
@@ -122,9 +123,33 @@ static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>
 - 之所以要求 `Send + Sync`，是因为这张表是一个进程范围的 `static`；这个约束限制的是闭包，而不是 `VmBackend` 这个 trait 本身。
 - `OnceLock` 惰性地初始化这张表（`builtin_backends()` 会播种两个本地后端），
   `RwLock` 让 `register_backend` 可以在启动时再加一个第三方后端。二进制程序在
-  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs`（`register_configured`）里就是这么做的。
+  `bins/delonix-runtime-bin/src/cmd/vmbackends.rs`（`register_configured`）里就是这么做的：provider
+  的 crate 只负责构建 `BackendRegistration`（`delonix_proxmox::registration`），由组合根把它交给
+  `delonix_vm::register_backend`。
 
-这个设计背后的决定记在 [ADR-0008](../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在同一个文件靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
+这个设计背后的决定记在 [ADR-0008](../../adr/0008-proxmox-vm-backend.md) 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 `VmNetwork` 这个端口，保存在 `crates/adapters/delonix-vm/src/lib.rs` 靠前位置的一个 `OnceLock<Box<dyn VmNetwork>>` 里）。
+
+并不是每个端口都是 trait 对象。VM 用例把它们的端口当作**泛型参数**来接收：
+
+```rust
+// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine<'a, R, B, D, S> {
+    pub root: &'a Path,
+    pub repo: R,       // R: StateRepository<Vm>
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option<&'a dyn VmNetwork>,
+}
+```
+
+原因是 trait 对象的一条规则：带有泛型方法的 trait 不是 *dyn-compatible*（对象安全）的，而
+`StateRepository<T>` 恰好有一个（`update<F>`，在 `crates/foundation/delonix-model/src/ports.rs`
+里）。所以这个 engine 是泛型的，就像 `container run` 的 `resolve_run<I, S, D, H>` 一样，由每个
+调用方挑选具体类型：`delonix-vm` 在 `engine`（`crates/adapters/delonix-vm/src/lib.rs`）里构建
+`VmEngine<JsonStore<Vm>, RegistryBackends, QemuImgDisks, CloudLocaldsSeed>`，而 `vm::tests` 里的
+测试则在一个内存中的 store 和一些会记录调用的假实现之上构建一个。泛型的代价是每种组合都有一份
+代码副本（单态化，monomorphization）；好处是不必为了适配 `dyn` 而改造任何端口。
 
 **延伸阅读：** The Rust Book ——
 [Trait](https://doc.rust-lang.org/book/ch10-02-traits.html)，
@@ -186,7 +211,7 @@ let cloned = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32))
 
 `mount_overlay_if_marked` 通过 `rustix::mount::fsopen`，再对每一层调用一次
 `fsconfig_set_string(&fs, "lowerdir+", lower)`，来挂载一个容器的 overlay 根。经典的 `mount(2)` 把所有选项都打包进一个页大小的 `data` 字符串里，对于层数很多的镜像，内核会把它默默地截断。这个测量和这个决定都记在
-[ADR-0037](../adr/0037-overlay-mount-new-api.md) 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 `///` 注释，会解释促使它这么写的那次故障。
+[ADR-0037](../../adr/0037-overlay-mount-new-api.md) 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 `///` 注释，会解释促使它这么写的那次故障。
 
 **延伸阅读：** The Rust Book ——[Unsafe Rust](https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html)；
 [Rustonomicon](https://doc.rust-lang.org/nomicon/)（尤其是
@@ -224,7 +249,7 @@ pub cloud_init: Option<bool>,
 **自动生成的 schema。** Spec 类型会 derive `schemars::JsonSchema`（比如
 `crates/contexts/delonix-compute/src/pod.rs` 里的 `PodSpec`），
 `bins/delonix-runtime-bin/src/cmd/schema.rs` 会从它们生成出已发布的 JSON Schema
-（[ADR-0007](../adr/0007-generated-manifest-schema.md)）。留意那里的一句注释：schemars 遵守 `#[serde(rename)]`，但不遵守 `#[serde(alias)]`。
+（[ADR-0007](../../adr/0007-generated-manifest-schema.md)）。留意那里的一句注释：schemars 遵守 `#[serde(rename)]`，但不遵守 `#[serde(alias)]`。
 
 **延伸阅读：** [serde.rs](https://serde.rs/) ——
 [字段属性](https://serde.rs/field-attrs.html)（`default`、`skip_serializing_if`、`alias`）；

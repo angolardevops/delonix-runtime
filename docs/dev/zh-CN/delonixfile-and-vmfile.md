@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:40e8ce16ae06683b26d6f4cd83f6266c6b58c55570381c2f91aee3bb1d09acc5 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
 # Delonixfile 与 VMfile
 
 **阅读之前：**[克隆、构建与测试](build-and-test.md)（一个二进制程序和一个隔离的状态根目录），以及云原生入门里的[OCI 镜像、按内容寻址的存储与 overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs)一节。
@@ -383,8 +383,9 @@ cloud-init 文件、产出物和一份 README。
 
 `vm create` 只会在调用者没有自己决定的地方应用记录下来的默认值：`--vcpus`/`--memory`
 参数优先于 `VCPUS`/`MEMORY`；对后端来说，`--backend` > 镜像自己的 `HYPERVISOR` >
-`DELONIX_VM_BACKEND` > `vm default-backend` > 自动检测（`cmd/vm.rs` 里的
-`resolve_vm_defaults`，以及 `delonix_vm::create_with`）。
+`DELONIX_VM_BACKEND` > 节点的 `defaultProvider`（providers 文件，由 `vm default-backend --set`
+写入） > 旧的按根目录保存的默认值 > 自动检测（`cmd/vm.rs` 里的 `resolve_vm_defaults`，以及
+`delonix_vm::standing_backend_choice`）。
 
 **默认离线，以及为什么。** 一条能联网的 `RUN`，会因为运行的时间不同而产出不同的镜像。
 `--network` 是可选加入的，因为一个 VMfile 最常见的诉求就是装一个软件包。带上
@@ -456,7 +457,7 @@ VMfile:2: invalid argument: unknown VM backend: 'vmware' (use 'cloud-hypervisor'
 | `ADD` 的 URL / 归档自动解压 | 支持 | 不支持（`ADD` 等同于 `COPY`） | 没有 `ADD` |
 | `RUN --mount` | secret、ssh、cache、bind、tmpfs | 仅 `type=secret`/`type=cache` | 没有 |
 | `--target` | 支持 | 支持 | 不支持 |
-| `--platform` | 支持 | `linux/<arch>`，需要宿主机的 binfmt | 不支持（镜像只有 amd64 —— [ADR-0018](../adr/0018-vm-images-stay-amd64.md)） |
+| `--platform` | 支持 | `linux/<arch>`，需要宿主机的 binfmt | 不支持（镜像只有 amd64 —— [ADR-0018](../../adr/0018-vm-images-stay-amd64.md)） |
 | 层缓存 | 支持 | 仅 rootless，且没有 GC | 没有 |
 | `CMD`/`ENTRYPOINT`/`USER`/`ENV` | 镜像配置 | 镜像配置 | 没有 `CMD`；`USER` 会创建一个账户；`ENV` → `/etc/environment` |
 | 资源提示 | — | `CPUS`/`MEMORY`/`SECURITY` 只是被记录，不会被应用 | `VCPUS`/`MEMORY`/`HYPERVISOR` 会被 `vm create` 当作默认值应用 |

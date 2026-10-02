@@ -24,9 +24,10 @@ with `stable`. CI uses exactly the same file (`rustup show` in every job).
 
 ### `protoc` (required to build)
 
-`crates/interfaces/delonix-cri/build.rs` compiles the Kubernetes CRI protobuf with
-`tonic-build`/`prost`, which needs the Protocol Buffers compiler on `PATH`. The `delonix` binary
-depends on `delonix-cri`, so **a plain `cargo build --workspace` fails without it**:
+`crates/interfaces/delonix-cri/build.rs` compiles the Kubernetes CRI protobuf, and
+`crates/interfaces/delonix-node-api/build.rs` the node contract in `proto/delonix/node/v1`, both
+with `tonic-build`/`prost`, which needs the Protocol Buffers compiler on `PATH`. The `delonix`
+binary depends on `delonix-cri`, so **a plain `cargo build --workspace` fails without it**:
 
 ```bash
 # Debian / Ubuntu
@@ -173,7 +174,8 @@ Options, from least to most invasive:
 
 Resource limits only reach the kernel if the shell you run the engine from sits in a **delegated**
 cgroup. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the same
-requirement. Without delegation the engine does two different things, depending on the flag:
+requirement. Without the controller a flag needs, `container run` refuses rather than run
+unlimited; there are two probes, depending on the flag:
 
 - `-m`/`--memory`, `-c`/`--cpus` and `--cpu-weight`: `container run` **refuses** before creating
   anything, with an error that names the fix, and exits **69** (`Error::Unavailable`, the

@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:e9205b57d61260f2d44b7c78c60bc5ee9e79f9781fa0948ce1738e55a800ee77 -->
+<!-- translated-from: README.md sha256:bb63e156dd668cde907112c102d5b2e8f1cb53382b74f70ac37d9f16dccade51 -->
 # Delonix Runtime — Manual do Contribuidor
 
 Este manual é para quem quer **mudar o motor**: clonaste o repositório hoje e queres enviar um
@@ -16,7 +16,7 @@ O workspace tem **28 crates** e produz **5 binários** (`delonix`, `delonix-cri`
 O Delonix Runtime é uma abstracção de execução para **um nó**: corre **containers e microVMs**
 e gere a rede e o armazenamento de que eles precisam. É declarativo (Kinds próprios, agrupados por
 `apiVersion` — ver `delonix api-resources`), e fala com os providers (o kernel Linux, libvirt,
-Cloud Hypervisor, Proxmox VE, o CRI do Kubernetes) só através de portas, nunca através de ramos
+Cloud Hypervisor, Proxmox VE, OPNsense, o CRI do Kubernetes) só através de portas, nunca através de ramos
 `if provider == …` espalhados pelo código.
 
 Três princípios moldam quase todos os comentários de revisão que vais receber:

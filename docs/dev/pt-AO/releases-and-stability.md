@@ -1,4 +1,4 @@
-<!-- translated-from: releases-and-stability.md sha256:7d575f084b949f5b59b58dec29fb1ba7eb63904aa8514433ec4a2809e13a25e4 -->
+<!-- translated-from: releases-and-stability.md sha256:217f9f0bef9e28eb6783c3db4a9f733f4a40b85de7fc9ff0bb1577cf93a542e8 -->
 # Releases e estabilidade
 
 **Antes de leres:** [Fluxo de contribuição](contributing-workflow.md#version-alignment) (o gate de versão) e [Publicar a documentação](publishing-docs.md) (o que uma release regenera).
@@ -46,8 +46,8 @@ que chegue ao remoto por acidente (`git push --tags`, `push.followTags=true`) j�
 binário à frente do mundo. Uma tag sem release é aqui um estado intermédio normal.
 
 ```bash
-git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # corta a versão
-gh workflow run release.yml -f tag=v4.4.0                 # publica-a
+git tag -a v4.5.0 -m "v4.5.0" && git push origin v4.5.0   # corta a versão
+gh workflow run release.yml -f tag=v4.5.0                 # publica-a
 ```
 
 Um job `guard` corre primeiro e custa segundos: recusa um `tag` que não tenha a forma `vX.Y.Z`,
@@ -55,12 +55,12 @@ um que não exista no remoto, e um que já tenha release — o input escolhe o c
 o nome à release, por isso um `tag: main` não verificado teria publicado uma release chamada
 "main". Só depois, num único job:
 
-1. Constrói `delonix`, `delonix-cri`, `delonix-mcp` e `delonix-mgmt` duas vezes — uma genérica
+1. Constrói `delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt` e `delonix-node-api` duas vezes — uma genérica
    x86-64, outra com `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — especificamente em
    `ubuntu-22.04`, para a linha de base do glibc (2.35) ficar compatível com o RHEL 9 e o
    Debian 12, não só com o Ubuntu mais recente. O `scripts/install.sh` escolhe a build `-v3`
    automaticamente quando o CPU do host a suporta. Um job `build-arm64` separado constrói os mesmos
-   quatro binários nativamente num runner aarch64 (um por componente, sem variante `-v3`), e são
+   cinco binários nativamente num runner aarch64 (um por componente, sem variante `-v3`), e são
    publicados como `<name>-aarch64-linux` sob o mesmo `SHA256SUMS`. O `install.sh` instala-os num
    host aarch64 (#447). O job só corre no momento da release, por isso a sua primeira execução foi a própria release
    v4.2.0; a CI corre a suite de testes nativamente em arm64 no job `test (arm64)` em cada PR.
@@ -125,8 +125,14 @@ dentro do `0.x`.
   (`compute.delonix.io/v1alpha1`, …) se terem tornado canónicos. Esta é a promessa que mais
   importa na prática — protege o que as pessoas põem em git e revêem num PR, não só o que
   escrevem numa prompt.
+- O **ficheiro de providers** do nó (`providers.yaml`, `apiVersion: config.delonix.io/v1`,
+  ADR-0054) tem a mesma promessa que o schema do manifesto: uma chave nunca é removida nem muda de
+  propósito, uma chave nova é sempre opcional, e o `apiVersion` só muda com um `v2` que sai
+  enquanto o `v1` continua a ser lido. O schema é gerado dos tipos que o motor lê
+  (`delonix provider config schema`, publicado como `docs/schema/v1/providers.json`, com um teste
+  que falha quando a cópia publicada não é a gerada).
 
-**Não estável — pode mudar em qualquer versão:** `serve cri`/`serve api`/`serve docker-api` (a API
+**Não estável — pode mudar em qualquer versão:** `serve cri`/`serve api`/`serve node-api`/`serve docker-api` (a API
 de gestão local em particular não tem contrato publicado nenhum e é explicitamente algo para não
 automatizar contra — vê [Os crates § `delonix-mgmt`](crates.md#delonix-mgmt) e a ADR-0040/0041);
 as superfícies imperativas `cluster`/`vm`/`pod`/`workload`/`net` (o **schema** de manifesto delas,

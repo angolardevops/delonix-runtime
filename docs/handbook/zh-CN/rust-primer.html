@@ -280,7 +280,7 @@ Rust by Example ——<a href="https://doc.rust-lang.org/rust-by-example/error/m
 <a href="https://docs.rs/thiserror">docs.rs 上的 <code>thiserror</code></a>。</p>
 <hr />
 <h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 作为端口的 trait：<code>VmBackend</code> 与后端注册表<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
-<p>引擎通过 <strong>trait</strong>（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的 <code>VmBackend</code>：</p>
+<p>引擎通过 <strong>trait</strong>（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 里的 <code>VmBackend</code>（它是从 <code>delonix-vm</code> 挪过去的，<code>delonix-vm</code> 会重新导出它，这样一个 provider crate 不必依赖某个适配器就能实现它）：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">pub trait VmBackend {
     fn id(&amp;self) -&gt; &amp;&#x27;static str;
     fn available(&amp;self) -&gt; bool;
@@ -291,13 +291,14 @@ Rust by Example ——<a href="https://doc.rust-lang.org/rust-by-example/error/m
     // ... more methods, many with default bodies
 }
 </code></pre></div>
-<p>实现有：同一个文件里的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及
+<p>实现有：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> 里的 <code>ProxmoxBackend</code>。trait 里带有<strong>默认实现体</strong>的方法（比如 <code>auto_selectable</code>）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。</p>
 <p>后端是在运行时挑选出来的，所以它们被当作 <strong>trait 对象</strong>来处理，也就是
 <code>Box&lt;dyn VmBackend&gt;</code>。它们是通过一个工厂（factory）注册表创建出来的：</p>
-<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-vm/src/lib.rs
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm_backend.rs
 pub type BackendFactory = Box&lt;dyn Fn() -&gt; Result&lt;Box&lt;dyn VmBackend&gt;&gt; + Send + Sync&gt;;
 
+// crates/adapters/delonix-vm/src/lib.rs
 static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegistration&gt;&gt;&gt; =
     std::sync::OnceLock::new();
 </code></pre></div>
@@ -306,9 +307,29 @@ static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegis
 <li>之所以要求 <code>Send + Sync</code>，是因为这张表是一个进程范围的 <code>static</code>；这个约束限制的是闭包，而不是 <code>VmBackend</code> 这个 trait 本身。</li>
 <li><code>OnceLock</code> 惰性地初始化这张表（<code>builtin_backends()</code> 会播种两个本地后端），
   <code>RwLock</code> 让 <code>register_backend</code> 可以在启动时再加一个第三方后端。二进制程序在
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）里就是这么做的。</li>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）里就是这么做的：provider
+  的 crate 只负责构建 <code>BackendRegistration</code>（<code>delonix_proxmox::registration</code>），由组合根把它交给
+  <code>delonix_vm::register_backend</code>。</li>
 </ul>
-<p>这个设计背后的决定记在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 <code>VmNetwork</code> 这个端口，保存在同一个文件靠前位置的一个 <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> 里）。</p>
+<p>这个设计背后的决定记在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 <code>VmNetwork</code> 这个端口，保存在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 靠前位置的一个 <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> 里）。</p>
+<p>并不是每个端口都是 trait 对象。VM 用例把它们的端口当作<strong>泛型参数</strong>来接收：</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/vm.rs
+pub struct VmEngine&lt;&#x27;a, R, B, D, S&gt; {
+    pub root: &amp;&#x27;a Path,
+    pub repo: R,       // R: StateRepository&lt;Vm&gt;
+    pub backends: B,   // B: VmBackends
+    pub disks: D,      // D: LocalDiskImages
+    pub seed: S,       // S: SeedBuilder
+    pub network: Option&lt;&amp;&#x27;a dyn VmNetwork&gt;,
+}
+</code></pre></div>
+<p>原因是 trait 对象的一条规则：带有泛型方法的 trait 不是 <em>dyn-compatible</em>（对象安全）的，而
+<code>StateRepository&lt;T&gt;</code> 恰好有一个（<code>update&lt;F&gt;</code>，在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>
+里）。所以这个 engine 是泛型的，就像 <code>container run</code> 的 <code>resolve_run&lt;I, S, D, H&gt;</code> 一样，由每个
+调用方挑选具体类型：<code>delonix-vm</code> 在 <code>engine</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）里构建
+<code>VmEngine&lt;JsonStore&lt;Vm&gt;, RegistryBackends, QemuImgDisks, CloudLocaldsSeed&gt;</code>，而 <code>vm::tests</code> 里的
+测试则在一个内存中的 store 和一些会记录调用的假实现之上构建一个。泛型的代价是每种组合都有一份
+代码副本（单态化，monomorphization）；好处是不必为了适配 <code>dyn</code> 而改造任何端口。</p>
 <p><strong>延伸阅读：</strong> The Rust Book ——
 <a href="https://doc.rust-lang.org/book/ch10-02-traits.html">Trait</a>，
 <a href="https://doc.rust-lang.org/book/ch18-02-trait-objects.html">Trait 对象</a>，
@@ -374,7 +395,7 @@ let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i
 <h3 id="the-new-mount-api-and-why-it-exists-here">新的挂载 API，以及它为什么会出现在这里<a class="hanchor" href="#the-new-mount-api-and-why-it-exists-here" aria-label="#">#</a></h3>
 <p><code>mount_overlay_if_marked</code> 通过 <code>rustix::mount::fsopen</code>，再对每一层调用一次
 <code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code>，来挂载一个容器的 overlay 根。经典的 <code>mount(2)</code> 把所有选项都打包进一个页大小的 <code>data</code> 字符串里，对于层数很多的镜像，内核会把它默默地截断。这个测量和这个决定都记在
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 <code>///</code> 注释，会解释促使它这么写的那次故障。</p>
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 <code>///</code> 注释，会解释促使它这么写的那次故障。</p>
 <p><strong>延伸阅读：</strong> The Rust Book ——<a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>；
 <a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a>（尤其是
 <a href="https://doc.rust-lang.org/nomicon/ffi.html">FFI</a>）；man 手册页
@@ -402,7 +423,7 @@ pub cloud_init: Option&lt;bool&gt;,
 <p><strong>自动生成的 schema。</strong> Spec 类型会 derive <code>schemars::JsonSchema</code>（比如
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a> 里的 <code>PodSpec</code>），
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 会从它们生成出已发布的 JSON Schema
-（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。留意那里的一句注释：schemars 遵守 <code>#[serde(rename)]</code>，但不遵守 <code>#[serde(alias)]</code>。</p>
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。留意那里的一句注释：schemars 遵守 <code>#[serde(rename)]</code>，但不遵守 <code>#[serde(alias)]</code>。</p>
 <p><strong>延伸阅读：</strong> <a href="https://serde.rs/">serde.rs</a> ——
 <a href="https://serde.rs/field-attrs.html">字段属性</a>（<code>default</code>、<code>skip_serializing_if</code>、<code>alias</code>）；
 <a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>；<a href="https://docs.rs/schemars"><code>schemars</code></a>。</p>
