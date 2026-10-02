@@ -14981,3 +14981,6 @@ msgstr "estas são as credenciais de fábrica da imagem — muda-as antes de mai
 
 msgid "(tears down everything the stack owns)"
 msgstr "(desmonta tudo o que a stack possui)"
+
+msgid "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project"
+msgstr "secret:  {secret} foi criado com uma chave gerada — vive no cofre de segredos (`delonix secret inspect {secret}`), não no projecto"

@@ -3,3 +3,4 @@ versions=12,13
 port=8000
 health=/api/v1/health/live
 lock=composer.lock
+up_secret=app APP_KEY=base64:{random32}

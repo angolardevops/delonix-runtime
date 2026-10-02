@@ -920,7 +920,13 @@ fn cert_line(source: CertSource, hosts: &[String]) -> String {
 /// What `--up` prints once the project answers: where to open it, what the
 /// certificate is, the credentials when the template declares any, and the
 /// three commands that come next. Pure, so the promise is testable.
-fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) -> Vec<String> {
+fn up_summary(
+    tname: &str,
+    name: &str,
+    plan: &Plan,
+    cert: Option<CertSource>,
+    created_secret: Option<&str>,
+) -> Vec<String> {
     let health = template_meta(tname).health;
     let port = plan.port.as_str();
     let open = meta_kv(tname, "open").unwrap_or(health);
@@ -949,6 +955,15 @@ fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) ->
             super::po::t("these are the image's factory credentials — change them before anyone else can reach the port (see README.md)")
         ));
     }
+    if let Some(secret) = created_secret {
+        out.push(format!(
+            "   {}",
+            super::po::tf(
+                "secret:  {secret} was created with a generated key — it lives in the secret store (`delonix secret inspect {secret}`), not in the project",
+                &[("secret", secret)],
+            )
+        ));
+    }
     out.push(format!("   health:  http://localhost:{port}{health}"));
     out.push(format!("   logs:    delonix container logs -f {name}"));
     out.push(format!(
@@ -956,6 +971,68 @@ fn up_summary(tname: &str, name: &str, plan: &Plan, cert: Option<CertSource>) ->
         super::po::t("(tears down everything the stack owns)")
     ));
     out
+}
+
+/// A secret the template's manifest references and that `--up` creates when
+/// it does not exist yet, from `up_secret=<suffix> <KEY>=<value>` in the
+/// template's meta. `{random32}` in the value is 32 random bytes in base64.
+///
+/// The manifest names the secret `<project>-<suffix>`; without it `stack
+/// apply` stops at `no such secret`, and `--up` would end on an error for a
+/// project nobody has touched yet. The key goes to the secret store only —
+/// never into a file of the project — and an existing secret is left alone.
+/// Returns the secret's name when this call created it.
+fn ensure_up_secret(exe: &Path, name: &str, spec: &str) -> Result<Option<String>> {
+    use std::io::{Read, Write};
+    let invalid = || Error::Invalid(format!("template.meta: up_secret={spec}"));
+    let (suffix, pair) = spec.split_once(' ').ok_or_else(invalid)?;
+    let (key, value) = pair.split_once('=').ok_or_else(invalid)?;
+    let secret = format!("{name}-{suffix}");
+    let exists = std::process::Command::new(exe)
+        .args(["secret", "inspect", &secret])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if exists {
+        return Ok(None);
+    }
+    let value = if value.contains("{random32}") {
+        // No fallback: a key that is not random is worse than no key.
+        let mut bytes = [0u8; 32];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+        use base64::Engine;
+        value.replace(
+            "{random32}",
+            &base64::engine::general_purpose::STANDARD.encode(bytes),
+        )
+    } else {
+        value.to_string()
+    };
+    // Through stdin, so the key never appears on a command line.
+    let mut child = std::process::Command::new(exe)
+        .args(["secret", "create", &secret, "--from-env-file", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        writeln!(stdin, "{key}={value}")?;
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if !out.status.success() {
+        return Err(Error::Invalid(super::po::tf(
+            "`delonix {args}` failed:\n{stderr}",
+            &[
+                ("args", &format!("secret create {secret}")),
+                ("stderr", String::from_utf8_lossy(&out.stderr).trim()),
+            ],
+        )));
+    }
+    Ok(Some(secret))
 }
 
 /// Seconds `--up` waits for the health path: the template's `wait=`, or 120.
@@ -1030,6 +1107,11 @@ fn build_and_up(
         ));
     }
 
+    let created_secret = match meta_kv(tname, "up_secret") {
+        Some(spec) => ensure_up_secret(&exe, name, spec)?,
+        None => None,
+    };
+
     let mut p = super::output::Progress::new();
     p.step(&format!("Applying the stack ({name})"), "🚀");
     run_quiet(&exe, dir, &["stack", "apply"])?;
@@ -1041,7 +1123,7 @@ fn build_and_up(
     drop(p);
 
     println!();
-    for line in up_summary(tname, name, plan, cert) {
+    for line in up_summary(tname, name, plan, cert, created_secret.as_deref()) {
         println!("{line}");
     }
     Ok(())
@@ -2344,17 +2426,44 @@ mod tests {
             "edge",
             &Plan::defaults("nginx"),
             Some(CertSource::SelfSigned),
+            None,
         )
         .join("\n");
         assert!(nginx.contains("https://localhost:8443/"), "{nginx}");
         assert!(nginx.contains("self-signed"), "{nginx}");
         assert!(!nginx.contains("pass:"), "{nginx}");
 
-        let odoo = up_summary("odoo", "erp", &Plan::defaults("odoo"), None).join("\n");
+        let odoo = up_summary("odoo", "erp", &Plan::defaults("odoo"), None, None).join("\n");
         assert!(odoo.contains("http://localhost:8069/web"), "{odoo}");
         assert!(odoo.contains("user:    admin"), "{odoo}");
         assert!(odoo.contains("pass:    admin"), "{odoo}");
         assert!(odoo.contains("change them"), "{odoo}");
+    }
+
+    /// The Laravel manifest references `<name>-app`; `--up` is told how to
+    /// create it, and says so when it did.
+    #[test]
+    fn a_template_declares_the_secret_up_creates() {
+        assert_eq!(
+            meta_kv("laravel", "up_secret"),
+            Some("app APP_KEY=base64:{random32}")
+        );
+        let manifest = TEMPLATES
+            .iter()
+            .find(|(n, _)| *n == "laravel")
+            .and_then(|(_, f)| f.iter().find(|(rel, _, _)| *rel == "delonix-manifest.yaml"))
+            .map(|(_, body, _)| *body)
+            .unwrap();
+        assert!(manifest.contains("- __NAME__-app"), "{manifest}");
+        let said = up_summary(
+            "laravel",
+            "shop",
+            &Plan::defaults("laravel"),
+            None,
+            Some("shop-app"),
+        )
+        .join("\n");
+        assert!(said.contains("shop-app was created"), "{said}");
     }
 
     /// `wait=` is read: Odoo declares 300 s, a template that says nothing gets 120.

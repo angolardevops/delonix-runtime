@@ -101,7 +101,9 @@ Every application template has, in the framework's own idiom:
   Optional keys are read by name (`TEMPLATE_KV`): `tls=<port>` (the template serves HTTPS;
   `init` generates the certificate into `./tls` and `__TLS_PORT__` is substituted), `open=`
   (the path `--up` prints as the address to open), and `login=`/`password=` (factory
-  credentials `--up` prints with the warning to change them).
+  credentials `--up` prints with the warning to change them), and `up_secret=<suffix> <KEY>=<value>`
+  (a secret `<project>-<suffix>` that `--up` creates when absent; `{random32}` is 32 random bytes
+  in base64).
 - One test renders every embedded template for every version it declares and parses the
   JSON and YAML it wrote, so a template added later is covered without a new test.
 
@@ -181,9 +183,11 @@ host.
 ### D10 — A fresh deployment comes up ready
 
 `delonix init -t <template> --up` must end with a service that answers ready. Two templates
-did not: `django` needed a manual `manage.py migrate`, and `laravel` needed a secret (still
-true — production refuses to start without `APP_KEY`, and a key is never generated into a
-file the project commits). `django` now migrates at start when `MIGRATE_ON_START=true`, which
+did not: `django` needed a manual `manage.py migrate`, and `laravel` needed a secret
+(production refuses to start without `APP_KEY`, and a key is never generated into a file the
+project commits). `--up` now creates that secret in the engine's secret store when it does not
+exist (`up_secret=` in `template.meta`; the value goes through stdin, never a command line),
+and says so; a manual `stack apply` still needs the `secret create` the manifest shows. `django` now migrates at start when `MIGRATE_ON_START=true`, which
 its manifest sets because the default is one replica on SQLite; with several replicas the
 variable is removed and the migration is a release step.
 

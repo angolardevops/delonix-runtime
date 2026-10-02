@@ -234,7 +234,11 @@ delonix stack destroy                 # removes what the manifest created
 The manifest runs the web container (port `__PORT__`, 512M/1 CPU) and the
 worker (256M), both with a read-only root filesystem, sharing the
 `__NAME__-data` volume that holds the SQLite file. The secret must exist
-before `stack apply` (so `delonix init --up` needs it too).
+before `stack apply`. `delonix init --up` creates it for you, with a generated
+`APP_KEY`, when it does not exist yet — in the engine's secret store, never in
+a file of this project — and says so; `delonix stack destroy` leaves it there
+(`delonix secret rm __NAME__-app` removes it, and with it the ability to read
+anything encrypted with that key).
 The image runs as the unprivileged user `app` (uid 10001), which owns nothing
 in the image except `/var/lib/app`, the mount point of the database volume.
 The manifest names it (`user:`) because the engine applies an image's USER
