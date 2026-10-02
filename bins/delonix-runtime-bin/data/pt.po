@@ -2979,8 +2979,11 @@ msgstr "overlay cifrado (wg_ip) mas 'wg' indisponível no host — instala wireg
 msgid "could not evaluate prerequisites: {err}"
 msgstr "não consegui avaliar os pré-requisitos: {err}"
 
-msgid "declared but NOT applied to an existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace`, which discards the disk) or change it with `vm create`/`vm stop`+`start`"
-msgstr "declarado mas NÃO aplicado a uma VM existente: {fields} — o reconciliador compara só {compared}. Recria-a (`--replace`, que deita fora o disco) ou muda-a com `vm create`/`vm stop`+`start`"
+msgid "changed since it was created and NOT applied to the existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) or change it with `vm create`/`vm stop`+`start`"
+msgstr "alterado desde a criação e NÃO aplicado à VM existente: {fields} — o reconciliador compara só {compared}. Recria-a (`--replace VirtualMachine/{name}`, que deita fora o disco) ou muda-a com `vm create`/`vm stop`+`start`"
+
+msgid "declared and not verifiable on an existing VM: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace VirtualMachine/{name}`, which discards the disk) to be sure, or change it with `vm create`/`vm stop`+`start`"
+msgstr "declarado e não verificável numa VM existente: {fields} — não guarda registo do spec com que foi criada (criada à mão, ou por uma versão anterior), e o reconciliador compara só {compared}. Recria-a (`--replace VirtualMachine/{name}`, que deita fora o disco) para ter a certeza, ou muda-a com `vm create`/`vm stop`+`start`"
 
 msgid "encrypted overlay (wgIp) but 'wg' is unavailable on the host — install wireguard-tools + the kernel module, or drop wgIp for plain (unencrypted) VXLAN transport"
 msgstr "overlay cifrado (wgIp) mas 'wg' indisponível no host — instala wireguard-tools + o módulo do kernel, ou tira o wgIp para transporte VXLAN plano (não cifrado)"
@@ -3594,14 +3597,11 @@ msgstr ""
 "aviso: volume '{vol}': medium de emptyDir desconhecido '{medium}' (o "
 "Kubernetes define \"\" e \"Memory\"); tratado como tmpfs."
 
-msgid ""
-"declared but NOT applied to an existing container: {fields} — the reconciler "
-"compares only {compared}. Recreate it (`--replace Container/<name>`) or change "
-"it with `container update` where that field is hot"
-msgstr ""
-"declarado mas NÃO aplicado a um container existente: {fields} — o "
-"reconciliador compara só {compared}. Recria-o (`--replace Container/<nome>`) "
-"ou muda-o com `container update` onde esse campo é quente"
+msgid "changed since it was created and NOT applied to the existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) or change it with `container update` where that field is hot"
+msgstr "alterado desde a criação e NÃO aplicado ao container existente: {fields} — o reconciliador compara só {compared}. Recria-o (`--replace Container/{name}`) ou muda-o com `container update` onde esse campo é quente"
+
+msgid "declared and not verifiable on an existing container: {fields} — it carries no record of the spec it was created with (created by hand, or by an older version), and the reconciler compares only {compared}. Recreate it (`--replace Container/{name}`) to be sure, or change it with `container update` where that field is hot"
+msgstr "declarado e não verificável num container existente: {fields} — não guarda registo do spec com que foi criado (criado à mão, ou por uma versão anterior), e o reconciliador compara só {compared}. Recria-o (`--replace Container/{name}`) para ter a certeza, ou muda-o com `container update` onde esse campo é quente"
 
 msgid "Packaging the image"
 msgstr "A empacotar a imagem"
@@ -4046,8 +4046,14 @@ msgstr "Todos os outros Kinds ({kinds}) são «garante presente»: o `apply` cri
 msgid "Not compared on a Container, and why: `env` and `command` (the record holds them merged with the image's), `user` (the record stores the resolved uid), `labels` (the engine adds its own)."
 msgstr "Não comparados num Container, e porquê: `env` e `command` (o registo guarda-os fundidos com os da imagem), `user` (o registo guarda o uid resolvido), `labels` (o motor acrescenta as suas)."
 
-msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing."
-msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada."
+msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `<Kind>/<name>` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)."
+msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada. Um `<Kind>/<name>` também recria esse recurso quando o plano não mostra alteração nele (um campo que o plano não compara, como `env`)."
+
+msgid "recreate requested with `--replace`"
+msgstr "recriação pedida com `--replace`"
+
+msgid "--replace {kind}/{name}: this Kind is ensure-present in this version and cannot be recreated by `stack apply` (nothing was changed)"
+msgstr "--replace {kind}/{name}: este Kind só garante presença nesta versão e não pode ser recriado pelo `stack apply` (nada foi alterado)"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit. Answers \"why is my change not showing up?\" without reading the source."
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai. Responde a «porque é que a minha alteração não aparece?» sem ler o código."

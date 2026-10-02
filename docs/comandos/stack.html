@@ -419,7 +419,7 @@ Options:
           Don&#x27;t apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run
 
       --replace &lt;KIND/NAME&gt;
-          Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace &lt;Kind&gt;/&lt;name&gt;` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing
+          Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace &lt;Kind&gt;/&lt;name&gt;` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `&lt;Kind&gt;/&lt;name&gt;` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)
 
       --prune
           Also REMOVE what this stack owns and the manifest no longer declares. Never happens without this flag
