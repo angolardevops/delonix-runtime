@@ -119,6 +119,8 @@ pub enum StackCmd {
         /// Authorize DESTROYING and recreating a resource whose change does not
         /// converge live: `--replace <Kind>/<name>` (repeatable), or
         /// `--replace all`. Without it, `apply` refuses and changes nothing.
+        /// A `<Kind>/<name>` also recreates that resource when the plan shows
+        /// no change for it (a field the plan does not compare, like `env`).
         #[arg(long = "replace", value_name = "KIND/NAME")]
         replace: Vec<String>,
         /// Also REMOVE what this stack owns and the manifest no longer declares.
@@ -815,6 +817,12 @@ fn plan_cmd(
 /// not change with the locale).
 fn explain(c: &Change) -> Option<String> {
     match c.action {
+        // A `Replace` with no cold field is one the operator asked for by name
+        // (`promote_named_replaces`): nothing differs, and saying «does not
+        // converge live: » with an empty list would read as a bug.
+        Action::Replace if c.cold_fields.is_empty() => {
+            Some(super::po::t("recreate requested with `--replace`").to_string())
+        }
         Action::Replace => Some(super::po::tf(
             "does not converge live: {fields}",
             &[("fields", &c.cold_fields.join(", "))],
@@ -1427,6 +1435,70 @@ fn replace_matches(token: &str, c: &Change) -> bool {
     }
 }
 
+/// An explicit `--replace <Kind>/<name>` recreates that resource even when the
+/// plan has no diff for it.
+///
+/// The reconciler compares a subset of each Kind's spec. For the rest the plan
+/// attaches `Converged=False (FieldsNotCompared)` and tells the operator to
+/// recreate with `--replace Container/<name>` — and that flag used to do
+/// nothing: it only authorised changes the plan ALREADY proposed as `Replace`,
+/// and an uncompared field never makes one. Measured 2026-10-02: an `env:`
+/// changed on a running container, `stack apply --replace Container/<name>`
+/// returned 0, and `container inspect` still showed the old env. The only path
+/// that worked was `container rm -f` and a second apply.
+///
+/// So the operator naming a resource IS the diff: it becomes a `Replace` here,
+/// before [`refuse_unallowed`], and from then on it goes through exactly the
+/// path every other recreate takes (`destroy_for_replace`, the creation layers,
+/// the stamp) — no second recreate path to drift from the first.
+///
+/// What is deliberately NOT promoted:
+/// - `--replace all` and a bare name. `all` authorises what the plan proposes;
+///   making it recreate every resource of the stack would turn a permission
+///   into a demolition. A bare name can match several Kinds at once (a
+///   `Container/db` and a `Volume/db`), and a forced recreate of a volume
+///   discards its data — only the `Kind/name` form says which one.
+/// - `Create`, `Replace`, `Delete`, `Conflict`: already decided (the conflict
+///   is still refused by `refuse_unallowed`, whatever was named).
+///
+/// What is refused instead of ignored, before anything is touched: a Kind the
+/// plan cannot recreate (ensure-present, or no teardown). Ignoring it would be
+/// this same defect again — a flag that reads as obeyed and changes nothing.
+fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Result<Vec<Change>> {
+    for c in changes.iter_mut() {
+        let named = replace
+            .iter()
+            .any(|r| r.contains('/') && replace_matches(r, c));
+        if !named {
+            continue;
+        }
+        match c.action {
+            Action::NoOp | Action::Update | Action::Adopt => {}
+            Action::NotConverged => {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--replace {kind}/{name}: this Kind is ensure-present in this version and \
+                     cannot be recreated by `stack apply` (nothing was changed)",
+                    &[("kind", &c.kind), ("name", &c.name)],
+                )))
+            }
+            _ => continue,
+        }
+        if !super::kinds::has_teardown(&c.kind) {
+            let why = no_teardown_reason(&c.kind)
+                .map(|w| super::po::t(w).to_string())
+                .unwrap_or_else(|| "removing this Kind declaratively is not implemented".into());
+            return Err(delonix_model::Error::Invalid(format!(
+                "--replace {}/{}: {why}",
+                c.kind, c.name
+            )));
+        }
+        c.action = Action::Replace;
+        // English, like every `reason`: it is part of the `-o json` payload.
+        c.reason = Some("recreate requested by --replace".to_string());
+    }
+    Ok(changes)
+}
+
 fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     let allow_all = replace.iter().any(|r| r == "all");
     let mut blocked = Vec::new();
@@ -1604,9 +1676,11 @@ fn apply_docs(
     // the misspelling that caused it.
     if !replace.iter().any(|r| r == "all") {
         for r in &replace {
-            let hits = changes
-                .iter()
-                .any(|c| format!("{}/{}", c.kind, c.name) == *r || c.name == *r);
+            // The same predicate `refuse_unallowed` authorises with. This check
+            // used to be raw equality against the canonical `Kind/name`, so
+            // `--replace container/web` — which `replace_matches` accepts — was
+            // refused here as a typo before it could authorise anything.
+            let hits = changes.iter().any(|c| replace_matches(r, c));
             if !hits {
                 return Err(delonix_model::Error::Invalid(super::po::tf(
                     "--replace '{value}': no resource with that name in this manifest \
@@ -1616,6 +1690,7 @@ fn apply_docs(
             }
         }
     }
+    let changes = promote_named_replaces(changes, &replace)?;
     refuse_unallowed(&changes, &replace)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
@@ -3358,6 +3433,108 @@ mod tests {
         for t in ["pod/web", "web", "network/api", "net/api", "naoexiste/api"] {
             assert!(!replace_matches(t, &c), "{t} must NOT authorise");
         }
+    }
+
+    fn with_action(mut c: Change, a: Action) -> Change {
+        c.action = a;
+        c
+    }
+
+    /// 2026-10-02: `env` changed on a running container, the plan said `=` and
+    /// told the operator to `--replace Container/<name>`, and that apply
+    /// recreated nothing — the flag only authorised a `Replace` the plan had
+    /// already proposed. Naming the resource now IS the diff, and the rest of
+    /// the stack is left exactly as the plan decided.
+    #[test]
+    fn a_named_replace_recreates_a_resource_the_plan_left_alone() {
+        let plan = vec![
+            with_action(a_change("Container", "web"), Action::NoOp),
+            with_action(a_change("Container", "db"), Action::NoOp),
+            with_action(a_change("Volume", "web"), Action::NoOp),
+        ];
+        let replace = vec!["Container/web".to_string()];
+        let out = promote_named_replaces(plan, &replace).unwrap();
+        assert_eq!(out[0].action, Action::Replace, "the named one is recreated");
+        assert_eq!(out[1].action, Action::NoOp, "another container is not");
+        assert_eq!(
+            out[2].action,
+            Action::NoOp,
+            "nor another Kind of the same name"
+        );
+        // And the gate that follows lets it through: the same flag that asked
+        // for the recreate is what authorises it.
+        refuse_unallowed(&out, &replace).unwrap();
+        assert_eq!(
+            explain(&out[0]).as_deref(),
+            Some("recreate requested with `--replace`")
+        );
+    }
+
+    #[test]
+    fn a_named_replace_accepts_every_spelling_and_promotes_update_and_adopt() {
+        for (tok, from) in [
+            ("container/web", Action::NoOp),
+            ("containers/web", Action::Update),
+            ("Container/web", Action::Adopt),
+        ] {
+            let out = promote_named_replaces(
+                vec![with_action(a_change("Container", "web"), from)],
+                &[tok.to_string()],
+            )
+            .unwrap();
+            assert_eq!(out[0].action, Action::Replace, "{tok} from {from:?}");
+        }
+    }
+
+    /// `all` authorises what the plan proposes — making it recreate every
+    /// resource would turn a permission into a demolition. A bare name can be
+    /// a container AND a volume, and a forced volume recreate loses data.
+    #[test]
+    fn all_and_a_bare_name_never_force_a_recreate() {
+        for tok in ["all", "web"] {
+            let out = promote_named_replaces(
+                vec![with_action(a_change("Container", "web"), Action::NoOp)],
+                &[tok.to_string()],
+            )
+            .unwrap();
+            assert_eq!(out[0].action, Action::NoOp, "{tok} must not force");
+        }
+    }
+
+    /// What the plan already decided stays decided; a conflict is still
+    /// refused by `refuse_unallowed`, whatever was named.
+    #[test]
+    fn a_named_replace_leaves_create_delete_and_conflict_alone() {
+        let r = vec!["Container/web".to_string()];
+        for a in [Action::Create, Action::Delete, Action::Conflict] {
+            let out =
+                promote_named_replaces(vec![with_action(a_change("Container", "web"), a)], &r)
+                    .unwrap();
+            assert_eq!(out[0].action, a);
+        }
+        let out = promote_named_replaces(
+            vec![with_action(a_change("Container", "web"), Action::Conflict)],
+            &r,
+        )
+        .unwrap();
+        assert!(refuse_unallowed(&out, &r).is_err());
+    }
+
+    /// A flag that reads as obeyed and changes nothing is the defect itself —
+    /// so a Kind that cannot be recreated is refused, never ignored.
+    #[test]
+    fn a_named_replace_that_cannot_recreate_is_refused_not_ignored() {
+        let ensure_present = promote_named_replaces(
+            vec![with_action(a_change("Secret", "s"), Action::NotConverged)],
+            &["Secret/s".to_string()],
+        );
+        assert!(ensure_present.is_err());
+        let no_teardown = promote_named_replaces(
+            vec![with_action(a_change(k::IMAGE, "alpine"), Action::NoOp)],
+            &[format!("{}/alpine", k::IMAGE)],
+        );
+        let err = no_teardown.unwrap_err().to_string();
+        assert!(err.contains("content-addressed"), "{err}");
     }
 
     use super::*;

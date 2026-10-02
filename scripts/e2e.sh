@@ -1921,6 +1921,51 @@ YAML
   rm -f "$OUT/adopt.yaml"
 fi
 
+# 2026-10-02: o `env` de um container a correr mudou no manifesto, o plano disse
+# `=` com «FieldsNotCompared … Recreate it (`--replace Container/<name>`)», e esse
+# `--replace` não recriava nada — só autorizava um `Replace` que o plano já
+# propusesse, e um campo não comparado nunca o propõe. O `inspect` ficava com o
+# env antigo e o único caminho era `container rm -f` + `apply`. Nomear o recurso
+# é agora o próprio diff; a prova é o `inspect`, não o rc do apply.
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  RPW="$WORK/replace-named"; mkdir -p "$RPW"; RPC="rp-$PFX"
+  cat >"$RPW/delonix-manifest.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: $RPC
+spec:
+  image: $IMG
+  command: ["sleep", "600"]
+  network: host
+  env: ["RP_MARK=old"]
+YAML
+  if "$BIN" stack apply -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1; then
+    sed -i 's/RP_MARK=old/RP_MARK=new/' "$RPW/delonix-manifest.yaml"
+    # Pelo `-o json`: o código da condição só sai no JSON (o plano humano diz a
+    # frase, e traduzida), e o JSON não muda com a locale (ADR-0005).
+    check "stack plan: um env mudado não é comparado, e o plano DIZ-O" ok bash -c "
+      '$BIN' stack plan -f '$RPW/delonix-manifest.yaml' -o json 2>/dev/null | grep -q 'FieldsNotCompared'"
+    check "stack apply --replace Container/<nome> recria mesmo sem diff no plano" ok bash -c "
+      out=\$('$BIN' stack apply -f '$RPW/delonix-manifest.yaml' --replace 'Container/$RPC' 2>&1) || { printf '%s\n' \"\$out\"; exit 1; }
+      printf '%s\n' \"\$out\"
+      printf '%s' \"\$out\" | grep -q recreating || { echo 'o apply não recriou'; exit 1; }"
+    check "... e o container recriado tem o env NOVO (container inspect)" ok bash -c "
+      out=\$('$BIN' container inspect '$RPC' 2>&1)
+      printf '%s' \"\$out\" | grep -q 'RP_MARK=new' || { echo 'env novo ausente'; exit 1; }
+      printf '%s' \"\$out\" | grep -q 'RP_MARK=old' && { echo 'o env antigo ficou'; exit 1; }
+      exit 0"
+    check "... e a seguir o plano não tem nada a propor" 0 \
+      "$BIN" stack plan -f "$RPW/delonix-manifest.yaml" --detailed-exitcode
+    check "--replace com o Kind em minúsculas também é aceite (não é um typo)" ok \
+      "$BIN" stack apply -f "$RPW/delonix-manifest.yaml" --replace "container/$RPC"
+    "$BIN" stack destroy -f "$RPW/delonix-manifest.yaml" >/dev/null 2>&1
+  else
+    skip "stack apply --replace nomeado: o apply do container de teste não passou neste host"
+  fi
+  "$BIN" container rm -f "$RPC" >/dev/null 2>&1
+fi
+
 # Um `kind: Stack` com um GRUPO mal escrito (`contaienrs:`) expande para nada, e
 # a mensagem que parava o comando era «<ficheiro> is empty (no YAML documents)»
 # — sobre um ficheiro que o utilizador vê que não está vazio. O aviso que nomeia

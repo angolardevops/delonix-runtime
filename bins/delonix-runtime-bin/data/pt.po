@@ -4046,8 +4046,14 @@ msgstr "Todos os outros Kinds ({kinds}) são «garante presente»: o `apply` cri
 msgid "Not compared on a Container, and why: `env` and `command` (the record holds them merged with the image's), `user` (the record stores the resolved uid), `labels` (the engine adds its own)."
 msgstr "Não comparados num Container, e porquê: `env` e `command` (o registo guarda-os fundidos com os da imagem), `user` (o registo guarda o uid resolvido), `labels` (o motor acrescenta as suas)."
 
-msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing."
-msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada."
+msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `<Kind>/<name>` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)."
+msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada. Um `<Kind>/<name>` também recria esse recurso quando o plano não mostra alteração nele (um campo que o plano não compara, como `env`)."
+
+msgid "recreate requested with `--replace`"
+msgstr "recriação pedida com `--replace`"
+
+msgid "--replace {kind}/{name}: this Kind is ensure-present in this version and cannot be recreated by `stack apply` (nothing was changed)"
+msgstr "--replace {kind}/{name}: este Kind só garante presença nesta versão e não pode ser recriado pelo `stack apply` (nada foi alterado)"
 
 msgid "Print WHICH fields the plan compares, per Kind, and exit. Answers \"why is my change not showing up?\" without reading the source."
 msgstr "Imprime QUE campos o plano compara, por Kind, e sai. Responde a «porque é que a minha alteração não aparece?» sem ler o código."
