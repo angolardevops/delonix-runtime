@@ -3030,6 +3030,15 @@ em `./tls` e carregado com o MESMO pid. Contra o staging REAL, com `le-test.ngol
 `Timeout during connect`: a porta 80 pública não chega a esta máquina (router ou operador).
 O script ganhou `LETSENCRYPT_STAGING=1`, `ACME_SERVER=<url>` e o email `-`. O template
 `httpd` usa o mesmo script e só tem o caminho ACME provado pelo smoke.
+**O smoke mentia com o servidor em baixo, e a cache do nginx guardava um 404 do ACME
+(2026-10-02)**. Com a stack destruída, o `scripts/smoke.sh` imprimia doze falhas e DOIS `ok`
+(«TLS 1.1 is refused», «no version in the Server header»): um check escrito como «isto NÃO
+acontece» passa quando nada responde. Agora o script pára à entrada com uma linha («nothing
+answers at …») e os checks negativos exigem primeiro uma resposta. E no template `nginx` o
+`open_file_cache_errors on` lembrava o «não encontrado»: um caminho do desafio ACME pedido uma
+vez antes de o ficheiro existir respondia 404 com o ficheiro já lá (medido três vezes
+seguidas); `open_file_cache off` nesse `location`, e o smoke tem um check que o reproduz.
+
 **As flags existem desde 2026-10-02**: `--port`, `--tls-port` e `--hostname` (repetível), num
 só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template — `delonix init`,
 `stack init` e `container init` — para não crescerem flags diferentes em cada um. Uma flag é
