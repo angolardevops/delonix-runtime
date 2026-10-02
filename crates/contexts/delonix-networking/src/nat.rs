@@ -247,9 +247,16 @@ pub trait NatProvider: delonix_compute::vm_provider::Provider {
     /// Reads back every NAT rule carrying `owner`'s mark. Read-only.
     fn observe(&self, owner: &OwnerMark) -> delonix_model::Result<NatObserved>;
 
+    /// Takes over the NAT rules carrying `owner`'s mark that a run which
+    /// DIED staged and never applied (ADR-0059 D4). Returns what it adopted,
+    /// for a message.
+    fn adopt_pending(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>>;
+
     /// Refuses (`RemoteForeignPending`) when the provider already carries
-    /// staged changes nobody applied — called BEFORE the first staged
-    /// write.
+    /// staged NAT rules nobody applied — called BEFORE the first staged
+    /// write. The [`commit`](Self::commit) checks again, and wider: a
+    /// provider whose apply pushes everything refuses there for any staged
+    /// change that is not this value's.
     fn check_no_foreign_pending(&self) -> delonix_model::Result<()>;
 
     /// Activates what `ensure_nat`/`remove_nat` staged, and proves it: a
@@ -311,21 +318,16 @@ pub fn register_nat_provider(reg: NatProviderRegistration) -> Result<()> {
     Ok(())
 }
 
-/// The provider that answers `want` for the NAT role (ADR-0059 D3), with
-/// the id it resolved to. Resolving does no I/O; only the chosen provider
-/// is built.
-pub fn choose_nat_provider(
-    want: &crate::resolve::Wanted,
-) -> Result<(&'static str, Box<dyn NatProvider>)> {
+/// Builds the NAT provider registered under `name` (id or alias), or `None`
+/// when nothing is. A document's NAT rules are served by the provider that
+/// serves the document, so the lookup is by that provider's id: one that is
+/// not in this registry does not have the role (ADR-0059 D1 rule 2).
+pub fn nat_provider_for(name: &str) -> Option<Result<Box<dyn NatProvider>>> {
+    let want = name.trim().to_lowercase();
     with_nat_providers(|regs| {
-        let cands: Vec<crate::resolve::Candidate> =
-            regs.iter().map(|r| (r.id, r.aliases)).collect();
-        let id = crate::resolve::choose(&cands, want)?;
-        let reg = regs
-            .iter()
-            .find(|r| r.id == id)
-            .expect("choose returns a registered id");
-        Ok((id, (reg.new)()?))
+        regs.iter()
+            .find(|r| r.id == want || r.aliases.contains(&want.as_str()))
+            .map(|r| (r.new)())
     })
 }
 

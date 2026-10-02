@@ -860,11 +860,15 @@ impl Client {
     /// Refuses ([`Error::ForeignPending`]) when anything staged on the
     /// appliance is not in `staging`.
     pub fn check_no_foreign_pending(&self, staging: &Staging) -> Result<()> {
-        let foreign: Vec<PendingChange> = self
+        let mut foreign: Vec<PendingChange> = self
             .pending_changes()?
             .into_iter()
             .filter(|p| !staging.covers(p))
             .collect();
+        // The same apply loads the NAT tables too (measured: `filter/apply`
+        // loaded a staged source NAT rule), so a NAT rule someone else staged
+        // is as foreign here as a filter rule.
+        foreign.extend(self.nat_pending_not_owned_by(staging.claimed().as_ref())?);
         if foreign.is_empty() {
             return Ok(());
         }
@@ -1027,9 +1031,23 @@ impl StagedChange {
 /// changes from everybody else's. Separate from [`Client`] on purpose: the
 /// client is shared by every provider value the registry builds.
 #[derive(Debug, Default)]
-pub struct Staging(std::sync::Mutex<Vec<StagedChange>>);
+pub struct Staging(
+    std::sync::Mutex<Vec<StagedChange>>,
+    /// The owner mark this caller writes under, once it has used one. A NAT
+    /// rule staged under the same mark is this caller's document too (its
+    /// NAT half commits right after), so it is not foreign here.
+    std::sync::Mutex<Option<OwnerMark>>,
+);
 
 impl Staging {
+    fn claim(&self, owner: &OwnerMark) {
+        *self.1.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner.clone());
+    }
+
+    fn claimed(&self) -> Option<OwnerMark> {
+        self.1.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     fn record(&self, change: StagedChange) {
         self.0
             .lock()
@@ -1508,12 +1526,14 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         alias: &GatewayAlias,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_alias(alias, owner, &self.staging)
             .map_err(delonix_model::Error::from)
     }
 
     fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_alias(name, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1524,6 +1544,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         rule: &GatewayRule,
         owner: &OwnerMark,
     ) -> delonix_model::Result<EnsureOutcome> {
+        self.staging.claim(owner);
         self.client
             .ensure_rule(rule, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1534,6 +1555,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         description: &str,
         owner: &OwnerMark,
     ) -> delonix_model::Result<RemoveOutcome> {
+        self.staging.claim(owner);
         self.client
             .remove_rule(description, owner, &self.staging)
             .map_err(delonix_model::Error::from)
@@ -1552,6 +1574,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     }
 
     fn owned_rule_ids(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
         self.client
             .owned_rule_ids(owner)
             .map_err(delonix_model::Error::from)
@@ -1562,6 +1585,7 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         owner: &OwnerMark,
         removed_ids: &[String],
     ) -> delonix_model::Result<Vec<String>> {
+        self.staging.claim(owner);
         self.client
             .adopt_pending(owner, removed_ids, &self.staging)
             .map_err(delonix_model::Error::from)

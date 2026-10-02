@@ -84,9 +84,10 @@ fn stock(method: &str, path: &str) -> Reply {
         }
         // The running state of a clean appliance: nothing loaded in pf that
         // the config does not also say.
-        ("GET", "diagnostics/firewall/pf_statistics/rules") => {
-            Reply::Json(200, r#"{"rules":{"filter rules":{}}}"#.into())
-        }
+        ("GET", "diagnostics/firewall/pf_statistics/rules") => Reply::Json(
+            200,
+            r#"{"rules":{"filter rules":{},"nat rules":{}}}"#.into(),
+        ),
         ("GET", "firewall/alias_util/aliases") => {
             Reply::Json(200, r#"["bogons","__lan_network"]"#.into())
         }
@@ -1374,4 +1375,37 @@ fn a_refusal_keeps_its_dx_number_through_the_gateway_provider_trait() {
     let e = provider.check_no_foreign_pending().unwrap_err();
     assert_eq!(e.number(), 5389, "{e}");
     assert!(e.to_string().contains("that are not this engine's"), "{e}");
+}
+
+/// One apply loads the NAT tables too, so the gateway's pre-check counts a
+/// NAT rule someone else staged; one staged under the document's own mark
+/// (its NAT half commits right after) is not foreign (ADR-0059 F5a).
+#[test]
+fn a_gateway_refuses_a_foreign_staged_nat_rule_and_not_its_own() {
+    use delonix_networking::gateway::GatewayProvider;
+    let appliance = MockAppliance::start(script(&[(
+        "POST",
+        "firewall/source_nat/search_rule",
+        Reply::Json(
+            200,
+            rows(&[
+                serde_json::json!({
+                    "uuid": U1, "enabled": "1", "interface": "lan", "source_net": "10.91.0.0/24",
+                    "target": "lanip", "description": "ours", "categories": CAT_OURS,
+                }),
+                serde_json::json!({
+                    "uuid": U2, "enabled": "1", "interface": "lan", "source_net": "10.92.0.0/24",
+                    "target": "lanip", "description": "by hand", "categories": "",
+                }),
+            ]),
+        ),
+    )]));
+    let provider = delonix_opnsense::OpnsenseGatewayProvider::connect(&target(&appliance)).unwrap();
+    // Any call that takes the owner claims it for this value's commit.
+    provider.adopt_pending(&mark(), &[]).unwrap();
+    let err = provider.check_no_foreign_pending().unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("'by hand'"), "{text}");
+    assert!(!text.contains("'ours'"), "{text}");
+    assert!(text.contains("1 staged change(s)"), "{text}");
 }

@@ -328,25 +328,57 @@ impl Client {
     /// The NAT rows configured and not running, or running and disabled —
     /// for the rows whose pf line can be derived (see the module doc).
     fn nat_pending(&self) -> Result<Vec<PendingChange>> {
+        self.nat_pending_where(|_| true)
+    }
+
+    /// The pending NAT rows that do not carry `owner`'s mark (all of them
+    /// when there is no owner) — what a filter commit would push for
+    /// somebody else.
+    pub(crate) fn nat_pending_not_owned_by(
+        &self,
+        owner: Option<&OwnerMark>,
+    ) -> Result<Vec<PendingChange>> {
+        let labels = match owner {
+            Some(_) => self.owner_categories()?,
+            None => Vec::new(),
+        };
+        self.nat_pending_where(|row| match owner {
+            Some(o) => owner_of_row(row, o, &labels) != Owner::Ours,
+            None => true,
+        })
+    }
+
+    fn nat_pending_where(&self, keep: impl Fn(&Value) -> bool) -> Result<Vec<PendingChange>> {
+        let mut rows = Vec::new();
+        for table in Table::BOTH {
+            rows.extend(self.nat_rows(table)?.into_iter().map(|r| (table, r)));
+        }
+        // No NAT row configured: nothing can be staged, and the running
+        // state need not be read (one request fewer on every filter commit
+        // of an appliance that has no NAT).
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
         let lines = self.nat_lines()?;
         let mut out = Vec::new();
-        for table in Table::BOTH {
-            for row in self.nat_rows(table)? {
-                let Some(sig) = Signature::of_row(table, &row) else {
-                    continue;
-                };
-                let what = match (table.enabled(&row), sig.loaded_in(&lines)) {
-                    (true, false) => "created or enabled, not applied",
-                    (false, true) => "disabled, not applied",
-                    _ => continue,
-                };
-                out.push(PendingChange {
-                    kind: "nat",
-                    id: str_field(&row, "uuid"),
-                    label: str_field(&row, table.description_field()),
-                    what,
-                });
+        for (table, row) in rows {
+            let Some(sig) = Signature::of_row(table, &row) else {
+                continue;
+            };
+            if !keep(&row) {
+                continue;
             }
+            let what = match (table.enabled(&row), sig.loaded_in(&lines)) {
+                (true, false) => "created or enabled, not applied",
+                (false, true) => "disabled, not applied",
+                _ => continue,
+            };
+            out.push(PendingChange {
+                kind: "nat",
+                id: str_field(&row, "uuid"),
+                label: str_field(&row, table.description_field()),
+                what,
+            });
         }
         Ok(out)
     }
@@ -364,8 +396,58 @@ impl Client {
         Ok(foreign)
     }
 
+    /// The pre-check: staged NAT rows that are not `staging`'s. The filter
+    /// and the aliases are left to the commit, so a caller that staged
+    /// those itself (a gateway document) is not refused for its own work.
+    fn refuse_nat_rows_foreign(&self, staging: &NatStaging) -> Result<()> {
+        let foreign: Vec<PendingChange> = self
+            .nat_pending()?
+            .into_iter()
+            .filter(|p| !staging.covers(p))
+            .collect();
+        Self::refuse_listed(foreign)
+    }
+
     fn refuse_nat_foreign(&self, staging: &NatStaging) -> Result<()> {
-        let foreign = self.nat_foreign_pending(staging)?;
+        Self::refuse_listed(self.nat_foreign_pending(staging)?)
+    }
+
+    /// The NAT rows carrying `owner`'s mark that are staged and not loaded,
+    /// taken into `staging` as created by it.
+    fn adopt_nat_pending(&self, owner: &OwnerMark, staging: &NatStaging) -> Result<Vec<String>> {
+        let lines = self.nat_lines()?;
+        let labels = self.owner_categories()?;
+        let mut adopted = Vec::new();
+        for table in Table::BOTH {
+            for row in self.nat_rows(table)? {
+                let Some(signature) = Signature::of_row(table, &row) else {
+                    continue;
+                };
+                if !table.enabled(&row)
+                    || signature.loaded_in(&lines)
+                    || owner_of_row(&row, owner, &labels) != Owner::Ours
+                    || staging
+                        .all()
+                        .iter()
+                        .any(|c| c.uuid == str_field(&row, "uuid"))
+                {
+                    continue;
+                }
+                let description = str_field(&row, table.description_field());
+                adopted.push(format!("nat rule '{description}'"));
+                staging.record(StagedNat {
+                    table,
+                    uuid: row_uuid(&row, table.controller())?,
+                    description,
+                    signature,
+                    op: StagedOp::Created,
+                });
+            }
+        }
+        Ok(adopted)
+    }
+
+    fn refuse_listed(foreign: Vec<PendingChange>) -> Result<()> {
         if foreign.is_empty() {
             return Ok(());
         }
@@ -694,9 +776,15 @@ impl NatProvider for OpnsenseNatProvider {
             .map_err(delonix_model::Error::from)
     }
 
+    fn adopt_pending(&self, owner: &OwnerMark) -> delonix_model::Result<Vec<String>> {
+        self.client
+            .adopt_nat_pending(owner, &self.staging)
+            .map_err(delonix_model::Error::from)
+    }
+
     fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
         self.client
-            .refuse_nat_foreign(&self.staging)
+            .refuse_nat_rows_foreign(&self.staging)
             .map_err(delonix_model::Error::from)
     }
 

@@ -1085,3 +1085,46 @@ What part 1 adds:
   - `networkDefaults.nat` still refuses every value.
   - a gateway-only commit does not look at staged NAT rules of others, and pushes them.
   - the appliance in the lab has one interface (`lan`); no packet was translated.
+
+## Addendum 2026-10-02 — F5a, part 2: `nat:` on a `NetworkGateway`
+
+- **The manifest field.** `spec.nat` is a list of `{ description, kind: snat|dnat, interface,
+  source, protocol, port, target, targetPort }`. A `snat` defaults its target to
+  `interface-address`; a `dnat` defaults `source` to `any` and `targetPort` to `port`. Each
+  entry is validated before any provider is reached, and a description declared twice is
+  refused.
+- **The provider is the document's.** NAT rules are served by the NAT provider registered
+  under the same id as the gateway provider that serves the document. A provider that is not
+  registered for the NAT role is refused (`ProviderNotRegistered`), naming the role.
+  `networkDefaults.nat` stays refused: there is no separate choice to make.
+- **The lifecycle is the gateway's.** The NAT rules are part of the record, the `remote`
+  field, the plan digest and the step ledger (`ensure_nat`, `remove_nat`, `commit_nat`). A
+  change to `nat` plans a replace, like `aliases`, `rules` and `policies`. Validate adds
+  `net.nat.snat`/`net.nat.dnat` to the capabilities the document needs.
+- **One apply loads everything, and the two halves account for it.** The gateway commits
+  first, then the NAT commit proves its rules in pf.
+  - The gateway's foreign check now counts staged NAT rules that do not carry the document's
+    owner mark. Before this, a document with only filter rules pushed a NAT rule someone else
+    had staged (the gap part 1 named).
+  - A document with only `nat:` runs no gateway check and no gateway commit: it stages nothing
+    on the filter.
+- **A pre-check refusal is a ledger step.** Before this, a refused pre-check left the record
+  written ahead with an empty ledger, and the next plan read the rules as missing and asked
+  for `--replace`. Now the plan says `applied: interrupted: step 1 (check_no_foreign_pending)
+  failed`, and a plain `stack apply` retries. This was a defect of the gateway path before
+  NAT; it showed in this slice's live run.
+- **Live** (lab OPNsense 26.1.2_5, binary of this branch):
+  - a source and a destination NAT rule: apply 0, both lines in pf, plan 0;
+  - the owned source rule disabled by hand: plan 2, `remote: nat rule 'f5 out' is disabled
+    on the provider`, and `drift` names it; an apply with the old digest refused (DX-5390);
+    `--replace` converged; delete left no row and no line;
+  - killed (`kill -9`) after both NAT rules were staged and before the commit: nothing in pf,
+    plan 2 with `applied: interrupted: step 3 (commit)`; the next plain apply adopted and
+    loaded both; plan 0;
+  - one document with an alias, a filter rule and a source NAT rule: apply 0, plan 0, delete
+    clean;
+  - a filter-only document with a NAT rule staged by hand: refused with DX-5389 naming the
+    NAT rule, nothing loaded; plan 2 with `interrupted`; after the hand rule was removed, a
+    plain apply answered 0 and the plan 0.
+- **Not in this slice**: one-to-one NAT and NPT; a NAT rule whose source is an alias; a
+  second interface on the lab appliance, so no packet was translated.

@@ -98,6 +98,30 @@ pub fn gateway_fingerprint(o: &GatewayObserved) -> serde_json::Value {
     serde_json::json!({ "aliases": aliases, "rules": rules })
 }
 
+/// The NAT rules a provider holds under a mark, as the fingerprint a digest
+/// covers: by description, each field as observed.
+pub fn nat_fingerprint(o: &crate::nat::NatObserved) -> serde_json::Value {
+    let mut rules: Vec<serde_json::Value> = o
+        .rules
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "description": r.description,
+                "kind": r.kind.as_str(),
+                "interface": r.interface,
+                "source": r.source,
+                "protocol": r.protocol,
+                "port": r.port,
+                "target": r.target,
+                "targetPort": r.target_port,
+                "disabled": o.disabled.contains(&r.description),
+            })
+        })
+        .collect();
+    rules.sort_by_key(|r| r["description"].as_str().unwrap_or_default().to_string());
+    serde_json::Value::Array(rules)
+}
+
 /// What a segment provider holds for a zone under a mark, as the
 /// fingerprint a digest covers: the zone's presence and the owned vnets by
 /// name.
