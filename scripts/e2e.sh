@@ -2760,7 +2760,7 @@ check "stop: PÁRA mesmo um container --restart always (o supervisor não o ress
 # --- o slirp de um container acaba com ele, e não segura o arranque ---------
 #
 # Um `slirp4netns` não sai quando o processo que serve morre, e era lançado com
-# todos os descritores de quem o lançava. Os sete cenários — e o que cada um
+# todos os descritores de quem o lançava. Os dez cenários — e o que cada um
 # media antes da correcção — estão no cabeçalho do `e2e_slirp_lifecycle.sh`,
 # que corre sozinho contra qualquer binário. 77 = o host não deixa medir.
 declare -A SLIRP_CHECKS=(
@@ -2770,9 +2770,12 @@ declare -A SLIRP_CHECKS=(
   [listed]="slirp: rm de um container já saído e listado ceifa o slirp dele"
   [stats]="slirp: o stats que regista a saída de um container solta o slirp dele"
   [kind]="slirp: o cluster ls que regista a saída de um nó solta o slirp dele"
+  [hang]="slirp: container start devolve, com a causa, quando o slirp que lançou não responde"
+  [zombies]="slirp: um --restart always que cai sempre não junta zombies no supervisor"
+  [stopgaveup]="slirp: um stop que desiste (DX-8101) solta a porta e o slirp logo"
   [infra]="rede: o pin e o plano de controlo não ficam com descritores de quem os arrancou"
 )
-for _sc in fds exit start listed stats kind infra; do
+for _sc in fds exit start listed stats kind hang zombies stopgaveup infra; do
   _out=$(bash "$(dirname "$0")/e2e_slirp_lifecycle.sh" "$_sc" "$BIN" "$IMG" "sl$PFX" 2>&1); _rc=$?
   if [[ $_rc -eq 77 ]]; then
     skip "${SLIRP_CHECKS[$_sc]}" "$_out"
@@ -2780,6 +2783,17 @@ for _sc in fds exit start listed stats kind infra; do
     check "${SLIRP_CHECKS[$_sc]}" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
   fi
 done
+
+# --- um rm -f que desiste não deixa o --restart ressuscitar o container -----
+# Ver o cabeçalho do `e2e_rm_force_gave_up.sh` (como se segura a saída do
+# PID 1 sem disco saturado). 77 = o host não deixa medir.
+_out=$(bash "$(dirname "$0")/e2e_rm_force_gave_up.sh" "$BIN" "$IMG" "rf$PFX" 2>&1); _rc=$?
+if [[ $_rc -eq 77 ]]; then
+  skip "rm -f que desiste (DX-8101) não deixa o supervisor ressuscitar o container" "$_out"
+else
+  check "rm -f que desiste (DX-8101) não deixa o supervisor ressuscitar o container" ok \
+    bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+fi
 
 ########################################
 section "schema gerado + explain + init"

@@ -5852,7 +5852,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   `cluster ls` só se exercita com o supervisor morto primeiro. Ao vivo, 2026-10-02: binário
   com as duas solturas revertidas — `stats` e `kind` FAIL, `exit` FAIL em 4 de 5 (a quinta
   passou porque outro `delonix` do host varreu órfãos nesse segundo: a varredura é por uid,
-  não por root); `main` — os três PASS;
+  não por root); `main` — os três PASS. **Mais três, com a mesma técnica de segurar a saída**: `stopgaveup`
+  (um `stop` que desiste com DX-8101 solta a porta e o slirp nesse momento — FAIL no binário de
+  antes do #646, PASS depois; o slirp fica ZOMBIE, não desaparece, porque é filho do supervisor);
+  `hang` (um `slirp4netns` falso no PATH que só dorme: o `start` tem de devolver com a causa); e
+  `zombies` — **achado ao provar**: o slirp e o shim de logs são filhos do supervisor, que só
+  colhia o container, e um `--restart always` que cai sempre juntava 2 zombies por reinício (6
+  ao fim de 3, medido). O supervisor colhe-os entre incarnações (`reap_finished_children`;
+  teste num processo próprio, porque `waitpid(-1)` no binário de testes levaria os filhos dos
+  outros testes). Um cenário que depende de saídas rápidas responde 77, e não PASS, quando o
+  disco está saturado — o `zombies` passou uma vez num binário defeituoso porque os reinícios
+  nem chegaram a acontecer;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
@@ -5955,7 +5965,12 @@ checklist para quem mexer aqui do que como lista de correcções:
   `a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor` (o teste É o supervisor: pai
   do processo, o mesmo `wait_and_record` e o mesmo `resume_restart`) e
   `a_refused_start_keeps_the_stop_the_operator_asked_for`, ambos vermelhos com a correcção
-  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**;
+  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**.
+  **Provado ao vivo a 2026-10-02, sem disco saturado** (`scripts/e2e_rm_force_gave_up.sh`, no
+  `e2e.sh`): o PID 1 de uma pidns só acaba de sair quando todos os processos dela foram colhidos
+  (`zap_pid_ns_processes`); um `container exec` deixa lá um processo com o pai FORA da pidns, e
+  com esse pai parado (SIGSTOP) o PID 1 fica em estado S até ao SIGCONT — o `rm -f` dá DX-8101
+  sempre. Binário de antes do #647: ressuscitou 3 em 3; `main`: 3 em 3 certos;
 - **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
   registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
   os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,
