@@ -2292,7 +2292,9 @@ mod tests {
     #[test]
     fn the_tls_token_and_the_tls_meta_key_go_together() {
         for (name, files) in TEMPLATES {
-            let uses = files.iter().any(|(_, body, _)| body.contains("__TLS_PORT__"));
+            let uses = files
+                .iter()
+                .any(|(_, body, _)| body.contains("__TLS_PORT__"));
             assert_eq!(uses, meta_kv(name, "tls").is_some(), "{name}");
         }
     }
