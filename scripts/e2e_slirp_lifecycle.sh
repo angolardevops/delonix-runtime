@@ -40,6 +40,17 @@
 # depois o SIGCONT deixa-o morrer. (Outro `delonix` neste host a varrer órfãos
 # no mesmo segundo também o deixaria pendente; só pode fazer passar, nunca
 # chumbar.)
+#   hang    — o `container start` não pode bloquear sem fim quando o slirp
+#             que lançou não responde (um falso no PATH que só dorme): no
+#             binário anterior o `add_hostfwd` falhava, o slirp ficava vivo com
+#             a ponta de escrita do handshake, e o pai lia-a para sempre.
+#   zombies — o slirp e o shim de logs são filhos do supervisor, que só colhia
+#             o container: um `--restart always` que cai sempre juntava dois
+#             zombies por reinício (6 ao fim de 3, medido).
+#   stopgaveup — um `stop` que desiste (DX-8101) já sinalizou o processo, e
+#             solta as portas nesse momento. A saída é segura como no
+#             `e2e_rm_force_gave_up.sh`: um `container exec` com o pai parado
+#             deixa o PID 1 em `zap_pid_ns_processes`.
 #   infra   — o pin e o plano de controlo da rede vivem enquanto a infra viver,
 #             e eram lançados com os descritores de quem calhasse arrancá-la
 #             (aqui um fd 9 aberto pelo chamador). Corre em roots SEUS: subir e
@@ -51,6 +62,8 @@ name="$PFX-$scenario"
 die() { echo "$*"; cleanup; exit 1; }
 cannot() { echo "$*"; cleanup; exit 77; }
 cleanup() {
+  [[ -n "${held_parent:-}" ]] && kill -CONT "$held_parent" 2>/dev/null
+  [[ -n "${execpid:-}" ]] && kill "$execpid" 2>/dev/null
   # Um slirp que o cenário parou não fica parado para trás.
   [[ -n "${slirp:-}" ]] && { kill -CONT "$slirp"; kill "$slirp"; } 2>/dev/null
   timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
@@ -85,7 +98,15 @@ wait_for() {
   while (( n-- > 0 )); do "$@" && return 0; sleep 0.2; done
   "$@"
 }
-gone() { [[ ! -e /proc/$1 ]]; }
+# Saiu: já não existe, ou é um zombie à espera do pai (o slirp é filho do
+# supervisor, que o colhe entre incarnações).
+gone() { [[ ! -e /proc/$1 ]] || [[ "$(awk '{print $3}' "/proc/$1/stat" 2>/dev/null)" == Z ]]; }
+# Filhos zombie do processo $1.
+zombies_of() {
+  local c n=0
+  for c in $(pgrep -P "$1"); do [[ "$(awk '{print $3}' "/proc/$c/stat" 2>/dev/null)" == Z ]] && n=$((n+1)); done
+  echo "$n"
+}
 # Verdadeiro se o processo $1 tem um SIGTERM (bit 15) por entregar.
 term_pending() {
   local a b
@@ -144,7 +165,101 @@ run() { # run <flags…> — arranca o container do cenário e devolve-o em $id/
   [[ -n "$slirp" ]] || die "nenhum slirp4netns serve o pid $pid do container"
 }
 
+# Os slirp4netns deste root (o ambiente deles herda o DELONIX_ROOT).
+our_slirps() {
+  local p
+  for p in $(pgrep -x slirp4netns); do
+    tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -qxF "DELONIX_ROOT=$DELONIX_ROOT" && echo "$p"
+  done
+}
+# Prende a saída do PID 1 $1: um processo do `exec` com o pai, fora da pidns,
+# parado. Devolve o pai parado em $held_parent.
+hold_exit_of() {
+  local p
+  "$BIN" container exec "$name" sleep 902 >/dev/null 2>&1 &
+  execpid=$!
+  held_parent=""
+  for _ in $(seq 1 50); do
+    for p in $(pgrep -x sleep); do
+      [[ "$({ tr '\0' ' ' <"/proc/$p/cmdline"; } 2>/dev/null)" == "sleep 902 " ]] || continue
+      [[ "$(readlink "/proc/$p/ns/pid")" == "$(readlink "/proc/$1/ns/pid")" ]] || continue
+      held_parent=$(awk '{print $4}' "/proc/$p/stat")
+    done
+    [[ -n "$held_parent" ]] && break
+    sleep 0.2
+  done
+  [[ -n "$held_parent" ]] || die "o exec não deixou processo dentro da pidns do container"
+  [[ "$(readlink "/proc/$held_parent/ns/pid")" != "$(readlink "/proc/$1/ns/pid")" ]] ||
+    cannot "o pai do processo do exec está dentro da pidns — a saída não fica presa"
+  kill -STOP "$held_parent"
+}
+
 case "$scenario" in
+hang)
+  # Um slirp4netns que nunca diz «pronto» nem responde — um falso, no PATH,
+  # que só dorme com o que herdou. Ele próprio regista o pid.
+  fake="$DELONIX_ROOT/fakeslirp-$name"; mkdir -p "$fake"
+  printf '#!/bin/sh\necho $$ >> "%s/pids"\nexec sleep 300\n' "$fake" >"$fake/slirp4netns"
+  chmod +x "$fake/slirp4netns"
+  timeout 180 "$BIN" container run -d --name "$name" --restart always -p "$port:8000" "$IMG" sleep 1000 >/dev/null 2>&1 ||
+    cannot "o container não arrancou neste host (run -d -p)"
+  pid=$(field "$name" pid)
+  timeout 120 "$BIN" container stop -t 1 "$name" >/dev/null 2>&1 || cannot "o stop falhou"
+  wait_for 30 gone "$pid" || cannot "o container ainda está a sair ao fim de 30s"
+  t0=$(date +%s)
+  PATH="$fake:$PATH" timeout 90 "$BIN" container start "$name" >/dev/null 2>"$fake/err"
+  rc=$?; took=$(( $(date +%s) - t0 ))
+  left=""
+  for p in $(cat "$fake/pids" 2>/dev/null); do [[ -e /proc/$p ]] && ! gone "$p" && left+="$p "; kill "$p" 2>/dev/null; done
+  err=$(head -c 300 "$fake/err"); rm -rf "$fake"
+  [[ $rc -ne 124 ]] || die "container start pendurou (90s) com o slirp que lançou mudo (falsos vivos: $left)"
+  [[ $rc -ne 0 ]] || die "o start disse que correu bem com um slirp que nunca respondeu"
+  [[ -n "$err" ]] || die "o start falhou (rc=$rc, ${took}s) sem dizer porquê"
+  [[ -z "$left" ]] || die "o start falhou (rc=$rc, ${took}s) e deixou o slirp que lançou vivo: $left"
+  ;;
+zombies)
+  # Um container que cai sempre, com `--restart always`: cada incarnação deixa
+  # um slirp e um shim de logs, filhos do supervisor.
+  timeout 180 "$BIN" container run -d --name "$name" --restart always -p "$port:8000" "$IMG" sh -c 'sleep 1; exit 1' >/dev/null 2>&1 ||
+    cannot "o container não arrancou neste host (run -d -p)"
+  pid=$(field "$name" pid); sup=$(awk '{print $4}' "/proc/$pid/stat")
+  # Três reinícios: backoffs de 2, 4 e 8 s, mais o segundo de cada vida.
+  for _ in $(seq 1 60); do
+    n=$(python3 - "$DELONIX_ROOT/events.jsonl" "$name" <<'PY' 2>/dev/null
+import json, sys
+n = 0
+for line in open(sys.argv[1]):
+    e = json.loads(line)
+    n += e.get("name") == sys.argv[2] and e.get("action") == "start"
+print(n)
+PY
+)
+    [[ ${n:-0} -ge 4 ]] && break
+    sleep 1
+  done
+  [[ ${n:-0} -ge 4 ]] || cannot "o container não chegou a 3 reinícios em 60s (saídas lentas: disco saturado?)"
+  [[ -e /proc/$sup ]] || die "o supervisor $sup morreu a meio dos reinícios"
+  z=$(zombies_of "$sup")
+  # Os da vida mais recente podem ainda estar por colher (no backoff): 2 no máximo.
+  [[ $z -le 2 ]] || die "o supervisor $sup tem $z filhos zombie ao fim de 3 reinícios: $(for c in $(pgrep -P "$sup"); do echo -n "$(cat /proc/$c/comm)/$(awk '{print $3}' /proc/$c/stat) "; done)"
+  ;;
+stopgaveup)
+  run --restart always
+  listening "$port" || die "a porta $port não ficou publicada"
+  hold_exit_of "$pid"
+  out=$(timeout 120 "$BIN" container stop -t 1 "$name" 2>&1); rc=$?
+  [[ $rc -ne 0 ]] || { kill -CONT "$held_parent"; cannot "o stop não desistiu: a saída não ficou presa"; }
+  grep -q "DX-8101" <<<"$out" || { kill -CONT "$held_parent"; die "o stop falhou, mas não por DX-8101 (rc=$rc): $out"; }
+  [[ -e /proc/$pid ]] || { kill -CONT "$held_parent"; die "o stop desistiu e o processo já tinha saído"; }
+  # O PID 1 ainda existe — a netns também: o slirp não sai sozinho.
+  wait_for 5 gone "$slirp" || { kill -CONT "$held_parent"; die "o stop desistiu (DX-8101) e deixou o slirp4netns $slirp vivo"; }
+  not_listening "$port" || { kill -CONT "$held_parent"; die "o stop desistiu e a porta $port continua à escuta"; }
+  kill -CONT "$held_parent"
+  wait_for 30 gone "$pid" || die "o PID 1 $pid não saiu depois do SIGCONT"
+  wait_for 15 no_shims "$id" || die "o shim de logs ficou vivo: $(shims_of "$id" | tr '\n' ' ')"
+  sleep 4
+  [[ "$(field "$name" status)" != Running ]] || die "o stop foi desfeito: o container voltou a correr"
+  ;;
 fds)
   run --restart always
   held=$(ls -l "/proc/$slirp/fd" 2>/dev/null | grep -o 'pipe:\[[0-9]*\]' | sort -u | tr '\n' ' ')
@@ -214,7 +329,7 @@ listed)
   wait_for 5 not_listening "$port" || die "a porta $port continua à escuta depois do rm"
   ;;
 *)
-  echo "cenário desconhecido: $scenario (fds|exit|start|listed|stats|kind|infra)"; exit 2 ;;
+  echo "cenário desconhecido: $scenario (fds|exit|start|listed|stats|kind|hang|zombies|stopgaveup|infra)"; exit 2 ;;
 esac
 cleanup
 exit 0
