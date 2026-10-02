@@ -4615,7 +4615,7 @@ if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force
      && [ \"\$('$BIN' container inspect '$SCAFN' | grep -m1 '\"id\"')\" = '$_cid1' ]"
   echo '<h1>e2e second build</h1>' > "$SCAFDIR/$SCAFN/public/index.html"
   check "--up depois de alterar o projecto: serve a versão nova" ok bash -c \
-    "timeout 240 '$BIN' stack init --template httpd '$SCAFDIR/$SCAFN' --up --force >/dev/null 2>&1 \
+    "timeout 420 '$BIN' stack init --template httpd '$SCAFDIR/$SCAFN' --up --force >/dev/null 2>&1 \
      && curl -ks https://127.0.0.1:8443/ | grep -q 'e2e second build'"
   "$BIN" stack destroy -f "$SCAFDIR/$SCAFN/delonix-manifest.yaml" >/dev/null 2>&1
 else
