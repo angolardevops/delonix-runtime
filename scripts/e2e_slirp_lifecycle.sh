@@ -61,12 +61,23 @@ name="$PFX-$scenario"
 
 die() { echo "$*"; cleanup; exit 1; }
 cannot() { echo "$*"; cleanup; exit 77; }
+# `rm -f` até o registo desaparecer. Um `rm -f` que desiste (DX-8101) mantém o
+# registo, como deve; sem repetir, o cenário deixava-o para trás no root (visto
+# a 2026-10-02: `fds` deixou um container `Exited (0)` com o disco carregado).
+remove_for_good() {
+  local _
+  for _ in 1 2 3 4; do
+    timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
+    "$BIN" container inspect "$name" >/dev/null 2>&1 || return 0
+    sleep 5
+  done
+}
 cleanup() {
   [[ -n "${held_parent:-}" ]] && kill -CONT "$held_parent" 2>/dev/null
   [[ -n "${execpid:-}" ]] && kill "$execpid" 2>/dev/null
   # Um slirp que o cenário parou não fica parado para trás.
   [[ -n "${slirp:-}" ]] && { kill -CONT "$slirp"; kill "$slirp"; } 2>/dev/null
-  timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
+  remove_for_good
 }
 
 free_port() {
@@ -224,7 +235,7 @@ zombies)
     cannot "o container não arrancou neste host (run -d -p)"
   pid=$(field "$name" pid); sup=$(awk '{print $4}' "/proc/$pid/stat")
   # Três reinícios: backoffs de 2, 4 e 8 s, mais o segundo de cada vida.
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 120); do
     n=$(python3 - "$DELONIX_ROOT/events.jsonl" "$name" <<'PY' 2>/dev/null
 import json, sys
 n = 0
@@ -237,7 +248,7 @@ PY
     [[ ${n:-0} -ge 4 ]] && break
     sleep 1
   done
-  [[ ${n:-0} -ge 4 ]] || cannot "o container não chegou a 3 reinícios em 60s (saídas lentas: disco saturado?)"
+  [[ ${n:-0} -ge 4 ]] || cannot "o container não chegou a 3 reinícios em 120s (saídas lentas: disco saturado?)"
   [[ -e /proc/$sup ]] || die "o supervisor $sup morreu a meio dos reinícios"
   z=$(zombies_of "$sup")
   # Os da vida mais recente podem ainda estar por colher (no backoff): 2 no máximo.
