@@ -3075,8 +3075,15 @@ fora): registo criado à mão, servido pelos dois servidores de nomes ao fim de 
 certificado emitido (`(STAGING) Baloney Bulgur YE2`), instalado em `./tls` e servido pelo
 nginx sem reiniciar o container. Contra o Pebble: DNS-01 com hooks emitiu `*.shop.test`, e o
 HTTP-01 depois da refactorização emitiu `www.shop.test`.
-**Não validado**: uma emissão pela CA de PRODUÇÃO do Let's Encrypt (só o staging), o HTTP-01
-contra o Let's Encrypt (só contra o Pebble), e uma renovação por `certbot renew` com hooks.
+**Depois do staging, pedir o de produção não fazia nada** (medido ao pedir o de produção para
+o mesmo nome): o certbot respondia «not yet due for renewal», e o script dizia «reloaded with
+the new certificate» com o de staging ainda lá. Staging primeiro é o caminho que o README
+recomenda, e o HTTP-01 tinha o mesmo defeito. O script passa a nomear o directório ACME com
+que fala (`acme_server`) e força a renovação quando o certificado que já tem para o nome veio
+de outro (`server =` no `letsencrypt/renewal/<nome>.conf`). Contra o Pebble, nos dois modos:
+mesma CA mantém o certificado, outra CA substitui-o. E a linha `certbot renew` que o script
+imprime, com hooks e `--force-renewal`, renovou e instalou pelo deploy hook.
+**Não validado**: o HTTP-01 contra o Let's Encrypt (só contra o Pebble).
 Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
 (o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
 dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
