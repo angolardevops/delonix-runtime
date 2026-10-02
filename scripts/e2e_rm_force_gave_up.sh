@@ -24,10 +24,21 @@ BIN="${1:?binário}"; IMG="${2:?imagem}"; PFX="${3:-rmf$$}"
 name="$PFX-rmf"
 ep=""
 
+# `rm -f` até o registo desaparecer. Um `rm -f` que desiste (DX-8101) mantém o
+# registo, como deve; sem repetir, o cenário deixava-o para trás no root (visto
+# a 2026-10-02: `fds` deixou um container `Exited (0)` com o disco carregado).
+remove_for_good() {
+  local _
+  for _ in 1 2 3 4; do
+    timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
+    "$BIN" container inspect "$name" >/dev/null 2>&1 || return 0
+    sleep 5
+  done
+}
 cleanup() {
   [[ -n "$ep" ]] && kill -CONT "$ep" 2>/dev/null
   [[ -n "${execpid:-}" ]] && kill "$execpid" 2>/dev/null
-  timeout 120 "$BIN" container rm -f "$name" >/dev/null 2>&1
+  remove_for_good
 }
 die() { echo "$*"; cleanup; exit 1; }
 cannot() { echo "$*"; cleanup; exit 77; }
@@ -91,4 +102,6 @@ st=$(field "$name" status); pid=$(field "$name" pid)
 [[ -z "$pid" ]] || die "o registo ficou com pid=$pid (status=$st)"
 timeout 120 "$BIN" container rm "$name" >/dev/null 2>&1 || die "o rm a seguir, que o erro pedia, falhou"
 "$BIN" container inspect "$name" >/dev/null 2>&1 && die "o rm não tirou o registo"
+# O `exec` cujo processo já foi colhido não fica para trás.
+kill "$execpid" 2>/dev/null
 exit 0
