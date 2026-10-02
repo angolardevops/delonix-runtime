@@ -3083,7 +3083,13 @@ que fala (`acme_server`) e força a renovação quando o certificado que já tem
 de outro (`server =` no `letsencrypt/renewal/<nome>.conf`). Contra o Pebble, nos dois modos:
 mesma CA mantém o certificado, outra CA substitui-o. E a linha `certbot renew` que o script
 imprime, com hooks e `--force-renewal`, renovou e instalou pelo deploy hook.
-**Não validado**: o HTTP-01 contra o Let's Encrypt (só contra o Pebble).
+**Produção, medido a 2026-10-02**: com o certificado de staging já instalado, o mesmo comando
+sem `LETSENCRYPT_STAGING` forçou a renovação, pediu um registo TXT novo (servido pelos dois
+servidores de nomes ao fim de 1470 s) e instalou um certificado da CA de produção (`YE1`,
+válido até 2026-12-31), servido pelo nginx sem reiniciar o container e verificado pelo `curl`
+contra a confiança do sistema (`ssl_verify=0`).
+**Não validado**: o HTTP-01 contra o Let's Encrypt (só contra o Pebble; a porta 80 pública não
+chega a esta máquina).
 Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
 (o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
 dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
