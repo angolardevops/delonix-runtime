@@ -14877,8 +14877,8 @@ msgstr "Volta a planear (`delonix stack plan -o json`), lê o que mudou e aplica
 msgid "Apply only if this is still the plan: a `planDigest` from `stack plan -o json` (repeatable, one per network document). A network document whose digest, recomputed now, is not among them is a stale plan — refused before anything is written."
 msgstr "Aplica só se o plano ainda for este: um `planDigest` do `stack plan -o json` (repetível, um por documento de rede). Um documento de rede cujo digest, recalculado agora, não esteja entre eles é um plano obsoleto — recusado antes de se escrever seja o que for."
 
-msgid "--plan-digest was given, and the manifest has no network document with a plan digest (kind: NetworkGateway) — nothing would be checked"
-msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede com digest de plano (kind: NetworkGateway) — nada seria verificado"
+msgid "--plan-digest was given, and the manifest has no network document with a plan digest (kind: NetworkGateway, NetworkZone) — nothing would be checked"
+msgstr "--plan-digest foi dado, e o manifesto não tem nenhum documento de rede com digest de plano (kind: NetworkGateway, NetworkZone) — nada seria verificado"
 
 # ---- ADR-0059 F4c: step ledger ----
 
@@ -15019,6 +15019,11 @@ msgstr "{name} está a correr o build anterior de {tag} — a recriá-lo"
 
 msgid "{name} exists but is not running — recreating it"
 msgstr "{name} existe mas não está a correr — a recriá-lo"
+
+# ---- ADR-0059 F4d: NetworkZone ----
+
+msgid "networkzone/{name}: the last run was {why} — applying again; the provider discards what it left staged"
+msgstr "networkzone/{name}: a última execução ficou {why} — a aplicar de novo; o provider descarta o que ela deixou preparado"
 
 # init: delonix-tunnel.yaml (kind: Gateway) nos templates
 msgid "  {cd}delonix stack apply -f delonix-tunnel.yaml   # optional: a public https address, no public IP needed (README.md)"

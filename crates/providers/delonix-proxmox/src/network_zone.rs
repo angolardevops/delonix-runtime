@@ -8,7 +8,9 @@
 
 use crate::{Client, Error, Ledger};
 use delonix_networking::ownership::{split_mark, Owner, OwnerMark, RemoveOutcome};
-use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
+use delonix_networking::segment::{
+    EnsureOutcome, NetworkZoneSpec, SegmentObserved, SegmentProvider, VNetSpec,
+};
 
 /// The canonical id this provider registers under, and the only one
 /// [`crate::register_segment_provider`] uses (`"pve"` as an alias, the
@@ -64,6 +66,44 @@ pub(crate) fn vnet_drift(row: &serde_json::Value, want: &VNetSpec) -> Vec<String
         out.push(format!("its alias is '{alias}', declared '{declared}'"));
     }
     out
+}
+
+/// What the cluster's zone and vnet listings say about one zone under one
+/// mark. Pure: the two listings are `GET /cluster/sdn/zones` and
+/// `GET /cluster/sdn/vnets` as the node answers them.
+pub(crate) fn observed_from(
+    zones: &[serde_json::Value],
+    vnets: &[serde_json::Value],
+    zone: &str,
+    owner: &OwnerMark,
+) -> SegmentObserved {
+    let text = |row: &serde_json::Value, k: &str| {
+        row.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    SegmentObserved {
+        zone_present: zones.iter().any(|z| text(z, "zone") == zone),
+        vnets: vnets
+            .iter()
+            .filter(|v| owner.owner_of(&text(v, "alias")) == Owner::Ours)
+            .map(|v| {
+                let alias = split_mark(&text(v, "alias")).0.trim().to_string();
+                VNetSpec {
+                    name: text(v, "vnet"),
+                    zone: text(v, "zone"),
+                    alias: Some(alias).filter(|a| !a.is_empty()),
+                }
+            })
+            .collect(),
+        foreign_vnets: vnets
+            .iter()
+            .filter(|v| text(v, "zone") == zone)
+            .filter(|v| owner.owner_of(&text(v, "alias")) != Owner::Ours)
+            .map(|v| text(v, "vnet"))
+            .collect(),
+    }
 }
 
 fn sdn_err(e: delonix_networking::Error) -> delonix_model::Error {
@@ -191,6 +231,22 @@ impl SegmentProvider for ProxmoxSegmentProvider {
         Ok(RemoveOutcome::Removed)
     }
 
+    /// Reads the RUNNING configuration, not the pending one: measured, the
+    /// plain listings show a zone and vnets a killed apply staged and never
+    /// applied, and reading those back as present is how a plan would call a
+    /// half-staged zone real.
+    fn observe(&self, zone: &str, owner: &OwnerMark) -> delonix_model::Result<SegmentObserved> {
+        let zones = self
+            .client
+            .sdn_zones_running()
+            .map_err(delonix_model::Error::from)?;
+        let vnets = self
+            .client
+            .sdn_vnets_running()
+            .map_err(delonix_model::Error::from)?;
+        Ok(observed_from(&zones, &vnets, zone, owner))
+    }
+
     /// [`Client::sdn_transaction`] (ADR-0049, the cluster's global SDN
     /// lock): the lock is taken WITHOUT `allow-pending`, so a cluster that
     /// already carries someone else's staged changes refuses before `change`
@@ -252,5 +308,51 @@ mod tests {
             "vnet": "v1", "zone": "z1", "alias": format!("web {}", mark().tag()),
         });
         assert!(vnet_drift(&same, &spec(Some("web"))).is_empty());
+    }
+
+    /// ADR-0059 D4, observe: only the vnets carrying THIS mark are read back,
+    /// with the alias as declared; the zone is present or not by its own id.
+    #[test]
+    fn observe_reads_the_zone_and_only_the_vnets_carrying_the_mark() {
+        let ours = mark().stamp("app tier");
+        let bare = mark().stamp("");
+        let other = OwnerMark::new("dlx-ffffffffffffffff")
+            .unwrap()
+            .stamp("theirs");
+        let zones = [
+            serde_json::json!({"zone": "z1"}),
+            serde_json::json!({"zone": "zz"}),
+        ];
+        let vnets = [
+            serde_json::json!({"vnet": "v1", "zone": "z1", "alias": ours}),
+            serde_json::json!({"vnet": "v2", "zone": "z1", "alias": bare}),
+            serde_json::json!({"vnet": "v3", "zone": "z1", "alias": other}),
+            serde_json::json!({"vnet": "v4", "zone": "z1", "alias": "by hand"}),
+            serde_json::json!({"vnet": "v5", "zone": "z1"}),
+        ];
+        let o = observed_from(&zones, &vnets, "z1", &mark());
+        assert!(o.zone_present);
+        assert_eq!(
+            o.vnets,
+            [
+                VNetSpec {
+                    name: "v1".into(),
+                    zone: "z1".into(),
+                    alias: Some("app tier".into())
+                },
+                VNetSpec {
+                    name: "v2".into(),
+                    zone: "z1".into(),
+                    alias: None
+                },
+            ]
+        );
+        assert_eq!(o.foreign_vnets, ["v3", "v4", "v5"]);
+        let elsewhere = observed_from(&zones, &vnets, "z", &mark());
+        assert!(!elsewhere.zone_present);
+        assert!(
+            elsewhere.foreign_vnets.is_empty(),
+            "foreign vnets are counted per zone"
+        );
     }
 }

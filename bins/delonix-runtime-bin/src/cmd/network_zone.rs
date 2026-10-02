@@ -80,7 +80,19 @@ pub struct VNetSpecInput {
 pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets"];
 
 /// Fields the reconciler compares.
-pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &["vnets"];
+///
+/// `remote` is what the cluster holds for the zone under the record's owner
+/// mark, observed on every plan (ADR-0059 D4): `in sync`, or each difference
+/// from what the record declared. The manifest always wants `in sync`.
+pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &["vnets", "remote", "applied"];
+
+/// The `remote` field of a record that matches the cluster.
+const IN_SYNC: &str = "in sync";
+
+/// The `applied` field of a record whose last apply ran to its end. Anything
+/// else is where it stopped (ADR-0059 D4): the manifest wants `complete`,
+/// the field converges live, and applying again resumes.
+const COMPLETE: &str = "complete";
 
 /// A registered record: what was last declared, plus the ownership fields
 /// every ownable Kind's own registry carries (mirrors `NetworkGatewayRecord`).
@@ -106,6 +118,11 @@ struct NetworkZoneRecord {
     /// the field existed; resolution then falls to the default.
     #[serde(default)]
     provider: String,
+    /// The last apply's one step — the cluster transaction — opened before
+    /// it ran and settled after (ADR-0059 D4). Unsettled is where a process
+    /// died.
+    #[serde(default)]
+    ledger: delonix_networking::ledger::StepLedger,
 }
 
 fn store() -> Result<JsonStore<NetworkZoneRecord>> {
@@ -172,6 +189,8 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkZoneSpecDoc = manifest::spec_of(doc)?;
     let mut fields = BTreeMap::new();
     fields.insert("vnets".into(), vnets_field(&spec.vnets));
+    fields.insert("remote".into(), IN_SYNC.into());
+    fields.insert("applied".into(), COMPLETE.into());
     Ok(super::reconcile::Desired {
         kind: k::NETWORK_ZONE.into(),
         name: doc.metadata.name.clone(),
@@ -184,20 +203,117 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// Every declared `NetworkZone` — the enumeration `--prune` needs, same
 /// reasoning as `network_gateway::actual`.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
-    Ok(store()?
+    store()?
         .list()?
         .into_iter()
-        .map(|rec| super::reconcile::Actual {
-            kind: k::NETWORK_ZONE.into(),
-            name: rec.name.clone(),
-            fields: record_fields(&rec),
-            owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
-            last_applied: rec
-                .annotations
-                .get(super::reconcile::LAST_APPLIED)
-                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        .map(|rec| {
+            let mut fields = record_fields(&rec);
+            fields.insert("remote".into(), remote_field(&rec)?);
+            fields.insert(
+                "applied".into(),
+                rec.ledger
+                    .interruption()
+                    .unwrap_or_else(|| COMPLETE.to_string()),
+            );
+            Ok(super::reconcile::Actual {
+                kind: k::NETWORK_ZONE.into(),
+                name: rec.name.clone(),
+                fields,
+                owner: rec.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                last_applied: rec
+                    .annotations
+                    .get(super::reconcile::LAST_APPLIED)
+                    .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+            })
         })
-        .collect())
+        .collect()
+}
+
+/// The capabilities a zone needs from its provider: what its apply uses, and
+/// what its plan digest covers (ADR-0059 D4).
+const REQUIRED: [delonix_compute::capability::Capability; 4] = {
+    use delonix_compute::capability::Capability as C;
+    [
+        C::NetSegmentRemote,
+        C::NetApplyStaged,
+        C::NetOwnershipMarker,
+        C::NetObserve,
+    ]
+};
+
+/// The record's vnets as the port's type, in this zone.
+fn declared_vnets(rec: &NetworkZoneRecord) -> Vec<VNetSpec> {
+    rec.vnets
+        .iter()
+        .map(|v| VNetSpec {
+            name: v.name.clone(),
+            zone: rec.name.clone(),
+            alias: v.alias.clone(),
+        })
+        .collect()
+}
+
+/// What the cluster holds for the record's zone under its owner mark,
+/// compared with what the record declared (ADR-0059 D4, observe; read-only).
+/// A record without a mark owns nothing that can be observed, and says so
+/// instead of claiming to be in sync.
+fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
+    if rec.ledger.is_interrupted() {
+        // An apply stopped mid-way: what is missing on the cluster is what it
+        // had not made live, and the `applied` field says so.
+        return Ok(IN_SYNC.into());
+    }
+    if rec.owner.is_empty() {
+        return Ok("not observed: the record predates owner marks".into());
+    }
+    let owner = OwnerMark::new(&rec.owner)?;
+    let (provider_id, provider) = resolve_provider(&rec.provider)?;
+    let observed = provider
+        .observe(&rec.name, &owner)
+        .map_err(at(provider_id, "observe"))?;
+    let drift = delonix_sdn::segment::segment_drift(&rec.name, &declared_vnets(rec), &observed);
+    Ok(if drift.is_empty() {
+        IN_SYNC.to_string()
+    } else {
+        drift.join("; ")
+    })
+}
+
+/// The digest of this document's plan (ADR-0059 D4): what the manifest
+/// declares, what the cluster holds for the zone under the record's mark
+/// right now, the provider, the catalog version and the states of the
+/// capabilities a zone uses. `None` when no provider resolves.
+pub(crate) fn plan_digest(doc: &ManifestDoc) -> Result<Option<String>> {
+    use delonix_compute::capability::CATALOG_VERSION;
+    let rec = store()?.load(&doc.metadata.name).unwrap_or_default();
+    let Ok((provider_id, provider)) = resolve_provider(&rec.provider) else {
+        return Ok(None);
+    };
+    let observed = if rec.owner.is_empty() {
+        Default::default()
+    } else {
+        provider
+            .observe(&doc.metadata.name, &OwnerMark::new(&rec.owner)?)
+            .map_err(at(provider_id, "observe"))?
+    };
+    let used = REQUIRED;
+    let states: BTreeMap<String, String> = provider
+        .capabilities()
+        .capabilities
+        .iter()
+        .filter(|c| used.contains(&c.capability))
+        .map(|c| (c.capability.name().to_string(), c.state.label().to_string()))
+        .collect();
+    let mut intent = desired(doc)?.fields;
+    intent.remove("remote");
+    intent.remove("applied");
+    Ok(Some(delonix_networking::plan::plan_digest(
+        &intent,
+        &delonix_networking::plan::segment_fingerprint(&observed),
+        provider_id,
+        CATALOG_VERSION,
+        &states,
+    )))
 }
 
 /// The record's owner token, generating one when it has none yet.
@@ -225,6 +341,12 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
     let (provider_id, provider) = resolve_provider(&rec.provider)?;
+    // Validate (ADR-0059 D4): before the record or the cluster is touched.
+    delonix_networking::resolve::require_capabilities(
+        &format!("NetworkZone/{name}"),
+        &provider.capabilities(),
+        &REQUIRED,
+    )?;
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
@@ -232,11 +354,39 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     vnets.retain(|o| !spec.vnets.iter().any(|n| n.name == o.name));
     vnets.extend(spec.vnets.iter().cloned());
     rec.vnets = vnets;
+    // The zone has no field to carry a mark, so whether it is this record's
+    // is the record's own word. A zone that is NOT running when this apply
+    // starts is one this apply creates: claimed here, before the transaction,
+    // so a process killed after the cluster committed and before the record
+    // was saved does not come back to a zone it made and refuses as someone
+    // else's. A transaction that FAILS takes the claim back.
+    let had_zone = rec.zone_owned;
+    if !had_zone
+        && !provider
+            .observe(&name, &owner)
+            .map_err(at(provider_id, "observe"))?
+            .zone_present
+    {
+        rec.zone_owned = true;
+    }
+    if let Some(why) = rec.ledger.interruption() {
+        println!(
+            "{}",
+            super::po::tf(
+                "networkzone/{name}: the last run was {why} — applying again; the provider discards what it left staged",
+                &[("name", &name), ("why", &why)],
+            )
+        );
+    }
+    rec.ledger = Default::default();
+    let step = rec.ledger.open("transaction", &name);
     s.save(&name, &rec)?;
 
-    let zone_owned = rec.zone_owned;
+    // What the closure trusts is what the record said BEFORE this run's
+    // claim: a zone someone else staged and never applied is still refused.
+    let zone_owned = had_zone;
     let mut created_zone = false;
-    provider.transaction(&mut || {
+    let outcome = provider.transaction(&mut || {
         match provider
             .ensure_zone(&NetworkZoneSpec { name: name.clone() })
             .map_err(at(provider_id, "ensure_zone"))?
@@ -266,11 +416,32 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 .map_err(at(provider_id, "ensure_vnet"))?;
         }
         Ok(())
-    })?;
+    });
+    rec.ledger.settle(
+        step,
+        outcome.as_ref().map(|_| ()).map_err(|e| e.to_string()),
+    );
+    if outcome.is_err() {
+        // A transaction can fail AFTER the cluster committed (measured: a
+        // node's network reload that never ran). The zone this run created
+        // is then running, and it is this record's: dropping the claim made
+        // the next apply refuse its own zone, and a delete leave it behind.
+        // When the zone cannot be read back the claim is kept — the closure
+        // above decides again on the next run, against what is there.
+        let committed = created_zone
+            && provider
+                .observe(&name, &owner)
+                .map(|o| o.zone_present)
+                .unwrap_or(true);
+        rec.zone_owned = had_zone || committed;
+        s.save(&name, &rec)?;
+    }
+    outcome?;
 
     if created_zone {
         rec.zone_owned = true;
     }
+    rec.ledger.finish();
     rec.vnets = spec.vnets.clone();
     s.save(&name, &rec)?;
     println!(

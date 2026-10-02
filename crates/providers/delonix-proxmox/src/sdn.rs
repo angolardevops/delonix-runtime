@@ -230,6 +230,23 @@ impl Client {
         Ok(w.data)
     }
 
+    /// The zones the cluster is RUNNING (`GET /cluster/sdn/zones?running=1`):
+    /// what the last apply made live. Measured on PVE 9.2.2: a zone staged
+    /// and never applied is in [`Self::sdn_zones`] and not here.
+    pub fn sdn_zones_running(&self) -> Result<Vec<serde_json::Value>> {
+        let body = self.get("/cluster/sdn/zones?running=1")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "/cluster/sdn/zones?running=1")?;
+        Ok(w.data)
+    }
+
+    /// The vnets the cluster is RUNNING (`GET /cluster/sdn/vnets?running=1`),
+    /// with the same fields as the pending listing (`vnet`, `zone`, `alias`).
+    pub fn sdn_vnets_running(&self) -> Result<Vec<serde_json::Value>> {
+        let body = self.get("/cluster/sdn/vnets?running=1")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "/cluster/sdn/vnets?running=1")?;
+        Ok(w.data)
+    }
+
     /// One SDN zone from the PENDING configuration
     /// (`GET /cluster/sdn/zones/{zone}`). Same PENDING-not-live caveat as
     /// [`Self::sdn_zones`].

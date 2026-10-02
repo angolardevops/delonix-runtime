@@ -346,6 +346,11 @@ impl Ledger {
         Self { path: None }
     }
 
+    /// A file next to the ledger, for durable state that is not a task.
+    pub(crate) fn sibling(&self, name: &str) -> Option<PathBuf> {
+        self.path.as_ref()?.parent().map(|d| d.join(name))
+    }
+
     pub fn records(&self) -> Vec<TaskRecord> {
         let Some(path) = &self.path else {
             return Vec::new();
@@ -4320,7 +4325,8 @@ fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &s
         // same words whether no token or a wrong one was sent.
         500 if body.contains("invalid lock token provided") => Error::SdnLocked(format!(
             "{text} — the cluster's SDN configuration is locked by another holder \
-             (`DELETE /cluster/sdn/lock` with its token releases it)"
+             (`DELETE /cluster/sdn/lock` with its token releases it; when the holder is gone and its \
+             token with it, `DELETE /cluster/sdn/lock?force=1` and `POST /cluster/sdn/rollback`)"
         )),
         500 if body.contains("configuration has pending changes") => {
             Error::SdnPendingChanges(format!(

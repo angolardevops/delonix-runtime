@@ -165,9 +165,86 @@ pub fn context(
     }
 }
 
+/// Validate (ADR-0059 D4): every capability a document needs has to be one
+/// the resolved provider's report marks usable. Refused with
+/// `unsupported_capability`, listing every unmet row with its state and
+/// detail (ADR-0050 D6's message shape), before anything is written. Pure:
+/// the report is the provider's own, already in hand.
+pub fn require_capabilities(
+    document: &str,
+    report: &delonix_compute::capability::ProviderReport,
+    required: &[delonix_compute::capability::Capability],
+) -> std::result::Result<(), crate::Error> {
+    let missing = delonix_compute::vm_registry::unmet(report, required);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(crate::Error::CapabilityUnmet(format!(
+        "{document}: the '{}' provider does not support what this document needs:\n  {}\n\
+         Use a provider that does (`delonix provider ls`), or drop what needs it",
+        report.id,
+        missing.join("\n  ")
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_document_is_refused_with_every_unmet_row_and_its_state() {
+        use delonix_compute::capability::{
+            Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
+            ProviderReport,
+        };
+        let health = ProviderHealth {
+            status: HealthStatus::Unknown,
+            reason: "NotProbed",
+            message: String::new(),
+        };
+        let report =
+            ProviderReport::build("fake", ProviderKind::Gateway, true, health, |c| match c {
+                C::NetGatewayFilter => S::Supported { evidence: "test:x" },
+                C::NetGatewayAlias => S::Partial {
+                    detail: "hosts only",
+                },
+                C::NetGatewayRuleOrder => S::NotImplemented,
+                _ => S::UnsupportedByProvider {
+                    reason: "not a gateway's",
+                },
+            });
+        require_capabilities(
+            "NetworkGateway/edge",
+            &report,
+            &[C::NetGatewayFilter, C::NetGatewayAlias],
+        )
+        .expect("supported and partial are both usable");
+        let e = require_capabilities(
+            "NetworkGateway/edge",
+            &report,
+            &[C::NetGatewayFilter, C::NetGatewayRuleOrder, C::NetNatDnat],
+        )
+        .unwrap_err();
+        let text = e.to_string();
+        assert!(
+            text.contains("NetworkGateway/edge") && text.contains("'fake'"),
+            "{text}"
+        );
+        assert!(
+            text.contains("net.gateway.rule-order: not-implemented"),
+            "{text}"
+        );
+        assert!(
+            text.contains("net.nat.dnat: unsupported-by-provider — not a gateway's"),
+            "{text}"
+        );
+        assert!(!text.contains("net.gateway.filter"), "{text}");
+        assert_eq!(
+            e.reason(),
+            Some(delonix_model::codes::Reason::UnsupportedCapability)
+        );
+        assert_eq!(e.number(), 6381);
+    }
 
     /// Two segment providers registered in the process — the case the
     /// battery cannot build, because only Proxmox serves the role and

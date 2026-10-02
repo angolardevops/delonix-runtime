@@ -1511,6 +1511,7 @@ fn apply(
 fn network_plan_digest(doc: &manifest::ManifestDoc) -> Result<Option<String>> {
     match doc.kind.as_str() {
         k::NETWORK_GATEWAY => super::network_gateway::plan_digest(doc),
+        k::NETWORK_ZONE => super::network_zone::plan_digest(doc),
         _ => Ok(None),
     }
 }
@@ -1527,7 +1528,7 @@ fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result
     for doc in docs {
         let id = format!("{}/{}", doc.kind, doc.metadata.name);
         let now = match doc.kind.as_str() {
-            k::NETWORK_GATEWAY => network_plan_digest(doc)?.ok_or_else(|| {
+            k::NETWORK_GATEWAY | k::NETWORK_ZONE => network_plan_digest(doc)?.ok_or_else(|| {
                 delonix_model::Error::from(delonix_networking::Error::StalePlan(format!(
                     "{id}: no plan digest can be computed (no provider resolves for it), so \
                      the plan it was given cannot be confirmed — nothing was written"
@@ -1549,7 +1550,7 @@ fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result
         return Err(delonix_model::Error::Invalid(
             super::po::t(
                 "--plan-digest was given, and the manifest has no network document with a plan \
-             digest (kind: NetworkGateway) — nothing would be checked",
+             digest (kind: NetworkGateway, NetworkZone) — nothing would be checked",
             )
             .into(),
         ));

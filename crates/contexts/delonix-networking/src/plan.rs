@@ -98,6 +98,27 @@ pub fn gateway_fingerprint(o: &GatewayObserved) -> serde_json::Value {
     serde_json::json!({ "aliases": aliases, "rules": rules })
 }
 
+/// What a segment provider holds for a zone under a mark, as the
+/// fingerprint a digest covers: the zone's presence and the owned vnets by
+/// name.
+pub fn segment_fingerprint(o: &crate::segment::SegmentObserved) -> serde_json::Value {
+    let mut vnets: Vec<serde_json::Value> = o
+        .vnets
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "name": v.name,
+                "zone": v.zone,
+                "alias": v.alias.as_deref().map(str::trim).filter(|a| !a.is_empty()),
+            })
+        })
+        .collect();
+    vnets.sort_by_key(|v| v["name"].as_str().unwrap_or_default().to_string());
+    let mut foreign = o.foreign_vnets.clone();
+    foreign.sort();
+    serde_json::json!({ "zonePresent": o.zone_present, "vnets": vnets, "foreignVnets": foreign })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +170,34 @@ mod tests {
         let d = digest(&intent, &observed, &caps);
         assert_eq!(d.len(), 64);
         assert_eq!(d, digest(&intent, &reordered, &caps));
+    }
+
+    /// ADR-0059 F4's exit criterion: a vnet someone else adds to the zone
+    /// between a plan and its apply makes the plan stale, though it is not
+    /// drift.
+    #[test]
+    fn a_foreign_vnet_in_the_zone_moves_the_digest() {
+        use crate::segment::{SegmentObserved, VNetSpec};
+        let (intent, _, caps) = inputs();
+        let ours = VNetSpec {
+            name: "v1".into(),
+            zone: "z".into(),
+            alias: None,
+        };
+        let before = SegmentObserved {
+            zone_present: true,
+            vnets: vec![ours.clone()],
+            foreign_vnets: vec![],
+        };
+        let after = SegmentObserved {
+            foreign_vnets: vec!["added-by-hand".into()],
+            ..before.clone()
+        };
+        let d = |o: &SegmentObserved| {
+            plan_digest(&intent, &segment_fingerprint(o), "proxmox", "1.3.0", &caps)
+        };
+        assert_ne!(d(&before), d(&after));
+        assert!(crate::segment::segment_drift("z", &[ours], &after).is_empty());
     }
 
     /// Each input a plan is decided from moves the digest: an apply after

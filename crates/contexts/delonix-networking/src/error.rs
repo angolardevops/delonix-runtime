@@ -24,6 +24,12 @@ pub enum Error {
     #[error("{0}")]
     UnsupportedByGatewayProvider(String),
 
+    /// The resolved provider's report does not mark usable a capability the
+    /// document needs (ADR-0059 D4, validate): refused before anything is
+    /// written, with every unmet row, its state and its detail.
+    #[error("{0}")]
+    CapabilityUnmet(String),
+
     /// A [`crate::segment::SegmentProvider`] registration refused —
     /// an empty id, or one whose id/alias already belongs to a different
     /// provider (ADR-0049 addendum, mirrors `GatewayProviderRegistrationRefused`).
@@ -137,6 +143,7 @@ impl Error {
             | Error::NoProviderForRole(_)
             | Error::PolicyNotRepresentable(_) => Reason::InvalidIntent,
             Error::UnsupportedByGatewayProvider(_)
+            | Error::CapabilityUnmet(_)
             | Error::ProviderNotRegistered(_)
             | Error::DefaultProviderNotRegistered(_)
             | Error::RecordedProviderNotRegistered(_) => Reason::UnsupportedCapability,
@@ -163,6 +170,7 @@ impl From<Error> for Dx {
             | Error::RemoteForeignPending(text)
             | Error::StalePlan(text) => Dx::Conflict(text),
             Error::UnsupportedByGatewayProvider(text)
+            | Error::CapabilityUnmet(text)
             | Error::ProviderNotRegistered(text)
             | Error::DefaultProviderNotRegistered(text)
             | Error::RecordedProviderNotRegistered(text) => Dx::Unavailable(text),
@@ -199,6 +207,7 @@ mod tests {
             Error::RemoteObjectDrifted("rule 'x' on opnsense: source differs".into()),
             Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
             Error::StalePlan("NetworkGateway/edge: the plan is stale".into()),
+            Error::CapabilityUnmet("opnsense does not support net.nat.dnat".into()),
             Error::ProviderNotRegistered("no gateway provider named 'x' is registered".into()),
             Error::NoProviderForRole("kind: NetworkZone names no segment provider".into()),
             Error::PolicyNotRepresentable("firewall rule #1: peer '::1' is IPv6".into()),

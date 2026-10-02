@@ -56,11 +56,71 @@ pub struct NetworkZoneSpec {
 /// A vnet to ensure exists inside a zone. `alias` is the declared,
 /// human-readable part; the provider writes it followed by the caller's
 /// [`OwnerMark`] — the vnet's only free-text field is where the mark lives.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VNetSpec {
     pub name: String,
     pub zone: String,
     pub alias: Option<String>,
+}
+
+/// What a segment provider holds for one zone under one owner mark, read
+/// back from the cluster (ADR-0059 D4, observe): whether the zone exists, and
+/// every vnet carrying the mark, with its alias as declared (the mark taken
+/// off).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SegmentObserved {
+    pub zone_present: bool,
+    pub vnets: Vec<VNetSpec>,
+    /// The names of the vnets in this zone that do NOT carry the mark:
+    /// someone else's. Never drift — they are not this engine's to judge —
+    /// but part of what a plan was decided against, so one added between a
+    /// plan and its apply makes the plan stale.
+    pub foreign_vnets: Vec<String>,
+}
+
+/// How what a provider holds differs from what a record declared, one line
+/// per difference, sorted. Empty = in sync. Pure.
+///
+/// The zone is expected to exist whenever the record has been applied. A
+/// vnet carrying the mark that nothing declares is a difference too: nobody
+/// else will remove it. An absent alias and an empty one are the same.
+pub fn segment_drift(zone: &str, vnets: &[VNetSpec], observed: &SegmentObserved) -> Vec<String> {
+    let alias = |a: &Option<String>| a.as_deref().unwrap_or("").trim().to_string();
+    let mut out = Vec::new();
+    if !observed.zone_present {
+        out.push(format!("zone '{zone}' is missing"));
+    }
+    for want in vnets {
+        match observed.vnets.iter().find(|v| v.name == want.name) {
+            None => out.push(format!("vnet '{}' is missing", want.name)),
+            Some(have) => {
+                if have.zone != want.zone {
+                    out.push(format!(
+                        "vnet '{}' is in zone '{}', declared '{}'",
+                        want.name, have.zone, want.zone
+                    ));
+                }
+                if alias(&have.alias) != alias(&want.alias) {
+                    out.push(format!(
+                        "vnet '{}' alias is '{}', declared '{}'",
+                        want.name,
+                        alias(&have.alias),
+                        alias(&want.alias)
+                    ));
+                }
+            }
+        }
+    }
+    for have in &observed.vnets {
+        if !vnets.iter().any(|v| v.name == have.name) {
+            out.push(format!(
+                "vnet '{}' carries this engine's mark and is not declared",
+                have.name
+            ));
+        }
+    }
+    out.sort();
+    out
 }
 
 /// A backend that can realize cluster-native SDN zones and vnets.
@@ -96,6 +156,11 @@ pub trait SegmentProvider: delonix_compute::vm_provider::Provider {
     /// Removes a vnet only when `owner` owns it; anything else of that name
     /// is left alone and reported.
     fn remove_vnet(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome>;
+
+    /// Reads back whether `zone` exists and every vnet carrying `owner`'s
+    /// mark (ADR-0059 D4, observe). Read-only: it takes no lock and stages
+    /// nothing.
+    fn observe(&self, zone: &str, owner: &OwnerMark) -> delonix_model::Result<SegmentObserved>;
 
     /// Runs `change` — the `ensure_*`/`remove_*` calls of one apply or one
     /// teardown — as ONE unit on the cluster, and makes it live:
@@ -269,6 +334,9 @@ mod tests {
         fn remove_vnet(&self, _n: &str, _o: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
             Ok(RemoveOutcome::Removed)
         }
+        fn observe(&self, _z: &str, _o: &OwnerMark) -> delonix_model::Result<SegmentObserved> {
+            Ok(SegmentObserved::default())
+        }
         fn transaction(
             &self,
             change: &mut dyn FnMut() -> delonix_model::Result<()>,
@@ -383,5 +451,47 @@ mod tests {
     fn segment_provider_ids_lists_what_is_registered() {
         register_segment_provider(fake("zone-listed", &[])).expect("register");
         assert!(segment_provider_ids().contains(&"zone-listed"));
+    }
+
+    fn vnet(name: &str, zone: &str, alias: Option<&str>) -> VNetSpec {
+        VNetSpec {
+            name: name.into(),
+            zone: zone.into(),
+            alias: alias.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_zone_that_matches_is_in_sync_and_an_empty_alias_is_no_alias() {
+        let observed = SegmentObserved {
+            zone_present: true,
+            vnets: vec![vnet("v1", "z", None), vnet("v2", "z", Some("app tier"))],
+            foreign_vnets: vec!["someone-elses".into()],
+        };
+        let declared = [
+            vnet("v2", "z", Some(" app tier ")),
+            vnet("v1", "z", Some("")),
+        ];
+        assert!(segment_drift("z", &declared, &observed).is_empty());
+    }
+
+    #[test]
+    fn every_difference_of_a_zone_is_named() {
+        let observed = SegmentObserved {
+            zone_present: false,
+            vnets: vec![vnet("moved", "other", Some("x")), vnet("stray", "z", None)],
+            foreign_vnets: vec![],
+        };
+        let declared = [vnet("moved", "z", Some("y")), vnet("gone", "z", None)];
+        assert_eq!(
+            segment_drift("z", &declared, &observed),
+            [
+                "vnet 'gone' is missing",
+                "vnet 'moved' alias is 'x', declared 'y'",
+                "vnet 'moved' is in zone 'other', declared 'z'",
+                "vnet 'stray' carries this engine's mark and is not declared",
+                "zone 'z' is missing",
+            ]
+        );
     }
 }
