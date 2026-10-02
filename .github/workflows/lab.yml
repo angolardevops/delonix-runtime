@@ -1,7 +1,7 @@
 name: Lab (nightly)
 
-# The nightly run on a SELF-HOSTED lab runner (decision D1 of
-# docs/discovery/65_PLANO_MATURIDADE.md).
+# The nightly run on a SELF-HOSTED lab runner (decision D1 of the maturity
+# plan; docs/lab.md links it).
 #
 # Why a self-hosted runner: the hosted `ubuntu-24.04` blocks unprivileged user
 # namespaces, so the chaos workflow there reports `skipped` and the E2E battery

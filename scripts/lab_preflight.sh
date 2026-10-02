@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Preflight of the nightly lab runner (decision D1 of
-# docs/discovery/65_PLANO_MATURIDADE.md).
+# Preflight of the nightly lab runner (decision D1 of the maturity plan;
+# docs/lab.md links it).
 #
 # The lab exists because a hosted runner blocks unprivileged user namespaces,
 # so the chaos job there goes green by skipping everything. A lab that is
