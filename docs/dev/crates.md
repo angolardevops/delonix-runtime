@@ -181,7 +181,9 @@ health checks, cgroup placement, extra networks, disks and NICs), the run
 specification every entry point translates into (`RunOpts`), and the `container run`
 use case as pure steps over ports — preflight, resolve, build the record, wire the
 network, start. It also holds the Pod specification types and their translation to
-`RunOpts`, and the workload IPv4 range. The records came here from the removed
+`RunOpts`, the workload IPv4 range, and — since ADR-0044 P4b.3b (#597) — the VM use
+cases (`vm::VmEngine`: create, stop, start, status, list, remove and the day-2 verbs).
+The records came here from the removed
 `delonix-runtime-core` (#406). It does **not** spawn processes, pull images or configure networks; it
 calls traits that adapters implement.
 
@@ -196,9 +198,14 @@ calls traits that adapters implement.
 | `run` | `resolve_run` (through ports) and `build_record` (pure) |
 | `network` | the network phase: `attach_custom_network`, `wire_network` |
 | `launch` | `Launch` intent, `WorkloadRuntime` port, `start` use case, restart policy |
-| `ports` | `ImageStore`, `StorageProvider`, `DeviceResolver`, `RunHost`, `NetworkProvider`, `VmNetwork` |
+| `ports` | `ImageStore`, `StorageProvider`, `DeviceResolver`, `RunHost`, `NetworkProvider`, `VmNetwork`, and the three ports of the VM use cases: `VmBackends` (the backend registry, as the use cases see it), `LocalDiskImages` (the local overlay), `SeedBuilder` (the NoCloud seed) |
+| `vm` | the VM use cases as methods of `VmEngine<'a, R, B, D, S>`, which receives the state root, a `StateRepository<Vm>`, the three ports above and the optional `VmNetwork`; and the pure halves they use (`valid_vm_name`, `vm_namespace_of`, `admission_verdict`, `resolve_required_capabilities`, `boot_spec_of`/`config_from`, `adopt_pid_starttime`/`argv_is_vmm_for`) |
 | `pod` | Pod spec types and `pod_to_run_opts`/`container_to_run_opts` |
 | `notice` | `Notice`, a warning returned as data instead of printed |
+| `capability`, `capability_host` | the versioned capability catalog (ADR-0050): `Capability`, `CapabilityState`, `ProviderReport`, `CATALOG_VERSION`; and the one "is this tool on `PATH`" probe every provider report reuses |
+| `vm_backend`, `vm_error`, `vm_firewall` | the `VmBackend` port with `VmConfig`, `BackendRegistration`/`BackendFactory`, the VM error groups and the per-VM firewall policy (ADR-0052) — moved here from `delonix-vm` by ADR-0044 P4b.2, and re-exported there |
+| `vm_provider` | the VM provider port of ADR-0044: `VmSpec`, `Extensions`, `Provider`, `VmProvider` |
+| `system_container` | the system-container provider port of ADR-0058 (`SystemContainerSpec`, `SystemContainerProvider`: create, start, stop, destroy, observe, resize, snapshots, `grow_rootfs`, backups, `clone_as`, `move_to`, firewall) — a system container is not a `Container` |
 
 **Main public API**
 
@@ -217,9 +224,13 @@ calls traits that adapters implement.
 | `launch::WorkloadRuntime` | port that turns a `Launch` into a process | `crates/contexts/delonix-compute/src/launch.rs:WorkloadRuntime` |
 | `ports::NetworkProvider` | port for attach/publish/firewall/shaping | `crates/contexts/delonix-compute/src/ports.rs:NetworkProvider` |
 | `ports::VmNetwork` | port for a VM tap on the rootless network | `crates/contexts/delonix-compute/src/ports.rs:VmNetwork` |
+| `vm::VmEngine` | the VM use cases over injected ports; never opens a store, runs a command or names a backend | `crates/contexts/delonix-compute/src/vm.rs:VmEngine` |
+| `vm::valid_vm_name` | name validation at the engine boundary (re-exported by `delonix-vm`) | `crates/contexts/delonix-compute/src/vm.rs:valid_vm_name` |
+| `ports::VmBackends`, `ports::LocalDiskImages`, `ports::SeedBuilder` | what the VM use cases ask of the backend registry, of `qemu-img` and of `cloud-localds` | `crates/contexts/delonix-compute/src/ports.rs` |
 
 **Talks to.** Only `delonix-model` and `delonix-node` (`safe_to_signal` for the
-records, `generate_id` in tests), by direct call. Everything else arrives through its
+records, `generate_id` in tests; `proc_starttime` and `mem_available_mib` for the VM use
+cases), by direct call. Everything else arrives through its
 ports, implemented in adapters:
 
 | Port | Implemented by |
@@ -231,6 +242,10 @@ ports, implemented in adapters:
 | `WorkloadRuntime` | `crates/adapters/delonix-linux/src/workload.rs:HostWorkload` |
 | `NetworkProvider` | `crates/adapters/delonix-sdn/src/run_network.rs:HostNetwork` |
 | `VmNetwork` | `crates/adapters/delonix-sdn/src/vm_network.rs:HostVmNetwork` |
+| `VmBackends` | `crates/adapters/delonix-vm/src/local_ports.rs:RegistryBackends` (over the registry, which stays in `delonix-vm` until P4b.4) |
+| `LocalDiskImages` | `crates/adapters/delonix-vm/src/local_ports.rs:QemuImgDisks` |
+| `SeedBuilder` | `crates/adapters/delonix-vm/src/local_ports.rs:CloudLocaldsSeed` |
+| `StateRepository<Vm>` | `delonix_state::JsonStore<Vm>`, handed in by `delonix-vm` (`engine` in `crates/adapters/delonix-vm/src/lib.rs`) |
 
 **Notable external dependencies.** `serde`, `schemars` (Cargo.toml comment: the
 spec types derive their JSON Schema next to their definition, so the published
@@ -238,10 +253,12 @@ schema cannot drift from the types).
 
 **Tests.** Inline unit tests with fake port implementations (`FakeNet`,
 `FakeRuntime`, `Fake` in `network.rs`, `launch.rs`, `run.rs`) — the use case is
-tested without a kernel.
+tested without a kernel. `vm::tests` does the same for the VM use cases: an in-memory
+store, a backend that records the calls it gets, and a fake disk and seed.
 
 **Start reading at.** `src/record.rs` (the `Container` and `Vm` structs), then
-`src/ports.rs`, then `src/run.rs`, then `src/launch.rs`.
+`src/ports.rs`, then `src/run.rs`, then `src/launch.rs`. For VMs, `src/vm.rs`
+(`VmEngine::create_with`).
 
 **Gotchas.**
 
@@ -269,6 +286,13 @@ tested without a kernel.
   first. Import paths matter.
 - `wire_network` must run **before** `launch::start`; its module doc records that a
   supervised `-d` otherwise missed the network settings.
+- The use cases are **generic** over their ports (`resolve_run<I, S, D, H>`,
+  `VmEngine<'a, R, B, D, S>`), not handed `&dyn` ports: `StateRepository<T>` has a generic
+  method (`update<F>`), so it cannot be a trait object (`docs/discovery/61_P4B_PLANO_MEDIDO.md`,
+  P4b.3 addendum).
+- A context never runs a program. `scripts/arch_fitness.py` counts `Command::new` under
+  `crates/contexts/` (`context_spawns`, baseline 0): the VM use cases could move here only
+  because `qemu-img` and `cloud-localds` went behind `LocalDiskImages` and `SeedBuilder`.
 
 ### `delonix-node`
 
@@ -284,7 +308,7 @@ processes, mount, or configure the network, and holds no workload record.
 
 | Module | Responsibility |
 |---|---|
-| `host` (private, re-exported at the crate root) | `now_unix`, `in_initial_userns`, `initial_uid_map`, `is_rootless`, `fmt_local_ts`, `is_alive`, `proc_starttime`, `safe_to_signal`, `generate_id`, `self_bin` |
+| `host` (private, re-exported at the crate root) | `now_unix`, `in_initial_userns`, `initial_uid_map`, `is_rootless`, `fmt_local_ts`, `is_alive`, `proc_starttime`, `safe_to_signal`, `generate_id`, `self_bin`, `mem_available_mib` (the host's `MemAvailable`, read for the VM admission check) |
 | `events` | append-only `events.jsonl` event log (`emit`, `read`, `read_from`, `size`) |
 | `dispatch` | version check and CLI resolution for server binaries run by `delonix` (`DELONIX_DISPATCH_VERSION`, `DELONIX_BIN`) |
 | `peer_cred` | `peer_uid` from `SO_PEERCRED` |
@@ -345,6 +369,7 @@ each Kind stay in the CLI.
 | `reconcile::plan` | desired vs actual → `Vec<Change>` | `crates/contexts/delonix-stack/src/reconcile.rs:plan` |
 | `reconcile::STACK_LABEL`, `LAST_APPLIED` | ownership label and three-way diff annotation | `crates/contexts/delonix-stack/src/reconcile.rs` |
 | `reconcile::hot_fields_for` | which field changes can be applied live | `crates/contexts/delonix-stack/src/reconcile.rs:hot_fields_for` |
+| `reconcile::is_hot_change` | whether one field change converges live: a hot field always, a grow-only field (today `SystemContainer.rootfs`) only when the number does not shrink | `crates/contexts/delonix-stack/src/reconcile.rs:is_hot_change` |
 | `revision::record`, `revision::list` | apply history | `crates/contexts/delonix-stack/src/revision.rs` |
 
 **Talks to.** `delonix-model` only. The CLI re-exports `kinds`, `reconcile`
@@ -360,7 +385,9 @@ and `revision` as `cmd::kinds` etc. (`bins/delonix-runtime-bin/src/cmd/mod.rs`).
 **Gotchas.** Adding a Kind is not only a row in `kinds.rs`: the CLI has per-Kind
 code (`desired_of`/`actual_of`, `converge_and_stamp`, `destroy_one` in
 `cmd/stack.rs`) and schema/completion tables with their own tests. Run the full
-test suite of `delonix-runtime-bin` after touching the table.
+test suite of `delonix-runtime-bin` after touching the table. A Kind whose apply
+decides by itself whether a change needs a recreate must ask `is_hot_change`, as
+`cmd/system_container.rs` does, so `plan` and `apply` never disagree.
 
 ### `delonix-security-runtime`
 
@@ -432,6 +459,8 @@ caller.
 | `cdi` | CDI device spec consumer (`HostDevices`) |
 | `run_host` | `HostRuntime`, the `RunHost` port implementation |
 | `regulate`, `resource_advice`, `workload_view` | resource pressure, host advice, requested-vs-enforced view |
+| `usage` | one sample of a workload's cumulative counters (`cgroup_sample`, `process_sample`), with what could not be read named in `Unmeasured` instead of reported as zero — what MCP's `workload.usage` returns |
+| `provider_report` | the Linux provider's answer to the capability catalog for containers and pods |
 
 **Main public API**
 
@@ -515,6 +544,7 @@ containers; a build runs its steps through the CLI.
 | `build::parse_dockerfile` | Dockerfile/Delonixfile grammar | `crates/adapters/delonix-oci/src/build.rs:parse_dockerfile` |
 | `Cas` | blob store | `crates/adapters/delonix-oci/src/cas.rs:Cas` |
 | `verify_signature` | cosign-style verification | `crates/adapters/delonix-oci/src/sign.rs:verify_signature` |
+| `write_oci_media_archive` | an OCI layout archive with OCI media types (the store's blobs byte for byte, only the manifest rewritten), which a Proxmox VE node accepts; `image save` keeps `write_oci_archive` | `crates/adapters/delonix-oci/src/save.rs:write_oci_media_archive` |
 
 **Talks to.** `delonix-model`, into whose `Error` its own errors convert
 (`src/error.rs`, `impl From<Error> for delonix_model::Error`, ADR-0043); `delonix-node`;
@@ -540,6 +570,10 @@ then `src/overlay.rs`.
 - The rootfs a container starts from is an overlay over shared layers with a marker
   file; the mount itself happens inside the container's init
   (`delonix_linux::mount_overlay_if_marked`), not here.
+- A blob upload is **retried but not resumed**: each attempt starts with a `HEAD` (a blob the
+  registry already holds is not sent twice) and then resends the blob from byte 0 in one `PUT`.
+  A pull, by contrast, resumes with `Range`. A cut upload reports how far it got
+  (`connection lost with N of M bytes sent`, in `registry.rs`).
 
 ### `delonix-sdn`
 
@@ -548,8 +582,10 @@ user+network namespace; a restartable *control* process inside it serves a unix
 control socket and owns the bridges, nftables rules, DHCP and internal DNS; one
 `slirp4netns` bridges that namespace to the host. It also covers the
 slirp-per-container path for `-p` without a custom network, IPAM, CNI plugin
-execution, WireGuard overlay, and optional eBPF flow accounting. It re-exports
-`delonix-net-rules`. It does not spawn containers.
+execution, WireGuard overlay, and optional eBPF flow accounting. It also defines the
+ports, and their registries, for the remote network providers (`GatewayProvider`,
+`NetworkZoneProvider`) and the ownership mark they stamp on what they create. It
+re-exports `delonix-net-rules`. It does not spawn containers.
 
 **Key modules**
 
@@ -565,6 +601,11 @@ execution, WireGuard overlay, and optional eBPF flow accounting. It re-exports
 | `bpf` | optional eBPF flow accounting |
 | `discover` | listening ports of a workload from `/proc/<pid>/net` |
 | `pin_userns` | the pin's own namespaces and id maps |
+| `gateway` | the `GatewayProvider` port and its registry (ADR-0051), for a perimeter appliance reached over its own API |
+| `network_zone` | the `NetworkZoneProvider` port and its registry, for a cluster's own SDN (ADR-0049 addendum) |
+| `ownership` | `OwnerMark`: how an object the engine created on a remote provider is recognised as its own — by a mark, not by its name |
+| `gc` | `find_strays`/`terminate`: network infra (pins, controls, slirps) whose state root is gone, for `net netns gc` |
+| `provider_report` | the network provider's answer to the capability catalog |
 
 **Main public API**
 
@@ -615,35 +656,47 @@ dev-only `proptest` for IP allocation invariants.
 
 ### `delonix-vm`
 
-**Purpose.** MicroVMs and VMs behind the `VmBackend` trait and a runtime
-**registry** of backends. Cloud Hypervisor and libvirt are the local backends; a
-remote backend registers itself from outside the crate. It owns VM records, boot
-and lifecycle, snapshots, cloud-init seed generation, and backend selection
-(explicit, default file, or auto-detection). It does not hold an HTTP client or
-provider credentials.
+**Purpose.** MicroVMs and VMs on this node: the two local backends (Cloud
+Hypervisor and libvirt) behind the `VmBackend` trait (defined in `delonix-compute`
+since ADR-0044 P4b.2 and re-exported here), the runtime **registry** of backends,
+which stays here until P4b.4, and backend selection (explicit, default file, or
+auto-detection). A remote backend is registered by the composition root from a
+registration its provider crate builds. Since P4b.3 (#596, #597) the VM use cases —
+create, stop, start, status, list, remove, snapshots and the other day-2 verbs — live in
+`delonix_compute::vm::VmEngine`; this crate implements the ports they call
+(`local_ports.rs`), assembles an engine per call over its `JsonStore<Vm>`, and keeps
+its public functions (`create_with`, `stop`, `start`, …) as one-line wrappers, so no
+caller changed. It does not hold an HTTP client or provider credentials.
 
 **Key modules**
 
 | Module | Responsibility |
 |---|---|
-| `lib.rs` | `VmConfig`, `VmBackend`, registry, `CloudHypervisorBackend`, `LibvirtBackend`, `create_with`, `start`/`stop`/`remove`, snapshots, `status`/`list` |
+| `lib.rs` | re-exports of `VmConfig`/`VmBackend`, the registry (`BACKENDS`, `register_backend`, `select_backend`, `select_for_create`, `backend_for`), `CloudHypervisorBackend`, `LibvirtBackend`, the default-backend file, and the lifecycle wrappers over `engine(base)` |
+| `local_ports` | this adapter's implementations of the VM use cases' ports: `RegistryBackends` (`VmBackends`, over the registry), `QemuImgDisks` (`LocalDiskImages`, the qcow2 overlay), `CloudLocaldsSeed` (`SeedBuilder`) |
 | `cloudinit` | `build_user_data`, `build_network_config`, `generate_seed_iso` |
+| `capabilities` | what each local backend declares against the capability catalog, and the host probe that turns a declared "yes" into "not on this host" |
+| `provider` | the two local backends on the ADR-0044 `VmProvider` port (`LocalVmProvider`) |
+| `firewall` | re-export of `delonix_compute::vm_firewall` |
 
 **Main public API**
 
 | Item | What it is | Where |
 |---|---|---|
-| `VmBackend` | the backend port (`boot`, `stop`, `destroy`, `resume`, `snapshot`, `ip`, `manages_own_storage`, `auto_selectable`, …) | `crates/adapters/delonix-vm/src/lib.rs:VmBackend` |
-| `register_backend`, `BackendRegistration` | add a backend by factory | `crates/adapters/delonix-vm/src/lib.rs` |
+| `VmBackend` | the backend port (`boot`, `stop`, `destroy`, `resume`, `snapshot`, `ip`, `manages_own_storage`, `auto_selectable`, …), re-exported | `crates/contexts/delonix-compute/src/vm_backend.rs:VmBackend` |
+| `register_backend` | add a backend by its `BackendRegistration` | `crates/adapters/delonix-vm/src/lib.rs:register_backend` |
+| `provider_reports` | the capability report of every registered backend, for `provider ls` | `crates/adapters/delonix-vm/src/lib.rs:provider_reports` |
 | `set_network` | register the `VmNetwork` port once per process | `crates/adapters/delonix-vm/src/lib.rs:set_network` |
-| `VmConfig` | what to create | `crates/adapters/delonix-vm/src/lib.rs:VmConfig` |
-| `create_with`, `start`, `stop`, `remove`, `status`, `list` | lifecycle | `crates/adapters/delonix-vm/src/lib.rs` |
-| `snapshot`, `restore`, `snapshots`, `delete_snapshot` | checkpoints | `crates/adapters/delonix-vm/src/lib.rs` |
-| `valid_vm_name` | name validation at the engine boundary | `crates/adapters/delonix-vm/src/lib.rs:valid_vm_name` |
+| `VmConfig` | what to create, re-exported | `crates/contexts/delonix-compute/src/vm_backend.rs:VmConfig` |
+| `create_with`, `start`, `stop`, `remove`, `status`, `list` | lifecycle: each builds a `VmEngine` and calls the method of the same name | `crates/adapters/delonix-vm/src/lib.rs`; the logic in `crates/contexts/delonix-compute/src/vm.rs` |
+| `snapshot`, `restore`, `snapshots`, `delete_snapshot`, `backup_disk_live` | checkpoints and the live disk backup, same shape | `crates/adapters/delonix-vm/src/lib.rs` |
+| `valid_vm_name` | name validation at the engine boundary, re-exported | `crates/contexts/delonix-compute/src/vm.rs:valid_vm_name` |
 
-**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` (the `Vm` record, the `VmNetwork` port),
-`delonix-net-rules`, `delonix-state` (`JsonStore<Vm>`, `write_atomic`; a declared
-layering exception removed in ADR-0040 P4). Host tools: `cloud-hypervisor` (and its HTTP API on a unix
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` (the `Vm` record, the `VmEngine`
+use cases, and the ports it implements or calls), `delonix-net-rules`, `delonix-state`
+(`JsonStore<Vm>`, `write_atomic`; a declared layering exception removed in ADR-0040 P4 — the
+engine reaches the store through `StateRepository<Vm>`, but `engine(base)` still opens the
+`JsonStore` it hands in). Host tools: `cloud-hypervisor` (and its HTTP API on a unix
 socket, e.g. `PUT /api/v1/vm.pause`), `virsh`, `qemu-img`, `cloud-localds`, `sh`.
 The network is reached only through the registered `VmNetwork`; the CLI registers
 `delonix_sdn::vm_network::HostVmNetwork` at startup
@@ -651,10 +704,12 @@ The network is reached only through the registered `VmNetwork`; the CLI register
 
 **Notable external dependencies.** `libc`, `tracing` — deliberately few.
 
-**Tests.** Inline unit test modules in `lib.rs`.
+**Tests.** Inline unit test modules in `lib.rs`; the use cases themselves are tested in
+`delonix-compute` (`vm::tests`) against fake ports.
 
-**Start reading at.** `VmBackend` and the registry in `src/lib.rs`, then
-`create_with`, then one backend (`CloudHypervisorBackend`).
+**Start reading at.** The registry in `src/lib.rs` and `src/local_ports.rs`, then
+`VmEngine::create_with` in `crates/contexts/delonix-compute/src/vm.rs`, then one backend
+(`CloudHypervisorBackend`).
 
 **Gotchas.**
 
@@ -665,6 +720,10 @@ The network is reached only through the registered `VmNetwork`; the CLI register
   host tool call whose output you parse.
 - `stop` and `destroy` are distinct trait methods: for a remote backend, destroying
   also removes the disk.
+- A change to what a VM operation *does* goes into `delonix_compute::vm`; knowledge of one
+  hypervisor (a `virsh` call, the libvirt-only anti-spoof opt-out, a domain left without a
+  record) goes into the backend or behind `VmBackends` (`admit`, `unrecorded`,
+  `stop_unrecorded`, `remove_unrecorded`). The wrappers here should stay one line.
 
 ### `delonix-volume`
 
@@ -674,7 +733,8 @@ including the `-v` grammar, quotas and usage measurement, network-backed volumes
 snapshots. It implements the compute `StorageProvider` port. It does not create a
 NAS dataset (that is `delonix-truenas`).
 
-**Key modules.** A single `lib.rs`.
+**Key modules.** `lib.rs`, and `provider_report` (the storage provider's answer to the
+capability catalog).
 
 **Main public API**
 
@@ -855,47 +915,132 @@ Rust, no C, builds on musl/aarch64).
 
 Providers are backends that speak to an external system's management API. They
 live outside the adapters so that talking to a remote management API stays out of
-the engine adapters (Cargo.toml comments of both crates). This is not "no HTTP in
+the engine adapters (the Cargo.toml comment of each provider crate). This is not "no HTTP in
 adapters": `delonix-oci` has its own OCI registry client, and `delonix-telemetry`
 exports OTLP over HTTP.
 
 ### `delonix-proxmox`
 
-**Purpose.** A `VmBackend` backed by the REST API of **one** Proxmox VE node,
-named explicitly. No inventory and no node selection. It never touches a local
-disk (`manages_own_storage` is `true`) and is never auto-detected
-(`auto_selectable` is `false`, because answering "available?" would cost a network
-round trip).
+**Purpose.** A Proxmox VE target reached over its REST API, behind four of the
+engine's ports: a `VmBackend` (VMs), the per-guest firewall of the node a VM or a system
+container runs on (ADR-0052), a `NetworkZoneProvider` for the cluster's own SDN (ADR-0049
+addendum), and a `SystemContainerProvider` for the node's LXC containers (ADR-0058,
+`kind: SystemContainer`). The target is one node, named explicitly — no inventory, no scheduling —
+but each VM is addressed on the node it actually runs on, so a VM moved inside the
+cluster is still found (ADR-0053). It never touches a local disk
+(`manages_own_storage` is `true`) and is never auto-detected (`auto_selectable` is
+`false`: answering "available?" would cost a network round trip). Its coverage of
+the Proxmox API is a measured matrix, not a claim (ADR-0049,
+`docs/proxmox/matrix-9.2.2.md`).
 
-**Key modules.** A single `lib.rs`.
+**Key modules**
+
+| Module | Responsibility |
+|---|---|
+| `lib.rs` | `Target`, `Auth`, `Client` (every VM, disk, backup, guest-agent and upload call), the task `Ledger`, `ProxmoxBackend` (`impl VmBackend`), `registration`, `capability_report` |
+| `error` | the crate's typed errors, one per HTTP status class |
+| `cluster` | read-only view of the target's cluster (`provider describe proxmox --probe`) |
+| `vm_firewall` | the node's own per-guest firewall: one policy engine over `GuestFirewall`, implemented for a VM (`QemuFirewall`, `/qemu/{vmid}/firewall/…`) and for a system container (`LxcFirewall`, `/lxc/{vmid}/firewall/…`) |
+| `sdn`, `sdn_routing`, `sdn_lock` | the cluster's own SDN (zones, vnets, subnets, controllers, fabrics, DHCP, IP reservations, prefix lists, route maps) and the global SDN lock used as a transaction (`sdn_transaction`) |
+| `network_zone` | `ProxmoxNetworkZoneProvider`, the `NetworkZoneProvider` implementation behind `kind: NetworkZone` |
+| `lxc` | `ProxmoxSystemContainerProvider`, a system container on the node (ADR-0058): create from a template staged under its manifest digest, start/stop/destroy, live `resize` and `grow_rootfs`, snapshots, backups on the node's storage, full `clone_as`, offline `move_to` another node, and the firewall through `LxcFirewall` |
 
 **Main public API**
 
 | Item | What it is | Where |
 |---|---|---|
-| `Target`, `Auth` | node endpoint, node name, credentials | `crates/providers/delonix-proxmox/src/lib.rs` |
-| `Client` | API client (`connect`, `create_vm`, `start`, `stop`, `destroy`, `snapshot`, `wait_task`, …) | `crates/providers/delonix-proxmox/src/lib.rs:Client` |
+| `Target`, `Auth`, `ClientOptions` | node endpoint, node name, credentials, route trace | `crates/providers/delonix-proxmox/src/lib.rs` |
+| `Client` | the API client (`connect_with`, `wait_task`, `stage_import`, `stage_template`, …) | `crates/providers/delonix-proxmox/src/lib.rs:Client` |
 | `ProxmoxBackend` | the `VmBackend` implementation | `crates/providers/delonix-proxmox/src/lib.rs:ProxmoxBackend` |
-| `register` | register the backend in `delonix-vm`'s registry | `crates/providers/delonix-proxmox/src/lib.rs:register` |
+| `ProxmoxSystemContainerProvider` | the `SystemContainerProvider` implementation (`new(client, template_storage, rootfs_storage)`) | `crates/providers/delonix-proxmox/src/lxc.rs:ProxmoxSystemContainerProvider` |
+| `registration` | the `BackendRegistration` the composition root registers; does no I/O until the backend is chosen | `crates/providers/delonix-proxmox/src/lib.rs:registration` |
+| `capability_report`, `network_capability_report` | what the provider declares against the capability catalog (declared, never probed) | `crates/providers/delonix-proxmox/src/lib.rs` |
 
-**Talks to.** `delonix-vm` (the trait and `register_backend`; a declared layering
-exception), `delonix-compute` (the `Vm` record) and `delonix-model`. The node over HTTPS with blocking `reqwest`.
-The CLI registers it from environment configuration at startup
+**Talks to.** `delonix-compute` (the `VmBackend` port, the `Vm` record, the
+capability catalog), `delonix-model`, and `delonix-sdn` for the `NetworkZoneProvider`
+port (a declared layering exception in `scripts/arch_fitness.py`). The node over
+HTTPS with blocking `reqwest`. The CLI builds its target from the providers file or
+the environment and registers it at startup
 (`bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured`).
+
+**Notable external dependencies.** `reqwest` (blocking, rustls), `serde`,
+`serde_json`, `sha2` (the checksum an upload is verified against by the node).
+
+**Tests.** Inline unit tests; `tests/failure_injection.rs` drives the client
+against a TLS mock node (401/403/404/409/5xx, a truncated body, a failed task, a
+timeout); `tests/live.rs` runs against a real node and skips with a printed line
+unless `DELONIX_PROXMOX_TEST_URL` is set (see
+[Environment variables](environment-variables.md)).
+
+**Start reading at.** Crate doc in `src/lib.rs`, then `Client::wait_task` and
+`task_verdict`, then `impl VmBackend for ProxmoxBackend`.
+
+**Gotchas.**
+
+- Most operations return a task id, not a result. A finished task reports
+  `status: stopped` whether it succeeded or not; the verdict is `exitstatus`, and
+  `WARNINGS: <n>` is a success with warnings, not a failure (`task_verdict`).
+- A lost answer is not a lost request: the task id is written to the VM's ledger
+  (`<vmdir>/proxmox-tasks.json`) before the wait, and after a transport failure
+  the client looks for the task or its effect instead of resending a write that is
+  not idempotent. A test reads the crate's source and fails on a write outside the
+  task path.
+- A system container is addressed by the locator in its record (`proxmox:<node>:<vmid>`), but every
+  operation resolves it through `located` (`src/lxc.rs`): when the container is not on the
+  recorded node, the cluster (`/cluster/resources`) is asked where it is, so a move whose
+  record was never updated is followed instead of read as gone — which would plan a second
+  container.
+- A privileged or nested system container is refused by design (ADR-0058): the provider's
+  `refuse` and the CLI's `reject_privilege` (`unprivileged`, `privileged`, `features`, `nesting`
+  in a manifest) answer DX-1540, instead of creating an unprivileged container and exiting 0.
+
+### `delonix-opnsense`
+
+**Purpose.** A `GatewayProvider` (ADR-0051) backed by an OPNsense appliance's own
+REST API: firewall aliases and filter rules for node-egress and perimeter policy,
+behind `kind: NetworkGateway`. Only a generated key/secret pair authenticates (a GUI
+account is refused by the appliance). Registering does no I/O; the appliance is
+contacted the first time the provider is selected.
+
+**Key modules**
+
+| Module | Responsibility |
+|---|---|
+| `lib.rs` | `Target`, `Auth`, `Client` (`ensure_alias`, `ensure_rule`, `commit`, `pending_changes`, …), `OpnsenseGatewayProvider` (`impl GatewayProvider`), `register_with` |
+| `capabilities` | `capability_report`, declared and never probed |
+| `error` | the crate's typed errors |
+
+**Talks to.** `delonix-sdn` (the `GatewayProvider` port and its registry, a
+declared layering exception), `delonix-compute` (the capability catalog),
+`delonix-model`. The appliance over HTTPS with blocking `reqwest`. The CLI
+registers it from the providers file or the environment
+(`bins/delonix-runtime-bin/src/cmd/gatewayproviders.rs`).
 
 **Notable external dependencies.** `reqwest` (blocking, rustls), `serde`,
 `serde_json`.
 
-**Tests.** Inline unit tests; `crates/providers/delonix-proxmox/tests/live.rs`
-runs against a real node and skips with a printed line unless
-`DELONIX_PROXMOX_TEST_URL` is set.
+**Tests.** Inline unit tests; `tests/failure_injection.rs` against a TLS mock
+appliance (302/401/403/404, a validation failure at HTTP 200, a truncated body);
+`tests/live.rs` against a real appliance, skipped when unconfigured.
 
-**Start reading at.** Crate doc in `src/lib.rs`, then `Client::wait_task`, then
-`impl VmBackend for ProxmoxBackend`.
+**Start reading at.** Crate doc in `src/lib.rs` (what the live spike measured, and
+the ownership rules), then `Client::request`, then `impl GatewayProvider`.
 
-**Gotchas.** Most operations return a task id, not a result. A finished task
-reports `status: stopped` whether it succeeded or not; the verdict is
-`exitstatus` (`task_verdict`, crate doc).
+**Gotchas.**
+
+- A validation failure comes back as HTTP **200** with `"result":"failed"`;
+  `Client::request` inspects every 2xx body for it. No credentials at all answer
+  `302` (a redirect to the GUI login), so the client never follows redirects.
+- An object is the engine's by its mark, not by its name: every alias and rule the
+  crate creates carries a firewall category `delonix-owner:<token>`
+  (`delonix_sdn::ownership::OwnerMark`). A same-named object without the mark is
+  refused, one of ours edited on the appliance is reported as drifted, and a commit
+  refuses when someone else's changes are staged, because the appliance's apply
+  pushes the whole configuration.
+- A failure crosses the `GatewayProvider` trait through `delonix_model::Error::from`,
+  never `into_root`, which strips the dictionary number: measured on the zone
+  provider, a `DX-5340` refusal arrived as a bare `5000` (comment above
+  `impl GatewayProvider for OpnsenseGatewayProvider`).
 
 ### `delonix-truenas`
 
@@ -1041,6 +1186,60 @@ of ADR-0040/0041 rather than these routes.
 **Gotchas.** Arguments passed to the CLI are validated to reject a leading `-`
 (`valid_arg`), otherwise an id could be parsed as a flag.
 
+### `delonix-node-api`
+
+**Purpose.** The node contract `delonix.node.v1` served on a local unix socket, as
+gRPC and HTTP/JSON from the same `proto/` files (ADR-0040 D4, ADR-0042, ADR-0050
+D5). Today it answers `NodeService.ListProviders` (also `GET /v1/providers?kind=`),
+the same `ProviderInfo` per provider that `delonix provider ls -o json` prints; the
+other `NodeService` RPCs answer `UNIMPLEMENTED` naming the step that brings them,
+and the contract's other services are not registered on the socket. The socket is
+`0600` and every connection is checked with `SO_PEERCRED` against the server's uid.
+
+**Key modules**
+
+| Module | Responsibility |
+|---|---|
+| `lib.rs` | `serve_blocking`, the generated `proto::v1` (prost/tonic stubs and the pbjson proto3 JSON) |
+| `service` | `NodeApi` (`impl NodeService`), `list_providers`, `router` (the JSON routes and the gRPC service on one `axum` router) |
+| `providers` | `measured_reports`, `declared_reports`, `provider_info`: the providers of this node as the contract carries them |
+
+**Main public API**
+
+| Item | What it is | Where |
+|---|---|---|
+| `serve_blocking` | run the server | `crates/interfaces/delonix-node-api/src/lib.rs:serve_blocking` |
+| `router` | the router both transports share, used directly by the in-process tests | `crates/interfaces/delonix-node-api/src/service.rs:router` |
+
+**Talks to.** `delonix-vm`, `delonix-proxmox`, `delonix-opnsense`, `delonix-linux`,
+`delonix-sdn` and `delonix-volume` for their capability reports, `delonix-compute`
+(the catalog), `delonix-node` (`peer_cred`, malloc arena tuning), `delonix-model`.
+It does not run the CLI.
+
+**Notable external dependencies.** `tonic`, `prost`, `pbjson`/`pbjson-types`,
+`axum`, `hyper`, `tokio`; `tonic-build` and `pbjson-build` at build time (needs
+`protoc`).
+
+**Tests.** Inline unit tests, including
+`the_declared_providers_are_the_published_matrix` (the provider list must match the
+one the CLI publishes in `docs/providers/capability-matrix.md`);
+`tests/grpc_list_providers.rs` drives the real server over the unix socket with the
+generated client, and the HTTP/JSON route through the same router.
+
+**Start reading at.** Crate doc in `src/lib.rs`, then `src/service.rs` (`router`,
+`list_providers`), then `src/providers.rs`.
+
+**Gotchas.**
+
+- The provider list is composed a second time here, because this crate cannot
+  depend on the CLI's `cmd/provider.rs`; the test above is what keeps the two equal.
+  A provider added on one side only is a red test.
+- An unknown path gets a 404 with a `google.rpc.Status` body for an HTTP caller,
+  and gRPC's `UNIMPLEMENTED` for a gRPC caller — never a 200 with an empty body,
+  which is what tonic's own fallback gives every path.
+- The HTTP route of an annotation is written by hand per RPC for now; a generic
+  transcoder over the `google.api.http` annotations is the next step (ADR-0042).
+
 ### `delonix-mcp`
 
 **Purpose.** A Model Context Protocol server: a local AI control surface. Stdio
@@ -1052,7 +1251,7 @@ JSON text. It keeps a local audit log and an in-process task registry.
 
 | Module | Responsibility |
 |---|---|
-| `lib.rs` | `DelonixMcp` tools (`runtime.info`, `resource.list`, `container.restart`, …), `serve_stdio`, `doctor_checks` |
+| `lib.rs` | `DelonixMcp` tools (`runtime.info`, `resource.list`, `container.restart`, `workload.usage`, …), `serve_stdio`, `doctor_checks` |
 | `risk` | risk level per tool |
 | `audit` | append-only `mcp/audit.log` |
 | `tasks` | session-scoped task registry |
@@ -1109,7 +1308,9 @@ ingress proxy in-process.
 | `cmd/dockerapi.rs` | Docker Engine API slice; `run_from_spec_file` for `__apirun` |
 | `cmd/policy.rs` | node runtime policy via `delonix-security-runtime` |
 | `cmd/hosts.rs`, `cmd/hosts_file.rs` | `hosts sync` (not a stable group) and the per-state-root managed block of the host's `/etc/hosts`, shared with `hosts: [host]` on an `HTTPRoute` (ADR-0046, ADR-0048 phase 2); the recompute is `desired_hosts`/`sync_hosts_now` in `cmd/ingress_proxy.rs`, called from `rebuild()` |
-| `cmd/vmbackends.rs` | registers configured remote VM backends |
+| `cmd/vmbackends.rs`, `cmd/gatewayproviders.rs`, `cmd/network_zone_providers.rs` | register the configured remote providers (Proxmox VE as VM backend and SDN zone provider, OPNsense as gateway provider) |
+| `cmd/system_container.rs` | `kind: SystemContainer` and the `systemcontainer` group (snapshots, `clone`, `move`): the composition root that turns the Proxmox configuration into a `SystemContainerProvider`, pulls the image with the engine's own pull, keeps a registry of locators, and reads what the container is back from the node on every plan (ADR-0058) |
+| `cmd/provider.rs`, `cmd/providers_config.rs` | `provider ls/describe/matrix` against the capability catalog; the node's `providers.yaml` (ADR-0054): lookup, parsing, `provider config show/validate/schema` |
 | `cmd/output.rs`, `cmd/po.rs` | tables/describe output, translation catalog |
 
 **Main public API.** Not a library. The entry points a contributor meets first:
@@ -1145,6 +1346,13 @@ architecture matches the code. `build.rs` embeds the project templates.
   [Contribution workflow](contributing-workflow.md).
 - The engine binary's hidden verbs are matched on raw `argv` before `clap`;
   renaming a public command does not rename them.
+- `main` installs a SIGPIPE handler before anything else (`install_sigpipe_handler`).
+  A closed stdout or stderr (`delonix image ls | head`) still ends the process
+  quietly, as with the default disposition; any other broken pipe — a registry that
+  closes the upload socket — makes the write fail with `EPIPE`, so the caller's
+  retry and error line run instead of the process dying with status 141 and no
+  message. The handler applies to the whole binary, so an `EPIPE` on an internal
+  pipe is now an error the code returns.
 
 ### `delonix-mgmt-bin` (binary `delonix-mgmt`)
 
@@ -1159,6 +1367,20 @@ then calls `delonix_mgmt::serve_blocking`.
 **Tests.** None of its own.
 
 **Start reading at.** `bins/delonix-mgmt-bin/src/main.rs`.
+
+### `delonix-node-api-bin` (binary `delonix-node-api`)
+
+**Purpose.** The executable of the node API. Answers `--version` before anything
+else, checks the dispatch version, reads `--addr` / `DELONIX_NODE_API_ADDR`
+(default `unix:///run/delonix-node.sock`), then calls
+`delonix_node_api::serve_blocking`.
+
+**Talks to.** `delonix-node-api`, `delonix-node` (`dispatch`),
+`delonix-telemetry` (`init`). Run by `delonix serve node-api`.
+
+**Tests.** Inline unit tests for the version flag and the address precedence.
+
+**Start reading at.** `bins/delonix-node-api-bin/src/main.rs`.
 
 ### `delonix-mcp-bin` (binary `delonix-mcp`)
 

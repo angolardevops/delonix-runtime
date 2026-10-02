@@ -1,4 +1,4 @@
-<!-- translated-from: system-design-interview.md sha256:521f8c297a328d828b08609f1c7800883ddc9f0b15dfe38970650e270ad31535 -->
+<!-- translated-from: system-design-interview.md sha256:4dc968058b2bad04dcabc1a8e8808533f5108d7fcee9df62ff8cb70bda00af79 -->
 # System Design Interview — o Delonix Engine
 
 **Antes de leres:** [Arquitectura](architecture.md) e [As crates](crates.md) — esta página defende
@@ -85,7 +85,7 @@ as duas políticas do host estão em
 | Porta de entrada | Codificação | Quem a usa |
 |---|---|---|
 | CLI `delonix` | argv, classes de saída estáveis | operadores, scripts |
-| Contrato de nó `delonix.node.v1` | gRPC **e** HTTP/JSON no **mesmo** socket unix local | qualquer cliente local (desenho; ainda não servido) |
+| Contrato de nó `delonix.node.v1` | gRPC **e** HTTP/JSON no **mesmo** socket unix local | qualquer cliente local (servido em parte: só `ListProviders`, pelo `delonix-node-api`) |
 | CRI `runtime.v1` | gRPC num socket unix | o kubelet |
 | MCP | JSON-RPC sobre stdio | um cliente de IA local, uma sessão por processo |
 
@@ -299,19 +299,30 @@ política por container custe o mesmo seja qual for o número de containers:
 ```text
 forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 ```
 
-O `fwcont` tem duas regras; as regras de cada container vivem na sua própria chain, alcançada através
-do verdict map `fwmap` chaveado por IP. O tráfego **entre** redes é descartado par a par, a menos que
+As regras de cada container vivem na sua própria chain, alcançada através do verdict map `fwmap`
+chaveado por IP — uma vez pela **origem** (`fwout`) e outra pelo **destino** (`fwcont`). São duas base
+chains de propósito: um `accept` dentro de uma chain saltada só termina a base chain que saltou, ao
+passo que um `drop` é final em todo o lado, por isso a política de egress da origem decide primeiro e
+a de ingress do destino continua a decidir depois. Com uma só base chain com as duas consultas, o
+`accept` do destino terminava a travessia e o `egress deny` da origem nunca corria
+(`fw_dispatch_chains` em `infra.rs`; uma tabela construída por um holder mais antigo é migrada no
+lugar por `fw_dispatch_migration_script`). O tráfego **entre** redes é descartado par a par, a menos que
 uma `NetworkRoute` ponha o par em `@netpair` — uma rota diz que o pacote *pode* atravessar, e a chain
 por container continua a decidir se é *permitido*.
 
 O **isolamento por namespace** vive na chain de cada container: os membros de `@dlxns<hash>` (mesmo
 namespace) são aceites, e as ligações **novas** vindas de qualquer outro endereço de container
 (`@dlxall`) são descartadas; as respostas continuam a fluir porque o drop só casa com `ct state new`.
-Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
+Esse drop é um guardrail que nenhuma regra de entrada retira: as regras explícitas são emitidas antes
+dele, por isso um `deny` nunca abre nada e um `allow` explícito (por exemplo um `kind: Dependency`)
+continua a admitir o único par que nomeia (`fw_chain_body` em `infra.rs`). Uma spec de firewall com
+uma regra inválida é recusada inteira, e um isolamento por namespace que não se aplica recusa o
+`run`, o `start` e o `pod create` e desfaz o attach, em vez de avisar. O IPv6 na SDN é recusado por omissão
 (`table ip6` com `policy drop`), porque todas as regras acima são IPv4.
 
 > **Legenda** — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
@@ -409,6 +420,13 @@ sequenceDiagram
   quando configurado). Um registo transporta uma closure factory e uma flag `auto_selectable`, para
   que a auto-detecção nunca construa — e portanto nunca autentique — um backend remoto. Registar não
   faz I/O.
+- **Casos de uso à parte do mecanismo.** O que o `create`, o `stop` ou o `status` decidem vive no
+  contexto de computação como `VmEngine`, que recebe um store de registos e três portas
+  (`VmBackends`, `LocalDiskImages`, `SeedBuilder`) e nunca corre ele próprio um programa; o adapter
+  responde a essas portas com o seu registo, o `qemu-img` e o `cloud-localds`. A orquestração é
+  por isso testável contra falsos, e uma regra específica de um hypervisor (a excepção ao
+  anti-spoof do libvirt, um domínio deixado sem registo) tem de ser uma resposta de porta e não um
+  `if` no caso de uso (ADR-0044 P4b.3).
 - **Rede de uma VM.** O Cloud Hypervisor corre dentro da netns do pin e recebe um `tap` numa bridge de
   rede através da porta `VmNetwork`, que a SDN implementa (`HostVmNetwork`); o `delonix-vm` não
   depende do `delonix-sdn`. Como o servidor DHCP é do próprio motor e determinístico, o lease é
@@ -421,11 +439,13 @@ sequenceDiagram
   locais realizam-na como um ISO NoCloud cujo `network-config` identifica a NIC primária pelo **MAC**,
   e um backend remoto pode realizá-la de forma nativa.
 
-**Onde vive no código:** `crates/adapters/delonix-vm/src/lib.rs` (`VmBackend`,
-`BackendRegistration`, `builtin_backends`, `register_backend`, `select_backend`, `auto_detect`,
+**Onde vive no código:** `crates/contexts/delonix-compute/src/vm_backend.rs` (`VmBackend`,
+`BackendRegistration`); `crates/contexts/delonix-compute/src/vm.rs` (`VmEngine`);
+`crates/adapters/delonix-vm/src/local_ports.rs` (`RegistryBackends`, `QemuImgDisks`,
+`CloudLocaldsSeed`); `crates/adapters/delonix-vm/src/lib.rs` (`builtin_backends`, `register_backend`, `select_backend`, `select_for_create`, `auto_detect`,
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`); `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`);
-`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`);
+`crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`, `VmBackends`, `LocalDiskImages`, `SeedBuilder`);
 `crates/adapters/delonix-sdn/src/vm_network.rs` (`HostVmNetwork`);
 `crates/adapters/delonix-sdn/src/infra.rs` (`sdn_reachable`, `dhcp_lease_ip`);
 `crates/providers/delonix-proxmox/src/lib.rs` (`ProxmoxBackend`);
@@ -558,7 +578,7 @@ sequenceDiagram
 
 **Porque não acrescentar um pequeno daemon para eventos e reinícios?**
 Porque cada processo residente é um domínio de falha e uma superfície de ataque. O registo de eventos
-é um ficheiro só de acrescento (`delonix_runtime_core::events`), os reinícios pertencem ao supervisor
+é um ficheiro só de acrescento (`delonix_node::events`), os reinícios pertencem ao supervisor
 por container, e a persistência no arranque é uma unit systemd por carga (`delonix system boot`). Um
 daemon precisa do seu próprio ADR com a evidência do que as alternativas não conseguiram fazer — ver
 o [ADR-0034](../../adr/0034-csi-daemon-conflict.md) para um caso em que a pergunta surgiu, e o

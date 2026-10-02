@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
+<!-- translated-from: environment-variables.md sha256:637f36d1cd2cce6e51a14bc9fb3a48479d4632e9f6b91e8a65460f02dbdd1833 -->
 # 环境变量（`DELONIX_*`）
 
 **阅读前须知：** 《克隆、构建与测试》里的[隔离引擎的状态](build-and-test.md#isolating-the-engines-state)。
@@ -28,10 +28,11 @@
 |---|---|---|
 | CRI 的 socket、capability 上限和模式 | `--addr` / `--cap-ceiling` / `--cap-ceiling-mode` > `DELONIX_CRI_ADDR` / `DELONIX_CRI_CAP_CEILING` / `DELONIX_CRI_CAP_CEILING_MODE` > `unix:///run/delonix-cri.sock` / 无上限 / `reject` | `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main` |
 | 管理 API 的 socket | `--addr` > `DELONIX_API_ADDR` > `unix:///run/delonix-mgmt.sock` | `bins/delonix-mgmt-bin/src/main.rs:run` |
+| 节点 API 的 socket | `--addr` > `DELONIX_NODE_API_ADDR` > `unix:///run/delonix-node.sock` | `bins/delonix-node-api-bin/src/main.rs:run` |
 | Docker API 的 socket | `--addr` > `DELONIX_DOCKER_ADDR` > `unix:///run/delonix-docker.sock` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` |
 | 输出语言 | `--l18n` > `DELONIX_L18N` > 英文 | `bins/delonix-runtime-bin/src/cmd/po.rs:peek_lang` |
 | VM 控制台的转义键 | `--escape` > `DELONIX_CONSOLE_ESCAPE` > `^]` | `bins/delonix-runtime-bin/src/cmd/vm.rs:resolve_escape` |
-| VM 的 backend | `--backend`（或镜像自带的 `HYPERVISOR`） > `DELONIX_VM_BACKEND` > providers 文件中的 `defaultProvider`（ADR-0054） > `vm default-backend --set` > 自动检测（仅在没有 providers 文件时） | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
+| VM 的 backend | `--backend`（或镜像自带的 `HYPERVISOR`） > `DELONIX_VM_BACKEND` > providers 文件中的 `defaultProvider`（ADR-0054；由 `vm default-backend --set` 写入） > 旧的 `<DELONIX_ROOT>/vm-default-backend` > 自动检测。无法读取的 providers 文件会让这次选择失败，而不是落到下一项 | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
 | 已发布端口绑定的地址 | `-p <ip>:<host>:<container>` 里的地址 > `DELONIX_PUBLISH_ADDR` > `127.0.0.1` | `crates/adapters/delonix-sdn/src/lib.rs:publish_bind_addr` |
 | `image scan --update` 用的 CVE 数据源 | `--feed` > `DELONIX_ADVISORY_FEED` > 报错 | `bins/delonix-runtime-bin/src/cmd/scan.rs:cmd_scan_update` |
 | 日志过滤器 | `DELONIX_LOG` > `RUST_LOG` > `info` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
@@ -62,7 +63,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_ROOT` | 每一个 store 和二进制文件：`bins/delonix-runtime-bin/src/cmd/util.rs:state_root`、`crates/adapters/delonix-oci/src/image.rs:ImageStore::default_root`、`crates/adapters/delonix-state/src/store.rs:Store::default_root`、`crates/adapters/delonix-sdn/src/infra.rs:base_root`、`crates/interfaces/delonix-cri/src/bin/delonix-cri.rs:main`、`bins/delonix-mgmt-bin/src/main.rs:run`、`crates/interfaces/delonix-mcp/src/lib.rs` | 引擎的 state root：容器记录、镜像、网络、IPAM、卷、VM、密钥。 | 一个目录路径。未设置：非 root 时是 `$XDG_DATA_HOME/delonix`（或 `~/.local/share/delonix`），root 身份下是 `/var/lib/delonix`。**`delonix-cri` 和 `delonix-mgmt` 无论如何都默认用 `/var/lib/delonix`**，这就是为什么 `delonix serve …` 会显式地把 CLI 的 root 传过去（`cmd/serve.rs:exec_server`）。 | 测试时要设置的那个变量。引擎也会在它启动的每一个子进程上**设置**它（re-exec、网络 holder、服务端、CRI 生命周期调用），好让路径在不同 user namespace 之间保持一致。 |
 | `DELONIX_NET_RUNTIME_DIR` | `crates/adapters/delonix-sdn/src/infra.rs:runtime_dir`（`RUNTIME_DIR_ENV`） | 网络基础设施的 unix socket（`control.sock`、`slirp.sock`）所在的目录。 | 一个目录路径；保持简短（socket 路径超过约 108 字节会因 `SUN_LEN` 失败）。未设置：`/tmp/delonix-net-<uid>` 加上一个从非默认 `DELONIX_ROOT` 派生出来的后缀。 | 隔离时和 `DELONIX_ROOT` 一起设置。引擎也会把它传给 holder 和 `--net <custom>` 的 re-exec（`infra::runtime_dir_env`），因为在 holder 的 user namespace 里 uid 是 0，默认值会不一样。 |
 | `DELONIX_L18N` | `bins/delonix-runtime-bin/src/cmd/po.rs:peek_lang` | CLI 的输出和 `--help` 用的语言。 | `en`（默认）或 `pt`。 | `--l18n` 优先。错误的*类别*（退出码）不依赖语言，但消息依赖——不要在脚本里对消息文本做 grep。 |
-| `DELONIX_LOG` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` | `delonix`、`delonix-cri`、`delonix-mgmt` 和 `delonix-mcp` 的日志过滤器。 | 一个 `tracing` 过滤表达式（`debug`、`warn`、`delonix_sdn=debug`）。回退到 `RUST_LOG`，再回退到 `info`。 | 日志写到 stderr；stdout 留给命令的输出。 |
+| `DELONIX_LOG` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` | `delonix`、`delonix-cri`、`delonix-mgmt`、`delonix-node-api` 和 `delonix-mcp` 的日志过滤器。 | 一个 `tracing` 过滤表达式（`debug`、`warn`、`delonix_sdn=debug`）。回退到 `RUST_LOG`，再回退到 `info`。 | 日志写到 stderr；stdout 留给命令的输出。 |
 | `DELONIX_LOG_FORMAT` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` | 日志行的格式。 | `json` 表示 JSON 行；其他任何值（或未设置）都是纯文本。 | 当一个服务端跑在 systemd 下、它的 journal 会被送到别处时有用。 |
 | `DELONIX_VERBOSE` | `bins/delonix-runtime-bin/src/cmd/output.rs`（`Progress`） | 把每一步的输出都流式打印出来，而不是把它们折叠进一行进度信息。 | 设置且不为 `0` → 详细模式。 | 跟某个命令上的 `--verbose` 效果一样（如果它有的话）。 |
 | `DELONIX_HOSTS_FILE` | `bins/delonix-runtime-bin/src/cmd/hosts_file.rs:hosts_path` | `HTTPRoute` 上的 `hosts: [host]` 和 `delonix hosts sync` 写入其托管代码块的那个 hosts 文件。 | 一个文件路径；默认 `/etc/hosts`。 | 在一次隔离运行里把它指向一个临时文件，这样真正的 `/etc/hosts` 永远不会被碰到（写它需要 root）。这个代码块是怎么工作的：[名字是怎么到达 `/etc/hosts` 的](service-names-and-hosts.md)。 |
@@ -72,6 +73,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_CRI_CAP_CEILING_MODE` | `crates/interfaces/delonix-cri/src/cap_ceiling.rs:CeilingMode::parse`（`MODE_ENV`）；由 `cmd/serve.rs:run` 转发 | 当一个 pod 显式要求的东西超过上限时会发生什么。 | `reject`（默认；也可以是 `enforce` 或空）→ `CreateContainer` 失败，并点名被拒绝的 capability。`clamp`（或 `trim`）→ 削减到上限，并给出警告。一个未知的词**会让服务端启动不了**。 | `--cap-ceiling-mode` 优先。在两种模式下，引擎隐含的默认集合都会被无声地削减到上限。 |
 | `DELONIX_CRI_FROM_SOURCE` | `bins/delonix-runtime-bin/src/cmd/vmimage.rs:locate_cri_bin`（`CRI_FROM_SOURCE_ENV`，由 `cri_from_source_requested` 解析） | 当 `cluster apply` / `cluster kubeadm` 需要一个二进制文件去安装到各个节点上时，选择从 cwd 周围的源码 checkout 编译 `delonix-cri`。 | 只有 `1` 或 `true`（去掉首尾空白后）才会打开它；未设置、空、`0` 或其他任何值都是关闭的。 | 默认关闭，好让装在集群上的 runtime 永远不依赖命令是从哪个目录跑的。没有它的话，顺序是 `--cri-bin`、`delonix` 旁边的那个 `delonix-cri`，然后是正在运行版本的 release 资产，并对照它的 `SHA256SUMS` 校验。来源、路径和 sha256 总会被打印出来。 |
 | `DELONIX_API_ADDR` | `bins/delonix-mgmt-bin/src/main.rs:run`；由 `cmd/serve.rs:run` 转发 | 本地管理 API（`delonix serve api`）的 socket。 | `unix://<path>`。默认 `unix:///run/delonix-mgmt.sock`。 | `--addr` 优先。这个 API 仅限本地（调用方的 uid）。 |
+| `DELONIX_NODE_API_ADDR` | `bins/delonix-node-api-bin/src/main.rs:run`；由 `cmd/serve.rs:run` 转发 | 节点 API（`delonix serve node-api`，以 gRPC 和 HTTP/JSON 提供的 `delonix.node.v1` 契约）的 socket。 | `unix://<path>`。默认 `unix:///run/delonix-node.sock`。 | `--addr` 优先。仅限本地（调用方的 uid）。 |
 | `DELONIX_DOCKER_ADDR` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` | Docker Engine API 切片（`delonix serve docker-api`）的 socket。 | `unix://<path>`（`unix://` 前缀可省略）。默认 `unix:///run/delonix-docker.sock`。 | `--addr` 优先。 |
 | `DELONIX_VM_BACKEND` | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` | 当某条命令没有点名 backend 时，整个会话范围内用的 VM backend。 | 一个 backend 名字（`libvirt`、`cloud-hypervisor`，或者一个已注册的远端 backend，比如 `proxmox`）。空白会被忽略。 | 优先级低于 `--backend` 和镜像自带的 `HYPERVISOR`，高于 `delonix vm default-backend --set` 设的机器级默认值。跟显式选择一样，它会覆盖能力启发式判断，并且如果这个 backend 跑不了这个 VM，可能会在启动很晚的时候才失败。 |
 | `DELONIX_PROVIDERS_CONFIG` | `cmd/providers_config.rs:locate_with` | 节点 providers 文件的路径（ADR-0054），优先于 `$XDG_CONFIG_HOME/delonix/providers.yaml` 和 `/etc/delonix/providers.yaml`。 | 一个路径。 | 必须指向已存在的文件——绝不退回到其他文件。找到的第一个文件就是配置；文件从不合并。无法读取的文件会让不带 `--backend` 的 VM 请求失败，而不是猜测一个 provider。 |
@@ -113,7 +115,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
 | `DELONIX_HYPERVISOR_FW` | `crates/adapters/delonix-vm/src/lib.rs:default_ch_firmware` | 当没有给出 `--firmware` 时，Cloud Hypervisor 启动用的固件。 | 一个文件路径，只在它存在时才用。否则用 `DEFAULT_CH_FIRMWARES` 里第一个存在的（EDK2 的 `CLOUDHV.fd` 排在 `hypervisor-fw` 前面）。 | 为什么 EDK2 的构建排在前面，见[构建 microVM](microvm-setup.md)。 |
-| `DELONIX_VM_RESERVE_MIB` | `crates/adapters/delonix-vm/src/lib.rs:vm_admission_check` | 为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 `MemAvailable`，就会被拒绝。 | 单位 MiB；默认 `2048`；一个解析不了的值会回退到 2048。 | 调低它有让宿主机 OOM-kill 东西的风险。 |
+| `DELONIX_VM_RESERVE_MIB` | `crates/contexts/delonix-compute/src/vm.rs:admission_check`（判定在 `admission_verdict` 中；`MemAvailable` 来自 `delonix_node::mem_available_mib`） | 为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 `MemAvailable`，就会被拒绝。 | 单位 MiB；默认 `2048`；一个解析不了的值会回退到 2048。 | 调低它有让宿主机 OOM-kill 东西的风险。 |
 | `DELONIX_VM_MEM_HARD_LIMIT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | libvirt domain 是否会在整个 QEMU 进程上得到一个 `<memtune><hard_limit>`。 | `off` → 没有硬性上限；其他任何值 → 有。 | |
 | `DELONIX_VM_MEM_OVERHEAD_PCT` | `crates/adapters/delonix-vm/src/lib.rs:mem_hard_limit_kib` | 硬性上限允许超出 guest 内存的余量。 | 百分比，接受范围 5–200；默认 `25`；至少 1 GiB 的余量。超出范围 → 25。 | |
 | `DELONIX_VM_CPU_QUOTA_CORES` | `crates/adapters/delonix-vm/src/lib.rs:cpu_quota_micros` | 一个 libvirt domain 的 CPU 上限（`<cputune><quota>`），以核心数为单位。 | 未设置 → vCPU 数 + 1（多出来那一核给 QEMU 的 emulator 和 IO 线程用）。一个正数 → 那么多核心。`off` → 没有上限。 | |
@@ -183,6 +185,7 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_OTLP_ENDPOINT` | `crates/adapters/delonix-telemetry/src/telemetry.rs:build_otlp_layer` | 通过 OTLP/HTTP（protobuf）导出 tracing span。 | 一个基础 URL，比如 `http://localhost:4318`；如果没有会自动补上 `/v1/traces`。未设置或空白 → 没有导出器。 | 构建导出器失败会给出警告，然后只用日志继续跑下去。服务名是 `OTEL_SERVICE_NAME` 或者可执行文件的名字。 |
 | `DELONIX_METRICS_ADDR` | `crates/interfaces/delonix-cri/src/lib.rs`（CRI 服务端启动） | 在 `delonix-cri` 里启用一个 Prometheus 的 `/metrics` HTTP 监听器。 | `host:port`，比如 `127.0.0.1:9100`。未设置 → 没有监听器。 | 是一个 TCP 监听器：除非这些指标应该能被网络访问，否则把它绑定到回环地址上。 |
 | `DELONIX_WALK_THREADS` | `crates/adapters/delonix-volume/src/lib.rs:walk_threads`（`system df`、卷用量和 rootless 配额背后的磁盘遍历） | 设置并行目录遍历用多少个 worker。 | 一个正整数；`1` → 顺序遍历。未设置 → CPU 数量，有上限。 | 并行遍历和顺序遍历给出**相同**的总量（用不同 worker 看到的硬链接测试过）；这个变量存在是为了在特定宿主机上证明这一点，也是当某个文件系统在并发 `readdir` 下表现异常时的逃生舱。 |
+| `MALLOC_ARENA_MAX`（glibc） | `crates/contexts/delonix-node/src/alloc_tuning.rs:limit_malloc_arenas`，由那些常驻的进程在启动时调用（网络的 pin 和 control、`delonix-cri`、`delonix-mgmt`、`delonix-node-api`、Docker API 切片、L7 ingress 代理） | glibc 自己对 malloc arena 数量的上限。未设置时，这些进程会自己把它限制为 2，因为 glibc 的默认行为会为每个发生争用的线程保留一个 64 MiB 的堆。 | 一个正整数；由 glibc 读取，而不是引擎。 | 设置了它，引擎就不去碰它：运维者的值优先。 |
 
 ## 由引擎自己设置／内部使用
 

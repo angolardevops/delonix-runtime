@@ -25,7 +25,7 @@ git log --oneline -- <path you will touch>          # what was already decided, 
 
 读一读你要动的那块区域的历史，不是走形式：这个代码库有很大一部分，就是尝试过、测量过、
 改动过的东西的记录。已经决定过或者已经移除的东西，不会因为不知情就被重做一遍。完整的记录
-在 [`AGENTS.md`](../../AGENTS.md)（按区域组织）和 [`docs/adr/`](../adr/README.md) 里。
+在 [`AGENTS.md`](../../../AGENTS.md)（按区域组织）和 [`docs/adr/`](../../adr/README.md) 里。
 
 ## 一个任务一个 worktree
 
@@ -100,7 +100,7 @@ crate 里的测试还会检查命令的 help 是否有葡萄牙语条目 —— 
 ## 门禁强制执行的架构规则
 
 `scripts/arch_fitness.py`（CI 的 `arch` job）强制执行
-[ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md) 里定下来的结构。
+[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md) 里定下来的结构。
 每个 crate 所在的层，以及允许的依赖方向，列在[架构](architecture.md)里。这对一次改动意味着：
 
 - **引擎不认识任何消费者。** 在 `crates/`、`bins/`、`proto/` 或者清单里，包括注释在内，
@@ -151,7 +151,7 @@ Record，再动代码，比如：
 - 对节点契约、清单 schema 的稳定性，或者分层结构的改动。
 
 在已有边界之内的日常功能，不需要 ADR。格式和现有清单都在
-[`docs/adr/README.md`](../adr/README.md) 里：一个决定一个文件，`NNNN-title.md`，用英文写。
+[`docs/adr/README.md`](../../adr/README.md) 里：一个决定一个文件，`NNNN-title.md`，用英文写。
 **已被接受的 ADR 永远不会被重写** —— 只会被一份新的 ADR 取代。
 
 ## 新增或修改一个 CLI 命令
@@ -180,12 +180,12 @@ Record，再动代码，比如：
 - 一个提交对应一个逻辑改动；提交信息里要说清楚**为什么**这么改 —— diff 本身已经说明了
   改了什么。
 - 有对应 issue 的话，要引用它。
-- 针对 `main` 开 PR，并填好[模板](../../.github/PULL_REQUEST_TEMPLATE.md)：你跑过什么；
+- 针对 `main` 开 PR，并填好[模板](../../../.github/PULL_REQUEST_TEMPLATE.md)：你跑过什么；
   如果涉及运行时、命名空间、cgroup 或网络相关的代码，还要写你在一台真实宿主机上**实机**
   跑过什么，带上命令和它的输出。
 - 「能编译」和「命令返回了 0」都不能算一个改动的收尾。要说清楚证明了什么，同样明确地
   说清楚没有验证过什么、为什么没验证。
-- 每一个改动都由 [`.github/CODEOWNERS`](../../.github/CODEOWNERS) 里列出的代码所有者
+- 每一个改动都由 [`.github/CODEOWNERS`](../../../.github/CODEOWNERS) 里列出的代码所有者
   评审。
 
 ## 涉及安全的改动
@@ -195,7 +195,7 @@ Record，再动代码，比如：
 处理 —— 要在 PR 里明确点出来。这些会得到额外的评审。
 
 如果你发现的是一个**漏洞**而不是一个 bug —— 提权、命名空间逃逸、命令注入、路径穿越 ——
-不要开一个公开的 issue 或 PR。按照 [`SECURITY.md`](../../SECURITY.md) 的流程走（GitHub
+不要开一个公开的 issue 或 PR。按照 [`SECURITY.md`](../../../SECURITY.md) 的流程走（GitHub
 私密漏洞报告）。
 
 ---

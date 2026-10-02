@@ -265,13 +265,18 @@ what is wrong</em>, in text you did not recognise yet.</p>
 <td><a href="#the-node-contract-gate">The node contract gate</a></td>
 </tr>
 <tr>
+<td><code>FAIL  new leak: &lt;name&gt; (N left) — a test no longer cleans up after itself</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_gate.<wbr>py</code></a></td>
+<td><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">The tests left something in the temp dir</a></td>
+</tr>
+<tr>
 <td><code>unshare()</code> fails, <code>EPERM</code></td>
 <td>AppArmor + user namespaces</td>
 <td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Preparing your environment § AppArmor</a></td>
 </tr>
 <tr>
-<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> refused, exit <code>69</code></td>
-<td>cgroup delegation</td>
+<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code>, or <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code>, refused, exit <code>69</code></td>
+<td>cgroup delegation (the <code>cpuset</code>/<code>io</code> controllers for the second group)</td>
 <td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Preparing your environment § cgroup delegation</a></td>
 </tr>
 <tr>
@@ -367,6 +372,32 @@ contract — see <a href="contributing-workflow.html#when-to-write-an-adr">Contr
 If what actually changed is generator output (a new field, a new RPC), <code>python3
 scripts/contract_gate.py --update</code> regenerates <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>; commit it in the same
 commit as the <code>.proto</code> change.</p>
+<h3 id="the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">The tests left something in the temp dir (<code>tmp_roots_gate.py</code>)<a class="hanchor" href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy" aria-label="#">#</a></h3>
+<p>The <code>test</code> job runs <code>cargo test --workspace</code> with <code>TMPDIR</code> pointing at an empty directory of its
+own, then judges what is left in it against <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/tmp_roots_baseline.json</code></a>. Names are
+normalised (every run of digits becomes <code>N</code>), so the same leak has the same name on every run:</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="nohighlight">FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+</code></pre></div>
+<p>The baseline is empty, so any entry at all is a new leak. The two other messages
+(<code>more of a known leak</code>, <code>fixed or reduced … — lower the baseline</code>) only appear if debt is ever
+recorded again.</p>
+<p>The same job runs the gate a second time on <code>/tmp</code> itself: a test that binds a Unix socket needs a
+short path (<code>sun_path</code> is 108 bytes) and puts it there, where the <code>TMPDIR</code> census never looks.
+<code>/tmp</code> on a runner is not empty, so it is listed just before <code>cargo test</code> and only what is new
+afterwards is judged (<code>--before</code>), against the same empty baseline. Both censuses also run when a
+test <strong>failed</strong> — that is exactly when a cleanup on a test's last line never runs — so a red test
+can come with a leak report of its own. Reproduce locally with a fresh directory of your own, and list what is there
+instead of judging it — a leak can depend on the host (a test that returns early when a tool is
+missing):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">mkdir -p &quot;$PWD/target/test-tmp&quot; &amp;&amp; ls -A /tmp &gt; &quot;$PWD/target/tmp-before.txt&quot;
+TMPDIR=&quot;$PWD/target/test-tmp&quot; cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir &quot;$PWD/target/test-tmp&quot; --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before &quot;$PWD/target/tmp-before.txt&quot; --list
+</code></pre></div>
+<p>The fix is in the test, not in the baseline: hold the directory in a <code>tempfile::TempDir</code>, so the
+removal also runs on an early <code>return</code> and on a failed assert — for a socket,
+<code>tempfile::tempdir_in("/tmp")</code> rather than a literal <code>/tmp</code> path with the pid — see
+<a href="coding-conventions.html">Coding conventions</a> (<em>A test removes its temporary directory on every exit</em>).</p>
 <h2 id="a-shared-or-stale-build-cache">A shared or stale build cache<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
 <p><a href="build-and-test.html#build">Clone, build and test § Build</a> already names the trade-off: pointing
 several worktrees at one shared <code>CARGO_TARGET_DIR</code> saves disk, but two builds running against it
@@ -400,6 +431,7 @@ already states.</p>
 <li><a href="#a-consumer-name-leaked-into-the-engine">A consumer name leaked into the engine</a></li>
 <li><a href="#the-version-gate-refuses-your-branch">The version gate refuses your branch</a></li>
 <li><a href="#the-node-contract-gate">The node contract gate</a></li>
+<li><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">The tests left something in the temp dir (tmp_roots_gate.py)</a></li>
 </ul>
 </li>
 <li><a href="#a-shared-or-stale-build-cache">A shared or stale build cache</a></li>

@@ -323,7 +323,7 @@ others converge on.</p>
 <tr>
 <td>Node contract <code>delonix.node.v1</code></td>
 <td>gRPC <strong>and</strong> HTTP/JSON on the <strong>same</strong> local unix socket</td>
-<td>any local client (design; not served yet)</td>
+<td>any local client (served in part: <code>ListProviders</code> only, by <code>delonix-node-api</code>)</td>
 </tr>
 <tr>
 <td>CRI <code>runtime.v1</code></td>
@@ -523,17 +523,28 @@ DNAT rule inside the pin's netns (<code>publish …</code> on the control socket
 policy costs the same no matter how many containers exist:</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-text">forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 </code></pre></div>
-<p><code>fwcont</code> has two rules; each container's rules live in its own chain, reached through the <code>fwmap</code>
-verdict map keyed by IP. Traffic <strong>between</strong> networks is dropped pairwise unless a <code>NetworkRoute</code>
+<p>Each container's rules live in its own chain, reached through the <code>fwmap</code> verdict map keyed by
+IP — once by <strong>source</strong> (<code>fwout</code>) and once by <strong>destination</strong> (<code>fwcont</code>). They are two base chains
+on purpose: an <code>accept</code> inside a jumped-to chain ends only the base chain that jumped, while a
+<code>drop</code> is final everywhere, so the source's egress policy decides first and the destination's
+ingress policy still decides after. With one base chain holding both lookups, the destination's
+<code>accept</code> ended the walk and the source's <code>egress deny</code> never ran (<code>fw_dispatch_chains</code> in
+<code>infra.rs</code>; a table built by an older holder is migrated in place by
+<code>fw_dispatch_migration_script</code>). Traffic <strong>between</strong> networks is dropped pairwise unless a <code>NetworkRoute</code>
 puts the pair in <code>@netpair</code> — a route says the packet <em>may</em> cross, and the per-container chain
 still decides whether it is <em>allowed</em>.</p>
 <p><strong>Isolation by namespace</strong> lives in each container's chain: members of <code>@dlxns&lt;hash&gt;</code> (same
 namespace) are accepted, and <strong>new</strong> connections from any other container address (<code>@dlxall</code>) are
-dropped; replies still flow because the drop matches only <code>ct state new</code>. An explicit ingress
-policy replaces that default. IPv6 in the SDN is refused by default (<code>table ip6</code> with
+dropped; replies still flow because the drop matches only <code>ct state new</code>. That drop is a
+guardrail no inbound rule removes: explicit rules are emitted before it, so a <code>deny</code> never opens
+anything and an explicit <code>allow</code> (for example a <code>kind: Dependency</code>) still admits the one peer it
+names (<code>fw_chain_body</code> in <code>infra.rs</code>). A firewall spec with an invalid rule is refused whole, and
+namespace isolation that does not apply refuses <code>run</code>, <code>start</code> and <code>pod create</code> and undoes the
+attach, instead of warning. IPv6 in the SDN is refused by default (<code>table ip6</code> with
 <code>policy drop</code>), because every rule above is IPv4.</p>
 <blockquote>
 <p><strong>Legend</strong> — participants are processes; solid arrows are calls, socket lines, forks or clones (the label says which); dashed arrows are replies or bytes sent back; a self-arrow is work inside that process; notes mark state or waits.</p>
@@ -617,6 +628,12 @@ belong to the provider answered by the provider.</p>
   only when configured). A registration carries a factory closure and an <code>auto_selectable</code> flag,
   so auto-detection never constructs — and therefore never authenticates — a remote backend.
   Registering does no I/O.</li>
+<li><strong>Use cases apart from mechanism.</strong> What <code>create</code>, <code>stop</code> or <code>status</code> decides lives in the
+  compute context as <code>VmEngine</code>, which is handed a record store and three ports (<code>VmBackends</code>,
+  <code>LocalDiskImages</code>, <code>SeedBuilder</code>) and never runs a program itself; the adapter answers those ports
+  with its registry, <code>qemu-img</code> and <code>cloud-localds</code>. The orchestration is therefore testable
+  against fakes, and a hypervisor-specific rule (the libvirt anti-spoof opt-out, a domain left
+  without a record) has to be a port answer rather than an <code>if</code> in the use case (ADR-0044 P4b.3).</li>
 <li><strong>Networking a VM.</strong> Cloud Hypervisor runs inside the pin's netns and gets a <code>tap</code> on a network
   bridge through the <code>VmNetwork</code> port, which the SDN implements (<code>HostVmNetwork</code>); <code>delonix-vm</code>
   does not depend on <code>delonix-sdn</code>. Because the DHCP server is the engine's own and deterministic,
@@ -629,11 +646,13 @@ belong to the provider answered by the provider.</p>
   it as a NoCloud ISO whose <code>network-config</code> matches the primary NIC by <strong>MAC</strong>, and a remote
   backend may realize it natively.</li>
 </ul>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>VmBackend</code>,
-<code>BackendRegistration</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>auto_detect</code>,
+<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> (<code>VmBackend</code>,
+<code>BackendRegistration</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a> (<code>VmEngine</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a> (<code>RegistryBackends</code>, <code>QemuImgDisks</code>,
+<code>CloudLocaldsSeed</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>select_for_create</code>, <code>auto_detect</code>,
 <code>backend_for</code>, <code>CloudHypervisorBackend</code>, <code>LibvirtBackend</code>, <code>launch_vmm</code>, <code>DEFAULT_CH_FIRMWARES</code>,
 <code>set_network</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a> (<code>generate_seed_iso</code>);
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a> (<code>HostVmNetwork</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>sdn_reachable</code>, <code>dhcp_lease_ip</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> (<code>ProxmoxBackend</code>);

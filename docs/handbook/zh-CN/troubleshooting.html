@@ -258,13 +258,18 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><a href="#the-node-contract-gate">节点契约门禁</a></td>
 </tr>
 <tr>
+<td><code>FAIL  new leak: &lt;name&gt; (N left) — a test no longer cleans up after itself</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_gate.<wbr>py</code></a></td>
+<td><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">测试在临时目录里留下了东西</a></td>
+</tr>
+<tr>
 <td><code>unshare()</code> 失败，<code>EPERM</code></td>
 <td>AppArmor + user namespace</td>
 <td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">准备你的环境 § AppArmor</a></td>
 </tr>
 <tr>
-<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 被拒绝，退出码 <code>69</code></td>
-<td>cgroup 委派</td>
+<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code>，或 <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code>，被拒绝，退出码 <code>69</code></td>
+<td>cgroup 委派（第二组需要 <code>cpuset</code>/<code>io</code> 控制器）</td>
 <td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">准备你的环境 § cgroup 委派</a></td>
 </tr>
 <tr>
@@ -323,6 +328,18 @@ FAIL  node.proto: SomeRpc has no google.api.http mapping
 FAIL  docs/api/openapi.yaml is not the generated one — run `python3 scripts/contract_gate.py --update` and commit it
 </code></pre></div>
 <p>它需要 <code>PATH</code> 上有 <code>protoc</code>、<code>buf</code>（钉在 v1.73.0）和 <code>protoc-gen-openapi</code>（钉在 v0.7.1），还需要拉取到 git 的 tag——缺工具会失败在更常见的 "command not found" 上，但缺 tag 会让 <code>buf breaking</code> 那项检查打印出 <code>ok</code>，同时明确说明目前还没有可比较的基线，而不是悄悄跳过这项检查。对 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 的一次真正的破坏性改动，需要先有一份 ADR，就像对任何一个稳定节点契约的改动一样——见<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程 § 什么时候要写 ADR</a>。如果实际改变的只是生成器的输出（一个新字段、一个新 RPC），<code>python3 scripts/contract_gate.py --update</code> 会重新生成 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>；把它和 <code>.proto</code> 的改动放进同一个提交里一起提交。</p>
+<h3 id="the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">测试在临时目录里留下了东西（<code>tmp_roots_gate.py</code>）<a class="hanchor" href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy" aria-label="#">#</a></h3>
+<p><code>test</code> 作业在运行 <code>cargo test --workspace</code> 时，把 <code>TMPDIR</code> 指向一个专属于它的空目录，然后拿里面剩下的东西去和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/tmp_roots_baseline.json</code></a> 对比。名字会被规范化（每一串数字都变成 <code>N</code>），所以同一个泄漏在每次运行里都叫同一个名字：</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+</code></pre></div>
+<p>基线是空的，所以任何一条都是新的泄漏。另外两种消息（<code>more of a known leak</code>、<code>fixed or reduced … — lower the baseline</code>）只有在又一次记录下债务时才会出现。</p>
+<p>同一个 job 会在 <code>/tmp</code> 本身上再跑一次这个 gate：一个绑定 Unix socket 的测试需要一条短路径（<code>sun_path</code> 只有 108 字节），于是把 socket 放在那里，而 <code>TMPDIR</code> 的清点从来不会去看那里。runner 上的 <code>/tmp</code> 不是空的，所以会在 <code>cargo test</code> 之前一刻先把它列出来，事后只评判新出现的东西（<code>--before</code>），对照的是同一份空基线。两次清点在某个测试<strong>失败</strong>时也都会运行——恰恰是在那种时候，写在测试最后一行的清理永远不会执行——所以一个红色的测试可能会附带一份它自己的泄漏报告。在本地复现时，用一个你自己的全新目录，并且列出里面的东西而不是去评判它——泄漏可能取决于宿主机（一个在缺少某个工具时提前返回的测试）：</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkdir -p &quot;$PWD/target/test-tmp&quot; &amp;&amp; ls -A /tmp &gt; &quot;$PWD/target/tmp-before.txt&quot;
+TMPDIR=&quot;$PWD/target/test-tmp&quot; cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir &quot;$PWD/target/test-tmp&quot; --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before &quot;$PWD/target/tmp-before.txt&quot; --list
+</code></pre></div>
+<p>修法在测试里，而不在基线里：把目录放进一个 <code>tempfile::TempDir</code>，这样删除在提前 <code>return</code> 和断言失败时也会执行——对于 socket，用 <code>tempfile::tempdir_in("/tmp")</code>，而不是带着 pid 的字面 <code>/tmp</code> 路径——见<a href="coding-conventions.html">编码约定</a>（<em>测试在每一种退出方式下都要删除自己的临时目录</em>）。</p>
 <h2 id="a-shared-or-stale-build-cache">共享或过期的构建缓存<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
 <p><a href="build-and-test.html#build">克隆、构建与测试 § 构建</a>里已经点明了这个取舍：让几个 worktree 共用同一个 <code>CARGO_TARGET_DIR</code> 能省磁盘，但两个同时对它进行构建的进程会互相等待，还<strong>可能互相覆盖对方的产物</strong>。这个症状很特殊，也很容易被误读成一次真正的失败：某个门禁（尤其是 <code>test</code> 或 <code>clippy</code>）针对一段看起来和你的改动毫无关系的代码失败了，或者一次构建结束得快得可疑，随后产出的那个二进制却表现得像一个更老的版本——包括某个本地的 pre-commit 或 pre-push 钩子，跨会话复用同一个共享的 target 目录，链接的时候用的是当时恰好躺在那里的、来自另一次并发构建的目标文件。</p>
 <p>这不是门禁本身的 bug：它确确实实是在构建错误的东西。在你开始调试这个"失败"本身之前，先排除是不是缓存过期：</p>
@@ -345,6 +362,7 @@ cargo build -p delonix-runtime-bin   # rebuild clean, then re-run the gate that 
 <li><a href="#a-consumer-name-leaked-into-the-engine">某个消费者的名字混进了引擎</a></li>
 <li><a href="#the-version-gate-refuses-your-branch">版本门禁拒绝了你的分支</a></li>
 <li><a href="#the-node-contract-gate">节点契约门禁</a></li>
+<li><a href="#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy">测试在临时目录里留下了东西（tmp_roots_gate.py）</a></li>
 </ul>
 </li>
 <li><a href="#a-shared-or-stale-build-cache">共享或过期的构建缓存</a></li>

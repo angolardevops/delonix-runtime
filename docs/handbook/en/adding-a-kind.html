@@ -216,8 +216,8 @@ and so on (<code>delonix api-resources</code> lists them all). Adding one touche
 <code>match</code> arm: the table that describes what the Kind IS, the code that applies it, and the
 reconciler wiring that lets <code>stack plan</code>/<code>apply</code> treat it like every other Kind. This page
 walks through that in order, with a real Kind — <strong><code>Service</code></strong> (ADR-0032) — as the worked
-example throughout. It is not the newest Kind (<code>IPPool</code>, <code>NetworkGateway</code>, <code>NetworkZone</code> and
-<code>RuntimePolicy</code> came after it), but it is the one that exercises every path at once: primary,
+example throughout. It is not the newest Kind (<code>IPPool</code>, <code>NetworkGateway</code>, <code>NetworkZone</code>,
+<code>RuntimePolicy</code> and <code>SystemContainer</code> came after it), but it is the one that exercises every path at once: primary,
 converging, removable, namespaced, and backed by a registry of its own. The newer Kinds went
 through the same steps; every file cited below is read from the tree, not from memory of an
 older layout.</p>
@@ -419,6 +419,12 @@ halfway, which the module doc calls "strictly worse than declaring the replace u
 the record with no restart needed — nothing about a <code>Service</code> is cold. A field left out of
 <code>hot_fields</code> still shows up in the plan; it just forces <code>Action::Replace</code> (refused without
 <code>--replace &lt;Kind&gt;/&lt;name&gt;</code>) instead of <code>Action::Update</code>.</p>
+<p>Some fields converge live in <strong>one direction only</strong>. A system container's root volume can be grown
+on a running container and never shrunk, so <code>SystemContainer.rootfs</code> is listed in
+<code>grow_only_fields</code>, not in <code>hot_fields</code>: <code>is_hot_change</code> treats a grow-only field as hot when both
+sides are numbers and the new one is not smaller, and as cold otherwise, so a shrink plans a
+<code>Replace</code>. If your Kind's own apply also decides whether a change needs a recreate, ask the same
+function — <code>cold_changes</code> in <code>cmd/system_container.rs</code> does — or <code>plan</code> and <code>apply</code> will disagree.</p>
 <p>Three tests in <code>cmd/stack.rs</code> keep this table honest against the <code>kinds.rs</code> table and against
 each other:</p>
 <ul>

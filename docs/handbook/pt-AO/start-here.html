@@ -422,7 +422,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
     Q --&gt;|images, registry, build| OCI[delonix-oci&lt;br/&gt;+ cmd/build.rs, cmd/image.rs]
     Q --&gt;|VMs| VM{local or remote?}
     VM --&gt;|Cloud Hypervisor / libvirt / cloud-init| DVM[delonix-vm]
-    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements VmBackend]
+    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements a port]
     Q --&gt;|what the kubelet sees| CRI[delonix-cri]
     Q --&gt;|a new crate| CRATE[LAYERS in arch_fitness.py&lt;br/&gt;+ crates/LAYER/ + root Cargo.toml]
     PROV --&gt; ADR
@@ -469,13 +469,13 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>Comportamento de VMs neste nó</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (o trait <code>VmBackend</code> e o registo de backends), <code>cloudinit.rs</code>; CLI em <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td>O que uma operação decide: os casos de uso em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a> (<code>VmEngine</code>). Como se faz aqui: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (os backends e o seu registo), <code>local_ports.rs</code>, <code>cloudinit.rs</code>; o próprio trait <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a>; CLI em <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
 <td><a href="microvm-setup.html">Construir microVMs</a>, <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits como portas</a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (os backends são registáveis)</td>
 </tr>
 <tr>
 <td><strong>Um backend de VM ou provider de armazenamento novo, atrás de uma API remota</strong></td>
-<td>Um crate novo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, a implementar uma porta; registado na raiz de composição (<code>cmd/vmbackends.rs</code>)</td>
+<td>Um crate novo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, a implementar uma porta; registado na raiz de composição (<code>cmd/vmbackends.rs</code>, <code>cmd/gatewayproviders.rs</code>), configurado a partir do ficheiro de providers (<code>cmd/providers_config.rs</code>), e a responder ao catálogo de capacidades com um relatório listado tanto em <code>cmd/provider.rs</code> como em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/providers.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>providers.<wbr>rs</code></a> (um teste mantém os dois iguais)</td>
 <td><a href="crates.html#providers">Providers</a>, <a href="architecture.html#layers-and-the-allowed-direction">Camadas</a></td>
 <td>Primeiro um ADR (<a href="contributing-workflow.html#when-to-write-an-adr">Quando escrever um ADR</a>); <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
 </tr>
