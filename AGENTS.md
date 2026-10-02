@@ -3088,8 +3088,16 @@ sem `LETSENCRYPT_STAGING` forçou a renovação, pediu um registo TXT novo (serv
 servidores de nomes ao fim de 1470 s) e instalou um certificado da CA de produção (`YE1`,
 válido até 2026-12-31), servido pelo nginx sem reiniciar o container e verificado pelo `curl`
 contra a confiança do sistema (`ssl_verify=0`).
-**Não validado**: o HTTP-01 contra o Let's Encrypt (só contra o Pebble; a porta 80 pública não
-chega a esta máquina).
+**HTTP-01 contra o Let's Encrypt, medido a 2026-10-02**, com a porta 80 pública a não chegar
+cá, por um túnel público até à porta HTTP do container. Staging e depois produção para o
+domínio do túnel: os dois emitidos, o de produção (`YE2`) servido pelo nginx e verificado pelo
+`curl` contra a confiança do sistema. Só o `localhost.run` serviu, e os outros dois falharam
+por razões que não são do script: o **ngrok** gratuito redirecciona
+`/.well-known/acme-challenge/` em HTTP para o `acme.ngrok.com` (o ACME dele), e a CA recebeu
+404; o **pinggy** gratuito responde a qualquer agente `Mozilla/…` (o validador do Let's
+Encrypt é um) com uma página de aviso de 15 KB, e a CA recusou-a («reader size limit
+exceeded»). **O `nginx -s reload` volta antes de os workers novos assumirem**: uma ligação
+logo a seguir ao «reloaded» ainda recebeu o certificado antigo, e segundos depois o novo.
 Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
 (o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
 dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
