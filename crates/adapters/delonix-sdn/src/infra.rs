@@ -1452,7 +1452,10 @@ fn start_control(pin: i32) -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    let child = Command::new("nsenter")
+    let mut cmd = Command::new("nsenter");
+    // Restartable and long-lived: it must not keep the descriptors of
+    // whichever CLI happened to start it (see `leave_callers_descriptors`).
+    let child = crate::leave_callers_descriptors(&mut cmd)
         .args([
             "-t",
             &pin.to_string(),
@@ -1607,6 +1610,10 @@ fn start_pin() -> Result<i32> {
     let pipes = crate::pin_userns::SyncPipes::new()?;
     let child_fds = [pipes.child_read.as_raw_fd(), pipes.child_write.as_raw_fd()];
     let mut cmd = Command::new(&exe);
+    // Registered BEFORE the `pre_exec` below that hands the two sync
+    // descriptors over: this one marks everything close-on-exec, that one
+    // clears the mark on exactly those two.
+    crate::leave_callers_descriptors(&mut cmd);
     cmd.args(["netns", "pin"])
         .env(crate::pin_userns::SYNC_ENV, pipes.env_value())
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
@@ -1762,7 +1769,8 @@ fn adopt_pin(control: i32) -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    let child = Command::new("nsenter")
+    let mut cmd = Command::new("nsenter");
+    let child = crate::leave_callers_descriptors(&mut cmd)
         .args([
             "-t",
             &control.to_string(),

@@ -28,6 +28,10 @@
 #             herdara e ficara para trás — podia dar.
 #   listed  — sem supervisor, o primeiro `container ps` regista a morte e apaga
 #             o pid; o `rm` a seguir já não tinha por onde chegar ao slirp.
+#   infra   — o pin e o plano de controlo da rede vivem enquanto a infra viver,
+#             e eram lançados com os descritores de quem calhasse arrancá-la
+#             (aqui um fd 9 aberto pelo chamador). Corre em roots SEUS: subir e
+#             descer a infra do chamador reiniciaria tudo o que lá corre.
 set -u
 scenario="${1:?cenário}"; BIN="${2:?binário}"; IMG="${3:?imagem}"; PFX="${4:-slp$$}"
 name="$PFX-$scenario"
@@ -68,6 +72,25 @@ wait_for() {
 gone() { [[ ! -e /proc/$1 ]]; }
 not_listening() { ! listening "$1"; }
 no_shims() { [[ -z "$(shims_of "$1")" ]]; }
+
+if [[ "$scenario" == infra ]]; then
+  # Curto: o socket de controlo vive aqui e o `sun_path` são 108 bytes.
+  own="/tmp/dlxi-$$"
+  export DELONIX_ROOT="$own/root" DELONIX_NET_RUNTIME_DIR="$own/run"
+  mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
+  mark="$own/callers-fd"
+  cleanup() { timeout 60 "$BIN" net netns down >/dev/null 2>&1; rm -rf "$own"; }
+  ( exec 9>"$mark"; timeout 120 "$BIN" net netns up >/dev/null 2>&1 ) ||
+    cannot "a infra de rede não sobe neste host (net netns up)"
+  held=""
+  for d in /proc/[0-9]*; do
+    ls -l "$d/fd" 2>/dev/null | grep -qF -- "-> $mark" &&
+      held+="${d#/proc/}($({ tr '\0' ' ' <"$d/cmdline"; } 2>/dev/null | cut -c1-60)) "
+  done
+  [[ -z "$held" ]] || die "a infra ficou com um descritor de quem a arrancou: $held"
+  cleanup
+  exit 0
+fi
 
 command -v slirp4netns >/dev/null || cannot "sem slirp4netns neste host"
 port=$(free_port)
@@ -138,7 +161,7 @@ listed)
   wait_for 5 not_listening "$port" || die "a porta $port continua à escuta depois do rm"
   ;;
 *)
-  echo "cenário desconhecido: $scenario (fds|exit|start|listed)"; exit 2 ;;
+  echo "cenário desconhecido: $scenario (fds|exit|start|listed|infra)"; exit 2 ;;
 esac
 cleanup
 exit 0
