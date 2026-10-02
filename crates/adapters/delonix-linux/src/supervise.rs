@@ -211,6 +211,9 @@ pub fn run_supervised(
             if let Some(pid) = waited {
                 (sup.on_exit)(c, pid);
             }
+            // The slirp just released and the log shim are this process's
+            // children too; collected here, or each restart leaves two zombies.
+            reap_finished_children();
             // `die` with the REAL exit code — the supervisor is the only one that
             // knows it (and the container's parent); a normal `run -d` would only see "Crashed".
             delonix_node::events::emit(
@@ -244,6 +247,8 @@ pub fn run_supervised(
             // the record over the flag the stop had just written). A `start` in the
             // same window left TWO incarnations running, one of them surviving
             // `rm -f`.
+            // What finished during the backoff (a shim that saw its EOF late).
+            reap_finished_children();
             let current = store.load(&c.id).ok();
             if !resume_restart(current.as_ref()) {
                 std::process::exit(0);
@@ -279,6 +284,31 @@ pub fn run_supervised(
         });
     }
     Ok(())
+}
+
+/// Collects every child of this process that has already exited, without
+/// waiting for any that has not. Returns how many.
+///
+/// **The supervisor is the parent of more than the container.** The slirp4netns
+/// its start spawned and the log shim are forked from it as well, and it only
+/// ever waited for the container's init. Each incarnation's two then stayed as
+/// zombies for as long as the supervisor lived — measured 2026-10-02, a
+/// crash-looping `--restart always -p` container: after 3 restarts, 3 zombie
+/// `slirp4netns` and 3 zombie `delonix` (the shims) under one supervisor, and
+/// one more of each per restart, for days if the container keeps crashing.
+///
+/// Only called between incarnations, with the init already reaped by
+/// [`crate::wait_and_record`]: no exit status anyone needs can be taken here.
+fn reap_finished_children() -> usize {
+    let mut n = 0;
+    loop {
+        // SAFETY: WNOHANG never blocks, and a null status pointer is allowed.
+        let r = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        if r <= 0 {
+            return n;
+        }
+        n += 1;
+    }
 }
 
 /// Reads the supervisor's handshake from `rd`: the status byte (`None` when it
@@ -388,6 +418,47 @@ mod tests {
             libc::waitpid(pid, std::ptr::null_mut(), 0);
         }
         got
+    }
+
+    /// **The supervisor collects the children it has besides the container.**
+    ///
+    /// Run in a forked process of its own: `waitpid(-1)` in the test binary would
+    /// take the children of the tests running beside this one.
+    #[test]
+    fn finished_children_are_collected_not_left_as_zombies() {
+        // SAFETY: the forked child makes only async-signal-safe calls until
+        // `_exit`; the parent only waits for it.
+        let probe = unsafe { libc::fork() };
+        assert!(probe >= 0, "fork");
+        if probe == 0 {
+            let mut kids = [0; 3];
+            for k in kids.iter_mut() {
+                // SAFETY: as above.
+                let p = unsafe { libc::fork() };
+                if p == 0 {
+                    // SAFETY: as above.
+                    unsafe { libc::_exit(0) };
+                }
+                *k = p;
+            }
+            // SAFETY: as above.
+            unsafe { libc::usleep(300_000) };
+            let reaped = reap_finished_children();
+            let zombies = kids
+                .iter()
+                .filter(|p| std::path::Path::new(&format!("/proc/{p}")).exists())
+                .count();
+            let ok = reaped == 3 && zombies == 0 && reap_finished_children() == 0;
+            // SAFETY: as above.
+            unsafe { libc::_exit(if ok { 0 } else { 1 }) };
+        }
+        let mut st = 0;
+        // SAFETY: `probe` is this test's own child.
+        assert_eq!(unsafe { libc::waitpid(probe, &mut st, 0) }, probe);
+        assert!(
+            libc::WIFEXITED(st) && libc::WEXITSTATUS(st) == 0,
+            "the three finished children were not all collected (status {st})"
+        );
     }
 
     /// **A failed start is reported even while something else holds the pipe.**

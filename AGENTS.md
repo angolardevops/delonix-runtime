@@ -2993,8 +2993,8 @@ bancada (`worker_connections 1024`, `maxconn 2048`, MPM por omissão). Agora:
   host, senão auto-assinado pelo próprio binário (`rcgen`, já na árvore). Um par que já lá
   esteja é MANTIDO. A chave fica 0600, é montada só de leitura, e `tls/` está no
   `.dockerignore` e no `.gitignore`. `scripts/tls.sh` renova, instala um certificado que já
-  se tenha, ou corre o Let's Encrypt (webroot em `./acme`; só nginx e httpd — o HAProxy não
-  serve ficheiros).
+  se tenha, ou corre o Let's Encrypt: por HTTP-01 (webroot em `./acme`; só nginx e httpd — o
+  HAProxy não serve ficheiros) ou por DNS-01 (`letsencrypt-dns`, os três).
 - **`nproc` dentro do container devolve os núcleos do HOST** (medido: 32). Por isso
   `worker_processes`/`nbthread` são 2, iguais ao `cpus: "2.0"` do manifesto, e não `auto`.
   `nofile` 65 535 pelo `ulimit:` do manifesto (medido dentro do container).
@@ -3060,13 +3060,88 @@ só `EdgeArgs` (`clap::Args`) achatado nos três `init` que aceitam template —
 uma resposta: substitui a pergunta do terminal e não é adivinhada. `--tls-port`/`--hostname`
 num template sem TLS, as duas portas iguais, um nome que não é host, ou qualquer das três sem
 template são RECUSADOS antes de escrever seja o que for.
-**Não validado**: uma emissão pela CA real do Let's Encrypt (a porta 80 pública não chega a
-este host).
+**Let's Encrypt por DNS-01 (2026-10-02)**: `scripts/tls.sh letsencrypt-dns <domínio> <email>`
+nos três templates. Valida por registo TXT, por isso nada tem de chegar ao host (NAT, CGNAT),
+emite wildcards, e é o primeiro caminho Let's Encrypt do `haproxy`. Sem hook, o script mostra
+o registo, grava-o em `letsencrypt/dns-challenge.txt` e espera até TODOS os servidores de
+nomes da zona o servirem (`DNS_WAIT`, 1800 s; pergunta aos autoritativos, sem recursão: um
+resolvedor público guardaria a resposta negativa). Com `DNS_AUTH_HOOK`/`DNS_CLEANUP_HOOK` um
+comando cria e apaga o registo, e a renovação é o `certbot renew` que o script imprime. Sem
+hook, renovar é correr o comando outra vez. O `haproxy` recusa `letsencrypt` (HTTP-01) pelo
+nome; antes emitia um certificado local para os nomes «letsencrypt, domínio, email».
+**Medido**: contra o staging REAL do Let's Encrypt, com `le-test.ngolacloud.com` (DNS no
+GoDaddy) e a máquina numa rede cuja porta 80 pública não chega cá (medido de três pontos de
+fora): registo criado à mão, servido pelos dois servidores de nomes ao fim de 2390 s,
+certificado emitido (`(STAGING) Baloney Bulgur YE2`), instalado em `./tls` e servido pelo
+nginx sem reiniciar o container. Contra o Pebble: DNS-01 com hooks emitiu `*.shop.test`, e o
+HTTP-01 depois da refactorização emitiu `www.shop.test`.
+**Depois do staging, pedir o de produção não fazia nada** (medido ao pedir o de produção para
+o mesmo nome): o certbot respondia «not yet due for renewal», e o script dizia «reloaded with
+the new certificate» com o de staging ainda lá. Staging primeiro é o caminho que o README
+recomenda, e o HTTP-01 tinha o mesmo defeito. O script passa a nomear o directório ACME com
+que fala (`acme_server`) e força a renovação quando o certificado que já tem para o nome veio
+de outro (`server =` no `letsencrypt/renewal/<nome>.conf`). Contra o Pebble, nos dois modos:
+mesma CA mantém o certificado, outra CA substitui-o. E a linha `certbot renew` que o script
+imprime, com hooks e `--force-renewal`, renovou e instalou pelo deploy hook.
+**Produção, medido a 2026-10-02**: com o certificado de staging já instalado, o mesmo comando
+sem `LETSENCRYPT_STAGING` forçou a renovação, pediu um registo TXT novo (servido pelos dois
+servidores de nomes ao fim de 1470 s) e instalou um certificado da CA de produção (`YE1`,
+válido até 2026-12-31), servido pelo nginx sem reiniciar o container e verificado pelo `curl`
+contra a confiança do sistema (`ssl_verify=0`).
+**HTTP-01 contra o Let's Encrypt, medido a 2026-10-02**, com a porta 80 pública a não chegar
+cá, por um túnel público até à porta HTTP do container. Staging e depois produção para o
+domínio do túnel: os dois emitidos, o de produção (`YE2`) servido pelo nginx e verificado pelo
+`curl` contra a confiança do sistema. Só o `localhost.run` serviu, e os outros dois falharam
+por razões que não são do script: o **ngrok** gratuito redirecciona
+`/.well-known/acme-challenge/` em HTTP para o `acme.ngrok.com` (o ACME dele), e a CA recebeu
+404; o **pinggy** gratuito responde a qualquer agente `Mozilla/…` (o validador do Let's
+Encrypt é um) com uma página de aviso de 15 KB, e a CA recusou-a («reader size limit
+exceeded»). **O `nginx -s reload` volta antes de os workers novos assumirem**: uma ligação
+logo a seguir ao «reloaded» ainda recebeu o certificado antigo, e segundos depois o novo.
+Dois pormenores vistos: o certbot mostra o texto do passo manual como «ran with error output»
+(o hook escreve no stderr quando não há terminal), e diz que agendou a renovação — a tarefa
+dele só cobre `/etc/letsencrypt`, não o `./letsencrypt` do projecto.
 
 **Visto de caminho, e não é dos templates**: com o host carregado, um `stack destroy` deu
 DX-8101 (um thread do httpd em `D` 4,5 min depois do SIGKILL) e, quando o `rm` seguinte
 passou, o `slirp4netns` do container ficou vivo a segurar as portas publicadas — o `apply`
 seguinte respondia «port 8080 is already in use by slirp4netns».
+
+## Os templates trazem um túnel para a internet sem IP público (`delonix-tunnel.yaml`, 2026-10-02)
+
+Os 11 templates do `init` geram `delonix-tunnel.yaml`: um `kind: Gateway` FORA do manifesto
+principal, por isso o `stack apply` nunca o abre. `delonix stack apply -f delonix-tunnel.yaml`
+abre-o, `delonix get gateways` dá o URL, `delonix delete gateways <nome>-tunnel` fecha-o (o
+`stack destroy` não lhe toca: um túnel não tem etiqueta de posse). O README de cada template
+tem a secção «On the internet without a public IP», e o fim do `--up` aponta para ela.
+
+- **Cloudflare é o provider dos templates, e a escolha foi medida.** Cobre os dois modos com o
+  mesmo agente: túnel rápido sem conta (`*.trycloudflare.com`, aleatório) e túnel com nome no
+  domínio do utilizador (DNS no Cloudflare, token num `kind: Secret` por `tokenSecretRef`).
+  Não mostra página de aviso a browsers e envia `X-Forwarded-Proto` com o esquema real. O
+  ngrok gratuito também não mostra aviso, dá um nome FIXO por conta (`*.ngrok-free.dev`, o
+  mesmo nas três aberturas medidas) e envia `X-Forwarded-Proto`; o pinggy gratuito mostra uma
+  página de aviso de 15 KB a qualquer agente `Mozilla/…`; o `localhost.run` não envia
+  `X-Forwarded-Proto` e sai quando o stdin chega ao fim (só aguenta com um stdin que nunca
+  acaba, por isso não está no motor).
+- **Nos templates de edge o túnel aponta para a porta TLS** (`insecureSkipTlsVerify: true`): a
+  porta HTTP redirecciona para `https://<host>:<porta TLS>`, que o endereço público não tem. O
+  certificado local (mkcert ou auto-assinado) não se pode verificar no salto agente→localhost;
+  o visitante recebe o do provider. O servidor TLS dos três redirecciona para
+  `https://<host>/` quando o túnel diz `X-Forwarded-Proto: http` (um cliente directo que mande
+  o cabeçalho só se redirecciona a si próprio).
+- **O Django só responde aos nomes do `ALLOWED_HOSTS`**: tal como gerado, o túnel dá 400. O
+  README manda acrescentar `.trycloudflare.com` (ou o domínio) e `TRUSTED_PROXY=*`, e **recriar
+  o container** (`container rm -f` e `stack apply`): uma mudança de `env` não se aplica a um
+  container que já existe, e o `--replace Container/<nome>` que a condição do plano sugere não
+  faz nada, porque o plano não vê a mudança (registado para corrigir à parte).
+- **Medido ao vivo** (raiz isolada, túnel rápido): nginx, httpd e haproxy servem HTTPS pelo
+  endereço público e mandam o visitante de HTTP para `https://<host>/`, com o redirect local
+  para a porta TLS intacto e os três `smoke.sh` a passar; a API Go e a do Django (depois dos
+  dois ajustes) criaram e listaram uma nota pelo túnel, com `Origin` de browser.
+- **Não validado**: o túnel com nome num domínio próprio (precisa de um domínio com DNS no
+  Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
+  ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
 
 ## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
 
@@ -5813,7 +5888,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   `cluster ls` só se exercita com o supervisor morto primeiro. Ao vivo, 2026-10-02: binário
   com as duas solturas revertidas — `stats` e `kind` FAIL, `exit` FAIL em 4 de 5 (a quinta
   passou porque outro `delonix` do host varreu órfãos nesse segundo: a varredura é por uid,
-  não por root); `main` — os três PASS;
+  não por root); `main` — os três PASS. **Mais três, com a mesma técnica de segurar a saída**: `stopgaveup`
+  (um `stop` que desiste com DX-8101 solta a porta e o slirp nesse momento — FAIL no binário de
+  antes do #646, PASS depois; o slirp fica ZOMBIE, não desaparece, porque é filho do supervisor);
+  `hang` (um `slirp4netns` falso no PATH que só dorme: o `start` tem de devolver com a causa); e
+  `zombies` — **achado ao provar**: o slirp e o shim de logs são filhos do supervisor, que só
+  colhia o container, e um `--restart always` que cai sempre juntava 2 zombies por reinício (6
+  ao fim de 3, medido). O supervisor colhe-os entre incarnações (`reap_finished_children`;
+  teste num processo próprio, porque `waitpid(-1)` no binário de testes levaria os filhos dos
+  outros testes). Um cenário que depende de saídas rápidas responde 77, e não PASS, quando o
+  disco está saturado — o `zombies` passou uma vez num binário defeituoso porque os reinícios
+  nem chegaram a acontecer;
 - **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
   `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
   reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
@@ -5916,7 +6001,12 @@ checklist para quem mexer aqui do que como lista de correcções:
   `a_forced_remove_that_gave_up_is_not_restarted_by_the_supervisor` (o teste É o supervisor: pai
   do processo, o mesmo `wait_and_record` e o mesmo `resume_restart`) e
   `a_refused_start_keeps_the_stop_the_operator_asked_for`, ambos vermelhos com a correcção
-  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**;
+  revertida (verificado). **Quem desiste a meio deixa escrito o que tinha pedido**.
+  **Provado ao vivo a 2026-10-02, sem disco saturado** (`scripts/e2e_rm_force_gave_up.sh`, no
+  `e2e.sh`): o PID 1 de uma pidns só acaba de sair quando todos os processos dela foram colhidos
+  (`zap_pid_ns_processes`); um `container exec` deixa lá um processo com o pai FORA da pidns, e
+  com esse pai parado (SIGSTOP) o PID 1 fica em estado S até ao SIGCONT — o `rm -f` dá DX-8101
+  sempre. Binário de antes do #647: ressuscitou 3 em 3; `main`: 3 em 3 certos;
 - **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
   registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
   os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,
@@ -8595,6 +8685,9 @@ ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
   - o `ENV` do último estágio era empacotado duas vezes, a segunda por expandir: `ENV
     PATH=/app/.venv/bin:$PATH` dava uma imagem cujo PATH era essa cadeia literal. O serviço
     corria (o comando vive no único directório que restava) e `exec <c> id` saía 127 calado.
+- **Os sete templates correram o seu CI gerado** (2026-10-02, binário de `cfd46e01`, raiz
+  isolada): `node` (4 passos `run:` do GitHub), `nestjs` (8), `nextjs` (5) e `django` (8), cada
+  um com o trabalho do GitLab, sem falhas. `go`, `laravel` e `fastapi` tinham corrido antes.
 - **«Validado» com a imagem a responder não é validado.** Os quatro passavam o smoke. O PATH
   partido só apareceu ao correr `id` lá dentro, e o `exec` de um comando inexistente não dizia
   nada — agora diz o mesmo que o init (`delonix: exec <programa>: <errno>`).
