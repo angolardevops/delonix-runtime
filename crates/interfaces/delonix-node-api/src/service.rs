@@ -142,6 +142,9 @@ pub fn router() -> axum::Router {
         .route("/v1/node/health", axum::routing::get(|| json(health())))
         .route("/v1/node/capacity", axum::routing::get(|| json(capacity())))
         .route("/openapi.json", axum::routing::get(openapi_json))
+        .route("/docs", axum::routing::get(crate::docs::swagger))
+        .route("/redoc", axum::routing::get(crate::docs::redoc))
+        .route("/docs/assets/:name", axum::routing::get(crate::docs::asset))
         .route_service(
             &format!("/{}/*rest", NodeServiceServer::<NodeApi>::NAME),
             NodeServiceServer::new(NodeApi),

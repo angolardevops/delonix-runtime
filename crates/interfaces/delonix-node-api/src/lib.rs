@@ -6,9 +6,10 @@
 //! `ProviderInfo` per provider that `delonix provider ls -o json` prints — and
 //! `GetNodeInfo`, `GetHealth` and `GetCapacity` (ADR-0042 step C), computed from
 //! the same functions `delonix system info` reads. `GET /openapi.json` serves
-//! the published document. `WatchEvents` answers `UNIMPLEMENTED` with the step
-//! that brings it; every other service of the contract is not registered on
-//! this socket at all.
+//! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
+//! render it from UI files embedded in the binary ([`docs`]). `WatchEvents`
+//! answers `UNIMPLEMENTED` with the step that brings it; every other service of
+//! the contract is not registered on this socket at all.
 //!
 //! Both encodings come from the same `proto/` files: the gRPC stubs and the
 //! proto3 JSON (`pbjson`, proto field names — what the published OpenAPI
@@ -32,6 +33,7 @@ pub mod proto {
     }
 }
 
+pub mod docs;
 pub mod node;
 pub mod providers;
 mod service;

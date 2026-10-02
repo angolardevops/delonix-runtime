@@ -606,6 +606,15 @@ if [[ -x "$NODEBIN" ]]; then
   check "GET /openapi.json serve o documento gerado, com as rotas do NodeService" ok env \
     DOC_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/openapi.json)" \
     python3 -c 'import json,os; d=json.loads(os.environ["DOC_JSON"]); assert d["openapi"].startswith("3"); assert {"/v1/node","/v1/node/health","/v1/node/capacity","/v1/providers"} <= set(d["paths"])'
+  NODE_ASSETS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
+  # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
+  check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \
+    "for p in /docs /redoc; do h=\$(curl -s -D - -o /dev/null --unix-socket '$NODESOCK' http://localhost\$p); echo \"\$h\" | grep -q '^HTTP/1.1 200' && echo \"\$h\" | grep -qi '^content-type: text/html' && echo \"\$h\" | grep -qi \"^content-security-policy: default-src 'none'; script-src 'self';\" || exit 1; done"
+  check "as páginas de docs não carregam nada de fora e cada asset que referem é servido" ok bash -c \
+    "for p in /docs /redoc; do b=\$(curl -s --unix-socket '$NODESOCK' http://localhost\$p); echo \"\$b\" | grep -qE 'src=\"(https?:)?//|href=\"(https?:)?//' && exit 1; for a in \$(echo \"\$b\" | grep -oE '/docs/assets/[^\"]+'); do [[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost\$a) == 200 ]] || exit 1; done; done"
+  check "o Swagger UI embebido é o do upstream (sha256 do SHA256SUMS) e o validador online está desligado" ok bash -c \
+    "want=\$(grep 'swagger-ui/swagger-ui-bundle.js\$' '$NODE_ASSETS_ROOT/third_party/node-api-docs/SHA256SUMS' | cut -d' ' -f1); got=\$(curl -s --unix-socket '$NODESOCK' http://localhost/docs/assets/swagger-ui-bundle.js | sha256sum | cut -d' ' -f1); [[ -n \$want && \$want == \$got ]] && curl -s --unix-socket '$NODESOCK' http://localhost/docs/assets/swagger-init.js | grep -q 'validatorUrl: null'"
   kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
 else
   skip "node API pelo contrato (ADR-0050 D5)" "sem delonix-node-api ao lado de $BIN (cargo build -p delonix-node-api-bin)"

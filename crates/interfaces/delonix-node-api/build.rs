@@ -54,5 +54,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "cargo:rerun-if-changed={}",
         root.join(".git/HEAD").display()
     );
+    verify_ui_assets(&root.join("third_party/node-api-docs"))?;
+    Ok(())
+}
+
+/// ADR-0042 D3: the Swagger UI and ReDoc files embedded in the binary are
+/// checked against the committed `third_party/node-api-docs/SHA256SUMS` on
+/// every build — a
+/// changed byte, a missing file, or a file nobody listed fails the build.
+/// The files are byte-identical to the upstream npm packages (`third_party/node-api-docs/README.md`).
+fn verify_ui_assets(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeSet;
+    let sums = std::fs::read_to_string(dir.join("SHA256SUMS"))?;
+    println!(
+        "cargo:rerun-if-changed={}",
+        dir.join("SHA256SUMS").display()
+    );
+    let mut listed = BTreeSet::new();
+    for line in sums.lines().filter(|l| !l.trim().is_empty()) {
+        let (want, file) = line.split_once("  ").ok_or_else(|| {
+            format!("third_party/node-api-docs/SHA256SUMS: malformed line '{line}'")
+        })?;
+        let path = dir.join(file);
+        println!("cargo:rerun-if-changed={}", path.display());
+        let bytes = std::fs::read(&path).map_err(|e| {
+            format!("third_party/node-api-docs/{file} is listed in SHA256SUMS and unreadable: {e}")
+        })?;
+        let got: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if got != want {
+            return Err(format!(
+                "third_party/node-api-docs/{file}: sha256 {got} is not the {want} SHA256SUMS records — the embedded \
+                 UI assets must be the upstream files, unchanged (its README.md)"
+            )
+            .into());
+        }
+        listed.insert(file.to_string());
+    }
+    for sub in ["swagger-ui", "redoc"] {
+        for entry in std::fs::read_dir(dir.join(sub))? {
+            let name = format!("{sub}/{}", entry?.file_name().to_string_lossy());
+            if !listed.contains(&name) {
+                return Err(format!(
+                    "third_party/node-api-docs/{name} is not listed in its SHA256SUMS"
+                )
+                .into());
+            }
+        }
+    }
     Ok(())
 }

@@ -42,6 +42,7 @@ tracing = { workspace = true }
 [build-dependencies]
 tonic-build = { workspace = true }
 pbjson-build = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }

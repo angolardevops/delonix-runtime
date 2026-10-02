@@ -1463,8 +1463,11 @@ unix local, só para o próprio uid. Hoje serve o <code>NodeService</code>:
 <code>/v1/node/health</code> e <code>/v1/node/capacity</code> dizem o que o nó é, se pode correr
 workloads e que espaço tem (ADR-0042 passo C) — um valor que não se mediu vem nomeado em
 <code>unmeasured</code>, nunca como zero. <code>GET /openapi.json</code> serve o documento gerado
-(<code>docs/api/openapi.yaml</code>); o <code>WatchEvents</code> responde <code>UNIMPLEMENTED</code>
-a nomear o passo que o traz.""",
+(<code>docs/api/openapi.yaml</code>), e <code>GET /docs</code> (Swagger UI) e <code>GET /redoc</code>
+desenham-no a partir de ficheiros embebidos no binário, sem carregar nada de fora (um
+Content-Security-Policy só deixa o próprio socket); chega-se a elas por um port-forward ou um
+túnel SSH até ao socket. O <code>WatchEvents</code> responde <code>UNIMPLEMENTED</code> a nomear o
+passo que o traz.""",
         "subs": {},
     },
     "manifest": {
@@ -2017,7 +2020,10 @@ local unix socket, for the owning uid only. Today it serves the <code>NodeServic
 <code>/v1/node/health</code> and <code>/v1/node/capacity</code> say what the node is, whether it can
 run workloads and what room it has (ADR-0042 step C) — a value that was not measured is named in
 <code>unmeasured</code>, never reported as zero. <code>GET /openapi.json</code> serves the generated
-document (<code>docs/api/openapi.yaml</code>); <code>WatchEvents</code> answers
+document (<code>docs/api/openapi.yaml</code>), and <code>GET /docs</code> (Swagger UI) and
+<code>GET /redoc</code> render it from UI files embedded in the binary, loading nothing from
+elsewhere (a Content-Security-Policy allows only the socket itself); a browser reaches them through
+a port-forward or an SSH tunnel to the socket. <code>WatchEvents</code> answers
 <code>UNIMPLEMENTED</code> naming the step that brings it.""",
     },
     "manifest": {
