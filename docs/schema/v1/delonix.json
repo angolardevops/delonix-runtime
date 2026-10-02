@@ -559,6 +559,31 @@
       ],
       "type": "object"
     },
+    "DnsInput": {
+      "description": "`spec.dns` of a zone: a DNS controller the provider's administrator\nregistered, and the domain the guests' records go under. The provider\nwrites the records — an A and a PTR for each guest that gets an address\nfrom a DHCP range, and for each subnet's gateway (`<vnet>-gw`).",
+      "properties": {
+        "reverseServer": {
+          "description": "The controller the PTR records go to; none when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "description": "The DNS controller (its id on the provider) the A records go to.",
+          "type": "string"
+        },
+        "zone": {
+          "description": "The domain, without the trailing dot.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "zone"
+      ],
+      "type": "object"
+    },
     "Entrypoint": {
       "description": "An entry point (proxy listen port).",
       "properties": {
@@ -1608,6 +1633,17 @@
       "additionalProperties": false,
       "description": "`spec` of `kind: NetworkZone`.",
       "properties": {
+        "dns": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DnsInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The DNS server the provider registers the zone's guests in (ADR-0059\nF5c). Hot: a change converges live; the records the provider already\nwrote stay as they are."
+        },
         "vnets": {
           "default": [],
           "items": {

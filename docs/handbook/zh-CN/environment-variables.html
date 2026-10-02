@@ -1189,6 +1189,34 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>没有它，那个测试里控制器那一半会被跳过；其余部分照常运行。</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_CONTROLLER</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>集群管理员已注册的 PowerDNS 控制器 id（<code>/cluster/sdn/dns</code>）——ADR-0064 实机用例把它交给区域，从不创建控制器。</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>实机用例为其客户机注册所用的域名，不带结尾的点；它和 <code>10.in-addr.arpa.</code> 必须已存在于 DNS 服务器上。</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>DNS 服务器的 API 基址（<code>http:/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>），由本机访问，供测试读回记录；引擎从不调用它。</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_DNS_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server</code></a></td>
+<td>存放 DNS 服务器 API 密钥的文件，用于测试自身的读取与清理。</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>防火墙测试的系统容器所接入的节点网桥：防火墙需要一个 <code>net0</code> 来设置 <code>firewall=1</code>。</td>

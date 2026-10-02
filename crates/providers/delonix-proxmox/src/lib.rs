@@ -42,6 +42,7 @@
 //!   make HTTP requests.
 
 pub mod cluster;
+mod dns;
 mod error;
 mod ipam;
 pub mod lxc;
@@ -62,6 +63,7 @@ pub use sdn_routing::{
     VnetFirewallOptions,
 };
 
+pub use dns::ProxmoxDnsProvider;
 pub use ipam::ProxmoxIpamProvider;
 pub use network_zone::{ProxmoxSegmentProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
@@ -4443,6 +4445,37 @@ fn parse<T: for<'de> Deserialize<'de>>(body: &str, what: &str) -> Result<T> {
     })
 }
 
+/// [`parse`] for an answer that carries a third-party credential — the SDN
+/// DNS and IPAM controllers come back with their API key or token in clear
+/// (measured on PVE 9.2.2, `GET /cluster/sdn/dns`). The error names the route
+/// and the decoder's complaint and never quotes the body: the `redact` pass
+/// only knows this client's own credentials, not a controller's.
+pub(crate) fn parse_secret_bearing<T: for<'de> Deserialize<'de>>(
+    body: &str,
+    what: &str,
+) -> Result<T> {
+    serde_json::from_str(body).map_err(|e| {
+        Error::Decode(format!(
+            "proxmox: could not read the answer from {what}: {} at line {} column {} (body not \
+             shown: it carries a controller's credential)",
+            decode_category(&e),
+            e.line(),
+            e.column()
+        ))
+    })
+}
+
+/// The category of a decode failure, without its message: serde's message
+/// can quote a fragment of the input (an unexpected string value).
+fn decode_category(e: &serde_json::Error) -> &'static str {
+    match e.classify() {
+        serde_json::error::Category::Io => "an I/O error",
+        serde_json::error::Category::Syntax => "malformed JSON",
+        serde_json::error::Category::Data => "an unexpected shape",
+        serde_json::error::Category::Eof => "a truncated answer",
+    }
+}
+
 /// Truncates to at most `max` BYTES without splitting a character. Slicing a
 /// response body by byte index panics when the cut lands inside a multi-byte
 /// character — and the body comes from the far end, so that turns any error
@@ -6646,9 +6679,9 @@ pub fn register_segment_provider(
     validate_target_url(&target.base_url)?;
     validate_node_name(&target.node)?;
 
-    // ONE client for the two roles: the IPAM provider's staged writes run
-    // inside the segment provider's transaction and carry the SDN lock token
-    // the client holds (ADR-0059 F5b).
+    // ONE client for the three roles: the IPAM and DNS providers' staged
+    // writes run inside the segment provider's transaction and carry the SDN
+    // lock token the client holds (ADR-0059 F5b, F5c).
     type Slot = std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<Client>>>>;
     let shared: Slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let connect = move |slot: &Slot| -> delonix_networking::Result<std::sync::Arc<Client>> {
@@ -6679,6 +6712,21 @@ pub fn register_segment_provider(
                     Ledger::at(&ipam_ledger),
                 ))
                     as Box<dyn delonix_networking::ipam::IpamProvider>)
+            }),
+        },
+    )
+    .map_err(delonix_model::Error::from)?;
+    let (dns_slot, dns_connect, dns_ledger) = (shared.clone(), connect.clone(), ledger_dir.clone());
+    delonix_networking::dns::register_dns_provider(
+        delonix_networking::dns::DnsProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
+            aliases: &["pve"],
+            new: Box::new(move || {
+                Ok(Box::new(ProxmoxDnsProvider::new(
+                    dns_connect(&dns_slot)?,
+                    Ledger::at(&dns_ledger),
+                ))
+                    as Box<dyn delonix_networking::dns::DnsProvider>)
             }),
         },
     )
@@ -6784,8 +6832,14 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             C::NetLbL4 | C::NetLbHealthCheck => S::UnsupportedByProvider {
                 reason: "PVE has no load balancer",
             },
-            C::NetDnsRecords | C::NetDnsAuthoritative => S::RequiresExternalComponent {
-                component: "a PowerDNS server — the only DNS plugin of PVE 9.2.2",
+            // ADR-0059 F5c (ADR-0064): `dns:` on a NetworkZone names a
+            // controller the cluster's administrator registered; the node
+            // writes a guest's A and PTR, proven against a real PowerDNS.
+            C::NetDnsRecords => S::Supported {
+                evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_dns_provider_registers_a_guest_in_the_zones_dns_server",
+            },
+            C::NetDnsAuthoritative => S::UnsupportedByProvider {
+                reason: "the SDN writes records into a PowerDNS server it does not run; it serves no zone itself",
             },
             // ADR-0059 F5b: `kind: NetworkZone` subnets, DHCP ranges and
             // reservations, proven by a guest that gets the reserved address.
