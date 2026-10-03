@@ -15,7 +15,13 @@
 //! the thin Kind-dispatch layer: parse the spec, write the registry entry,
 //! answer the reconciler's questions. See `docs/adr/0032-service-kind-dns-round-robin.md`
 //! for the full design and the deliberately-deferred pieces (a real L4 VIP,
-//! `type: LoadBalancer`/`NodePort`/`ExternalName`, readiness-gated membership).
+//! `type: LoadBalancer`/`NodePort`/`ExternalName`).
+//!
+//! **Membership is readiness-aware.** Only a `Running` container is a backend,
+//! and one that declares a health check is a backend only while `healthy`
+//! (`Starting`/`Unhealthy` are out). A container with no health check is ready
+//! when it runs. This is discovery, not draining: a client holding a resolved
+//! address keeps it.
 //!
 //! **No new CLI leaf.** Reached the same way `kind: Dependency`/
 //! `kind: NetworkAccessRule` already are — through `delonix apply -f`/
