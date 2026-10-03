@@ -304,12 +304,36 @@ fn pod_network(spec_network: &str) -> &str {
     }
 }
 
+/// A pod name is unique on the node; the same name in another namespace is a
+/// conflict, never «already exists».
+fn check_pod_namespace(name: &str, want: &str, have: &str) -> Result<()> {
+    let have = if have.is_empty() { "default" } else { have };
+    if want.eq_ignore_ascii_case(have) {
+        return Ok(());
+    }
+    Err(Error::Conflict(format!(
+        "pod '{name}' already exists in namespace '{have}'; a pod name is unique on the node, so '{want}' cannot reuse it"
+    )))
+}
+
 fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()> {
     valid_pod_name(name)?;
     let (images, store) = open_stores()?;
 
     // Idempotent ("ensure present"): if the pod already has containers, do nothing.
     let already = members_of(&store, name)?;
+    // A pod name is unique on the node (the shared netns and the member names
+    // `<pod>-<member>` are not namespaced). The same name asked for in ANOTHER
+    // namespace is a different resource and must not be answered «already
+    // exists, nothing to do» — that reported success for a pod that was never
+    // created, and left the caller believing its workload was running.
+    if let Some(first) = already.first() {
+        check_pod_namespace(
+            name,
+            namespace.as_deref().unwrap_or("default"),
+            &first.namespace,
+        )?;
+    }
     if !already.is_empty() {
         println!(
             "pod/{name}: already exists ({} container(s)), nothing to do",
@@ -1000,6 +1024,13 @@ pub fn netnsconnect(port_str: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_same_pod_name_in_another_namespace_is_a_conflict() {
+        assert!(check_pod_namespace("p", "default", "").is_ok());
+        assert!(check_pod_namespace("p", "teamA", "teama").is_ok());
+        let e = check_pod_namespace("p", "teamB", "teamA").unwrap_err();
+        assert!(matches!(e, Error::Conflict(_)), "{e}");
+    }
     use super::*;
 
     #[test]
