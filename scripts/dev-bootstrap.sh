@@ -16,6 +16,7 @@
 #                         needs on targets where it is not the default (aarch64).
 #   protoc                the CRI and node-contract build scripts (prost/tonic).
 #   pkg-config, make, git, curl, python3 >= 3.11 (the script gates use tomllib).
+#   cargo-nextest         `make test` runs the suite in about a fifth of the time.
 #   sccache               a shared compile cache for Rust and C/C++ objects: a second
 #                         worktree does not pay for the whole build again.
 #
@@ -137,7 +138,7 @@ install_rust() {
 
 install_cargo_tools() {
   local tool
-  for tool in sccache cargo-deny; do
+  for tool in sccache cargo-deny cargo-nextest; do
     has "$tool" && continue
     echo "installing $tool with cargo (compiles from source; a few minutes)"
     # Lowest priority and a bounded job count: bootstrapping must not be the build
@@ -189,12 +190,24 @@ else
 fi
 
 echo "recommended"
-for c in clang ld.lld sccache cargo-deny; do
+for c in clang ld.lld sccache cargo-deny cargo-nextest; do
   if has "$c"; then row ok "$c" "$(command -v "$c")"; else row opt "$c" "not installed"; fi
 done
 for c in nice ionice; do
   if has "$c"; then row ok "$c" "builds run at low CPU/disk priority"; else row opt "$c" "not installed — builds run at normal priority"; fi
 done
+
+# rustc ships its own LLVM. Cross-language LTO (Rust and C in one optimisation
+# unit) needs the C compiler to be the same major; otherwise it is not available.
+# Plain builds are unaffected, so this is informational, never a failure.
+if has rustc && has clang; then
+  rl=$(rustc "+$CHANNEL" -vV 2>/dev/null | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')
+  cl=$(clang --version 2>/dev/null | sed -n 's/.*clang version \([0-9]*\).*/\1/p')
+  if [ -n "$rl" ] && [ -n "$cl" ]; then
+    if [ "$rl" = "$cl" ]; then row ok "llvm match" "rustc and clang are both LLVM $rl"
+    else row opt "llvm match" "rustc uses LLVM $rl, clang is $cl: no cross-language LTO (plain builds unaffected)"; fi
+  fi
+fi
 
 echo "optional (specific gates only)"
 for pair in "mold:make LINKER=mold" "buf:scripts/contract_gate.py" "protoc-gen-openapi:scripts/contract_gate.py" \

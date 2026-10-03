@@ -289,6 +289,7 @@ make uninstall        # remove o que o `make install` escreveu
 make ci               # verificação de formato, gates de script, clippy, testes
 make help             # todos os alvos
 </code></pre></div>
+<p>O <code>make test</code> usa o <code>cargo-nextest</code> quando está instalado (o <code>make bootstrap</code> instala-o) e corre os doctests por <code>cargo test --doc</code>; medido neste workspace, os 2682 testes levam 24 s contra 126 s com <code>cargo test</code>. <code>NEXTEST=0</code> força o <code>cargo test</code> simples. O perfil <code>dev</code> guarda só tabelas de linhas (<code>debug = "line-tables-only"</code>): um <code>cargo test --workspace --no-run</code> a frio passou de 71 s e 8,5 GiB de target para 44 s e 4,9 GiB, e um debugger deixa de mostrar variáveis locais.</p>
 <p><strong>O que o <code>make install</code> escreve.</strong> Os cinco binários em <code>~/.local/bin</code>, a completion de shell e
 as páginas de manual geradas pelo binário instalado em <code>~/.local/share</code>, e
 <code>~/.config/delonix/env.sh</code>, que exporta <code>DELONIX_BIN</code> (a CLI instalada), <code>DELONIX_ROOT</code> (o state
@@ -330,9 +331,9 @@ artefactos um do outro. O <code>make info</code> imprime o que foi resolvido.</p
 <td>compila sem a cache partilhada (que também guarda os objectos C do <code>ring</code> e do <code>zstd-sys</code>)</td>
 </tr>
 <tr>
-<td><code>PROFILE=debug</code></td>
+<td><code>PROFILE=debug|release-ci</code></td>
 <td><code>release</code></td>
-<td>compila e instala o perfil dev</td>
+<td>o perfil dev, ou <code>release-ci</code> (thin LTO, 16 unidades de codegen: medido 114 s contra 188 s para os cinco binários, um binário de 38 MiB em vez de 32). A release publicada e o perf gate mantêm <code>release</code></td>
 </tr>
 <tr>
 <td><code>LINKER=mold|lld</code></td>
