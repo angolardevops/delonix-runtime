@@ -9,10 +9,16 @@
 //! (`write_oci_media_archive`, slice 1), and handed to the port, which uploads
 //! it once under its manifest digest (slice 2).
 //!
-//! **No `provider` field**, like `kind: NetworkZone`: the runtime's own
-//! configuration (`DELONIX_PROXMOX_*`, or `providers.yaml`) decides which
-//! node runs it. This module is the composition root that turns that
-//! configuration into a `SystemContainerProvider`.
+//! **The provider block is `type` + `spec`** (ADR-0071), like `kind: VirtualMachine`
+//! and `kind: Gateway`: `spec.provider.type` is `proxmox` (the only provider of
+//! this port), and `spec.provider.spec` carries what only that provider
+//! understands — the swap allowance and the node bridge/VLAN. The runtime's own
+//! configuration (`DELONIX_PROXMOX_*`, or `providers.yaml`) still decides WHICH
+//! node runs it; `ref` stays reserved. The block is normalized at load
+//! (`lower_system_container_provider`) to the flat fields the one executor
+//! reads, so the old spelling (`swap`/`network` at the top of `spec`) keeps
+//! working and means the same. This module is the composition root that turns
+//! the configuration into a `SystemContainerProvider`.
 //!
 //! **Its own registry** keeps the provider's locator and what was declared.
 //! What the container IS — its memory, swap, cores, entrypoint and
@@ -69,6 +75,91 @@ pub struct SystemContainerSpecDoc {
     /// A network interface on a bridge of the node. Absent: none.
     #[serde(default)]
     pub network: Option<SystemContainerNetDoc>,
+    /// `{ type: proxmox, spec: { swap, network } }` — what only the provider
+    /// understands. Folded into the flat fields at load; never present when
+    /// the document reaches the executor.
+    #[serde(default, skip_serializing)]
+    pub provider: Option<SystemContainerProviderDoc>,
+}
+
+/// The provider block of a `SystemContainer` (ADR-0071).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct SystemContainerProviderDoc {
+    /// `proxmox`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub spec: Option<SystemContainerProviderSpecDoc>,
+}
+
+/// Fields only the Proxmox node understands for a system container.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct SystemContainerProviderSpecDoc {
+    #[serde(default)]
+    pub swap: Option<String>,
+    #[serde(default)]
+    pub network: Option<SystemContainerNetDoc>,
+}
+
+const SYSTEM_CONTAINER_PROVIDER_TYPES: &[&str] = &["proxmox"];
+const SYSTEM_CONTAINER_PROVIDER_SPEC: &[&str] = &["swap", "network"];
+
+/// Normalizes `spec.provider: { type, spec }` to the flat fields (ADR-0071).
+/// The type is validated and then dropped: this port has one executor.
+pub(crate) fn lower_system_container_provider(docs: &mut [ManifestDoc]) -> Result<()> {
+    use serde_yaml::Value;
+    for doc in docs.iter_mut().filter(|d| d.kind == k::SYSTEM_CONTAINER) {
+        let name = doc.metadata.name.clone();
+        let bad = |msg: String| Error::Invalid(format!("SystemContainer '{name}': {msg}"));
+        let Value::Mapping(spec) = &mut doc.spec else {
+            continue;
+        };
+        let Some(Value::Mapping(p)) = spec.get("provider").cloned() else {
+            continue;
+        };
+        for key in p.keys().filter_map(Value::as_str) {
+            if !matches!(key, "type" | "spec") {
+                return Err(bad(format!(
+                    "spec.provider.{key}: unknown field (a provider block is `type` + `spec`)"
+                )));
+            }
+        }
+        let ty = p
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("spec.provider.type is required".into()))?;
+        if !SYSTEM_CONTAINER_PROVIDER_TYPES.contains(&ty) {
+            return Err(bad(format!(
+                "spec.provider.type '{ty}' cannot run a system container (known: {})",
+                SYSTEM_CONTAINER_PROVIDER_TYPES.join(", ")
+            )));
+        }
+        match p.get("spec") {
+            None | Some(Value::Null) => {}
+            Some(Value::Mapping(block)) => {
+                for key in block.keys().filter_map(Value::as_str) {
+                    if !SYSTEM_CONTAINER_PROVIDER_SPEC.contains(&key) {
+                        return Err(bad(format!(
+                            "spec.provider.spec.{key}: not a {ty} field of a system container"
+                        )));
+                    }
+                    if spec.contains_key(key) {
+                        return Err(bad(format!(
+                            "'{key}' is written both in spec.provider.spec and at the top of spec — say it once"
+                        )));
+                    }
+                }
+                for key in SYSTEM_CONTAINER_PROVIDER_SPEC {
+                    if let Some(v) = block.get(*key) {
+                        spec.insert(Value::from(*key), v.clone());
+                    }
+                }
+            }
+            Some(_) => return Err(bad("spec.provider.spec must be a mapping".into())),
+        }
+        spec.remove("provider");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -106,10 +197,21 @@ pub const SYSTEM_CONTAINER_SPEC_FIELDS: &[&str] = &[
     "cores",
     "rootfs",
     "network",
+    "provider",
 ];
 
 /// Fields the reconciler compares.
-pub const RECONCILED_SYSTEM_CONTAINER_FIELDS: &[&str] = SYSTEM_CONTAINER_SPEC_FIELDS;
+/// (`provider` is folded into the flat fields at load, so it is never compared.)
+pub const RECONCILED_SYSTEM_CONTAINER_FIELDS: &[&str] = &[
+    "image",
+    "entrypoint",
+    "env",
+    "memory",
+    "swap",
+    "cores",
+    "rootfs",
+    "network",
+];
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct SystemContainerRecord {
@@ -429,6 +531,7 @@ fn record_fields(rec: &SystemContainerRecord) -> Result<BTreeMap<String, String>
         cores: default_cores(),
         rootfs: rec.rootfs_gib,
         network: rec.network.clone(),
+        provider: None,
     };
     spec_fields(&spec)
 }
@@ -998,6 +1101,7 @@ fn record_port_spec(rec: &SystemContainerRecord) -> Result<SystemContainerSpec> 
         cores: default_cores(),
         rootfs: rec.rootfs_gib,
         network: rec.network.clone(),
+        provider: None,
     };
     port_spec(
         &rec.name,
@@ -1085,6 +1189,45 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    fn sc_doc(spec: &str) -> Vec<ManifestDoc> {
+        manifest::load_str(
+            &format!("apiVersion: delonix.io/v1\nkind: SystemContainer\nmetadata: {{ name: sc }}\nspec: {spec}\n"),
+            "t",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_provider_block_folds_into_the_flat_fields_and_means_the_same() {
+        let a = sc_doc("{ image: alpine:3.20, provider: { type: proxmox, spec: { swap: 256M, network: { bridge: vmbr1, vlan: 7 } } } }");
+        let b = sc_doc("{ image: alpine:3.20, swap: 256M, network: { bridge: vmbr1, vlan: 7 } }");
+        assert_eq!(a[0].spec, b[0].spec);
+        assert!(a[0].spec.get("provider").is_none());
+    }
+
+    #[test]
+    fn a_provider_block_that_says_a_thing_twice_or_wrongly_is_refused() {
+        let err = |spec: &str| {
+            manifest::load_str(
+                &format!("apiVersion: delonix.io/v1\nkind: SystemContainer\nmetadata: {{ name: sc }}\nspec: {spec}\n"),
+                "t",
+            )
+            .unwrap_err()
+            .to_string()
+        };
+        assert!(
+            err("{ image: a, swap: 1G, provider: { type: proxmox, spec: { swap: 2G } } }")
+                .contains("say it once")
+        );
+        assert!(err("{ image: a, provider: { type: libvirt } }")
+            .contains("cannot run a system container"));
+        assert!(
+            err("{ image: a, provider: { type: proxmox, spec: { memory: 1G } } }")
+                .contains("not a proxmox field")
+        );
+        assert!(err("{ image: a, provider: { spec: {} } }").contains("type is required"));
+    }
     use super::*;
 
     fn spec() -> SystemContainerSpecDoc {
