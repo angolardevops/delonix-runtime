@@ -455,7 +455,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
-    let containers = cstore.list().unwrap_or_default();
+    let containers = cstore.list()?;
     for kind in super::kinds::stack_kinds() {
         if super::kinds::converges(kind) {
             continue;

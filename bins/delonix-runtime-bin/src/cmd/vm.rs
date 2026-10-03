@@ -1337,8 +1337,10 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// plan does not use would make planning slow for nothing.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     let base = state_root();
-    Ok(delonix_vm::list(&base)
-        .unwrap_or_default()
+    // An unreadable store is an ERROR, not an empty machine: an empty list plans
+    // `Create` for every declared VM, and a second VM of the same name on a
+    // provider that still has the first.
+    Ok(delonix_vm::list(&base)?
         .into_iter()
         .map(|vm| {
             let mut f = std::collections::BTreeMap::new();
