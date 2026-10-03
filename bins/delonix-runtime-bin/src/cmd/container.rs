@@ -328,7 +328,10 @@ pub(crate) fn created_specs(
         .into_iter()
         .filter_map(|c| {
             let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
-            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+            Some((
+                manifest::scoped_plan_name(&c.namespace, &c.name),
+                super::reconcile::decode_last_applied(raw)?,
+            ))
         })
         .collect())
 }
@@ -652,7 +655,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     };
     Ok(super::reconcile::Desired {
         kind: k::CONTAINER.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields,
         converges: true,
         ownable: true,
@@ -672,7 +675,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
             kind: k::CONTAINER.into(),
-            name: c.name.clone(),
+            name: manifest::scoped_plan_name(&c.namespace, &c.name),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: c
@@ -1003,7 +1006,7 @@ fn valid_container_name(name: &str) -> bool {
 // language — the context returns them as data and never prints.
 #[cfg(test)]
 use delonix_compute::pod::HostAlias;
-pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
+pub(crate) use delonix_compute::pod::{PodSpec, POD_CONTAINER_FIELDS, POD_SPEC_FIELDS};
 
 /// Prints each translation notice ONCE per invocation.
 ///
@@ -2429,6 +2432,101 @@ fn controller_limits_decision(
     Err(delonix_model::Error::Unavailable(msg))
 }
 
+/// Refuses `--device-read/write-bps/iops` when no block device can be resolved
+/// for the store this container's rootfs will live in — `io.max` caps ONE named
+/// disk, and with none to name the limit does not exist.
+///
+/// # Why
+///
+/// [`preflight_controller_limits`] proves the `io` controller is there; that is
+/// half of it. The engine used to take the device from `/var/lib/delonix`,
+/// `/var/lib` or `/` whatever the store in use, and skip `io.max` without a
+/// word when all three were anonymous (major 0: btrfs, overlayfs, tmpfs).
+/// Measured 2026-09-27 as root with the store on another disk: `io.max` named
+/// the disk of `/var/lib/delonix`, and `dd` under `--device-write-bps 5mb` wrote
+/// at 1.9 GB/s, exit 0, no warning. The runtime now resolves the device from
+/// the container's own rootfs; this refuses up front when that answer is none.
+///
+/// `store` is `<root>/containers`, the parent of every container's rootfs.
+/// Only probed when a `--device-*` flag was given. Same escape hatch as the
+/// other two limit pre-flights.
+fn preflight_io_device(opts: &RunOpts, store: &std::path::Path) -> Result<()> {
+    if opts.io_max.is_none() {
+        return Ok(());
+    }
+    let escape_hatch = std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some();
+    io_device_decision(store, runtime::io_device_of(store).as_deref(), escape_hatch)
+}
+
+/// The decision `preflight_io_device` makes, pure so the refusal is tested
+/// without a btrfs mount — including the answer that must not come back: `Ok`
+/// with no device.
+fn io_device_decision(
+    store: &std::path::Path,
+    device: Option<&str>,
+    escape_hatch: bool,
+) -> Result<()> {
+    if device.is_some() {
+        return Ok(());
+    }
+    let flags = "--device-read-bps, --device-write-bps, --device-read-iops, --device-write-iops";
+    let store = store.display().to_string();
+    if escape_hatch {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "warning: {flags} cannot be enforced: no block device could be resolved for the \
+                 container store at {store}, so the kernel will not see the limit — continuing \
+                 unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set",
+                &[("flags", flags), ("store", &store)],
+            )
+        );
+        return Ok(());
+    }
+    Err(delonix_model::Error::Unavailable(super::po::tf(
+        "{flags} cannot be enforced: no block device could be resolved for the container store \
+         at {store} — io.max caps one named disk, and this filesystem reports none (btrfs, \
+         overlayfs and tmpfs do not have one) — so the limit would not exist while this command \
+         reports success. Put the store (DELONIX_ROOT) on a filesystem backed by a block device, \
+         or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit.",
+        &[("flags", flags), ("store", &store)],
+    )))
+}
+
+#[cfg(test)]
+mod io_device_preflight_tests {
+    use super::io_device_decision;
+    use std::path::Path;
+
+    /// THE regression: `--device-*` with no resolvable device used to run with
+    /// no cap and exit 0. Reverting to that makes this `Ok` and fails.
+    #[test]
+    fn no_device_refuses_with_exit_69() {
+        let err = io_device_decision(Path::new("/srv/btrfs/delonix/containers"), None, false)
+            .expect_err("no device must refuse, not run uncapped");
+        assert_eq!(delonix_model::exitcode::for_error(&err), 69, "{err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("/srv/btrfs/delonix/containers"), "{msg}");
+        assert!(msg.contains("--device-write-bps"), "{msg}");
+        assert!(msg.contains("DELONIX_ALLOW_UNENFORCED_LIMITS"), "{msg}");
+    }
+
+    #[test]
+    fn a_resolved_device_passes() {
+        assert!(io_device_decision(
+            Path::new("/var/lib/delonix/containers"),
+            Some("259:0"),
+            false
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn the_escape_hatch_runs_unenforced() {
+        assert!(io_device_decision(Path::new("/srv/btrfs/delonix/containers"), None, true).is_ok());
+    }
+}
+
 #[cfg(test)]
 mod controller_limits_preflight_tests {
     use super::{controller_limits_decision, controllers_wanted, RunOpts};
@@ -2626,6 +2724,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
     preflight_controller_limits(&opts)?;
+    preflight_io_device(&opts, &images.root().join("containers"))?;
     // The combinations of flags that cannot mean anything, refused before any
     // side effect — see `delonix_compute::preflight` for the two that used to be
     // checked only after the workload had run, or never.

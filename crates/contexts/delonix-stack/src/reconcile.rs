@@ -258,14 +258,19 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // it means a different directory and the bytes already written stay in
         // the old one — cold, which turns it into a refused `Replace` rather
         // than a silent move.
-        k::VOLUME => &["quota", "alertPct"],
+        k::VOLUME => &["quota", "alertPct", "labels"],
         // Measured on PVE 9.2.2 against a running container before being
         // declared: `memory` and `swap` land in its cgroup at once, `cores` in
         // its cpuset a few seconds later, and nothing is left pending. `image`,
         // `entrypoint`, `env` and `network` stay cold (ADR-0058, plan 63
         // slice 4). `rootfs` is grow-only, see `grow_only_fields`.
         k::SYSTEM_CONTAINER => &["memory", "swap", "cores"],
-        k::NETWORK => &["peers"],
+        // The only thing about a VM that changes without recreating it: its
+        // labels are bookkeeping on the record. Every other compared field
+        // defines the machine, and stays a refused `Replace` — which discards
+        // the disk.
+        k::VM => &["labels"],
+        k::NETWORK => &["peers", "labels"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
         k::IMAGE => &["ref", "digest"],
@@ -542,6 +547,53 @@ pub fn list_delta(from: Option<&str>, to: Option<&str>) -> (Vec<String>, Vec<Str
 /// string as two characters, never a literal one.
 pub fn encode_last_applied(fields: &BTreeMap<String, String>) -> String {
     serde_json::to_string(fields).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// The plan field that carries a document's own `metadata.labels`.
+pub const LABELS_FIELD: &str = "labels";
+
+/// Label keys the engine writes itself (ownership, management). A document
+/// cannot set them and the `labels` field never reports them: they are how the
+/// reconciler knows whose a resource is, not something a manifest declares.
+pub const RESERVED_LABEL_PREFIX: &str = "delonix.io/";
+
+/// `metadata.labels` as a plan field: the labels a document may own, as one
+/// canonical JSON object (keys ordered). `None` when there are none — a
+/// document that declares no labels says nothing about them, so labels put on
+/// the resource by hand are left alone (three-way diff).
+///
+/// Both sides of the comparison come through here — the document's labels and
+/// the record's — which is what keeps an unchanged manifest at zero
+/// differences.
+pub fn user_labels_field(labels: &BTreeMap<String, String>) -> Option<String> {
+    let own: BTreeMap<&String, &String> = labels
+        .iter()
+        .filter(|(k, _)| !k.starts_with(RESERVED_LABEL_PREFIX))
+        .collect();
+    if own.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&own).ok()
+}
+
+/// What moving the `labels` field from `from` to `to` means for the record: a
+/// key in `to` is set, a key only in `from` is removed (`None`). The shape the
+/// stores' `set_metadata` takes — which merges, so the engine's own labels and
+/// anything else on the record stay where they are.
+pub fn labels_delta(from: Option<&str>, to: Option<&str>) -> Vec<(String, Option<String>)> {
+    let parse = |raw: Option<&str>| -> BTreeMap<String, String> {
+        raw.and_then(|r| serde_json::from_str(r).ok())
+            .unwrap_or_default()
+    };
+    let (old, new) = (parse(from), parse(to));
+    let mut out: Vec<(String, Option<String>)> = old
+        .keys()
+        .filter(|k| !new.contains_key(*k))
+        .map(|k| (k.clone(), None))
+        .collect();
+    out.extend(new.into_iter().map(|(k, v)| (k, Some(v))));
+    out.retain(|(k, _)| !k.starts_with(RESERVED_LABEL_PREFIX));
+    out
 }
 
 /// Reads back what [`encode_last_applied`] wrote. A corrupt or absent value is
@@ -871,5 +923,67 @@ mod tests {
         let p = plan(&[d], &[a], "s");
         assert_eq!(p[0].action, Action::Replace);
         assert_eq!(p[0].cold_fields, vec!["memory".to_string()]);
+    }
+
+    /// `labels` is a VM's ONLY hot field: a label change is an update in place,
+    /// and everything else about a VM stays a refused `Replace`.
+    #[test]
+    fn labels_are_the_only_thing_a_vm_changes_without_being_recreated() {
+        assert_eq!(hot_fields(k::VM), ["labels"]);
+        assert!(hot_fields(k::NETWORK).contains(&"labels"));
+        assert!(hot_fields(k::VOLUME).contains(&"labels"));
+    }
+
+    /// A document's own labels are one plan field, the same string from the
+    /// manifest and from the record; the engine's ownership labels never are.
+    #[test]
+    fn the_labels_field_is_canonical_and_leaves_the_engines_labels_out() {
+        let map = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let declared = map(&[("tier", "front"), ("app", "web")]);
+        let on_record = map(&[
+            ("app", "web"),
+            ("delonix.io/managed-by", "delonix"),
+            ("delonix.io/stack", "shop"),
+            ("tier", "front"),
+        ]);
+        assert_eq!(
+            user_labels_field(&declared).as_deref(),
+            Some(r#"{"app":"web","tier":"front"}"#)
+        );
+        assert_eq!(user_labels_field(&declared), user_labels_field(&on_record));
+        // Nothing declared says nothing: no field, so labels put on by hand
+        // are not this document's to revert.
+        assert_eq!(user_labels_field(&map(&[])), None);
+        assert_eq!(
+            user_labels_field(&map(&[("delonix.io/stack", "shop")])),
+            None
+        );
+    }
+
+    /// Moving the field sets what is declared and removes what no longer is —
+    /// and never touches a key the engine owns, whatever a manifest says.
+    #[test]
+    fn a_labels_change_sets_removes_and_never_touches_reserved_keys() {
+        let from = r#"{"app":"web","tier":"front"}"#;
+        let to = r#"{"app":"api","delonix.io/stack":"mine"}"#;
+        let mut delta = labels_delta(Some(from), Some(to));
+        delta.sort();
+        assert_eq!(
+            delta,
+            vec![
+                ("app".to_string(), Some("api".to_string())),
+                ("tier".to_string(), None),
+            ]
+        );
+        assert_eq!(
+            labels_delta(Some(from), None),
+            vec![("app".to_string(), None), ("tier".to_string(), None)]
+        );
+        assert!(labels_delta(None, None).is_empty());
     }
 }

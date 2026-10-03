@@ -6338,7 +6338,7 @@ pub fn network_list() -> Vec<NetDef> {
 /// [`network_list`] under an explicit state root — for the `NetworkStore`,
 /// which is opened on a root of its own and has to see the `NetDef`s of THAT
 /// root when it picks a free `/16` (see [`crate::used_bases`]).
-pub(crate) fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
+pub fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
     let dir = root.join("ingress").join("networks");
     let mut v: Vec<NetDef> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -8592,6 +8592,25 @@ fn dns_state_serves(status: Option<&str>) -> bool {
     matches!(status, Some("Running") | Some("Paused") | Some("Created"))
 }
 
+/// Whether a container may be a backend of a `kind: Service`.
+///
+/// Running is not ready. A name resolves as soon as the container is alive (a
+/// client of ONE container wants the address early); a Service load-spreads, so
+/// handing out a member that is `Starting` or `Unhealthy` sends a share of the
+/// traffic to something that cannot answer. A container with no health check
+/// declared has nothing to wait for: it is ready when it runs. A paused or
+/// not-yet-started one is never a backend.
+fn service_member_ready(
+    status: Option<&str>,
+    has_health_check: bool,
+    health: Option<&str>,
+) -> bool {
+    if status != Some("Running") {
+        return false;
+    }
+    !has_health_check || health == Some("healthy")
+}
+
 /// One resolvable name, with everything needed to decide WHO may resolve it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DnsEntry {
@@ -8706,11 +8725,14 @@ fn build_dns_index() -> DnsIndex {
     // Collected alongside the container loop below, for the `kind: Service`
     // pass at the end — a SECOND directory read would just re-parse the same
     // files this loop already opened.
-    let mut container_summaries: Vec<(
+    // (labels, namespace, address, ready) of each serving container.
+    type ContainerSummary = (
         std::collections::BTreeMap<String, String>,
         String,
         [u8; 4],
-    )> = Vec::new();
+        bool,
+    );
+    let mut container_summaries: Vec<ContainerSummary> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -8766,7 +8788,12 @@ fn build_dns_index() -> DnsIndex {
                         .collect()
                 })
                 .unwrap_or_default();
-            container_summaries.push((container_labels, ns.clone(), ip));
+            let ready = service_member_ready(
+                v["status"].as_str(),
+                !v["health"].is_null(),
+                v["health_state"]["health"].as_str(),
+            );
+            container_summaries.push((container_labels, ns.clone(), ip, ready));
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -8869,11 +8896,12 @@ fn build_dns_index() -> DnsIndex {
     for def in service_list() {
         let ips: Vec<[u8; 4]> = container_summaries
             .iter()
-            .filter(|(labels, ns, _)| {
-                ns.eq_ignore_ascii_case(&def.namespace)
+            .filter(|(labels, ns, _, ready)| {
+                *ready
+                    && ns.eq_ignore_ascii_case(&def.namespace)
                     && crate::matches_labels(labels, &def.match_labels)
             })
-            .map(|(_, _, ip)| *ip)
+            .map(|(_, _, ip, _)| *ip)
             .collect();
         // An empty match is not an error here (ADR-0032: "applies to nothing,
         // warns loudly, succeeds") — the warning is the CALLER's job (the
@@ -9225,6 +9253,24 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_service_member_must_be_ready_not_merely_running() {
+        assert!(service_member_ready(Some("Running"), false, None));
+        assert!(service_member_ready(Some("Running"), true, Some("healthy")));
+        assert!(!service_member_ready(
+            Some("Running"),
+            true,
+            Some("starting")
+        ));
+        assert!(!service_member_ready(Some("Running"), true, None));
+        assert!(!service_member_ready(
+            Some("Running"),
+            true,
+            Some("unhealthy")
+        ));
+        assert!(!service_member_ready(Some("Paused"), false, None));
+        assert!(!service_member_ready(Some("Created"), false, None));
+    }
     #[test]
     fn deleting_an_absent_route_element_is_success_but_add_is_not() {
         let enoent = "Error: Could not process rule: No such file or directory";

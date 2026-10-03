@@ -40,7 +40,7 @@ use super::manifest::{self, ManifestDoc, Metadata};
 use super::util::{find, open_stores, state_root};
 
 pub(crate) const APP_SPEC_FIELDS: &[&str] = &["source", "builder", "runImage", "image"];
-pub(crate) const RECONCILED_APP_FIELDS: &[&str] = &["ref"];
+pub(crate) const RECONCILED_APP_FIELDS: &[&str] = &["ref", "inputs"];
 
 /// The CNB Platform API version this engine speaks to `/cnb/lifecycle/creator`
 /// (`CNB_PLATFORM_API`) — REQUIRED, not optional: the lifecycle refuses to run
@@ -124,17 +124,18 @@ fn resolve_builder(spec: &AppSpec) -> Result<ResolvedBuilder> {
 
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: AppSpec = manifest::spec_of(doc)?;
+    let source_dir = resolve_source_dir(&spec.source, &doc.metadata.name)?;
     let mut f = BTreeMap::new();
     f.insert("ref".into(), spec.image.clone());
+    // What the build would consume. Compared against the fingerprint recorded
+    // when the image currently under `ref` was built, so a second apply with
+    // nothing changed is a no-op and a changed source file is a visible change.
+    f.insert("inputs".into(), fingerprint(&spec, &source_dir)?);
     Ok(super::reconcile::Desired {
         kind: k::APP.into(),
         name: doc.metadata.name.clone(),
         fields: f,
-        // No build cache, same honesty `kind: Image`'s built case already
-        // states: `apply` reruns the build and replaces the tag every time,
-        // so reporting drift would make `--detailed-exitcode` return 2
-        // forever in any repo that declares an App.
-        converges: false,
+        converges: true,
         // The output is a shared, content-addressed image — same reasoning
         // as `kind: Image`, which is also never ownable.
         ownable: false,
@@ -152,6 +153,14 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         let mut f = BTreeMap::new();
         f.insert("ref".into(), spec.image);
         f.insert("digest".into(), img.id.clone());
+        // Only trusted while the tag still points at the image that record was
+        // written for: a retag or a rebuilt-by-hand image reads as «inputs
+        // unknown», which plans a rebuild instead of claiming it is current.
+        let recorded = read_build_record(&doc.metadata.name)
+            .filter(|r| r.digest == img.id)
+            .map(|r| r.inputs)
+            .unwrap_or_default();
+        f.insert("inputs".into(), recorded);
         out.push(super::reconcile::Actual {
             kind: k::APP.into(),
             name: doc.metadata.name.clone(),
@@ -161,6 +170,87 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         });
     }
     Ok(out)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuildRecord {
+    inputs: String,
+    digest: String,
+}
+
+fn build_record_path(name: &str) -> PathBuf {
+    state_root().join("apps").join(format!("{name}.json"))
+}
+
+fn read_build_record(name: &str) -> Option<BuildRecord> {
+    serde_json::from_slice(&std::fs::read(build_record_path(name)).ok()?).ok()
+}
+
+fn write_build_record(name: &str, rec: &BuildRecord) -> Result<()> {
+    let path = build_record_path(name);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let bytes = serde_json::to_vec(rec).map_err(|e| Error::Invalid(e.to_string()))?;
+    delonix_state::write_atomic(&path, &bytes).map_err(|e| Error::Invalid(e.to_string()))
+}
+
+/// Directories that are tooling output, not build input. Hashing them would
+/// make every `npm install` look like a source change.
+const FINGERPRINT_SKIP: &[&str] = &[".git", "node_modules", "target", ".delonix"];
+
+/// A digest of everything the build consumes: the spec fields that choose the
+/// builder and the content of the source tree (paths, sizes, bytes; a symlink
+/// by its target, never followed).
+fn fingerprint(spec: &AppSpec, source_dir: &std::path::Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    for part in [&spec.builder, spec.run_image.as_deref().unwrap_or("")] {
+        h.update((part.len() as u64).to_le_bytes());
+        h.update(part.as_bytes());
+    }
+    let mut stack = vec![source_dir.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir)? {
+            let e = e?;
+            let name = e.file_name();
+            let ft = e.file_type()?;
+            if ft.is_dir() {
+                if !FINGERPRINT_SKIP.iter().any(|s| name == *s) {
+                    stack.push(e.path());
+                }
+            } else {
+                files.push(e.path());
+            }
+        }
+    }
+    files.sort();
+    for p in files {
+        let rel = p.strip_prefix(source_dir).unwrap_or(&p);
+        let rel = rel.to_string_lossy();
+        h.update((rel.len() as u64).to_le_bytes());
+        h.update(rel.as_bytes());
+        let meta = std::fs::symlink_metadata(&p)?;
+        if meta.file_type().is_symlink() {
+            let t = std::fs::read_link(&p)?;
+            h.update(b"L");
+            h.update(t.to_string_lossy().as_bytes());
+        } else {
+            h.update(b"F");
+            h.update(meta.len().to_le_bytes());
+            let mut f = std::fs::File::open(&p)?;
+            let mut buf = [0u8; 64 * 1024];
+            loop {
+                let n = std::io::Read::read(&mut f, &mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                h.update(&buf[..n]);
+            }
+        }
+    }
+    Ok(format!("{:x}", h.finalize()))
 }
 
 /// The App's OUTPUT ref — same reasoning as `image::image_ref`: identity for
@@ -252,6 +342,16 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
     let spec: AppSpec = manifest::spec_of(doc)?;
     let name = &doc.metadata.name;
     let source_dir = resolve_source_dir(&spec.source, name)?;
+
+    let inputs = fingerprint(&spec, &source_dir)?;
+    // Same inputs, same image under the tag: nothing to build. This is what
+    // makes the second apply a no-op instead of minutes of rebuild.
+    if let (Some(rec), Ok(img)) = (read_build_record(name), images.resolve(&spec.image)) {
+        if rec.inputs == inputs && rec.digest == img.id {
+            println!("app '{name}': up to date -> {}", spec.image);
+            return Ok(());
+        }
+    }
 
     let resolved = resolve_builder(&spec)?;
     let (builder_image, run_image) = resolved.images();
@@ -384,6 +484,14 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
     match pulled {
         Ok(_) => {
             images.tag(&remote_ref, &spec.image)?;
+            let built = images.resolve(&spec.image)?;
+            write_build_record(
+                name,
+                &BuildRecord {
+                    inputs,
+                    digest: built.id.clone(),
+                },
+            )?;
             println!("app '{name}': built -> {}", spec.image);
             Ok(())
         }
@@ -420,6 +528,35 @@ mod tests {
             run_image: run_image.map(str::to_string),
             image: "x:latest".to_string(),
         }
+    }
+
+    #[test]
+    fn the_fingerprint_follows_the_inputs_and_ignores_tooling_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(d.join("main.go"), "package main").unwrap();
+        let sp = spec("auto", None);
+        let base = fingerprint(&sp, d).unwrap();
+        assert_eq!(base, fingerprint(&sp, d).unwrap(), "stable across runs");
+        std::fs::create_dir(d.join("node_modules")).unwrap();
+        std::fs::write(d.join("node_modules/x.js"), "1").unwrap();
+        assert_eq!(
+            base,
+            fingerprint(&sp, d).unwrap(),
+            "node_modules is not input"
+        );
+        std::fs::write(d.join("main.go"), "package main // changed").unwrap();
+        assert_ne!(
+            base,
+            fingerprint(&sp, d).unwrap(),
+            "a source edit changes it"
+        );
+        let after_edit = fingerprint(&sp, d).unwrap();
+        assert_ne!(
+            after_edit,
+            fingerprint(&spec("heroku", None), d).unwrap(),
+            "builder is input"
+        );
     }
 
     #[test]

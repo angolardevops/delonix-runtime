@@ -32,9 +32,13 @@ pub enum ServeCmd {
     },
     /// Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.
     ///
-    /// The versioned node contract (ADR-0040). Today it serves `GetNodeInfo`,
-    /// `GetHealth`, `GetCapacity` and `ListProviders`, and `GET /openapi.json`;
-    /// `WatchEvents` answers UNIMPLEMENTED with the step that brings it.
+    /// The versioned node contract (ADR-0040). Today it serves `GetApiRoot`
+    /// (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`,
+    /// `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`,
+    /// `ListNetworks`), and `GET /openapi.json`,
+    /// rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded
+    /// in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings
+    /// it.
     NodeApi {
         /// Socket address (default: `$DELONIX_NODE_API_ADDR` or `unix:///run/delonix-node.sock`).
         #[arg(long)]

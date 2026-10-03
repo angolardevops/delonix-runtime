@@ -192,6 +192,21 @@ fn force_microvm_backend(name: &str, block: &mut serde_yaml::Value) -> Result<()
         return Ok(());
     };
     let key = Value::from("backend");
+    // The same contradiction in its canonical spelling: `provider.name`, or a
+    // vendor block that belongs to another hypervisor.
+    if let Some(Value::Mapping(p)) = m.get("provider") {
+        let named = p.get("name").and_then(Value::as_str);
+        let vendor = p.keys().filter_map(Value::as_str).find(|k| *k != "name");
+        if let Some(b) = named.or(vendor) {
+            if !is_ch_backend(b) {
+                return Err(Error::Invalid(super::po::tf(
+                    "workload '{name}': type: microvm forces the cloud-hypervisor backend — remove 'provider: {backend}' (or use type: vm)",
+                    &[("name", name), ("backend", b)],
+                )));
+            }
+        }
+        m.remove("provider");
+    }
     if let Some(b) = m.get(&key).and_then(Value::as_str) {
         if !is_ch_backend(b) {
             return Err(Error::Invalid(super::po::tf(

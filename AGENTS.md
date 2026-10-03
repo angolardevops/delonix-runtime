@@ -48,6 +48,10 @@ que precisa de nomes de fora vive em `docs/`, nunca no código.
 ## Comandos
 
 ```bash
+make bootstrap                        # uma vez por máquina: toolchain, C/C++, protoc, sccache
+make build                            # os cinco binários (release), com jobs/prioridade à medida da máquina
+make install                          # ~/.local/bin + ~/.config/delonix/env.sh (DELONIX_BIN, DELONIX_ROOT)
+make ci                               # fmt, gates de script, clippy, testes
 cargo build --workspace               # tudo
 cargo test  --workspace               # testes
 cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abaixo)
@@ -1163,6 +1167,7 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   que não é e porquê (`env`/`command` vêm fundidos com os da imagem, `user` é guardado como uid).
 - `mount_to_spec` é o inverso do `resolve_spec` de propósito — aquele **cria** o volume, e calcular
   um plano não pode criar nada.
+- **Os `metadata.labels` de um `Network` e de um `Volume` chegam ao registo e convergem (2026-10-03).** Só o `Container` os recebia: uma rede ou um volume aplicados por manifesto ficavam com o carimbo de posse e mais nada, sem aviso. Agora são o campo `labels` do plano (JSON canónico, `reconcile::user_labels_field`), quente: mudar ou tirar um label converge sem recriar. As chaves `delonix.io/…` são do motor e ficam fora do campo; um manifesto sem labels não toca em labels postos à mão. O `network describe` e o `volume describe` passaram a mostrar os labels. A `VirtualMachine` tinha o mesmo defeito (medido) e levou a mesma correcção: `labels` é o seu ÚNICO campo quente (`vm::converge`), por isso mudar um label não recria a máquina nem toca no convidado, e o `describe vm` mostra-os.
 - **`Volume`/`Network` ganharam `labels`/`annotations`** (`#[serde(default)]`, registos antigos
   continuam válidos). O `Network` não é serde — é `key=value` com vários escritores, por isso o
   `set_metadata` reescreve LINHA A LINHA (idioma do `add_overlay_peer`) e promove um registo legado
@@ -5213,6 +5218,24 @@ divergência só existe num processo filho com uid mapeado. Corrigido com `infra
 os filhos que precisam dele) e `cmd::container::reexec_env` (uma lista partilhada pelos DOIS sítios
 de re-exec, para um terceiro não nascer com metade).
 
+## Manifestos estritos, App com impressão digital, Service pronto (ADR-0069, 2026-10-03)
+
+- **Um campo que o motor não entende RECUSA o manifesto antes de qualquer efeito**
+  (`manifest::load`), incluindo os itens de `spec.containers[]` de um Pod
+  (`POD_CONTAINER_FIELDS`: probes e `lifecycle` não existem e já não se perdem em silêncio).
+  `stack validate` usa `load_lenient` para relatar; `DELONIX_MANIFEST_LENIENT=1` é a válvula
+  explícita. O contador de avisos é por thread: um teste que o lê usa `thread_unknown_fields`,
+  nunca o global (flaky em paralelo).
+- **`kind: App` converge**: `desired()` calcula a impressão digital das entradas (builder +
+  árvore de fontes), `actual()` lê o registo `<state>/apps/<nome>.json` só enquanto a tag aponta
+  para o digest gravado, e o `apply` salta o build quando coincidem.
+- **`kind: Service`**: só entram `Running` e, havendo health check, `healthy`.
+- **Plan**: um store ilegível (VM, volumes com âmbito, presença de containers) é erro, não «vazio».
+- **Pod**: o mesmo nome noutra namespace é `Conflict`, não «already exists».
+- **CNI**: prazo de 60 s (`DELONIX_CNI_TIMEOUT_SECS`) e 1 MiB por stream.
+- O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
+  com scope, refresh operacional do plan de VM, OpenStack).
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como
@@ -7452,6 +7475,63 @@ sabia calcular (`delonix provider ls -o json`).
   CLI, na bateria (7 desde o ADR-0052, medido a 2026-09-26). **Não validado**: socket activation (ADR-0040 P5), as rotas de
   documentação do passo C, e um cliente de outra linguagem contra o OpenAPI.
 
+## O node API passou a ter mutações: o registo de `Operation` e `CreateNetwork`/`DeleteNetwork` (ADR-0042 passo E, fatia E2, 2026-10-03)
+
+- **O registo** (`delonix_node_api::operations`): um ficheiro por operação em
+  `<root>/operations/<id>.json`, escrito `RUNNING` ANTES do trabalho e reescrito no fim. Guarda o
+  pid e o `starttime` de quem faz o trabalho; uma leitura que encontre um registo por acabar cujo
+  dono já não existe termina-o `FAILED` com razão `Interrupted` e grava isso (o servidor é
+  activado por socket e não tem quem o faça por ele). Um registo acabado sai ao fim de sete dias,
+  quando outra operação começa.
+- **Recusa antes, operação depois.** O que se decide sem tocar em nada é o próprio erro e não
+  escreve registo: pedido errado, nome já usado (409), `etag` que não bate (412), rede com algo
+  ligado (409, DX-5307, a nomear o que está ligado). Uma falha do TRABALHO é a operação, `FAILED`,
+  com a classe do motor em `error.reason` e o número em `error.metadata["dx"]`.
+- **Idempotência**: `request_id` → id `r-<request_id>`, criado em exclusivo por `link(2)`. O mesmo
+  pedido outra vez recebe a primeira operação — verificado ANTES do «já existe» do create e do
+  «não existe» do delete, que o primeiro pedido tornou verdadeiros. Em REST, `Idempotency-Key` é o
+  `request_id` e `If-Match` o `etag`; cabeçalho e corpo em desacordo são recusados.
+- **Resposta REST**: a `Operation` com `Location: /v1/operations/{id}`; 202 enquanto corre, 200
+  quando acabou. As duas mutações de rede acabam antes de responder, por isso respondem 200 — lê-se
+  o `state`, não o status.
+- **Um só caminho de escrita**: `delonix_sdn::netops` (`create_bridge`, `dependents_of`, `remove`)
+  é o que a CLI e o node API chamam. O `overlay` pelo API é recusado pelo nome (501).
+- **O número do dicionário atravessa o gRPC** no metadata `dx-number` (`network_ops::status_of`),
+  e o `engine_error` reconstrói o erro com ele: o REST responde `DX-5307`, não um conflito genérico.
+- **Defeito encontrado e fechado**: o `NetworkStore::create_with_cidr` não validava o nome. Medido
+  na v4.4.0: `network create '../evil' --subnet 10.231.0.0/24` escreveu o registo FORA de
+  `networks/` e saiu 0. A validação passou para o store (`validate_name`), com teste.
+- **Os testes de mutação não tocam no dataplane**: o `infra` segue o root do PROCESSO, por isso os
+  unitários injectam o trabalho (`create_with`/`delete_with`) e a prova com o dataplane real é a
+  bateria (`scripts/e2e_node_network_ops.py`, seis cenários). O teste gRPC corre contra o root do
+  processo e só exercita recusas.
+- **Não validado**: um servidor morto a meio de um create num socket real (o `Interrupted` está
+  provado com um registo escrito à mão cujo dono é um processo que saiu).
+
+## As leituras de volumes no node API, e a F6 do ADR-0059 adiada (ADR-0042 passo E, fatia E3, 2026-10-03)
+
+- **`GetVolume` e `ListVolumes`** nas duas codificações (`delonix_node_api::volumes`). Criar e
+  remover continuam 501: o remover de um volume com dados de subuid passa por um re-exec da CLI
+  (`__rmtree`), que é a mesma pergunta da F6.
+- **Namespaces**: o store tem a raiz sem dono (onde cai todo o `volume create`) e uma sub-árvore
+  por namespace (as shares). O contrato não tem «sem namespace», por isso a raiz é reportada em
+  `default`, junto com a sub-árvore `default`; `*` lista tudo. Um nome que exista nos dois sítios
+  aparece duas vezes na lista e o `GetVolume` recusa-o (`FAILED_PRECONDITION`) — a mesma recusa
+  que um workload leva ao montar esse nome.
+- **Uso**: o `Get` mede (blocos em disco, como o `du`); a `List` NÃO mede — percorrer os dados de
+  todos os volumes de um nó a cada listagem é o custo já medido no dashboard. `used_bytes` só
+  existe quando a medição foi completa, e a condição `UsageMeasured` diz qual dos três casos:
+  `Measured`, `UnreadableDirectories` (dados de subuid, ilegíveis pelo uid do servidor) ou
+  `NotMeasuredInList`. Desconhecido nunca é zero.
+- **O `etag` é do registo, não do uso**: escrever dados num volume não muda o que ele é.
+- **`page`** passou a ser um módulo (tamanho de página, token, escape, href, fnv), usado por redes,
+  volumes e operações — eram três cópias.
+- **Correcção ao #680**: um `etag` antigo respondia `ABORTED`; o contrato (`ResourceMeta.etag`)
+  diz `FAILED_PRECONDITION`. Passa a responder isso, marcado no metadata `stale-etag`, e o REST
+  continua 412.
+- **F6 do ADR-0059 adiada (decisão do dono, 2026-10-03)**: `PlanStack`/`ApplyStack` no socket
+  esperam pela P5 do ADR-0040; o ratchet `self_exec_sites` não sobe por causa dela. Adendo no ADR-0059.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -7497,7 +7577,7 @@ antes de qualquer commit:
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
-| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NodeService` — `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — e o `GET /openapi.json`; o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
+| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` —, as leituras do `VolumeService` (`GetVolume`, `ListVolumes`, fatia E3) e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
 | `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 

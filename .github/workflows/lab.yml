@@ -1,0 +1,115 @@
+name: Lab (nightly)
+
+# The nightly run on a SELF-HOSTED lab runner (decision D1 of the maturity
+# plan; docs/lab.md links it).
+#
+# Why a self-hosted runner: the hosted `ubuntu-24.04` blocks unprivileged user
+# namespaces, so the chaos workflow there reports `skipped` and the E2E battery
+# never runs. A green that ran nothing is the failure this repository gates
+# against everywhere else; on a hosted runner it is the only result available.
+#
+# What this workflow refuses, so a night cannot read as covered when it was not:
+#   - a host missing a piece the battery needs fails the PREFLIGHT, naming
+#     every missing piece (`scripts/lab_preflight.sh`), before anything runs;
+#   - a SKIP the lab has not declared fails the SKIP GATE
+#     (`scripts/lab_skip_gate.py` against `scripts/lab_allowed_skips.txt`), and
+#     a declared SKIP that ran fails it too;
+#   - a battery or chaos FAIL fails the job, as it does locally.
+#
+# Registering the runner is the owner's step (docs/lab.md): a host with the
+# label `delonix-lab`. Until one is registered, the scheduled run waits in the
+# queue; it never turns green on someone else's machine.
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: 'Chaos scenarios to run (empty = all)'
+        default: ''
+
+concurrency:
+  group: lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    name: lab (self-hosted, full battery)
+    runs-on: [self-hosted, linux, delonix-lab]
+    timeout-minutes: 240
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      OUT: /tmp/delonix-lab-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight (the host can run all of it)
+        run: bash scripts/lab_preflight.sh
+
+      # The battery calls the sibling servers (`serve api`, `mcp`,
+      # `serve node-api`, `serve cri`); built in another target they are not
+      # found, and six checks fail for a reason that is not the engine's.
+      - name: Build
+        run: |
+          cargo build --release -p delonix-runtime-bin -p delonix-mgmt-bin \
+            -p delonix-mcp-bin -p delonix-node-api-bin -p delonix-cri
+          ./target/release/delonix --version
+
+      - name: E2E battery
+        run: |
+          set -o pipefail
+          rm -rf "$OUT"; mkdir -p "$OUT"
+          export DELONIX_ROOT="$OUT/root" DELONIX_NET_RUNTIME_DIR=/tmp/dlx-lab-run
+          bash scripts/e2e.sh ./target/release/delonix 2>&1 | tee e2e.log
+          ./target/release/delonix net netns down >/dev/null 2>&1 || true
+
+      - name: SKIP gate
+        if: ${{ !cancelled() }}
+        run: python3 scripts/lab_skip_gate.py "$OUT/results.jsonl"
+
+      - name: Chaos harness
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          systemd-run --user --scope -p Delegate=yes -q -- \
+            bash scripts/chaos.sh ${{ github.event.inputs.scenarios }} 2>&1 | tee chaos.log
+
+      - name: Performance gate
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          bash scripts/bench.sh --json > bench.json
+          python3 scripts/bench_gate.py --run bench.json
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Lab night'
+            echo
+            echo '```'
+            grep -E '^ (PASS|FAIL|SKIP)=|^ [0-9]+ (SKIP|XFAIL|XPASS|falhas)|^ *[-~x!] ' e2e.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo '(no battery summary)'
+            sed -n '/── resumo ──/,$p' chaos.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-${{ github.run_id }}
+          path: |
+            e2e.log
+            chaos.log
+            bench.json
+            ${{ env.OUT }}/results.jsonl
+          retention-days: 30
+
+      # A self-hosted runner keeps what a run leaves behind, and leaving the
+      # holder or container directories is the leak the harness exists to catch.
+      - name: Clean up
+        if: always()
+        run: |
+          bash scripts/chaos.sh --clean || true
+          rm -rf "$OUT" /tmp/dlx-lab-run
