@@ -8642,7 +8642,10 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
   Agora saem com DX-1540 no `desired` e no `apply_one`, antes de resolver o provider, por isso a
-  recusa ganha ao DX-6000 mesmo sem nó. Gate: a secção «kind: SystemContainer — as recusas que
+  recusa ganha ao DX-6000 mesmo sem nó. **Desde 2026-10-03 a recusa corre no carregamento do manifesto** (`manifest::refused_by_name`), antes da
+  verificação de campos desconhecidos: com os manifestos estritos (#682) essa verificação falava
+  primeiro e respondia DX-1000 «unknown field — check the spelling» a um campo bem escrito; só a
+  bateria E2E o mostrou (2 FAIL), porque não corre no CI. Gate: a secção «kind: SystemContainer — as recusas que
   não precisam de nó» do `scripts/e2e.sh` (7 checks; 3 chumbam com a recusa revertida,
   verificado). A layer zstd (DX-1409) fica no teste unitário do `delonix-oci`: pelo Kind só se
   chega lá com um nó.
