@@ -4736,8 +4736,9 @@ mod tests {
         ));
         assert_eq!(p.len(), 1, "{p:?}");
         assert!(p[0].starts_with("provider.libvirt"), "{p:?}");
-        let p =
-            super::provider_block_problems(&y("provider: { name: libvirt, libvirt: { machin: q35 } }"));
+        let p = super::provider_block_problems(&y(
+            "provider: { name: libvirt, libvirt: { machin: q35 } }",
+        ));
         assert_eq!(p, vec!["provider.libvirt.machin".to_string()]);
         let p = super::provider_block_problems(&y("provider: { vmware: {} }"));
         assert_eq!(p, vec!["provider.vmware".to_string()]);
@@ -4748,7 +4749,9 @@ mod tests {
     fn the_old_spellings_are_reported_so_a_manifest_moves_to_provider() {
         let l = super::legacy_provider_spellings(&y("backend: libvirt\nmachine: q35\ndisk: d"));
         assert_eq!(l, vec!["backend".to_string(), "machine".to_string()]);
-        assert!(super::legacy_provider_spellings(&y("disk: d\nprovider: { name: libvirt }")).is_empty());
+        assert!(
+            super::legacy_provider_spellings(&y("disk: d\nprovider: { name: libvirt }")).is_empty()
+        );
     }
 
     use super::{valid_migrate_memory_spec, valid_migrate_network_name};
