@@ -3224,18 +3224,21 @@ kind: Gateway
 metadata:
   name: public
 spec:
-  provider: pinggy           # pinggy (zero extra binary) | ngrok | cloudflare
+  provider:
+    type: pinggy               # pinggy (zero extra binary) | ngrok | cloudflare
+    spec:                      # what only that service understands; omit for none
+      hostname: null           # custom/reserved hostname — ngrok&#x27;s --url; cloudflare only with a token (informational, the route lives in its dashboard)
+      token: null              # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel&#x27;s token (literal — prefer tokenSecretRef)
+      tokenSecretRef: null     # pull the token from a `kind: Secret`&#x27;s `token` key instead
   localPort: 80               # the HTTPRoute proxy&#x27;s port, or any container&#x27;s published port
-  hostname: null               # custom/reserved hostname — ngrok&#x27;s --url; cloudflare only with a token (informational, the route lives in its dashboard)
-  token: null                  # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel&#x27;s token (literal — prefer tokenSecretRef)
-  tokenSecretRef: null         # pull the token from a `kind: Secret`&#x27;s `token` key instead
   insecureSkipTlsVerify: false # skip TLS verification of the LOCAL backend&#x27;s self-signed cert — never affects the public URL, no-op for pinggy</code></pre>
 <details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-gateway.yaml</span><span class='lang-en'>Every option — examples/full-gateway.yaml</span></summary><pre><code># Complete reference for `kind: Gateway` — exposes ONE local TCP port to the public internet
 # through a third-party tunnel provider. It only does the outbound transport; point `localPort`
 # at the HTTPRoute proxy&#x27;s listening port to publish many backends behind one public URL.
 #
-# spec fields: provider* (pinggy | ngrok | cloudflare), localPort*, hostname, token,
-# tokenSecretRef, insecureSkipTlsVerify.   (* = required)
+# spec fields: provider* (`type`: pinggy | ngrok | cloudflare, and `spec`: hostname, token,
+#   tokenSecretRef — what only that service understands; a bare `provider: pinggy` selects with no options), localPort*,
+# insecureSkipTlsVerify.   (* = required)
 # `token` and `tokenSecretRef` are two ways to give the same credential: use ONE per document.
 # Only one ngrok tunnel can be alive at a time (its local agent API has a fixed port).
 ---
@@ -3259,19 +3262,22 @@ apiVersion: gateway.delonix.io/v1alpha1
 kind: Gateway
 metadata: { name: public-pinggy-pro }
 spec:
-  provider: pinggy
+  provider:
+    type: pinggy
+    spec: { token: &quot;REPLACE-WITH-PINGGY-PRO-TOKEN&quot; }
   localPort: 8080
-  token: &quot;REPLACE-WITH-PINGGY-PRO-TOKEN&quot;
 ---
 # 3. ngrok with a reserved hostname (passed as ngrok&#x27;s --url) and the token read from a Secret.
 apiVersion: gateway.delonix.io/v1alpha1
 kind: Gateway
 metadata: { name: public-ngrok }
 spec:
-  provider: ngrok
+  provider:
+    type: ngrok
+    spec:
+      hostname: demo.ngrok.app   # custom/reserved hostname (provider-dependent)
+      tokenSecretRef: tunnel-token   # kind: Secret whose `token` key holds the authtoken
   localPort: 8080
-  hostname: demo.ngrok.app   # custom/reserved hostname (provider-dependent)
-  tokenSecretRef: tunnel-token   # kind: Secret whose `token` key holds the authtoken
 ---
 # 4. cloudflare NAMED tunnel: runs `cloudflared tunnel run --token ...` for a tunnel you already
 #    created. `hostname` is informational only — the route itself lives in the Cloudflare dashboard.
@@ -3281,10 +3287,10 @@ apiVersion: gateway.delonix.io/v1alpha1
 kind: Gateway
 metadata: { name: public-cloudflare }
 spec:
-  provider: cloudflare
+  provider:
+    type: cloudflare
+    spec: { hostname: app.example.com, tokenSecretRef: tunnel-token }
   localPort: 8443
-  hostname: app.example.com
-  tokenSecretRef: tunnel-token
   insecureSkipTlsVerify: true
 ---
 # 5. cloudflare quick tunnel: no token at all (an ephemeral trycloudflare.com URL).

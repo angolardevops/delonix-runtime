@@ -751,7 +751,9 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     // `VirtualMachine.spec.expose` lowers to a synthetic `kind: HTTPRoute` (ADR-0046).
     let docs = crate::cmd::vm_expose::lower_vm_expose(docs)?;
     // `Network.spec.provider` (a provider-realized segment) folds into the zone's own document (ADR-0070).
-    let docs = crate::cmd::network_provider::lower_network_providers(docs)?;
+    let mut docs = crate::cmd::network_provider::lower_network_providers(docs)?;
+    // `Gateway.spec.provider: { type, spec }` normalizes to the scalar + flat fields (ADR-0071).
+    crate::cmd::tunnel::lower_tunnel_provider(&mut docs)?;
     // The unknown-field guard, for EVERY document and therefore for every
     // command that reads a manifest — `validate`, `plan`, `apply`, and each
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what

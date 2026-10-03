@@ -1,6 +1,6 @@
 # ADR-0071: The provider block is `type` + `spec`; no `ref` until the node has more than one target per type
 
-- **Status:** Accepted (2026-10-03, by the owner's canonical brief) — implemented for `VirtualMachine` and `Network`
+- **Status:** Accepted (2026-10-03, by the owner's canonical brief) — implemented for `VirtualMachine`, `Network` and the tunnel `Gateway`
 - **Date:** 2026-10-03
 - **Deciders:** Walter Angolar
 - **Supersedes:** the spelling in ADR-0070 D1 (`provider: { name, <vendor>: {…} }`); keeps its rule (provider specifics live inline in the resource's own spec, never one Kind per provider resource)
@@ -45,9 +45,6 @@ that a changed default never re-binds an existing resource.
 
 ## Pending
 
-- `Gateway` (the tunnel) still spells its provider as a scalar, `provider: cloudflare`, with `token*`
-  and `hostname` beside it. Its canonical form would be `provider: { type: cloudflare, spec: {…} }`;
-  eleven shipped templates and `examples/` carry the scalar, so it moves with a converter and the
-  templates in a change of its own.
+- The tunnel `Gateway` is done: `provider: { type: cloudflare, spec: { hostname, token, tokenSecretRef } }`; a bare `provider: pinggy` stays valid as the selection-only spelling. `insecureSkipTlsVerify` stays generic (it is about the local backend) and `localPort` is the intent. The eleven templates and `examples/` moved; the loader normalizes to the scalar + flat fields the executor reads, and a key written in both places is refused.
 - `NetworkGateway` (OPNsense) and `SystemContainer` (Proxmox LXC): see ADR-0070 D3.
 - Per-disk and per-NIC options keyed by the generic item's stable name (the brief's §4.3).
