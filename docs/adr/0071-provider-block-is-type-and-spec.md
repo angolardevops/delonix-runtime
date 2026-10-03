@@ -46,5 +46,6 @@ that a changed default never re-binds an existing resource.
 ## Pending
 
 - The tunnel `Gateway` is done: `provider: { type: cloudflare, spec: { hostname, token, tokenSecretRef } }`; a bare `provider: pinggy` stays valid as the selection-only spelling. `insecureSkipTlsVerify` stays generic (it is about the local backend) and `localPort` is the intent. The eleven templates and `examples/` moved; the loader normalizes to the scalar + flat fields the executor reads, and a key written in both places is refused.
-- `NetworkGateway` (OPNsense) and `SystemContainer` (Proxmox LXC): see ADR-0070 D3.
+- `SystemContainer` (Proxmox LXC) **has the block** (2026-10-03): `spec.provider: { type: proxmox, spec: { swap, network } }`, folded at load into the flat fields the one executor reads (`lower_system_container_provider`); the flat spelling keeps working and means the same. The generic part stays at the top: image, entrypoint, env, memory, cores, rootfs. The ADR-0058 contract (hot/cold fields, no exec/logs) is unchanged.
+- `NetworkGateway` (OPNsense): see ADR-0070 D3. Not moved yet — it needs a perimeter scope in the policy model, and its live proof needs an OPNsense API key.
 - Per-disk and per-NIC options keyed by the generic item's stable name (the brief's §4.3).

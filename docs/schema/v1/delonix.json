@@ -3358,6 +3358,54 @@
       ],
       "type": "object"
     },
+    "SystemContainerProviderDoc": {
+      "description": "The provider block of a `SystemContainer` (ADR-0071).",
+      "properties": {
+        "spec": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SystemContainerProviderSpecDoc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "description": "`proxmox`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "SystemContainerProviderSpecDoc": {
+      "description": "Fields only the Proxmox node understands for a system container.",
+      "properties": {
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SystemContainerNetDoc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "swap": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SystemContainerSpecDoc": {
       "additionalProperties": false,
       "description": "`spec` of `kind: SystemContainer`.",
@@ -3404,6 +3452,18 @@
           ],
           "default": null,
           "description": "A network interface on a bridge of the node. Absent: none."
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SystemContainerProviderDoc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`{ type: proxmox, spec: { swap, network } }` — what only the provider\nunderstands. Folded into the flat fields at load; never present when\nthe document reaches the executor.",
+          "writeOnly": true
         },
         "rootfs": {
           "default": 4,
