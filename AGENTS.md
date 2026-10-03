@@ -7457,6 +7457,39 @@ sabia calcular (`delonix provider ls -o json`).
   CLI, na bateria (7 desde o ADR-0052, medido a 2026-09-26). **Não validado**: socket activation (ADR-0040 P5), as rotas de
   documentação do passo C, e um cliente de outra linguagem contra o OpenAPI.
 
+## O node API passou a ter mutações: o registo de `Operation` e `CreateNetwork`/`DeleteNetwork` (ADR-0042 passo E, fatia E2, 2026-10-03)
+
+- **O registo** (`delonix_node_api::operations`): um ficheiro por operação em
+  `<root>/operations/<id>.json`, escrito `RUNNING` ANTES do trabalho e reescrito no fim. Guarda o
+  pid e o `starttime` de quem faz o trabalho; uma leitura que encontre um registo por acabar cujo
+  dono já não existe termina-o `FAILED` com razão `Interrupted` e grava isso (o servidor é
+  activado por socket e não tem quem o faça por ele). Um registo acabado sai ao fim de sete dias,
+  quando outra operação começa.
+- **Recusa antes, operação depois.** O que se decide sem tocar em nada é o próprio erro e não
+  escreve registo: pedido errado, nome já usado (409), `etag` que não bate (412), rede com algo
+  ligado (409, DX-5307, a nomear o que está ligado). Uma falha do TRABALHO é a operação, `FAILED`,
+  com a classe do motor em `error.reason` e o número em `error.metadata["dx"]`.
+- **Idempotência**: `request_id` → id `r-<request_id>`, criado em exclusivo por `link(2)`. O mesmo
+  pedido outra vez recebe a primeira operação — verificado ANTES do «já existe» do create e do
+  «não existe» do delete, que o primeiro pedido tornou verdadeiros. Em REST, `Idempotency-Key` é o
+  `request_id` e `If-Match` o `etag`; cabeçalho e corpo em desacordo são recusados.
+- **Resposta REST**: a `Operation` com `Location: /v1/operations/{id}`; 202 enquanto corre, 200
+  quando acabou. As duas mutações de rede acabam antes de responder, por isso respondem 200 — lê-se
+  o `state`, não o status.
+- **Um só caminho de escrita**: `delonix_sdn::netops` (`create_bridge`, `dependents_of`, `remove`)
+  é o que a CLI e o node API chamam. O `overlay` pelo API é recusado pelo nome (501).
+- **O número do dicionário atravessa o gRPC** no metadata `dx-number` (`network_ops::status_of`),
+  e o `engine_error` reconstrói o erro com ele: o REST responde `DX-5307`, não um conflito genérico.
+- **Defeito encontrado e fechado**: o `NetworkStore::create_with_cidr` não validava o nome. Medido
+  na v4.4.0: `network create '../evil' --subnet 10.231.0.0/24` escreveu o registo FORA de
+  `networks/` e saiu 0. A validação passou para o store (`validate_name`), com teste.
+- **Os testes de mutação não tocam no dataplane**: o `infra` segue o root do PROCESSO, por isso os
+  unitários injectam o trabalho (`create_with`/`delete_with`) e a prova com o dataplane real é a
+  bateria (`scripts/e2e_node_network_ops.py`, seis cenários). O teste gRPC corre contra o root do
+  processo e só exercita recusas.
+- **Não validado**: um servidor morto a meio de um create num socket real (o `Interrupted` está
+  provado com um registo escrito à mão cujo dono é um processo que saiu).
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -7502,7 +7535,7 @@ antes de qualquer commit:
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
-| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve as leituras do `NetworkService` (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`; ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
+| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` — e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
 | `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 

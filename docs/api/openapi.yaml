@@ -2523,6 +2523,11 @@ components:
                         $ref: '#/components/schemas/delonix.node.v1.Operation'
                 page:
                     $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
+                    description: '"self", and "next" while there is another page.'
         delonix.node.v1.ListPodsResponse:
             type: object
             properties:
@@ -2710,6 +2715,11 @@ components:
                 trace_id:
                     type: string
                     description: W3C trace id of the request that started it, so an operation and its spans join up.
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
+                    description: '"self", "collection", and "target" — the resource — once a create succeeded.'
         delonix.node.v1.OverlayPeer:
             type: object
             properties:

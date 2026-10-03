@@ -666,6 +666,16 @@ code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (co
   check "uma rede que não existe é 404 com um problem+json; noutro namespace a lista é vazia" ok bash -c \
     "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' '$NETS/nao-existe') == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/namespaces/outro/networks | grep -q '\"networks\":\[\]'"
   "$BIN" network rm e1net-a >/dev/null 2>&1; "$BIN" network rm e1net-b >/dev/null 2>&1
+  # ADR-0042 passo E: as mutações de rede pelo contrato, cada uma respondida com
+  # uma Operation PERSISTIDA antes do trabalho. Cada cenário lê o que o socket
+  # respondeu E o que o motor tem depois (a CLI, os ficheiros do state root).
+  NETOPS="$(cd "$(dirname "$0")" && pwd)/e2e_node_network_ops.py"
+  netops() { env BIN="$BIN" NODESOCK="$NODESOCK" DELONIX_ROOT="$DELONIX_ROOT" IMG="${IMG:-}" python3 "$NETOPS" "$1"; }
+  check "POST …/networks cria a rede: Operation SUCCEEDED com Location, e a CLI e o registo do dataplane têm-na" ok netops create
+  check "o mesmo pedido com a mesma Idempotency-Key é respondido com a primeira Operation; sem chave é 409" ok netops replay
+  check "a Operation lê-se por id e na lista; a de um processo que já não existe lê-se FAILED/Interrupted" ok netops operations
+  check "overlay (501), outro namespace, subnet inválida e um nome com '..' são recusados sem criar nada" ok netops refused
+  check "DELETE com If-Match antigo é 412 e a rede fica; com o ETag actual remove-a do motor e do dataplane" ok netops delete
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \
@@ -1161,6 +1171,21 @@ else
   E2E_HAVE_IMAGE=0
   skip "image pull ($IMG)" "sem rede (ou registo inalcançável) e a imagem não está no store"
   skip "tudo o que precisa de $IMG" "a imagem não pôde ser obtida — ver o skip acima"
+fi
+
+# ADR-0042 passo E: uma rede com um container ligado não se remove pelo socket
+# (409 DX-5307, a nomear o container), e remove-se depois de ele sair. Aqui e
+# não na secção do node API porque precisa da imagem.
+if [[ $E2E_HAVE_IMAGE -eq 1 && -x "$NODEBIN" ]]; then
+  "$BIN" serve node-api --addr "unix://$NODESOCK" >>"$OUT/node-api.log" 2>&1 &
+  NODEPID=$!
+  for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+  check "DELETE de uma rede em uso é 409 DX-5307 e não escreve Operation; sem o container remove-a" ok \
+    env BIN="$BIN" NODESOCK="$NODESOCK" DELONIX_ROOT="$DELONIX_ROOT" IMG="$IMG" \
+    python3 "$(cd "$(dirname "$0")" && pwd)/e2e_node_network_ops.py" inuse
+  kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+else
+  skip "DELETE de uma rede em uso pelo node API" "sem imagem ou sem delonix-node-api"
 fi
 
 # `image load` é o verbo que qualquer pessoa lê como ADITIVO — trazer um
