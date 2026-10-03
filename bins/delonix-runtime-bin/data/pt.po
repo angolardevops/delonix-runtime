@@ -13588,8 +13588,8 @@ msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continua
 msgid "could not remove {path}: {err}"
 msgstr "não consegui remover {path}: {err}"
 
-msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
-msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff}"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff}"
 
 msgid "about to remove {path} — {summary}"
 msgstr "prestes a remover {path} — {summary}"
@@ -15117,3 +15117,28 @@ msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endere
 
 msgid "internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")"
 msgstr "internet: delonix stack apply -f delonix-tunnel.yaml — um endereço https público sem IP público (README.md, \"On the internet without a public IP\")"
+
+# anti-spoofing: concessões da política do nó (--allow-source, --no-source-check)
+msgid "Let this container send from a source prefix besides its own address, for a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix the node policy grants (`allowedSourcePrefixes`); every use is logged."
+msgstr "Deixa este container enviar a partir de um prefixo de origem além do seu endereço, para um container que encaminha (`a.b.c.d/len`, repetível). Só dentro de um prefixo que a política do nó conceda (`allowedSourcePrefixes`); cada uso fica registado."
+
+msgid "Switch anti-spoofing off for this container. Exceptional: only when the node policy grants it (`allowSourceCheckOptOut`); every use is logged."
+msgstr "Desliga a anti-spoof para este container. Excepcional: só quando a política do nó o concede (`allowSourceCheckOptOut`); cada uso fica registado."
+
+msgid "--allow-source {prefix}: not a canonical a.b.c.d/len prefix"
+msgstr "--allow-source {prefix}: não é um prefixo canónico a.b.c.d/len"
+
+msgid "--allow-source {prefix}: not inside any prefix this node's policy grants (allowedSourcePrefixes)"
+msgstr "--allow-source {prefix}: não está dentro de nenhum prefixo que a política deste nó conceda (allowedSourcePrefixes)"
+
+msgid "--no-source-check: this node's policy does not grant it (allowSourceCheckOptOut)"
+msgstr "--no-source-check: a política deste nó não o concede (allowSourceCheckOptOut)"
+
+msgid "source-check override not granted by the node policy"
+msgstr "excepção à verificação de origem não concedida pela política do nó"
+
+msgid "A container asked for an anti-spoofing exception (`--allow-source` or `--no-source-check`) that this node's runtime policy does not grant. These are permissions, not ceilings: without `allowedSourcePrefixes` / `allowSourceCheckOptOut` in the policy nothing is granted. The refusal is in the event log."
+msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--no-source-check`) que a política de runtime deste nó não concede. São permissões, não tectos: sem `allowedSourcePrefixes` / `allowSourceCheckOptOut` na política nada é concedido. A recusa fica no registo de eventos."
+
+msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
+msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."

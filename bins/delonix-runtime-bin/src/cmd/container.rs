@@ -1232,6 +1232,15 @@ pub enum ContainerCmd {
         /// Drop a capability. Repeatable.
         #[arg(long = "cap-drop")]
         cap_drop: Vec<String>,
+        /// Let this container send from a source prefix besides its own address, for
+        /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
+        /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
+        #[arg(long = "allow-source", value_name = "PREFIX")]
+        allow_source: Vec<String>,
+        /// Switch anti-spoofing off for this container. Exceptional: only when the
+        /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
+        #[arg(long = "no-source-check")]
+        no_source_check: bool,
         /// Security options (docker-style), repeatable:
         /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
         /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
@@ -1735,6 +1744,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             read_only,
             cap_add,
             cap_drop,
+            allow_source,
+            no_source_check,
             security_opt,
             apparmor,
             selinux,
@@ -1784,6 +1795,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: false,
                 detach,
                 name,
                 hostname,
@@ -1824,6 +1836,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 read_only,
                 cap_add,
                 cap_drop,
+                allow_source,
+                no_source_check,
                 security_opt,
                 apparmor,
                 selinux,
@@ -1981,8 +1995,10 @@ pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
+    let governed = super::firewall::policy_targets(docs);
     for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
+        let hold = governed.contains(name.as_str());
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
         let pod_shaped = doc.spec.get("containers").is_some();
@@ -1999,6 +2015,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             let pod: PodSpec = manifest::spec_of(doc)?;
             let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
             opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
+            opts.policy_hold = hold;
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -2008,6 +2025,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: hold,
                 detach: spec.detach,
                 name: Some(name.clone()),
                 hostname: spec.hostname,
@@ -2183,6 +2201,29 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 }
 
 pub(crate) use delonix_compute::RunOpts;
+
+/// Applies a container's anti-spoofing grants to the port its attach just
+/// pinned: extra source prefixes, or the check switched off. Each use is
+/// written to the event log — the opt-out is exceptional and must leave a trail.
+/// Nothing to do (and nothing logged) for a container with neither.
+fn apply_source_overrides(id: &str, name: &str, prefixes: &[String], off: bool) -> Result<()> {
+    let root = super::util::state_root();
+    if off {
+        infra::spoof_off(id)?;
+        delonix_node::events::emit(&root, "container", "source-check-off", id, name, None);
+    } else if !prefixes.is_empty() {
+        infra::spoof_allow(id, prefixes)?;
+        delonix_node::events::emit(
+            &root,
+            "container",
+            "source-prefixes-allowed",
+            id,
+            name,
+            Some(&prefixes.join(",")),
+        );
+    }
+    Ok(())
+}
 
 /// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
 /// not actually filtering intra-bridge traffic — the precondition namespace
@@ -2676,6 +2717,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             opts.net.is_empty() || opts.net == "host",
         ),
     )?;
+    // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
+    // the ceiling above, absent from the policy means NOT granted.
+    super::policy::authorise_source_overrides(
+        &super::util::state_root(),
+        opts.name.as_deref().unwrap_or(&opts.image),
+        &opts.allow_source,
+        opts.no_source_check,
+    )?;
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
@@ -2869,7 +2918,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &[("p", profile)],
         ))
     };
-    let on_attached = |namespace: &str| warn_if_namespace_isolation_inert(namespace);
+    let (allow_source, no_source_check) =
+        (opts_copy.allow_source.clone(), opts_copy.no_source_check);
+    let override_name = cname.clone();
+    let on_attached = |namespace: &str| {
+        warn_if_namespace_isolation_inert(namespace);
+        // The attach pinned the port to the container's own address; the grants
+        // the policy authorised in the preflight are applied on top. A failure
+        // leaves the port pinned (fail-closed) and says so.
+        if let Err(e) = apply_source_overrides(&id, &override_name, &allow_source, no_source_check)
+        {
+            super::output::error(&e.to_string());
+        }
+    };
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
     };
@@ -2925,6 +2986,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mounts = resolved.mounts;
     let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
+    // A container some policy document governs is born CLOSED (ADR-0069): the
+    // chain exists before the process does, and the record carries the same state
+    // so a restart cannot reopen it. `stack apply` releases it after the policy
+    // layers; a failed apply leaves it closed.
+    if opts_copy.policy_hold {
+        c.firewall = Some(policy_hold_firewall(&c.namespace));
+        c.annotations
+            .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
 
     let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
@@ -2942,6 +3012,21 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             );
             print_notices(&notices);
             let (netns, ip) = attached?;
+            if let Some(fw) = c.firewall.as_ref().filter(|_| opts_copy.policy_hold) {
+                // Before the re-exec starts the process: no packet of this
+                // container ever meets an open chain. If the chain cannot be
+                // installed the container is not started (fail closed).
+                if let Err(e) = infra::apply_firewall_all(&c.id, &[ip.as_str()], fw) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(Error::Runtime {
+                        context: "run",
+                        message: format!(
+                            "'{}' could not be created closed (policy hold), so it was not started: {e}",
+                            c.name
+                        ),
+                    });
+                }
+            }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
@@ -4021,6 +4106,22 @@ pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::record
 /// rm`/`clear` used to leave it in), the next `egress deny` then built a chain that
 /// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
 /// with nothing reporting it.
+/// Annotation on a container that is closed until its policy is applied.
+pub(crate) const POLICY_HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
+/// The closed state: default-deny both ways, no rules. Written with the policy
+/// fields the dataplane has always understood, so a holder from before this
+/// change enforces it too instead of ignoring an unknown field.
+pub(crate) fn policy_hold_firewall(namespace: &str) -> delonix_model::records::ContainerFw {
+    delonix_model::records::ContainerFw {
+        enabled: true,
+        policy_in: "deny".to_string(),
+        policy_out: "deny".to_string(),
+        rules: Vec::new(),
+        namespace: namespace.to_string(),
+    }
+}
+
 pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
     let mut fw = c.firewall.clone().unwrap_or_default();
     // Also for an EXISTING record: one written with the wrong namespace is
@@ -4035,6 +4136,14 @@ pub(crate) fn apply_firewall_everywhere(
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
+    // While a container is held, whatever the policy documents write goes to its
+    // RECORD (the intended state) and the dataplane keeps the closed chain: a
+    // policy that has applied its default but not yet its rules must not open a
+    // door the next document was going to shut. The release applies the record.
+    if c.annotations.contains_key(POLICY_HOLD_ANNOTATION) {
+        return infra::apply_firewall_all(&c.id, &refs, &policy_hold_firewall(&c.namespace))
+            .map_err(Into::into);
+    }
     infra::apply_firewall_all(&c.id, &refs, fw).map_err(Into::into)
 }
 
@@ -4152,11 +4261,11 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             // The attach re-pins the port to its own address only; the prefixes
             // the engine authorised (a Kind node's PodCIDR) come back from the
             // record, or a restarted node would drop every pod packet it routes.
-            if !c.allowed_sources.is_empty() {
-                if let Err(e) = infra::spoof_allow(&c.id, &c.allowed_sources) {
-                    infra::detach_container(&c.id, &ip);
-                    return Err(e.into());
-                }
+            if let Err(e) =
+                apply_source_overrides(&c.id, &c.name, &c.allowed_sources, c.source_check_disabled)
+            {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
             }
             warn_if_namespace_isolation_inert(&c.namespace);
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via

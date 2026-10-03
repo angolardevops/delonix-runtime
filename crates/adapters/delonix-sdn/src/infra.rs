@@ -2565,6 +2565,10 @@ fn handle_control(line: &str) -> String {
             let port = sanitize(port);
             spoof_bind(&port, ip, (*mac != "-").then_some(*mac))
         }
+        ["spoofoff", netns] => {
+            spoof_off_port(&vh_name(&sanitize(netns)));
+            Ok(())
+        }
         ["spoofallow", netns, cidrs] => {
             let port = vh_name(&sanitize(netns));
             let list: Vec<&str> = if *cidrs == "-" {
@@ -3694,6 +3698,25 @@ fn spoof_allow_port(port: &str, cidrs: &[&str]) -> Result<()> {
         return Ok(());
     }
     apply_nft_stdin(&script)
+}
+
+/// Takes `port` out of the pinned sets (`ports`, `macports`): nothing it sends
+/// is checked any more. Its address elements stay, harmless without the port in
+/// `ports`, and are cleared with the rest on detach.
+fn spoof_off_port(port: &str) {
+    for set in ["ports", "macports"] {
+        run_ok(
+            "nft",
+            &[
+                "delete",
+                "element",
+                "bridge",
+                SPOOF_TABLE,
+                set,
+                &format!("{{ \"{port}\" }}"),
+            ],
+        );
+    }
 }
 
 /// The MAC of `ifname` inside `netns`, as `ip -o link` prints it.
@@ -7233,7 +7256,34 @@ pub fn spoof_allow(netns: &str, cidrs: &[String]) -> Result<()> {
     } else {
         cidrs.join(",")
     };
-    control_send(&format!("spoofallow {} {list}", sanitize(netns)))
+    tolerate_old_control(control_send(&format!(
+        "spoofallow {} {list}",
+        sanitize(netns)
+    )))
+}
+
+/// Switches anti-spoofing OFF for the container attached as `netns`: its port
+/// leaves the pinned sets, so any source and MAC pass. The engine reaches it
+/// only for a container whose node policy granted `allowSourceCheckOptOut`.
+pub fn spoof_off(netns: &str) -> Result<()> {
+    tolerate_old_control(control_send(&format!("spoofoff {}", sanitize(netns))))
+}
+
+/// A control plane started by an older binary does not know the anti-spoofing
+/// verbs — and it does not filter spoofed sources at all, so an override has
+/// nothing to change there. Answering with an error would fail a `start` of a
+/// Kind node after an in-place upgrade; this says it instead.
+fn tolerate_old_control(r: Result<()>) -> Result<()> {
+    match r {
+        Err(e) if is_unknown_verb(&e) => {
+            tracing::warn!(
+                "this node's network control plane predates bridge anti-spoofing; \
+                 run `delonix net netns down` then `up` to enable it"
+            );
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<String> {
