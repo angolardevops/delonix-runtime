@@ -41,11 +41,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Event'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:
         get:
             tags:
@@ -73,11 +73,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListImagesResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:build:
         post:
             tags:
@@ -97,11 +97,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:delete:
         post:
             tags:
@@ -121,11 +121,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:get:
         get:
             tags:
@@ -144,11 +144,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Image'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:pull:
         post:
             tags:
@@ -168,11 +168,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:push:
         post:
             tags:
@@ -192,11 +192,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/images:scan:
         post:
             tags:
@@ -216,11 +216,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers:
         get:
             tags:
@@ -254,11 +254,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListContainersResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - ContainerService
@@ -286,11 +286,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{container}/logs:
         get:
             tags:
@@ -333,11 +333,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.LogChunk'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}:
         get:
             tags:
@@ -362,11 +362,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         delete:
             tags:
                 - ContainerService
@@ -402,11 +402,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         patch:
             tags:
                 - ContainerService
@@ -447,11 +447,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}/stats:
         get:
             tags:
@@ -476,11 +476,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ContainerStats'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}:kill:
         post:
             tags:
@@ -511,11 +511,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}:start:
         post:
             tags:
@@ -546,11 +546,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}:stop:
         post:
             tags:
@@ -581,11 +581,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/containers/{name}:wait:
         post:
             tags:
@@ -616,11 +616,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.WaitContainerResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/networks:
         get:
             tags:
@@ -654,11 +654,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListNetworksResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - NetworkService
@@ -686,11 +686,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/networks/{name}:
         get:
             tags:
@@ -715,11 +715,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Network'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         delete:
             tags:
                 - NetworkService
@@ -755,11 +755,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/networks/{network}:connect:
         post:
             tags:
@@ -790,11 +790,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/networks/{network}:disconnect:
         post:
             tags:
@@ -825,11 +825,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Container'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/pods:
         get:
             tags:
@@ -863,11 +863,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListPodsResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - PodService
@@ -895,11 +895,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/pods/{name}:
         get:
             tags:
@@ -924,11 +924,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Pod'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         delete:
             tags:
                 - PodService
@@ -964,11 +964,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines:
         get:
             tags:
@@ -1002,11 +1002,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListVirtualMachinesResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - VirtualMachineService
@@ -1034,11 +1034,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{name}:
         get:
             tags:
@@ -1063,11 +1063,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         delete:
             tags:
                 - VirtualMachineService
@@ -1103,11 +1103,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{name}:pause:
         post:
             tags:
@@ -1138,11 +1138,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{name}:resume:
         post:
             tags:
@@ -1173,11 +1173,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{name}:start:
         post:
             tags:
@@ -1208,11 +1208,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{name}:stop:
         post:
             tags:
@@ -1246,11 +1246,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots:
         get:
             tags:
@@ -1275,11 +1275,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListSnapshotsResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - VirtualMachineService
@@ -1309,11 +1309,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}:
         delete:
             tags:
@@ -1347,11 +1347,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}:restore:
         post:
             tags:
@@ -1387,11 +1387,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/volumes:
         get:
             tags:
@@ -1425,11 +1425,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListVolumesResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         post:
             tags:
                 - VolumeService
@@ -1457,11 +1457,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/namespaces/{namespace}/volumes/{name}:
         get:
             tags:
@@ -1486,11 +1486,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Volume'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
         delete:
             tags:
                 - VolumeService
@@ -1533,11 +1533,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/node:
         get:
             tags:
@@ -1551,11 +1551,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.NodeInfo'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/node/capacity:
         get:
             tags:
@@ -1569,11 +1569,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Capacity'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/node/health:
         get:
             tags:
@@ -1590,11 +1590,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Health'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/operations:
         get:
             tags:
@@ -1623,11 +1623,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListOperationsResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/operations/{id}:
         get:
             tags:
@@ -1647,11 +1647,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/operations/{id}:cancel:
         post:
             tags:
@@ -1678,11 +1678,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/operations/{id}:watch:
         get:
             tags:
@@ -1703,11 +1703,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/providers:
         get:
             tags:
@@ -1726,11 +1726,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.ListProvidersResponse'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/stacks/{stack}:apply:
         post:
             tags:
@@ -1756,11 +1756,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/stacks/{stack}:destroy:
         post:
             tags:
@@ -1786,11 +1786,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.Operation'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
     /v1/stacks/{stack}:plan:
         post:
             tags:
@@ -1817,13 +1817,75 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/delonix.node.v1.StackPlan'
                 default:
-                    description: Default error response
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
                     content:
-                        application/json:
+                        application/problem+json:
                             schema:
-                                $ref: '#/components/schemas/google.rpc.Status'
+                                $ref: '#/components/schemas/Problem'
 components:
     schemas:
+        Problem:
+            type: object
+            description: An error as an RFC 9457 problem document (`application/problem+json`). Built by the engine's `codes::problem` — the same document the CLI's errors map to.
+            required:
+                - type
+                - title
+                - status
+                - detail
+                - code
+                - dx
+            properties:
+                type:
+                    type: string
+                    description: The entry of `code` in the published error dictionary (`codigos.html#DX-NNNN`).
+                title:
+                    type: string
+                    description: What the code means, in one line.
+                status:
+                    type: integer
+                    format: int32
+                    description: The HTTP status of this response.
+                detail:
+                    type: string
+                    description: What happened, for this request.
+                instance:
+                    type: string
+                    description: The request path or resource the error is about.
+                code:
+                    type: string
+                    description: The engine's error class (`DX_NOT_FOUND`, `DX_INVALID_ARGUMENT`, …) — the same classes the CLI exits with.
+                dx:
+                    type: string
+                    description: The dictionary number (`DX-4001`); `delonix explain` describes it.
+                exit:
+                    type: integer
+                    format: int32
+                    description: The exit code the CLI gives this failure.
+                reason:
+                    type: string
+                    description: For a network failure, the ADR-0059 D5 reason slug.
+                provider:
+                    type: string
+                    description: The provider the failure came from, when one did.
+                role:
+                    type: string
+                    description: The provider role involved, when one was.
+                capability:
+                    type: string
+                    description: The catalog capability involved, when one was.
+                step:
+                    type: string
+                    description: The step that failed, when the operation has steps.
+                planDigest:
+                    type: string
+                    description: The plan digest an apply was given, when one was.
+                cause:
+                    type: string
+                    description: The underlying error, when there is one.
+                grpc_status:
+                    type: integer
+                    format: int32
+                    description: The gRPC status code the same failure carries on the gRPC encoding.
         delonix.node.v1.ApplyStackRequest:
             type: object
             properties:
@@ -3051,22 +3113,6 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
-        google.rpc.Status:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    description: The status code, which should be an enum value of [google.rpc.Code][google.rpc.Code].
-                    format: int32
-                message:
-                    type: string
-                    description: A developer-facing error message, which should be in English. Any user-facing error message should be localized and sent in the [google.rpc.Status.details][google.rpc.Status.details] field, or localized by the client.
-                details:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/google.protobuf.Any'
-                    description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
-            description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
 tags:
     - name: ContainerService
     - name: ImageService

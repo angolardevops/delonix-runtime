@@ -580,14 +580,21 @@ if [[ -x "$NODEBIN" ]]; then
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
   check "GET /v1/providers?kind=gateway traz o opnsense (ADR-0059 F1)" ok bash -c \
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=gateway' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert [p[\"id\"] for p in d]==[\"opnsense\"], d'"
-  check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
-    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
+  check "GET /v1/providers?kind=ceph é 400 com um problem+json DX-1000 (gRPC 3)" ok env \
+    PROB_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" 'http://localhost/v1/providers?kind=ceph')" \
+    PROB_JSON="$(curl -s --unix-socket "$NODESOCK" 'http://localhost/v1/providers?kind=ceph')" \
+    python3 -c 'import json,os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 400" in h and "content-type: application/problem+json" in h, h; d=json.loads(os.environ["PROB_JSON"]); assert (d["status"],d["dx"],d["code"],d["grpc_status"])==(400,"DX-1000","DX_INVALID_ARGUMENT",3), d'
   # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic
   # respondia a QUALQUER caminho desconhecido com 200 + `grpc-status: 12` e corpo
-  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um
-  # google.rpc.Status (code 5); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
-  check "um caminho sem handler é 404 com code 5, nunca um 200 vazio" ok bash -c \
-    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/nada) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/nada | grep -q '\"code\":5'"
+  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um problem
+  # document (DX-4001, ADR-0042 D2); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
+  check "um caminho sem handler é 404 com um problem+json DX-4001, nunca um 200 vazio" ok env \
+    PROB_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1/nada)" \
+    PROB_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1/nada)" \
+    python3 -c 'import json,os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 404" in h and "content-type: application/problem+json" in h, h; d=json.loads(os.environ["PROB_JSON"]); assert (d["status"],d["dx"],d["instance"])==(404,"DX-4001","/v1/nada"), d'
+  check "um método que o caminho não serve é 405 com Allow: GET e um problem+json" ok env \
+    PROB_HDR="$(curl -s -X DELETE -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1/node)" \
+    python3 -c 'import os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 405" in h and "allow: get" in h and "content-type: application/problem+json" in h, h'
   # ADR-0042 passo C: GetNodeInfo/GetHealth/GetCapacity pelas rotas JSON, e o
   # OpenAPI publicado. Cada resposta é comparada com o que a CLI diz no mesmo
   # host; os valores passam às asserções por variáveis de ambiente.

@@ -11,6 +11,11 @@
 //! answers `UNIMPLEMENTED` with the step that brings it; every other service of
 //! the contract is not registered on this socket at all.
 //!
+//! Errors: gRPC carries `google.rpc.Status`; the REST encoding answers every
+//! error with an RFC 9457 `application/problem+json` document built by the
+//! engine's `codes::problem` — the same `DX-` codes the CLI exits with — which
+//! is what the published OpenAPI declares (ADR-0042 D2).
+//!
 //! Both encodings come from the same `proto/` files: the gRPC stubs and the
 //! proto3 JSON (`pbjson`, proto field names — what the published OpenAPI
 //! declares). The HTTP route for a `google.api.http` annotation is written by
