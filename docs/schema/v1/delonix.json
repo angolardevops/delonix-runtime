@@ -644,6 +644,13 @@
             "null"
           ]
         },
+        "name": {
+          "description": "Stable name of this disk: what `provider.spec.devices.<name>` refers to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "readOnly": {
           "default": false,
           "description": "Mount read-only.",
@@ -678,6 +685,13 @@
         },
         "model": {
           "description": "Model: `virtio` (default), `e1000`, …",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Stable name of this NIC: what `provider.spec.devices.<name>` refers to.",
           "type": [
             "string",
             "null"
