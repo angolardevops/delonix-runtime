@@ -23,6 +23,13 @@ pub struct RunOpts {
     #[serde(default)]
     pub user: Option<String>,
     pub net: String,
+    /// Start with the network CLOSED (default-deny both ways) until a policy
+    /// document that governs this container has been applied (ADR-0069).
+    /// Set by `stack apply` for a container some `NetworkPolicy` /
+    /// `NetworkAccessRule` / `Dependency` names; released by the stack once the
+    /// policy layers have run, and left closed if they fail.
+    #[serde(default)]
+    pub policy_hold: bool,
     /// Logical ISOLATION namespace (default `default`). See "namespace isolation" in AGENTS.md.
     #[serde(default)]
     pub namespace: Option<String>,
@@ -78,6 +85,15 @@ pub struct RunOpts {
     pub read_only: bool,
     #[serde(default)]
     pub cap_add: Vec<String>,
+    /// Anti-spoofing: source prefixes this container may use besides its own
+    /// address, for a container that routes (`--allow-source`). Granted only by
+    /// the node policy; see `cmd/policy.rs`.
+    #[serde(default)]
+    pub allow_source: Vec<String>,
+    /// Anti-spoofing switched off for this container (`--no-source-check`).
+    /// Exceptional, granted only by the node policy, and logged.
+    #[serde(default)]
+    pub no_source_check: bool,
     #[serde(default)]
     pub cap_drop: Vec<String>,
     #[serde(default)]

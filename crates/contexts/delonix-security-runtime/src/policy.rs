@@ -100,6 +100,20 @@ pub struct SecurityPolicy {
     /// host deserved to be named.
     #[serde(default)]
     pub allowed_image_url_hosts: Vec<String>,
+
+    // ---- Anti-spoofing GRANTS. These two invert the rule above: they do not
+    // ---- restrict anything, they let something through, so «absent» means
+    // ---- «not granted» and no policy file grants nothing.
+    /// Source prefixes a container may be authorised to use besides its own
+    /// address (`container run --allow-source`), for a container that routes.
+    /// A request's prefix must sit inside one of these. Empty = none granted.
+    #[serde(default)]
+    pub allowed_source_prefixes: Vec<String>,
+    /// Lets a container switch the source check off (`--no-source-check`).
+    /// Exceptional: a workload without it can forge any address on its
+    /// bridge. Every use is written to the event log. Absent = refused.
+    #[serde(default)]
+    pub allow_source_check_opt_out: bool,
 }
 
 /// A policy that parses but probably does not mean what its author intended.
@@ -149,6 +163,10 @@ impl SecurityPolicy {
             && !self.deny_device_passthrough
             && !self.deny_latest_vm_image
             && self.allowed_image_url_hosts.is_empty()
+            // A policy that only GRANTS anti-spoofing exceptions says something
+            // on purpose; calling it «probably a mistake» would be wrong.
+            && self.allowed_source_prefixes.is_empty()
+            && !self.allow_source_check_opt_out
     }
 
     /// Semantic checks that a schema cannot express.
@@ -326,6 +344,14 @@ mod tests {
             .lint()
             .iter()
             .any(|l| l.id == "POLICY-REGISTRY-NOT-A-HOST"));
+    }
+
+    #[test]
+    fn a_policy_that_only_grants_is_not_silent() {
+        let p = SecurityPolicy::parse(r#"{"allowedSourcePrefixes": ["10.99.0.0/16"]}"#).unwrap();
+        assert!(!p.is_silent());
+        let p = SecurityPolicy::parse(r#"{"allowSourceCheckOptOut": true}"#).unwrap();
+        assert!(!p.is_silent());
     }
 
     #[test]

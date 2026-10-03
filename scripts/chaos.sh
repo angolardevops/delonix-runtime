@@ -2059,7 +2059,112 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
+scen_policy_hold() {
+  head_ "policy-hold — um workload governado por política nasce FECHADO, e uma política que falha não o abre"
+  local dir="$SANDBOX/policy-hold"
+  rm -rf "$dir"; mkdir -p "$dir"
+  cat > "$dir/base.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: phnet }
+spec: { driver: bridge }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: phclient }
+spec: { image: $IMAGE, network: phnet, command: [sleep, "3600"] }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: phsrv }
+spec: { image: $IMAGE, network: phnet, command: [sleep, "3600"] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: phsrv-in }
+spec: { target: phsrv, direction: ingress, defaultPolicy: allow, rules: [] }
+YAML
+  # O mesmo ficheiro com uma regra de CIDR impossível: o `validate_graph` não a
+  # apanha, por isso a camada de políticas falha DEPOIS de os containers terem
+  # sido criados e de a política `allow` já ter sido escrita — a pior janela.
+  cp "$dir/base.yaml" "$dir/broken.yaml"
+  cat >> "$dir/broken.yaml" <<'YAML'
+---
+apiVersion: delonix.io/v1
+kind: NetworkAccessRule
+metadata: { name: bad-rule }
+spec: { target: phsrv, direction: ingress, port: "80", from: "999.1.1.1/99" }
+YAML
+  ipof() {
+    dlx container inspect "$1" 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+d=d[0] if isinstance(d,list) else d
+print(d.get("ip") or "")' 2>/dev/null
+  }
+  holdof() {
+    dlx container inspect "$1" 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+d=d[0] if isinstance(d,list) else d
+print("1" if "delonix.io/policy-hold" in (d.get("annotations") or {}) else "0")' 2>/dev/null
+  }
+  reach() { dlx container exec phclient ping -c1 -W2 "$1" 2>/dev/null | grep -q "1 packets received"; }
+
+  # 1. A camada de políticas FALHA: o apply sai != 0 e o governado fica fechado.
+  if dlx stack apply -f "$dir/broken.yaml" >"$dir/broken.out" 2>&1; then
+    bad "policy-hold" "o apply com uma regra de CIDR invalido saiu 0"
+    dlx stack destroy -f "$dir/base.yaml" >/dev/null 2>&1; return
+  fi
+  local ip; ip=$(ipof phsrv)
+  if [ -z "$ip" ] || [ "$(ipof phclient)" = "" ]; then
+    skip "policy-hold" "os containers do cenario nao arrancaram"
+    dlx stack destroy -f "$dir/base.yaml" >/dev/null 2>&1; return
+  fi
+  if reach "$ip"; then
+    bad "policy-hold" "apos uma politica que FALHOU o governado respondia a pings — a falha abriu a rede"
+  else
+    ok "policy-hold: a politica falhou e o workload governado ficou fechado"
+  fi
+  if [ "$(holdof phsrv)" = "1" ]; then
+    ok "policy-hold: o registo diz que o workload esta em espera"
+  else
+    bad "policy-hold" "o registo nao marca o workload como fechado"
+  fi
+  grep -q "stay CLOSED\|ficam FECHADOS" "$dir/broken.out" \
+    && ok "policy-hold: o erro diz que o workload ficou fechado" \
+    || bad "policy-hold" "o apply falhado nao avisa que o workload ficou fechado"
+
+  # 2. A regra errada sai: o apply seguinte liberta-o, ao que a politica diz.
+  if ! dlx stack apply -f "$dir/base.yaml" >"$dir/fixed.out" 2>&1; then
+    bad "policy-hold" "o apply corrigido falhou: $(tail -2 "$dir/fixed.out" | tr '\n' ' ')"
+  else
+    ip=$(ipof phsrv)
+    reach "$ip" && ok "policy-hold: o apply seguinte abriu o workload (politica ingress allow)" \
+                || bad "policy-hold" "depois do apply corrigido o workload continua inalcancavel"
+    [ "$(holdof phsrv)" = "0" ] && ok "policy-hold: a marca de espera saiu" \
+                                || bad "policy-hold" "a marca de espera ficou depois da libertacao"
+    # A direccao que o manifesto NAO declarou volta ao aberto: sai de phsrv.
+    local cip; cip=$(ipof phclient)
+    dlx container exec phsrv ping -c1 -W2 "$cip" 2>/dev/null | grep -q "1 packets received" \
+      && ok "policy-hold: a direccao nao declarada (saida) voltou ao aberto" \
+      || bad "policy-hold" "a saida de phsrv ficou fechada — o hold nao devia sobreviver a libertacao"
+  fi
+
+  # 3. Um terceiro apply nao fecha nada outra vez.
+  dlx stack apply -f "$dir/base.yaml" >"$dir/third.out" 2>&1
+  [ "$(holdof phsrv)" = "0" ] && reach "$(ipof phsrv)" \
+    && ok "policy-hold: o segundo apply sem mudancas nao refecha" \
+    || bad "policy-hold" "um apply sem mudancas fechou o workload"
+  # E um container que nenhuma politica nomeia nunca foi fechado.
+  [ "$(holdof phclient)" = "0" ] && ok "policy-hold: o container nao governado nunca foi fechado" \
+    || bad "policy-hold" "o container sem politica foi marcado como fechado"
+
+  dlx stack destroy -f "$dir/base.yaml" >/dev/null 2>&1
+  rm -rf "$dir"
+}
+
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

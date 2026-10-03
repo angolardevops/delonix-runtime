@@ -1830,6 +1830,47 @@ else
 fi
 for c in "$A1" "$A2" "$A3" "$A4"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
 "$BIN" network rm "$AS" >/dev/null 2>&1
+
+# The anti-spoofing GRANTS: a container that routes gets extra source prefixes,
+# and an exceptional opt-out exists — both only when the node policy grants
+# them, and every use is in the event log. No policy = nothing granted. Writes
+# policy.json, so it runs on isolated state only.
+if [[ "$E2E_ISOLATED" == 1 ]]; then
+  GS="gs-$PFX"; GR="gr-$PFX"; GT="gt-$PFX"; GO="go-$PFX"
+  POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
+  check "antispoof: --allow-source sem política é recusado (77)" 77 \
+    "$BIN" container run -d --name "$GR" --allow-source 10.99.1.0/24 --net none "$IMG" true
+  check "antispoof: --no-source-check sem política é recusado (77)" 77 \
+    "$BIN" container run -d --name "$GR" --no-source-check --net none "$IMG" true
+  check "antispoof: a recusa diz DX-7801" ok bash -c \
+    "'$BIN' container run -d --name $GR --allow-source 10.99.1.0/24 --net none '$IMG' true 2>&1 | grep -q DX-7801"
+  printf '{"allowedSourcePrefixes":["10.99.0.0/16"],"allowSourceCheckOptOut":true}\n' > "$POL"
+  check "antispoof: um prefixo fora da concessão é recusado" 77 \
+    "$BIN" container run -d --name "$GR" --allow-source 10.98.0.0/24 --net none "$IMG" true
+  if "$BIN" network create "$GS" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GT" --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GR" --cap-add NET_ADMIN --allow-source 10.99.1.0/24 --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GO" --cap-add NET_ADMIN --no-source-check --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1; then
+    IT=$(ip_of "$GT")
+    from_src() {  # <container> <source> → echo requests that reached GT
+      local e0; e0=$(echos_of "$GT")
+      "$BIN" container exec "$1" sh -c "ip addr add $2/32 dev eth0; ip neigh flush all; ping -c3 -W1 -I $2 $IT; ip addr del $2/32 dev eth0" >/dev/null 2>&1
+      echo $(( $(echos_of "$GT") - e0 ))
+    }
+    check "antispoof: o router chega com uma origem dentro do prefixo concedido" ok test "$(from_src "$GR" 10.99.1.7)" -eq 3
+    check "antispoof: o router é cortado fora do prefixo concedido" ok test "$(from_src "$GR" 10.99.2.7)" -eq 0
+    check "antispoof: o opt-out concedido deixa passar qualquer origem" ok test "$(from_src "$GO" 10.77.0.9)" -eq 3
+    check "antispoof: cada uso fica no registo de eventos" ok bash -c \
+      "grep -q '\"source-prefixes-allowed\"' '$DELONIX_ROOT/events.jsonl' && grep -q '\"source-check-off\"' '$DELONIX_ROOT/events.jsonl'"
+  else
+    skip "antispoof: concessões" "não foi possível preparar a rede e os containers"
+  fi
+  for c in "$GR" "$GT" "$GO"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
+  "$BIN" network rm "$GS" >/dev/null 2>&1
+  rm -f "$POL"
+else
+  skip "antispoof: concessões" "estado partilhado — o check escreveria o policy.json do nó real"
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
