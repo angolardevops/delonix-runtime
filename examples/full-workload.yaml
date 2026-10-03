@@ -167,7 +167,7 @@ spec:
   type: vm
   vm:
     disk: delonix-vm-base:ubuntu-24.04
-    backend: libvirt                    # `vm` accepts any backend (unlike `microvm`)
+    provider: { type: libvirt }                    # `vm` accepts any backend (unlike `microvm`)
     restartPolicy: always
     vcpus: 2
     memory: 4G
@@ -209,7 +209,7 @@ spec:
     resources: { vcpus: 2, memory: 2G }
     network: { name: wl-net, mode: nat, staticIp: 192.168.122.61 }
     cloudInit: { hostname: wl-vm-grouped }
-    libvirt: { backend: libvirt, machine: q35 }
+    provider: { type: libvirt, spec: { machine: q35 } }
 ---
 # ---------------------------------------------------------------------------
 # type: microvm — a VirtualMachine on the microVM hypervisor; the backend is FORCED to cloud-hypervisor
@@ -223,7 +223,7 @@ spec:
   type: microvm
   microvm:
     disk: delonix-vm-base:ubuntu-24.04  # needs an image that boots on Cloud Hypervisor (not the libvirt-only k8s golden)
-    backend: cloud-hypervisor           # optional: only the value cloud-hypervisor is accepted here
+    provider: { type: cloud-hypervisor }           # optional: only the value cloud-hypervisor is accepted here
     vcpus: 2
     memory: 2G
     network: wl-net

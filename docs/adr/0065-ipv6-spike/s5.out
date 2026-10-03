@@ -1,0 +1,6 @@
+## holder (forwarding=1, accept_ra=2 on tap0=2):
+  addr fd00::5c97:b7ff:fe37:2fc9/64
+  default via fe80::2 dev tap0 proto ra metric 1024 expires 1795sec hoplimit 64 pref medium
+container fd65:1::a -> slirp gw fd00::2 WITHOUT nat66: FAIL
+container -> fd00::2 WITH inet masquerade on tap0: OK
+  masquerade packets 1

@@ -1,0 +1,6 @@
+bridge-nf-call-iptables=1
+spoofed a->b (same bridge) rc=0
+spoofed a->c (routed br0->br1) rc=0
+holder antispoof rule: counter packets 0
+b received spoofed: packets 3
+c received spoofed: packets 3

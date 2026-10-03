@@ -1,0 +1,3 @@
+# SKIPs the nightly lab accepts, one `name<TAB>reason` per line (scripts/lab_skip_gate.py).
+# Every line is a measurement the lab does not take, with the reason it cannot.
+# A line whose check starts to run fails the gate until it is removed.

@@ -1525,8 +1525,8 @@ msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
 msgid "After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)."
 msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-D para sair)."
 
-msgid "After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout."
-msgstr "Depois de arrancar, espera (com spinner) até a VM ter IP, até ao --boot-timeout."
+msgid "After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running."
+msgstr "Depois de arrancar, espera (com spinner) até a VM responder, até ao --boot-timeout; se nunca responder, sai com 124 (DX-8503) e deixa a VM a correr."
 
 msgid "Seconds to wait with --wait (default 120)."
 msgstr "Segundos a esperar com --wait (default 120)."
@@ -12393,6 +12393,15 @@ msgstr "O nó continuou a recusar porque o lock de configuração da VM estava t
 msgid "Check the node's task log for this VM; something is still holding the lock."
 msgstr "Verifica o registo de tasks do nó para esta VM; algo ainda está a segurar o lock."
 
+msgid "VM did not come up before the boot timeout"
+msgstr "a VM não ficou de pé antes do tempo de arranque"
+
+msgid "`--wait` gave the VM the whole `--boot-timeout` and never saw it answer: no address yet, or an address that never replied. The VM is left as it is, still running."
+msgstr "O `--wait` deu à VM o `--boot-timeout` inteiro e nunca a viu responder: ainda sem endereço, ou com um endereço que nunca respondeu. A VM fica como está, a correr."
+
+msgid "Watch the boot with `delonix vm console <name>`; raise `--boot-timeout` for a slow guest, or `delonix vm rm` it if it will not boot."
+msgstr "Acompanha o arranque com `delonix vm console <name>`; sobe o `--boot-timeout` para um convidado lento, ou `delonix vm rm` se não arrancar."
+
 msgid "Proxmox request failed"
 msgstr "pedido ao Proxmox falhou"
 
@@ -13955,17 +13964,17 @@ msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado q
 msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
 msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
 
-msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket — the versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
-msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix — o contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket — the versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix — o contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
 msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket."
 msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix."
 
-msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
-msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
-msgid "The versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
-msgstr "O contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+msgid "The versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "O contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
 msgid "Socket address (default: `$DELONIX_NODE_API_ADDR` or `unix:///run/delonix-node.sock`)."
 msgstr "Endereço do socket (por omissão: `$DELONIX_NODE_API_ADDR` ou `unix:///run/delonix-node.sock`)."
@@ -14287,6 +14296,34 @@ msgstr "A imagem seria enviada para o storage de importação do nó, e esse sto
 msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
 msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
 
+# DX-4001 / DX-6001 / DX-9005 — the node API's own failures (ADR-0042 D2)
+msgid "no such route on the node API"
+msgstr "não há essa rota na API de nó"
+
+msgid "The request reached the node API socket on a method and path it has no handler for. The published OpenAPI (`GET /openapi.json`) lists the contract; a path there may still be one this engine version does not serve (DX-6001)."
+msgstr "O pedido chegou ao socket da API de nó com um método e um caminho para os quais ela não tem handler. O OpenAPI publicado (`GET /openapi.json`) lista o contrato; um caminho que lá esteja pode ainda não ser servido por esta versão do motor (DX-6001)."
+
+msgid "Check the method and the path against `GET /openapi.json`, or open `GET /docs`."
+msgstr "Confere o método e o caminho no `GET /openapi.json`, ou abre o `GET /docs`."
+
+msgid "the node API does not serve this yet"
+msgstr "a API de nó ainda não serve isto"
+
+msgid "The operation is in the contract (`proto/delonix/node/v1`) and this engine version does not serve it: the message names the ADR step that brings it. The HTTP status is 501 Not Implemented, not 503: retrying will not help."
+msgstr "A operação está no contrato (`proto/delonix/node/v1`) e esta versão do motor não a serve: a mensagem nomeia o passo do ADR que a traz. O estado HTTP é 501 Not Implemented, não 503: repetir não ajuda."
+
+msgid "Use the CLI for the operation meanwhile, or an engine version that serves it (`GET /v1/node` gives the version)."
+msgstr "Entretanto usa a CLI para a operação, ou uma versão do motor que a sirva (o `GET /v1/node` dá a versão)."
+
+msgid "the node API failed while answering"
+msgstr "a API de nó falhou ao responder"
+
+msgid "The node API could not compute its answer: a probe it runs panicked or a value it reads could not be produced. The message carries what failed."
+msgstr "A API de nó não conseguiu calcular a resposta: uma sonda que corre entrou em pânico ou um valor que lê não pôde ser obtido. A mensagem diz o que falhou."
+
+msgid "Read the message; the server's log (`delonix serve node-api`) has the detail. Report it if it repeats."
+msgstr "Lê a mensagem; o log do servidor (`delonix serve node-api`) tem o detalhe. Reporta-o se se repetir."
+
 # DX-1540 — a system container the Proxmox node cannot hold (ADR-0058)
 msgid "the system container asks for something the node cannot hold"
 msgstr "o container de sistema pede algo que o nó não consegue guardar"
@@ -14392,6 +14429,12 @@ msgstr "não é possível impor {flags}: ao cgroup onde este container correria 
 
 msgid "{flags} cannot be enforced: delonix.slice does not hand down the `{controllers}` controller — the limit would not exist while this command reports success. Check that /sys/fs/cgroup/cgroup.controllers lists them (the kernel may be built without them), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
 msgstr "não é possível impor {flags}: o delonix.slice não passa para baixo o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. Confirma que /sys/fs/cgroup/cgroup.controllers os lista (o kernel pode ter sido compilado sem eles), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
+msgid "warning: {flags} cannot be enforced: no block device could be resolved for the container store at {store}, so the kernel will not see the limit — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: não é possível impor {flags}: não foi possível determinar um dispositivo de bloco para a store de containers em {store}, por isso o kernel não verá o limite — a continuar sem imposição porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "{flags} cannot be enforced: no block device could be resolved for the container store at {store} — io.max caps one named disk, and this filesystem reports none (btrfs, overlayfs and tmpfs do not have one) — so the limit would not exist while this command reports success. Put the store (DELONIX_ROOT) on a filesystem backed by a block device, or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: não foi possível determinar um dispositivo de bloco para a store de containers em {store} — o io.max limita um disco com nome, e este sistema de ficheiros não reporta nenhum (btrfs, overlayfs e tmpfs não têm) — por isso o limite não existiria enquanto este comando reporta sucesso. Põe a store (DELONIX_ROOT) num sistema de ficheiros assente num dispositivo de bloco, ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
 
 msgid "← a Kubernetes node boots without them"
 msgstr "← um nó Kubernetes arranca sem eles"

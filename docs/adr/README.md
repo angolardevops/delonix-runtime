@@ -99,6 +99,14 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0065** — IPv6 in the SDN dataplane: one `table inet` instead of `ip` + an `ip6` refusal,
+  v6 addresses derived from the v4 lease (no second IPAM), static assignment and AAAA in the
+  holder's DNS, NAT66 egress through slirp. Opt-in per network (`--ipv6`); the default is
+  considered only in a major after six gates (isolation, DNS, routing, firewall, port publishing,
+  provider compatibility). v6 publishing is refused by measured backend capability (slirp4netns
+  1.2.1 cannot), never converted to IPv4. v6 anti-spoof extends the `table bridge` of the separate
+  IPv4 anti-spoof security fix (P0), whose bug the spike found. *Proposed*; a pt-AO review copy
+  sits next to it.
 - **0066** — An L4 load balancer in the engine: `kind: Service` gains `type: VirtualIP`, a VIP
   from an operator-configured IPAM pool (no default; overlap with engine networks, pod and service
   subnets, host routes and VPN overlays refused), DNAT by `numgen random` in a `svc` chain of the
@@ -107,3 +115,6 @@ never rewritten — supersede them with a new one.
   the holder AND, when defined, the health probe passes (`Starting` out). Retires the caller-less
   `lbset`/`lbclear` pair and the hash-derived `service_vip`. *Proposed*; spike measured in an
   unprivileged netns. Review copy in pt-AO alongside.
+- **0069** — The Kind catalog after reassessment: a manifest the engine does not fully understand is refused before any effect (including Pod `containers[]` items), `App` converges on a fingerprint of its build inputs, CNI plugins are bounded, `Service` backends must be ready, and an unreadable store is an error rather than «nothing there». Records why `NetworkAccessRule`, `NetworkZone`, `Gateway`, `Container` and `KubernetesCluster` are not merged or renamed, and lists what is still pending. *Accepted*.
+- **0070** — Provider specifics live in a `provider` block of the resource's own spec (`provider.name` + a typed vendor block), not in one Kind per provider resource; neutral open-interface concepts (OCI/CRI/CNI/CSI) never go in it. Implemented for `VirtualMachine`; records what moving `NetworkZone`, `NetworkGateway` and `SystemContainer` still needs. *Accepted*.
+- **0071** — The provider block is `type` + `spec`, typed per provider and resource; `ref` is reserved until the node has named targets; a provider spec never overrides the generic intent. Supersedes the spelling of ADR-0070. *Accepted*.
