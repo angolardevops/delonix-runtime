@@ -115,6 +115,14 @@ never rewritten — supersede them with a new one.
   the holder AND, when defined, the health probe passes (`Starting` out). Retires the caller-less
   `lbset`/`lbclear` pair and the hash-derived `service_vip`. *Proposed*; spike measured in an
   unprivileged netns. Review copy in pt-AO alongside.
+- **0067** — The engine manages storage pools (owner decision D2): a `StoragePoolDriver` port in a
+  new `delonix-storage` context, one provider crate per backend (btrfs, zfs, lvm-thin) and the
+  current directory store as the `dir` driver; `kind: StoragePool` only uses pools from a root-owned
+  administrator allowlist (no device, path or command in a manifest); the engine stays rootless and
+  privileged operations go through a per-request, socket-activated helper (or an explicitly
+  configured rootful node service); a probe without privilege answers «could not determine», never
+  «no pools»; pools are created and destroyed only by the administrator. *Proposed*; a Portuguese
+  review copy is `0067-storage-pools.pt-AO.md`.
 - **0069** — The Kind catalog after reassessment: a manifest the engine does not fully understand is refused before any effect (including Pod `containers[]` items), `App` converges on a fingerprint of its build inputs, CNI plugins are bounded, `Service` backends must be ready, and an unreadable store is an error rather than «nothing there». Records why `NetworkAccessRule`, `NetworkZone`, `Gateway`, `Container` and `KubernetesCluster` are not merged or renamed, and lists what is still pending. *Accepted*.
 - **0070** — Provider specifics live in a `provider` block of the resource's own spec (`provider.name` + a typed vendor block), not in one Kind per provider resource; neutral open-interface concepts (OCI/CRI/CNI/CSI) never go in it. Implemented for `VirtualMachine`; records what moving `NetworkZone`, `NetworkGateway` and `SystemContainer` still needs. *Accepted*.
 - **0071** — The provider block is `type` + `spec`, typed per provider and resource; `ref` is reserved until the node has named targets; a provider spec never overrides the generic intent. Supersedes the spelling of ADR-0070. *Accepted*.
