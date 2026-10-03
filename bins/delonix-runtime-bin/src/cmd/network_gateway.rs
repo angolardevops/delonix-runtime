@@ -193,6 +193,56 @@ pub struct GatewayRuleSpec {
     pub protocol: Option<String>,
 }
 
+/// Normalizes `spec.provider: { type, spec }` to the scalar the executor reads
+/// (ADR-0071). The scalar spelling keeps working and means the same.
+///
+/// `provider.spec` is accepted EMPTY and nothing else: the document's
+/// vocabulary (aliases, rules, NAT, policies) is the engine's generic
+/// perimeter vocabulary, and the two appliance-only knobs that exist
+/// (`nat[].interface`, `policies[].sequence`) belong to single list items, not
+/// to the document. A provider-level key is refused by name rather than
+/// ignored, so the day a second gateway provider needs one it is added here
+/// with a test, not discovered in a manifest that already used it.
+pub(crate) fn lower_network_gateway_provider(docs: &mut [ManifestDoc]) -> Result<()> {
+    use serde_yaml::Value;
+    for doc in docs.iter_mut().filter(|d| d.kind == k::NETWORK_GATEWAY) {
+        let name = doc.metadata.name.clone();
+        let bad = |msg: String| Error::Invalid(format!("NetworkGateway '{name}': {msg}"));
+        let Value::Mapping(spec) = &mut doc.spec else {
+            continue;
+        };
+        let Some(Value::Mapping(p)) = spec.get("provider").cloned() else {
+            continue;
+        };
+        for key in p.keys().filter_map(Value::as_str) {
+            if !matches!(key, "type" | "spec") {
+                return Err(bad(format!(
+                    "spec.provider.{key}: unknown field (a provider block is `type` + `spec`)"
+                )));
+            }
+        }
+        let ty = p
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| bad("spec.provider.type is required".into()))?
+            .to_string();
+        match p.get("spec") {
+            None | Some(Value::Null) => {}
+            Some(Value::Mapping(m)) if m.is_empty() => {}
+            Some(Value::Mapping(m)) => {
+                let key = m.keys().filter_map(Value::as_str).next().unwrap_or("?");
+                return Err(bad(format!(
+                    "spec.provider.spec.{key}: a {ty} gateway has no provider-level field (the appliance-only knobs are per item: `nat[].interface`, `policies[].sequence`)"
+                )));
+            }
+            Some(_) => return Err(bad("spec.provider.spec must be a mapping".into())),
+        }
+        spec.insert(Value::from("provider"), Value::from(ty));
+    }
+    Ok(())
+}
+
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
 /// spec uses).
 pub const NETWORK_GATEWAY_SPEC_FIELDS: &[&str] =
@@ -1317,6 +1367,36 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    fn gw(spec: &str) -> Result<Vec<ManifestDoc>> {
+        manifest::load_str(
+            &format!("apiVersion: delonix.io/v1\nkind: NetworkGateway\nmetadata: {{ name: gw }}\nspec: {spec}\n"),
+            "t",
+        )
+    }
+
+    #[test]
+    fn the_provider_block_lowers_to_the_scalar_and_means_the_same() {
+        let a = gw("{ provider: { type: opnsense }, aliases: [] }").unwrap();
+        let b = gw("{ provider: opnsense, aliases: [] }").unwrap();
+        assert_eq!(a[0].spec, b[0].spec);
+        let c = gw("{ provider: { type: opnsense, spec: {} } }").unwrap();
+        assert_eq!(
+            c[0].spec.get("provider").and_then(|v| v.as_str()),
+            Some("opnsense")
+        );
+    }
+
+    #[test]
+    fn a_provider_block_with_an_unknown_part_is_refused_by_name() {
+        let err = |spec: &str| gw(spec).unwrap_err().to_string();
+        assert!(err("{ provider: { spec: {} } }").contains("type is required"));
+        assert!(err("{ provider: { type: opnsense, ref: x } }").contains("spec.provider.ref"));
+        assert!(
+            err("{ provider: { type: opnsense, spec: { category: x } } }")
+                .contains("no provider-level field")
+        );
+    }
     use super::*;
 
     fn policy(yaml: &str) -> GatewayPolicySpec {
