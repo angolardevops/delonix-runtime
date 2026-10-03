@@ -25,7 +25,8 @@ apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkGateway
 metadata: { name: edge }
 spec:
-  provider: opnsense
+  # ADR-0071 block form; the scalar `provider: opnsense` is the same thing.
+  provider: { type: opnsense }
   aliases:
     - name: delonix_web
       kind: host            # host | network

@@ -8898,3 +8898,4 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   (`allowed_sources`, `source_check_disabled`) e reaplicados em cada `start`. Uma
   política só com concessões já não dispara o lint `POLICY-SILENT`.
 - `SystemContainer` tem o bloco `spec.provider: { type: proxmox, spec: { swap, network } }` (2026-10-03): `lower_system_container_provider` dobra-o nos campos planos no `manifest::load`, a grafia plana continua válida e quer dizer o mesmo, repetir um campo nos dois sítios é recusado. `examples/systemcontainer.yaml`.
+- `NetworkGateway` aceita `spec.provider: { type }` (2026-10-03), dobrado no escalar por `lower_network_gateway_provider`; `provider.spec` só vazio. O Kind fica (vocabulário de perímetro genérico, não um Kind por recurso do provider). Só testado por unidade: a VM OPNsense do laboratório não arranca.

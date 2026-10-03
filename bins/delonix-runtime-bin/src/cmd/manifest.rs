@@ -780,6 +780,8 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     crate::cmd::tunnel::lower_tunnel_provider(&mut docs)?;
     // `SystemContainer.spec.provider: { type, spec }` likewise.
     crate::cmd::system_container::lower_system_container_provider(&mut docs)?;
+    // `NetworkGateway.spec.provider: { type }` likewise.
+    crate::cmd::network_gateway::lower_network_gateway_provider(&mut docs)?;
     // The unknown-field guard, for EVERY document and therefore for every
     // command that reads a manifest — `validate`, `plan`, `apply`, and each
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
