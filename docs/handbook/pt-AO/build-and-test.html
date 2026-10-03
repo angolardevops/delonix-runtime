@@ -276,6 +276,73 @@ binários vão para lá em vez de <code>target/</code>.</p>
   artefactos um do outro. Um directório de target por worktree é mais lento da primeira vez e
   previsível depois disso.</li>
 </ul>
+<h2 id="the-makefile">O Makefile<a class="hanchor" href="#the-makefile" aria-label="#">#</a></h2>
+<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> na raiz junta os comandos desta página num só ciclo de vida. Não acrescenta lógica
+de build própria: <code>make build</code> corre o <code>cargo build</code> mostrado acima, com o número de jobs e a
+prioridade escolhidos para a máquina.</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">make bootstrap        # uma vez por máquina: toolchain de Rust fixada, compiladores C/C++, protoc, sccache
+make doctor           # as mesmas verificações, sem mudar nada (sai com 1 quando falta algo obrigatório)
+make build            # os cinco binários, perfil release
+make install          # compila e instala para o teu utilizador em ~/.local/bin (Opção B abaixo)
+make install-system   # instala a árvore já compilada em /usr/local/bin com sudo (Opção C abaixo)
+make uninstall        # remove o que o `make install` escreveu
+make ci               # verificação de formato, gates de script, clippy, testes
+make help             # todos os alvos
+</code></pre></div>
+<p><strong>O que o <code>make install</code> escreve.</strong> Os cinco binários em <code>~/.local/bin</code>, a completion de shell e
+as páginas de manual geradas pelo binário instalado em <code>~/.local/share</code>, e
+<code>~/.config/delonix/env.sh</code>, que exporta <code>DELONIX_BIN</code> (a CLI instalada), <code>DELONIX_ROOT</code> (o state
+root) e acrescenta <code>~/.local/bin</code> ao <code>PATH</code> quando falta. Um bloco marcado em <code>~/.bashrc</code> e
+<code>~/.zshrc</code> carrega esse ficheiro; o <code>make uninstall</code> remove o bloco e deixa os ficheiros como
+estavam. <code>SHELL_RC=0</code> escreve o ficheiro de ambiente sem tocar nos teus ficheiros de shell, e
+<code>make install DELONIX_ROOT=&lt;dir&gt;</code> dá à build de desenvolvimento um state root próprio, longe de
+uma release instalada. Enquanto <code>DELONIX_BIN</code> estiver exportada, o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> e o
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> inspeccionam o binário instalado — retira-a antes de os correres
+contra a tua árvore.</p>
+<p>O <code>make install-system</code> copia binários já compilados (nunca compila sob <code>sudo</code>) e recusa enquanto
+houver processos do motor a correr, pelas razões listadas na Opção C; <code>FORCE=1</code> ultrapassa a
+recusa. Em Ubuntu 23.10+ o <code>make apparmor</code> escreve o perfil <code>delonix-dev</code> descrito na Opção B.</p>
+<p><strong>Afinação do build.</strong> Estas definições mudam o esforço do cargo, nunca o que ele produz, por isso
+o <code>make build</code> e um <code>cargo build</code> simples partilham um directório de target sem recompilar os
+artefactos um do outro. O <code>make info</code> imprime o que foi resolvido.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Variável</th>
+<th>Omissão</th>
+<th>Efeito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JOBS=&lt;n&gt;</code></td>
+<td>o <code>jobs</code> da tua configuração do cargo; sem ela, <code>min(núcleos, (RAM disponível − 2 GiB) /<wbr> 3 GiB)</code></td>
+<td>processos <code>rustc</code>/linker em paralelo. Um linker num binário de teste grande deste workspace foi medido em 1,5–1,9 GiB, o <code>rustc</code> release do <code>delonix</code> em 2,4 GiB</td>
+</tr>
+<tr>
+<td><code>LOWPRIO=0</code></td>
+<td>os builds correm sob <code>nice -n 19 ionice -c2 -n7</code></td>
+<td>corre com prioridade normal de CPU e disco</td>
+</tr>
+<tr>
+<td><code>SCCACHE=0</code></td>
+<td>o <code>sccache</code> é usado quando está no <code>PATH</code> e a tua configuração do cargo não nomeia um wrapper</td>
+<td>compila sem a cache partilhada (que também guarda os objectos C do <code>ring</code> e do <code>zstd-sys</code>)</td>
+</tr>
+<tr>
+<td><code>PROFILE=debug</code></td>
+<td><code>release</code></td>
+<td>compila e instala o perfil dev</td>
+</tr>
+<tr>
+<td><code>LINKER=mold|lld</code></td>
+<td>a omissão da toolchain — LLD em x86_64 com a toolchain fixada</td>
+<td>define <code>RUSTFLAGS</code>, por isso tudo recompila uma vez e um <code>cargo</code> simples deixa de partilhar o resultado</td>
+</tr>
+</tbody>
+</table></div>
+<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> não faz parte deste ciclo: instala uma release publicada e prepara um host
+para correr containers e VMs, e não precisa de toolchain.</p>
 <h2 id="installing-your-build-locally">Instalar a tua build localmente<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
 <p>A maioria das mudanças nunca precisa de uma build instalada: corre <code>./target/debug/delonix</code> a partir
 do teu worktree. Instala só quando precisas de um caminho estável — uma unit do systemd, um script
@@ -742,6 +809,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 <ul>
 <li><a href="#clone">Clonar</a></li>
 <li><a href="#build">Compilar</a></li>
+<li><a href="#the-makefile">O Makefile</a></li>
 <li><a href="#installing-your-build-locally">Instalar a tua build localmente</a><ul>
 <li><a href="#how-delonix-finds-its-server-binaries">Como o delonix encontra os seus binários de servidor</a></li>
 <li><a href="#option-a-run-it-from-the-worktree-safest">Opção A — corrê-la a partir do worktree (a mais segura)</a></li>

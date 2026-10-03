@@ -48,6 +48,10 @@ que precisa de nomes de fora vive em `docs/`, nunca no código.
 ## Comandos
 
 ```bash
+make bootstrap                        # uma vez por máquina: toolchain, C/C++, protoc, sccache
+make build                            # os cinco binários (release), com jobs/prioridade à medida da máquina
+make install                          # ~/.local/bin + ~/.config/delonix/env.sh (DELONIX_BIN, DELONIX_ROOT)
+make ci                               # fmt, gates de script, clippy, testes
 cargo build --workspace               # tudo
 cargo test  --workspace               # testes
 cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abaixo)

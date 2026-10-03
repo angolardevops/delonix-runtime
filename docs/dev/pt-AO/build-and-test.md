@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:e3064f16c3cd8456faff94b7b2e482d8957a320e5a93071573df9e38ba594950 -->
+<!-- translated-from: build-and-test.md sha256:f20f8b371a1254fe69460d1336153f6f6870cf6c3efd9d093fc7950449787dc3 -->
 # Clonar, compilar e testar
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md): a toolchain fixada, o `protoc`, e um host que passa nas suas verificações.
@@ -49,6 +49,53 @@ Duas notas práticas:
   disco, mas dois builds a correr ao mesmo tempo sobre ele esperam um pelo outro e podem invalidar os
   artefactos um do outro. Um directório de target por worktree é mais lento da primeira vez e
   previsível depois disso.
+
+## O Makefile
+
+O `Makefile` na raiz junta os comandos desta página num só ciclo de vida. Não acrescenta lógica
+de build própria: `make build` corre o `cargo build` mostrado acima, com o número de jobs e a
+prioridade escolhidos para a máquina.
+
+```bash
+make bootstrap        # uma vez por máquina: toolchain de Rust fixada, compiladores C/C++, protoc, sccache
+make doctor           # as mesmas verificações, sem mudar nada (sai com 1 quando falta algo obrigatório)
+make build            # os cinco binários, perfil release
+make install          # compila e instala para o teu utilizador em ~/.local/bin (Opção B abaixo)
+make install-system   # instala a árvore já compilada em /usr/local/bin com sudo (Opção C abaixo)
+make uninstall        # remove o que o `make install` escreveu
+make ci               # verificação de formato, gates de script, clippy, testes
+make help             # todos os alvos
+```
+
+**O que o `make install` escreve.** Os cinco binários em `~/.local/bin`, a completion de shell e
+as páginas de manual geradas pelo binário instalado em `~/.local/share`, e
+`~/.config/delonix/env.sh`, que exporta `DELONIX_BIN` (a CLI instalada), `DELONIX_ROOT` (o state
+root) e acrescenta `~/.local/bin` ao `PATH` quando falta. Um bloco marcado em `~/.bashrc` e
+`~/.zshrc` carrega esse ficheiro; o `make uninstall` remove o bloco e deixa os ficheiros como
+estavam. `SHELL_RC=0` escreve o ficheiro de ambiente sem tocar nos teus ficheiros de shell, e
+`make install DELONIX_ROOT=<dir>` dá à build de desenvolvimento um state root próprio, longe de
+uma release instalada. Enquanto `DELONIX_BIN` estiver exportada, o `scripts/cli-tree.sh` e o
+`scripts/docs_cli_gate.py` inspeccionam o binário instalado — retira-a antes de os correres
+contra a tua árvore.
+
+O `make install-system` copia binários já compilados (nunca compila sob `sudo`) e recusa enquanto
+houver processos do motor a correr, pelas razões listadas na Opção C; `FORCE=1` ultrapassa a
+recusa. Em Ubuntu 23.10+ o `make apparmor` escreve o perfil `delonix-dev` descrito na Opção B.
+
+**Afinação do build.** Estas definições mudam o esforço do cargo, nunca o que ele produz, por isso
+o `make build` e um `cargo build` simples partilham um directório de target sem recompilar os
+artefactos um do outro. O `make info` imprime o que foi resolvido.
+
+| Variável | Omissão | Efeito |
+|---|---|---|
+| `JOBS=<n>` | o `jobs` da tua configuração do cargo; sem ela, `min(núcleos, (RAM disponível − 2 GiB) / 3 GiB)` | processos `rustc`/linker em paralelo. Um linker num binário de teste grande deste workspace foi medido em 1,5–1,9 GiB, o `rustc` release do `delonix` em 2,4 GiB |
+| `LOWPRIO=0` | os builds correm sob `nice -n 19 ionice -c2 -n7` | corre com prioridade normal de CPU e disco |
+| `SCCACHE=0` | o `sccache` é usado quando está no `PATH` e a tua configuração do cargo não nomeia um wrapper | compila sem a cache partilhada (que também guarda os objectos C do `ring` e do `zstd-sys`) |
+| `PROFILE=debug` | `release` | compila e instala o perfil dev |
+| `LINKER=mold\|lld` | a omissão da toolchain — LLD em x86_64 com a toolchain fixada | define `RUSTFLAGS`, por isso tudo recompila uma vez e um `cargo` simples deixa de partilhar o resultado |
+
+O `scripts/install.sh` não faz parte deste ciclo: instala uma release publicada e prepara um host
+para correr containers e VMs, e não precisa de toolchain.
 
 ## Instalar a tua build localmente
 
