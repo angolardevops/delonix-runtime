@@ -265,6 +265,11 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // `entrypoint`, `env` and `network` stay cold (ADR-0058, plan 63
         // slice 4). `rootfs` is grow-only, see `grow_only_fields`.
         k::SYSTEM_CONTAINER => &["memory", "swap", "cores"],
+        // The only thing about a VM that changes without recreating it: its
+        // labels are bookkeeping on the record. Every other compared field
+        // defines the machine, and stays a refused `Replace` — which discards
+        // the disk.
+        k::VM => &["labels"],
         k::NETWORK => &["peers", "labels"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
@@ -918,6 +923,15 @@ mod tests {
         let p = plan(&[d], &[a], "s");
         assert_eq!(p[0].action, Action::Replace);
         assert_eq!(p[0].cold_fields, vec!["memory".to_string()]);
+    }
+
+    /// `labels` is a VM's ONLY hot field: a label change is an update in place,
+    /// and everything else about a VM stays a refused `Replace`.
+    #[test]
+    fn labels_are_the_only_thing_a_vm_changes_without_being_recreated() {
+        assert_eq!(hot_fields(k::VM), ["labels"]);
+        assert!(hot_fields(k::NETWORK).contains(&"labels"));
+        assert!(hot_fields(k::VOLUME).contains(&"labels"));
     }
 
     /// A document's own labels are one plan field, the same string from the

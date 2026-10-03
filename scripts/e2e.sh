@@ -2583,6 +2583,33 @@ printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
 check "network apply / volume apply fora de uma stack também escrevem os labels do documento" ok bash -c \
   "'$BIN' network apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' volume apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' network describe nl-pk-net | grep -q 'app=web' && '$BIN' volume describe nl-pk-vol | grep -q 'app=web'"
 "$BIN" network rm nl-pk-net >/dev/null 2>&1; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
+# The same for a `kind: VirtualMachine` — measured dropping them too. Labels are
+# the one VM field that converges in place: the domain keeps its id.
+if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+  NLVM="nl-vm-$PFX"; qemu-img create -f qcow2 "$NLDIR/vm.qcow2" 64M >/dev/null 2>&1
+  nl_vm_manifest() {
+    printf '%s\n' 'apiVersion: compute.delonix.io/v1alpha1' 'kind: VirtualMachine' \
+      "metadata: { name: $NLVM, labels: $1 }" \
+      "spec: { disk: $NLDIR/vm.qcow2, backend: libvirt, memory: 256M }" > "$NLDIR/vm.yaml"
+  }
+  nl_vm_labels() { "$BIN" describe vm "$NLVM" 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ','; }
+  nl_vm_manifest '{ app: web, tier: front }'
+  if (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1); then
+    NLDOM="$(virsh -c qemu:///system domid "$NLVM" 2>/dev/null | head -1)"
+    check "stack apply: metadata.labels de uma VirtualMachine chegam ao registo, sem deriva no plano" ok bash -c \
+      "[[ '$(nl_vm_labels)' == 'app=web,tier=front,' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
+    nl_vm_manifest '{ app: api }'
+    (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1)
+    check "mudar os labels de uma VM converge a quente: o registo segue e o domínio é o mesmo" ok bash -c \
+      "[[ '$(nl_vm_labels)' == 'app=api,' ]] && [[ \"\$(virsh -c qemu:///system domid '$NLVM' | head -1)\" == '$NLDOM' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
+  else
+    skip "labels de uma VirtualMachine" "o stack apply da VM não passou neste host"
+  fi
+  (cd "$NLDIR" && "$BIN" stack destroy -f vm.yaml >/dev/null 2>&1)
+else
+  skip "labels de uma VirtualMachine" "precisa de virsh + qemu-img e de uma ligação qemu:///system utilizável"
+fi
 
 # ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
