@@ -111,9 +111,18 @@ impl SecretStore {
                 return Err(Error::InvalidEnvKey(k.clone()));
             }
         }
+        // The version is the STORE's to assign (ADR-0069 item 6): the caller
+        // cannot forget to bump it, or bump it without a change. Same values →
+        // same version; different values → the previous + 1; first save → 1.
+        let mut stored = s.clone();
+        stored.version = match self.load(&s.name) {
+            Ok(prev) if prev.data == s.data => prev.version.max(1),
+            Ok(prev) => prev.version.max(1) + 1,
+            Err(_) => 1,
+        };
         // value encrypted at-rest: header || nonce || ciphertext.
         let mut blob = Vec::from(SEALED_MAGIC);
-        blob.extend_from_slice(&self.vault.seal(&serde_json::to_vec(s)?)?);
+        blob.extend_from_slice(&self.vault.seal(&serde_json::to_vec(&stored)?)?);
         // Durable AND mode-atomic. Two gaps closed here, both of which this
         // file had and its siblings did not:
         //
@@ -147,6 +156,7 @@ impl SecretStore {
             name: name.to_string(),
             data: BTreeMap::new(),
             updated_unix: 0,
+            version: 0,
         });
         if !f(&mut s) {
             return Ok(s);
@@ -285,6 +295,28 @@ impl SecretStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_store_assigns_the_version_from_the_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = SecretStore::open(tmp.path()).unwrap();
+        let mk = |v: &str| Secret {
+            name: "db".into(),
+            data: [("PASS".to_string(), v.to_string())].into(),
+            updated_unix: 1,
+            version: 99, // a caller cannot choose it
+        };
+        s.save(&mk("a")).unwrap();
+        assert_eq!(s.load("db").unwrap().version, 1);
+        s.save(&mk("a")).unwrap();
+        assert_eq!(
+            s.load("db").unwrap().version,
+            1,
+            "same values, same version"
+        );
+        s.save(&mk("b")).unwrap();
+        assert_eq!(s.load("db").unwrap().version, 2, "new values, next version");
+    }
+
     use super::*;
 
     #[test]
@@ -317,6 +349,7 @@ mod tests {
             name: "db".into(),
             data,
             updated_unix: 1,
+            version: 0,
         })
         .unwrap();
         // 0600 file
@@ -404,6 +437,7 @@ mod tests {
                 name: "app".into(),
                 data,
                 updated_unix: 1,
+                version: 0,
             })
             .unwrap();
 
@@ -430,6 +464,7 @@ mod tests {
             name: "old".into(),
             data: old,
             updated_unix: 0,
+            version: 0,
         })
         .unwrap();
         std::fs::write(dir.join("secrets/old.json"), &legacy).unwrap();
@@ -450,6 +485,7 @@ mod tests {
                 name: "db".into(),
                 data,
                 updated_unix: 1,
+                version: 0,
             })
             .unwrap();
         let out = dir.join("run-secrets");
@@ -480,6 +516,7 @@ mod tests {
                 name: "s1".into(),
                 data: d1,
                 updated_unix: 1,
+                version: 0,
             })
             .unwrap();
         let mut d2 = BTreeMap::new();
@@ -489,6 +526,7 @@ mod tests {
                 name: "s2".into(),
                 data: d2,
                 updated_unix: 1,
+                version: 0,
             })
             .unwrap();
 

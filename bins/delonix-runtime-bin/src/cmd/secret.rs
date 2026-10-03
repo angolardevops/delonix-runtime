@@ -27,6 +27,7 @@ struct SecretLsRow {
     keys: usize,
     names: Vec<String>,
     updated_unix: u64,
+    version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     used_by: Option<Vec<String>>,
 }
@@ -447,18 +448,55 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
             )));
         }
         let n = data.len();
+        let previous = store.load(name).ok();
         store.save(&Secret {
             name: name.clone(),
             data,
             updated_unix: now_unix(),
+            version: 0,
         })?;
-        println!(
-            "{}",
-            super::po::tf(
-                "secret/{name}: ensured ({n} key(s))",
+        // The version is assigned by the store; read it back rather than
+        // computing it twice. What changed is said by key NAME only — a value
+        // never reaches a line a CI log keeps (ADR-0069 item 6).
+        let now = store.load(name)?;
+        let line = match previous {
+            None => super::po::tf(
+                "secret/{name}: created, version 1 ({n} key(s))",
                 &[("name", name), ("n", &n.to_string())],
-            )
-        );
+            ),
+            Some(prev) if prev.data == now.data => super::po::tf(
+                "secret/{name}: unchanged, version {v} ({n} key(s))",
+                &[
+                    ("name", name),
+                    ("v", &now.version.to_string()),
+                    ("n", &n.to_string()),
+                ],
+            ),
+            Some(prev) => {
+                let mut changed: Vec<&str> = now
+                    .data
+                    .iter()
+                    .filter(|(k, v)| prev.data.get(*k) != Some(*v))
+                    .map(|(k, _)| k.as_str())
+                    .chain(
+                        prev.data
+                            .keys()
+                            .filter(|k| !now.data.contains_key(*k))
+                            .map(String::as_str),
+                    )
+                    .collect();
+                changed.sort_unstable();
+                super::po::tf(
+                    "secret/{name}: rotated to version {v} (changed: {keys})",
+                    &[
+                        ("name", name),
+                        ("v", &now.version.to_string()),
+                        ("keys", &changed.join(", ")),
+                    ],
+                )
+            }
+        };
+        println!("{line}");
     }
     Ok(())
 }
@@ -584,6 +622,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 name: name.clone(),
                 data,
                 updated_unix: now_unix(),
+                version: 0,
             })?;
             let line = match (existed, dropped.is_empty()) {
                 (false, _) => super::po::tf(
@@ -621,12 +660,14 @@ pub fn run(action: SecretCmd) -> Result<()> {
                         keys: s.data.len(),
                         names: s.data.keys().cloned().collect(),
                         updated_unix: s.updated_unix,
+                        version: s.version.max(1),
                     })
                     .collect();
                 return crate::cmd::output::print_json(&rows);
             }
-            let mut t =
-                output::Table::new(&["NAME", "KEYS", "NAMES", "AGE", "USED BY"]).right_align(1);
+            let mut t = output::Table::new(&["NAME", "VERSION", "KEYS", "NAMES", "AGE", "USED BY"])
+                .right_align(1)
+                .right_align(2);
             for s in store.list() {
                 let keys: Vec<&str> = s.data.keys().map(String::as_str).collect();
                 let used_by = match secret_user_names(&s.name) {
@@ -636,6 +677,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 };
                 t.row(vec![
                     s.name.clone(),
+                    s.version.max(1).to_string(),
                     s.data.len().to_string(),
                     keys.join(", "),
                     output::fmt_age(s.updated_unix),
@@ -655,6 +697,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 return output::print_json(&[inspect_view(&s, reveal)]);
             }
             println!("Name:  {}", s.name);
+            println!("Version: {}", s.version.max(1));
             for (k, v) in &s.data {
                 // Redaction by default — the value only comes out with explicit --reveal.
                 println!(
@@ -835,6 +878,7 @@ mod tests {
                 name: "s".into(),
                 data,
                 updated_unix: 0,
+                version: 0,
             })
             .unwrap();
 
@@ -878,6 +922,7 @@ mod tests {
                 name: "s".into(),
                 data,
                 updated_unix: 0,
+                version: 0,
             })
             .unwrap();
 
@@ -1061,6 +1106,7 @@ mod tests {
             name: "s".into(),
             data: BTreeMap::from([("senha".to_string(), "SUPERSECRETO".to_string())]),
             updated_unix: 0,
+            version: 0,
         };
         for reveal in [false, true] {
             let out = serde_json::to_string(&inspect_view(&s, reveal)).unwrap();

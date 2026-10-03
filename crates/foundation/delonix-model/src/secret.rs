@@ -15,6 +15,11 @@ pub struct Secret {
     /// Creation/update instant (Unix seconds).
     #[serde(default)]
     pub updated_unix: u64,
+    /// Rotation counter: 1 when first stored, +1 each time the VALUES change.
+    /// Assigned by the store on save, never by the caller; `0` is a record
+    /// written before versions existed (read as version 1).
+    #[serde(default)]
+    pub version: u32,
 }
 
 impl Secret {

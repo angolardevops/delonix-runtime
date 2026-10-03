@@ -15249,3 +15249,13 @@ msgstr "--plan-digest foi dado, e o manifesto não tem nada contra que o verific
 
 msgid "warning: could not ask the provider whether VM '{name}' exists: {err}"
 msgstr "aviso: não foi possível perguntar ao provider se a VM '{name}' existe: {err}"
+
+# ---- ADR-0069 item 6: secret versions ----
+msgid "secret/{name}: created, version 1 ({n} key(s))"
+msgstr "secret/{name}: criado, versão 1 ({n} chave(s))"
+
+msgid "secret/{name}: unchanged, version {v} ({n} key(s))"
+msgstr "secret/{name}: sem alterações, versão {v} ({n} chave(s))"
+
+msgid "secret/{name}: rotated to version {v} (changed: {keys})"
+msgstr "secret/{name}: rodado para a versão {v} (alteradas: {keys})"
