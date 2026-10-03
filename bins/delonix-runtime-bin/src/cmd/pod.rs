@@ -1029,7 +1029,7 @@ mod tests {
         assert!(check_pod_namespace("p", "default", "").is_ok());
         assert!(check_pod_namespace("p", "teamA", "teama").is_ok());
         let e = check_pod_namespace("p", "teamB", "teamA").unwrap_err();
-        assert!(matches!(e, Error::Conflict(_)), "{e}");
+        assert!(e.to_string().contains("already exists"), "{e}");
     }
     use super::*;
 
