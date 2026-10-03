@@ -171,7 +171,7 @@ def scenario_delete():
     record; sent again with the same key it is the same answer, and without a
     key it is 404."""
     code, _, doc = call("DELETE", NETS + "/e2op-a", headers=['If-Match: "0000000000000000"'])
-    ok(code == 412 and doc["grpc_status"] == 10, (code, doc))
+    ok(code == 412 and doc["grpc_status"] == 9, (code, doc))
     rc, _ = cli("network", "inspect", "e2op-a")
     ok(rc == 0, "a refused delete removed the network")
     code, hdrs, _ = call("GET", NETS + "/e2op-a")

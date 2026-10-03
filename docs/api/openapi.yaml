@@ -2573,6 +2573,11 @@ components:
                         $ref: '#/components/schemas/delonix.node.v1.Volume'
                 page:
                     $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
+                    description: '"self", and "next" while there is another page.'
         delonix.node.v1.LocalVolume:
             type: object
             properties: {}
@@ -3157,6 +3162,11 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Condition'
+                    description: '"UsageMeasured" says whether used_bytes is the real usage, and why not.'
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
         delonix.node.v1.VolumeSpec:
             type: object
             properties:

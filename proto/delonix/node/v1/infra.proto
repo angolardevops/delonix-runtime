@@ -176,7 +176,9 @@ message Volume {
   // Absent when usage could not be measured (e.g. unreadable subuid-owned data) —
   // unknown is not zero.
   optional int64 used_bytes = 3;
+  // "UsageMeasured" says whether used_bytes is the real usage, and why not.
   repeated Condition conditions = 4;
+  repeated Link links = 5;
 }
 
 message CreateVolumeRequest {
@@ -193,6 +195,8 @@ message CreateVolumeRequest {
 message ListVolumesResponse {
   repeated Volume volumes = 1;
   PageResponse page = 2;
+  // "self", and "next" while there is another page.
+  repeated Link links = 3;
 }
 
 message DeleteVolumeRequest {
