@@ -48,6 +48,7 @@ pub mod gc;
 pub use delonix_networking::{gateway, ownership, segment};
 pub mod infra;
 pub mod ipam;
+pub mod netops;
 mod pin_userns;
 pub mod policy_nft;
 pub mod provider_report;
@@ -1128,6 +1129,26 @@ impl NetworkStore {
         Ok(out)
     }
 
+    /// Whether `name` can be a user network: not the reserved default, and
+    /// only letters, digits, `-` and `_` — it becomes a file name under the
+    /// store, so nothing that could leave it.
+    pub fn validate_name(name: &str) -> Result<()> {
+        if name.is_empty() || name == DEFAULT_NET {
+            return Err(Error::ReservedNetworkName(
+                "'bridge' is the default network (reserved)".into(),
+            ));
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(Error::InvalidNetworkName(format!(
+                "invalid network name: '{name}'"
+            )));
+        }
+        Ok(())
+    }
+
     /// Creates a user network (free subnet, no collision with existing ones).
     pub fn create(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
@@ -1336,11 +1357,11 @@ impl NetworkStore {
     /// redes que partilham endereços é a falha que não dá erro nenhum: dá dois
     /// containers com o mesmo IP e uma rede que funciona para um deles.
     pub fn create_with_cidr(&self, name: &str, cidr: Cidr) -> Result<Network> {
-        if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::ReservedNetworkName(
-                "'bridge' is the default network (reserved)".into(),
-            ));
-        }
+        // The name is a file name under the store. `create` checked its
+        // alphabet and this did not: measured on v4.4.0, `network create
+        // '../evil' --subnet 10.231.0.0/24` wrote the record OUTSIDE
+        // `networks/` and answered 0.
+        Self::validate_name(name)?;
         if let Ok(existente) = self.get(name) {
             return Ok(existente);
         }
@@ -3700,6 +3721,27 @@ mod tests_detached_helper {
 /// não escritos à mão: uma lista fixa deixaria de exercitar colisão nenhuma no
 /// dia em que a função de dispersão mudasse, e o teste continuaria verde a não
 /// testar nada.
+#[cfg(test)]
+mod tests_network_name {
+    use super::*;
+
+    /// The name is a file name under the store: with an explicit subnet it
+    /// was written unchecked, and `../evil` landed outside `networks/`.
+    #[test]
+    fn a_name_that_leaves_the_store_is_refused_with_a_subnet_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("state");
+        let store = NetworkStore::open(&root).unwrap();
+        let cidr = NetworkStore::validate_subnet("10.231.0.0/24").unwrap();
+        for bad in ["../evil", "a/b", "..", "a b", ""] {
+            assert!(store.create_with_cidr(bad, cidr).is_err(), "{bad}");
+        }
+        assert!(!root.join("evil").exists());
+        assert!(store.list().unwrap().is_empty());
+        assert!(store.create_with_cidr("good-1", cidr).is_ok());
+    }
+}
+
 #[cfg(test)]
 mod tests_alocacao_16 {
     use super::*;
