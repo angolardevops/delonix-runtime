@@ -40,6 +40,9 @@ const PROXMOX_KEYS: &[&str] = &["zone", "alias", "dhcpRange", "reservations", "d
 /// Provider-neutral `Network` fields that make no sense for a provider segment.
 const NATIVE_ONLY: &[&str] = &["driver", "parent", "vni", "peers", "wgIp", "wg_ip"];
 
+/// A zone being assembled: its vnets, and the zone-level `dns` with the network that declared it.
+type ZoneParts = (Vec<Value>, Option<(Value, String)>);
+
 fn bad(net: &str, msg: &str) -> Error {
     Error::Invalid(format!("Network '{net}': {msg}"))
 }
@@ -47,7 +50,7 @@ fn bad(net: &str, msg: &str) -> Error {
 pub(crate) fn lower_network_providers(docs: Vec<ManifestDoc>) -> Result<Vec<ManifestDoc>> {
     let mut out = Vec::with_capacity(docs.len());
     // zone -> (vnets, dns, first network that declared dns)
-    let mut zones: BTreeMap<String, (Vec<Value>, Option<(Value, String)>)> = BTreeMap::new();
+    let mut zones: BTreeMap<String, ZoneParts> = BTreeMap::new();
     for doc in docs {
         if doc.kind != k::NETWORK || doc.spec.get("provider").is_none() {
             out.push(doc);
