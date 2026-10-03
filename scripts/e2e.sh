@@ -139,8 +139,22 @@ else
   # («vm create --require sem --backend…») between two runs, because the
   # installer had run in between and named libvirt. An empty providers file
   # keeps the outcome the engine's; a check that needs a provider sets its own.
+  #
+  # A providers file with no `networkDefaults` for a role switches off the
+  # «single registered provider» rule for that role (ADR-0059 D3), so a run
+  # that DOES configure a remote network provider through the environment has
+  # to name it here. Measured 2026-10-03 against the lab node: with the bare
+  # file every NetworkZone check of the remote-providers section answered
+  # DX-1380 and nothing reached the cluster.
   if [[ -z "${DELONIX_PROVIDERS_CONFIG:-}" ]]; then
-    printf 'apiVersion: config.delonix.io/v1\n' >"$OUT/providers-none.yaml"
+    {
+      printf 'apiVersion: config.delonix.io/v1\n'
+      if [[ -n "${DELONIX_PROXMOX_URL:-}" || -n "${DELONIX_OPNSENSE_URL:-}" ]]; then
+        printf 'networkDefaults:\n'
+        [[ -n "${DELONIX_PROXMOX_URL:-}" ]] && printf '  segment: proxmox\n'
+        [[ -n "${DELONIX_OPNSENSE_URL:-}" ]] && printf '  gateway: opnsense\n'
+      fi
+    } >"$OUT/providers-none.yaml"
     export DELONIX_PROVIDERS_CONFIG="$OUT/providers-none.yaml"
   fi
   if [[ ${#DELONIX_NET_RUNTIME_DIR} -gt 80 ]]; then
