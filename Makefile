@@ -28,6 +28,9 @@
 #                 the dev profile, or the faster-to-build CI profile (thin LTO, 16 codegen
 #                 units: about 40% shorter than release, a 38 MiB binary instead of 32).
 #                 Default: release, the profile that ships.
+#   REPRODUCIBLE=1
+#                 remap path prefixes and fix the build time, so two builds of one commit
+#                 give the same binary wherever they are checked out. Rebuilds everything once.
 #   LINKER=mold|lld
 #                 opt-in linker override. NOT fingerprint-neutral: it sets RUSTFLAGS, so it
 #                 rebuilds everything once and a plain `cargo` no longer shares the result.
@@ -102,6 +105,17 @@ ifeq ($(LOWPRIO),1)
 	$(shell command -v ionice >/dev/null 2>&1 && echo ionice -c2 -n7)
 endif
 
+# REPRODUCIBLE=1: the binary stops depending on the checkout path and on the build
+# time (path prefixes remapped, SOURCE_DATE_EPOCH = the commit time). `make
+# repro-check` proves it by building the tree from two different paths and comparing.
+# Like LINKER it sets RUSTFLAGS, so it rebuilds everything once.
+REPRODUCIBLE ?= 0
+ifeq ($(REPRODUCIBLE),1)
+  export SOURCE_DATE_EPOCH := $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
+  export RUSTFLAGS := $(strip $(RUSTFLAGS) --remap-path-prefix=$(CURDIR)=/build \
+	--remap-path-prefix=$(CARGO_HOME_DIR)=/cargo --remap-path-prefix=$(or $(RUSTUP_HOME),$(HOME)/.rustup)=/rustup)
+endif
+
 ifdef LINKER
   ifneq ($(filter-out mold lld,$(LINKER)),)
     $(error LINKER must be `mold` or `lld`, not `$(LINKER)`)
@@ -133,7 +147,7 @@ IMAGE_REPO ?= delonix/runtime
 IMAGE      := $(IMAGE_REPO):$(TAG)
 GHCR_IMAGE ?= ghcr.io/angolardevops/delonix-runtime
 
-.PHONY: help info bootstrap doctor build build-debug binaries check fmt fmt-check lint test deny \
+.PHONY: help info repro-check bootstrap doctor build build-debug binaries check fmt fmt-check lint test deny \
 	gates ci install install-system uninstall uninstall-system apparmor clean \
 	image ghcr-push kind-load image-tag bench coverage require-protoc require-built
 
@@ -236,6 +250,9 @@ uninstall-system: ## Remove what `make install-system` put in /usr/local (sudo)
 
 apparmor: ## Ubuntu 23.10+: allow user namespaces for the binary installed in ~/.local/bin (sudo; own profile, replaces nothing)
 	@scripts/dev-install.sh apparmor --prefix "$(PREFIX)"
+
+repro-check: ## Prove the release binary is independent of the checkout path (two release builds, about 4 min)
+	@scripts/repro-check.sh
 
 clean: ## Remove this tree's build artefacts
 	cargo clean
