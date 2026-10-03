@@ -124,21 +124,22 @@ spec:
     userData: "@/etc/delonix/examples/user-data.yaml"
     # seed: /path/seed.iso              # prebuilt seed — see `prebuilt-seed`
 
-  libvirt:                              # advanced libvirt knobs
-    backend: libvirt
-    machine: q35
-    cpuModel: host-model
-    cpuTopology: { sockets: 1, cores: 2, threads: 1 }
-    tpm: false
-    video: qxl
-    bootOrder: [hd]
-    extraDisks:
-      - { source: /var/lib/libvirt/images/scratch.raw, format: raw, bus: sata }
-    extraNics:
-      - { type: bridge, source: br0, model: e1000 }
-    xmlOverlay:                         # => libvirtXmlOverlay
-      - "<memballoon model='virtio'/>"
-    # xml: "<domain …>"                 # => libvirtXml — see `raw-domain`
+  provider:                             # the hypervisor, and what only it understands
+    name: libvirt
+    libvirt:
+      machine: q35
+      cpuModel: host-model
+      cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+      tpm: false
+      video: qxl
+      bootOrder: [hd]
+      extraDisks:
+        - { source: /var/lib/libvirt/images/scratch.raw, format: raw, bus: sata }
+      extraNics:
+        - { type: bridge, source: br0, model: e1000 }
+      xmlOverlay:                         
+        - "<memballoon model='virtio'/>"
+      # xml: "<domain …>"               # whole <domain>, used verbatim — see `raw-domain`
 ---
 # ---------------------------------------------------------------------------
 # 4. Bridge mode: the VM attaches to a host bridge (mutually exclusive with a static `ip`, which is nat-only)

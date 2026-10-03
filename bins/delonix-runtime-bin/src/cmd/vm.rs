@@ -307,6 +307,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "boot",
     "cloudInit",
     "libvirt",
+    "provider",
 ];
 
 /// Re-deserializes a `kind: VirtualMachine` document's spec, accepting BOTH the historic
@@ -380,6 +381,106 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// `spec.provider` — the ONE place a manifest says which hypervisor realizes the
+/// VM and carries what only that hypervisor understands.
+///
+/// ```yaml
+/// provider:
+///   name: libvirt        # the target (replaces the top-level `backend`)
+///   libvirt:             # vendor block: typed, validated, refused for any other `name`
+///     machine: q35
+///     xml: "<domain>…"
+/// ```
+///
+/// Everything outside this block is provider-neutral (disk, resources, network,
+/// cloud-init). A vendor block under a `name` that is not its own is an error,
+/// never a field that is silently ignored on the other backend.
+const VM_PROVIDER_NAMES: &[&str] = &["libvirt"];
+
+/// Sub-keys of the vendor block `provider.libvirt` -> the flat field each becomes.
+const VM_PROVIDER_LIBVIRT: &[(&str, &str)] = &[
+    ("machine", "machine"),
+    ("cpuModel", "cpuModel"),
+    ("cpuTopology", "cpuTopology"),
+    ("tpm", "tpm"),
+    ("video", "video"),
+    ("bootOrder", "bootOrder"),
+    ("extraDisks", "extraDisks"),
+    ("extraNics", "extraNics"),
+    ("xmlOverlay", "libvirtXmlOverlay"),
+    ("xml", "libvirtXml"),
+];
+
+/// Problems in `spec.provider`, as dotted paths for the unknown-field report.
+fn provider_block_problems(spec: &serde_yaml::Value) -> Vec<String> {
+    use serde_yaml::Value;
+    let Some(Value::Mapping(p)) = spec.get("provider") else {
+        return Vec::new();
+    };
+    let name = p.get("name").and_then(|v| v.as_str());
+    let mut out = Vec::new();
+    for (k, v) in p {
+        let Some(key) = k.as_str() else { continue };
+        if key == "name" {
+            continue;
+        }
+        if !VM_PROVIDER_NAMES.contains(&key) {
+            out.push(format!("provider.{key}"));
+            continue;
+        }
+        if name.is_some_and(|n| n != key) {
+            out.push(format!(
+                "provider.{key} (provider.name is '{}', so this block is for another hypervisor)",
+                name.unwrap_or_default()
+            ));
+        }
+        if let Value::Mapping(block) = v {
+            for sub in block.keys().filter_map(|s| s.as_str()) {
+                if !VM_PROVIDER_LIBVIRT.iter().any(|(from, _)| *from == sub) {
+                    out.push(format!("provider.{key}.{sub}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The older spellings of what now lives under `spec.provider`: the flat
+/// vendor fields, the `libvirt:` group and the top-level `backend`. Still
+/// accepted and lowered to the same fields; reported so a manifest moves to the
+/// one canonical shape.
+pub(crate) fn legacy_provider_spellings(spec: &serde_yaml::Value) -> Vec<String> {
+    let serde_yaml::Value::Mapping(m) = spec else {
+        return Vec::new();
+    };
+    const FLAT: &[&str] = &[
+        "backend",
+        "machine",
+        "cpuModel",
+        "cpu_model",
+        "cpuTopology",
+        "cpu_topology",
+        "tpm",
+        "video",
+        "bootOrder",
+        "boot_order",
+        "extraDisks",
+        "extra_disks",
+        "extraNics",
+        "extra_nics",
+        "libvirtXmlOverlay",
+        "libvirt_xml_overlay",
+        "libvirtXml",
+        "libvirt_xml",
+        "libvirt",
+    ];
+    m.keys()
+        .filter_map(|k| k.as_str())
+        .filter(|k| FLAT.contains(k))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Sub-keys accepted inside the grouped `network:` mapping.
 const VM_NETWORK_KEYS: &[&str] = &["name", "mode", "bridge", "staticIp", "allowMacSpoofing"];
 
@@ -412,6 +513,7 @@ pub(crate) fn unknown_group_keys(spec: &serde_yaml::Value) -> Vec<String> {
     for (group, pairs) in VM_GROUPS {
         scan(group, &|k| pairs.iter().any(|(from, _)| *from == k));
     }
+    out.extend(provider_block_problems(spec));
     out
 }
 
@@ -442,6 +544,22 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         hoist(m, &net, "bridge", "bridge");
         hoist(m, &net, "staticIp", "ip");
         hoist(m, &net, "allowMacSpoofing", "allowMacSpoofing");
+    }
+    if let Some(Value::Mapping(p)) = m.get("provider").cloned() {
+        m.remove("provider");
+        hoist(m, &p, "name", "backend");
+        // A vendor block names its hypervisor; with no `name`, the block itself
+        // selects it (the same answer, written once).
+        for vendor in VM_PROVIDER_NAMES {
+            if let Some(Value::Mapping(block)) = p.get(*vendor) {
+                if m.get("backend").is_none_or(Value::is_null) {
+                    m.insert(Value::from("backend"), Value::from(*vendor));
+                }
+                for (from, to) in VM_PROVIDER_LIBVIRT {
+                    hoist(m, block, from, to);
+                }
+            }
+        }
     }
     for (group, pairs) in VM_GROUPS {
         if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
@@ -4586,6 +4704,53 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    fn y(t: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(t).unwrap()
+    }
+
+    #[test]
+    fn provider_block_lowers_to_the_same_flat_fields_as_the_old_spellings() {
+        let new = normalize_vm_spec(y(
+            "disk: d\nprovider: { name: libvirt, libvirt: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let old = super::normalize_vm_spec(y(
+            "disk: d\nbackend: libvirt\nmachine: q35\ntpm: true\nlibvirtXml: '<domain/>'\nlibvirtXmlOverlay: ['<a/>']",
+        ));
+        assert_eq!(new, old);
+    }
+
+    #[test]
+    fn a_vendor_block_alone_selects_its_provider() {
+        let v = super::normalize_vm_spec(y("disk: d\nprovider: { libvirt: { machine: q35 } }"));
+        assert_eq!(v["backend"], serde_yaml::Value::from("libvirt"));
+        let v = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { name: null, libvirt: { tpm: true } }",
+        ));
+        assert_eq!(v["backend"], serde_yaml::Value::from("libvirt"));
+    }
+
+    #[test]
+    fn a_vendor_block_for_another_hypervisor_is_a_problem_not_an_ignored_field() {
+        let p = super::provider_block_problems(&y(
+            "provider: { name: cloud-hypervisor, libvirt: { machine: q35 } }",
+        ));
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].starts_with("provider.libvirt"), "{p:?}");
+        let p =
+            super::provider_block_problems(&y("provider: { name: libvirt, libvirt: { machin: q35 } }"));
+        assert_eq!(p, vec!["provider.libvirt.machin".to_string()]);
+        let p = super::provider_block_problems(&y("provider: { vmware: {} }"));
+        assert_eq!(p, vec!["provider.vmware".to_string()]);
+        assert!(super::provider_block_problems(&y("provider: { name: proxmox }")).is_empty());
+    }
+
+    #[test]
+    fn the_old_spellings_are_reported_so_a_manifest_moves_to_provider() {
+        let l = super::legacy_provider_spellings(&y("backend: libvirt\nmachine: q35\ndisk: d"));
+        assert_eq!(l, vec!["backend".to_string(), "machine".to_string()]);
+        assert!(super::legacy_provider_spellings(&y("disk: d\nprovider: { name: libvirt }")).is_empty());
+    }
+
     use super::{valid_migrate_memory_spec, valid_migrate_network_name};
 
     #[test]

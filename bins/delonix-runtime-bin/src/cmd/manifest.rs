@@ -447,6 +447,19 @@ fn check_unknown_fields(doc: &ManifestDoc) {
         warn_unknown_fields(doc, fields);
     }
     check_pod_members(doc);
+    if doc.kind == k::VM {
+        let legacy = crate::cmd::vm::legacy_provider_spellings(&doc.spec);
+        if !legacy.is_empty() {
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': {keys} belong under spec.provider (name + the vendor block) — still accepted, move them to the canonical shape",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("keys", &legacy.join(", ")),
+                ],
+            ));
+        }
+    }
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
         k::VM => crate::cmd::vm::unknown_group_keys(&doc.spec),

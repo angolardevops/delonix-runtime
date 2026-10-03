@@ -209,7 +209,7 @@ spec:
     resources: { vcpus: 2, memory: 2G }
     network: { name: wl-net, mode: nat, staticIp: 192.168.122.61 }
     cloudInit: { hostname: wl-vm-grouped }
-    libvirt: { backend: libvirt, machine: q35 }
+    provider: { name: libvirt, libvirt: { machine: q35 } }
 ---
 # ---------------------------------------------------------------------------
 # type: microvm — a VirtualMachine on the microVM hypervisor; the backend is FORCED to cloud-hypervisor
