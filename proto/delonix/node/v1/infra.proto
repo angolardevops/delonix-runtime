@@ -76,6 +76,7 @@ message Network {
   ResourceMeta meta = 1;
   NetworkSpec spec = 2;
   repeated Condition conditions = 3; // "Realized" is read from the dataplane record
+  repeated Link links = 4;
 }
 
 message CreateNetworkRequest {
@@ -92,6 +93,8 @@ message CreateNetworkRequest {
 message ListNetworksResponse {
   repeated Network networks = 1;
   PageResponse page = 2;
+  // "self", and "next" while there is another page.
+  repeated Link links = 3;
 }
 
 message ConnectContainerRequest {

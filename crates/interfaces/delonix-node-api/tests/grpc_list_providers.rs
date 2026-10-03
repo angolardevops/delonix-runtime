@@ -48,6 +48,9 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         }))
         .await
         .expect("connect to the server's unix socket");
+    let mut nets = delonix_node_api::proto::v1::network_service_client::NetworkServiceClient::new(
+        channel.clone(),
+    );
     let mut cli = NodeServiceClient::new(channel);
 
     let all = cli
@@ -142,6 +145,33 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
     }
     assert!(cap.cpu_millis_allocatable <= cap.cpu_millis_total);
     assert!(cap.memory_bytes_allocatable <= cap.memory_bytes_total);
+
+    // ADR-0042 step E, first wave: the network reads are served over gRPC too.
+    // A namespace other than `default` has no networks whatever this host has,
+    // and a mutation of the same service still says it is not served.
+    let none = nets
+        .list_networks(delonix_node_api::proto::v1::ListNetworksRequest {
+            namespace: "no-such-namespace".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("ListNetworks")
+        .into_inner();
+    assert!(none.networks.is_empty());
+    assert!(none.links.iter().any(|l| l.rel == "self"));
+    let missing = nets
+        .get_network(delonix_node_api::proto::v1::GetNetworkRequest {
+            name: "x".into(),
+            namespace: "no-such-namespace".into(),
+        })
+        .await
+        .expect_err("no such network");
+    assert_eq!(missing.code(), tonic::Code::NotFound);
+    let create = nets
+        .create_network(delonix_node_api::proto::v1::CreateNetworkRequest::default())
+        .await
+        .expect_err("not served yet");
+    assert_eq!(create.code(), tonic::Code::Unimplemented);
 
     // ADR-0042 D2: the entry point, on the gRPC encoding too.
     let root = cli

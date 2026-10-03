@@ -51,6 +51,7 @@ pub fn api_root() -> ApiRoot {
             link("health", "/v1/node/health"),
             link("capacity", "/v1/node/capacity"),
             link("providers", "/v1/providers"),
+            link("networks", "/v1/namespaces/default/networks"),
             link("openapi", "/openapi.json"),
             link("docs", "/docs"),
             link("redoc", "/redoc"),
