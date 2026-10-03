@@ -80,6 +80,31 @@ delonix image vm describe freepbx-17-asterisk22-r1
 VERIFY_ADMIN=random ./scripts/appliances/verify-freepbx.sh      # admin password generated on first boot
 ```
 
+### Measured — 2026-10-03, end to end
+
+One run of `build-freepbx.sh` followed by `verify-freepbx.sh` in both modes, on the
+commit that pins `mariadb.socket` to loopback:
+
+| | |
+|---|---|
+| Build | guest reported success; record read back from the finished disk |
+| What it carries | FreePBX framework 17.0.33, Asterisk 22.11.0, Debian `20260923-2610` |
+| Image | 3.0 GiB compressed (zstd), 20 GiB virtual |
+| `verify-freepbx.sh` (password given at creation) | 27 ok, 0 failed |
+| `VERIFY_ADMIN=random verify-freepbx.sh` | 27 ok, 0 failed |
+
+The verifier earned its place on its first run against a finished image: both modes came
+back **26 ok, 1 failed** — "the database (3306) listens on loopback only". It was right.
+`my.cnf` says `bind-address=127.0.0.1`, but `mariadb.socket` is enabled with
+`ListenStream=3306`, so systemd opens the port on every interface and `bind-address` never
+applies (`ss`: `*:3306`, held by systemd and mariadbd). The build now pins that socket to
+`127.0.0.1:3306`, and the check passes.
+
+**Not measured:** a SIP registration or a call through this PBX; a login through the web
+form in a browser; TLS on 5061; the image booted by `delonix vm create` (the verifier
+boots it with QEMU directly); and the image published — nothing has been pushed to a
+registry.
+
 ## 5. Boot a VM from it — and the first boot
 
 ```bash

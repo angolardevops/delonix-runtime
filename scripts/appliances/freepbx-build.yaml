@@ -118,6 +118,19 @@ write_files:
       # silently into a background job.
       fwconsole ma refreshsignatures || { echo "!! fwconsole ma refreshsignatures failed"; exit 1; }
       echo "==> module signatures refreshed"
+
+      # The database must not be reachable from the network. Measured on the
+      # finished image (2026-10-03): my.cnf says bind-address=127.0.0.1, and
+      # the port was open on every interface anyway -- mariadb.socket is
+      # enabled with `ListenStream=3306`, systemd opens that socket itself, and
+      # bind-address never gets a say. Keep the socket activation, pin it to
+      # loopback.
+      mkdir -p /etc/systemd/system/mariadb.socket.d
+      printf '%s\n' '[Socket]' 'ListenStream=' 'ListenStream=@mariadb' \
+        'ListenStream=/run/mysqld/mysqld.sock' 'ListenStream=127.0.0.1:3306' \
+        > /etc/systemd/system/mariadb.socket.d/10-delonix-loopback.conf
+      systemctl daemon-reload
+      echo "==> mariadb.socket pinned to 127.0.0.1:3306"
       fwconsole ma list > /etc/delonix/freepbx-modules.txt 2>&1 || true
 
       # The AMI secret and the admin login are rotated on each clone's first
