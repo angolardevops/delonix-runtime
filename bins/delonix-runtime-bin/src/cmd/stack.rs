@@ -501,7 +501,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // document to derive prerequisites from, and it is on its way out.
         let Some(doc) = docs
             .iter()
-            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
         else {
             continue;
         };
@@ -808,7 +808,7 @@ fn plan_cmd(
     for c in &mut changes {
         if let Some(doc) = docs
             .iter()
-            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
         {
             c.plan_digest = network_plan_digest(doc)?;
         }
@@ -1122,7 +1122,10 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
             let ip: Option<&str> = match kind {
                 k::CONTAINER => containers
                     .iter()
-                    .find(|c| &c.name == name)
+                    .find(|c| {
+                        manifest::scoped_plan_name(&c.namespace, &c.name)
+                            == manifest::plan_name(doc)
+                    })
                     .and_then(|c| c.ip.as_deref()),
                 k::VM => vms
                     .iter()
@@ -1297,7 +1300,10 @@ fn presence(
         // A node-wide singleton — the document's name never selects among
         // several, there is only ever `<root>/policy.json`.
         k::RUNTIME_POLICY => super::policy::presence_of(),
-        k::CONTAINER => match containers.iter().find(|c| c.name == name) {
+        k::CONTAINER => match containers
+            .iter()
+            .find(|c| manifest::scoped_plan_name(&c.namespace, &c.name) == manifest::plan_name(doc))
+        {
             Some(c) => {
                 let mut c = c.clone();
                 delonix_linux::reconcile_status(&mut c);
@@ -2277,7 +2283,7 @@ fn converge_and_stamp(
                 k::RUNTIME_POLICY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "RuntimePolicy/{}: not in the manifest",
@@ -2298,7 +2304,7 @@ fn converge_and_stamp(
                 k::FIREWALL_POLICY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "FirewallPolicy/{}: not in the manifest",
@@ -2312,7 +2318,7 @@ fn converge_and_stamp(
                 k::NETWORK_ACCESS_RULE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkAccessRule/{}: not in the manifest",
@@ -2326,7 +2332,7 @@ fn converge_and_stamp(
                 k::SERVICE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "Service/{}: not in the manifest",
@@ -2340,7 +2346,7 @@ fn converge_and_stamp(
                 k::NETWORK_GATEWAY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkGateway/{}: not in the manifest",
@@ -2356,7 +2362,7 @@ fn converge_and_stamp(
                 k::SYSTEM_CONTAINER => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "SystemContainer/{}: not in the manifest",
@@ -2368,7 +2374,7 @@ fn converge_and_stamp(
                 k::NETWORK_ZONE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkZone/{}: not in the manifest",
@@ -2380,7 +2386,7 @@ fn converge_and_stamp(
                 k::IPPOOL => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "IPPool/{}: not in the manifest",
@@ -2401,7 +2407,7 @@ fn converge_and_stamp(
                 k::GATEWAY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "Tunnel/{}: not in the manifest",
@@ -2447,7 +2453,7 @@ fn created_doc<'a>(
         return None;
     }
     docs.iter()
-        .find(|d| d.kind == kind && d.metadata.name == name)
+        .find(|d| d.kind == kind && manifest::plan_name(d) == name)
 }
 
 /// Stamps ownership + last-applied on what the manifest declares.

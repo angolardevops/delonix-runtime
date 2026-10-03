@@ -465,6 +465,43 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     }
 }
 
+/// The name a document goes by IN A PLAN (its resource key within its Kind).
+///
+/// The reconciler identifies a resource by `(kind, name)`. A Container or a
+/// Service is scoped by namespace — two tenants may each own `db` — so in a
+/// namespace other than `default` the plan name is `<namespace>/<name>`, the
+/// form `container`/`find` already accept. `default` keeps the bare name, so
+/// nothing changes for a node that does not use namespaces. Every place that
+/// matches a plan entry back to its document goes through here, so the two
+/// cannot disagree.
+pub fn plan_name(doc: &ManifestDoc) -> String {
+    match doc.kind.as_str() {
+        k::CONTAINER | k::SERVICE => scoped_plan_name(
+            doc.metadata.namespace.as_deref().unwrap_or_default(),
+            &doc.metadata.name,
+        ),
+        _ => doc.metadata.name.clone(),
+    }
+}
+
+/// `<namespace>/<name>` outside `default`, the bare name inside it.
+pub fn scoped_plan_name(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() || namespace.eq_ignore_ascii_case("default") {
+        name.to_string()
+    } else {
+        format!("{namespace}/{name}")
+    }
+}
+
+/// The inverse of [`scoped_plan_name`]: `(namespace, name)`; the namespace is
+/// `default` for a bare name.
+pub fn split_plan_name(plan: &str) -> (&str, &str) {
+    match plan.split_once('/') {
+        Some((ns, name)) => (ns, name),
+        None => ("default", plan),
+    }
+}
+
 /// Unknown keys inside each `containers[]` item of a Pod-shaped spec. The
 /// top-level check never looked here, so `readinessProbe:` on a member was
 /// dropped without a word and the pod was reported ready when it was merely running.
@@ -476,7 +513,9 @@ fn check_pod_members(doc: &ManifestDoc) {
         return;
     };
     for (i, item) in items.iter().enumerate() {
-        let serde_yaml::Value::Mapping(m) = item else { continue };
+        let serde_yaml::Value::Mapping(m) = item else {
+            continue;
+        };
         for key in m.keys().filter_map(|k| k.as_str()) {
             if super::container::POD_CONTAINER_FIELDS.contains(&key) {
                 continue;
@@ -1326,6 +1365,48 @@ spec: {}
         // Without a labels/annotations block → empty maps, never an error.
         assert!(docs[1].metadata.labels.is_empty());
         assert!(docs[1].metadata.annotations.is_empty());
+    }
+
+    #[test]
+    fn homonym_containers_and_services_in_two_namespaces_have_distinct_plan_names() {
+        let docs = load_str(
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db, namespace: teamA }\nspec: { image: alpine }\n---\napiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db, namespace: teamB }\nspec: { image: alpine }\n---\napiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db }\nspec: { image: alpine }\n",
+            "t",
+        )
+        .unwrap();
+        let names: Vec<String> = docs.iter().map(plan_name).collect();
+        assert_eq!(names, ["teamA/db", "teamB/db", "db"]);
+        for n in &names {
+            let (ns, name) = split_plan_name(n);
+            assert_eq!(scoped_plan_name(ns, name), *n);
+        }
+        // Planned against what is on the node, each resolves to its own entry.
+        let desired: Vec<_> = docs
+            .iter()
+            .map(|d| crate::cmd::reconcile::Desired {
+                kind: "Container".into(),
+                name: plan_name(d),
+                fields: Default::default(),
+                converges: true,
+                ownable: true,
+            })
+            .collect();
+        let actual: Vec<_> = names
+            .iter()
+            .map(|n| crate::cmd::reconcile::Actual {
+                kind: "Container".into(),
+                name: n.clone(),
+                fields: Default::default(),
+                owner: Some("s".into()),
+                last_applied: None,
+            })
+            .collect();
+        let plan = crate::cmd::reconcile::plan(&desired, &actual, "s");
+        assert!(
+            plan.iter()
+                .all(|c| c.diffs.is_empty() && !format!("{:?}", c.action).contains("Delete")),
+            "{plan:?}"
+        );
     }
 
     #[test]

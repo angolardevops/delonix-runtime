@@ -328,7 +328,10 @@ pub(crate) fn created_specs(
         .into_iter()
         .filter_map(|c| {
             let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
-            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+            Some((
+                manifest::scoped_plan_name(&c.namespace, &c.name),
+                super::reconcile::decode_last_applied(raw)?,
+            ))
         })
         .collect())
 }
@@ -652,7 +655,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     };
     Ok(super::reconcile::Desired {
         kind: k::CONTAINER.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields,
         converges: true,
         ownable: true,
@@ -672,7 +675,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
             kind: k::CONTAINER.into(),
-            name: c.name.clone(),
+            name: manifest::scoped_plan_name(&c.namespace, &c.name),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: c
