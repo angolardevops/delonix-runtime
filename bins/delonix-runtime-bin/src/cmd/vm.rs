@@ -1179,7 +1179,8 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// machine, so every one of these is a `Replace` that `apply` refuses without
 /// `--replace`. Refusing is the point — recreating a VM throws away its overlay
 /// disk, which is everything the guest wrote since it was created.
-pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "network", "backend"];
+pub(crate) const RECONCILED_VM_FIELDS: &[&str] =
+    &["disk", "vcpus", "memory", "network", "backend", "labels"];
 
 /// The spec fields this manifest declares that the reconciler does NOT compare
 /// — named, on a VM that already exists, instead of dropped in silence.
@@ -1307,14 +1308,21 @@ fn desired_vm_fields(
 /// What the manifest declares, for the reconciler.
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VmSpec = vm_spec_of(doc)?;
+    let mut fields = desired_vm_fields(
+        &super::vmimage::VmImageStore::open(state_root())?,
+        &doc.metadata.name,
+        &spec,
+    );
+    // `metadata.labels` of the document — see `network::desired`. Measured
+    // before this: a VM applied with labels carried the ownership stamp and
+    // nothing the manifest had declared.
+    if let Some(labels) = super::reconcile::user_labels_field(&doc.metadata.labels) {
+        fields.insert(super::reconcile::LABELS_FIELD.into(), labels);
+    }
     Ok(super::reconcile::Desired {
         kind: k::VM.into(),
         name: doc.metadata.name.clone(),
-        fields: desired_vm_fields(
-            &super::vmimage::VmImageStore::open(state_root())?,
-            &doc.metadata.name,
-            &spec,
-        ),
+        fields,
         converges: true,
         ownable: true,
     })
@@ -1339,6 +1347,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("memory".into(), vm.memory.clone());
             f.insert("network".into(), vm.network.clone());
             f.insert("backend".into(), vm.backend.clone());
+            if let Some(labels) = super::reconcile::user_labels_field(&vm.labels) {
+                f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+            }
             super::reconcile::Actual {
                 kind: k::VM.into(),
                 name: vm.name.clone(),
@@ -1752,7 +1763,16 @@ pub(crate) fn stamp(
         delonix_state::JsonStore::open(state_root().join("vms"))?;
     let encoded = super::reconcile::encode_last_applied(fields);
     let created = created.map(super::reconcile::encode_last_applied);
+    // The document's own labels go on with the stamp: the one step every
+    // applied VM passes through, created or adopted.
+    let own = super::reconcile::labels_delta(
+        None,
+        fields
+            .get(super::reconcile::LABELS_FIELD)
+            .map(String::as_str),
+    );
     st.update(name, |vm| {
+        set_labels(&mut vm.labels, &own);
         vm.labels
             .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
         vm.labels
@@ -1765,6 +1785,50 @@ pub(crate) fn stamp(
         }
         true
     })?;
+    Ok(())
+}
+
+/// Sets and removes labels on a VM record — the shape `labels_delta` gives.
+fn set_labels(
+    labels: &mut std::collections::BTreeMap<String, String>,
+    delta: &[(String, Option<String>)],
+) {
+    for (key, value) in delta {
+        match value {
+            Some(v) => {
+                labels.insert(key.clone(), v.clone());
+            }
+            None => {
+                labels.remove(key);
+            }
+        }
+    }
+}
+
+/// Applies the hot part of a plan. A VM's labels are the only field that
+/// converges in place: they are bookkeeping on the record, and the guest is
+/// not touched. Anything else reaching here is a bug in
+/// `reconcile::hot_fields`, and is refused instead of half-applied.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
+        delonix_state::JsonStore::open(state_root().join("vms"))?;
+    for d in diffs {
+        match d.field.as_str() {
+            "labels" => {
+                let delta = super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref());
+                st.update(name, |vm| {
+                    set_labels(&mut vm.labels, &delta);
+                    true
+                })?;
+            }
+            other => {
+                return Err(Error::Invalid(format!(
+                    "vm/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2107,6 +2171,18 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         let vm = delonix_vm::create(&base, &cfg)?;
         warn_if_mac_spoofing_allowed(&vm);
         println!("{}", super::po::tf("vm/{name}: ensured", &[("name", name)]));
+        // The document's own labels, for the path that does not stamp (`vm
+        // apply` outside a stack). Additive — removal is the plan's.
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let delta = super::reconcile::labels_delta(None, own.as_deref());
+        if !delta.is_empty() {
+            let st: delonix_state::JsonStore<delonix_compute::Vm> =
+                delonix_state::JsonStore::open(base.join("vms"))?;
+            st.update(name, |vm| {
+                set_labels(&mut vm.labels, &delta);
+                true
+            })?;
+        }
     }
     Ok(())
 }
@@ -4313,6 +4389,16 @@ fn describe_one(
     d.field("Backend", &vm.backend);
     d.field("Created", output::fmt_local(vm.created_unix));
     d.field("Age", output::fmt_age(vm.created_unix));
+    // As `container describe` prints them: without this a label on a VM — the
+    // stack that owns it included — was visible nowhere.
+    if vm.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, v) in &vm.labels {
+            d.item(format!("{k}={v}"));
+        }
+    }
     d.field(
         "PID",
         vm.pid
@@ -5037,6 +5123,30 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
                 "'{comparado}' é comparado e não devia estar na lista: {listados}"
             );
         }
+    }
+
+    /// A label change on a VM record sets what is declared, removes what no
+    /// longer is, and leaves the engine's own labels where they are.
+    #[test]
+    fn a_vm_label_change_is_bookkeeping_on_the_record() {
+        let mut labels: std::collections::BTreeMap<String, String> = [
+            ("app".to_string(), "web".to_string()),
+            ("tier".to_string(), "front".to_string()),
+            ("delonix.io/stack".to_string(), "shop".to_string()),
+        ]
+        .into();
+        let delta = crate::cmd::reconcile::labels_delta(
+            Some(r#"{"app":"web","tier":"front"}"#),
+            Some(r#"{"app":"api"}"#),
+        );
+        super::set_labels(&mut labels, &delta);
+        assert_eq!(labels.get("app").map(String::as_str), Some("api"));
+        assert!(!labels.contains_key("tier"));
+        assert_eq!(
+            labels.get("delonix.io/stack").map(String::as_str),
+            Some("shop")
+        );
+        assert!(RECONCILED_VM_FIELDS.contains(&"labels"));
     }
 
     /// A manifest that declares ONLY what the reconciler compares has nothing

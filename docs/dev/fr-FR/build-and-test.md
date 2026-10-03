@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:e3064f16c3cd8456faff94b7b2e482d8957a320e5a93071573df9e38ba594950 -->
+<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
 # Cloner, compiler et tester
 
 **Avant de lire :** [Préparer votre environnement](environment.md) : la toolchain épinglée, `protoc`, et un hôte qui passe ses vérifications.
@@ -50,6 +50,56 @@ Deux remarques pratiques :
   mais deux builds qui s’y exécutent en même temps s’attendront mutuellement et peuvent invalider
   les artefacts l’un de l’autre. Un répertoire target par worktree est plus lent la première fois et prévisible
   ensuite.
+
+## Le Makefile
+
+Le `Makefile` à la racine réunit les commandes de cette page en un seul cycle de vie. Il n'ajoute
+aucune logique de build : `make build` lance le `cargo build` montré ci-dessus, avec le nombre de
+jobs et la priorité choisis pour la machine.
+
+```bash
+make bootstrap        # une fois par machine : toolchain Rust épinglée, compilateurs C/C++, protoc, sccache
+make doctor           # les mêmes vérifications, sans rien modifier (sort avec 1 s'il manque un élément requis)
+make build            # les cinq binaires, profil release
+make install          # compile puis installe pour votre utilisateur dans ~/.local/bin (Option B ci-dessous)
+make install-system   # installe l'arbre déjà compilé dans /usr/local/bin avec sudo (Option C ci-dessous)
+make uninstall        # retire ce que `make install` a écrit
+make ci               # vérification du format, gates de script, clippy, tests
+make help             # toutes les cibles
+```
+
+`make test` utilise `cargo-nextest` lorsqu'il est installé (`make bootstrap` l'installe) et lance les doctests via `cargo test --doc` ; mesuré sur ce workspace, les 2682 tests prennent 24 s contre 126 s avec `cargo test`. `NEXTEST=0` force le `cargo test` simple. Le profil `dev` ne garde que les tables de lignes (`debug = "line-tables-only"`) : un `cargo test --workspace --no-run` à froid est passé de 71 s et 8,5 GiB de target à 44 s et 4,9 GiB, et un débogueur n'affiche plus les variables locales.
+
+**Ce que `make install` écrit.** Les cinq binaires dans `~/.local/bin`, la complétion de shell et
+les pages de manuel générées par le binaire installé sous `~/.local/share`, et
+`~/.config/delonix/env.sh`, qui exporte `DELONIX_BIN` (la CLI installée), `DELONIX_ROOT` (le state
+root) et ajoute `~/.local/bin` au `PATH` s'il y manque. Un bloc marqué dans `~/.bashrc` et
+`~/.zshrc` charge ce fichier ; `make uninstall` retire le bloc et laisse les fichiers tels qu'ils
+étaient. `SHELL_RC=0` écrit le fichier d'environnement sans toucher à vos fichiers de shell, et
+`make install DELONIX_ROOT=<dir>` donne au build de développement son propre state root, à l'écart
+d'une release installée. Tant que `DELONIX_BIN` est exportée, `scripts/cli-tree.sh` et
+`scripts/docs_cli_gate.py` inspectent le binaire installé — retirez-la avant de les lancer sur
+votre arbre.
+
+`make install-system` copie des binaires déjà compilés (il ne compile jamais sous `sudo`) et
+refuse tant que des processus du moteur tournent, pour les raisons listées dans l'Option C ;
+`FORCE=1` passe outre. Sur Ubuntu 23.10+, `make apparmor` écrit le profil `delonix-dev` décrit
+dans l'Option B.
+
+**Réglage du build.** Ces réglages changent l'effort de cargo, jamais ce qu'il produit : `make
+build` et un `cargo build` simple partagent donc un répertoire target sans recompiler les
+artefacts l'un de l'autre. `make info` affiche ce qui a été résolu.
+
+| Variable | Défaut | Effet |
+|---|---|---|
+| `JOBS=<n>` | le `jobs` de votre configuration cargo ; sans elle, `min(cœurs, (RAM disponible − 2 GiB) / 3 GiB)` | processus `rustc`/linker en parallèle. Un linker sur un gros binaire de test de ce workspace a été mesuré à 1,5–1,9 GiB, le `rustc` release de `delonix` à 2,4 GiB |
+| `LOWPRIO=0` | les builds tournent sous `nice -n 19 ionice -c2 -n7` | priorité CPU et disque normale |
+| `SCCACHE=0` | `sccache` est utilisé s'il est dans le `PATH` et que votre configuration cargo ne nomme aucun wrapper | compile sans le cache partagé (qui garde aussi les objets C de `ring` et `zstd-sys`) |
+| `PROFILE=debug\|release-ci` | `release` | le profil dev, ou `release-ci` (thin LTO, 16 unités de codegen : mesuré 114 s contre 188 s pour les cinq binaires, un binaire de 38 MiB au lieu de 32). La release publiée et le perf gate gardent `release` |
+| `LINKER=mold\|lld` | le défaut de la toolchain — LLD sur x86_64 avec la toolchain épinglée | définit `RUSTFLAGS` : tout recompile une fois et un `cargo` simple ne partage plus le résultat |
+
+`scripts/install.sh` ne fait pas partie de ce cycle : il installe une release publiée et prépare
+un hôte à exécuter des conteneurs et des VM, et n'a besoin d'aucune toolchain.
 
 ## Installer votre build localement
 

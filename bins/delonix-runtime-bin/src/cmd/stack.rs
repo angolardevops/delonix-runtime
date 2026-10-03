@@ -2288,6 +2288,7 @@ fn converge_and_stamp(
                 }
                 k::CONTAINER => super::container::converge(&c.name, &c.diffs)?,
                 k::VOLUME => super::volume::converge(&c.name, &c.diffs)?,
+                k::VM => super::vm::converge(&c.name, &c.diffs)?,
                 k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
                 k::IMAGE => super::image::converge(&c.name, &c.diffs)?,
                 // A firewall policy re-applies WHOLE: `apply_fw_doc` already

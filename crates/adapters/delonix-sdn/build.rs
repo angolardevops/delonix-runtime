@@ -29,6 +29,17 @@ fn main() {
 
     let mut cmd = Command::new(clang);
     cmd.args(["-O2", "-g", "-target", "bpf", "-D__TARGET_ARCH_x86"]);
+    // `-g` makes clang record the working directory and the source path in the
+    // object, and the object is embedded in the binary: two builds of the same
+    // commit from different checkouts then differ. Build scripts run with the
+    // crate directory as cwd, so mapping it to a fixed name removes the checkout
+    // path from the output.
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.arg(format!(
+            "-ffile-prefix-map={}=/build/delonix-sdn",
+            cwd.display()
+        ));
+    }
     cmd.arg("-I").arg(&helpers);
     // asm/types.h lives in the arch include dir; harmless if absent.
     cmd.arg("-I/usr/include/x86_64-linux-gnu");
