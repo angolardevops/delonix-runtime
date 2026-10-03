@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:f20f8b371a1254fe69460d1336153f6f6870cf6c3efd9d093fc7950449787dc3 -->
+<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
 # Clonar, compilar e testar
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md): a toolchain fixada, o `protoc`, e um host que passa nas suas verificações.
@@ -67,6 +67,8 @@ make ci               # verificação de formato, gates de script, clippy, teste
 make help             # todos os alvos
 ```
 
+O `make test` usa o `cargo-nextest` quando está instalado (o `make bootstrap` instala-o) e corre os doctests por `cargo test --doc`; medido neste workspace, os 2682 testes levam 24 s contra 126 s com `cargo test`. `NEXTEST=0` força o `cargo test` simples. O perfil `dev` guarda só tabelas de linhas (`debug = "line-tables-only"`): um `cargo test --workspace --no-run` a frio passou de 71 s e 8,5 GiB de target para 44 s e 4,9 GiB, e um debugger deixa de mostrar variáveis locais.
+
 **O que o `make install` escreve.** Os cinco binários em `~/.local/bin`, a completion de shell e
 as páginas de manual geradas pelo binário instalado em `~/.local/share`, e
 `~/.config/delonix/env.sh`, que exporta `DELONIX_BIN` (a CLI instalada), `DELONIX_ROOT` (o state
@@ -91,7 +93,7 @@ artefactos um do outro. O `make info` imprime o que foi resolvido.
 | `JOBS=<n>` | o `jobs` da tua configuração do cargo; sem ela, `min(núcleos, (RAM disponível − 2 GiB) / 3 GiB)` | processos `rustc`/linker em paralelo. Um linker num binário de teste grande deste workspace foi medido em 1,5–1,9 GiB, o `rustc` release do `delonix` em 2,4 GiB |
 | `LOWPRIO=0` | os builds correm sob `nice -n 19 ionice -c2 -n7` | corre com prioridade normal de CPU e disco |
 | `SCCACHE=0` | o `sccache` é usado quando está no `PATH` e a tua configuração do cargo não nomeia um wrapper | compila sem a cache partilhada (que também guarda os objectos C do `ring` e do `zstd-sys`) |
-| `PROFILE=debug` | `release` | compila e instala o perfil dev |
+| `PROFILE=debug\|release-ci` | `release` | o perfil dev, ou `release-ci` (thin LTO, 16 unidades de codegen: medido 114 s contra 188 s para os cinco binários, um binário de 38 MiB em vez de 32). A release publicada e o perf gate mantêm `release` |
 | `LINKER=mold\|lld` | a omissão da toolchain — LLD em x86_64 com a toolchain fixada | define `RUSTFLAGS`, por isso tudo recompila uma vez e um `cargo` simples deixa de partilhar o resultado |
 
 O `scripts/install.sh` não faz parte deste ciclo: instala uma release publicada e prepara um host

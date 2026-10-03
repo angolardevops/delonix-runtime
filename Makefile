@@ -24,7 +24,10 @@
 #   SCCACHE=0     do not use sccache even when it is installed (default: used when found
 #                 and your cargo config names no wrapper; it also caches the C/C++ objects
 #                 that `cc`-built crates compile).
-#   PROFILE=debug build/install the dev profile instead of release.
+#   PROFILE=debug|release-ci
+#                 the dev profile, or the faster-to-build CI profile (thin LTO, 16 codegen
+#                 units: about 40% shorter than release, a 38 MiB binary instead of 32).
+#                 Default: release, the profile that ships.
 #   LINKER=mold|lld
 #                 opt-in linker override. NOT fingerprint-neutral: it sets RUSTFLAGS, so it
 #                 rebuilds everything once and a plain `cargo` no longer shares the result.
@@ -43,8 +46,10 @@ ifeq ($(PROFILE),release)
   PROFILE_FLAG := --release
 else ifeq ($(PROFILE),debug)
   PROFILE_FLAG :=
+else ifeq ($(PROFILE),release-ci)
+  PROFILE_FLAG := --profile release-ci
 else
-  $(error PROFILE must be `release` or `debug`, not `$(PROFILE)`)
+  $(error PROFILE must be `release`, `release-ci` or `debug`, not `$(PROFILE)`)
 endif
 
 CARGO_FLAGS ?= --locked
@@ -135,7 +140,7 @@ GHCR_IMAGE ?= ghcr.io/angolardevops/delonix-runtime
 help: ## Show this help
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z0-9_.-]+:.*## /{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "  Variables: PROFILE=release|debug  JOBS=<n>  LOWPRIO=0  SCCACHE=0  LINKER=mold|lld"
+	@echo "  Variables: PROFILE=release|release-ci|debug  NEXTEST=0  JOBS=<n>  LOWPRIO=0  SCCACHE=0  LINKER=mold|lld"
 	@echo "             PREFIX=$(PREFIX)  SYSTEM_PREFIX=$(SYSTEM_PREFIX)  DELONIX_ROOT=<dir>  SHELL_RC=0"
 
 info: ## Print the build settings this Makefile resolved on this machine
@@ -143,6 +148,7 @@ info: ## Print the build settings this Makefile resolved on this machine
 	@echo "target dir   $(TARGET_DIR)"
 	@echo "jobs         $(or $(CARGO_BUILD_JOBS),(cargo config)) — $(JOBS_FROM)"
 	@echo "wrapper      $(WRAPPER_FROM)"
+	@echo "tests        $(if $(filter 1,$(NEXTEST)),cargo nextest (+ cargo test --doc),cargo test)"
 	@echo "priority     $(if $(strip $(LOWPRIO_CMD)),$(strip $(LOWPRIO_CMD)),normal)"
 	@echo "linker       $(if $(LINKER),$(LINKER) (RUSTFLAGS=$(RUSTFLAGS)),toolchain default)"
 	@echo "protoc       $(if $(PROTOC),$(PROTOC),MISSING — run: make bootstrap)"
@@ -183,8 +189,18 @@ fmt-check: ## Fail when the workspace is not formatted (the CI `fmt` job)
 lint: require-protoc ## clippy on every target, warnings are errors (the CI `clippy` job)
 	$(CARGO) clippy --workspace --all-targets $(CARGO_FLAGS) -- -D warnings
 
-test: require-protoc ## Run the workspace tests (the CI `test` job)
+# cargo-nextest runs the same 2682 tests in about a fifth of the time (measured:
+# 24 s against 126 s) because it schedules every test binary in parallel. It does
+# not run doctests, so those go through cargo. NEXTEST=0 forces plain cargo test.
+NEXTEST ?= $(shell cargo nextest --version >/dev/null 2>&1 && echo 1)
+
+test: require-protoc ## Run the workspace tests: nextest when installed, else cargo test (ARGS=... passes filters)
+ifeq ($(NEXTEST),1)
+	$(CARGO) nextest run --workspace $(CARGO_FLAGS) --no-fail-fast $(ARGS)
+	$(CARGO) test --workspace --doc $(CARGO_FLAGS)
+else
 	$(CARGO) test --workspace $(CARGO_FLAGS) --no-fail-fast $(ARGS)
+endif
 
 deny: ## Supply-chain check (needs cargo-deny)
 	cargo deny check

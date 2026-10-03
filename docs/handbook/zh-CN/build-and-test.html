@@ -279,6 +279,7 @@ make uninstall        # 删除 `make install` 写入的内容
 make ci               # 格式检查、脚本 gate、clippy、测试
 make help             # 所有目标
 </code></pre></div>
+<p>安装了 <code>cargo-nextest</code> 时，<code>make test</code> 会使用它（<code>make bootstrap</code> 会安装），并通过 <code>cargo test --doc</code> 运行文档测试；在本 workspace 上实测，2682 个测试用时 24 秒，<code>cargo test</code> 为 126 秒。<code>NEXTEST=0</code> 强制使用普通的 <code>cargo test</code>。<code>dev</code> 配置只保留行号表（<code>debug = "line-tables-only"</code>）：冷启动的 <code>cargo test --workspace --no-run</code> 从 71 秒、8.5 GiB 的 target 降到 44 秒、4.9 GiB，调试器不再显示局部变量。</p>
 <p><strong><code>make install</code> 写入什么。</strong> <code>~/.local/bin</code> 中的五个二进制；由已安装的二进制生成、放在
 <code>~/.local/share</code> 下的 shell 补全和手册页；以及 <code>~/.config/delonix/env.sh</code>，它导出
 <code>DELONIX_BIN</code>（已安装的 CLI）、<code>DELONIX_ROOT</code>（state root），并在 <code>PATH</code> 中缺少
@@ -317,9 +318,9 @@ make help             # 所有目标
 <td>不使用共享编译缓存（它也缓存 <code>ring</code> 和 <code>zstd-sys</code> 的 C 目标文件）</td>
 </tr>
 <tr>
-<td><code>PROFILE=debug</code></td>
+<td><code>PROFILE=debug|release-ci</code></td>
 <td><code>release</code></td>
-<td>构建并安装 dev 配置</td>
+<td>dev 配置，或 <code>release-ci</code>（thin LTO，16 个 codegen 单元：五个二进制实测 114 秒对 188 秒，二进制 38 MiB 对 32 MiB）。发布版本和性能 gate 仍使用 <code>release</code></td>
 </tr>
 <tr>
 <td><code>LINKER=mold|lld</code></td>
