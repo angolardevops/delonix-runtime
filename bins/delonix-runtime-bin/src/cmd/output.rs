@@ -728,7 +728,27 @@ impl Layers {
             return f(); // nothing declared: no line, no tick, no noise
         }
         self.ran += 1;
-        announced(&format!("{kind} ({n})"), icon, f)
+        // The journal (ADR-0069 item 4): one line before the layer runs and one
+        // after, in the node's event log. A killed apply leaves `apply-started`
+        // with no closing line, which is the answer to «how far did it get».
+        let root = super::util::state_root();
+        let detail = format!("{n} document(s)");
+        delonix_node::events::emit(&root, "stack", "apply-started", kind, kind, Some(&detail));
+        let result = announced(&format!("{kind} ({n})"), icon, f);
+        match &result {
+            Ok(()) => {
+                delonix_node::events::emit(&root, "stack", "apply-done", kind, kind, Some(&detail))
+            }
+            Err(e) => delonix_node::events::emit(
+                &root,
+                "stack",
+                "apply-failed",
+                kind,
+                kind,
+                Some(&e.to_string()),
+            ),
+        }
+        result
     }
 
     /// The total, once every layer has run.

@@ -390,6 +390,16 @@ pub trait VmBackend {
         None
     }
 
+    /// Whether the provider ALREADY holds a VM called `name`, whatever the
+    /// registry says — the question a plan asks before it proposes a `Create`
+    /// (ADR-0069 item 3). `Ok(None)` means «this backend cannot enumerate», which
+    /// is not «no»: a plan then trusts the registry, as it always did. A backend
+    /// that can enumerate answers `Some(bool)`, and an error is an error — never
+    /// a quiet `false`, because «not there» is what makes a plan create.
+    fn holds_vm(&self, _name: &str) -> delonix_model::Result<Option<bool>> {
+        Ok(None)
+    }
+
     /// Is [`VmBackend::ip`] a PREDICTION rather than an OBSERVATION?
     ///
     /// Default `false`: libvirt reads a real DHCP lease, so an address there is
