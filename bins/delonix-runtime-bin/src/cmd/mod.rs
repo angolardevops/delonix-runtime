@@ -75,6 +75,7 @@ pub mod service;
 pub mod sharevolume;
 pub mod stack;
 pub mod storage;
+pub mod storage_pool;
 pub mod svc;
 pub mod system;
 pub mod system_container;

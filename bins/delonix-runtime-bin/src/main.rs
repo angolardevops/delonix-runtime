@@ -595,6 +595,9 @@ fn run() -> Result<()> {
     // Same reasoning, one layer over: a remote GatewayProvider (OPNsense) has to be
     // registered before anything selects it by name (ADR-0051).
     cmd::gatewayproviders::register_configured();
+    // The storage pool drivers of this build (ADR-0067). No I/O: a driver's
+    // probe runs when a pool is used or listed.
+    cmd::storage_pool::register_drivers();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {

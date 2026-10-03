@@ -858,6 +858,8 @@ pub(crate) struct VolumeFacts {
     /// A CONTAINER references it, running or stopped (see [`volume_facts`]).
     /// Being a share's parent is NOT this — that is derived, and reported.
     pub referenced: bool,
+    /// The storage pool it is allocated in, if any (ADR-0067).
+    pub pool: Option<String>,
     /// Whether the sweep's [`Scope`] allows TAKING this one.
     ///
     /// Out-of-scope volumes are still collected, because safety is derived from
@@ -939,6 +941,10 @@ pub(crate) enum Keep {
     /// A network share (`nfs`/`cifs`/`webdav`) — deliberate infrastructure an
     /// operator declared, not leftover debris, and the data is not even local.
     NetworkDriver(String),
+    /// Allocated in a storage pool: its data is in the pool, and only the
+    /// pool's driver gives it back. Dropping the record would leave a stamped
+    /// volume in the pool with nothing pointing at it.
+    InPool(String),
 }
 
 /// **PURE** — splits the volumes into the ones prune may take and the ones it
@@ -1001,6 +1007,8 @@ pub(crate) fn classify_volumes(
             keep.push((v.clone(), Keep::ShareOf(p.qualified())));
         } else if !children.is_empty() {
             keep.push((v.clone(), Keep::HoldsShares(children)));
+        } else if let Some(pool) = &v.pool {
+            keep.push((v.clone(), Keep::InPool(pool.clone())));
         } else if v.provisioned {
             keep.push((v.clone(), Keep::Provisioned));
         } else if delonix_volume::is_network_driver(&v.driver) {
@@ -1063,6 +1071,7 @@ pub(crate) fn volume_facts(store: &VolumeStore, scope: &Scope) -> Result<Vec<Vol
                 .annotations
                 .contains_key(super::provision::PROVENANCE_ANNOTATION),
             referenced,
+            pool: v.pool.clone(),
         });
     }
     Ok(out)
@@ -1114,6 +1123,11 @@ pub(crate) fn keep_reason(k: &Keep) -> Option<String> {
             )
             .to_string(),
         ),
+        Keep::InPool(pool) => Some(po::tf(
+            "allocated in storage pool '{pool}' — remove it with `volume rm`, which gives the \
+             data back to the pool",
+            &[("pool", pool)],
+        )),
         Keep::NetworkDriver(d) => Some(po::tf(
             "network driver '{driver}' — declared infrastructure, remove it with `volume rm`",
             &[("driver", d)],
@@ -1744,6 +1758,7 @@ mod tests {
             provisioned: false,
             referenced: false,
             in_scope: true,
+            pool: None,
         }
     }
 

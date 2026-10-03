@@ -40,6 +40,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
+    kinds::STORAGE_POOL,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
@@ -70,6 +71,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
+    kinds::STORAGE_POOL,
     kinds::CLUSTER,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
@@ -88,6 +90,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
+    kinds::STORAGE_POOL,
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
@@ -323,6 +326,7 @@ pub(crate) fn get(
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
         k if k == kinds::SERVICE => super::service::cmd_ls(output),
         k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
+        k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_ls(output),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_ls(output),
         k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_ls(output),
         k if k == kinds::SYSTEM_CONTAINER => super::system_container::cmd_ls(output),
@@ -402,6 +406,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
         k if k == kinds::SERVICE => super::service::cmd_describe(&n),
         k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
+        k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_describe(&n),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_describe(&n),
         k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_describe(&n),
         k if k == kinds::SYSTEM_CONTAINER => super::system_container::cmd_describe(&n),
@@ -506,6 +511,19 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             Ok(())
         }
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_delete_policy(names),
+        k if k == kinds::STORAGE_POOL => {
+            for n in names {
+                super::storage_pool::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "storagepool {name}: no longer in use (the pool itself is untouched)",
+                        &[("name", n)]
+                    )
+                );
+            }
+            Ok(())
+        }
         k if k == kinds::IPPOOL => {
             for n in names {
                 super::ippool::remove_for_replace(n)?;

@@ -1,22 +1,18 @@
 [package]
-name = "delonix-volume"
+name = "delonix-storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-delonix-node = { workspace = true }
-delonix-state = { workspace = true }
 delonix-model = { workspace = true }
 thiserror = { workspace = true }
-# Implements the compute context's StorageProvider port (ADR-0040).
-delonix-compute = { workspace = true }
-# The `dir` storage pool driver implements the storage context's port (ADR-0067).
-delonix-storage = { workspace = true }
-# `statvfs` and `access`, for the `dir` pool's probe and usage.
-libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The administrator's allowlist (`/etc/delonix/storage-pools.yaml`, ADR-0067 D3).
+serde_yaml = { workspace = true }
+# `geteuid`, to refuse an allowlist someone else can write.
+libc = { workspace = true }
 
 [dev-dependencies]
 # A per-test temp dir that is removed when the test ends, also on panic
