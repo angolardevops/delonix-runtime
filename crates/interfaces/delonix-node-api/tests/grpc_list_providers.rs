@@ -4,7 +4,7 @@
 
 use delonix_node_api::proto::v1::node_service_client::NodeServiceClient;
 use delonix_node_api::proto::v1::{
-    ConditionStatus, GetCapacityRequest, GetHealthRequest, GetNodeInfoRequest,
+    ConditionStatus, GetApiRootRequest, GetCapacityRequest, GetHealthRequest, GetNodeInfoRequest,
     ListProvidersRequest, WatchEventsRequest,
 };
 
@@ -142,6 +142,18 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
     }
     assert!(cap.cpu_millis_allocatable <= cap.cpu_millis_total);
     assert!(cap.memory_bytes_allocatable <= cap.memory_bytes_total);
+
+    // ADR-0042 D2: the entry point, on the gRPC encoding too.
+    let root = cli
+        .get_api_root(GetApiRootRequest::default())
+        .await
+        .expect("GetApiRoot")
+        .into_inner();
+    assert_eq!(root.api_version, "delonix.node.v1");
+    assert!(root
+        .links
+        .iter()
+        .any(|l| l.rel == "self" && l.href == "/v1"));
 
     // What is not served says so — and says with which step it arrives.
     let watch = cli
@@ -341,6 +353,7 @@ async fn the_rest_routes_are_get_only() {
     use tower::ServiceExt;
     let app = delonix_node_api::router();
     for path in [
+        "/v1",
         "/v1/providers",
         "/v1/node",
         "/v1/node/health",
@@ -361,4 +374,86 @@ async fn the_rest_routes_are_get_only() {
         assert_eq!(res.status(), 405, "POST {path}");
         assert_eq!(res.headers()["allow"], "GET", "POST {path}");
     }
+}
+
+/// ADR-0042 D2, Richardson level 3: a client navigates from `GET /v1` without
+/// building a URI. Every link the root offers answers 200 (nothing it cannot
+/// serve is offered), every resource links to itself under its own path, and
+/// the RFC 8288 `Link` header says what the body's `links` say.
+#[tokio::test]
+async fn a_client_navigates_from_the_root_by_its_links() {
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let app = delonix_node_api::router();
+    let get = |path: String| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    axum::http::Request::get(path.as_str())
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = res.status().as_u16();
+            let link = res
+                .headers()
+                .get("link")
+                .map(|v| v.to_str().unwrap().to_string());
+            let ctype = res.headers()["content-type"].to_str().unwrap().to_string();
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            let json = if ctype.starts_with("application/json") {
+                serde_json::from_slice::<serde_json::Value>(&body).ok()
+            } else {
+                None
+            };
+            (status, link, json)
+        }
+    };
+    let (status, header, root) = get("/v1".into()).await;
+    assert_eq!(status, 200);
+    let root = root.expect("JSON");
+    assert_eq!(root["api_version"], "delonix.node.v1");
+    let links = root["links"].as_array().expect("links");
+    assert_eq!(
+        header.as_deref(),
+        delonix_node_api::link_header(&root).as_deref(),
+        "the Link header mirrors the body"
+    );
+    for l in links {
+        let href = l["href"].as_str().unwrap();
+        assert_eq!(l["method"], "GET", "{l}");
+        let (status, header, body) = get(href.to_string()).await;
+        assert_eq!(
+            status, 200,
+            "the root offers {href} and it does not answer 200"
+        );
+        // A JSON resource links to itself under its own path, and mirrors its
+        // links in the header.
+        if let Some(body) = body {
+            if href == "/openapi.json" {
+                continue;
+            }
+            let own = body["links"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{href} has no links: {body}"));
+            assert!(
+                own.iter().any(|x| x["rel"] == "self" && x["href"] == href),
+                "{href} does not link to itself: {own:?}"
+            );
+            assert_eq!(
+                header.as_deref(),
+                delonix_node_api::link_header(&body).as_deref()
+            );
+        }
+    }
+    // A filtered list's self link keeps the filter.
+    let (_, _, body) = get("/v1/providers?kind=network".into()).await;
+    let body = body.unwrap();
+    assert!(body["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x["rel"] == "self" && x["href"] == "/v1/providers?kind=network"));
 }

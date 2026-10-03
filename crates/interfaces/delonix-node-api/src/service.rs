@@ -9,8 +9,9 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::{
-    Capacity, Event, GetCapacityRequest, GetHealthRequest, GetNodeInfoRequest, Health,
-    ListProvidersRequest, ListProvidersResponse, NodeInfo, WatchEventsRequest,
+    ApiRoot, Capacity, Event, GetApiRootRequest, GetCapacityRequest, GetHealthRequest,
+    GetNodeInfoRequest, Health, ListProvidersRequest, ListProvidersResponse, NodeInfo,
+    WatchEventsRequest,
 };
 use crate::{node, providers};
 
@@ -75,7 +76,12 @@ pub async fn list_providers(req: ListProvidersRequest) -> Result<ListProvidersRe
     let reports = tokio::task::spawn_blocking(providers::measured_reports)
         .await
         .map_err(|e| Status::internal(format!("provider probe panicked: {e}")))?;
+    let this = match &kind {
+        Some(k) => format!("/v1/providers?kind={k}"),
+        None => "/v1/providers".to_string(),
+    };
     Ok(ListProvidersResponse {
+        links: vec![node::link("self", &this), node::link("root", "/v1")],
         providers: reports
             .iter()
             .filter(|r| kind.as_deref().is_none_or(|k| r.kind.as_str() == k))
@@ -86,6 +92,13 @@ pub async fn list_providers(req: ListProvidersRequest) -> Result<ListProvidersRe
 
 #[tonic::async_trait]
 impl NodeService for NodeApi {
+    async fn get_api_root(
+        &self,
+        _req: Request<GetApiRootRequest>,
+    ) -> Result<Response<ApiRoot>, Status> {
+        Ok(Response::new(node::api_root()))
+    }
+
     async fn get_node_info(
         &self,
         _req: Request<GetNodeInfoRequest>,
@@ -138,6 +151,10 @@ pub fn router() -> axum::Router {
     // keeps that answer for gRPC callers and gives HTTP callers a 404.
     axum::Router::new()
         .route("/v1/providers", axum::routing::get(http_list_providers))
+        .route(
+            "/v1",
+            axum::routing::get(|| json("/v1", async { Ok::<_, Status>(node::api_root()) })),
+        )
         .route(
             "/v1/node",
             axum::routing::get(|| json("/v1/node", node_info())),
@@ -194,9 +211,37 @@ async fn json<T: serde::Serialize>(
     answer: impl std::future::Future<Output = Result<T, Status>>,
 ) -> axum::response::Response {
     match answer.await {
-        Ok(msg) => (hyper::StatusCode::OK, axum::Json(msg)).into_response(),
+        Ok(msg) => with_link_header(&msg),
         Err(status) => problem(status, path),
     }
+}
+
+/// A message as its JSON with the RFC 8288 `Link` header mirroring its own
+/// `links` (ADR-0042 D2) — read back from the JSON just serialized, so the
+/// header and the body cannot disagree.
+fn with_link_header<T: serde::Serialize>(msg: &T) -> axum::response::Response {
+    let body = serde_json::to_value(msg).unwrap_or(serde_json::Value::Null);
+    let header = link_header(&body);
+    let mut res = (hyper::StatusCode::OK, axum::Json(body)).into_response();
+    if let Some(v) = header.and_then(|h| hyper::header::HeaderValue::from_str(&h).ok()) {
+        res.headers_mut().insert(hyper::header::LINK, v);
+    }
+    res
+}
+
+/// `</v1/node>; rel="self", </v1>; rel="root"` from a message's `links`;
+/// `None` when it has none.
+pub fn link_header(body: &serde_json::Value) -> Option<String> {
+    let links = body.get("links")?.as_array()?;
+    let parts: Vec<String> = links
+        .iter()
+        .filter_map(|l| {
+            let href = l.get("href")?.as_str()?;
+            let rel = l.get("rel")?.as_str()?;
+            Some(format!("<{href}>; rel=\"{rel}\""))
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 /// The published OpenAPI document — the one the contract gate generates from
@@ -245,7 +290,7 @@ async fn http_list_providers(Query(q): Query<HashMap<String, String>>) -> axum::
         kind: q.get("kind").cloned().unwrap_or_default(),
     };
     match list_providers(req).await {
-        Ok(resp) => (hyper::StatusCode::OK, axum::Json(resp)).into_response(),
+        Ok(resp) => with_link_header(&resp),
         Err(status) => problem(status, "/v1/providers"),
     }
 }

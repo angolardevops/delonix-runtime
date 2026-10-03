@@ -3,7 +3,9 @@
 //!
 //! What is served today, and it is said here so nobody reads the socket as the
 //! whole contract: `NodeService.ListProviders` (ADR-0050 D5) — the same
-//! `ProviderInfo` per provider that `delonix provider ls -o json` prints — and
+//! `ProviderInfo` per provider that `delonix provider ls -o json` prints — the
+//! entry point `GetApiRoot` (`GET /v1`: a link to every resource served; each
+//! resource carries its own `links`, mirrored in an RFC 8288 `Link` header) and
 //! `GetNodeInfo`, `GetHealth` and `GetCapacity` (ADR-0042 step C), computed from
 //! the same functions `delonix system info` reads. `GET /openapi.json` serves
 //! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
@@ -44,7 +46,8 @@ pub mod providers;
 mod service;
 
 pub use service::{
-    capacity, health, list_providers, node_info, openapi_document, router, NodeApi, OPENAPI_YAML,
+    capacity, health, link_header, list_providers, node_info, openapi_document, router, NodeApi,
+    OPENAPI_YAML,
 };
 
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
