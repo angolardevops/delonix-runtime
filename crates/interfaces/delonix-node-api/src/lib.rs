@@ -18,6 +18,11 @@
 //! engine's `codes::problem` — the same `DX-` codes the CLI exits with — which
 //! is what the published OpenAPI declares (ADR-0042 D2).
 //!
+//! Step E, first wave: `NetworkService.GetNetwork` and `ListNetworks`
+//! ([`networks`]) — the resource's `etag` is the REST `ETag` (a matching
+//! `If-None-Match` is 304), a list takes `label_selector` ([`selector`]) and
+//! pages by name, with the next page as a link.
+//!
 //! The REST routes are not written by hand: `build.rs` generates the route
 //! table and the dispatchers from the `google.api.http` annotations
 //! ([`transcode`]), for every RPC of the contract. A route of a service this
@@ -35,6 +40,10 @@
 //! checked with `SO_PEERCRED` against this process's uid — the same discipline
 //! as the CRI, the management API and the holder's control socket.
 
+// A `tonic::Status` is large by nature and it is the error every service
+// method returns; the CRI crate silences this lint for the same reason.
+#![allow(clippy::result_large_err)]
+
 use delonix_model::Error;
 
 /// The generated contract: prost messages, tonic server and client, and the
@@ -47,8 +56,10 @@ pub mod proto {
 }
 
 pub mod docs;
+pub mod networks;
 pub mod node;
 pub mod providers;
+pub mod selector;
 mod service;
 pub mod transcode;
 

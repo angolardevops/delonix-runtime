@@ -160,7 +160,10 @@ workloads e que espaço tem (ADR-0042 passo C) — um valor que não se mediu ve
 (<code>docs/api/openapi.yaml</code>), e <code>GET /docs</code> (Swagger UI) e <code>GET /redoc</code>
 desenham-no a partir de ficheiros embebidos no binário, sem carregar nada de fora (um
 Content-Security-Policy só deixa o próprio socket); chega-se a elas por um port-forward ou um
-túnel SSH até ao socket. O <code>WatchEvents</code> responde <code>UNIMPLEMENTED</code> a nomear o
+túnel SSH até ao socket. <code>GET /v1/namespaces/default/networks[/&lt;nome&gt;]</code> lê as redes do nó
+(ADR-0042 passo E): a condição <code>Realized</code> vem do registo do dataplane, a lista aceita
+<code>label_selector</code> e pagina com <code>page.page_size</code>/<code>page.page_token</code>, e uma rede traz
+<code>ETag</code> (<code>If-None-Match</code> responde 304). O <code>WatchEvents</code> responde <code>UNIMPLEMENTED</code> a nomear o
 passo que o traz.</p><p class='lang-en'>The versioned contract <code>proto/delonix/node/v1</code> served by the
 <code>delonix-node-api</code> binary (ADR-0040 P5): gRPC and HTTP/JSON from the SAME files, on a
 local unix socket, for the owning uid only. Today it serves the <code>NodeService</code>, from the
@@ -173,7 +176,10 @@ run workloads and what room it has (ADR-0042 step C) — a value that was not me
 document (<code>docs/api/openapi.yaml</code>), and <code>GET /docs</code> (Swagger UI) and
 <code>GET /redoc</code> render it from UI files embedded in the binary, loading nothing from
 elsewhere (a Content-Security-Policy allows only the socket itself); a browser reaches them through
-a port-forward or an SSH tunnel to the socket. <code>WatchEvents</code> answers
+a port-forward or an SSH tunnel to the socket. <code>GET /v1/namespaces/default/networks[/&lt;name&gt;]</code>
+reads the node's networks (ADR-0042 step E): the <code>Realized</code> condition comes from the dataplane
+record, the list takes <code>label_selector</code> and pages with <code>page.page_size</code>/<code>page.page_token</code>,
+and a network carries an <code>ETag</code> (<code>If-None-Match</code> answers 304). <code>WatchEvents</code> answers
 <code>UNIMPLEMENTED</code> naming the step that brings it.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs"><code>cmd/serve.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix serve node-api [OPTIONS]
