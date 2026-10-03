@@ -14,10 +14,11 @@ microVMs** e governa a rede e o armazenamento de que eles precisam. É declarati
 **Kinds próprios** nos grupos publicados (`core`, `compute`, `networking`, `gateway`,
 `storage`, `artifact`, `infrastructure` — `delonix api-resources`). Fala com **providers**
 só pela interface de gestão de cada um, atrás de portas: o kernel Linux (namespaces,
-cgroups, nftables), libvirt e Cloud Hypervisor, Proxmox VE, OpenStack (ADR-0039) e a API
-do Kubernetes (o CRI que serve o kubelet, o bootstrap de clusters com kubeadm e kind). Um
-provider novo entra como implementação de uma porta, nunca como um `if provider == …`
-espalhado pelo código.
+cgroups, nftables), libvirt e Cloud Hypervisor, Proxmox VE e a API do Kubernetes (o CRI
+que serve o kubelet, o bootstrap de clusters com kubeadm e kind). **OpenStack não é um
+provider do motor**: existe só o ADR-0039, *Proposed*, sem backend, e `provider.type:
+openstack` é recusado no carregamento. Um provider novo entra como implementação de uma
+porta, nunca como um `if provider == …` espalhado pelo código.
 
 **Princípios, e o que cada um proíbe:**
 
