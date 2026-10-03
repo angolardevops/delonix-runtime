@@ -439,7 +439,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         let Ok(scoped) = VolumeStore::open_scoped(state_root(), &ns) else {
             continue;
         };
-        for v in scoped.list().unwrap_or_default() {
+        for v in scoped.list()? {
             out.push(actual_of(scoped_plan_name(&ns, &v.name), &v));
         }
     }

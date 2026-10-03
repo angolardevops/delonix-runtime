@@ -1604,6 +1604,7 @@
           },
           "type": "array"
         },
+        "provider": {},
         "subnet": {
           "type": [
             "string",
@@ -3850,6 +3851,7 @@
             }
           ]
         },
+        "provider": {},
         "requiredCapabilities": {
           "default": [],
           "description": "Capabilities the backend must support on this host, by catalog name\n(`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider\nls` lists them; CLI `--require`). An unknown name is refused as invalid;\na backend that lacks one is refused before anything is created, and\nauto-detection only picks a backend that has them all (ADR-0050 D6).",

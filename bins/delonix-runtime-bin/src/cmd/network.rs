@@ -57,7 +57,7 @@ fn default_driver() -> String {
 /// Names accepted in the `spec` of `kind: Network` (canonical + aliases), for the
 /// unknown-fields warning.
 pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
-    "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip",
+    "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip", "provider",
 ];
 
 /// Fields the reconciler compares for a `kind: Network`. Only `peers` converges
