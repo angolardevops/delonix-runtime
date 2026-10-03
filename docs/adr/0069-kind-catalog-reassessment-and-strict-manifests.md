@@ -75,10 +75,28 @@ and applies the record: a direction the manifest declared keeps its policy, one 
 returns to the open default. If a policy layer fails the workload stays closed, the apply says
 so, and the next apply releases it; a second apply of an unchanged manifest holds nothing. The
 hold is written with the policy fields the dataplane has always understood (`deny`/`deny`), so a
-holder from before this change enforces it too. Not covered: Pods, VMs and system containers
-(different attach paths, each needs its own test). Lab: `scripts/chaos.sh policy_hold` — 8
+holder from before this change enforces it too. **Pods are covered** (see D6b). Not covered: VMs and
+system containers (their firewall is the provider's, `scope: vm`/`systemcontainer`, and a hold there is
+provider-specific). Lab: `scripts/chaos.sh policy_hold` — 8
 checks pass, and with the hold disabled 3 fail, including the ping that gets through after a
 failed policy.
+
+**D6b. A Pod is one policy target.** A `NetworkPolicy` / `NetworkAccessRule` / `Dependency` naming a
+Pod used to pass `stack validate` and fail at apply with `no such container: <pod>`, after the layers
+before it had created things — five shipped examples did it. `update_locked` and `load_governed`
+(`cmd/firewall.rs`) now resolve a name that is no container to the pod's **view**
+(`pod::pod_view`): the head member's record wearing the shared netns as identity and the pod's
+address, so every policy path (default policy, rules, origin-keyed rules, `fromWorkload`) runs
+unchanged on it and only `firewall` and `annotations` are written back, under the head's lock.
+`apply_pod_namespace_isolation` reapplies the persisted firewall (or the hold) when a pod's netns is
+recreated, so a holder respawn does not reopen it. A VM named by a container-scope policy is now
+refused by `stack validate` (use `scope: vm`). The imperative `net ingress|egress <pod>` verbs
+still answer `no such container`. Also fixed on the way: a Pod on `network: appnet` planned a
+replace on every second apply, because `actual()` read the network back from the member's record
+(`--net host`); the declared network now travels on the members (`delonix.io/pod-network`).
+Lab: `scripts/chaos.sh policy_hold_pod` — 7 checks pass (closed after a failed policy, marked, opened
+by the next apply, no drift in the following plan, `deny` closes the pod, a member restart does not
+reopen it); with the pod hold disabled 2 fail.
 
 **D7. Catalog.** Keep: `RuntimePolicy`, `Secret`, `Network`, `NetworkRoute`, `Volume`, `Image`,
 `App` (as the build operation's declarative front), `VirtualMachine`, `Pod`, `Service`,
@@ -107,7 +125,7 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
 
 ## Pending (real, with the prerequisite)
 
-1. D6 for Pods, VMs and system containers.
+1. D6 for VMs and system containers (provider firewalls); a holder-respawn test for a held or governed pod; `net ingress|egress <pod>` on the CLI.
 2. Plan identity as `(kind, scope, name)` for Pod/Service/Container/VM (only share volumes are
    scoped today); `destroy_one` takes `(kind, name)`. Needs a `ResourceKey` through
    `reconcile.rs` and the destroy path. D5 removes the silent false success but not the
