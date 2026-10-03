@@ -8,8 +8,8 @@
 //!   subnet: 10.80.0.0/24             # provider-neutral
 //!   gateway: 10.80.0.1
 //!   provider:
-//!     name: proxmox
-//!     proxmox:
+//!     type: proxmox
+//!     spec:
 //!       zone: lab                    # the SDN zone this vnet lives in
 //!       alias: "lab network 1"
 //!       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
@@ -74,35 +74,59 @@ pub(crate) fn lower_network_providers(docs: Vec<ManifestDoc>) -> Result<Vec<Mani
         let Some(Value::Mapping(p)) = spec.get("provider") else {
             return Err(bad(&net, "spec.provider must be a mapping"));
         };
-        let name = p.get("name").and_then(Value::as_str);
+        // Canonical: `type` + `spec`. Older spelling: `name` + a `proxmox:` block.
         for key in p.keys().filter_map(Value::as_str) {
-            if key != "name" && key != "proxmox" {
-                return Err(bad(
-                    &net,
-                    &format!("spec.provider.{key}: unknown provider (known: proxmox)"),
-                ));
+            if !matches!(key, "type" | "spec" | "name" | "proxmox") {
+                return Err(bad(&net, &format!("spec.provider.{key}: unknown field")));
             }
         }
-        if name.is_some_and(|n| n != "proxmox") {
+        let ty = p
+            .get("type")
+            .or_else(|| p.get("name"))
+            .and_then(Value::as_str);
+        if ty.is_some_and(|t| t != "proxmox") {
             return Err(bad(
                 &net,
                 &format!(
-                    "spec.provider.name is '{}', and only 'proxmox' realizes a Network segment",
-                    name.unwrap_or_default()
+                    "spec.provider.type is '{}', and only 'proxmox' realizes a Network segment",
+                    ty.unwrap_or_default()
                 ),
             ));
         }
-        let Some(Value::Mapping(px)) = p.get("proxmox") else {
-            return Err(bad(
-                &net,
-                "spec.provider needs a `proxmox:` block (with `zone`)",
-            ));
+        let px = match (p.get("spec"), p.get("proxmox")) {
+            (Some(_), Some(_)) => {
+                return Err(bad(
+                    &net,
+                    "spec.provider has both `spec` and the older `proxmox` block — keep `spec`",
+                ));
+            }
+            (Some(Value::Mapping(m)), None) => {
+                if ty.is_none() {
+                    return Err(bad(
+                        &net,
+                        "spec.provider.spec needs spec.provider.type: proxmox",
+                    ));
+                }
+                m
+            }
+            (None, Some(Value::Mapping(m))) => {
+                super::output::warn(&format!(
+                    "Network '{net}': provider.name/provider.proxmox is the older spelling — still accepted, move it to provider.type + provider.spec"
+                ));
+                m
+            }
+            _ => {
+                return Err(bad(
+                    &net,
+                    "spec.provider needs `type: proxmox` and a `spec:` mapping (with `zone`)",
+                ));
+            }
         };
         for key in px.keys().filter_map(Value::as_str) {
             if !PROXMOX_KEYS.contains(&key) {
                 return Err(bad(
                     &net,
-                    &format!("spec.provider.proxmox.{key}: unknown field"),
+                    &format!("spec.provider.spec.{key}: unknown field"),
                 ));
             }
         }
@@ -203,7 +227,7 @@ mod tests {
 
     fn n(name: &str, zone: &str, extra: &str) -> ManifestDoc {
         net(&format!(
-            "apiVersion: networking.delonix.io/v1alpha1\nkind: Network\nmetadata: {{ name: {name} }}\nspec:\n  subnet: 10.80.0.0/24\n  gateway: 10.80.0.1\n  provider:\n    name: proxmox\n    proxmox: {{ zone: {zone}{extra} }}\n"
+            "apiVersion: networking.delonix.io/v1alpha1\nkind: Network\nmetadata: {{ name: {name} }}\nspec:\n  subnet: 10.80.0.0/24\n  gateway: 10.80.0.1\n  provider:\n    type: proxmox\n    spec: {{ zone: {zone}{extra} }}\n"
         ))
     }
 
@@ -230,6 +254,28 @@ mod tests {
     }
 
     #[test]
+    fn the_older_spelling_lowers_to_exactly_what_type_and_spec_lowers_to() {
+        let new = lower_network_providers(vec![n("a", "lab", ", alias: x")]).unwrap();
+        let old = lower_network_providers(vec![net(
+            "apiVersion: networking.delonix.io/v1alpha1\nkind: Network\nmetadata: { name: a }\nspec:\n  subnet: 10.80.0.0/24\n  gateway: 10.80.0.1\n  provider: { name: proxmox, proxmox: { zone: lab, alias: x } }\n",
+        )])
+        .unwrap();
+        assert_eq!(new[0].spec, old[0].spec);
+        let both = net(
+            "apiVersion: v\nkind: Network\nmetadata: { name: a }\nspec: { provider: { type: proxmox, spec: { zone: z }, proxmox: { zone: z } } }\n",
+        );
+        let e = lower_network_providers(vec![both]).unwrap_err().to_string();
+        assert!(e.contains("both `spec` and the older `proxmox`"), "{e}");
+        let no_type = net(
+            "apiVersion: v\nkind: Network\nmetadata: { name: a }\nspec: { provider: { spec: { zone: z } } }\n",
+        );
+        let e = lower_network_providers(vec![no_type])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("needs spec.provider.type"), "{e}");
+    }
+
+    #[test]
     fn a_native_network_is_left_alone() {
         let native = net("apiVersion: networking.delonix.io/v1alpha1\nkind: Network\nmetadata: { name: lan }\nspec: { subnet: 10.201.0.0/16 }\n");
         let out = lower_network_providers(vec![native]).unwrap();
@@ -240,7 +286,7 @@ mod tests {
     #[test]
     fn mistakes_are_refused_with_the_network_named() {
         for (bad_doc, needle) in [
-            (n("a", "lab", ", bogus: 1"), "proxmox.bogus"),
+            (n("a", "lab", ", bogus: 1"), "provider.spec.bogus"),
             (
                 net("apiVersion: v\nkind: Network\nmetadata: { name: a }\nspec: { driver: overlay, provider: { name: proxmox, proxmox: { zone: z } } }\n"),
                 "native-SDN",

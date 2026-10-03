@@ -42,10 +42,12 @@ spec:
     userData: null              # your own cloud-init user-data (path/@path) — replaces the generated one
 
   # The hypervisor, and what only that hypervisor understands. Everything above is
-  # provider-neutral; the vendor block under `provider` is refused for any other `name`.
+  # provider-neutral. `type` picks the provider (omit the whole block = the configured
+  # default / auto-detection); `spec` is typed per provider, and a key the type does
+  # not have is refused.
   provider:
-    name: null                   # cloud-hypervisor | libvirt | proxmox | null (auto)
-    libvirt:                     # libvirt only: full XML parity, all optional
+    type: libvirt                # cloud-hypervisor | libvirt | proxmox
+    spec:                        # libvirt: full XML parity, all optional
       machine: null                 # machine type (default q35)
       cpuModel: null                # host-passthrough (default) | host-model | a named model
       cpuTopology: null             # { sockets: 1, cores: 4, threads: 2 }

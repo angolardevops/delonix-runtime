@@ -195,8 +195,14 @@ fn force_microvm_backend(name: &str, block: &mut serde_yaml::Value) -> Result<()
     // The same contradiction in its canonical spelling: `provider.name`, or a
     // vendor block that belongs to another hypervisor.
     if let Some(Value::Mapping(p)) = m.get("provider") {
-        let named = p.get("name").and_then(Value::as_str);
-        let vendor = p.keys().filter_map(Value::as_str).find(|k| *k != "name");
+        let named = p
+            .get("type")
+            .or_else(|| p.get("name"))
+            .and_then(Value::as_str);
+        let vendor = p
+            .keys()
+            .filter_map(Value::as_str)
+            .find(|k| !matches!(*k, "name" | "type" | "spec"));
         if let Some(b) = named.or(vendor) {
             if !is_ch_backend(b) {
                 return Err(Error::Invalid(super::po::tf(

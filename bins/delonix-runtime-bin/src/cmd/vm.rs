@@ -382,22 +382,30 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// `spec.provider` — the ONE place a manifest says which hypervisor realizes the
-/// VM and carries what only that hypervisor understands.
+/// VM and carries what only that hypervisor understands (ADR-0071).
 ///
 /// ```yaml
 /// provider:
-///   name: libvirt        # the target (replaces the top-level `backend`)
-///   libvirt:             # vendor block: typed, validated, refused for any other `name`
+///   type: libvirt        # which provider; replaces the top-level `backend`
+///   spec:                # typed per provider AND per resource; unknown keys are refused
 ///     machine: q35
 ///     xml: "<domain>…"
 /// ```
 ///
 /// Everything outside this block is provider-neutral (disk, resources, network,
-/// cloud-init). A vendor block under a `name` that is not its own is an error,
-/// never a field that is silently ignored on the other backend.
-const VM_PROVIDER_NAMES: &[&str] = &["libvirt"];
+/// cloud-init). The node has one target per provider type (`providers.yaml`,
+/// ADR-0054), so `type` selects it and there is no separate `ref` — a field the
+/// engine would accept and ignore is not a feature. A `spec` key that the named
+/// type does not have is an error, never a field the other backend ignores.
+const VM_PROVIDER_TYPES: &[&str] = &["libvirt", "cloud-hypervisor", "proxmox"];
 
-/// Sub-keys of the vendor block `provider.libvirt` -> the flat field each becomes.
+/// The older spelling (`provider: { name, libvirt: {…} }`): vendor key = type,
+/// its mapping = spec. Still normalized, reported by [`legacy_provider_spellings`].
+const VM_PROVIDER_LEGACY_VENDORS: &[&str] = &["libvirt"];
+
+/// `provider.spec` keys of a VM -> the flat field each becomes, by provider
+/// type. Only libvirt has VM-specific keys today; the others are `[]` on purpose
+/// (`spec: {}` is valid, any key is refused) until one is implemented and proven.
 const VM_PROVIDER_LIBVIRT: &[(&str, &str)] = &[
     ("machine", "machine"),
     ("cpuModel", "cpuModel"),
@@ -411,38 +419,102 @@ const VM_PROVIDER_LIBVIRT: &[(&str, &str)] = &[
     ("xml", "libvirtXml"),
 ];
 
+fn vm_provider_spec_keys(ty: &str) -> &'static [(&'static str, &'static str)] {
+    if ty == "libvirt" {
+        VM_PROVIDER_LIBVIRT
+    } else {
+        &[]
+    }
+}
+
 /// Problems in `spec.provider`, as dotted paths for the unknown-field report.
 fn provider_block_problems(spec: &serde_yaml::Value) -> Vec<String> {
     use serde_yaml::Value;
     let Some(Value::Mapping(p)) = spec.get("provider") else {
         return Vec::new();
     };
-    let name = p.get("name").and_then(|v| v.as_str());
     let mut out = Vec::new();
-    for (k, v) in p {
-        let Some(key) = k.as_str() else { continue };
-        if key == "name" {
-            continue;
-        }
-        if !VM_PROVIDER_NAMES.contains(&key) {
-            out.push(format!("provider.{key}"));
-            continue;
-        }
-        if name.is_some_and(|n| n != key) {
+    let legacy_name = p.get("name").and_then(|v| v.as_str());
+    let ty = p.get("type").and_then(|v| v.as_str()).or(legacy_name);
+    if let Some(t) = ty {
+        if !VM_PROVIDER_TYPES.contains(&t) {
             out.push(format!(
-                "provider.{key} (provider.name is '{}', so this block is for another hypervisor)",
-                name.unwrap_or_default()
+                "provider.type ('{t}' is not a provider; known: {})",
+                VM_PROVIDER_TYPES.join(", ")
             ));
         }
-        if let Value::Mapping(block) = v {
-            for sub in block.keys().filter_map(|s| s.as_str()) {
-                if !VM_PROVIDER_LIBVIRT.iter().any(|(from, _)| *from == sub) {
-                    out.push(format!("provider.{key}.{sub}"));
-                }
+        if let Some(flat) = spec.get("backend").and_then(|v| v.as_str()) {
+            if flat != t {
+                out.push(format!(
+                    "provider.type ('{t}') contradicts backend: '{flat}' — say it once"
+                ));
             }
         }
     }
+    for (k, v) in p {
+        let Some(key) = k.as_str() else { continue };
+        match key {
+            "type" | "name" => {}
+            "spec" => match v {
+                Value::Mapping(block) => {
+                    let Some(t) = ty else {
+                        if !block.is_empty() {
+                            out.push("provider.spec (needs provider.type)".to_string());
+                        }
+                        continue;
+                    };
+                    for sub in block.keys().filter_map(|s| s.as_str()) {
+                        if !vm_provider_spec_keys(t)
+                            .iter()
+                            .any(|(from, _)| *from == sub)
+                        {
+                            out.push(format!("provider.spec.{sub} (not a '{t}' VM field)"));
+                        }
+                    }
+                }
+                Value::Null => {}
+                _ => out.push("provider.spec (must be a mapping)".to_string()),
+            },
+            vendor if VM_PROVIDER_LEGACY_VENDORS.contains(&vendor) => {
+                if ty.is_some_and(|t| t != vendor) {
+                    out.push(format!(
+                        "provider.{vendor} (provider.name is '{}', so this block is for another hypervisor)",
+                        ty.unwrap_or_default()
+                    ));
+                }
+                if let Value::Mapping(block) = v {
+                    for sub in block.keys().filter_map(|s| s.as_str()) {
+                        if !VM_PROVIDER_LIBVIRT.iter().any(|(from, _)| *from == sub) {
+                            out.push(format!("provider.{vendor}.{sub}"));
+                        }
+                    }
+                }
+            }
+            other => out.push(format!("provider.{other}")),
+        }
+    }
+    out.extend(topology_contradiction(spec));
     out
+}
+
+/// A CPU topology that does not multiply out to the declared vCPU count is two
+/// answers to one question; the generic `vcpus` is not silently overridden.
+fn topology_contradiction(spec: &serde_yaml::Value) -> Option<String> {
+    let flat = normalize_vm_spec(spec.clone());
+    let vcpus = flat.get("vcpus")?.as_u64()?;
+    let t = flat.get("cpuTopology").filter(|t| t.is_mapping())?;
+    let n = |k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_u64())
+            .filter(|n| *n > 0)
+            .unwrap_or(1)
+    };
+    let product = n("sockets") * n("cores") * n("threads");
+    (product != vcpus).then(|| {
+        format!(
+            "provider.spec.cpuTopology ({product} CPUs) contradicts vcpus: {vcpus} — they must agree"
+        )
+    })
 }
 
 /// The older spellings of what now lives under `spec.provider`: the flat
@@ -474,11 +546,24 @@ pub(crate) fn legacy_provider_spellings(spec: &serde_yaml::Value) -> Vec<String>
         "libvirt_xml",
         "libvirt",
     ];
-    m.keys()
+    let mut out: Vec<String> = m
+        .keys()
         .filter_map(|k| k.as_str())
         .filter(|k| FLAT.contains(k))
         .map(str::to_string)
-        .collect()
+        .collect();
+    if let Some(serde_yaml::Value::Mapping(p)) = m.get("provider") {
+        if p.contains_key("name")
+            || VM_PROVIDER_LEGACY_VENDORS
+                .iter()
+                .any(|v| p.contains_key(*v))
+        {
+            out.push(
+                "provider.name/provider.<vendor> (now provider.type + provider.spec)".to_string(),
+            );
+        }
+    }
+    out
 }
 
 /// Sub-keys accepted inside the grouped `network:` mapping.
@@ -547,14 +632,25 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
     }
     if let Some(Value::Mapping(p)) = m.get("provider").cloned() {
         m.remove("provider");
-        hoist(m, &p, "name", "backend");
-        // A vendor block names its hypervisor; with no `name`, the block itself
-        // selects it (the same answer, written once).
-        for vendor in VM_PROVIDER_NAMES {
-            if let Some(Value::Mapping(block)) = p.get(*vendor) {
-                if m.get("backend").is_none_or(Value::is_null) {
-                    m.insert(Value::from("backend"), Value::from(*vendor));
+        let set_backend = |m: &mut serde_yaml::Mapping, ty: &str| {
+            if m.get("backend").is_none_or(Value::is_null) {
+                m.insert(Value::from("backend"), Value::from(ty));
+            }
+        };
+        // Canonical: `type` + `spec`.
+        if let Some(ty) = p.get("type").and_then(Value::as_str) {
+            set_backend(m, ty);
+            if let Some(Value::Mapping(block)) = p.get("spec") {
+                for (from, to) in vm_provider_spec_keys(ty) {
+                    hoist(m, block, from, to);
                 }
+            }
+        }
+        // Older spelling: `name` and/or a vendor block.
+        hoist(m, &p, "name", "backend");
+        for vendor in VM_PROVIDER_LEGACY_VENDORS {
+            if let Some(Value::Mapping(block)) = p.get(*vendor) {
+                set_backend(m, vendor);
                 for (from, to) in VM_PROVIDER_LIBVIRT {
                     hoist(m, block, from, to);
                 }
@@ -4716,6 +4812,63 @@ mod tests {
     }
 
     #[test]
+    fn type_and_spec_lower_to_the_same_flat_fields_as_the_older_spellings() {
+        let new = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { type: libvirt, spec: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let legacy = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { name: libvirt, libvirt: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let flat = super::normalize_vm_spec(y(
+            "disk: d\nbackend: libvirt\nmachine: q35\ntpm: true\nlibvirtXml: '<domain/>'\nlibvirtXmlOverlay: ['<a/>']",
+        ));
+        assert_eq!(new, flat);
+        assert_eq!(legacy, flat);
+    }
+
+    #[test]
+    fn spec_keys_are_per_provider_type_and_the_other_types_have_none_yet() {
+        let p = super::provider_block_problems(&y(
+            "provider: { type: cloud-hypervisor, spec: { machine: q35 } }",
+        ));
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].starts_with("provider.spec.machine"), "{p:?}");
+        assert!(
+            super::provider_block_problems(&y("provider: { type: proxmox, spec: {} }")).is_empty()
+        );
+        assert!(super::provider_block_problems(&y(
+            "provider: { type: libvirt, spec: { machine: q35 } }"
+        ))
+        .is_empty());
+        let p = super::provider_block_problems(&y("provider: { type: vmware }"));
+        assert!(p[0].contains("is not a provider"), "{p:?}");
+        let p = super::provider_block_problems(&y("provider: { spec: { machine: q35 } }"));
+        assert_eq!(p, vec!["provider.spec (needs provider.type)".to_string()]);
+        let p = super::provider_block_problems(&y("provider: { ref: pve }"));
+        assert_eq!(p, vec!["provider.ref".to_string()]);
+    }
+
+    #[test]
+    fn a_type_that_contradicts_the_flat_backend_is_refused_not_resolved_by_precedence() {
+        let p = super::provider_block_problems(&y("backend: proxmox\nprovider: { type: libvirt }"));
+        assert!(p.iter().any(|m| m.contains("contradicts backend")), "{p:?}");
+    }
+
+    #[test]
+    fn a_cpu_topology_that_does_not_multiply_to_vcpus_is_a_contradiction() {
+        let bad = y("vcpus: 4\nprovider: { type: libvirt, spec: { cpuTopology: { sockets: 1, cores: 2, threads: 1 } } }");
+        let p = super::provider_block_problems(&bad);
+        assert!(p.iter().any(|m| m.contains("contradicts vcpus")), "{p:?}");
+        let ok = y("resources: { vcpus: 4 }\nprovider: { type: libvirt, spec: { cpuTopology: { sockets: 1, cores: 2, threads: 2 } } }");
+        assert!(super::provider_block_problems(&ok).is_empty());
+        // No declared vcpus: nothing to contradict.
+        assert!(super::provider_block_problems(&y(
+            "provider: { type: libvirt, spec: { cpuTopology: { cores: 3 } } }"
+        ))
+        .is_empty());
+    }
+
+    #[test]
     fn provider_block_lowers_to_the_same_flat_fields_as_the_old_spellings() {
         let new = normalize_vm_spec(y(
             "disk: d\nprovider: { name: libvirt, libvirt: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
@@ -4757,7 +4910,11 @@ mod tests {
         let l = super::legacy_provider_spellings(&y("backend: libvirt\nmachine: q35\ndisk: d"));
         assert_eq!(l, vec!["backend".to_string(), "machine".to_string()]);
         assert!(
-            super::legacy_provider_spellings(&y("disk: d\nprovider: { name: libvirt }")).is_empty()
+            super::legacy_provider_spellings(&y("disk: d\nprovider: { type: libvirt }")).is_empty()
+        );
+        assert_eq!(
+            super::legacy_provider_spellings(&y("provider: { name: libvirt }")).len(),
+            1
         );
     }
 
