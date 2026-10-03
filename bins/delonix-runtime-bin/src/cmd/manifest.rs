@@ -434,6 +434,21 @@ pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'stati
     spec_fields_for(&doc.kind)
 }
 
+/// A field a Kind refuses BY NAME, with its own code, is refused here — before
+/// the unknown-field check, and for every command that loads a manifest.
+///
+/// The unknown-field check would otherwise speak first, and say the wrong
+/// thing: measured on the E2E battery after manifests became strict, a
+/// `SystemContainer` with `unprivileged: false` answered DX-1000 «unknown field
+/// 'unprivileged' — check the spelling» instead of DX-1540. The author spelled
+/// it right; the engine does not give what it asks.
+fn refused_by_name(doc: &ManifestDoc) -> Result<()> {
+    if doc.kind == k::SYSTEM_CONTAINER {
+        crate::cmd::system_container::reject_privilege(doc)?;
+    }
+    Ok(())
+}
+
 /// Warns about every unknown `spec` key of one document — the top-level ones and
 /// the ones nested inside a grouped form.
 ///
@@ -691,6 +706,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         // `Dependency`, lowered further down — were the only Kinds to LOSE the
         // warning they already had. Measured: `Dependency` and `Workload` warned
         // before the move and went silent after it.
+        refused_by_name(&doc)?;
         check_unknown_fields(&doc);
         if doc.kind == k::STACK {
             // A Stack's children are built HERE, so they never passed through the
@@ -703,6 +719,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
                 // Stack — a typo there is as invisible as anywhere else. Checked
                 // BEFORE a `Workload` child is lowered, for the same reason the
                 // top-level guard runs on the document as written.
+                refused_by_name(&child)?;
                 check_unknown_fields(&child);
                 if child.kind == k::WORKLOAD {
                     // Same reduction the top-level loop applies below: a Stack's
@@ -1450,6 +1467,31 @@ spec: {}
         )
         .unwrap();
         assert!(load(&p).is_ok());
+    }
+
+    /// A field a Kind refuses by name keeps its own code under the strict
+    /// load: DX-1540, not the «not understood» of a typo — and the lenient
+    /// load refuses it too, because nothing about it is a spelling mistake.
+    #[test]
+    fn a_field_refused_by_name_keeps_its_own_code_under_the_strict_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\nmetadata: { name: t }\nspec: { image: alpine:3.20, unprivileged: false }\n",
+        )
+        .unwrap();
+        for err in [load(&p).unwrap_err(), load_lenient(&p).unwrap_err()] {
+            assert_eq!(err.number(), 1540, "{err}");
+            assert!(!err.to_string().contains("not understood"), "{err}");
+        }
+        // Inside a Stack too.
+        std::fs::write(
+            &p,
+            "apiVersion: core.delonix.io/v1alpha1\nkind: Stack\nmetadata: { name: s }\nspec:\n  systemContainers:\n    - name: t\n      spec: { image: alpine:3.20, privileged: true }\n",
+        )
+        .unwrap();
+        assert_eq!(load(&p).unwrap_err().number(), 1540);
     }
 
     #[test]
