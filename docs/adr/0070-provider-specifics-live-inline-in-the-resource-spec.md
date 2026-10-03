@@ -1,6 +1,6 @@
 # ADR-0070: Provider specifics live in a `provider` block of the resource's own spec
 
-- **Status:** Accepted (2026-10-03, owner's direction) — D1–D2 implemented for `VirtualMachine`; D3 lists the Kinds that still carry provider specifics and what moving each needs
+- **Status:** Accepted (2026-10-03, owner's direction) — D1–D2 implemented for `VirtualMachine`, D3 for `NetworkZone` (now `Network` + `provider.proxmox`); the table lists what is still to move
 - **Date:** 2026-10-03
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0008 (VM backend registry), ADR-0044 (provider ports), ADR-0049/0051/0059 (Proxmox, OPNsense, network providers by role), ADR-0058 (system containers), ADR-0069
@@ -53,7 +53,7 @@ because each needs more than a re-spelling:
 
 | Kind today | Provider part | Target shape | What blocks the move |
 |---|---|---|---|
-| `NetworkZone` | Proxmox SDN zone + vnets, DNS/IPAM settings | `kind: Network` with `provider.proxmox: { zone, vnet, dns, subnets }` | A zone is shared by several vnets (it is created with the first and removed with the last): the zone needs a reference count in the registry, and `Network` today is one native bridge. |
+| `NetworkZone` | **Moved.** Proxmox SDN zone + vnets, DNS/IPAM settings | `kind: Network` with `spec.provider.proxmox: { zone, alias, dhcpRange, reservations, dns }`; `subnet`/`gateway` stay neutral | Done at load: the networks that name a zone are folded into the one `NetworkZone` document the executor already reconciles (the way `Dependency` folds into `NetworkPolicy`), so the zone is created with the first vnet and removed with the last without a reference count. `kind: NetworkZone` still loads, announced as superseded; the synthesized document carries `delonix.io/lowered-from` so the load does not announce a Kind the author never wrote. `dns` is a zone setting: networks of one zone that disagree on it are refused. Native-only fields (`driver`, `vni`, `peers`, …) with a provider block are refused. |
 | `NetworkGateway` | OPNsense aliases and perimeter rules | the perimeter rules belong to `NetworkPolicy` with a `provider` scope; the aliases to the provider block | A policy has no perimeter scope yet; the OPNsense ownership marks must carry over. |
 | `SystemContainer` | Proxmox LXC (cores, swap, rootfs, template staging) | a guest `kind` with `provider.proxmox` (ADR-0058 says its semantics are closer to a VM than to a Pod) | The ADR-0058 contract (`exec`/logs unsupported, hot vs cold fields) has to be re-expressed on the new Kind and its snapshot/backup/move verbs repointed. |
 | `Volume` `provision.truenas`, `nfs`/`cifs`/`webdav` | already a vendor-keyed block (`provision.<vendor>`) | unchanged | — it already follows D1. |

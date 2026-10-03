@@ -44,7 +44,7 @@ metadata:
   namespace: default                    # isolation namespace (enforced on the Cloud Hypervisor backend only)
 spec:
   disk: delonix-vm-base:ubuntu-24.04    # base image: a name in the VM image store, or a path (an overlay is made per VM)
-  backend: libvirt                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
+  provider: { name: libvirt }                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
   restartPolicy: always                 # no | on-failure | always
   vcpus: 4                              # omitted => the image's own default, else 1
   memory: 4G                            # "512M" | "2G" | "2Gi" (k8s-style suffix accepted)
@@ -150,7 +150,7 @@ metadata:
   name: bridge-vm
 spec:
   disk: delonix-vm-base:ubuntu-24.04
-  backend: libvirt
+  provider: { name: libvirt }
   netMode: bridge
   bridge: br0                           # host bridge / libvirt network to attach to
   vcpus: 2
@@ -165,7 +165,7 @@ metadata:
   name: direct-kernel
 spec:
   disk: delonix-vm-base:fedora-42
-  backend: cloud-hypervisor
+  provider: { name: cloud-hypervisor }
   network: vm-net
   kernel: /var/lib/delonix/kernels/vmlinuz-6.14.0     # direct kernel boot
   initrd: /var/lib/delonix/kernels/initramfs-6.14.0.img
@@ -182,7 +182,7 @@ metadata:
   name: firmware-boot
 spec:
   disk: delonix-vm-base:ubuntu-24.04
-  backend: cloud-hypervisor
+  provider: { name: cloud-hypervisor }
   network: vm-net
   firmware: /usr/local/share/delonix/CLOUDHV.fd       # UEFI firmware path
   vcpus: 2
@@ -208,14 +208,16 @@ metadata:
   name: raw-domain
 spec:
   disk: delonix-vm-base:ubuntu-24.04
-  backend: libvirt
-  libvirtXml: |
-    <domain type='kvm'>
-      <name>raw-domain</name>
-      <memory unit='MiB'>1024</memory>
-      <vcpu>1</vcpu>
-      <os><type arch='x86_64' machine='q35'>hvm</type></os>
-    </domain>
+  provider:
+    name: libvirt
+    libvirt:
+      xml: |
+        <domain type='kvm'>
+          <name>raw-domain</name>
+          <memory unit='MiB'>1024</memory>
+          <vcpu>1</vcpu>
+          <os><type arch='x86_64' machine='q35'>hvm</type></os>
+        </domain>
 ---
 # ---------------------------------------------------------------------------
 # 9. The disk is BUILT from a VMfile (spec.build) — mutually exclusive with `disk`

@@ -750,6 +750,8 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     }
     // `VirtualMachine.spec.expose` lowers to a synthetic `kind: HTTPRoute` (ADR-0046).
     let docs = crate::cmd::vm_expose::lower_vm_expose(docs)?;
+    // `Network.spec.provider` (a provider-realized segment) folds into the zone's own document (ADR-0070).
+    let docs = crate::cmd::network_provider::lower_network_providers(docs)?;
     // The unknown-field guard, for EVERY document and therefore for every
     // command that reads a manifest — `validate`, `plan`, `apply`, and each
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
@@ -775,6 +777,12 @@ fn warn_sunset_kinds(docs: &[ManifestDoc]) {
     use std::collections::BTreeMap;
     let mut seen: BTreeMap<&str, (usize, &str)> = BTreeMap::new();
     for d in docs {
+        if d.metadata
+            .annotations
+            .contains_key(super::network_provider::LOWERED_FROM)
+        {
+            continue;
+        }
         if let Some(f) = super::kinds::facts(&d.kind) {
             if let super::kinds::Form::Sunset(to) = f.form {
                 let e = seen.entry(f.kind).or_insert((0, to));
