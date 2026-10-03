@@ -123,6 +123,12 @@ never rewritten — supersede them with a new one.
   configured rootful node service); a probe without privilege answers «could not determine», never
   «no pools»; pools are created and destroyed only by the administrator. *Proposed*; a Portuguese
   review copy is `0067-storage-pools.pt-AO.md`.
+- **0068** — VM hotplug: a new `vm update` verb (like `container update`; `vm resize` stays cold)
+  adds vCPUs, memory, disks and NICs on a running VM within a maximum declared at create (default
+  maximum = boot size). Initial, maximum and assigned are kept apart, and the maximum is not
+  consumption. An operation is complete only when the guest uses the resource; otherwise it is
+  `Partial` (DX-8504, exit 124). Removal is a separate capability, out of the first phases. The
+  Delonix base images online added CPUs and memory. *Proposed*; a pt-AO review copy sits next to it.
 - **0069** — The Kind catalog after reassessment: a manifest the engine does not fully understand is refused before any effect (including Pod `containers[]` items), `App` converges on a fingerprint of its build inputs, CNI plugins are bounded, `Service` backends must be ready, and an unreadable store is an error rather than «nothing there». Records why `NetworkAccessRule`, `NetworkZone`, `Gateway`, `Container` and `KubernetesCluster` are not merged or renamed, and lists what is still pending. *Accepted*.
 - **0070** — Provider specifics live in a `provider` block of the resource's own spec (`provider.name` + a typed vendor block), not in one Kind per provider resource; neutral open-interface concepts (OCI/CRI/CNI/CSI) never go in it. Implemented for `VirtualMachine`; records what moving `NetworkZone`, `NetworkGateway` and `SystemContainer` still needs. *Accepted*.
 - **0071** — The provider block is `type` + `spec`, typed per provider and resource; `ref` is reserved until the node has named targets; a provider spec never overrides the generic intent. Supersedes the spelling of ADR-0070. *Accepted*.
