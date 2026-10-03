@@ -75,8 +75,9 @@ pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
 /// nothing happens and the run reports success. Both sides normalise a gateway
 /// equal to the derived one away ([`normalized_gateway`]), which is what keeps an
 /// unchanged manifest at zero differences.
-pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] =
-    &["driver", "parent", "subnet", "gateway", "vni", "peers"];
+pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] = &[
+    "driver", "parent", "subnet", "gateway", "vni", "peers", "labels",
+];
 
 /// A gateway worth recording: `None` when absent or equal to the one derived from
 /// `subnet`, which declares nothing.
@@ -183,6 +184,13 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     let store = NetworkStore::open(state_root())?;
     for d in diffs {
         match d.field.as_str() {
+            "labels" => {
+                store.set_metadata(
+                    name,
+                    &super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref()),
+                    &[],
+                )?;
+            }
             "peers" => {
                 let (removed, added) =
                     super::reconcile::list_delta(d.from.as_deref(), d.to.as_deref());
@@ -328,18 +336,27 @@ pub(crate) fn stamp(
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
+    // The document's own labels go on with the stamp: this is the one step
+    // every applied network passes through, created or adopted.
+    let mut labels = super::reconcile::labels_delta(
+        None,
+        fields
+            .get(super::reconcile::LABELS_FIELD)
+            .map(String::as_str),
+    );
+    labels.extend([
+        (
+            super::reconcile::STACK_LABEL.to_string(),
+            Some(stack.to_string()),
+        ),
+        (
+            super::reconcile::MANAGED_BY.to_string(),
+            Some("delonix".to_string()),
+        ),
+    ]);
     store.set_metadata(
         name,
-        &[
-            (
-                super::reconcile::STACK_LABEL.to_string(),
-                Some(stack.to_string()),
-            ),
-            (
-                super::reconcile::MANAGED_BY.to_string(),
-                Some("delonix".to_string()),
-            ),
-        ],
+        &labels,
         &[(
             super::reconcile::LAST_APPLIED.to_string(),
             Some(super::reconcile::encode_last_applied(fields)),
@@ -350,10 +367,17 @@ pub(crate) fn stamp(
 
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkSpec = manifest::spec_of(doc)?;
+    let mut fields = desired_network_fields(&spec);
+    // `metadata.labels` of the document. Until this was a plan field they never
+    // reached the record: the network carried the ownership stamp and nothing
+    // the manifest had declared.
+    if let Some(labels) = super::reconcile::user_labels_field(&doc.metadata.labels) {
+        fields.insert(super::reconcile::LABELS_FIELD.into(), labels);
+    }
     Ok(super::reconcile::Desired {
         kind: k::NETWORK.into(),
         name: doc.metadata.name.clone(),
-        fields: desired_network_fields(&spec),
+        fields,
         converges: true,
         ownable: true,
     })
@@ -367,7 +391,13 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|n| super::reconcile::Actual {
             kind: k::NETWORK.into(),
             name: n.name.clone(),
-            fields: actual_network_fields(&n, effective_default_route(&n.name).as_deref()),
+            fields: {
+                let mut f = actual_network_fields(&n, effective_default_route(&n.name).as_deref());
+                if let Some(labels) = super::reconcile::user_labels_field(&n.labels) {
+                    f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+                }
+                f
+            },
             owner: n.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: n
                 .annotations
@@ -750,6 +780,18 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             spec.wg_ip,
         )?;
         println!("network/{name}: {}", super::po::t("created"));
+    }
+    // The documents' own labels, for the path that does not stamp: `network
+    // apply` outside a stack ensures the network and never reaches `stamp`,
+    // so without this pass a label declared there was dropped. Additive — it
+    // sets what is declared and removes nothing; removal is the plan's
+    // (`converge`), which knows what was applied before.
+    for doc in manifest::of_kind(docs, k::NETWORK) {
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let labels = super::reconcile::labels_delta(None, own.as_deref());
+        if !labels.is_empty() && store.get(&doc.metadata.name).is_ok() {
+            store.set_metadata(&doc.metadata.name, &labels, &[])?;
+        }
     }
     Ok(())
 }
@@ -1425,6 +1467,16 @@ fn describe_one(n: &Network) {
     d.field_opt("WireGuard IP", n.wg_ip.as_deref());
     if !n.peers.is_empty() {
         d.list("Peers", &n.peers);
+    }
+    // The same block `container describe` prints: without it a label on this
+    // record — the stack that owns it included — was visible nowhere.
+    if n.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, v) in &n.labels {
+            d.item(format!("{k}={v}"));
+        }
     }
     match attached_containers(&n.name) {
         Some(cs) => {

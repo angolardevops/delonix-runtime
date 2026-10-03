@@ -1167,6 +1167,7 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   que não é e porquê (`env`/`command` vêm fundidos com os da imagem, `user` é guardado como uid).
 - `mount_to_spec` é o inverso do `resolve_spec` de propósito — aquele **cria** o volume, e calcular
   um plano não pode criar nada.
+- **Os `metadata.labels` de um `Network` e de um `Volume` chegam ao registo e convergem (2026-10-03).** Só o `Container` os recebia: uma rede ou um volume aplicados por manifesto ficavam com o carimbo de posse e mais nada, sem aviso. Agora são o campo `labels` do plano (JSON canónico, `reconcile::user_labels_field`), quente: mudar ou tirar um label converge sem recriar. As chaves `delonix.io/…` são do motor e ficam fora do campo; um manifesto sem labels não toca em labels postos à mão. O `network describe` e o `volume describe` passaram a mostrar os labels.
 - **`Volume`/`Network` ganharam `labels`/`annotations`** (`#[serde(default)]`, registos antigos
   continuam válidos). O `Network` não é serde — é `key=value` com vários escritores, por isso o
   `set_metadata` reescreve LINHA A LINHA (idioma do `add_overlay_peer`) e promove um registo legado
