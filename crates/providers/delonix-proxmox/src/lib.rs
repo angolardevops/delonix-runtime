@@ -1185,6 +1185,14 @@ impl Client {
         Ok(located_node(&w.data, vmid))
     }
 
+    /// Whether the cluster lists a QEMU VM called `name`: `GET
+    /// /cluster/resources?type=vm`, the `qemu` entries whose `name` matches.
+    pub fn has_vm_named(&self, name: &str) -> Result<bool> {
+        let body = self.get("/cluster/resources?type=vm")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "cluster resources")?;
+        Ok(names_vm(&w.data, name))
+    }
+
     /// The node a VM was found on in this process, if it moved.
     fn relocated_node(&self, vmid: u32) -> Option<String> {
         self.relocated.lock().ok()?.get(&vmid).cloned()
@@ -5419,6 +5427,14 @@ fn create_form(
     form
 }
 
+/// Whether any `qemu` entry of `/cluster/resources` is called `name`. Pure.
+fn names_vm(entries: &[serde_json::Value], name: &str) -> bool {
+    entries.iter().any(|e| {
+        e.get("type").and_then(|t| t.as_str()).unwrap_or("qemu") == "qemu"
+            && e.get("name").and_then(|n| n.as_str()) == Some(name)
+    })
+}
+
 /// The one node `/cluster/resources?type=vm` lists QEMU VM `vmid` on, or
 /// `None` for zero or more than one match. Pure.
 fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
@@ -6583,6 +6599,10 @@ impl VmBackend for ProxmoxBackend {
         Ok(self.on_vm(vm, |c, vmid| vm_firewall::apply(c, &ledger, vmid, policy))?)
     }
 
+    fn holds_vm(&self, name: &str) -> delonix_model::Result<Option<bool>> {
+        Ok(Some(self.client.has_vm_named(name)?))
+    }
+
     fn read_firewall(
         &self,
         _vmdir: &Path,
@@ -7267,6 +7287,17 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_vm_matches_qemu_entries_by_name_only() {
+        let e = vec![
+            serde_json::json!({"type":"qemu","name":"web","vmid":100,"node":"pve"}),
+            serde_json::json!({"type":"lxc","name":"db","vmid":101,"node":"pve"}),
+        ];
+        assert!(names_vm(&e, "web"));
+        assert!(!names_vm(&e, "db"), "a container is not a VM");
+        assert!(!names_vm(&e, "we"), "a prefix is not a match");
+    }
+
     use super::*;
 
     #[test]

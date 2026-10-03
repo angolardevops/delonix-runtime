@@ -130,9 +130,8 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
    scoped today); `destroy_one` takes `(kind, name)`. Needs a `ResourceKey` through
    `reconcile.rs` and the destroy path. D5 removes the silent false success but not the
    plan-level homonym limit.
-3. Operational refresh in `plan` for VMs a provider knows and the registry does not.
-4. Saved plans with a digest for every Kind (today only network documents) and a journal for
-   container/pod/volume/VM applies (networking and Proxmox have ledgers).
+3. DONE: `plan` asks the provider (`VmBackend::holds_vm`, Proxmox implements it) before a VM `Create`; a VM the provider holds and the registry does not is a `Conflict`. Other backends cannot enumerate and keep trusting the registry.
+4. DONE: every change carries a `planDigest` and `apply --plan-digest` refuses a stale one; each apply layer writes `apply-started`/`apply-done`/`apply-failed` to the node event log.
 5. Pod standalone: `emptyDir` on disk, `network: host|none` that mean what they say, `requests`
    admission semantics, probes/init containers. D1 makes the unsupported ones refuse; it does not
    implement them.

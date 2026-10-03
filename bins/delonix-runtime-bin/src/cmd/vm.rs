@@ -1542,6 +1542,18 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     })
 }
 
+/// Whether the provider the document names already holds a VM of that name
+/// (ADR-0069 item 3). `None` = the backend cannot enumerate, or could not be
+/// asked: a plan then trusts the registry, as before. An error is reported by
+/// the caller as a warning, never as «not there».
+pub(crate) fn provider_holds(doc: &ManifestDoc) -> Result<Option<bool>> {
+    let spec: VmSpec = vm_spec_of(doc)?;
+    let Ok(backend) = delonix_compute::vm_registry::select_backend(spec.backend.as_deref()) else {
+        return Ok(None);
+    };
+    backend.holds_vm(&doc.metadata.name)
+}
+
 /// What is on the machine, for the reconciler.
 ///
 /// Reads the STORE and not `delonix_vm::status`: `status` asks the backend

@@ -127,10 +127,10 @@ pub enum StackCmd {
         /// Never happens without this flag.
         #[arg(long = "prune")]
         prune: bool,
-        /// Apply only if this is still the plan: a `planDigest` from `stack
-        /// plan -o json` (repeatable, one per network document). A network
-        /// document whose digest, recomputed now, is not among them is a
-        /// stale plan — refused before anything is written.
+        /// Apply only if this is still the plan: the `planDigest` of each change
+        /// from `stack plan -o json` (repeatable). A change whose digest,
+        /// recomputed now, is not among them is a stale plan — refused before
+        /// anything is written.
         #[arg(long = "plan-digest", value_name = "DIGEST")]
         plan_digest: Vec<String>,
     },
@@ -513,6 +513,31 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
             .into_iter()
             .filter(|x| !x.ok)
             .collect();
+        // A VM the registry does not know but the provider does: planning a
+        // `Create` would build a second VM of the same name beside the first.
+        // The provider is asked only for what would otherwise be a `Create`.
+        if c.kind == k::VM && c.action == reconcile::Action::Create {
+            match super::vm::provider_holds(doc) {
+                Ok(Some(true)) => {
+                    c.action = reconcile::Action::Conflict;
+                    c.changed = false;
+                    c.reason = Some(format!(
+                        "the provider already holds a VM named '{}' that this node's registry \
+                         does not know — creating would make a second one. Remove it at the \
+                         provider, or rename this VM",
+                        c.name
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "warning: could not ask the provider whether VM '{name}' exists: {err}",
+                        &[("name", &c.name), ("err", &e.to_string())],
+                    )
+                ),
+            }
+        }
         // A `kind: VirtualMachine` accepts 36 spec fields and the reconciler compares five.
         // On a Create that is harmless — creation applies the whole spec. On a
         // VM that ALREADY EXISTS it was a silent drop: the plan said "no
@@ -810,15 +835,7 @@ fn plan_cmd(
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
-    let mut changes = build_plan(&docs, &stack)?;
-    for c in &mut changes {
-        if let Some(doc) = docs
-            .iter()
-            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
-        {
-            c.plan_digest = network_plan_digest(doc)?;
-        }
-    }
+    let changes = plan_with_digests(&docs, &stack)?;
     let any = changes.iter().any(|c| c.changed);
     match output {
         super::output::OutputFormat::Json => super::output::print_json(&changes)?,
@@ -850,6 +867,9 @@ fn explain(c: &Change) -> Option<String> {
             "does not converge live: {fields}",
             &[("fields", &c.cold_fields.join(", "))],
         )),
+        // No owner: the conflict is a VM only the provider holds, and the
+        // reason says so (English, as the JSON payload has it).
+        Action::Conflict if c.owner.is_none() && c.reason.is_some() => c.reason.clone(),
         Action::Conflict => Some(super::po::tf(
             "owned by the stack '{owner}'",
             &[("owner", c.owner.as_deref().unwrap_or("?"))],
@@ -1608,8 +1628,50 @@ fn apply(
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
-    refuse_stale_plan(&docs, &plan_digests)?;
+    refuse_stale_plan(&docs, &stack_name(&path, name.as_deref()), &plan_digests)?;
     apply_docs(&docs, &path, name.as_deref(), replace, do_prune, None)
+}
+
+/// The plan with a digest on every change: the provider-derived one for the
+/// network documents, and for every other Kind a digest of the change itself —
+/// kind, name, action and every differing field with BOTH of its values. The
+/// machine's value being inside is what makes it go stale when the machine moves.
+fn plan_with_digests(docs: &[manifest::ManifestDoc], stack: &str) -> Result<Vec<Change>> {
+    let mut changes = build_plan(docs, stack)?;
+    for c in &mut changes {
+        let net = match docs
+            .iter()
+            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
+        {
+            Some(doc) => network_plan_digest(doc)?,
+            None => None,
+        };
+        c.plan_digest = Some(net.unwrap_or_else(|| change_digest(c)));
+    }
+    Ok(changes)
+}
+
+/// SHA-256 (hex) over the canonical text of one change. Pure.
+fn change_digest(c: &Change) -> String {
+    use sha2::{Digest, Sha256};
+    let mut text = format!("v1\n{}\n{}\n{:?}\n", c.kind, c.name, c.action);
+    let mut cold = c.cold_fields.clone();
+    cold.sort();
+    text.push_str(&cold.join(","));
+    text.push('\n');
+    if let Some(o) = &c.owner {
+        text.push_str(o);
+    }
+    text.push('\n');
+    let mut diffs: Vec<_> = c.diffs.iter().collect();
+    diffs.sort_by(|a, b| a.field.cmp(&b.field));
+    for d in diffs {
+        text.push_str(&format!("{}={:?}->{:?};", d.field, d.from, d.to));
+    }
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The digest of one document's plan, for the Kinds that have one (ADR-0059
@@ -1626,7 +1688,7 @@ fn network_plan_digest(doc: &manifest::ManifestDoc) -> Result<Option<String>> {
 /// be one of those given — the `If-Match` rule applied to a plan. Checked
 /// before the first write; without the flag nothing is checked and `apply`
 /// plans and applies in one invocation, as it always has.
-fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result<()> {
+fn refuse_stale_plan(docs: &[manifest::ManifestDoc], stack: &str, given: &[String]) -> Result<()> {
     if given.is_empty() {
         return Ok(());
     }
@@ -1652,11 +1714,31 @@ fn refuse_stale_plan(docs: &[manifest::ManifestDoc], given: &[String]) -> Result
             .into());
         }
     }
+    // Every other Kind: the digest of its change, recomputed from the machine
+    // as it is now. A change the plan did not have (a resource that appeared,
+    // a field someone edited by hand) gives a digest nobody holds.
+    for c in plan_with_digests(docs, stack)? {
+        if matches!(c.kind.as_str(), k::NETWORK_GATEWAY | k::NETWORK_ZONE) {
+            continue;
+        }
+        let Some(now) = c.plan_digest.as_deref() else {
+            continue;
+        };
+        checked += 1;
+        if !given.iter().any(|g| g == now) {
+            return Err(delonix_networking::Error::StalePlan(format!(
+                "{}/{}: the plan is stale — its digest is now {now}, which is not among the \
+                 --plan-digest given. The manifest or the machine changed since the plan. \
+                 Nothing was written; plan again",
+                c.kind, c.name
+            ))
+            .into());
+        }
+    }
     if checked == 0 {
         return Err(delonix_model::Error::Invalid(
             super::po::t(
-                "--plan-digest was given, and the manifest has no network document with a plan \
-             digest (kind: NetworkGateway, NetworkZone) — nothing would be checked",
+                "--plan-digest was given, and the manifest has nothing to check it against",
             )
             .into(),
         ));
@@ -3525,6 +3607,29 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_change_digest_follows_the_machine_value() {
+        let mut a = a_change("Container", "web");
+        a.diffs.push(reconcile::FieldDiff {
+            field: "memory".into(),
+            from: Some("64M".into()),
+            to: Some("128M".into()),
+            hot: true,
+        });
+        let before = change_digest(&a);
+        assert_eq!(
+            before,
+            change_digest(&a.clone()),
+            "same change, same digest"
+        );
+        a.diffs[0].from = Some("96M".into());
+        assert_ne!(
+            before,
+            change_digest(&a),
+            "someone edited the machine: the plan is stale"
+        );
+    }
+
     #[test]
     fn a_container_scope_policy_naming_a_vm_is_refused_but_a_pod_is_a_valid_target() {
         let d = manifest::load_str(
