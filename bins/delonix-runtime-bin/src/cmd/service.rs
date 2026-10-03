@@ -15,7 +15,13 @@
 //! the thin Kind-dispatch layer: parse the spec, write the registry entry,
 //! answer the reconciler's questions. See `docs/adr/0032-service-kind-dns-round-robin.md`
 //! for the full design and the deliberately-deferred pieces (a real L4 VIP,
-//! `type: LoadBalancer`/`NodePort`/`ExternalName`, readiness-gated membership).
+//! `type: LoadBalancer`/`NodePort`/`ExternalName`).
+//!
+//! **Membership is readiness-aware.** Only a `Running` container is a backend,
+//! and one that declares a health check is a backend only while `healthy`
+//! (`Starting`/`Unhealthy` are out). A container with no health check is ready
+//! when it runs. This is discovery, not draining: a client holding a resolved
+//! address keeps it.
 //!
 //! **No new CLI leaf.** Reached the same way `kind: Dependency`/
 //! `kind: NetworkAccessRule` already are — through `delonix apply -f`/
@@ -79,7 +85,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: ServiceSpec = manifest::spec_of(doc)?;
     Ok(super::reconcile::Desired {
         kind: k::SERVICE.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields: service_fields(&spec),
         converges: true,
         ownable: true,
@@ -104,7 +110,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("port".into(), def.port.to_string());
             super::reconcile::Actual {
                 kind: k::SERVICE.into(),
-                name: def.name.clone(),
+                name: manifest::scoped_plan_name(&def.namespace, &def.name),
                 fields: f,
                 owner: def.labels.get(super::reconcile::STACK_LABEL).cloned(),
                 last_applied: def
@@ -121,10 +127,10 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// registry entry (unlike `NetworkAccessRule`, a `Service` does not target a
 /// container it does not own — its record is entirely its own, so stamping it
 /// directly carries none of that Kind's risk).
-pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {
-    let namespace = doc_namespace_of(name)?;
+pub(crate) fn stamp(plan: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {
+    let (namespace, name) = manifest::split_plan_name(plan);
     delonix_sdn::infra::service_set_metadata(
-        &namespace,
+        namespace,
         name,
         &[
             (
@@ -145,23 +151,9 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 }
 
 /// `--prune`/`stack destroy`'s teardown.
-pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
-    let namespace = doc_namespace_of(name)?;
-    delonix_sdn::infra::service_remove(&namespace, name).map_err(Into::into)
-}
-
-/// Finds which namespace an already-registered `Service` NAMED `name` lives
-/// in. The reconciler's `stamp`/teardown paths receive only a plan NAME, not
-/// the document — same shape `netroute`'s `split_route_name` exists to
-/// resolve, here by a registry scan instead of a name split, because a
-/// `Service`'s identity is `metadata.name` (not a derived key like a route's
-/// pair) but its FILE is keyed by `(namespace, name)`.
-fn doc_namespace_of(name: &str) -> Result<String> {
-    delonix_sdn::infra::service_list()
-        .into_iter()
-        .find(|d| d.name == name)
-        .map(|d| d.namespace)
-        .ok_or_else(|| Error::NotFound(format!("service: {name}")))
+pub(crate) fn remove_for_replace(plan: &str) -> Result<()> {
+    let (namespace, name) = manifest::split_plan_name(plan);
+    delonix_sdn::infra::service_remove(namespace, name).map_err(Into::into)
 }
 
 /// For `stack ls`/`describe`: declared vs. how many live backends it resolves
@@ -444,7 +436,7 @@ mod tests {
     fn um_servico_ja_existente_e_adoptado_pela_stack_que_o_declara() {
         let p = plan(
             &[desired(&doc("web", "teamA", &[("app", "web")], 8080)).unwrap()],
-            &[actual_de("web", &[("app", "web")], 8080, None)],
+            &[actual_de("teamA/web", &[("app", "web")], 8080, None)],
             "s",
         );
         assert_eq!(p.len(), 1, "{p:?}");
@@ -457,7 +449,7 @@ mod tests {
     fn mudar_a_porta_planeia_um_update() {
         let p = plan(
             &[desired(&doc("web", "teamA", &[("app", "web")], 9090)).unwrap()],
-            &[actual_de("web", &[("app", "web")], 8080, Some("s"))],
+            &[actual_de("teamA/web", &[("app", "web")], 8080, Some("s"))],
             "s",
         );
         assert_eq!(p.len(), 1, "{p:?}");

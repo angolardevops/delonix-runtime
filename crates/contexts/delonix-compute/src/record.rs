@@ -536,6 +536,13 @@ pub struct Container {
     /// `network connect`). Each one is its own `eth<idx>` interface.
     #[serde(default)]
     pub extra_networks: Vec<ExtraNet>,
+    /// Source prefixes this container may use on its PRIMARY interface besides
+    /// its own address, enforced by the bridge anti-spoofing table. Set by the
+    /// engine (a Kind node's own PodCIDR), never directly by a request.
+    /// Persisted because the binding is rebuilt on every attach: a `start`
+    /// that lost it would cut the traffic it exists to let through.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_sources: Vec<String>,
     /// Additional DNS names of the container on its network (`--network-alias`), besides the
     /// container name — resolved by other containers on the same network.
     #[serde(default)]
@@ -792,6 +799,7 @@ impl Container {
             namespace: default_namespace(),
             expose: None,
             extra_networks: Vec::new(),
+            allowed_sources: Vec::new(),
             net_aliases: Vec::new(),
             dns_knows: None,
             net_mode: None,

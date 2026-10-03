@@ -1,0 +1,54 @@
+table inet dlxing {
+  set dlxall4 { type ipv4_addr; }
+  set dlxall6 { type ipv6_addr; }
+  set dlxns4_x { type ipv4_addr; }
+  set dlxns6_x { type ipv6_addr; }
+  map fwmap4 { type ipv4_addr : verdict; }
+  map fwmap6 { type ipv6_addr : verdict; }
+  set dlxbr { type ifname; }
+  map netpair { type ifname . ifname : verdict; counter; }
+  chain fwguard { type filter hook forward priority -20;
+    ip daddr 169.254.0.0/16 counter drop
+    ip daddr 127.0.0.0/8 counter drop
+    ip6 daddr fe80::/10 counter drop
+    ip6 daddr ::1/128 counter drop
+    ip6 daddr fd00:ec2::254 counter drop
+  }
+  chain fwout { type filter hook forward priority -6; ip saddr vmap @fwmap4; ip6 saddr vmap @fwmap6; }
+  chain fwcont { type filter hook forward priority -5; ip daddr vmap @fwmap4; ip6 daddr vmap @fwmap6; }
+  chain fwdeny { type filter hook forward priority -10;
+    ct state established,related accept
+    iifname . oifname vmap @netpair
+    iifname @dlxbr oifname @dlxbr counter drop
+    iifname "vh-a" ip6 saddr != fd65:1::a counter drop
+    iifname "vh-a" ip6 saddr != fd65:1::a icmpv6 type nd-router-advert counter drop
+  }
+  chain fwabc {
+    ct state invalid counter drop
+    ct state established,related counter accept
+    ip6 daddr fd65:1::a ip6 saddr @dlxns6_x counter accept
+    ip6 daddr fd65:1::a ip6 saddr @dlxall6 ct state new counter drop
+    ip6 daddr fd65:1::a meta l4proto { tcp, udp } th dport 80 counter accept
+    ip6 saddr fd65:1::a counter drop
+  }
+  chain dlxinput { type filter hook input priority 0;
+    ct state established,related accept
+    iifname "lo" accept
+    udp dport { 53, 67, 68, 547 } accept
+    meta l4proto icmp accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, echo-request } accept
+    ct state new counter drop
+  }
+  chain pre { type nat hook prerouting priority -100; }
+  chain post { type nat hook postrouting priority 100; oifname "tap0" masquerade; }
+  chain forward { type filter hook forward priority 0; policy drop;
+    ct state established,related accept
+    ct state invalid drop
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept
+    iifname . oifname vmap @netpair
+  }
+}
+add element inet dlxing fwmap6 { fd65:1::a : jump fwabc }
+add element inet dlxing dlxall6 { fd65:1::a, fd65:1::b }
+add element inet dlxing dlxns6_x { fd65:1::a }
+add element inet dlxing fwmap4 { 10.200.0.2 : jump fwabc }

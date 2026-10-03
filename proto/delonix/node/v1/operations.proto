@@ -58,6 +58,8 @@ message Operation {
   string request_id = 11;
   // W3C trace id of the request that started it, so an operation and its spans join up.
   string trace_id = 12;
+  // "self", "collection", and "target" — the resource — once a create succeeded.
+  repeated Link links = 13;
 }
 
 enum OperationState {
@@ -86,6 +88,8 @@ message ListOperationsRequest {
 message ListOperationsResponse {
   repeated Operation operations = 1;
   PageResponse page = 2;
+  // "self", and "next" while there is another page.
+  repeated Link links = 3;
 }
 
 message CancelOperationRequest {

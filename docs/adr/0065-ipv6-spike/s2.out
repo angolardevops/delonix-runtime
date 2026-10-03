@@ -1,0 +1,40 @@
+## holder netns bridge-nf-call-ip6tables before: 1  iptables: 1
+### bridge-nf-call-ip6tables=0 (write: ok) iptables=0 (ok)
+a->b v6 bridged: OK
+a->c v6 routed: FAIL
+a(spoof ::99)->b: replies
+a(spoof .99)->b v4: replies
+b addrs from RA: fd77::d407:ccff:fe78:e265/64 
+  a2b-seen: packets 0
+  spoof6-seen-any-iif: packets 0
+  spoof6-seen-iif-veth: packets 0
+  spoof6-seen-iif-bridge: packets 0
+  spoof4-seen-any-iif: packets 0
+  spoof4-seen-iif-veth: packets 0
+  ra-seen: packets 0
+  nd-seen: packets 0
+  inter-bridge-drop: packets 2
+  intra-br0-seen: packets 0
+### bridge-nf-call-ip6tables=1 (write: ok) iptables=1 (ok)
+a->b v6 bridged: OK
+a->c v6 routed: FAIL
+a(spoof ::99)->b: replies
+a(spoof .99)->b v4: replies
+b addrs from RA: fd77:1::d407:ccff:fe78:e265/64 fd77::d407:ccff:fe78:e265/64 
+  a2b-seen: packets 2
+  spoof6-seen-any-iif: packets 2
+  spoof6-seen-iif-veth: packets 0
+  spoof6-seen-iif-bridge: packets 2
+  spoof4-seen-any-iif: packets 2
+  spoof4-seen-iif-veth: packets 0
+  ra-seen: packets 1
+  nd-seen: packets 2
+  inter-bridge-drop: packets 4
+  intra-br0-seen: packets 19
+### table bridge (native, no br_netfilter needed): bridge-nf-call-ip6tables=0
+a(spoof ::99)->b: no reply
+a->b legit: OK
+b addrs from RA fd77:b: 
+  spoof6-drop: packets 2
+  ra-drop: packets 1
+  na-spoof-drop: packets 0

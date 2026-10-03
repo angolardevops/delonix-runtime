@@ -1,46 +1,54 @@
-# kind: NetworkZone — a zone of Proxmox VE's own SDN and the vnets inside it
-# (ADR-0049 addendum). The document never names the infrastructure: it is
-# realized by the zone provider the runtime has configured, which today is a
-# Proxmox node registered through DELONIX_PROXMOX_URL/_NODE and a credential
-# (see "Remote providers" in the README). With no provider configured, `apply`
-# refuses; `manifest validate` does not need one.
+# A segment realized by a cluster provider — Proxmox VE's own SDN — written as a
+# `Network` with the provider's part inline in `spec.provider` (ADR-0070, ADR-0071).
+# Everything outside `provider` is provider-neutral; `provider.spec` is typed for the
+# provider named by `provider.type`, and a key that provider does not have is refused.
 #
-# metadata.name is the zone's SDN id on the node — a lowercase letter and up to
-# seven more lowercase letters or digits; the provider checks the exact format.
-# Ownership: every vnet's alias ends with this document's owner mark
-# (`[delonix-owner:<token>]`), and a zone is this document's only if the engine
-# created it (a zone has no text field to mark). A zone or vnet of the same name
-# that is not is refused, never adopted, and never deleted. Each apply and each
-# teardown is one transaction under the cluster's SDN lock: refused while
-# someone else's SDN changes are pending, rolled back if a step fails.
-# There is no update in place: `apply` ensures every vnet listed is present, and
-# a vnet dropped from the list stays until the whole zone is torn down
-# (`stack apply --prune`, `stack destroy`, or `--replace NetworkZone/<name>`),
-# which removes the vnets, then the zone, then commits once.
+# The document never names the infrastructure endpoint: it is realized by the
+# zone provider the runtime has configured, which today is a Proxmox node
+# registered through DELONIX_PROXMOX_URL/_NODE and a credential (see "Remote
+# providers" in the README). With no provider configured, `apply` refuses;
+# `manifest validate` does not need one.
+#
+# metadata.name is the vnet's SDN id on the node (a lowercase letter and up to
+# seven more lowercase letters or digits; the provider checks the exact format).
+# `zone` is the SDN zone the vnet lives in. A zone is shared by its vnets: the
+# networks that name the same zone are applied as one zone, created with the
+# first and removed with the last. Everything the zone-level `dns` says must be
+# identical on every network of that zone.
+#
+# Ownership: every vnet's alias ends with this engine's owner mark
+# (`[delonix-owner:<token>]`), and a zone is the engine's only if it created it.
+# A zone or vnet of the same name that is not is refused, never adopted, never
+# deleted. Each apply and teardown is one transaction under the cluster's SDN
+# lock: refused while someone else's SDN changes are pending, rolled back if a
+# step fails. There is no update in place: `apply` ensures every network listed
+# is present, and one dropped from the manifest stays until the whole zone is
+# torn down (`stack apply --prune`, `stack destroy`, or
+# `--replace NetworkZone/<zone>`).
 apiVersion: networking.delonix.io/v1alpha1
-kind: NetworkZone
-metadata: { name: lab }
+kind: Network
+metadata: { name: labnet1 }
 spec:
-  vnets:
-    - { name: labnet1, alias: "lab network 1" }
-    - { name: labnet2 }
-#
-# Addressing and DNS (ADR-0059 F5b/F5c), on a vnet:
-#
-#   spec:
-#     dns: { server: pdns, zone: lab.example, reverseServer: pdns }
-#     vnets:
-#       - name: labnet1
-#         subnets:
-#           - cidr: 10.80.0.0/24
-#             gateway: 10.80.0.1
-#             dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
-#             reservations: [{ ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }]
-#
-# `dns.server` and `dns.reverseServer` name DNS controllers registered on the
-# cluster by its administrator; the engine never creates one. The node writes
-# the records: an A and a PTR for each guest that gets an address from a DHCP
-# range (named after the guest), and `<vnet>-gw` for each subnet's gateway. A
-# zone with `dns` and no `dhcpRange` is refused (it would register nobody).
-# Changing `dns` converges live; the records already written stay. A teardown
-# names the gateway records the node leaves on the DNS server.
+  subnet: 10.80.0.0/24
+  gateway: 10.80.0.1
+  provider:
+    type: proxmox
+    spec:
+      zone: lab
+      alias: "lab network 1"
+      dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
+      reservations: [{ ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }]
+      # dns: { server: pdns, zone: lab.example, reverseServer: pdns }
+      #   `server`/`reverseServer` name DNS controllers registered on the cluster
+      #   by its administrator; the engine never creates one. The node writes the
+      #   records (an A and a PTR per guest that gets an address from a DHCP
+      #   range, and `<vnet>-gw` for each subnet's gateway). `dns` without a
+      #   `dhcpRange` is refused. Changing it converges live.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: labnet2 }
+spec:
+  provider:
+    type: proxmox
+    spec: { zone: lab }

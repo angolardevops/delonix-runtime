@@ -14,7 +14,7 @@ apiVersion: compute.delonix.io/v1alpha1
 kind: VirtualMachine
 metadata: { name: web-vm }
 spec:
-  backend: proxmox
+  provider: { type: proxmox }
   disk: "local-lvm:8"
   vcpus: 2
   memory: 2G
