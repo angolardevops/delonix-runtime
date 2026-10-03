@@ -8389,12 +8389,14 @@ fn build_dns_index() -> DnsIndex {
     // Collected alongside the container loop below, for the `kind: Service`
     // pass at the end — a SECOND directory read would just re-parse the same
     // files this loop already opened.
-    let mut container_summaries: Vec<(
+    // (labels, namespace, address, ready) of each serving container.
+    type ContainerSummary = (
         std::collections::BTreeMap<String, String>,
         String,
         [u8; 4],
         bool,
-    )> = Vec::new();
+    );
+    let mut container_summaries: Vec<ContainerSummary> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
