@@ -2749,7 +2749,7 @@ fn history(
 /// `stack validate` — dry-run: only runs `validate_graph` and reports, without applying.
 fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
     let path = manifest::resolve_path(file)?;
-    let docs = manifest::load(&path)?;
+    let docs = manifest::load_lenient(&path)?;
     let issues = validate_graph(&docs);
     // Fields the load has just warned about. Saying `OK` on the line after
     // `unknown field 'resources.memoria' — ignored` was the engine contradicting
@@ -3618,7 +3618,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("stack.yaml");
         std::fs::write(&p, yaml).unwrap();
-        manifest::load(&p).unwrap()
+        manifest::load_lenient(&p).unwrap()
     }
 
     fn check(yaml: &str) -> Vec<String> {

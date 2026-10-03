@@ -1003,7 +1003,7 @@ fn valid_container_name(name: &str) -> bool {
 // language — the context returns them as data and never prints.
 #[cfg(test)]
 use delonix_compute::pod::HostAlias;
-pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
+pub(crate) use delonix_compute::pod::{PodSpec, POD_CONTAINER_FIELDS, POD_SPEC_FIELDS};
 
 /// Prints each translation notice ONCE per invocation.
 ///

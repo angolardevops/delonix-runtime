@@ -446,6 +446,7 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     if let Some(fields) = spec_fields_for_doc(doc) {
         warn_unknown_fields(doc, fields);
     }
+    check_pod_members(doc);
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
         k::VM => crate::cmd::vm::unknown_group_keys(&doc.spec),
@@ -464,7 +465,71 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     }
 }
 
+/// Unknown keys inside each `containers[]` item of a Pod-shaped spec. The
+/// top-level check never looked here, so `readinessProbe:` on a member was
+/// dropped without a word and the pod was reported ready when it was merely running.
+fn check_pod_members(doc: &ManifestDoc) {
+    if doc.kind != k::POD && doc.kind != k::CONTAINER {
+        return;
+    }
+    let Some(serde_yaml::Value::Sequence(items)) = doc.spec.get("containers") else {
+        return;
+    };
+    for (i, item) in items.iter().enumerate() {
+        let serde_yaml::Value::Mapping(m) = item else { continue };
+        for key in m.keys().filter_map(|k| k.as_str()) {
+            if super::container::POD_CONTAINER_FIELDS.contains(&key) {
+                continue;
+            }
+            count_unknown_field_warning();
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] — ignored (check the spelling)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("key", key),
+                    ("i", &i.to_string()),
+                ],
+            ));
+        }
+    }
+}
+
+/// Loads a manifest and REFUSES it when any field was not understood.
+///
+/// A typo (`memroy:`), a field of a newer schema or a field this engine does not
+/// implement used to be a warning on stderr and exit 0, so a deployment could run
+/// with defaults the author never chose. Every command that applies, plans or
+/// diffs a manifest arrives here, so the refusal happens before any effect.
+/// `DELONIX_MANIFEST_LENIENT=1` restores the old behaviour for a manifest written
+/// for a newer binary; `stack validate` uses [`load_lenient`] so it can report.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
+    let before = thread_unknown_fields();
+    let docs = load_lenient(path)?;
+    let ignored = thread_unknown_fields() - before;
+    if ignored > 0 && !manifest_lenient() {
+        return Err(Error::Invalid(super::po::tf(
+            "{path}: {n} field(s) not understood (listed above) — nothing was applied; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to ignore them",
+            &[("path", &path.display().to_string()), ("n", &ignored.to_string())],
+        )));
+    }
+    Ok(docs)
+}
+
+fn manifest_lenient() -> bool {
+    std::env::var("DELONIX_MANIFEST_LENIENT").is_ok_and(|v| v == "1")
+}
+
+thread_local! {
+    static THREAD_UNKNOWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn thread_unknown_fields() -> usize {
+    THREAD_UNKNOWN.with(|c| c.get())
+}
+
+/// [`load`] without the refusal: unknown fields are warned about and counted.
+pub fn load_lenient(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
             "{} {}: {e}",
@@ -799,6 +864,7 @@ pub fn unknown_field_warnings() -> usize {
 }
 
 pub(crate) fn count_unknown_field_warning() {
+    THREAD_UNKNOWN.with(|c| c.set(c.get() + 1));
     UNKNOWN_FIELD_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -1263,6 +1329,39 @@ spec: {}
     }
 
     #[test]
+    fn a_typo_is_refused_before_any_effect_and_lenient_restores_the_old_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: web }\nspec: { image: alpine, memroy: 2G }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err().to_string();
+        assert!(err.contains("not understood"), "{err}");
+        assert!(load_lenient(&p).is_ok());
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: web }\nspec: { image: alpine }\n",
+        )
+        .unwrap();
+        assert!(load(&p).is_ok());
+    }
+
+    #[test]
+    fn a_probe_inside_a_pod_member_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Pod\nmetadata: { name: p }\nspec:\n  containers:\n    - name: a\n      image: alpine\n      readinessProbe: { httpGet: { path: /, port: 80 } }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err().to_string();
+        assert!(err.contains("not understood"), "{err}");
+    }
+
+    #[test]
     fn unknown_fields_apanha_gralha_e_ignora_conhecidos() {
         let text = "\
 apiVersion: delonix.io/v1
@@ -1273,7 +1372,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("delonix-manifest-unknown.yaml");
         std::fs::write(&p, text).unwrap();
-        let docs = load(&p).unwrap();
+        let docs = load_lenient(&p).unwrap();
         let unknown = unknown_fields(&docs[0], crate::cmd::container::CONTAINER_SPEC_FIELDS);
         // `memroy` (typo) is flagged; `image`/`restartPolicy` (canonical) are not.
         assert_eq!(unknown, vec!["memroy".to_string()]);
@@ -1292,7 +1391,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         )
         .unwrap();
         let antes = super::unknown_field_warnings();
-        super::load(&p).unwrap();
+        super::load_lenient(&p).unwrap();
         assert_eq!(
             super::unknown_field_warnings(),
             antes + 1,
