@@ -634,6 +634,38 @@ for l in d["links"]:
     python3 -c 'import json,os; d=json.loads(os.environ["NS_JSON"]); assert (d["status"],d["dx"],d["grpc_status"])==(501,"DX-6001",12), d; h=os.environ["NS_HDR"].lower(); assert "http/1.1 405" in h and "allow: post" in h, h'
   check "um parâmetro de query que o pedido não tem é recusado (400), não ignorado" ok bash -c \
     "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kindd=network') == 400 ]]"
+  # ADR-0042 passo E, 1.ª onda: as leituras de rede pelo contrato. Duas redes
+  # neste root — uma aplicada por manifesto (leva o carimbo de posse como
+  # label), outra criada pela CLI (sem labels) — e o socket tem de as mostrar
+  # como o motor as tem.
+  printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+    'metadata: { name: e1net-a }' 'spec: {}' > "$OUT/e1-nets.yaml"
+  "$BIN" stack apply -f "$OUT/e1-nets.yaml" >/dev/null 2>&1
+  "$BIN" network create e1net-b >/dev/null 2>&1
+  NETS="http://localhost/v1/namespaces/default/networks"
+  check "GET …/networks lista as redes do nó, com a condição Realized lida do registo do dataplane" ok env \
+    NET_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS")" \
+    python3 -c 'import json,os; d=json.loads(os.environ["NET_JSON"]); n={x["meta"]["name"]:x for x in d["networks"]}; assert {"e1net-a","e1net-b"}<=set(n), list(n); a=n["e1net-a"]; assert a["meta"]["namespace"]=="default" and a["meta"]["labels"].get("delonix.io/managed-by")=="delonix" and not n["e1net-b"]["meta"]["labels"], a["meta"]; assert a["spec"]["topology"]=="NETWORK_TOPOLOGY_BRIDGE" and a["spec"]["ipv4_cidr"].endswith("/16"), a["spec"]; c=a["conditions"][0]; assert (c["type"],c["status"],c["reason"])==("Realized","CONDITION_STATUS_TRUE","DataplaneRecorded"), c'
+  check "o selector de labels filtra, e a paginação dá Link rel=next com um token que continua a lista" ok env \
+    SEL_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS?label_selector=delonix.io%2Fmanaged-by%3Ddelonix")" \
+    PG_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" "$NETS?page.page_size=1")" \
+    PG_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS?page.page_size=1")" \
+    NODESOCK="$NODESOCK" \
+    python3 -c 'import json,os,subprocess; s=json.loads(os.environ["SEL_JSON"]); assert [x["meta"]["name"] for x in s["networks"]]==["e1net-a"], s; p=json.loads(os.environ["PG_JSON"]); assert len(p["networks"])==1 and p["page"]["next_page_token"], p; nxt=[l["href"] for l in p["links"] if l["rel"]=="next"][0]; assert "rel=\"next\"" in os.environ["PG_HDR"], os.environ["PG_HDR"]; q=json.loads(subprocess.run(["curl","-s","--unix-socket",os.environ["NODESOCK"],"http://localhost"+nxt],capture_output=True,text=True).stdout); assert q["networks"] and q["networks"][0]["meta"]["name"]>p["networks"][0]["meta"]["name"], q'
+  check "GET de uma rede traz ETag; If-None-Match com esse valor é 304; depois de mudar a rede volta a ser 200" ok env \
+    BIN="$BIN" NODESOCK="$NODESOCK" URL="$NETS/e1net-a" \
+    python3 -c 'import os,subprocess
+def get(*h):
+    out=subprocess.run(["curl","-s","-D","-","-o","/dev/null","--unix-socket",os.environ["NODESOCK"],*h,os.environ["URL"]],capture_output=True,text=True).stdout
+    lines=out.splitlines(); etag=[l.split(":",1)[1].strip() for l in lines if l.lower().startswith("etag:")]
+    return lines[0].split()[1], (etag or [""])[0]
+code,etag=get(); assert code=="200" and etag.startswith("\""), (code,etag)
+code,same=get("-H","If-None-Match: "+etag); assert (code,same)==("304",etag), (code,same)
+subprocess.run([os.environ["BIN"],"network","rm","e1net-a"],capture_output=True); subprocess.run([os.environ["BIN"],"network","create","e1net-a"],capture_output=True)
+code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (code,new,etag)'
+  check "uma rede que não existe é 404 com um problem+json; noutro namespace a lista é vazia" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' '$NETS/nao-existe') == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/namespaces/outro/networks | grep -q '\"networks\":\[\]'"
+  "$BIN" network rm e1net-a >/dev/null 2>&1; "$BIN" network rm e1net-b >/dev/null 2>&1
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \

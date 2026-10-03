@@ -2509,6 +2509,11 @@ components:
                         $ref: '#/components/schemas/delonix.node.v1.Network'
                 page:
                     $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
+                    description: '"self", and "next" while there is another page.'
         delonix.node.v1.ListOperationsResponse:
             type: object
             properties:
@@ -2606,6 +2611,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/delonix.node.v1.Condition'
+                links:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Link'
         delonix.node.v1.NetworkAttachment:
             type: object
             properties:

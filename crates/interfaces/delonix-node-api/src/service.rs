@@ -5,11 +5,17 @@ use std::pin::Pin;
 use axum::response::IntoResponse;
 use tonic::{Request, Response, Status};
 
+use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::{
     ApiRoot, Capacity, Event, GetApiRootRequest, GetCapacityRequest, GetHealthRequest,
     GetNodeInfoRequest, Health, ListProvidersRequest, ListProvidersResponse, NodeInfo,
     WatchEventsRequest,
+};
+use crate::proto::v1::{
+    ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
+    DisconnectContainerRequest, GetNetworkRequest, ListNetworksRequest, ListNetworksResponse,
+    Network, Operation,
 };
 use crate::{node, providers};
 
@@ -136,6 +142,69 @@ impl NodeService for NodeApi {
     }
 }
 
+/// A served service's RPC that is not served yet — the same answer the REST
+/// encoding gives for a whole service that is not ([`crate::transcode::not_served`]).
+fn unserved(service: &str, rpc: &str) -> Status {
+    Status::unimplemented(format!(
+        "{service}.{rpc} is in the contract and this engine does not serve it yet"
+    ))
+}
+
+#[tonic::async_trait]
+impl NetworkService for NodeApi {
+    async fn get_network(
+        &self,
+        req: Request<GetNetworkRequest>,
+    ) -> Result<Response<Network>, Status> {
+        let req = req.into_inner();
+        blocking("network", move || {
+            crate::networks::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_networks(
+        &self,
+        req: Request<ListNetworksRequest>,
+    ) -> Result<Response<ListNetworksResponse>, Status> {
+        let req = req.into_inner();
+        blocking("networks", move || {
+            crate::networks::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn create_network(
+        &self,
+        _req: Request<CreateNetworkRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("NetworkService", "CreateNetwork"))
+    }
+
+    async fn delete_network(
+        &self,
+        _req: Request<DeleteNetworkRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("NetworkService", "DeleteNetwork"))
+    }
+
+    async fn connect_container(
+        &self,
+        _req: Request<ConnectContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("NetworkService", "ConnectContainer"))
+    }
+
+    async fn disconnect_container(
+        &self,
+        _req: Request<DisconnectContainerRequest>,
+    ) -> Result<Response<Container>, Status> {
+        Err(unserved("NetworkService", "DisconnectContainer"))
+    }
+}
+
 /// The router both transports share. The contract's REST routes are not
 /// listed here: they are resolved against the table `build.rs` generates from
 /// the `google.api.http` annotations ([`crate::transcode`]), in the fallback —
@@ -160,6 +229,10 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", NodeServiceServer::<NodeApi>::NAME),
             NodeServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", NetworkServiceServer::<NodeApi>::NAME),
+            NetworkServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -183,6 +256,11 @@ async fn rest(
     use crate::transcode;
     let path = req.uri().path().to_string();
     let query = req.uri().query().map(str::to_string);
+    let if_none_match = req
+        .headers()
+        .get(hyper::header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     let answer = async {
         let body = axum::body::to_bytes(req.into_body(), MAX_BODY)
             .await
@@ -195,13 +273,48 @@ async fn rest(
         let input = transcode::bind(route, &vars, query.as_deref(), &body)?;
         match route.service {
             "NodeService" => transcode::dispatch_node_service(&NodeApi, route.rpc, input).await,
+            "NetworkService" => {
+                transcode::dispatch_network_service(&NodeApi, route.rpc, input).await
+            }
             _ => Err(transcode::not_served(route)),
         }
     };
     match answer.await {
-        Ok(body) => with_link_header(body),
+        Ok(body) => with_etag(with_link_header_of(body), if_none_match.as_deref()),
         Err(status) => problem(status, &path),
     }
+}
+
+/// ADR-0042 D2, concurrency: a resource's `meta.etag` is its `ETag` header,
+/// and a `GET` whose `If-None-Match` names that version is `304 Not Modified`
+/// with no body. Only the REST routes come through here, and of those only
+/// `GET` answers a resource — a mutation answers an `Operation`, which has no
+/// `meta`.
+fn with_etag(
+    (body, mut res): (serde_json::Value, axum::response::Response),
+    if_none_match: Option<&str>,
+) -> axum::response::Response {
+    let Some(etag) = body
+        .pointer("/meta/etag")
+        .and_then(|v| v.as_str())
+        .filter(|e| !e.is_empty())
+    else {
+        return res;
+    };
+    let quoted = format!("\"{etag}\"");
+    let Ok(value) = hyper::header::HeaderValue::from_str(&quoted) else {
+        return res;
+    };
+    let unchanged = if_none_match.is_some_and(|sent| {
+        sent.split(',')
+            .map(|t| t.trim().trim_start_matches("W/"))
+            .any(|t| t == "*" || t == quoted)
+    });
+    if unchanged {
+        res = hyper::StatusCode::NOT_MODIFIED.into_response();
+    }
+    res.headers_mut().insert(hyper::header::ETAG, value);
+    res
 }
 
 /// Everything the router has no route for. One of the contract's REST routes
@@ -242,13 +355,13 @@ async fn fallback(req: axum::extract::Request) -> axum::response::Response {
 /// A message's JSON with the RFC 8288 `Link` header mirroring its own `links`
 /// (ADR-0042 D2) — read from the body being sent, so the header and the body
 /// cannot disagree.
-fn with_link_header(body: serde_json::Value) -> axum::response::Response {
+fn with_link_header_of(body: serde_json::Value) -> (serde_json::Value, axum::response::Response) {
     let header = link_header(&body);
-    let mut res = (hyper::StatusCode::OK, axum::Json(body)).into_response();
+    let mut res = (hyper::StatusCode::OK, axum::Json(&body)).into_response();
     if let Some(v) = header.and_then(|h| hyper::header::HeaderValue::from_str(&h).ok()) {
         res.headers_mut().insert(hyper::header::LINK, v);
     }
-    res
+    (body, res)
 }
 
 /// `</v1/node>; rel="self", </v1>; rel="root"` from a message's `links`;
