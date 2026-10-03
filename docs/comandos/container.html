@@ -329,6 +329,12 @@ Options:
       --cap-drop &lt;CAP_DROP&gt;
           Drop a capability. Repeatable
 
+      --allow-source &lt;PREFIX&gt;
+          Let this container send from a source prefix besides its own address, for a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix the node policy grants (`allowedSourcePrefixes`); every use is logged
+
+      --no-source-check
+          Switch anti-spoofing off for this container. Exceptional: only when the node policy grants it (`allowSourceCheckOptOut`); every use is logged
+
       --security-opt &lt;SECURITY_OPT&gt;
           Security options (docker-style), repeatable: `seccomp=unconfined` | `seccomp=&lt;profile.json&gt;` (OCI/runc format) | `apparmor=&lt;profile&gt;` | `no-new-privileges[=true|false]` (default true, stricter than docker/podman)
 
