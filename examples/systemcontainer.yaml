@@ -1,0 +1,21 @@
+# kind: SystemContainer — a whole userland run as one unit on a provider node
+# (ADR-0058). Not a `kind: Container`: no exec, logs or exit status.
+#
+# The generic part (image, entrypoint, env, memory, cores, rootfs) is the
+# intent. What only the Proxmox node understands — the swap allowance and the
+# node bridge/VLAN — lives inline in `provider.spec` (ADR-0071), not in a Kind
+# of its own. The old spelling (`swap` and `network` at the top of `spec`)
+# still loads and means the same thing.
+apiVersion: compute.delonix.io/v1alpha1
+kind: SystemContainer
+metadata: { name: edge-dns }
+spec:
+  image: alpine:3.20
+  memory: 256M
+  cores: 1
+  rootfs: 2
+  provider:
+    type: proxmox
+    spec:
+      swap: 128M
+      network: { bridge: vmbr0, dhcp: true }
