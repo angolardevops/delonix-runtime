@@ -1795,6 +1795,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: false,
                 detach,
                 name,
                 hostname,
@@ -1994,8 +1995,10 @@ pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
+    let governed = super::firewall::policy_targets(docs);
     for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
+        let hold = governed.contains(name.as_str());
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
         let pod_shaped = doc.spec.get("containers").is_some();
@@ -2012,6 +2015,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             let pod: PodSpec = manifest::spec_of(doc)?;
             let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
             opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
+            opts.policy_hold = hold;
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -2021,6 +2025,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: hold,
                 detach: spec.detach,
                 name: Some(name.clone()),
                 hostname: spec.hostname,
@@ -2981,6 +2986,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mounts = resolved.mounts;
     let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
+    // A container some policy document governs is born CLOSED (ADR-0069): the
+    // chain exists before the process does, and the record carries the same state
+    // so a restart cannot reopen it. `stack apply` releases it after the policy
+    // layers; a failed apply leaves it closed.
+    if opts_copy.policy_hold {
+        c.firewall = Some(policy_hold_firewall(&c.namespace));
+        c.annotations
+            .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
 
     let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
@@ -2998,6 +3012,21 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             );
             print_notices(&notices);
             let (netns, ip) = attached?;
+            if let Some(fw) = c.firewall.as_ref().filter(|_| opts_copy.policy_hold) {
+                // Before the re-exec starts the process: no packet of this
+                // container ever meets an open chain. If the chain cannot be
+                // installed the container is not started (fail closed).
+                if let Err(e) = infra::apply_firewall_all(&c.id, &[ip.as_str()], fw) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(Error::Runtime {
+                        context: "run",
+                        message: format!(
+                            "'{}' could not be created closed (policy hold), so it was not started: {e}",
+                            c.name
+                        ),
+                    });
+                }
+            }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
@@ -4077,6 +4106,22 @@ pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::record
 /// rm`/`clear` used to leave it in), the next `egress deny` then built a chain that
 /// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
 /// with nothing reporting it.
+/// Annotation on a container that is closed until its policy is applied.
+pub(crate) const POLICY_HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
+/// The closed state: default-deny both ways, no rules. Written with the policy
+/// fields the dataplane has always understood, so a holder from before this
+/// change enforces it too instead of ignoring an unknown field.
+pub(crate) fn policy_hold_firewall(namespace: &str) -> delonix_model::records::ContainerFw {
+    delonix_model::records::ContainerFw {
+        enabled: true,
+        policy_in: "deny".to_string(),
+        policy_out: "deny".to_string(),
+        rules: Vec::new(),
+        namespace: namespace.to_string(),
+    }
+}
+
 pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
     let mut fw = c.firewall.clone().unwrap_or_default();
     // Also for an EXISTING record: one written with the wrong namespace is
@@ -4091,6 +4136,14 @@ pub(crate) fn apply_firewall_everywhere(
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
+    // While a container is held, whatever the policy documents write goes to its
+    // RECORD (the intended state) and the dataplane keeps the closed chain: a
+    // policy that has applied its default but not yet its rules must not open a
+    // door the next document was going to shut. The release applies the record.
+    if c.annotations.contains_key(POLICY_HOLD_ANNOTATION) {
+        return infra::apply_firewall_all(&c.id, &refs, &policy_hold_firewall(&c.namespace))
+            .map_err(Into::into);
+    }
     infra::apply_firewall_all(&c.id, &refs, fw).map_err(Into::into)
 }
 

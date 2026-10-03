@@ -5236,6 +5236,21 @@ de re-exec, para um terceiro não nascer com metade).
 - O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
   com scope, refresh operacional do plan de VM, OpenStack).
 
+## Um workload governado por política nasce fechado (ADR-0069 D6, 2026-10-03)
+
+- `policy_targets(docs)` (`cmd/firewall.rs`) lista os containers que uma `NetworkPolicy`,
+  `NetworkAccessRule` ou `Dependency` do manifesto nomeia; o `container::apply` cria-os com
+  `RunOpts.policy_hold` (chain default-deny instalada antes do processo; anotação
+  `delonix.io/policy-hold` no registo). Enquanto a anotação existir o dataplane fica fechado e
+  o que as políticas escrevem vai para o REGISTO (`apply_firewall_everywhere`).
+- `release_policy_holds` corre depois das camadas de política e abre ao que elas dizem; uma
+  direcção não declarada volta ao default aberto. Se uma camada falha, o workload fica fechado e
+  o apply diz-o; o apply seguinte liberta-o. Só containers; Pods/VMs por fazer.
+- Cenário `policy_hold` do `scripts/chaos.sh` (lab = raízes isoladas, `DELONIX_ROOT` e
+  `DELONIX_NET_RUNTIME_DIR`): a falha da política tem de ser DEPOIS de os containers existirem
+  (um CIDR impossível numa `NetworkAccessRule`; uma referência a um container inexistente é
+  apanhada antes pelo `validate_graph` e o cenário saltava). `container inspect` já emite JSON.
+
 ## O bloco `provider` é `type` + `spec` (ADR-0070/0071, 2026-10-03)
 
 - O que só um fabricante entende vive **inline** no recurso: `spec.provider: { type, spec }`.
