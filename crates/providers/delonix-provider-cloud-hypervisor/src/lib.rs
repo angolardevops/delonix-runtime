@@ -361,7 +361,7 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
                 evidence: "chaos:scen_namespace_isolation",
             }),
             C::VmAntispoof => bin(S::Partial {
-                detail: "the tap gets the same `iifname … ip saddr != <ip> drop` rule as a veth (auditoria #3); proven by rule inspection, not in the battery",
+                detail: "the tap is pinned to its DHCP lease and the guest MAC in the bridge anti-spoofing table (`dlxspoof`, 2026-10-02; the old `ip` rule never matched); a booted guest got its lease and answered ARP through it, but no battery check forges from a guest yet",
             }),
             C::VmRawDefinition => S::UnsupportedByProvider {
                 reason: "no raw definition format exists for the CH command line",
