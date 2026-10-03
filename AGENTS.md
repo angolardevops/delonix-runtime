@@ -8832,6 +8832,12 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   dentro do CIDR dos pods.
 - **Upgrade**: a regra é instalada pelo plano de controlo; só pega num nó depois de
   `delonix net netns down` + `up`.
-- **Por fazer (PR seguinte)**: prefixos autorizados para containers que fazem de router
-  e um opt-out — os dois só com autorização do administrador na política do nó e
-  auditados; o tenant não os liga.
+- **Concessões, só pelo administrador**: `container run --allow-source <a.b.c.d/len>`
+  (repetível, para um container que encaminha) e `--no-source-check` (excepcional).
+  São PERMISSÕES na política do nó (`allowedSourcePrefixes`, `allowSourceCheckOptOut`),
+  o inverso dos tectos ao lado: sem política, nada é concedido, e `mode: warn` não
+  concede. Um prefixo pedido tem de ser canónico e caber dentro de um concedido; a
+  recusa é DX-7801 (exit 77) e fica no registo de eventos, tal como cada uso concedido
+  (`source-prefixes-allowed`, `source-check-off`). Guardados no registo
+  (`allowed_sources`, `source_check_disabled`) e reaplicados em cada `start`. Uma
+  política só com concessões já não dispara o lint `POLICY-SILENT`.

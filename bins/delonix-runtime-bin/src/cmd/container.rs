@@ -1232,6 +1232,15 @@ pub enum ContainerCmd {
         /// Drop a capability. Repeatable.
         #[arg(long = "cap-drop")]
         cap_drop: Vec<String>,
+        /// Let this container send from a source prefix besides its own address, for
+        /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
+        /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
+        #[arg(long = "allow-source", value_name = "PREFIX")]
+        allow_source: Vec<String>,
+        /// Switch anti-spoofing off for this container. Exceptional: only when the
+        /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
+        #[arg(long = "no-source-check")]
+        no_source_check: bool,
         /// Security options (docker-style), repeatable:
         /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
         /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
@@ -1735,6 +1744,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             read_only,
             cap_add,
             cap_drop,
+            allow_source,
+            no_source_check,
             security_opt,
             apparmor,
             selinux,
@@ -1824,6 +1835,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 read_only,
                 cap_add,
                 cap_drop,
+                allow_source,
+                no_source_check,
                 security_opt,
                 apparmor,
                 selinux,
@@ -2183,6 +2196,29 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 }
 
 pub(crate) use delonix_compute::RunOpts;
+
+/// Applies a container's anti-spoofing grants to the port its attach just
+/// pinned: extra source prefixes, or the check switched off. Each use is
+/// written to the event log — the opt-out is exceptional and must leave a trail.
+/// Nothing to do (and nothing logged) for a container with neither.
+fn apply_source_overrides(id: &str, name: &str, prefixes: &[String], off: bool) -> Result<()> {
+    let root = super::util::state_root();
+    if off {
+        infra::spoof_off(id)?;
+        delonix_node::events::emit(&root, "container", "source-check-off", id, name, None);
+    } else if !prefixes.is_empty() {
+        infra::spoof_allow(id, prefixes)?;
+        delonix_node::events::emit(
+            &root,
+            "container",
+            "source-prefixes-allowed",
+            id,
+            name,
+            Some(&prefixes.join(",")),
+        );
+    }
+    Ok(())
+}
 
 /// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
 /// not actually filtering intra-bridge traffic — the precondition namespace
@@ -2676,6 +2712,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             opts.net.is_empty() || opts.net == "host",
         ),
     )?;
+    // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
+    // the ceiling above, absent from the policy means NOT granted.
+    super::policy::authorise_source_overrides(
+        &super::util::state_root(),
+        opts.name.as_deref().unwrap_or(&opts.image),
+        &opts.allow_source,
+        opts.no_source_check,
+    )?;
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
@@ -2869,7 +2913,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &[("p", profile)],
         ))
     };
-    let on_attached = |namespace: &str| warn_if_namespace_isolation_inert(namespace);
+    let (allow_source, no_source_check) =
+        (opts_copy.allow_source.clone(), opts_copy.no_source_check);
+    let override_name = cname.clone();
+    let on_attached = |namespace: &str| {
+        warn_if_namespace_isolation_inert(namespace);
+        // The attach pinned the port to the container's own address; the grants
+        // the policy authorised in the preflight are applied on top. A failure
+        // leaves the port pinned (fail-closed) and says so.
+        if let Err(e) = apply_source_overrides(&id, &override_name, &allow_source, no_source_check)
+        {
+            super::output::error(&e.to_string());
+        }
+    };
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
     };
@@ -4152,11 +4208,11 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             // The attach re-pins the port to its own address only; the prefixes
             // the engine authorised (a Kind node's PodCIDR) come back from the
             // record, or a restarted node would drop every pod packet it routes.
-            if !c.allowed_sources.is_empty() {
-                if let Err(e) = infra::spoof_allow(&c.id, &c.allowed_sources) {
-                    infra::detach_container(&c.id, &ip);
-                    return Err(e.into());
-                }
+            if let Err(e) =
+                apply_source_overrides(&c.id, &c.name, &c.allowed_sources, c.source_check_disabled)
+            {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
             }
             warn_if_namespace_isolation_inert(&c.namespace);
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via

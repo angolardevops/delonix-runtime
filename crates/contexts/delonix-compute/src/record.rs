@@ -543,6 +543,10 @@ pub struct Container {
     /// that lost it would cut the traffic it exists to let through.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_sources: Vec<String>,
+    /// Anti-spoofing is OFF for this container (`--no-source-check`, granted by
+    /// the node policy). Persisted for the same reason as `allowed_sources`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub source_check_disabled: bool,
     /// Additional DNS names of the container on its network (`--network-alias`), besides the
     /// container name — resolved by other containers on the same network.
     #[serde(default)]
@@ -800,6 +804,7 @@ impl Container {
             expose: None,
             extra_networks: Vec::new(),
             allowed_sources: Vec::new(),
+            source_check_disabled: false,
             net_aliases: Vec::new(),
             dns_knows: None,
             net_mode: None,
