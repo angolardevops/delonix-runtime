@@ -781,6 +781,18 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         )?;
         println!("network/{name}: {}", super::po::t("created"));
     }
+    // The documents' own labels, for the path that does not stamp: `network
+    // apply` outside a stack ensures the network and never reaches `stamp`,
+    // so without this pass a label declared there was dropped. Additive — it
+    // sets what is declared and removes nothing; removal is the plan's
+    // (`converge`), which knows what was applied before.
+    for doc in manifest::of_kind(docs, k::NETWORK) {
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let labels = super::reconcile::labels_delta(None, own.as_deref());
+        if !labels.is_empty() && store.get(&doc.metadata.name).is_ok() {
+            store.set_metadata(&doc.metadata.name, &labels, &[])?;
+        }
+    }
     Ok(())
 }
 

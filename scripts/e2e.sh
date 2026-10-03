@@ -2544,6 +2544,13 @@ nl_manifest '{ app: api }'
 check "mudar e tirar um label é uma alteração do plano (2), converge a quente e sai do registo" ok bash -c \
   "cd '$NLDIR' && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1; [[ \$? == 2 ]] && '$BIN' stack apply -f m.yaml >/dev/null 2>&1 && [[ \"\$($(declare -f nl_labels); BIN='$BIN' nl_labels)\" == 'app=api,|app=api,' ]] && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1"
 (cd "$NLDIR" && "$BIN" stack destroy -f m.yaml >/dev/null 2>&1)
+printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+  'metadata: { name: nl-pk-net, labels: { app: web } }' 'spec: {}' '---' \
+  'apiVersion: storage.delonix.io/v1alpha1' 'kind: Volume' \
+  'metadata: { name: nl-pk-vol, labels: { app: web } }' 'spec: {}' > "$NLDIR/pk.yaml"
+check "network apply / volume apply fora de uma stack também escrevem os labels do documento" ok bash -c \
+  "'$BIN' network apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' volume apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' network describe nl-pk-net | grep -q 'app=web' && '$BIN' volume describe nl-pk-vol | grep -q 'app=web'"
+"$BIN" network rm nl-pk-net >/dev/null 2>&1; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.

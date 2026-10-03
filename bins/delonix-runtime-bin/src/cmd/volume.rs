@@ -929,6 +929,20 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
         println!("volume/{name}: {}", super::po::t("ensured"));
     }
+    // The documents' own labels, for the path that does not stamp — see
+    // `network::apply`. The plan name is the one `desired` gives, so a share
+    // is found in its namespace's store.
+    for doc in manifest::of_kind(docs, k::VOLUME) {
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let labels = super::reconcile::labels_delta(None, own.as_deref());
+        if labels.is_empty() {
+            continue;
+        }
+        let (store, name) = store_for_plan_name(&desired(doc)?.name)?;
+        if store.inspect(&name).is_ok() {
+            store.set_metadata(&name, &labels, &[])?;
+        }
+    }
     Ok(())
 }
 
