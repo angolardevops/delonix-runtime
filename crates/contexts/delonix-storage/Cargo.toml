@@ -9,8 +9,6 @@ delonix-model = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# The administrator's allowlist (`/etc/delonix/storage-pools.yaml`, ADR-0067 D3).
-serde_yaml = { workspace = true }
 # `geteuid`, to refuse an allowlist someone else can write.
 libc = { workspace = true }
 
@@ -18,6 +16,9 @@ libc = { workspace = true }
 # A per-test temp dir that is removed when the test ends, also on panic
 # (`scripts/tmp_roots_gate.py`).
 tempfile = { workspace = true }
+# The tests read the allowlist as the composition root does. The crate itself
+# takes the decoder as an argument (`allowlist::Decode`).
+serde_yaml = { workspace = true }
 
 [lints]
 workspace = true

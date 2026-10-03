@@ -12,9 +12,11 @@ kind: Gateway
 metadata:
   name: public
 spec:
-  provider: pinggy           # pinggy (zero extra binary) | ngrok | cloudflare
+  provider:
+    type: pinggy               # pinggy (zero extra binary) | ngrok | cloudflare
+    spec:                      # what only that service understands; omit for none
+      hostname: null           # custom/reserved hostname — ngrok's --url; cloudflare only with a token (informational, the route lives in its dashboard)
+      token: null              # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel's token (literal — prefer tokenSecretRef)
+      tokenSecretRef: null     # pull the token from a `kind: Secret`'s `token` key instead
   localPort: 80               # the HTTPRoute proxy's port, or any container's published port
-  hostname: null               # custom/reserved hostname — ngrok's --url; cloudflare only with a token (informational, the route lives in its dashboard)
-  token: null                  # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel's token (literal — prefer tokenSecretRef)
-  tokenSecretRef: null         # pull the token from a `kind: Secret`'s `token` key instead
   insecureSkipTlsVerify: false # skip TLS verification of the LOCAL backend's self-signed cert — never affects the public URL, no-op for pinggy

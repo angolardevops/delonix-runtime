@@ -57,7 +57,7 @@ fn default_driver() -> String {
 /// Names accepted in the `spec` of `kind: Network` (canonical + aliases), for the
 /// unknown-fields warning.
 pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
-    "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip",
+    "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip", "provider",
 ];
 
 /// Fields the reconciler compares for a `kind: Network`. Only `peers` converges
@@ -75,8 +75,9 @@ pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
 /// nothing happens and the run reports success. Both sides normalise a gateway
 /// equal to the derived one away ([`normalized_gateway`]), which is what keeps an
 /// unchanged manifest at zero differences.
-pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] =
-    &["driver", "parent", "subnet", "gateway", "vni", "peers"];
+pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] = &[
+    "driver", "parent", "subnet", "gateway", "vni", "peers", "labels",
+];
 
 /// A gateway worth recording: `None` when absent or equal to the one derived from
 /// `subnet`, which declares nothing.
@@ -183,6 +184,13 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     let store = NetworkStore::open(state_root())?;
     for d in diffs {
         match d.field.as_str() {
+            "labels" => {
+                store.set_metadata(
+                    name,
+                    &super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref()),
+                    &[],
+                )?;
+            }
             "peers" => {
                 let (removed, added) =
                     super::reconcile::list_delta(d.from.as_deref(), d.to.as_deref());
@@ -328,18 +336,27 @@ pub(crate) fn stamp(
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
+    // The document's own labels go on with the stamp: this is the one step
+    // every applied network passes through, created or adopted.
+    let mut labels = super::reconcile::labels_delta(
+        None,
+        fields
+            .get(super::reconcile::LABELS_FIELD)
+            .map(String::as_str),
+    );
+    labels.extend([
+        (
+            super::reconcile::STACK_LABEL.to_string(),
+            Some(stack.to_string()),
+        ),
+        (
+            super::reconcile::MANAGED_BY.to_string(),
+            Some("delonix".to_string()),
+        ),
+    ]);
     store.set_metadata(
         name,
-        &[
-            (
-                super::reconcile::STACK_LABEL.to_string(),
-                Some(stack.to_string()),
-            ),
-            (
-                super::reconcile::MANAGED_BY.to_string(),
-                Some("delonix".to_string()),
-            ),
-        ],
+        &labels,
         &[(
             super::reconcile::LAST_APPLIED.to_string(),
             Some(super::reconcile::encode_last_applied(fields)),
@@ -350,10 +367,17 @@ pub(crate) fn stamp(
 
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkSpec = manifest::spec_of(doc)?;
+    let mut fields = desired_network_fields(&spec);
+    // `metadata.labels` of the document. Until this was a plan field they never
+    // reached the record: the network carried the ownership stamp and nothing
+    // the manifest had declared.
+    if let Some(labels) = super::reconcile::user_labels_field(&doc.metadata.labels) {
+        fields.insert(super::reconcile::LABELS_FIELD.into(), labels);
+    }
     Ok(super::reconcile::Desired {
         kind: k::NETWORK.into(),
         name: doc.metadata.name.clone(),
-        fields: desired_network_fields(&spec),
+        fields,
         converges: true,
         ownable: true,
     })
@@ -367,7 +391,13 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|n| super::reconcile::Actual {
             kind: k::NETWORK.into(),
             name: n.name.clone(),
-            fields: actual_network_fields(&n, effective_default_route(&n.name).as_deref()),
+            fields: {
+                let mut f = actual_network_fields(&n, effective_default_route(&n.name).as_deref());
+                if let Some(labels) = super::reconcile::user_labels_field(&n.labels) {
+                    f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+                }
+                f
+            },
             owner: n.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: n
                 .annotations
@@ -751,6 +781,18 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         )?;
         println!("network/{name}: {}", super::po::t("created"));
     }
+    // The documents' own labels, for the path that does not stamp: `network
+    // apply` outside a stack ensures the network and never reaches `stamp`,
+    // so without this pass a label declared there was dropped. Additive — it
+    // sets what is declared and removes nothing; removal is the plan's
+    // (`converge`), which knows what was applied before.
+    for doc in manifest::of_kind(docs, k::NETWORK) {
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let labels = super::reconcile::labels_delta(None, own.as_deref());
+        if !labels.is_empty() && store.get(&doc.metadata.name).is_ok() {
+            store.set_metadata(&doc.metadata.name, &labels, &[])?;
+        }
+    }
     Ok(())
 }
 
@@ -1054,58 +1096,30 @@ pub(crate) fn create_network(
             // an octet derived from the network's name hash and was told
             // nothing. `create_with_base` had existed for this the whole time,
             // with a doc-comment saying so and zero callers.
-            let net = match subnet.as_deref() {
-                Some(s) => {
-                    // Prefixo ARBITRÁRIO (ADR-0013, camada A). Só depois de o
-                    // dataplane saber o comprimento: o holder deriva-o do
-                    // registo em vez do `/16` fixo, e a chave do registo de
-                    // leases passa a vir da rede que CONTÉM o endereço. Ligar
-                    // isto antes fazia o `create` passar e o primeiro container
-                    // falhar no attach.
-                    let cidr = NetworkStore::validate_subnet(s)?;
-                    store.create_with_cidr(name, cidr)?
-                }
-                None => store.create(name)?,
-            };
-            // Um gateway DECLARADO é aceite desde a camada A — mas validado
-            // contra o prefixo, e nunca em silêncio. Ele não muda quem é dono da
-            // bridge (o holder continua a encaminhar e a mascarar); muda a ROTA
-            // DEFAULT que os containers desta rede recebem, que passa a apontar
-            // para um appliance de fronteira ali dentro.
+            // The two writes, their order and the rollback live in
+            // `delonix_sdn::netops::create_bridge`, shared with the node API.
             //
-            // Decidido AQUI, uma vez, para os DOIS braços do `match`. Estava
-            // dentro do braço `Some(subnet)` enquanto o valor era usado fora
-            // dele, por isso um `--gateway` sem `--subnet` chegava ao registo sem
-            // uma única validação — e o `create` reportava sucesso, deixando o
-            // primeiro `attach` a morrer num `ip route add default via` para um
-            // endereço fora da rede.
-            let declared_gw = match declared_gateway(gateway, &net.subnet) {
-                Ok(g) => g,
-                Err(e) => {
-                    let _ = store.remove(name);
-                    return Err(e);
+            // A DECLARED gateway is validated against the prefix, and never in
+            // silence. It does not change who owns the bridge (the holder keeps
+            // forwarding and masquerading); it changes the DEFAULT ROUTE this
+            // network's containers receive, which then points at a border
+            // appliance inside it. Decided once, for a network with and without
+            // an explicit subnet: a `--gateway` with no `--subnet` used to reach
+            // the record unvalidated, and the first `attach` died on an
+            // `ip route add default via` to an address outside the network.
+            let net = delonix_sdn::netops::create_bridge(store, name, subnet.as_deref(), |net| {
+                let declared =
+                    declared_gateway(gateway, &net.subnet).map_err(delonix_sdn::Error::from)?;
+                if let Some(gw) = &declared {
+                    super::output::warn(&super::po::tf(
+                        "network '{name}': the default route of its workloads will point at \
+                         {gw}, not at the engine ({have}). Nothing answers there until a \
+                         workload on this network does — until then they have no way out.",
+                        &[("name", name), ("gw", gw), ("have", &net.gateway)],
+                    ));
                 }
-            };
-            if let Some(gw) = &declared_gw {
-                super::output::warn(&super::po::tf(
-                    "network '{name}': the default route of its workloads will point at \
-                     {gw}, not at the engine ({have}). Nothing answers there until a \
-                     workload on this network does — until then they have no way out.",
-                    &[("name", name), ("gw", gw), ("have", &net.gateway)],
-                ));
-            }
-            // Realize it physically (real bridge of the rootless holder) — aligned
-            // to the SAME prefix the NetworkStore just decided. If this fails, the
-            // declarative record just created above would otherwise be ORPHANED —
-            // `network ls` would show it, nothing could attach (NotFound), and a
-            // retry would fail with "already exists" until a manual `network rm`.
-            // Roll it back so a failed `create` leaves nothing behind to clean up.
-            if let Err(e) =
-                infra::network_create_with_gateway(name, &net.prefix, declared_gw.as_deref())
-            {
-                let _ = store.remove(name);
-                return Err(e.into());
-            }
+                Ok(declared)
+            })?;
             Ok(net)
         }
         "macvlan" | "ipvlan" => {
@@ -1426,6 +1440,16 @@ fn describe_one(n: &Network) {
     if !n.peers.is_empty() {
         d.list("Peers", &n.peers);
     }
+    // The same block `container describe` prints: without it a label on this
+    // record — the stack that owns it included — was visible nowhere.
+    if n.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, v) in &n.labels {
+            d.item(format!("{k}={v}"));
+        }
+    }
     match attached_containers(&n.name) {
         Some(cs) => {
             d.list("Containers", &cs);
@@ -1480,58 +1504,16 @@ fn network_dependents(name: &str, subnet: &str) -> Result<Vec<String>> {
         .into_iter()
         .map(|v| (v.name, v.network))
         .collect();
-    Ok(dependents_of(name, subnet, &containers, &vms))
-}
-
-/// PURE half of [`network_dependents`]: who, among these records, is on `name`.
-///
-/// A POD member carries no `network` — membership is the `pod` field, and the
-/// pod's netns is what sits on the bridge. The address the pod really got is on
-/// every member (`pod::POD_IP_LABEL`), so a member is attached when that address
-/// is inside this network's subnet.
-fn dependents_of(
-    name: &str,
-    subnet: &str,
-    containers: &[delonix_compute::Container],
-    vms: &[(String, String)],
-) -> Vec<String> {
-    let cidr = delonix_sdn::Cidr::parse(subnet);
-    let in_subnet = |ip: &str| {
-        cidr.as_ref()
-            .zip(delonix_sdn::Cidr::parse_addr(ip))
-            .is_some_and(|(c, a)| c.contains(a))
-    };
-    let mut out: Vec<String> = containers
-        .iter()
-        .filter(|c| {
-            c.network.as_deref() == Some(name)
-                || c.extra_networks.iter().any(|e| e.network == name)
-                || (c.pod.is_some()
-                    && c.labels
-                        .get(super::pod::POD_IP_LABEL)
-                        .is_some_and(|ip| in_subnet(ip)))
-        })
-        .map(|c| format!("container {}", c.name))
-        .collect();
-    out.extend(
-        vms.iter()
-            .filter(|(_, net)| net == name)
-            .map(|(vm, _)| format!("vm {vm}")),
-    );
-    out
+    Ok(delonix_sdn::netops::dependents_of(
+        name,
+        subnet,
+        &containers,
+        &vms,
+    ))
 }
 
 fn remove_unchecked(store: &NetworkStore, name: &str) -> Result<()> {
-    // Read the VXLAN device name BEFORE the record goes: it is derived from the
-    // `vni`, which only the store record carries. Removing the uplink first
-    // also avoids the state that leaked before — a device mastered on a bridge
-    // that has just been deleted.
-    let uplink = store.get(name).ok().and_then(|n| n.vxlan_dev());
-    store.remove(name)?;
-    if let Some(dev) = uplink {
-        infra::vxlan_remove(&dev);
-    }
-    infra::network_remove(name);
+    delonix_sdn::netops::remove(store, name)?;
     println!("{name}");
     Ok(())
 }
@@ -1717,8 +1699,8 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
 
 #[cfg(test)]
 mod dependents_tests {
-    use super::dependents_of;
     use delonix_compute::{Container, ExtraNet};
+    use delonix_sdn::netops::dependents_of;
 
     fn c(name: &str) -> Container {
         Container::new(

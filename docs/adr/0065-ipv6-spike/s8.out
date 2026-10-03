@@ -1,0 +1,16 @@
+bridge-nf-call-ip(6)tables=0 (native bridge family only)
+legit v4 a->b: replies
+legit v6 a->b: replies
+legit v6 a->holder gw: replies
+spoof v4 a->b: no reply
+spoof v4 a->holder: no reply
+spoof v6 a->b: no reply
+spoof v6 a->holder: no reply
+b got rogue RA prefix: 0 ; holder got: 0
+  rule 1 0
+  rule 2 3
+  rule 3 2
+  rule 4 4
+  rule 5 1
+  rule 6 0
+  rule 7 0

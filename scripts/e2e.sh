@@ -580,14 +580,21 @@ if [[ -x "$NODEBIN" ]]; then
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
   check "GET /v1/providers?kind=gateway traz o opnsense (ADR-0059 F1)" ok bash -c \
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=gateway' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert [p[\"id\"] for p in d]==[\"opnsense\"], d'"
-  check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
-    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
+  check "GET /v1/providers?kind=ceph é 400 com um problem+json DX-1000 (gRPC 3)" ok env \
+    PROB_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" 'http://localhost/v1/providers?kind=ceph')" \
+    PROB_JSON="$(curl -s --unix-socket "$NODESOCK" 'http://localhost/v1/providers?kind=ceph')" \
+    python3 -c 'import json,os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 400" in h and "content-type: application/problem+json" in h, h; d=json.loads(os.environ["PROB_JSON"]); assert (d["status"],d["dx"],d["code"],d["grpc_status"])==(400,"DX-1000","DX_INVALID_ARGUMENT",3), d'
   # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic
   # respondia a QUALQUER caminho desconhecido com 200 + `grpc-status: 12` e corpo
-  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um
-  # google.rpc.Status (code 5); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
-  check "um caminho sem handler é 404 com code 5, nunca um 200 vazio" ok bash -c \
-    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/nada) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/nada | grep -q '\"code\":5'"
+  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um problem
+  # document (DX-4001, ADR-0042 D2); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
+  check "um caminho sem handler é 404 com um problem+json DX-4001, nunca um 200 vazio" ok env \
+    PROB_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1/nada)" \
+    PROB_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1/nada)" \
+    python3 -c 'import json,os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 404" in h and "content-type: application/problem+json" in h, h; d=json.loads(os.environ["PROB_JSON"]); assert (d["status"],d["dx"],d["instance"])==(404,"DX-4001","/v1/nada"), d'
+  check "um método que o caminho não serve é 405 com Allow: GET e um problem+json" ok env \
+    PROB_HDR="$(curl -s -X DELETE -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1/node)" \
+    python3 -c 'import os; h=os.environ["PROB_HDR"].lower(); assert "http/1.1 405" in h and "allow: get" in h and "content-type: application/problem+json" in h, h'
   # ADR-0042 passo C: GetNodeInfo/GetHealth/GetCapacity pelas rotas JSON, e o
   # OpenAPI publicado. Cada resposta é comparada com o que a CLI diz no mesmo
   # host; os valores passam às asserções por variáveis de ambiente.
@@ -607,6 +614,82 @@ if [[ -x "$NODEBIN" ]]; then
     DOC_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/openapi.json)" \
     python3 -c 'import json,os; d=json.loads(os.environ["DOC_JSON"]); assert d["openapi"].startswith("3"); assert {"/v1/node","/v1/node/health","/v1/node/capacity","/v1/providers"} <= set(d["paths"])'
   NODE_ASSETS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  # ADR-0042 D2 (Richardson 3): a client navega a partir de GET /v1 pelos links,
+  # sem construir URIs — cada link oferecido responde 200, e o cabeçalho Link
+  # (RFC 8288) espelha os links do corpo.
+  check "GET /v1: cada link oferecido responde 200, e o cabeçalho Link espelha o corpo" ok env \
+    ROOT_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1)" \
+    ROOT_JSON="$(curl -s --unix-socket "$NODESOCK" http://localhost/v1)" \
+    NODESOCK="$NODESOCK" \
+    python3 -c 'import json,os,subprocess; d=json.loads(os.environ["ROOT_JSON"]); assert d["api_version"]=="delonix.node.v1", d; hdr=[l for l in os.environ["ROOT_HDR"].splitlines() if l.lower().startswith("link:")]; assert hdr and "rel=\"self\"" in hdr[0], hdr
+for l in d["links"]:
+    code=subprocess.run(["curl","-s","-o","/dev/null","-w","%{http_code}","--unix-socket",os.environ["NODESOCK"],"http://localhost"+l["href"]],capture_output=True,text=True).stdout
+    assert code=="200", (l, code)'
+  # ADR-0042 passo C: as rotas REST são GERADAS das anotações google.api.http.
+  # Uma rota do contrato que o motor ainda não serve é 501 (DX-6001), nunca o
+  # 404 de um caminho que o contrato não tem; um verbo (`{name}:start`) resolve.
+  check "uma rota do contrato ainda não servida é 501 DX-6001, e um verbo noutro método é 405 com Allow: POST" ok env \
+    NS_JSON="$(curl -s -X POST --unix-socket "$NODESOCK" http://localhost/v1/namespaces/default/containers/web:start)" \
+    NS_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" http://localhost/v1/namespaces/default/containers/web:start)" \
+    python3 -c 'import json,os; d=json.loads(os.environ["NS_JSON"]); assert (d["status"],d["dx"],d["grpc_status"])==(501,"DX-6001",12), d; h=os.environ["NS_HDR"].lower(); assert "http/1.1 405" in h and "allow: post" in h, h'
+  check "um parâmetro de query que o pedido não tem é recusado (400), não ignorado" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kindd=network') == 400 ]]"
+  # ADR-0042 passo E, 1.ª onda: as leituras de rede pelo contrato. Duas redes
+  # neste root — uma aplicada por manifesto (leva o carimbo de posse como
+  # label), outra criada pela CLI (sem labels) — e o socket tem de as mostrar
+  # como o motor as tem.
+  printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+    'metadata: { name: e1net-a }' 'spec: {}' > "$OUT/e1-nets.yaml"
+  "$BIN" stack apply -f "$OUT/e1-nets.yaml" >/dev/null 2>&1
+  "$BIN" network create e1net-b >/dev/null 2>&1
+  NETS="http://localhost/v1/namespaces/default/networks"
+  check "GET …/networks lista as redes do nó, com a condição Realized lida do registo do dataplane" ok env \
+    NET_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS")" \
+    python3 -c 'import json,os; d=json.loads(os.environ["NET_JSON"]); n={x["meta"]["name"]:x for x in d["networks"]}; assert {"e1net-a","e1net-b"}<=set(n), list(n); a=n["e1net-a"]; assert a["meta"]["namespace"]=="default" and a["meta"]["labels"].get("delonix.io/managed-by")=="delonix" and not n["e1net-b"]["meta"]["labels"], a["meta"]; assert a["spec"]["topology"]=="NETWORK_TOPOLOGY_BRIDGE" and a["spec"]["ipv4_cidr"].endswith("/16"), a["spec"]; c=a["conditions"][0]; assert (c["type"],c["status"],c["reason"])==("Realized","CONDITION_STATUS_TRUE","DataplaneRecorded"), c'
+  check "o selector de labels filtra, e a paginação dá Link rel=next com um token que continua a lista" ok env \
+    SEL_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS?label_selector=delonix.io%2Fmanaged-by%3Ddelonix")" \
+    PG_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" "$NETS?page.page_size=1")" \
+    PG_JSON="$(curl -s --unix-socket "$NODESOCK" "$NETS?page.page_size=1")" \
+    NODESOCK="$NODESOCK" \
+    python3 -c 'import json,os,subprocess; s=json.loads(os.environ["SEL_JSON"]); assert [x["meta"]["name"] for x in s["networks"]]==["e1net-a"], s; p=json.loads(os.environ["PG_JSON"]); assert len(p["networks"])==1 and p["page"]["next_page_token"], p; nxt=[l["href"] for l in p["links"] if l["rel"]=="next"][0]; assert "rel=\"next\"" in os.environ["PG_HDR"], os.environ["PG_HDR"]; q=json.loads(subprocess.run(["curl","-s","--unix-socket",os.environ["NODESOCK"],"http://localhost"+nxt],capture_output=True,text=True).stdout); assert q["networks"] and q["networks"][0]["meta"]["name"]>p["networks"][0]["meta"]["name"], q'
+  check "GET de uma rede traz ETag; If-None-Match com esse valor é 304; depois de mudar a rede volta a ser 200" ok env \
+    BIN="$BIN" NODESOCK="$NODESOCK" URL="$NETS/e1net-a" \
+    python3 -c 'import os,subprocess
+def get(*h):
+    out=subprocess.run(["curl","-s","-D","-","-o","/dev/null","--unix-socket",os.environ["NODESOCK"],*h,os.environ["URL"]],capture_output=True,text=True).stdout
+    lines=out.splitlines(); etag=[l.split(":",1)[1].strip() for l in lines if l.lower().startswith("etag:")]
+    return lines[0].split()[1], (etag or [""])[0]
+code,etag=get(); assert code=="200" and etag.startswith("\""), (code,etag)
+code,same=get("-H","If-None-Match: "+etag); assert (code,same)==("304",etag), (code,same)
+subprocess.run([os.environ["BIN"],"network","rm","e1net-a"],capture_output=True); subprocess.run([os.environ["BIN"],"network","create","e1net-a"],capture_output=True)
+code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (code,new,etag)'
+  check "uma rede que não existe é 404 com um problem+json; noutro namespace a lista é vazia" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' '$NETS/nao-existe') == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/namespaces/outro/networks | grep -q '\"networks\":\[\]'"
+  "$BIN" network rm e1net-a >/dev/null 2>&1; "$BIN" network rm e1net-b >/dev/null 2>&1
+  # ADR-0042 passo E: as mutações de rede pelo contrato, cada uma respondida com
+  # uma Operation PERSISTIDA antes do trabalho. Cada cenário lê o que o socket
+  # respondeu E o que o motor tem depois (a CLI, os ficheiros do state root).
+  NETOPS="$(cd "$(dirname "$0")" && pwd)/e2e_node_network_ops.py"
+  netops() { env BIN="$BIN" NODESOCK="$NODESOCK" DELONIX_ROOT="$DELONIX_ROOT" IMG="${IMG:-}" python3 "$NETOPS" "$1"; }
+  check "POST …/networks cria a rede: Operation SUCCEEDED com Location, e a CLI e o registo do dataplane têm-na" ok netops create
+  check "o mesmo pedido com a mesma Idempotency-Key é respondido com a primeira Operation; sem chave é 409" ok netops replay
+  check "a Operation lê-se por id e na lista; a de um processo que já não existe lê-se FAILED/Interrupted" ok netops operations
+  check "overlay (501), outro namespace, subnet inválida e um nome com '..' são recusados sem criar nada" ok netops refused
+  check "DELETE com If-Match antigo é 412 e a rede fica; com o ETag actual remove-a do motor e do dataplane" ok netops delete
+  # ADR-0042 passo E: as leituras de volumes pelo contrato. Um volume criado
+  # pela CLI, com dados e uma quota, lê-se pelo socket como o motor o tem.
+  E3V="e3vol-$$"
+  "$BIN" volume create "$E3V" --quota 1G >/dev/null 2>&1
+  printf 'abcde' > "$("$BIN" volume inspect "$E3V" 2>/dev/null | sed -n 's/^ *[Mm]ountpoint: *//p' | head -1)/f" 2>/dev/null
+  VOLS="http://localhost/v1/namespaces/default/volumes"
+  check "GET …/volumes/{nome} mede o uso, traz a quota e o ETag; a lista diz que não mediu" ok env \
+    V_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" "$VOLS/$E3V")" \
+    V_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS/$E3V")" \
+    L_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS")" E3V="$E3V" \
+    python3 -c 'import json,os; v=json.loads(os.environ["V_JSON"]); n=os.environ["E3V"]; assert v["meta"]["name"]==n and v["meta"]["namespace"]=="default", v["meta"]; assert int(v["used_bytes"])>0, v; assert int(v["spec"]["quota_bytes"])==1<<30 and "local" in v["spec"], v["spec"]; c=v["conditions"][0]; assert (c["type"],c["status"],c["reason"])==("UsageMeasured","CONDITION_STATUS_TRUE","Measured"), c; assert "etag: \""+v["meta"]["etag"]+"\"" in os.environ["V_HDR"].lower(), os.environ["V_HDR"]; l=[x for x in json.loads(os.environ["L_JSON"])["volumes"] if x["meta"]["name"]==n]; assert len(l)==1 and "used_bytes" not in l[0] and l[0]["conditions"][0]["reason"]=="NotMeasuredInList", l'
+  check "um volume que não existe é 404 DX-4000; criar e remover volumes pelo socket ainda é 501" ok bash -c \
+    "[[ \$(curl -s --unix-socket '$NODESOCK' '$VOLS/nao-existe' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"status\"],d[\"dx\"])') == '404 DX-4000' ]] && [[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE --unix-socket '$NODESOCK' '$VOLS/$E3V') == 501 ]] && '$BIN' volume inspect '$E3V' >/dev/null"
+  "$BIN" volume rm "$E3V" >/dev/null 2>&1
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \
@@ -717,6 +800,55 @@ check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volume snapshot create 
 check "snapshot rm" ok "$BIN" volume snapshot rm "$VOL" s1
 
 ########################################
+section "storage: kind StoragePool e volumes num pool (ADR-0067 P0)"
+########################################
+# The administrator declares a pool in an allowlist; a manifest only NAMES it.
+# The pool lives on /dev/shm, not under $OUT: the engine refuses to allocate in
+# a pool above 95% full, and the disk a developer runs this on often is — the
+# refusal is the engine working, and it would hide every other check here.
+SPD="/dev/shm/dlx-e2e-pool-$PFX"; SPF="$OUT/storage-pools-$PFX.yaml"; SPW="$OUT/sp-$PFX"
+mkdir -p "$SPW"
+sp() { env DELONIX_STORAGE_POOLS_FILE="$SPF" "$BIN" "$@"; }
+sp_fns="$(declare -f sp); BIN='$BIN' SPF='$SPF'"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: { alertPct: 85 }\n' "$PFX" >"$SPW/pool.yaml"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: { driver: dir, path: /srv/x }\n' "$PFX" >"$SPW/admin.yaml"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: outro-%s }\nspec: {}\n' "$PFX" >"$SPW/other.yaml"
+rm -f "$SPF"
+check "StoragePool sem allowlist no nó recusa com 69 (DX-6203), nada criado" ok bash -c \
+  "$sp_fns; out=\$(sp stack apply -f '$SPW/pool.yaml' 2>&1); rc=\$?; [[ \$rc == 69 ]] && grep -q DX-6203 <<<\"\$out\""
+if mkdir -p "$SPD" 2>/dev/null; then
+  printf 'pools:\n  media-%s:\n    driver: dir\n    path: %s\n    maxVolumeBytes: 64G\n' "$PFX" "$SPD" >"$SPF"; chmod 644 "$SPF"
+  check "um campo do administrador no manifesto (driver, path) é recusado pelo nome: DX-1217, não «unknown field»" ok bash -c \
+    "$sp_fns; out=\$(sp stack apply -f '$SPW/admin.yaml' 2>&1); rc=\$?; [[ \$rc == 1 ]] && grep -q DX-1217 <<<\"\$out\" && ! grep -q 'check the spelling' <<<\"\$out\""
+  check "um pool que a allowlist não tem é recusado com 77 (DX-7201)" 77 sp stack apply -f "$SPW/other.yaml"
+  chmod 666 "$SPF"
+  check "uma allowlist que outros podem escrever é recusada (DX-1218)" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/pool.yaml' 2>&1 | grep -q DX-1218"
+  chmod 644 "$SPF"
+  check "stack apply do StoragePool: fica em uso e o plano seguinte não vê deriva" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/pool.yaml' >/dev/null 2>&1 && sp get storagepools | grep -q 'media-$PFX .*AVAILABLE' && sp stack plan -f '$SPW/pool.yaml' --detailed-exitcode >/dev/null 2>&1"
+  check "volume create --pool --size: os dados ficam DENTRO do pool, com a marca do motor" ok bash -c \
+    "$sp_fns; sp volume create 'spv-$PFX' --pool 'media-$PFX' --size 64M >/dev/null 2>&1 && [[ -d '$SPD/spv-$PFX/_data' && -f '$SPD/spv-$PFX/.delonix-volume.json' ]] && sp volume inspect 'spv-$PFX' | grep -q '$SPD/spv-$PFX/_data'"
+  check "um volume maior do que o maxVolumeBytes do administrador é recusado com 77" 77 \
+    sp volume create "spbig-$PFX" --pool "media-$PFX" --size 100G
+  check "um volume que passa o tecto de sobre-alocação do pool é recusado com 5 (DX-5202)" ok bash -c \
+    "$sp_fns; out=\$(sp volume create 'spover-$PFX' --pool 'media-$PFX' --size 63G 2>&1); rc=\$?; [[ \$rc == 5 ]] && grep -q DX-5202 <<<\"\$out\" && [[ ! -e '$SPD/spover-$PFX' ]]"
+  mkdir -p "$SPD/spalheio-$PFX"; echo dados >"$SPD/spalheio-$PFX/keep"
+  check "um directório com dados e sem a marca do motor nunca é adoptado pelo nome (5), e fica intacto" ok bash -c \
+    "$sp_fns; sp volume create 'spalheio-$PFX' --pool 'media-$PFX' --size 16M >/dev/null 2>&1; rc=\$?; [[ \$rc == 5 ]] && [[ \$(cat '$SPD/spalheio-$PFX/keep') == dados ]]"
+  check "delete storagepools com volumes lá dentro recusa (5) e nomeia-os" ok bash -c \
+    "$sp_fns; out=\$(sp delete storagepools 'media-$PFX' 2>&1); rc=\$?; [[ \$rc == 5 ]] && grep -q 'spv-$PFX' <<<\"\$out\""
+  check "volume rm liberta o volume do pool; delete deixa de usar o pool e o directório do pool fica" ok bash -c \
+    "$sp_fns; sp volume rm 'spv-$PFX' >/dev/null 2>&1 && [[ ! -e '$SPD/spv-$PFX' ]] && sp delete storagepools 'media-$PFX' >/dev/null 2>&1 && [[ -d '$SPD' && -f '$SPD/spalheio-$PFX/keep' ]]"
+  printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: {}\n---\napiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: { name: spm-%s }\nspec: { pool: media-%s, size: 32M }\n' "$PFX" "$PFX" "$PFX" >"$SPW/stack.yaml"
+  check "por manifesto: pool e volume aplicam, o plano não vê deriva, e o destroy leva o volume, deixa de usar o pool e deixa o directório do pool" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/stack.yaml' >/dev/null 2>&1 && [[ -d '$SPD/spm-$PFX/_data' ]] && sp stack plan -f '$SPW/stack.yaml' --detailed-exitcode >/dev/null 2>&1 && sp stack destroy -f '$SPW/stack.yaml' >/dev/null 2>&1 && [[ ! -e '$SPD/spm-$PFX' && -d '$SPD' ]] && sp get storagepools | grep 'media-$PFX ' | grep -qw no"
+  rm -rf "$SPD"
+else
+  skip "storage pools" "não foi possível criar um directório em /dev/shm para o pool"
+fi
+rm -f "$SPF"
+
 section "volume create: --driver/--opt (Sprint 6 — fusão do --type/--server/--share)"
 ########################################
 # `storage`/`sharevolume` tinham ZERO checks executados — o balde dos
@@ -1102,6 +1234,21 @@ else
   E2E_HAVE_IMAGE=0
   skip "image pull ($IMG)" "sem rede (ou registo inalcançável) e a imagem não está no store"
   skip "tudo o que precisa de $IMG" "a imagem não pôde ser obtida — ver o skip acima"
+fi
+
+# ADR-0042 passo E: uma rede com um container ligado não se remove pelo socket
+# (409 DX-5307, a nomear o container), e remove-se depois de ele sair. Aqui e
+# não na secção do node API porque precisa da imagem.
+if [[ $E2E_HAVE_IMAGE -eq 1 && -x "$NODEBIN" ]]; then
+  "$BIN" serve node-api --addr "unix://$NODESOCK" >>"$OUT/node-api.log" 2>&1 &
+  NODEPID=$!
+  for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+  check "DELETE de uma rede em uso é 409 DX-5307 e não escreve Operation; sem o container remove-a" ok \
+    env BIN="$BIN" NODESOCK="$NODESOCK" DELONIX_ROOT="$DELONIX_ROOT" IMG="$IMG" \
+    python3 "$(cd "$(dirname "$0")" && pwd)/e2e_node_network_ops.py" inuse
+  kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+else
+  skip "DELETE de uma rede em uso pelo node API" "sem imagem ou sem delonix-node-api"
 fi
 
 # `image load` é o verbo que qualquer pessoa lê como ADITIVO — trazer um
@@ -1678,6 +1825,149 @@ else
 fi
 
 ########################################
+
+section "network: isolamento por namespace sem br_netfilter é RECUSADO (D5)"
+########################################
+# Decision D5 of the maturity plan: a named namespace on a host that does not
+# filter bridge traffic is REFUSED (DX-6305, exit 69). Before it was a warning
+# and `run` exited 0 on a tenant boundary that blocked nothing.
+#
+# The host here HAS br_netfilter, so the condition is made where it lives: the
+# sysctl is per network namespace, and it is set to 0 INSIDE this run's
+# isolated holder only. A keeper container holds the holder up, because a
+# refused attach that left the holder empty tears it down, and the next one is
+# born with the default (1) — measured, that is how the valve check first
+# passed for the wrong reason.
+#
+# Never on shared state: there the holder is the real one, and the sysctl would
+# switch off isolation for every workload on the node.
+REAL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
+if [[ "$E2E_ISOLATED" != 1 || "$DELONIX_ROOT" == "$REAL_ROOT" ]]; then
+  skip "D5: recusa sem br_netfilter" "estado partilhado — o sysctl tocaria no holder real"
+else
+  N5="n5-$PFX"; K5="k5-$PFX"
+  if "$BIN" network create "$N5" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$K5" --net "$N5" "$IMG" sleep 600 >/dev/null 2>&1 \
+     && PIN5=$(cat "$DELONIX_ROOT/ingress/holder.pid" 2>/dev/null) \
+     && nsenter -t "$PIN5" -U -n --preserve-credentials \
+          sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null; then
+    ORF5=$(ipam_orfaos)
+    check "D5: --namespace sem filtragem de bridge sai com 69" 69 \
+      "$BIN" container run -d --name "r5-$PFX" --namespace teama --net "$N5" "$IMG" sleep 600
+    check "D5: e diz DX-6305" ok bash -c \
+      "'$BIN' container run -d --name r5b-$PFX --namespace teama --net '$N5' '$IMG' sleep 600 2>&1 | grep -q DX-6305"
+    check "D5: o recusado não fica no store" ok bash -c \
+      "! '$BIN' container ps -a | grep -q ' r5-$PFX '"
+    check "D5: nem deixa lease órfão" ok test "$(ipam_orfaos)" = "$ORF5"
+    check "D5: um pod numa namespace também é recusado" 69 bash -c \
+      "printf 'apiVersion: compute.delonix.io/v1alpha1\nkind: Pod\nmetadata: {name: p5-$PFX, namespace: teamx}\nspec:\n  network: $N5\n  containers:\n  - {name: a, image: $IMG, command: [sleep, \"600\"]}\n' > '$OUT/p5.yaml' && '$BIN' pod create -f '$OUT/p5.yaml'"
+    check "D5: a válvula avisa e deixa correr" ok bash -c \
+      "DELONIX_ALLOW_UNENFORCED_ISOLATION=1 '$BIN' container run -d --name v5-$PFX --namespace teama --net '$N5' '$IMG' sleep 600 2>&1 | grep -q 'would not be enforced'"
+    check "D5: a namespace default nunca é recusada" ok \
+      "$BIN" container run -d --name d5-$PFX --net "$N5" "$IMG" sleep 600
+  else
+    skip "D5: recusa sem br_netfilter" "não foi possível preparar o holder isolado (rede, imagem ou nsenter)"
+  fi
+  for c in "r5-$PFX" "r5b-$PFX" "v5-$PFX" "d5-$PFX" "$K5" "p5-$PFX-a"; do
+    "$BIN" container rm -f "$c" >/dev/null 2>&1
+  done
+  "$BIN" pod rm "p5-$PFX" >/dev/null 2>&1
+  "$BIN" network rm "$N5" >/dev/null 2>&1
+fi
+section "network: anti-spoofing na bridge — origem e MAC forjados são bloqueados"
+########################################
+# Until 2026-10-02 the anti-spoof rule lived in `table ip` and never matched:
+# with br_netfilter the IP layer sees the BRIDGE as the input interface, not
+# the port. Measured against the engine, a container with NET_ADMIN forged its
+# source, reached its neighbour (3/3) and crossed namespace isolation by
+# forging a member of the other namespace (0 packets with its own address, 3
+# with the forged one). The table is now `bridge dlxspoof`, at prerouting.
+#
+# Every check counts echo requests RECEIVED by the target (Icmp InEchos), not
+# the sender's rc: a ping whose reply is dropped also fails, and a check on the
+# rc would pass on a defect that delivers the forged packet.
+AS="as-$PFX"; A1="as1-$PFX"; A2="as2-$PFX"; A3="as3-$PFX"; A4="as4-$PFX"
+echos_of() { "$BIN" container exec "$1" awk '/^Icmp:/{getline; print $10}' /proc/net/snmp 2>/dev/null; }
+ip_of() { "$BIN" container inspect "$1" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["ip"])'; }
+if "$BIN" network create "$AS" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A1" --cap-add NET_ADMIN --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A2" --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A3" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A4" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1; then
+  I2=$(ip_of "$A2"); I3=$(ip_of "$A3"); I4=$(ip_of "$A4")
+  e0=$(echos_of "$A2"); "$BIN" container exec "$A1" ping -c3 -W1 "$I2" >/dev/null 2>&1
+  check "antispoof: o tráfego legítimo chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 3
+  e0=$(echos_of "$A2")
+  "$BIN" container exec "$A1" sh -c "ip addr add ${I2%.*}.250/16 dev eth0; ping -c3 -W1 -I ${I2%.*}.250 $I2" >/dev/null 2>&1
+  check "antispoof: origem forjada não chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 0
+  e0=$(echos_of "$A3")
+  "$BIN" container exec "$A1" sh -c "ip addr add $I4/16 dev eth0; ping -c3 -W1 -I $I4 $I3" >/dev/null 2>&1
+  check "antispoof: forjar um membro de outra namespace não fura o isolamento" ok \
+    test "$(( $(echos_of "$A3") - e0 ))" -eq 0
+  "$BIN" container exec "$A1" sh -c "ip addr del ${I2%.*}.250/16 dev eth0; ip addr del $I4/16 dev eth0" >/dev/null 2>&1
+  e0=$(echos_of "$A4"); "$BIN" container exec "$A3" ping -c3 -W1 "$I4" >/dev/null 2>&1
+  check "antispoof: a mesma namespace continua aberta" ok test "$(( $(echos_of "$A4") - e0 ))" -eq 3
+  "$BIN" container stop "$A2" >/dev/null 2>&1; "$BIN" container start "$A2" >/dev/null 2>&1
+  # Wait for the CONDITION, not a sleep: a counter read before the restarted
+  # container answers `exec` comes back empty and the arithmetic fails.
+  for _ in $(seq 1 50); do [ -n "$(echos_of "$A2")" ] && break; sleep 0.2; done
+  # The restarted container has a NEW veth and MAC; flush the sender's
+  # neighbour cache or its pings go to the old MAC and prove nothing.
+  I2=$(ip_of "$A2"); e0=$(echos_of "$A2")
+  "$BIN" container exec "$A1" sh -c "ip neigh flush all; ping -c3 -W1 $I2" >/dev/null 2>&1
+  check "antispoof: depois de um start o vizinho continua alcançável" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 3
+  e0=$(echos_of "$A2")
+  # Same flush, on both sides: without it a stale neighbour entry loses the
+  # packets with or without anti-spoofing, and the check passes on the defect.
+  "$BIN" container exec "$A2" ip neigh flush all >/dev/null 2>&1
+  "$BIN" container exec "$A1" sh -c "ip link set eth0 down; ip link set eth0 address 02:00:00:00:be:ef; ip link set eth0 up; ip neigh flush all; ping -c3 -W1 $I2" >/dev/null 2>&1
+  check "antispoof: MAC forjado não chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 0
+else
+  skip "antispoof" "não foi possível preparar a rede e os containers (imagem ou rede)"
+fi
+for c in "$A1" "$A2" "$A3" "$A4"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
+"$BIN" network rm "$AS" >/dev/null 2>&1
+
+# The anti-spoofing GRANTS: a container that routes gets extra source prefixes,
+# and an exceptional opt-out exists — both only when the node policy grants
+# them, and every use is in the event log. No policy = nothing granted. Writes
+# policy.json, so it runs on isolated state only.
+if [[ "$E2E_ISOLATED" == 1 ]]; then
+  GS="gs-$PFX"; GR="gr-$PFX"; GT="gt-$PFX"; GO="go-$PFX"
+  POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
+  check "antispoof: --allow-source sem política é recusado (77)" 77 \
+    "$BIN" container run -d --name "$GR" --allow-source 10.99.1.0/24 --net none "$IMG" true
+  check "antispoof: --no-source-check sem política é recusado (77)" 77 \
+    "$BIN" container run -d --name "$GR" --no-source-check --net none "$IMG" true
+  check "antispoof: a recusa diz DX-7801" ok bash -c \
+    "'$BIN' container run -d --name $GR --allow-source 10.99.1.0/24 --net none '$IMG' true 2>&1 | grep -q DX-7801"
+  printf '{"allowedSourcePrefixes":["10.99.0.0/16"],"allowSourceCheckOptOut":true}\n' > "$POL"
+  check "antispoof: um prefixo fora da concessão é recusado" 77 \
+    "$BIN" container run -d --name "$GR" --allow-source 10.98.0.0/24 --net none "$IMG" true
+  if "$BIN" network create "$GS" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GT" --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GR" --cap-add NET_ADMIN --allow-source 10.99.1.0/24 --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$GO" --cap-add NET_ADMIN --no-source-check --net "$GS" "$IMG" sleep 900 >/dev/null 2>&1; then
+    IT=$(ip_of "$GT")
+    from_src() {  # <container> <source> → echo requests that reached GT
+      local e0; e0=$(echos_of "$GT")
+      "$BIN" container exec "$1" sh -c "ip addr add $2/32 dev eth0; ip neigh flush all; ping -c3 -W1 -I $2 $IT; ip addr del $2/32 dev eth0" >/dev/null 2>&1
+      echo $(( $(echos_of "$GT") - e0 ))
+    }
+    check "antispoof: o router chega com uma origem dentro do prefixo concedido" ok test "$(from_src "$GR" 10.99.1.7)" -eq 3
+    check "antispoof: o router é cortado fora do prefixo concedido" ok test "$(from_src "$GR" 10.99.2.7)" -eq 0
+    check "antispoof: o opt-out concedido deixa passar qualquer origem" ok test "$(from_src "$GO" 10.77.0.9)" -eq 3
+    check "antispoof: cada uso fica no registo de eventos" ok bash -c \
+      "grep -q '\"source-prefixes-allowed\"' '$DELONIX_ROOT/events.jsonl' && grep -q '\"source-check-off\"' '$DELONIX_ROOT/events.jsonl'"
+  else
+    skip "antispoof: concessões" "não foi possível preparar a rede e os containers"
+  fi
+  for c in "$GR" "$GT" "$GO"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
+  "$BIN" network rm "$GS" >/dev/null 2>&1
+  rm -f "$POL"
+else
+  skip "antispoof: concessões" "estado partilhado — o check escreveria o policy.json do nó real"
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
@@ -2487,6 +2777,70 @@ check "…mede a tabela de vizinhos ARP" ok \
   bash -c "'$BIN' system doctor | grep -q 'ARP/neighbour table'"
 check "…mede a largura da gama de portas efémeras" ok \
   bash -c "'$BIN' system doctor | grep -q 'ephemeral port range'"
+
+# ------------------------------------------------------------------------------
+# `metadata.labels` of a Network and of a Volume reach the record and converge.
+# Until 2026-10-03 only a Container received them: a network or a volume applied
+# from a manifest carried the ownership stamp and nothing the document declared.
+# The CYCLE is what proves it — apply, read the record, plan unchanged, change a
+# label, apply, read again.
+# ------------------------------------------------------------------------------
+NLDIR="$OUT/nl-labels"; mkdir -p "$NLDIR"
+nl_manifest() {
+  printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+    "metadata: { name: nl-net, labels: $1 }" 'spec: {}' '---' \
+    'apiVersion: storage.delonix.io/v1alpha1' 'kind: Volume' \
+    "metadata: { name: nl-vol, labels: $1 }" 'spec: {}' > "$NLDIR/m.yaml"
+}
+nl_labels() { # the labels the engine has for both, as "<network>|<volume>"
+  local n v
+  n="$("$BIN" network describe nl-net 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ',')"
+  v="$("$BIN" volume describe nl-vol 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ',')"
+  echo "$n|$v"
+}
+nl_manifest '{ app: web, tier: front }'
+check "stack apply: metadata.labels de um Network e de um Volume chegam ao registo" ok bash -c \
+  "cd '$NLDIR' && '$BIN' stack apply -f m.yaml >/dev/null 2>&1 && [[ \"\$($(declare -f nl_labels); BIN='$BIN' nl_labels)\" == 'app=web,tier=front,|app=web,tier=front,' ]]"
+check "um manifesto inalterado não mostra deriva nos labels (plan --detailed-exitcode = 0)" 0 \
+  bash -c "cd '$NLDIR' && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1"
+nl_manifest '{ app: api }'
+check "mudar e tirar um label é uma alteração do plano (2), converge a quente e sai do registo" ok bash -c \
+  "cd '$NLDIR' && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1; [[ \$? == 2 ]] && '$BIN' stack apply -f m.yaml >/dev/null 2>&1 && [[ \"\$($(declare -f nl_labels); BIN='$BIN' nl_labels)\" == 'app=api,|app=api,' ]] && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1"
+(cd "$NLDIR" && "$BIN" stack destroy -f m.yaml >/dev/null 2>&1)
+printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+  'metadata: { name: nl-pk-net, labels: { app: web } }' 'spec: {}' '---' \
+  'apiVersion: storage.delonix.io/v1alpha1' 'kind: Volume' \
+  'metadata: { name: nl-pk-vol, labels: { app: web } }' 'spec: {}' > "$NLDIR/pk.yaml"
+check "network apply / volume apply fora de uma stack também escrevem os labels do documento" ok bash -c \
+  "'$BIN' network apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' volume apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' network describe nl-pk-net | grep -q 'app=web' && '$BIN' volume describe nl-pk-vol | grep -q 'app=web'"
+"$BIN" network rm nl-pk-net >/dev/null 2>&1; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
+# The same for a `kind: VirtualMachine` — measured dropping them too. Labels are
+# the one VM field that converges in place: the domain keeps its id.
+if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+  NLVM="nl-vm-$PFX"; qemu-img create -f qcow2 "$NLDIR/vm.qcow2" 64M >/dev/null 2>&1
+  nl_vm_manifest() {
+    printf '%s\n' 'apiVersion: compute.delonix.io/v1alpha1' 'kind: VirtualMachine' \
+      "metadata: { name: $NLVM, labels: $1 }" \
+      "spec: { disk: $NLDIR/vm.qcow2, backend: libvirt, memory: 256M }" > "$NLDIR/vm.yaml"
+  }
+  nl_vm_labels() { "$BIN" describe vm "$NLVM" 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ','; }
+  nl_vm_manifest '{ app: web, tier: front }'
+  if (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1); then
+    NLDOM="$(virsh -c qemu:///system domid "$NLVM" 2>/dev/null | head -1)"
+    check "stack apply: metadata.labels de uma VirtualMachine chegam ao registo, sem deriva no plano" ok bash -c \
+      "[[ '$(nl_vm_labels)' == 'app=web,tier=front,' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
+    nl_vm_manifest '{ app: api }'
+    (cd "$NLDIR" && "$BIN" stack apply -f vm.yaml >/dev/null 2>&1)
+    check "mudar os labels de uma VM converge a quente: o registo segue e o domínio é o mesmo" ok bash -c \
+      "[[ '$(nl_vm_labels)' == 'app=api,' ]] && [[ \"\$(virsh -c qemu:///system domid '$NLVM' | head -1)\" == '$NLDOM' ]] && cd '$NLDIR' && '$BIN' stack plan -f vm.yaml --detailed-exitcode >/dev/null 2>&1"
+  else
+    skip "labels de uma VirtualMachine" "o stack apply da VM não passou neste host"
+  fi
+  (cd "$NLDIR" && "$BIN" stack destroy -f vm.yaml >/dev/null 2>&1)
+else
+  skip "labels de uma VirtualMachine" "precisa de virsh + qemu-img e de uma ligação qemu:///system utilizável"
+fi
 
 # ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
@@ -3598,6 +3952,18 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
+    # D6 (docs/discovery/65_PLANO_MATURIDADE.md): a `--wait` that runs out of
+    # time is an ERROR. The disk is empty, so the guest never answers; the
+    # create must say so with exit 124 (DX-8503) and leave the VM running.
+    # Before, it printed a warning and exited 0 — a script's next step ran
+    # against a guest that never booted.
+    WVM="$CVM-w"
+    check "CH: vm create --wait que esgota o tempo sai com 124" 124 \
+      "$BIN" vm create "$WVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M \
+      --wait --boot-timeout 5
+    check "CH: e a VM fica a correr" ok bash -c \
+      "'$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$WVM' and v['status']=='Running' for v in json.load(sys.stdin)) else 1)\""
+    "$BIN" delete vm "$WVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1

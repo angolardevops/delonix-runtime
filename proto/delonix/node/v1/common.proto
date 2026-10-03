@@ -23,6 +23,20 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
 
 // Identity and bookkeeping common to every resource the engine manages.
+// A hypermedia link (ADR-0042 D2, Richardson level 3): where a client can go from a
+// resource without building a URI by hand. In the contract, not invented by the REST
+// side — an extra JSON key the OpenAPI did not declare would make the published schema
+// lie. The REST encoding also mirrors each link in an RFC 8288 `Link` header.
+message Link {
+  // The relation: "self", "collection", an action ("start"), or a named resource
+  // ("health", "docs").
+  string rel = 1;
+  // An absolute path on this socket ("/v1/node/health").
+  string href = 2;
+  // The HTTP method that follows the link ("GET", "POST").
+  string method = 3;
+}
+
 message ResourceMeta {
   // Name, unique per (kind, namespace). Immutable.
   string name = 1;

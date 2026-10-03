@@ -672,6 +672,7 @@ flowchart TB
     delonix_node["delonix-node"]
     delonix_security_runtime["delonix-security-runtime"]
     delonix_stack["delonix-stack"]
+    delonix_storage["delonix-storage"]
   end
   subgraph adapter["Adapters"]
     delonix_linux["delonix-linux"]
@@ -791,6 +792,7 @@ flowchart TB
   delonix_runtime_bin --> delonix_security_runtime
   delonix_runtime_bin --> delonix_stack
   delonix_runtime_bin --> delonix_state
+  delonix_runtime_bin --> delonix_storage
   delonix_runtime_bin --> delonix_telemetry
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
@@ -809,6 +811,7 @@ flowchart TB
   delonix_state --> delonix_compute
   delonix_state --> delonix_model
   delonix_state --> delonix_node
+  delonix_storage --> delonix_model
   delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_model
@@ -820,6 +823,7 @@ flowchart TB
   delonix_volume --> delonix_model
   delonix_volume --> delonix_node
   delonix_volume --> delonix_state
+  delonix_volume --> delonix_storage
   class delonix_compute block
   class delonix_cri iface
   class delonix_linux block
@@ -844,6 +848,7 @@ flowchart TB
   class delonix_security_runtime block
   class delonix_stack block
   class delonix_state block
+  class delonix_storage block
   class delonix_telemetry block
   class delonix_truenas external
   class delonix_vm block

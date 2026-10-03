@@ -368,7 +368,10 @@ const FACTS: &[KindFacts] = &[
         short: &["nz"],
         api_version: "networking.delonix.io/v1alpha1",
         domain: Domain::NetConnectivity,
-        form: Form::Primary,
+        // Superseded by `Network` + `spec.provider.proxmox` (ADR-0070): the
+        // networks naming a zone are folded into this Kind's document at load,
+        // so it stays the executor and stops being the way to write it.
+        form: Form::Sunset(NETWORK),
         in_stack: true,
         stack_group: "networkZones",
         converges: true,

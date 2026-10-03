@@ -481,6 +481,13 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <td>Tem de nomear um ficheiro existente — nunca recua para outro. O primeiro ficheiro encontrado é a configuração; nunca se fundem. Um ficheiro ilegível faz falhar um pedido de VM sem <code>--backend</code>, em vez de adivinhar um provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td>Caminho da allowlist de pools de armazenamento do administrador (ADR-0067 D3), em vez de <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
+<td>Um caminho.</td>
+<td>O ficheiro é recusado quando o grupo ou todos lhe podem escrever, ou quando não pertence nem ao root nem ao utilizador que corre o motor. Um ficheiro que não existe quer dizer que nenhum pool foi declarado.</td>
+</tr>
+<tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (o aviso de rootless sem delegação e <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>Silencia os avisos sobre a falta de delegação de cgroup e sobre um container sem tecto de memória em lado nenhum.</td>
@@ -553,6 +560,13 @@ antes de usares uma delas.</p>
 <td>Volta a dar aos containers endereços IPv6 na SDN.</td>
 <td><code>1</code> → ligado; qualquer outra coisa → IPv6 desligado no container e forwarding recusado.</td>
 <td><strong>Nenhuma regra de firewall, isolamento de namespace ou <code>Dependency</code> se aplica ao IPv6</strong> — todas as políticas são só IPv4. Aviso de segurança. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Corre um workload numa namespace com nome mesmo quando o kernel não filtra o tráfego dentro de uma bridge (<code>br_netfilter</code> não carregado, ou <code>bridge-nf-call-iptables=0</code>), com um aviso. Sem ela o pedido é recusado (DX-6305, saída 69), porque o isolamento seria instalado e não imporia nada. Só <code>1</code> a abre.</td>
+<td><code>1</code> → corre com um aviso; qualquer outro valor (ou ausente) → recusado.</td>
+<td>As regras de isolamento são instaladas e não impõem nada. Ver o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>

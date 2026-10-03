@@ -302,23 +302,41 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let pool = PoolRef { name: "p", entry: &e };
+        let pool = PoolRef {
+            name: "p",
+            entry: &e,
+        };
         assert_eq!(d.probe(&pool), PoolProbe::Available);
 
         let gone = entry(&tmp.path().join("nope"));
-        let p = d.probe(&PoolRef { name: "p", entry: &gone });
-        assert!(matches!(p, PoolProbe::Unavailable { ref missing, .. } if missing.contains("does not exist")), "{p:?}");
+        let p = d.probe(&PoolRef {
+            name: "p",
+            entry: &gone,
+        });
+        assert!(
+            matches!(p, PoolProbe::Unavailable { ref missing, .. } if missing.contains("does not exist")),
+            "{p:?}"
+        );
 
         let file = tmp.path().join("file");
         std::fs::write(&file, b"").unwrap();
         let not_dir = entry(&file);
-        let p = d.probe(&PoolRef { name: "p", entry: &not_dir });
-        assert!(matches!(p, PoolProbe::Unavailable { ref missing, .. } if missing.contains("not a directory")), "{p:?}");
+        let p = d.probe(&PoolRef {
+            name: "p",
+            entry: &not_dir,
+        });
+        assert!(
+            matches!(p, PoolProbe::Unavailable { ref missing, .. } if missing.contains("not a directory")),
+            "{p:?}"
+        );
 
         // A path under a FILE cannot be examined at all (ENOTDIR): that is
         // «could not find out», never «absent».
         let under = entry(&file.join("x"));
-        let p = d.probe(&PoolRef { name: "p", entry: &under });
+        let p = d.probe(&PoolRef {
+            name: "p",
+            entry: &under,
+        });
         assert!(matches!(p, PoolProbe::Undetermined { .. }), "{p:?}");
     }
 
@@ -327,7 +345,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let pool = PoolRef { name: "media", entry: &e };
+        let pool = PoolRef {
+            name: "media",
+            entry: &e,
+        };
         let me = Owner::new("1000:/a");
 
         let a = d.allocate(&pool, &req("db"), &me).unwrap();
@@ -344,7 +365,9 @@ mod tests {
         assert_eq!(std::fs::read(a.path.join("f")).unwrap(), b"x");
 
         // Another state root asking for the same name is refused.
-        let other = d.allocate(&pool, &req("db"), &Owner::new("1000:/b")).unwrap_err();
+        let other = d
+            .allocate(&pool, &req("db"), &Owner::new("1000:/b"))
+            .unwrap_err();
         assert!(matches!(other, Error::PoolConflict(_)), "{other}");
 
         // A directory that was there before, with content and no stamp.
@@ -364,19 +387,34 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let pool = PoolRef { name: "p", entry: &e };
+        let pool = PoolRef {
+            name: "p",
+            entry: &e,
+        };
         let me = Owner::new("o");
         let block = VolumeRequest {
             shape: VolumeShape::Block,
             ..req("disk")
         };
-        assert!(matches!(d.allocate(&pool, &block, &me), Err(Error::PoolUnavailable(_))));
+        assert!(matches!(
+            d.allocate(&pool, &block, &me),
+            Err(Error::PoolUnavailable(_))
+        ));
         for bad in ["../x", "a/b", ".hid", "", ".."] {
             assert!(
-                matches!(d.allocate(&pool, &req(bad), &me), Err(Error::InvalidPoolRequest(_))),
+                matches!(
+                    d.allocate(&pool, &req(bad), &me),
+                    Err(Error::InvalidPoolRequest(_))
+                ),
                 "{bad}"
             );
-            assert!(matches!(d.release(&pool, bad, &me), Err(Error::InvalidPoolRequest(_))), "{bad}");
+            assert!(
+                matches!(
+                    d.release(&pool, bad, &me),
+                    Err(Error::InvalidPoolRequest(_))
+                ),
+                "{bad}"
+            );
         }
         assert!(is_empty_dir(tmp.path()));
     }
@@ -386,7 +424,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let pool = PoolRef { name: "p", entry: &e };
+        let pool = PoolRef {
+            name: "p",
+            entry: &e,
+        };
         let me = Owner::new("me");
 
         let a = d.allocate(&pool, &req("v"), &me).unwrap();
@@ -400,7 +441,10 @@ mod tests {
         // An unstamped directory is never released.
         std::fs::create_dir(tmp.path().join("plain")).unwrap();
         std::fs::write(tmp.path().join("plain/keep"), b"k").unwrap();
-        assert!(matches!(d.release(&pool, "plain", &me), Err(Error::PoolConflict(_))));
+        assert!(matches!(
+            d.release(&pool, "plain", &me),
+            Err(Error::PoolConflict(_))
+        ));
         assert!(tmp.path().join("plain/keep").exists());
 
         d.release(&pool, "v", &me).unwrap();
@@ -416,12 +460,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let pool = PoolRef { name: "p", entry: &e };
+        let pool = PoolRef {
+            name: "p",
+            entry: &e,
+        };
         let me = Owner::new("me");
         d.allocate(&pool, &req("v"), &me).unwrap();
         std::fs::write(tmp.path().join("v/notes.txt"), b"mine").unwrap();
         assert!(d.release(&pool, "v", &me).is_err());
-        assert_eq!(std::fs::read(tmp.path().join("v/notes.txt")).unwrap(), b"mine");
+        assert_eq!(
+            std::fs::read(tmp.path().join("v/notes.txt")).unwrap(),
+            b"mine"
+        );
     }
 
     #[test]
@@ -429,10 +479,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = DirPoolDriver::new(None);
         let e = entry(tmp.path());
-        let u = d.usage(&PoolRef { name: "p", entry: &e });
+        let u = d.usage(&PoolRef {
+            name: "p",
+            entry: &e,
+        });
         let (cap, used) = (u.capacity_bytes.unwrap(), u.used_bytes.unwrap());
         assert!(cap > 0 && used <= cap, "{u:?}");
         let gone = entry(&tmp.path().join("nope"));
-        assert_eq!(d.usage(&PoolRef { name: "p", entry: &gone }), PoolUsage::default());
+        assert_eq!(
+            d.usage(&PoolRef {
+                name: "p",
+                entry: &gone
+            }),
+            PoolUsage::default()
+        );
     }
 }

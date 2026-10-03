@@ -457,7 +457,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
-    let containers = cstore.list().unwrap_or_default();
+    let containers = cstore.list()?;
     for kind in super::kinds::stack_kinds() {
         if super::kinds::converges(kind) {
             continue;
@@ -503,7 +503,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // document to derive prerequisites from, and it is on its way out.
         let Some(doc) = docs
             .iter()
-            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
         else {
             continue;
         };
@@ -814,7 +814,7 @@ fn plan_cmd(
     for c in &mut changes {
         if let Some(doc) = docs
             .iter()
-            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+            .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
         {
             c.plan_digest = network_plan_digest(doc)?;
         }
@@ -1128,7 +1128,10 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
             let ip: Option<&str> = match kind {
                 k::CONTAINER => containers
                     .iter()
-                    .find(|c| &c.name == name)
+                    .find(|c| {
+                        manifest::scoped_plan_name(&c.namespace, &c.name)
+                            == manifest::plan_name(doc)
+                    })
                     .and_then(|c| c.ip.as_deref()),
                 k::VM => vms
                     .iter()
@@ -1303,7 +1306,10 @@ fn presence(
         // A node-wide singleton — the document's name never selects among
         // several, there is only ever `<root>/policy.json`.
         k::RUNTIME_POLICY => super::policy::presence_of(),
-        k::CONTAINER => match containers.iter().find(|c| c.name == name) {
+        k::CONTAINER => match containers
+            .iter()
+            .find(|c| manifest::scoped_plan_name(&c.namespace, &c.name) == manifest::plan_name(doc))
+        {
             Some(c) => {
                 let mut c = c.clone();
                 delonix_linux::reconcile_status(&mut c);
@@ -1941,6 +1947,31 @@ fn run_layers(
     docs: &[manifest::ManifestDoc],
     base: &std::path::Path,
 ) -> Result<()> {
+    let result = run_layers_inner(layers, docs, base);
+    if result.is_err() {
+        // A container some policy governs is created CLOSED and only opened once
+        // the policy layers succeed. Say so when they did not: the workloads are
+        // not lost, they are waiting, and re-running the apply releases them.
+        if let Some(held) = super::firewall::held_targets(docs) {
+            if !held.is_empty() {
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "{n} workload(s) stay CLOSED (policy hold): {names} — fix the error above and apply again; the next apply releases them",
+                        &[("n", &held.len().to_string()), ("names", &held.join(", "))],
+                    )
+                );
+            }
+        }
+    }
+    result
+}
+
+fn run_layers_inner(
+    layers: &mut super::output::Layers,
+    docs: &[manifest::ManifestDoc],
+    base: &std::path::Path,
+) -> Result<()> {
     // The node's own admission ceiling, before ANYTHING else: a stricter
     // policy declared in this very manifest already governs the Container/Vm/
     // Pod layers further down, in the SAME apply — see `kinds.rs`'s row.
@@ -1957,7 +1988,9 @@ fn run_layers(
     layers.run(k::NETWORK_ZONE, "🗺", || super::network_zone::apply(docs))?;
     // Before the volumes: one with `spec.pool` is allocated in a pool that has
     // to be in use by then.
-    layers.run(k::STORAGE_POOL, "🗄️", || super::storage_pool::apply(docs))?;
+    layers.run(k::STORAGE_POOL, "🗄️", || {
+        super::storage_pool::apply(docs)
+    })?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
@@ -1975,6 +2008,18 @@ fn run_layers(
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
     })?;
+    // The workloads these policies govern were created closed; the policy is in
+    // place now, so they open — to exactly what it says (ADR-0069).
+    let released = super::firewall::release_policy_holds(docs)?;
+    if released > 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "{n} workload(s) opened: their policy is in place",
+                &[("n", &released.to_string())],
+            )
+        );
+    }
     layers.run(k::NETWORK_GATEWAY, "🛰", || {
         super::network_gateway::apply(docs)
     })?;
@@ -2288,7 +2333,7 @@ fn converge_and_stamp(
                 k::RUNTIME_POLICY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "RuntimePolicy/{}: not in the manifest",
@@ -2299,6 +2344,7 @@ fn converge_and_stamp(
                 }
                 k::CONTAINER => super::container::converge(&c.name, &c.diffs)?,
                 k::VOLUME => super::volume::converge(&c.name, &c.diffs)?,
+                k::VM => super::vm::converge(&c.name, &c.diffs)?,
                 k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
                 k::IMAGE => super::image::converge(&c.name, &c.diffs)?,
                 // A firewall policy re-applies WHOLE: `apply_fw_doc` already
@@ -2308,7 +2354,7 @@ fn converge_and_stamp(
                 k::FIREWALL_POLICY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "FirewallPolicy/{}: not in the manifest",
@@ -2322,7 +2368,7 @@ fn converge_and_stamp(
                 k::NETWORK_ACCESS_RULE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkAccessRule/{}: not in the manifest",
@@ -2336,7 +2382,7 @@ fn converge_and_stamp(
                 k::SERVICE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "Service/{}: not in the manifest",
@@ -2350,7 +2396,7 @@ fn converge_and_stamp(
                 k::NETWORK_GATEWAY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkGateway/{}: not in the manifest",
@@ -2366,7 +2412,7 @@ fn converge_and_stamp(
                 k::SYSTEM_CONTAINER => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "SystemContainer/{}: not in the manifest",
@@ -2378,7 +2424,7 @@ fn converge_and_stamp(
                 k::NETWORK_ZONE => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "NetworkZone/{}: not in the manifest",
@@ -2390,7 +2436,7 @@ fn converge_and_stamp(
                 k::IPPOOL => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "IPPool/{}: not in the manifest",
@@ -2423,7 +2469,7 @@ fn converge_and_stamp(
                 k::GATEWAY => {
                     let doc = docs
                         .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
                         .ok_or_else(|| {
                             delonix_model::Error::Invalid(format!(
                                 "Tunnel/{}: not in the manifest",
@@ -2469,7 +2515,7 @@ fn created_doc<'a>(
         return None;
     }
     docs.iter()
-        .find(|d| d.kind == kind && d.metadata.name == name)
+        .find(|d| d.kind == kind && manifest::plan_name(d) == name)
 }
 
 /// Stamps ownership + last-applied on what the manifest declares.
@@ -2772,7 +2818,7 @@ fn history(
 /// `stack validate` — dry-run: only runs `validate_graph` and reports, without applying.
 fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
     let path = manifest::resolve_path(file)?;
-    let docs = manifest::load(&path)?;
+    let docs = manifest::load_lenient(&path)?;
     let issues = validate_graph(&docs);
     // Fields the load has just warned about. Saying `OK` on the line after
     // `unknown field 'resources.memoria' — ignored` was the engine contradicting
@@ -2889,6 +2935,27 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
     )
 }
 
+/// Why a container-scope policy cannot target `target`, when it names a VM
+/// declared in the same manifest (and no Container of that name).
+fn container_scope_target_problem(
+    kind: &str,
+    name: &str,
+    target: &str,
+    plain: &std::collections::HashSet<String>,
+    vms: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if plain.contains(target) {
+        return None;
+    }
+    if vms.contains(target) {
+        return Some(super::po::tf(
+            "{kind} '{name}' → target '{target}' is a VirtualMachine — use `scope: vm`, which puts the policy on the provider's firewall",
+            &[("kind", kind), ("name", name), ("target", target)],
+        ));
+    }
+    None
+}
+
 /// PURE core of `validate_graph`: receives what already exists on the machine as
 /// explicit lists (instead of reading the stores), so the tests are
 /// deterministic and do not depend on the real state of the dev machine.
@@ -2945,6 +3012,13 @@ fn validate_graph_full(
     // names it as its backend (ADR-0046), and `Dependency` documents already say
     // «containers/VMs».
     let mut containers = declared(&[k::CONTAINER, k::POD, k::VM]);
+    // What a container-scope policy CANNOT govern, declared in this very manifest:
+    // a VM (its firewall is the provider's, `scope: vm`). It used to pass this
+    // check and fail at apply with «no such container», after the layers before
+    // the policy had already created things. A Pod IS governable: it is one
+    // target, with the shared netns for identity (`pod::pod_view`).
+    let plain_containers = declared(&[k::CONTAINER]);
+    let declared_vms = declared(&[k::VM]);
     let mut secrets = declared(&[k::SECRET]);
     let mut system_containers = declared(&[k::SYSTEM_CONTAINER]);
     system_containers.extend(existing_system_containers.iter().cloned());
@@ -3207,6 +3281,14 @@ fn validate_graph_full(
                                 &[("kind", &doc.kind), ("name", name), ("target", target)],
                             ));
                         }
+                    } else if let Some(why) = container_scope_target_problem(
+                        &doc.kind,
+                        name,
+                        target,
+                        &plain_containers,
+                        &declared_vms,
+                    ) {
+                        issues.push(why);
                     } else if !containers.contains(target) {
                         issues.push(super::po::tf(
                             "{kind} '{name}' → target '{target}' is not a declared or existing Container",
@@ -3228,7 +3310,15 @@ fn validate_graph_full(
                 // No `scope: network` for this Kind — a rule always targets a
                 // container, never a network's egress policy.
                 if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
-                    if !containers.contains(target) {
+                    if let Some(why) = container_scope_target_problem(
+                        &doc.kind,
+                        name,
+                        target,
+                        &plain_containers,
+                        &declared_vms,
+                    ) {
+                        issues.push(why);
+                    } else if !containers.contains(target) {
                         issues.push(super::po::tf(
                             "{kind} '{name}' → target '{target}' is not a declared or existing Container",
                             &[("kind", &doc.kind), ("name", name), ("target", target)],
@@ -3435,6 +3525,49 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_container_scope_policy_naming_a_vm_is_refused_but_a_pod_is_a_valid_target() {
+        let d = manifest::load_str(
+            "\
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: pp }
+spec: { containers: [{ name: a, image: alpine }] }
+---
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: vv }
+spec: { disk: x }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: cc }
+spec: { image: alpine }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: p1 }
+spec: { target: pp, direction: ingress, defaultPolicy: deny, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkAccessRule
+metadata: { name: r1 }
+spec: { target: vv, direction: ingress, port: '80' }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: ok }
+spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
+",
+            "t",
+        )
+        .unwrap();
+        let issues = validate_graph_with(&d, &[], &[], &[], &[]);
+        // The VM is refused; the Pod `pp` (named by `p1`) and the Container are not.
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("scope: vm"), "{issues:?}");
+    }
+
     /// **A hot field that nobody compares never converges.**
     ///
     /// `hot_fields(k)` says «this one applies without recreating the resource»
@@ -3641,7 +3774,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("stack.yaml");
         std::fs::write(&p, yaml).unwrap();
-        manifest::load(&p).unwrap()
+        manifest::load_lenient(&p).unwrap()
     }
 
     fn check(yaml: &str) -> Vec<String> {

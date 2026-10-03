@@ -99,3 +99,36 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0065** — IPv6 in the SDN dataplane: one `table inet` instead of `ip` + an `ip6` refusal,
+  v6 addresses derived from the v4 lease (no second IPAM), static assignment and AAAA in the
+  holder's DNS, NAT66 egress through slirp. Opt-in per network (`--ipv6`); the default is
+  considered only in a major after six gates (isolation, DNS, routing, firewall, port publishing,
+  provider compatibility). v6 publishing is refused by measured backend capability (slirp4netns
+  1.2.1 cannot), never converted to IPv4. v6 anti-spoof extends the `table bridge` of the separate
+  IPv4 anti-spoof security fix (P0), whose bug the spike found. *Proposed*; a pt-AO review copy
+  sits next to it.
+- **0066** — An L4 load balancer in the engine: `kind: Service` gains `type: VirtualIP`, a VIP
+  from an operator-configured IPAM pool (no default; overlap with engine networks, pod and service
+  subnets, host routes and VPN overlays refused), DNAT by `numgen random` in a `svc` chain of the
+  holder rewritten whole and atomically on every membership event, a TCP reset/ICMP reject when no
+  backend is ready, hairpin that requires `br_netfilter`, and readiness = the port accepts from
+  the holder AND, when defined, the health probe passes (`Starting` out). Retires the caller-less
+  `lbset`/`lbclear` pair and the hash-derived `service_vip`. *Proposed*; spike measured in an
+  unprivileged netns. Review copy in pt-AO alongside.
+- **0067** — The engine manages storage pools (owner decision D2): a `StoragePoolDriver` port in a
+  new `delonix-storage` context, one provider crate per backend (btrfs, zfs, lvm-thin) and the
+  current directory store as the `dir` driver; `kind: StoragePool` only uses pools from a root-owned
+  administrator allowlist (no device, path or command in a manifest); the engine stays rootless and
+  privileged operations go through a per-request, socket-activated helper (or an explicitly
+  configured rootful node service); a probe without privilege answers «could not determine», never
+  «no pools»; pools are created and destroyed only by the administrator. *Proposed*; a Portuguese
+  review copy is `0067-storage-pools.pt-AO.md`.
+- **0068** — VM hotplug: a new `vm update` verb (like `container update`; `vm resize` stays cold)
+  adds vCPUs, memory, disks and NICs on a running VM within a maximum declared at create (default
+  maximum = boot size). Initial, maximum and assigned are kept apart, and the maximum is not
+  consumption. An operation is complete only when the guest uses the resource; otherwise it is
+  `Partial` (DX-8504, exit 124). Removal is a separate capability, out of the first phases. The
+  Delonix base images online added CPUs and memory. *Proposed*; a pt-AO review copy sits next to it.
+- **0069** — The Kind catalog after reassessment: a manifest the engine does not fully understand is refused before any effect (including Pod `containers[]` items), `App` converges on a fingerprint of its build inputs, CNI plugins are bounded, `Service` backends must be ready, and an unreadable store is an error rather than «nothing there». Records why `NetworkAccessRule`, `NetworkZone`, `Gateway`, `Container` and `KubernetesCluster` are not merged or renamed, and lists what is still pending. *Accepted*.
+- **0070** — Provider specifics live in a `provider` block of the resource's own spec (`provider.name` + a typed vendor block), not in one Kind per provider resource; neutral open-interface concepts (OCI/CRI/CNI/CSI) never go in it. Implemented for `VirtualMachine`; records what moving `NetworkZone`, `NetworkGateway` and `SystemContainer` still needs. *Accepted*.
+- **0071** — The provider block is `type` + `spec`, typed per provider and resource; `ref` is reserved until the node has named targets; a provider spec never overrides the generic intent. Supersedes the spelling of ADR-0070. *Accepted*.

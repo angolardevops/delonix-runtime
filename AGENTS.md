@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 28 crates.
+[README.md](README.md) para a arquitectura dos 29 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -48,6 +48,10 @@ que precisa de nomes de fora vive em `docs/`, nunca no código.
 ## Comandos
 
 ```bash
+make bootstrap                        # uma vez por máquina: toolchain, C/C++, protoc, sccache
+make build                            # os cinco binários (release), com jobs/prioridade à medida da máquina
+make install                          # ~/.local/bin + ~/.config/delonix/env.sh (DELONIX_BIN, DELONIX_ROOT)
+make ci                               # fmt, gates de script, clippy, testes
 cargo build --workspace               # tudo
 cargo test  --workspace               # testes
 cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abaixo)
@@ -237,7 +241,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 
 ```
 crates/foundation/   delonix-model, delonix-net-rules
-crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-node, delonix-security-runtime
+crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-storage, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
@@ -1163,6 +1167,7 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   que não é e porquê (`env`/`command` vêm fundidos com os da imagem, `user` é guardado como uid).
 - `mount_to_spec` é o inverso do `resolve_spec` de propósito — aquele **cria** o volume, e calcular
   um plano não pode criar nada.
+- **Os `metadata.labels` de um `Network` e de um `Volume` chegam ao registo e convergem (2026-10-03).** Só o `Container` os recebia: uma rede ou um volume aplicados por manifesto ficavam com o carimbo de posse e mais nada, sem aviso. Agora são o campo `labels` do plano (JSON canónico, `reconcile::user_labels_field`), quente: mudar ou tirar um label converge sem recriar. As chaves `delonix.io/…` são do motor e ficam fora do campo; um manifesto sem labels não toca em labels postos à mão. O `network describe` e o `volume describe` passaram a mostrar os labels. A `VirtualMachine` tinha o mesmo defeito (medido) e levou a mesma correcção: `labels` é o seu ÚNICO campo quente (`vm::converge`), por isso mudar um label não recria a máquina nem toca no convidado, e o `describe vm` mostra-os.
 - **`Volume`/`Network` ganharam `labels`/`annotations`** (`#[serde(default)]`, registos antigos
   continuam válidos). O `Network` não é serde — é `key=value` com vários escritores, por isso o
   `set_metadata` reescreve LINHA A LINHA (idioma do `add_overlay_peer`) e promove um registo legado
@@ -5213,6 +5218,58 @@ divergência só existe num processo filho com uid mapeado. Corrigido com `infra
 os filhos que precisam dele) e `cmd::container::reexec_env` (uma lista partilhada pelos DOIS sítios
 de re-exec, para um terceiro não nascer com metade).
 
+## Manifestos estritos, App com impressão digital, Service pronto (ADR-0069, 2026-10-03)
+
+- **Um campo que o motor não entende RECUSA o manifesto antes de qualquer efeito**
+  (`manifest::load`), incluindo os itens de `spec.containers[]` de um Pod
+  (`POD_CONTAINER_FIELDS`: probes e `lifecycle` não existem e já não se perdem em silêncio).
+  `stack validate` usa `load_lenient` para relatar; `DELONIX_MANIFEST_LENIENT=1` é a válvula
+  explícita. O contador de avisos é por thread: um teste que o lê usa `thread_unknown_fields`,
+  nunca o global (flaky em paralelo).
+- **`kind: App` converge**: `desired()` calcula a impressão digital das entradas (builder +
+  árvore de fontes), `actual()` lê o registo `<state>/apps/<nome>.json` só enquanto a tag aponta
+  para o digest gravado, e o `apply` salta o build quando coincidem.
+- **`kind: Service`**: só entram `Running` e, havendo health check, `healthy`.
+- **Plan**: um store ilegível (VM, volumes com âmbito, presença de containers) é erro, não «vazio».
+- **Pod**: o mesmo nome noutra namespace é `Conflict`, não «already exists».
+- **CNI**: prazo de 60 s (`DELONIX_CNI_TIMEOUT_SECS`) e 1 MiB por stream.
+- O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
+  com scope, refresh operacional do plan de VM, OpenStack).
+
+## Um workload governado por política nasce fechado (ADR-0069 D6, 2026-10-03)
+
+- `policy_targets(docs)` (`cmd/firewall.rs`) lista os containers que uma `NetworkPolicy`,
+  `NetworkAccessRule` ou `Dependency` do manifesto nomeia; o `container::apply` cria-os com
+  `RunOpts.policy_hold` (chain default-deny instalada antes do processo; anotação
+  `delonix.io/policy-hold` no registo). Enquanto a anotação existir o dataplane fica fechado e
+  o que as políticas escrevem vai para o REGISTO (`apply_firewall_everywhere`).
+- `release_policy_holds` corre depois das camadas de política e abre ao que elas dizem; uma
+  direcção não declarada volta ao default aberto. Se uma camada falha, o workload fica fechado e
+  o apply diz-o; o apply seguinte liberta-o. Containers e Pods; VMs/system containers por fazer
+  (a firewall deles é a do provider).
+- **Um Pod é UM alvo de política**: `firewall::update_locked`/`load_governed` resolvem um nome que
+  não é container para a vista do pod (`pod::pod_view`: registo do membro-cabeça com o netns
+  partilhado como id e o IP do pod); só `firewall` e `annotations` voltam ao membro-cabeça. A rede
+  declarada de um Pod viaja nos membros (`delonix.io/pod-network`) — ler `net_mode` do membro dava
+  sempre `host` e todo o segundo apply de um pod numa rede custom pedia `--replace`.
+- Cenário `policy_hold` do `scripts/chaos.sh` (lab = raízes isoladas, `DELONIX_ROOT` e
+  `DELONIX_NET_RUNTIME_DIR`): a falha da política tem de ser DEPOIS de os containers existirem
+  (um CIDR impossível numa `NetworkAccessRule`; uma referência a um container inexistente é
+  apanhada antes pelo `validate_graph` e o cenário saltava). `container inspect` já emite JSON.
+
+## O bloco `provider` é `type` + `spec` (ADR-0070/0071, 2026-10-03)
+
+- O que só um fabricante entende vive **inline** no recurso: `spec.provider: { type, spec }`.
+  `type` (`libvirt`/`cloud-hypervisor`/`proxmox`) substitui o `backend`; `spec` é tipado por
+  provider **e** por recurso e uma chave que o `type` não tem é recusada. `ref` está reservado até
+  o nó ter alvos nomeados (o `providers.yaml` do ADR-0054 tem um alvo por tipo).
+- `Network` com `provider.type: proxmox` é um segmento SDN: as redes que nomeiam a mesma zona
+  fundem-se, ao carregar, no único `NetworkZone` que o executor já reconcilia
+  (`cmd/network_provider.rs`). `kind: NetworkZone` carrega, anunciado como superado.
+- As grafias anteriores (`backend`, o grupo `libvirt:`, `provider: { name, libvirt }`, os campos
+  planos) normalizam para o mesmo e são reportadas; **um segundo executor nunca**. Uma `cpuTopology`
+  que não multiplica para `vcpus` é recusada: o genérico é a intenção.
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como
@@ -5675,11 +5732,15 @@ não `modprobe`/`sysctl -w`: o `virt-customize` corre contra um convidado offlin
 já o fazia, mas justificava-o pelo **Kubernetes** — por isso uma imagem para rootless-only não
 tinha razão para o herdar, e não herdava. Teste a exigir os dois sysctls nas quatro distros.
 
-**Por decidir, e é decisão de política, não de código**: o motor continua sem verificar isto em
-runtime. Um `container run --namespace` num host sem o módulo (um `install.sh --no-tune`, um
-container, uma distro sem ele) continua a anunciar isolamento que não existe. Avisar é o mínimo;
-recusar seria fail-closed a sério e parte quem hoje corre assim — sem isolamento real, mas a
-correr. Merece a sua própria sessão.
+**Decidido a 2026-10-02 (D5 do plano de maturidade): recusa.** Um `--namespace`
+com nome num host que não filtra o tráfego de bridge é recusado com DX-6305 (exit 69)
+antes de o workload correr: container, pod e VM. O attach é desfeito, por isso não fica
+lease nem registo. `DELONIX_ALLOW_UNENFORCED_ISOLATION=1` mantém o comportamento antigo
+(aviso alto e o workload corre). «Não consegui perguntar» (holder em baixo ou antigo)
+continua silencioso. O gate da bateria põe o sysctl a 0 só dentro do holder ISOLADO da
+corrida, com um container a segurá-lo: uma recusa que deixa o holder vazio desmonta-o, e o
+seguinte nasce com o valor por omissão (1) — foi assim que o check da válvula passou pela
+razão errada na primeira medição.
 
 ## A classe «X não é Y» — varredura de 2026-08-05
 
@@ -7452,6 +7513,89 @@ sabia calcular (`delonix provider ls -o json`).
   CLI, na bateria (7 desde o ADR-0052, medido a 2026-09-26). **Não validado**: socket activation (ADR-0040 P5), as rotas de
   documentação do passo C, e um cliente de outra linguagem contra o OpenAPI.
 
+## O node API passou a ter mutações: o registo de `Operation` e `CreateNetwork`/`DeleteNetwork` (ADR-0042 passo E, fatia E2, 2026-10-03)
+
+- **O registo** (`delonix_node_api::operations`): um ficheiro por operação em
+  `<root>/operations/<id>.json`, escrito `RUNNING` ANTES do trabalho e reescrito no fim. Guarda o
+  pid e o `starttime` de quem faz o trabalho; uma leitura que encontre um registo por acabar cujo
+  dono já não existe termina-o `FAILED` com razão `Interrupted` e grava isso (o servidor é
+  activado por socket e não tem quem o faça por ele). Um registo acabado sai ao fim de sete dias,
+  quando outra operação começa.
+- **Recusa antes, operação depois.** O que se decide sem tocar em nada é o próprio erro e não
+  escreve registo: pedido errado, nome já usado (409), `etag` que não bate (412), rede com algo
+  ligado (409, DX-5307, a nomear o que está ligado). Uma falha do TRABALHO é a operação, `FAILED`,
+  com a classe do motor em `error.reason` e o número em `error.metadata["dx"]`.
+- **Idempotência**: `request_id` → id `r-<request_id>`, criado em exclusivo por `link(2)`. O mesmo
+  pedido outra vez recebe a primeira operação — verificado ANTES do «já existe» do create e do
+  «não existe» do delete, que o primeiro pedido tornou verdadeiros. Em REST, `Idempotency-Key` é o
+  `request_id` e `If-Match` o `etag`; cabeçalho e corpo em desacordo são recusados.
+- **Resposta REST**: a `Operation` com `Location: /v1/operations/{id}`; 202 enquanto corre, 200
+  quando acabou. As duas mutações de rede acabam antes de responder, por isso respondem 200 — lê-se
+  o `state`, não o status.
+- **Um só caminho de escrita**: `delonix_sdn::netops` (`create_bridge`, `dependents_of`, `remove`)
+  é o que a CLI e o node API chamam. O `overlay` pelo API é recusado pelo nome (501).
+- **O número do dicionário atravessa o gRPC** no metadata `dx-number` (`network_ops::status_of`),
+  e o `engine_error` reconstrói o erro com ele: o REST responde `DX-5307`, não um conflito genérico.
+- **Defeito encontrado e fechado**: o `NetworkStore::create_with_cidr` não validava o nome. Medido
+  na v4.4.0: `network create '../evil' --subnet 10.231.0.0/24` escreveu o registo FORA de
+  `networks/` e saiu 0. A validação passou para o store (`validate_name`), com teste.
+- **Os testes de mutação não tocam no dataplane**: o `infra` segue o root do PROCESSO, por isso os
+  unitários injectam o trabalho (`create_with`/`delete_with`) e a prova com o dataplane real é a
+  bateria (`scripts/e2e_node_network_ops.py`, seis cenários). O teste gRPC corre contra o root do
+  processo e só exercita recusas.
+- **Não validado**: um servidor morto a meio de um create num socket real (o `Interrupted` está
+  provado com um registo escrito à mão cujo dono é um processo que saiu).
+
+## As leituras de volumes no node API, e a F6 do ADR-0059 adiada (ADR-0042 passo E, fatia E3, 2026-10-03)
+
+- **`GetVolume` e `ListVolumes`** nas duas codificações (`delonix_node_api::volumes`). Criar e
+  remover continuam 501: o remover de um volume com dados de subuid passa por um re-exec da CLI
+  (`__rmtree`), que é a mesma pergunta da F6.
+- **Namespaces**: o store tem a raiz sem dono (onde cai todo o `volume create`) e uma sub-árvore
+  por namespace (as shares). O contrato não tem «sem namespace», por isso a raiz é reportada em
+  `default`, junto com a sub-árvore `default`; `*` lista tudo. Um nome que exista nos dois sítios
+  aparece duas vezes na lista e o `GetVolume` recusa-o (`FAILED_PRECONDITION`) — a mesma recusa
+  que um workload leva ao montar esse nome.
+- **Uso**: o `Get` mede (blocos em disco, como o `du`); a `List` NÃO mede — percorrer os dados de
+  todos os volumes de um nó a cada listagem é o custo já medido no dashboard. `used_bytes` só
+  existe quando a medição foi completa, e a condição `UsageMeasured` diz qual dos três casos:
+  `Measured`, `UnreadableDirectories` (dados de subuid, ilegíveis pelo uid do servidor) ou
+  `NotMeasuredInList`. Desconhecido nunca é zero.
+- **O `etag` é do registo, não do uso**: escrever dados num volume não muda o que ele é.
+- **`page`** passou a ser um módulo (tamanho de página, token, escape, href, fnv), usado por redes,
+  volumes e operações — eram três cópias.
+- **Correcção ao #680**: um `etag` antigo respondia `ABORTED`; o contrato (`ResourceMeta.etag`)
+  diz `FAILED_PRECONDITION`. Passa a responder isso, marcado no metadata `stale-etag`, e o REST
+  continua 412.
+- **F6 do ADR-0059 adiada (decisão do dono, 2026-10-03)**: `PlanStack`/`ApplyStack` no socket
+  esperam pela P5 do ADR-0040; o ratchet `self_exec_sites` não sobe por causa dela. Adendo no ADR-0059.
+
+## Pools de armazenamento: a P0 do ADR-0067 (`kind: StoragePool`, driver `dir`, 2026-10-03)
+
+- **Quem decide o quê**: o administrador declara os pools numa allowlist
+  (`/etc/delonix/storage-pools.yaml`, ou `DELONIX_STORAGE_POOLS_FILE`); um manifesto só NOMEIA um
+  pool. `driver`, `path`, `device` e os outros campos do administrador num `kind: StoragePool`
+  são recusados pelo nome (DX-1217) no carregamento do manifesto, antes da verificação de campos
+  desconhecidos — a mesma regra dos campos de privilégio do `SystemContainer`.
+- **O motor nunca cria nem destrói um pool.** `delete storagepools` deixa de o usar; o directório e
+  o que lá está ficam. Com volumes do motor lá dentro, recusa (DX-5201) e nomeia-os.
+- **Posse por marca, nunca pelo nome**: cada volume de pool leva `.delonix-volume.json` com o dono
+  (uid e state root). Um directório com dados e sem marca nunca é adoptado; um directório VAZIO
+  com o nome do volume é tomado (é o que um apply morto entre o `mkdir` e a marca deixa).
+- **Recusa antes de encher**: acima de 95% de ocupação do pool não se aloca (DX-5202), e a soma
+  dos tamanhos alocados não passa `overcommit.maxRatio` × capacidade. Um volume acima do
+  `maxVolumeBytes` do administrador é 77 (DX-7201).
+- **O contexto `delonix-storage` não traz parser YAML**: a raiz de composição
+  (`cmd/storage_pool.rs`) entrega-lhe o descodificador. O portão de arquitectura recusa
+  `serde_yaml` num contexto.
+- **A allowlist é recusada** se o grupo ou todos lhe puderem escrever, ou se não for do root nem de
+  quem corre o motor (DX-1218). Sem allowlist, um pool é 69 (DX-6203), nunca «não há pools».
+- **Gate**: a secção «storage: kind StoragePool e volumes num pool» do `scripts/e2e.sh` (12
+  checks). O pool da bateria vive em `/dev/shm`: no disco do host, a 95%, o próprio motor recusava
+  todas as alocações — a regra a funcionar, e a tapar os outros checks.
+- **Não validado**: o helper e os drivers de bloco (P1–P6, que precisam de root e de uma VM de
+  lab), e um container a escrever num volume de pool.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -7469,7 +7613,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (28 crates)
+## Arquitetura (29 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -7482,6 +7626,7 @@ antes de qualquer commit:
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API. Desde a P4b.3b do ADR-0044, também os use cases da VM (`vm::VmEngine`: create, stop, start, status, list, remove e os verbos de dia 2), genéricos sobre o `StateRepository<Vm>` e os portos `VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`; o `delonix-vm` monta o engine e mantém as funções públicas como invólucros. Desde a P4b.4a, também o registo de backends de VM (`vm_registry`: `seed`, `register_backend`, a auto-detecção, `backend_for`, o `mac_for`), semeado pela raiz de composição com os backends em que confia para responder `available()` localmente |
 | `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-networking` | contexto Networking (`networking.delonix.io`, ADR-0059 D7): as portas de rede por papel (`GatewayProvider`, `NetworkZoneProvider`), os seus registos por nome e as marcas de posse dos objectos remotos. Saíram do `delonix-sdn` no F2a do ADR-0059, com a forma que o `VmBackend` teve na P4b.2; o `delonix-sdn` reexporta os três módulos, e o OPNsense e o Proxmox deixaram de depender do dataplane nativo |
+| `delonix-storage` | contexto Storage (`storage.delonix.io`, ADR-0067): a porta que um driver de pool de armazenamento implementa (`StoragePoolDriver`: sondar, alocar, libertar, uso), o registo de drivers por nome, a allowlist do administrador (`/etc/delonix/storage-pools.yaml`, lida com o descodificador que a raiz de composição lhe entrega — o contexto não traz um parser YAML) e a marca de posse de um volume de pool. O driver `dir` vive no `delonix-volume`; os de bloco (btrfs, ZFS, LVM-thin) entram como crates de provider |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | a raiz de composição das VMs até à P5 (ADR-0044 P4b.4): semeia o registo do compute com os backends locais, monta o `VmEngine` por chamada (`JsonStore`, disco e seed locais, rede) e mantém as funções públicas como invólucros. Desde a P4b.4c já não tem nenhum backend: os dois locais são crates de provider |
@@ -7497,7 +7642,7 @@ antes de qualquer commit:
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
-| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NodeService` — `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
+| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` —, as leituras do `VolumeService` (`GetVolume`, `ListVolumes`, fatia E3) e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
 | `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
@@ -8528,7 +8673,10 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
   `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
   configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
   Agora saem com DX-1540 no `desired` e no `apply_one`, antes de resolver o provider, por isso a
-  recusa ganha ao DX-6000 mesmo sem nó. Gate: a secção «kind: SystemContainer — as recusas que
+  recusa ganha ao DX-6000 mesmo sem nó. **Desde 2026-10-03 a recusa corre no carregamento do manifesto** (`manifest::refused_by_name`), antes da
+  verificação de campos desconhecidos: com os manifestos estritos (#682) essa verificação falava
+  primeiro e respondia DX-1000 «unknown field — check the spelling» a um campo bem escrito; só a
+  bateria E2E o mostrou (2 FAIL), porque não corre no CI. Gate: a secção «kind: SystemContainer — as recusas que
   não precisam de nó» do `scripts/e2e.sh` (7 checks; 3 chumbam com a recusa revertida,
   verificado). A layer zstd (DX-1409) fica no teste unitário do `delonix-oci`: pelo Kind só se
   chega lá com um nó.
@@ -8703,3 +8851,48 @@ ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
   DX-8101** (o PID 1 fica em `D`, `wb_wait_for_completion`): é o ADR-0056 D4, não é dos
   templates. Medido aqui com um `sleep` que não escreveu nada, enquanto outra corrida enchia o
   disco. Repetir o comando resolve.
+
+## A anti-spoof nunca filtrou nada, e passou para uma tabela `bridge` (2026-10-02)
+
+Encontrado pelo spike do ADR-0065 (IPv6) e confirmado contra o motor. A regra era
+`ip dlxing fwdeny iifname <veth> ip saddr != <ip> drop`, uma por porta, e o contador
+ficava a zero: o tráfego entre duas portas da mesma bridge só chega à camada IP pelo
+`br_netfilter`, e aí o `iifname` é a BRIDGE, nunca a porta. Medido: um container com
+`NET_ADMIN` forjou a origem e chegou ao vizinho (3/3); forjando o endereço de um membro
+de outra namespace furou o isolamento (0 pacotes com o seu endereço, 3 com o forjado).
+A correcção da auditoria #3 para o tap das VMs («a mesma regra do veth») herdou o
+defeito. **Lição: uma regra de segurança só está provada quando um pacote forjado é
+contado a cair** — a auditoria leu o ruleset e viu a regra lá.
+
+- **`table bridge dlxspoof`, hook `prerouting`**, onde o `iifname` é a porta. Prende
+  por porta o MAC (`macs`), a origem IPv4 exacta (`src`) ou um prefixo autorizado
+  (`srcpfx`, intervalos), e o IP e o MAC do emissor ARP. DHCP e sondas ARP de `0.0.0.0`
+  passam (uma VM não tem endereço antes do lease); frames 802.1Q/802.1ad de uma porta
+  presa caem. Um conjunto lido em JSON (`nft -j`) é o que o `spoof_forget` usa para
+  levar os elementos de uma porta: os nomes de porta reutilizam-se.
+- **Containers**: o `attach`/`attach-extra` do holder prendem o veth ao IP e ao MAC lido
+  na netns. **VMs**: o cliente envia `spoofbind <tap> <ip> <mac>` depois do `vmtap`, para
+  TODAS as VMs com lease — a namespace `default` incluída, que a linha `vmtap` curta
+  nunca levava. Um plano de controlo de um binário anterior não conhece o verbo: avisa
+  e segue (era tão inerte antes como depois).
+- **Nós Kind**: o kindnet encaminha o CIDR do cluster sem masquerade, por isso o tráfego
+  de pods entre nós sai com a origem do pod. Depois de os nós estarem `Ready`, o
+  `cluster create` lê o `.spec.podCIDR` de cada nó, exige que seja um prefixo canónico,
+  dentro do `podSubnet` e ESTRITAMENTE mais estreito, e autoriza-o só na interface desse
+  nó (`spoofallow`), guardando-o em `Container.allowed_sources` para o `start` o repor.
+  Medido num cluster de 2 nós: ping pod↔pod entre nós 3/3 nos dois sentidos; o worker
+  com origem no PodCIDR do control-plane é cortado (o `curl` esgota o tempo, contador
+  +3) e com o seu próprio recebe o RST. **Armadilha do teste**: contra o IP de um NÓ o
+  kindnet faz masquerade e a origem forjada nunca chega ao fio — o destino tem de estar
+  dentro do CIDR dos pods.
+- **Upgrade**: a regra é instalada pelo plano de controlo; só pega num nó depois de
+  `delonix net netns down` + `up`.
+- **Concessões, só pelo administrador**: `container run --allow-source <a.b.c.d/len>`
+  (repetível, para um container que encaminha) e `--no-source-check` (excepcional).
+  São PERMISSÕES na política do nó (`allowedSourcePrefixes`, `allowSourceCheckOptOut`),
+  o inverso dos tectos ao lado: sem política, nada é concedido, e `mode: warn` não
+  concede. Um prefixo pedido tem de ser canónico e caber dentro de um concedido; a
+  recusa é DX-7801 (exit 77) e fica no registo de eventos, tal como cada uso concedido
+  (`source-prefixes-allowed`, `source-check-off`). Guardados no registo
+  (`allowed_sources`, `source_check_disabled`) e reaplicados em cada `start`. Uma
+  política só com concessões já não dispara o lint `POLICY-SILENT`.

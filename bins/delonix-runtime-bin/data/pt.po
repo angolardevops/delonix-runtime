@@ -1525,8 +1525,8 @@ msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
 msgid "After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)."
 msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-D para sair)."
 
-msgid "After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout."
-msgstr "Depois de arrancar, espera (com spinner) até a VM ter IP, até ao --boot-timeout."
+msgid "After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running."
+msgstr "Depois de arrancar, espera (com spinner) até a VM responder, até ao --boot-timeout; se nunca responder, sai com 124 (DX-8503) e deixa a VM a correr."
 
 msgid "Seconds to wait with --wait (default 120)."
 msgstr "Segundos a esperar com --wait (default 120)."
@@ -9680,9 +9680,9 @@ msgstr "l4guard: inactiva"
 msgid "l4guard: active"
 msgstr "l4guard: activa"
 
-# --namespace sem br_netfilter — o isolamento reporta sucesso mas é inerte
-msgid "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
-msgstr "--namespace '{namespace}' está activo, mas este host não filtra tráfego de bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0) — o isolamento entre namespaces na MESMA rede reporta sucesso mas não bloqueia tráfego nenhum. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
+# --namespace sem br_netfilter — recusado (D5, DX-6305): o isolamento seria inerte
+msgid "--namespace '{namespace}' would not be enforced: this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so isolation between namespaces on the SAME network would report success and block nothing. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`); or DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose"
+msgstr "--namespace '{namespace}' não seria imposto: este host não filtra o tráfego de bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), por isso o isolamento entre namespaces na MESMA rede reportaria sucesso e não bloquearia nada. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir em /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`); ou DELONIX_ALLOW_UNENFORCED_ISOLATION=1 para correr sem isolamento de propósito"
 
 # net l4guard (comentários de exemplo do manual, `delonix man net l4guard`)
 msgid "turn on the ingress-wide DDoS guard: at most 20 new connections/s and 100 concurrent connections per source IP"
@@ -12393,6 +12393,15 @@ msgstr "O nó continuou a recusar porque o lock de configuração da VM estava t
 msgid "Check the node's task log for this VM; something is still holding the lock."
 msgstr "Verifica o registo de tasks do nó para esta VM; algo ainda está a segurar o lock."
 
+msgid "VM did not come up before the boot timeout"
+msgstr "a VM não ficou de pé antes do tempo de arranque"
+
+msgid "`--wait` gave the VM the whole `--boot-timeout` and never saw it answer: no address yet, or an address that never replied. The VM is left as it is, still running."
+msgstr "O `--wait` deu à VM o `--boot-timeout` inteiro e nunca a viu responder: ainda sem endereço, ou com um endereço que nunca respondeu. A VM fica como está, a correr."
+
+msgid "Watch the boot with `delonix vm console <name>`; raise `--boot-timeout` for a slow guest, or `delonix vm rm` it if it will not boot."
+msgstr "Acompanha o arranque com `delonix vm console <name>`; sobe o `--boot-timeout` para um convidado lento, ou `delonix vm rm` se não arrancar."
+
 msgid "Proxmox request failed"
 msgstr "pedido ao Proxmox falhou"
 
@@ -13579,8 +13588,8 @@ msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continua
 msgid "could not remove {path}: {err}"
 msgstr "não consegui remover {path}: {err}"
 
-msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
-msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff}"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff}"
 
 msgid "about to remove {path} — {summary}"
 msgstr "prestes a remover {path} — {summary}"
@@ -13955,17 +13964,17 @@ msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado q
 msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
 msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
 
-msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket — the versioned node contract (ADR-0040). Today it serves `GetNodeInfo`, `GetHealth`, `GetCapacity` and `ListProviders`, and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
-msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix — o contrato de nó versionado (ADR-0040). Hoje serve o `GetNodeInfo`, o `GetHealth`, o `GetCapacity` e o `ListProviders`, e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket — the versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix — o contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
 msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket."
 msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix."
 
-msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040). Today it serves `GetNodeInfo`, `GetHealth`, `GetCapacity` and `ListProviders`, and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
-msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040). Hoje serve o `GetNodeInfo`, o `GetHealth`, o `GetCapacity` e o `ListProviders`, e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
-msgid "The versioned node contract (ADR-0040). Today it serves `GetNodeInfo`, `GetHealth`, `GetCapacity` and `ListProviders`, and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
-msgstr "O contrato de nó versionado (ADR-0040). Hoje serve o `GetNodeInfo`, o `GetHealth`, o `GetCapacity` e o `ListProviders`, e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
+msgid "The versioned node contract (ADR-0040). Today it serves `GetApiRoot` (`GET /v1`, a link to everything served), `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders` and the network reads (`GetNetwork`, `ListNetworks`), and `GET /openapi.json`, rendered at `GET /docs` (Swagger UI) and `GET /redoc` from UI files embedded in the binary; `WatchEvents` answers UNIMPLEMENTED with the step that brings it."
+msgstr "O contrato de nó versionado (ADR-0040). Hoje serve o `GetApiRoot` (`GET /v1`, um link para tudo o que é servido), o `GetNodeInfo`, o `GetHealth`, o `GetCapacity`, o `ListProviders` e as leituras de rede (`GetNetwork`, `ListNetworks`), e o `GET /openapi.json`, desenhado em `GET /docs` (Swagger UI) e `GET /redoc` a partir de ficheiros embebidos no binário; o `WatchEvents` responde UNIMPLEMENTED com o passo que o traz."
 
 msgid "Socket address (default: `$DELONIX_NODE_API_ADDR` or `unix:///run/delonix-node.sock`)."
 msgstr "Endereço do socket (por omissão: `$DELONIX_NODE_API_ADDR` ou `unix:///run/delonix-node.sock`)."
@@ -14286,6 +14295,34 @@ msgstr "A imagem seria enviada para o storage de importação do nó, e esse sto
 
 msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
 msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
+
+# DX-4001 / DX-6001 / DX-9005 — the node API's own failures (ADR-0042 D2)
+msgid "no such route on the node API"
+msgstr "não há essa rota na API de nó"
+
+msgid "The request reached the node API socket on a method and path it has no handler for. The published OpenAPI (`GET /openapi.json`) lists the contract; a path there may still be one this engine version does not serve (DX-6001)."
+msgstr "O pedido chegou ao socket da API de nó com um método e um caminho para os quais ela não tem handler. O OpenAPI publicado (`GET /openapi.json`) lista o contrato; um caminho que lá esteja pode ainda não ser servido por esta versão do motor (DX-6001)."
+
+msgid "Check the method and the path against `GET /openapi.json`, or open `GET /docs`."
+msgstr "Confere o método e o caminho no `GET /openapi.json`, ou abre o `GET /docs`."
+
+msgid "the node API does not serve this yet"
+msgstr "a API de nó ainda não serve isto"
+
+msgid "The operation is in the contract (`proto/delonix/node/v1`) and this engine version does not serve it: the message names the ADR step that brings it. The HTTP status is 501 Not Implemented, not 503: retrying will not help."
+msgstr "A operação está no contrato (`proto/delonix/node/v1`) e esta versão do motor não a serve: a mensagem nomeia o passo do ADR que a traz. O estado HTTP é 501 Not Implemented, não 503: repetir não ajuda."
+
+msgid "Use the CLI for the operation meanwhile, or an engine version that serves it (`GET /v1/node` gives the version)."
+msgstr "Entretanto usa a CLI para a operação, ou uma versão do motor que a sirva (o `GET /v1/node` dá a versão)."
+
+msgid "the node API failed while answering"
+msgstr "a API de nó falhou ao responder"
+
+msgid "The node API could not compute its answer: a probe it runs panicked or a value it reads could not be produced. The message carries what failed."
+msgstr "A API de nó não conseguiu calcular a resposta: uma sonda que corre entrou em pânico ou um valor que lê não pôde ser obtido. A mensagem diz o que falhou."
+
+msgid "Read the message; the server's log (`delonix serve node-api`) has the detail. Report it if it repeats."
+msgstr "Lê a mensagem; o log do servidor (`delonix serve node-api`) tem o detalhe. Reporta-o se se repetir."
 
 # DX-1540 — a system container the Proxmox node cannot hold (ADR-0058)
 msgid "the system container asks for something the node cannot hold"
@@ -15080,3 +15117,125 @@ msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endere
 
 msgid "internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")"
 msgstr "internet: delonix stack apply -f delonix-tunnel.yaml — um endereço https público sem IP público (README.md, \"On the internet without a public IP\")"
+
+msgid "namespace isolation would not be enforced on this host"
+msgstr "o isolamento por namespace não seria imposto neste host"
+
+msgid "A named namespace was asked for, but the kernel is not filtering traffic inside a bridge (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0). Every isolation rule would install and none would block anything."
+msgstr "Foi pedida uma namespace com nome, mas o kernel não filtra o tráfego dentro de uma bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0). Todas as regras de isolamento seriam instaladas e nenhuma bloquearia nada."
+
+msgid "Load br_netfilter and set bridge-nf-call-iptables=1 (`delonix system doctor` prints the commands, `install.sh --tune` persists them), or set DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose."
+msgstr "Carrega o br_netfilter e põe bridge-nf-call-iptables=1 (o `delonix system doctor` imprime os comandos, o `install.sh --tune` persiste-os), ou define DELONIX_ALLOW_UNENFORCED_ISOLATION=1 para correr sem isolamento de propósito."
+
+# anti-spoofing: concessões da política do nó (--allow-source, --no-source-check)
+msgid "Let this container send from a source prefix besides its own address, for a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix the node policy grants (`allowedSourcePrefixes`); every use is logged."
+msgstr "Deixa este container enviar a partir de um prefixo de origem além do seu endereço, para um container que encaminha (`a.b.c.d/len`, repetível). Só dentro de um prefixo que a política do nó conceda (`allowedSourcePrefixes`); cada uso fica registado."
+
+msgid "Switch anti-spoofing off for this container. Exceptional: only when the node policy grants it (`allowSourceCheckOptOut`); every use is logged."
+msgstr "Desliga a anti-spoof para este container. Excepcional: só quando a política do nó o concede (`allowSourceCheckOptOut`); cada uso fica registado."
+
+msgid "--allow-source {prefix}: not a canonical a.b.c.d/len prefix"
+msgstr "--allow-source {prefix}: não é um prefixo canónico a.b.c.d/len"
+
+msgid "--allow-source {prefix}: not inside any prefix this node's policy grants (allowedSourcePrefixes)"
+msgstr "--allow-source {prefix}: não está dentro de nenhum prefixo que a política deste nó conceda (allowedSourcePrefixes)"
+
+msgid "--no-source-check: this node's policy does not grant it (allowSourceCheckOptOut)"
+msgstr "--no-source-check: a política deste nó não o concede (allowSourceCheckOptOut)"
+
+msgid "source-check override not granted by the node policy"
+msgstr "excepção à verificação de origem não concedida pela política do nó"
+
+msgid "A container asked for an anti-spoofing exception (`--allow-source` or `--no-source-check`) that this node's runtime policy does not grant. These are permissions, not ceilings: without `allowedSourcePrefixes` / `allowSourceCheckOptOut` in the policy nothing is granted. The refusal is in the event log."
+msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--no-source-check`) que a política de runtime deste nó não concede. São permissões, não tectos: sem `allowedSourcePrefixes` / `allowSourceCheckOptOut` na política nada é concedido. A recusa fica no registo de eventos."
+
+msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
+msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."
+
+# ADR-0067: storage pools (dicionário de códigos e ajuda)
+msgid "the storage pool request cannot be served as written"
+msgstr "o pedido de pool de armazenamento não pode ser servido como está escrito"
+
+msgid "A `kind: StoragePool`, a `spec.pool` or a `--pool` carries something a pool request may not: a device, a path or a command (those are the administrator's, in the allowlist), a size that is missing or does not parse, or a pool beside another backing for the same volume (ADR-0067 D2)."
+msgstr "Um `kind: StoragePool`, um `spec.pool` ou um `--pool` traz algo que um pedido de pool não pode trazer: um dispositivo, um caminho ou um comando (esses são do administrador, na allowlist), um tamanho em falta ou que não se lê, ou um pool ao lado de outro suporte para o mesmo volume (ADR-0067 D2)."
+
+msgid "Name only the pool; give the volume a `size`; and keep `pool` apart from `nfs`/`cifs`/`webdav`/`share`/`provision`/`quota`."
+msgstr "Nomeia só o pool; dá um `size` ao volume; e mantém `pool` separado de `nfs`/`cifs`/`webdav`/`share`/`provision`/`quota`."
+
+msgid "the storage pool allowlist cannot be used"
+msgstr "a allowlist de pools de armazenamento não pode ser usada"
+
+msgid "The administrator's allowlist of storage pools exists and is refused: it does not parse, names a field nobody defined, an entry lacks what its driver needs, or the file can be written by someone other than its owner (ADR-0067 D3)."
+msgstr "A allowlist de pools de armazenamento do administrador existe e é recusada: não se lê, nomeia um campo que ninguém definiu, falta a uma entrada o que o seu driver precisa, ou o ficheiro pode ser escrito por alguém que não é o dono (ADR-0067 D3)."
+
+msgid "Fix the file the message names (`/etc/delonix/storage-pools.yaml` unless DELONIX_STORAGE_POOLS_FILE says otherwise) and keep it mode 0644, owned by root or by the user running the engine."
+msgstr "Corrige o ficheiro que a mensagem nomeia (`/etc/delonix/storage-pools.yaml`, a não ser que DELONIX_STORAGE_POOLS_FILE diga outro) e mantém-no com modo 0644, do root ou do utilizador que corre o motor."
+
+msgid "storage pool driver registration refused"
+msgstr "registo de driver de pool de armazenamento recusado"
+
+msgid "A storage pool driver was registered with no id. A programming error in the process that registered it, not in what was asked."
+msgstr "Um driver de pool de armazenamento foi registado sem id. É um erro de programação no processo que o registou, não no que foi pedido."
+
+msgid "Report it: the composition root registers the drivers, and one of them has an empty id."
+msgstr "Reporta-o: a raiz de composição regista os drivers, e um deles tem o id vazio."
+
+msgid "no such storage pool"
+msgstr "esse pool de armazenamento não existe"
+
+msgid "No `kind: StoragePool` with that name is in use on this node. The administrator's allowlist says which pools may be used; a pool is used once a `kind: StoragePool` names it."
+msgstr "Não há nenhum `kind: StoragePool` com esse nome em uso neste nó. A allowlist do administrador diz que pools podem ser usados; um pool passa a ser usado quando um `kind: StoragePool` o nomeia."
+
+msgid "List them with `delonix get storagepools`, and apply a `kind: StoragePool` with that name."
+msgstr "Lista-os com `delonix get storagepools`, e aplica um `kind: StoragePool` com esse nome."
+
+msgid "the storage pool holds something that stands in the way"
+msgstr "o pool de armazenamento tem algo no caminho"
+
+msgid "The pool still holds volumes of this engine, or the object a driver was asked to create or release exists in the pool without this engine's stamp for this state root. An object is never adopted or deleted by its name (ADR-0067 D5)."
+msgstr "O pool ainda tem volumes deste motor, ou o objecto que foi pedido a um driver para criar ou libertar existe no pool sem a marca deste motor para este state root. Um objecto nunca é adoptado nem apagado pelo nome (ADR-0067 D5)."
+
+msgid "Remove the volumes the message lists first; for an object that is not this engine's, pick another volume name or have its owner remove it."
+msgstr "Remove primeiro os volumes que a mensagem lista; para um objecto que não é deste motor, escolhe outro nome de volume ou pede ao dono que o remova."
+
+msgid "the storage pool cannot take this volume"
+msgstr "o pool de armazenamento não pode receber este volume"
+
+msgid "The sum of the sizes allocated in the pool would pass its over-allocation ceiling (`overcommit.maxRatio` times its capacity), or the pool is already above 95% full (ADR-0067 D6)."
+msgstr "A soma dos tamanhos alocados no pool passaria o seu tecto de sobre-alocação (`overcommit.maxRatio` vezes a capacidade), ou o pool já está acima de 95% de ocupação (ADR-0067 D6)."
+
+msgid "Free space in the pool, ask for a smaller volume, or raise `overcommit.maxRatio` in the `kind: StoragePool` knowing a full pool fails every volume in it."
+msgstr "Liberta espaço no pool, pede um volume mais pequeno, ou sobe o `overcommit.maxRatio` no `kind: StoragePool` sabendo que um pool cheio faz falhar todos os volumes que lá estão."
+
+msgid "the storage pool cannot be used on this host"
+msgstr "o pool de armazenamento não pode ser usado neste host"
+
+msgid "No allowlist of storage pools exists on this node, the pool's driver is not built in this version, or the probe found the backing object missing or not writable. Nothing was created."
+msgstr "Não existe allowlist de pools de armazenamento neste nó, o driver do pool não está construído nesta versão, ou a sonda encontrou o objecto de suporte em falta ou sem escrita. Nada foi criado."
+
+msgid "Follow the remedy in the message: have the administrator declare the pool in `/etc/delonix/storage-pools.yaml`, create its directory, or give this user write access to it."
+msgstr "Segue o remédio da mensagem: pede ao administrador que declare o pool em `/etc/delonix/storage-pools.yaml`, cria o directório dele, ou dá a este utilizador acesso de escrita."
+
+msgid "the state of the storage pool could not be determined"
+msgstr "não foi possível determinar o estado do pool de armazenamento"
+
+msgid "The listing that would say whether the pool is usable needs a privilege this process does not have, or the allowlist could not be read. An empty answer obtained without the privilege to list is never read as «no pools» (ADR-0067 D3.5)."
+msgstr "A listagem que diria se o pool é utilizável precisa de um privilégio que este processo não tem, ou a allowlist não pôde ser lida. Uma resposta vazia obtida sem o privilégio para listar nunca é lida como «não há pools» (ADR-0067 D3.5)."
+
+msgid "Follow the remedy in the message; nothing was created or changed."
+msgstr "Segue o remédio da mensagem; nada foi criado nem alterado."
+
+msgid "the administrator's allowlist does not permit this"
+msgstr "a allowlist do administrador não permite isto"
+
+msgid "The pool is not in the administrator's allowlist of storage pools, or the volume asked for is larger than the pool's `maxVolumeBytes`. A manifest can only use what the administrator declared (ADR-0067 D3)."
+msgstr "O pool não está na allowlist de pools de armazenamento do administrador, ou o volume pedido é maior do que o `maxVolumeBytes` do pool. Um manifesto só pode usar o que o administrador declarou (ADR-0067 D3)."
+
+msgid "Ask the administrator to add the pool to `/etc/delonix/storage-pools.yaml` or to raise its `maxVolumeBytes`; or use a pool `delonix get storagepools` lists."
+msgstr "Pede ao administrador que acrescente o pool a `/etc/delonix/storage-pools.yaml` ou que suba o `maxVolumeBytes`; ou usa um pool que o `delonix get storagepools` liste."
+
+msgid "Allocate the volume in this storage pool (see `delonix get storagepools`)"
+msgstr "Aloca o volume neste pool de armazenamento (ver `delonix get storagepools`)"
+
+msgid "Size asked of the pool (e.g. `10g`) — only with `--pool`"
+msgstr "Tamanho pedido ao pool (ex.: `10g`) — só com `--pool`"

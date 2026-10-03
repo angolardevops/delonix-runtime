@@ -518,6 +518,8 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 k::CONTAINER => &[("network", "object"), ("env", "object")],
                 k::VM => &[("network", "object")],
                 k::DEPENDENCY => &[("to", "string")],
+                // The selection-only scalar, or `{ type, spec }` (ADR-0071).
+                k::GATEWAY => &[("provider", "object")],
                 _ => &[],
             };
             for (dual, other) in dual_shaped.iter().copied() {

@@ -436,6 +436,26 @@ pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'stati
     spec_fields_for(&doc.kind)
 }
 
+/// A field a Kind refuses BY NAME, with its own code, is refused here — before
+/// the unknown-field check, and for every command that loads a manifest.
+///
+/// The unknown-field check would otherwise speak first, and say the wrong
+/// thing: measured on the E2E battery after manifests became strict, a
+/// `SystemContainer` with `unprivileged: false` answered DX-1000 «unknown field
+/// 'unprivileged' — check the spelling» instead of DX-1540. The author spelled
+/// it right; the engine does not give what it asks.
+fn refused_by_name(doc: &ManifestDoc) -> Result<()> {
+    if doc.kind == k::SYSTEM_CONTAINER {
+        crate::cmd::system_container::reject_privilege(doc)?;
+    }
+    // A pool's driver, path or device is the administrator's (ADR-0067 D3):
+    // DX-1217 naming the field, not «unknown field».
+    if doc.kind == k::STORAGE_POOL {
+        crate::cmd::storage_pool::refuse_admin_fields(doc)?;
+    }
+    Ok(())
+}
+
 /// Warns about every unknown `spec` key of one document — the top-level ones and
 /// the ones nested inside a grouped form.
 ///
@@ -447,6 +467,20 @@ pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'stati
 fn check_unknown_fields(doc: &ManifestDoc) {
     if let Some(fields) = spec_fields_for_doc(doc) {
         warn_unknown_fields(doc, fields);
+    }
+    check_pod_members(doc);
+    if doc.kind == k::VM {
+        let legacy = crate::cmd::vm::legacy_provider_spellings(&doc.spec);
+        if !legacy.is_empty() {
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': {keys} belong under spec.provider (name + the vendor block) — still accepted, move them to the canonical shape",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("keys", &legacy.join(", ")),
+                ],
+            ));
+        }
     }
     let nested = match doc.kind.as_str() {
         k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
@@ -466,7 +500,110 @@ fn check_unknown_fields(doc: &ManifestDoc) {
     }
 }
 
+/// The name a document goes by IN A PLAN (its resource key within its Kind).
+///
+/// The reconciler identifies a resource by `(kind, name)`. A Container or a
+/// Service is scoped by namespace — two tenants may each own `db` — so in a
+/// namespace other than `default` the plan name is `<namespace>/<name>`, the
+/// form `container`/`find` already accept. `default` keeps the bare name, so
+/// nothing changes for a node that does not use namespaces. Every place that
+/// matches a plan entry back to its document goes through here, so the two
+/// cannot disagree.
+pub fn plan_name(doc: &ManifestDoc) -> String {
+    match doc.kind.as_str() {
+        k::CONTAINER | k::SERVICE => scoped_plan_name(
+            doc.metadata.namespace.as_deref().unwrap_or_default(),
+            &doc.metadata.name,
+        ),
+        _ => doc.metadata.name.clone(),
+    }
+}
+
+/// `<namespace>/<name>` outside `default`, the bare name inside it.
+pub fn scoped_plan_name(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() || namespace.eq_ignore_ascii_case("default") {
+        name.to_string()
+    } else {
+        format!("{namespace}/{name}")
+    }
+}
+
+/// The inverse of [`scoped_plan_name`]: `(namespace, name)`; the namespace is
+/// `default` for a bare name.
+pub fn split_plan_name(plan: &str) -> (&str, &str) {
+    match plan.split_once('/') {
+        Some((ns, name)) => (ns, name),
+        None => ("default", plan),
+    }
+}
+
+/// Unknown keys inside each `containers[]` item of a Pod-shaped spec. The
+/// top-level check never looked here, so `readinessProbe:` on a member was
+/// dropped without a word and the pod was reported ready when it was merely running.
+fn check_pod_members(doc: &ManifestDoc) {
+    if doc.kind != k::POD && doc.kind != k::CONTAINER {
+        return;
+    }
+    let Some(serde_yaml::Value::Sequence(items)) = doc.spec.get("containers") else {
+        return;
+    };
+    for (i, item) in items.iter().enumerate() {
+        let serde_yaml::Value::Mapping(m) = item else {
+            continue;
+        };
+        for key in m.keys().filter_map(|k| k.as_str()) {
+            if super::container::POD_CONTAINER_FIELDS.contains(&key) {
+                continue;
+            }
+            count_unknown_field_warning();
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': unknown field '{key}' in spec.containers[{i}] — ignored (check the spelling)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("key", key),
+                    ("i", &i.to_string()),
+                ],
+            ));
+        }
+    }
+}
+
+/// Loads a manifest and REFUSES it when any field was not understood.
+///
+/// A typo (`memroy:`), a field of a newer schema or a field this engine does not
+/// implement used to be a warning on stderr and exit 0, so a deployment could run
+/// with defaults the author never chose. Every command that applies, plans or
+/// diffs a manifest arrives here, so the refusal happens before any effect.
+/// `DELONIX_MANIFEST_LENIENT=1` restores the old behaviour for a manifest written
+/// for a newer binary; `stack validate` uses [`load_lenient`] so it can report.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
+    let before = thread_unknown_fields();
+    let docs = load_lenient(path)?;
+    let ignored = thread_unknown_fields() - before;
+    if ignored > 0 && !manifest_lenient() {
+        return Err(Error::Invalid(super::po::tf(
+            "{path}: {n} field(s) not understood (listed above) — nothing was applied; fix the spelling, or set DELONIX_MANIFEST_LENIENT=1 to ignore them",
+            &[("path", &path.display().to_string()), ("n", &ignored.to_string())],
+        )));
+    }
+    Ok(docs)
+}
+
+fn manifest_lenient() -> bool {
+    std::env::var("DELONIX_MANIFEST_LENIENT").is_ok_and(|v| v == "1")
+}
+
+thread_local! {
+    static THREAD_UNKNOWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn thread_unknown_fields() -> usize {
+    THREAD_UNKNOWN.with(|c| c.get())
+}
+
+/// [`load`] without the refusal: unknown fields are warned about and counted.
+pub fn load_lenient(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
             "{} {}: {e}",
@@ -576,6 +713,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         // `Dependency`, lowered further down — were the only Kinds to LOSE the
         // warning they already had. Measured: `Dependency` and `Workload` warned
         // before the move and went silent after it.
+        refused_by_name(&doc)?;
         check_unknown_fields(&doc);
         if doc.kind == k::STACK {
             // A Stack's children are built HERE, so they never passed through the
@@ -588,6 +726,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
                 // Stack — a typo there is as invisible as anywhere else. Checked
                 // BEFORE a `Workload` child is lowered, for the same reason the
                 // top-level guard runs on the document as written.
+                refused_by_name(&child)?;
                 check_unknown_fields(&child);
                 if child.kind == k::WORKLOAD {
                     // Same reduction the top-level loop applies below: a Stack's
@@ -635,6 +774,10 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     }
     // `VirtualMachine.spec.expose` lowers to a synthetic `kind: HTTPRoute` (ADR-0046).
     let docs = crate::cmd::vm_expose::lower_vm_expose(docs)?;
+    // `Network.spec.provider` (a provider-realized segment) folds into the zone's own document (ADR-0070).
+    let mut docs = crate::cmd::network_provider::lower_network_providers(docs)?;
+    // `Gateway.spec.provider: { type, spec }` normalizes to the scalar + flat fields (ADR-0071).
+    crate::cmd::tunnel::lower_tunnel_provider(&mut docs)?;
     // The unknown-field guard, for EVERY document and therefore for every
     // command that reads a manifest — `validate`, `plan`, `apply`, and each
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
@@ -660,6 +803,12 @@ fn warn_sunset_kinds(docs: &[ManifestDoc]) {
     use std::collections::BTreeMap;
     let mut seen: BTreeMap<&str, (usize, &str)> = BTreeMap::new();
     for d in docs {
+        if d.metadata
+            .annotations
+            .contains_key(super::network_provider::LOWERED_FROM)
+        {
+            continue;
+        }
         if let Some(f) = super::kinds::facts(&d.kind) {
             if let super::kinds::Form::Sunset(to) = f.form {
                 let e = seen.entry(f.kind).or_insert((0, to));
@@ -801,6 +950,7 @@ pub fn unknown_field_warnings() -> usize {
 }
 
 pub(crate) fn count_unknown_field_warning() {
+    THREAD_UNKNOWN.with(|c| c.set(c.get() + 1));
     UNKNOWN_FIELD_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -1265,6 +1415,115 @@ spec: {}
     }
 
     #[test]
+    fn homonym_containers_and_services_in_two_namespaces_have_distinct_plan_names() {
+        let docs = load_str(
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db, namespace: teamA }\nspec: { image: alpine }\n---\napiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db, namespace: teamB }\nspec: { image: alpine }\n---\napiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: db }\nspec: { image: alpine }\n",
+            "t",
+        )
+        .unwrap();
+        let names: Vec<String> = docs.iter().map(plan_name).collect();
+        assert_eq!(names, ["teamA/db", "teamB/db", "db"]);
+        for n in &names {
+            let (ns, name) = split_plan_name(n);
+            assert_eq!(scoped_plan_name(ns, name), *n);
+        }
+        // Planned against what is on the node, each resolves to its own entry.
+        let desired: Vec<_> = docs
+            .iter()
+            .map(|d| crate::cmd::reconcile::Desired {
+                kind: "Container".into(),
+                name: plan_name(d),
+                fields: Default::default(),
+                converges: true,
+                ownable: true,
+            })
+            .collect();
+        let actual: Vec<_> = names
+            .iter()
+            .map(|n| crate::cmd::reconcile::Actual {
+                kind: "Container".into(),
+                name: n.clone(),
+                fields: Default::default(),
+                owner: Some("s".into()),
+                last_applied: None,
+            })
+            .collect();
+        let plan = crate::cmd::reconcile::plan(&desired, &actual, "s");
+        assert!(
+            plan.iter()
+                .all(|c| c.diffs.is_empty() && !format!("{:?}", c.action).contains("Delete")),
+            "{plan:?}"
+        );
+    }
+
+    #[test]
+    fn a_typo_is_refused_before_any_effect_and_lenient_restores_the_old_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: web }\nspec: { image: alpine, memroy: 2G }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err().to_string();
+        assert!(err.contains("not understood"), "{err}");
+        assert!(load_lenient(&p).is_ok());
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Container\nmetadata: { name: web }\nspec: { image: alpine }\n",
+        )
+        .unwrap();
+        assert!(load(&p).is_ok());
+    }
+
+    /// A field a Kind refuses by name keeps its own code under the strict
+    /// load: DX-1540, not the «not understood» of a typo — and the lenient
+    /// load refuses it too, because nothing about it is a spelling mistake.
+    #[test]
+    fn a_field_refused_by_name_keeps_its_own_code_under_the_strict_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\nmetadata: { name: t }\nspec: { image: alpine:3.20, unprivileged: false }\n",
+        )
+        .unwrap();
+        for err in [load(&p).unwrap_err(), load_lenient(&p).unwrap_err()] {
+            assert_eq!(err.number(), 1540, "{err}");
+            assert!(!err.to_string().contains("not understood"), "{err}");
+        }
+        // The same for a pool field that is the administrator's.
+        std::fs::write(
+            &p,
+            "apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media }\nspec: { driver: dir, path: /srv/x }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err();
+        assert_eq!(err.number(), 1217, "{err}");
+        assert!(err.to_string().contains("`driver`") && err.to_string().contains("`path`"));
+        // Inside a Stack too.
+        std::fs::write(
+            &p,
+            "apiVersion: core.delonix.io/v1alpha1\nkind: Stack\nmetadata: { name: s }\nspec:\n  systemContainers:\n    - name: t\n      spec: { image: alpine:3.20, privileged: true }\n",
+        )
+        .unwrap();
+        assert_eq!(load(&p).unwrap_err().number(), 1540);
+    }
+
+    #[test]
+    fn a_probe_inside_a_pod_member_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Pod\nmetadata: { name: p }\nspec:\n  containers:\n    - name: a\n      image: alpine\n      readinessProbe: { httpGet: { path: /, port: 80 } }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err().to_string();
+        assert!(err.contains("not understood"), "{err}");
+    }
+
+    #[test]
     fn unknown_fields_apanha_gralha_e_ignora_conhecidos() {
         let text = "\
 apiVersion: delonix.io/v1
@@ -1275,7 +1534,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("delonix-manifest-unknown.yaml");
         std::fs::write(&p, text).unwrap();
-        let docs = load(&p).unwrap();
+        let docs = load_lenient(&p).unwrap();
         let unknown = unknown_fields(&docs[0], crate::cmd::container::CONTAINER_SPEC_FIELDS);
         // `memroy` (typo) is flagged; `image`/`restartPolicy` (canonical) are not.
         assert_eq!(unknown, vec!["memroy".to_string()]);
@@ -1293,10 +1552,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
         )
         .unwrap();
-        let antes = super::unknown_field_warnings();
-        super::load(&p).unwrap();
+        let antes = super::thread_unknown_fields();
+        super::load_lenient(&p).unwrap();
         assert_eq!(
-            super::unknown_field_warnings(),
+            super::thread_unknown_fields(),
             antes + 1,
             "carregar um manifesto com um campo inventado tem de contar UM aviso"
         );
@@ -1431,6 +1690,7 @@ spec: { image: nginx }
             "networks" => ("{ driver: bridge }", "Network"),
             "networkRoutes" => ("{ from: a, to: b }", "NetworkRoute"),
             "networkZones" => ("{ vnets: [{ name: prod }] }", "NetworkZone"),
+            "storagePools" => ("{ alertPct: 85 }", "StoragePool"),
             "volumes" => ("{}", "Volume"),
             "images" => ("{ pull: alpine }", "Image"),
             "apps" => ("{ source: ., image: shop }", "App"),

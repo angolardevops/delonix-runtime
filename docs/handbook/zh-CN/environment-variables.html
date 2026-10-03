@@ -455,6 +455,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>必须指向已存在的文件——绝不退回到其他文件。找到的第一个文件就是配置；文件从不合并。无法读取的文件会让不带 <code>--backend</code> 的 VM 请求失败，而不是猜测一个 provider。</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td>管理员的存储池许可清单的路径（ADR-0067 D3），取代 <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>。</td>
+<td>一个路径。</td>
+<td>当文件可被其所属组或所有人写入，或既不属于 root 也不属于运行引擎的用户时，文件会被拒绝。文件不存在表示没有声明任何存储池。</td>
+</tr>
+<tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a>（关于缺少 cgroup 委派的警告，以及 <code>warn_if_unprotected_memory</code>）、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>让「缺少 cgroup 委派」和「容器在任何地方都没有内存上限」这两类警告不再出现。</td>
@@ -524,6 +531,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>重新给 SDN 上的容器分配 IPv6 地址。</td>
 <td><code>1</code> → 启用；其他任何值 → 容器里的 IPv6 被禁用，转发被拒绝。</td>
 <td><strong>没有任何防火墙规则、namespace 隔离或 <code>Dependency</code> 会应用到 IPv6 上</strong>——每一条策略都只针对 IPv4。安全警告。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，<em>«Bloco 0 do plano 33 (v0.37.1)»</em>。</td>
+</tr>
+<tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>即使内核不过滤 bridge 内部的流量（未加载 <code>br_netfilter</code>，或 <code>bridge-nf-call-iptables=0</code>），也让具名 namespace 里的工作负载带着告警跑起来。不设置时请求会被拒绝（DX-6305，退出码 69），因为隔离规则装上了却什么都不拦。只有 <code>1</code> 才打开。</td>
+<td><code>1</code> → 带着告警跑；其他取值（或未设置）→ 拒绝。</td>
+<td>隔离规则装上了却什么都不拦。见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 中 «O isolamento de namespace é INERTE sem <code>br_netfilter</code>» 一节。</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>

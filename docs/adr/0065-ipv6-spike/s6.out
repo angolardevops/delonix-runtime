@@ -1,0 +1,10 @@
+v4 a(X)->b(Y): BLOCKED
+v6 a(X)->b(Y): BLOCKED
+v4 c(Y)->b(Y): OPEN
+v6 c(Y)->b(Y): OPEN
+v4 b(Y)->a(X) (return via established): OPEN
+v6 b(Y)->a(X) (return via established): OPEN
+  ip daddr 10.9.0.3 ip saddr @nsY4 counter packets 1
+  ip daddr 10.9.0.3 ip saddr @dlxall4 ct state new counter packets 2
+  ip6 daddr fd65:1::b ip6 saddr @nsY6 counter packets 1
+  ip6 daddr fd65:1::b ip6 saddr @dlxall6 ct state new counter packets 2

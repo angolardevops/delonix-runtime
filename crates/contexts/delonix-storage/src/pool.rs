@@ -22,9 +22,15 @@ pub struct PoolRef<'a> {
 pub enum PoolProbe {
     Available,
     /// The pool cannot be used, and the driver knows why.
-    Unavailable { missing: String, remedy: String },
+    Unavailable {
+        missing: String,
+        remedy: String,
+    },
     /// The driver could not find out.
-    Undetermined { reason: String, remedy: String },
+    Undetermined {
+        reason: String,
+        remedy: String,
+    },
 }
 
 impl PoolProbe {

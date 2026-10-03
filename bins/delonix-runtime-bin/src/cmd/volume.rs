@@ -258,6 +258,7 @@ pub(crate) const RECONCILED_VOLUME_FIELDS: &[&str] = &[
     "alertPct",
     "parent",
     "pool",
+    "labels",
 ];
 
 /// The manifest side, in comparable form.
@@ -373,8 +374,19 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     let current = store.inspect(name)?;
     let mut quota = current.quota_bytes;
     let mut alert = None;
+    let mut quota_touched = false;
     for d in diffs {
+        if d.field != "labels" {
+            quota_touched = true;
+        }
         match d.field.as_str() {
+            "labels" => {
+                store.set_metadata(
+                    name,
+                    &super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref()),
+                    &[],
+                )?;
+            }
             "quota" => quota = d.to.as_deref().and_then(|v| v.parse::<u64>().ok()),
             "alertPct" => alert = d.to.as_deref().and_then(|v| v.parse::<u8>().ok()),
             other => {
@@ -400,7 +412,11 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     // `privileged: false`, the same as `create_volume`'s own call: the hard
     // ext4-loopback cap belongs to the root model, and a declarative apply must
     // not quietly take a different route from the imperative one it mirrors.
-    store.set_quota(name, quota, alert, false)?;
+    // A change of labels alone is bookkeeping on the record: it has no reason
+    // to go through the quota path.
+    if quota_touched {
+        store.set_quota(name, quota, alert, false)?;
+    }
     Ok(())
 }
 
@@ -443,19 +459,28 @@ pub(crate) fn stamp(
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let (store, name) = store_for_plan_name(name)?;
+    // The document's own labels go on with the stamp: this is the one step
+    // every applied volume passes through, created or adopted.
+    let mut labels = super::reconcile::labels_delta(
+        None,
+        fields
+            .get(super::reconcile::LABELS_FIELD)
+            .map(String::as_str),
+    );
+    labels.extend([
+        (
+            super::reconcile::STACK_LABEL.to_string(),
+            Some(stack.to_string()),
+        ),
+        (
+            super::reconcile::MANAGED_BY.to_string(),
+            Some("delonix".to_string()),
+        ),
+    ]);
     let name = name.as_str();
     store.set_metadata(
         name,
-        &[
-            (
-                super::reconcile::STACK_LABEL.to_string(),
-                Some(stack.to_string()),
-            ),
-            (
-                super::reconcile::MANAGED_BY.to_string(),
-                Some("delonix".to_string()),
-            ),
-        ],
+        &labels,
         &[(
             super::reconcile::LAST_APPLIED.to_string(),
             Some(super::reconcile::encode_last_applied(fields)),
@@ -482,7 +507,14 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         // The FIELDS are computed from the document's own name: a share's
         // directory is `<parent>/shares/<ns>/<name>`, and the qualifier belongs
         // to the plan's identity, not to anything on disk.
-        fields: desired_volume_fields(&doc.metadata.name, &spec)?,
+        fields: {
+            let mut f = desired_volume_fields(&doc.metadata.name, &spec)?;
+            // `metadata.labels` of the document — see `network::desired`.
+            if let Some(labels) = super::reconcile::user_labels_field(&doc.metadata.labels) {
+                f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+            }
+            f
+        },
         name,
         converges: true,
         ownable: true,
@@ -506,7 +538,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         let Ok(scoped) = VolumeStore::open_scoped(state_root(), &ns) else {
             continue;
         };
-        for v in scoped.list().unwrap_or_default() {
+        for v in scoped.list()? {
             out.push(actual_of(scoped_plan_name(&ns, &v.name), &v));
         }
     }
@@ -519,7 +551,13 @@ fn actual_of(name: String, v: &delonix_volume::Volume) -> super::reconcile::Actu
         super::reconcile::Actual {
             kind: k::VOLUME.into(),
             name,
-            fields: actual_volume_fields(&v),
+            fields: {
+                let mut f = actual_volume_fields(&v);
+                if let Some(labels) = super::reconcile::user_labels_field(&v.labels) {
+                    f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+                }
+                f
+            },
             owner: v.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: v
                 .annotations
@@ -1013,6 +1051,20 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
         println!("volume/{name}: {}", super::po::t("ensured"));
     }
+    // The documents' own labels, for the path that does not stamp — see
+    // `network::apply`. The plan name is the one `desired` gives, so a share
+    // is found in its namespace's store.
+    for doc in manifest::of_kind(docs, k::VOLUME) {
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let labels = super::reconcile::labels_delta(None, own.as_deref());
+        if labels.is_empty() {
+            continue;
+        }
+        let (store, name) = store_for_plan_name(&desired(doc)?.name)?;
+        if store.inspect(&name).is_ok() {
+            store.set_metadata(&name, &labels, &[])?;
+        }
+    }
     Ok(())
 }
 
@@ -1459,6 +1511,16 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
     d.field_opt("Pool", v.pool.as_deref());
     if v.parent.is_none() {
         d.field("Driver", &v.driver);
+    }
+    // The same block `container describe` prints: without it a label on this
+    // record — the stack that owns it included — was visible nowhere.
+    if v.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, val) in &v.labels {
+            d.item(format!("{k}={val}"));
+        }
     }
     d.field("Mountpoint", &v.mountpoint);
     d.field("Created", output::fmt_local(v.created_unix));
@@ -2261,8 +2323,11 @@ mod tests {
         .unwrap();
         let share: super::VolumeSpec =
             serde_yaml::from_str("share:\n  from: nas\nquota: 5G\nalertPct: 90\n").unwrap();
+        // A volume in a storage pool (ADR-0067): `pool` is compared, `size`
+        // travels as the quota.
+        let pooled: super::VolumeSpec = serde_yaml::from_str("pool: fast\nsize: 1G\n").unwrap();
         let mut seen = std::collections::BTreeSet::new();
-        for spec in [&net, &share] {
+        for spec in [&net, &share, &pooled] {
             let f = super::desired_volume_fields("dados", spec).unwrap();
             for k in f.keys() {
                 assert!(
@@ -2271,6 +2336,19 @@ mod tests {
                 );
                 seen.insert(k.clone());
             }
+        }
+        // `labels` is the one field that comes from the document's metadata
+        // and not from its spec — through `desired`, like the others.
+        let doc: crate::cmd::manifest::ManifestDoc = serde_yaml::from_str(
+            "apiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: { name: dados, labels: { app: web } }\nspec: {}\n",
+        )
+        .unwrap();
+        for k in super::desired(&doc).unwrap().fields.keys() {
+            assert!(
+                super::RECONCILED_VOLUME_FIELDS.contains(&k.as_str()),
+                "{k} is compared but undocumented"
+            );
+            seen.insert(k.clone());
         }
         assert_eq!(
             seen.len(),

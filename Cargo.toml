@@ -171,3 +171,20 @@ undocumented_unsafe_blocks = "deny"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Developer and CI profiles. Measured on this workspace (2026-10-03, 8 jobs, no
+# sccache, `cargo test --workspace --no-run`, cold): line tables instead of full
+# debuginfo took 70.9 s / 8.5 GiB of target to 44.2 s / 4.9 GiB. The cost: a
+# debugger no longer shows local variables; backtraces and panics keep file:line.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# For gates that need a release-optimised binary but not the shipped one
+# (`make build PROFILE=release-ci`): same thin LTO, 16 codegen units instead of
+# one. Measured: 113.6 s against 188.4 s for the five binaries, peak rustc
+# 2.0 GiB against 2.5 GiB; the binary is 38 MiB against 32 MiB. The published
+# release and the perf gate keep using `release`.
+[profile.release-ci]
+inherits = "release"
+codegen-units = 16

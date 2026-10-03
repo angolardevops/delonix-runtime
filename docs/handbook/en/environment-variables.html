@@ -479,6 +479,13 @@ and how to tear the isolated infra down, is in
 <td>Must name an existing file — never falls back to another one. The first file found is the configuration; files are never merged. A file that cannot be read makes a VM request without <code>--backend</code> fail instead of guessing a provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td>Path to the administrator's storage pool allowlist (ADR-0067 D3), instead of <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
+<td>A path.</td>
+<td>The file is refused when its group or everyone can write it, or when it belongs to neither root nor the user running the engine. A file that does not exist means no pool was declared.</td>
+</tr>
+<tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the rootless-without-delegation warning and <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>Silences the warnings about missing cgroup delegation and about a container with no memory ceiling anywhere.</td>
@@ -552,11 +559,32 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <td><strong>No firewall rule, namespace isolation or <code>Dependency</code> applies to IPv6</strong> — every policy is IPv4-only. Security warning. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Runs a workload in a named namespace even when the kernel does not filter traffic inside a bridge (<code>br_netfilter</code> not loaded, or <code>bridge-nf-call-iptables=0</code>), with a warning. Without it the request is refused (DX-6305, exit 69), because the isolation would be installed and enforce nothing. Only <code>1</code> opens it.</td>
+<td><code>1</code> → run with a warning; anything else (or unset) → refused.</td>
+<td>The isolation rules are installed and enforce nothing. See <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, and with <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> even when the container's cgroup lacks the <code>cpuset</code>/<code>io</code> controller (<code>preflight_controller_limits</code>), instead of refusing (exit 69).</td>
 <td>Set (any value) → run, unlimited, with a warning.</td>
 <td>The kernel never sees the limits. See <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_MANIFEST_LENIENT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>manifest.<wbr>rs:manifest_lenient</code></a></td>
+<td>Loads a manifest that has fields the engine does not understand, warning about them, instead of refusing it before any effect (ADR-0069 D1).</td>
+<td><code>1</code> → lenient. Anything else, or unset → a not-understood field refuses the manifest.</td>
+<td>For a manifest written for a newer binary. A typo (<code>memroy:</code>) is also "not understood": prefer fixing the spelling. <code>stack validate</code> always reports instead of refusing.</td>
+</tr>
+<tr>
+<td><code>DELONIX_CNI_TIMEOUT_SECS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>cni.<wbr>rs:invoke</code></a></td>
+<td>Deadline for one CNI plugin invocation; a plugin still running at the deadline is killed and reaped.</td>
+<td>Positive integer seconds. Default 60; a value that does not parse, or 0, falls back to the default silently.</td>
+<td>Output of a plugin is capped at 1 MiB per stream regardless.</td>
 </tr>
 <tr>
 <td><code>DELONIX_INSECURE_BESTEFFORT</code></td>

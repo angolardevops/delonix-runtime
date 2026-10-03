@@ -33,6 +33,11 @@ use super::manifest::{self, ManifestDoc};
 use super::output::{self, OutputFormat};
 use super::util::state_root;
 
+/// The allowlist is YAML; the storage context takes the decoder from here.
+fn decode_allowlist(text: &str) -> std::result::Result<allowlist::Allowlist, String> {
+    serde_yaml::from_str(text).map_err(|e| e.to_string())
+}
+
 /// Above this share of the pool's capacity in use, a NEW volume is refused
 /// (ADR-0067 D6): a full pool fails every volume in it, not only the last one.
 const REFUSE_ABOVE_PCT: u8 = 95;
@@ -106,9 +111,8 @@ pub fn register_drivers() {
     ONCE.call_once(|| {
         // The mapped remover: a volume's data may belong to a sub-uid a
         // container wrote as, which this process cannot unlink directly.
-        let dir = delonix_volume::pool_dir::DirPoolDriver::new(Some(
-            delonix_linux::remove_tree_mapped,
-        ));
+        let dir =
+            delonix_volume::pool_dir::DirPoolDriver::new(Some(delonix_linux::remove_tree_mapped));
         // An id that is a literal cannot be empty; the only refusal there is.
         let _ = delonix_storage::registry::register(Arc::new(dir));
     });
@@ -144,13 +148,15 @@ impl Resolved {
 fn resolve(name: &str) -> Result<Resolved> {
     register_drivers();
     let file = allowlist::path();
-    let list = allowlist::load().map_err(pool_err)?.ok_or_else(|| {
-        pool_err(PoolError::PoolUnavailable(super::po::tf(
-            "storage pool '{name}': no pool is declared on this node — {file} does not exist. \
+    let list = allowlist::load(decode_allowlist)
+        .map_err(pool_err)?
+        .ok_or_else(|| {
+            pool_err(PoolError::PoolUnavailable(super::po::tf(
+                "storage pool '{name}': no pool is declared on this node — {file} does not exist. \
              Pools are declared there by the administrator, never by a manifest",
-            &[("name", name), ("file", &file.display().to_string())],
-        )))
-    })?;
+                &[("name", name), ("file", &file.display().to_string())],
+            )))
+        })?;
     let entry = list.pools.get(name).cloned().ok_or_else(|| {
         let known: Vec<&str> = list.pools.keys().map(String::as_str).collect();
         pool_err(PoolError::NotAllowed(super::po::tf(
@@ -291,7 +297,7 @@ fn volumes_in(pool: &str) -> Result<Vec<(String, u64)>> {
 // ---- the spec ---------------------------------------------------------------
 
 /// Refuses, by name, every field that is the administrator's to set.
-fn refuse_admin_fields(doc: &ManifestDoc) -> Result<()> {
+pub(crate) fn refuse_admin_fields(doc: &ManifestDoc) -> Result<()> {
     let serde_yaml::Value::Mapping(map) = &doc.spec else {
         return Ok(());
     };
@@ -404,7 +410,8 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 
 pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {
     let d = dir();
-    let mut r = read_in(&d, name)?.ok_or_else(|| Error::NotFound(format!("storagepool: {name}")))?;
+    let mut r =
+        read_in(&d, name)?.ok_or_else(|| Error::NotFound(format!("storagepool: {name}")))?;
     r.labels
         .insert(super::reconcile::STACK_LABEL.into(), stack.into());
     r.labels
@@ -745,7 +752,7 @@ fn rows() -> Result<Vec<LsRow>> {
     let records = list_in(&dir());
     // An allowlist that cannot be read is said once, on stderr; the pools in
     // use are still listed, each with the reason it is unavailable.
-    let declared = match allowlist::load() {
+    let declared = match allowlist::load(decode_allowlist) {
         Ok(l) => l.unwrap_or_default().pools,
         Err(e) => {
             output::warn(&Error::from(e).to_string());
@@ -761,8 +768,13 @@ fn rows() -> Result<Vec<LsRow>> {
         let rec = records.iter().find(|r| r.name == name);
         let entry = declared.get(&name);
         let (state, detail) = state_of(&name);
-        let usage = match (entry, entry.and_then(|e| delonix_storage::registry::driver(&e.driver))) {
-            (Some(entry), Some(d)) if state == "AVAILABLE" => d.usage(&PoolRef { name: &name, entry }),
+        let usage = match (
+            entry,
+            entry.and_then(|e| delonix_storage::registry::driver(&e.driver)),
+        ) {
+            (Some(entry), Some(d)) if state == "AVAILABLE" => {
+                d.usage(&PoolRef { name: &name, entry })
+            }
             _ => PoolUsage::default(),
         };
         let held = volumes_in(&name)?;
@@ -880,13 +892,19 @@ mod tests {
         for field in ADMIN_ONLY_FIELDS {
             let e = desired(&doc(&format!("{{ {field}: x }}"))).unwrap_err();
             assert_eq!(e.number(), 1217, "{field}: {e}");
-            assert!(e.to_string().contains(&format!("`{field}`")), "{field}: {e}");
+            assert!(
+                e.to_string().contains(&format!("`{field}`")),
+                "{field}: {e}"
+            );
         }
         // Several at once are all named: fixing them one refusal at a time is
         // one apply per field.
         let e = desired(&doc("{ devices: [/dev/sdb], path: /srv }")).unwrap_err();
         let text = e.to_string();
-        assert!(text.contains("`devices`") && text.contains("`path`"), "{text}");
+        assert!(
+            text.contains("`devices`") && text.contains("`path`"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -899,8 +917,12 @@ mod tests {
         assert_eq!(d.fields["alertPct"], "70");
         // `1` and `1.0` are one ceiling, or every plan would show a difference.
         assert_eq!(
-            desired(&doc("{ overcommit: { maxRatio: 1 } }")).unwrap().fields,
-            desired(&doc("{ overcommit: { maxRatio: 1.0 } }")).unwrap().fields
+            desired(&doc("{ overcommit: { maxRatio: 1 } }"))
+                .unwrap()
+                .fields,
+            desired(&doc("{ overcommit: { maxRatio: 1.0 } }"))
+                .unwrap()
+                .fields
         );
     }
 

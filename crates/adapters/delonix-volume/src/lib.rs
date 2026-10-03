@@ -485,7 +485,8 @@ impl VolumeStore {
         alert_pct: Option<u8>,
         pool: &str,
     ) -> Result<Volume> {
-        let mut vol = self.register_external(name, mountpoint, Some(size_bytes), alert_pct, None)?;
+        let mut vol =
+            self.register_external(name, mountpoint, Some(size_bytes), alert_pct, None)?;
         if vol.pool.as_deref() != Some(pool) {
             vol.pool = Some(pool.to_string());
             write_meta(&self.meta_path(name), &vol)?;

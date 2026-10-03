@@ -328,7 +328,10 @@ pub(crate) fn created_specs(
         .into_iter()
         .filter_map(|c| {
             let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
-            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+            Some((
+                manifest::scoped_plan_name(&c.namespace, &c.name),
+                super::reconcile::decode_last_applied(raw)?,
+            ))
         })
         .collect())
 }
@@ -652,7 +655,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     };
     Ok(super::reconcile::Desired {
         kind: k::CONTAINER.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields,
         converges: true,
         ownable: true,
@@ -672,7 +675,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
             kind: k::CONTAINER.into(),
-            name: c.name.clone(),
+            name: manifest::scoped_plan_name(&c.namespace, &c.name),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: c
@@ -1003,7 +1006,7 @@ fn valid_container_name(name: &str) -> bool {
 // language — the context returns them as data and never prints.
 #[cfg(test)]
 use delonix_compute::pod::HostAlias;
-pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
+pub(crate) use delonix_compute::pod::{PodSpec, POD_CONTAINER_FIELDS, POD_SPEC_FIELDS};
 
 /// Prints each translation notice ONCE per invocation.
 ///
@@ -1229,6 +1232,15 @@ pub enum ContainerCmd {
         /// Drop a capability. Repeatable.
         #[arg(long = "cap-drop")]
         cap_drop: Vec<String>,
+        /// Let this container send from a source prefix besides its own address, for
+        /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
+        /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
+        #[arg(long = "allow-source", value_name = "PREFIX")]
+        allow_source: Vec<String>,
+        /// Switch anti-spoofing off for this container. Exceptional: only when the
+        /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
+        #[arg(long = "no-source-check")]
+        no_source_check: bool,
         /// Security options (docker-style), repeatable:
         /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
         /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
@@ -1732,6 +1744,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             read_only,
             cap_add,
             cap_drop,
+            allow_source,
+            no_source_check,
             security_opt,
             apparmor,
             selinux,
@@ -1781,6 +1795,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: false,
                 detach,
                 name,
                 hostname,
@@ -1821,6 +1836,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 read_only,
                 cap_add,
                 cap_drop,
+                allow_source,
+                no_source_check,
                 security_opt,
                 apparmor,
                 selinux,
@@ -1978,8 +1995,10 @@ pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
+    let governed = super::firewall::policy_targets(docs);
     for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
+        let hold = governed.contains(name.as_str());
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
         let pod_shaped = doc.spec.get("containers").is_some();
@@ -1996,6 +2015,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             let pod: PodSpec = manifest::spec_of(doc)?;
             let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
             opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
+            opts.policy_hold = hold;
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -2005,6 +2025,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: hold,
                 detach: spec.detach,
                 name: Some(name.clone()),
                 hostname: spec.hostname,
@@ -2181,35 +2202,77 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 
 pub(crate) use delonix_compute::RunOpts;
 
-/// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
-/// not actually filtering intra-bridge traffic — the precondition namespace
-/// isolation silently depends on (see the `br_netfilter` section of
-/// AGENTS.md — isolation is INERT without it, measured 2026-08-12). Without
-/// the module
-/// (or with `bridge-nf-call-iptables=0`), every rule installs, `stack ls`/
-/// the firewall listing report success, and a container in a DIFFERENT
-/// namespace on the same bridge is reachable anyway — a security property
-/// that reads as applied while it does nothing.
-///
-/// Called on every attach of a NAMED namespace rather than once, matching
-/// the existing style for `--network-alias`/`--expose` (see nearby): an
-/// operator who fixes the host later stops seeing it, one who does not is
-/// reminded every time, not just the first.
-///
-/// Never refuses — this host may be one where the fix is not in the
-/// operator's hands yet. A query failure (holder unreachable/too old) stays
-/// silent: "could not ask" is not "it's off", same discipline as
-/// `infra::network_routes_live`.
-pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
-    if namespace.is_empty() || namespace == "default" {
-        return;
+/// Applies a container's anti-spoofing grants to the port its attach just
+/// pinned: extra source prefixes, or the check switched off. Each use is
+/// written to the event log — the opt-out is exceptional and must leave a trail.
+/// Nothing to do (and nothing logged) for a container with neither.
+fn apply_source_overrides(id: &str, name: &str, prefixes: &[String], off: bool) -> Result<()> {
+    let root = super::util::state_root();
+    if off {
+        infra::spoof_off(id)?;
+        delonix_node::events::emit(&root, "container", "source-check-off", id, name, None);
+    } else if !prefixes.is_empty() {
+        infra::spoof_allow(id, prefixes)?;
+        delonix_node::events::emit(
+            &root,
+            "container",
+            "source-prefixes-allowed",
+            id,
+            name,
+            Some(&prefixes.join(",")),
+        );
     }
-    if let Ok(false) = infra::br_netfilter_active() {
-        super::output::warn(&super::po::tf(
-            "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)",
-            &[("namespace", namespace)],
-        ));
+    Ok(())
+}
+
+/// Refuses `--namespace <ns>` when the kernel is not filtering intra-bridge
+/// traffic — the precondition namespace isolation silently depends on (see the
+/// `br_netfilter` section of AGENTS.md: isolation is INERT without it, measured
+/// 2026-08-12). Without the module (or with `bridge-nf-call-iptables=0`),
+/// every rule installs, `stack ls` and the firewall listing report success,
+/// and a container in a DIFFERENT namespace on the same bridge is reachable
+/// anyway — a security property that reads as applied while it does nothing.
+///
+/// # Why this is a refusal now, and was a warning before
+///
+/// Owner's decision D5 of the maturity plan (in `docs/discovery/`)
+/// (2026-10-02): the warning let `run` exit 0 on a tenant boundary that did
+/// not exist, the same shape the cgroup-limit preflight already refuses
+/// (DX-6305, exit 69). `DELONIX_ALLOW_UNENFORCED_ISOLATION=1` keeps the old
+/// behaviour — a loud warning and the workload runs — for a host where the
+/// fix is not in the operator's hands yet.
+///
+/// "Could not ask" (holder unreachable or too old) is not "it is off": that
+/// answer stays silent, same discipline as `infra::network_routes_live`.
+pub(crate) fn refuse_if_namespace_isolation_inert(namespace: &str) -> Result<()> {
+    isolation_verdict(
+        namespace,
+        infra::br_netfilter_active().ok(),
+        allow_unenforced_isolation(),
+    )
+}
+
+/// The valve of [`refuse_if_namespace_isolation_inert`]. Only `1` opens it: a
+/// typo must not quietly turn a refusal back into a warning.
+fn allow_unenforced_isolation() -> bool {
+    std::env::var("DELONIX_ALLOW_UNENFORCED_ISOLATION").as_deref() == Ok("1")
+}
+
+/// The pure decision behind [`refuse_if_namespace_isolation_inert`]:
+/// `filtering` is `None` when the host could not be asked.
+fn isolation_verdict(namespace: &str, filtering: Option<bool>, allow: bool) -> Result<()> {
+    if namespace.is_empty() || namespace == "default" || filtering != Some(false) {
+        return Ok(());
     }
+    let why = super::po::tf(
+        "--namespace '{namespace}' would not be enforced: this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so isolation between namespaces on the SAME network would report success and block nothing. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`); or DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose",
+        &[("namespace", namespace)],
+    );
+    if allow {
+        super::output::warn(&why);
+        return Ok(());
+    }
+    Err(Error::coded(6305, Error::Unavailable(why)))
 }
 
 /// Refuses `-m`/`--cpus`/`--cpu-weight` when this session has no real cgroup2
@@ -2673,6 +2736,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             opts.net.is_empty() || opts.net == "host",
         ),
     )?;
+    // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
+    // the ceiling above, absent from the policy means NOT granted.
+    super::policy::authorise_source_overrides(
+        &super::util::state_root(),
+        opts.name.as_deref().unwrap_or(&opts.image),
+        &opts.allow_source,
+        opts.no_source_check,
+    )?;
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
@@ -2866,7 +2937,22 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &[("p", profile)],
         ))
     };
-    let on_attached = |namespace: &str| warn_if_namespace_isolation_inert(namespace);
+    let (allow_source, no_source_check) =
+        (opts_copy.allow_source.clone(), opts_copy.no_source_check);
+    let override_name = cname.clone();
+    let on_attached = |namespace: &str| {
+        // A named namespace on a host that does not filter bridge traffic is
+        // refused (DX-6305) before anything else is applied to the port.
+        refuse_if_namespace_isolation_inert(namespace)?;
+        // The attach pinned the port to the container's own address; the grants
+        // the policy authorised in the preflight are applied on top. A failure
+        // leaves the port pinned (fail-closed) and says so.
+        if let Err(e) = apply_source_overrides(&id, &override_name, &allow_source, no_source_check)
+        {
+            super::output::error(&e.to_string());
+        }
+        Ok(())
+    };
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
     };
@@ -2922,6 +3008,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mounts = resolved.mounts;
     let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
+    // A container some policy document governs is born CLOSED (ADR-0069): the
+    // chain exists before the process does, and the record carries the same state
+    // so a restart cannot reopen it. `stack apply` releases it after the policy
+    // layers; a failed apply leaves it closed.
+    if opts_copy.policy_hold {
+        c.firewall = Some(policy_hold_firewall(&c.namespace));
+        c.annotations
+            .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
 
     let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
@@ -2939,6 +3034,21 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             );
             print_notices(&notices);
             let (netns, ip) = attached?;
+            if let Some(fw) = c.firewall.as_ref().filter(|_| opts_copy.policy_hold) {
+                // Before the re-exec starts the process: no packet of this
+                // container ever meets an open chain. If the chain cannot be
+                // installed the container is not started (fail closed).
+                if let Err(e) = infra::apply_firewall_all(&c.id, &[ip.as_str()], fw) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(Error::Runtime {
+                        context: "run",
+                        message: format!(
+                            "'{}' could not be created closed (policy hold), so it was not started: {e}",
+                            c.name
+                        ),
+                    });
+                }
+            }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
@@ -4018,6 +4128,22 @@ pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::record
 /// rm`/`clear` used to leave it in), the next `egress deny` then built a chain that
 /// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
 /// with nothing reporting it.
+/// Annotation on a container that is closed until its policy is applied.
+pub(crate) const POLICY_HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
+/// The closed state: default-deny both ways, no rules. Written with the policy
+/// fields the dataplane has always understood, so a holder from before this
+/// change enforces it too instead of ignoring an unknown field.
+pub(crate) fn policy_hold_firewall(namespace: &str) -> delonix_model::records::ContainerFw {
+    delonix_model::records::ContainerFw {
+        enabled: true,
+        policy_in: "deny".to_string(),
+        policy_out: "deny".to_string(),
+        rules: Vec::new(),
+        namespace: namespace.to_string(),
+    }
+}
+
 pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
     let mut fw = c.firewall.clone().unwrap_or_default();
     // Also for an EXISTING record: one written with the wrong namespace is
@@ -4032,6 +4158,14 @@ pub(crate) fn apply_firewall_everywhere(
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
+    // While a container is held, whatever the policy documents write goes to its
+    // RECORD (the intended state) and the dataplane keeps the closed chain: a
+    // policy that has applied its default but not yet its rules must not open a
+    // door the next document was going to shut. The release applies the record.
+    if c.annotations.contains_key(POLICY_HOLD_ANNOTATION) {
+        return infra::apply_firewall_all(&c.id, &refs, &policy_hold_firewall(&c.namespace))
+            .map_err(Into::into);
+    }
     infra::apply_firewall_all(&c.id, &refs, fw).map_err(Into::into)
 }
 
@@ -4146,7 +4280,19 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
-            warn_if_namespace_isolation_inert(&c.namespace);
+            // The attach re-pins the port to its own address only; the prefixes
+            // the engine authorised (a Kind node's PodCIDR) come back from the
+            // record, or a restarted node would drop every pod packet it routes.
+            if let Err(e) =
+                apply_source_overrides(&c.id, &c.name, &c.allowed_sources, c.source_check_disabled)
+            {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
+            }
+            if let Err(e) = refuse_if_namespace_isolation_inert(&c.namespace) {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
+            }
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
             // nsenter doesn't run from the reexec'd process.
             if let Some(port) = c.expose {
@@ -8296,5 +8442,34 @@ containers:
         let counts = super::restart_counts(root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 0);
         assert_eq!(counts.get("c2").copied().unwrap_or(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod isolation_verdict_tests {
+    use super::isolation_verdict;
+
+    #[test]
+    fn a_named_namespace_on_a_host_that_does_not_filter_is_refused_with_its_code() {
+        let e = isolation_verdict("teama", Some(false), false).unwrap_err();
+        assert_eq!(e.number(), 6305);
+        assert_eq!(delonix_model::exitcode::for_error(&e), 69);
+    }
+
+    #[test]
+    fn the_valve_turns_the_refusal_back_into_a_warning() {
+        assert!(isolation_verdict("teama", Some(false), true).is_ok());
+    }
+
+    #[test]
+    fn nothing_is_refused_when_the_host_filters_or_cannot_be_asked() {
+        assert!(isolation_verdict("teama", Some(true), false).is_ok());
+        assert!(isolation_verdict("teama", None, false).is_ok());
+    }
+
+    #[test]
+    fn the_default_namespace_is_never_refused() {
+        assert!(isolation_verdict("default", Some(false), false).is_ok());
+        assert!(isolation_verdict("", Some(false), false).is_ok());
     }
 }

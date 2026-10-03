@@ -115,19 +115,25 @@ pub fn valid_pool_name(name: &str) -> bool {
     };
     name.len() <= 63
         && (first.is_ascii_lowercase() || first.is_ascii_digit())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
         && !name.contains("..")
 }
 
 /// Reads the allowlist the engine uses. `Ok(None)` when the file does not
 /// exist: no pool was ever declared on this node, which is a different answer
 /// from a file that is there and cannot be used.
-pub fn load() -> Result<Option<Allowlist>> {
-    load_from(&path())
+pub fn load(decode: Decode) -> Result<Option<Allowlist>> {
+    load_from(&path(), decode)
 }
 
+/// Turns the text of the file into the document. The context does not carry a
+/// YAML parser (a context depends on no serialization format of a CLI or a
+/// server): the composition root passes the one it already has.
+pub type Decode = fn(&str) -> std::result::Result<Allowlist, String>;
+
 /// [`load`] from a given file.
-pub fn load_from(file: &Path) -> Result<Option<Allowlist>> {
+pub fn load_from(file: &Path, decode: Decode) -> Result<Option<Allowlist>> {
     let meta = match std::fs::metadata(file) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -145,7 +151,7 @@ pub fn load_from(file: &Path) -> Result<Option<Allowlist>> {
             file.display()
         ))
     })?;
-    parse(&text, file).map(Some)
+    parse(&text, file, decode).map(Some)
 }
 
 /// Only the file's owner may be able to write it, and the owner is root or
@@ -174,12 +180,11 @@ fn check_writers(file: &Path, meta: &std::fs::Metadata) -> Result<()> {
 }
 
 /// Parses and validates the text of an allowlist. `file` is only named in errors.
-pub fn parse(text: &str, file: &Path) -> Result<Allowlist> {
+pub fn parse(text: &str, file: &Path, decode: Decode) -> Result<Allowlist> {
     let list: Allowlist = if text.trim().is_empty() {
         Allowlist::default()
     } else {
-        serde_yaml::from_str(text)
-            .map_err(|e| Error::InvalidAllowlist(format!("{}: {e}", file.display())))?
+        decode(text).map_err(|e| Error::InvalidAllowlist(format!("{}: {e}", file.display())))?
     };
     if let Some(mode) = list.mode.as_deref() {
         if !matches!(mode, "helper" | "in-process") {
@@ -190,9 +195,9 @@ pub fn parse(text: &str, file: &Path) -> Result<Allowlist> {
         }
     }
     for (name, entry) in &list.pools {
-        entry
-            .validate(name)
-            .map_err(|why| Error::InvalidAllowlist(format!("{}: pool '{name}': {why}", file.display())))?;
+        entry.validate(name).map_err(|why| {
+            Error::InvalidAllowlist(format!("{}: pool '{name}': {why}", file.display()))
+        })?;
     }
     Ok(list)
 }
@@ -298,18 +303,27 @@ pub fn phase_of(driver: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    fn yaml(text: &str) -> std::result::Result<Allowlist, String> {
+        serde_yaml::from_str(text).map_err(|e| e.to_string())
+    }
+
     fn parse_ok(text: &str) -> Allowlist {
-        parse(text, Path::new("test.yaml")).unwrap()
+        parse(text, Path::new("test.yaml"), yaml).unwrap()
     }
 
     fn parse_err(text: &str) -> String {
-        parse(text, Path::new("test.yaml")).unwrap_err().to_string()
+        parse(text, Path::new("test.yaml"), yaml)
+            .unwrap_err()
+            .to_string()
     }
 
     #[test]
     fn a_dir_pool_needs_a_path_and_nothing_of_another_driver() {
         let l = parse_ok("pools:\n  media:\n    driver: dir\n    path: /srv/dlx\n");
-        assert_eq!(l.pools["media"].path.as_deref(), Some(Path::new("/srv/dlx")));
+        assert_eq!(
+            l.pools["media"].path.as_deref(),
+            Some(Path::new("/srv/dlx"))
+        );
         assert!(parse_err("pools:\n  media:\n    driver: dir\n").contains("needs `path`"));
         assert!(
             parse_err("pools:\n  media:\n    driver: dir\n    path: /srv/x\n    vg: vg0\n")
@@ -331,8 +345,10 @@ mod tests {
 
     #[test]
     fn a_field_nobody_defined_is_refused_not_ignored() {
-        assert!(parse_err("pools:\n  m:\n    driver: dir\n    path: /srv/x\n    command: rm\n")
-            .contains("command"));
+        assert!(
+            parse_err("pools:\n  m:\n    driver: dir\n    path: /srv/x\n    command: rm\n")
+                .contains("command")
+        );
         assert!(parse_err("poools: {}\n").contains("poools"));
     }
 
@@ -355,7 +371,16 @@ mod tests {
         for ok in ["media", "fast-1", "a.b_c", "0"] {
             assert!(valid_pool_name(ok), "{ok}");
         }
-        for bad in ["", "Media", "-x", ".x", "a/b", "a..b", "a b", &"x".repeat(64)] {
+        for bad in [
+            "",
+            "Media",
+            "-x",
+            ".x",
+            "a/b",
+            "a..b",
+            "a b",
+            &"x".repeat(64),
+        ] {
             assert!(!valid_pool_name(bad), "{bad}");
         }
     }
@@ -373,20 +398,28 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("pools.yaml");
-        assert!(load_from(&file).unwrap().is_none());
+        assert!(load_from(&file, yaml).unwrap().is_none());
         std::fs::write(&file, "pools: {}\n").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(load_from(&file).unwrap().is_some());
+        assert!(load_from(&file, yaml).unwrap().is_some());
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
-        let e = load_from(&file).unwrap_err().to_string();
+        let e = load_from(&file, yaml).unwrap_err().to_string();
         assert!(e.contains("writable by its group or by everyone"), "{e}");
     }
 
     #[test]
     fn max_volume_bytes_uses_the_callers_size_grammar() {
-        let l = parse_ok("pools:\n  m:\n    driver: dir\n    path: /srv/x\n    maxVolumeBytes: 2G\n");
-        let parse = |s: &str| s.strip_suffix('G').and_then(|n| n.parse::<u64>().ok()).map(|n| n << 30);
-        assert_eq!(l.pools["m"].max_volume_bytes("m", parse).unwrap(), Some(2 << 30));
+        let l =
+            parse_ok("pools:\n  m:\n    driver: dir\n    path: /srv/x\n    maxVolumeBytes: 2G\n");
+        let parse = |s: &str| {
+            s.strip_suffix('G')
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(|n| n << 30)
+        };
+        assert_eq!(
+            l.pools["m"].max_volume_bytes("m", parse).unwrap(),
+            Some(2 << 30)
+        );
         let none = |_: &str| None;
         assert!(l.pools["m"].max_volume_bytes("m", none).is_err());
     }
