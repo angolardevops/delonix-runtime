@@ -1,7 +1,7 @@
 # A segment realized by a cluster provider — Proxmox VE's own SDN — written as a
-# `Network` with the provider's part inline in `spec.provider` (ADR-0070).
-# Everything outside `provider` is provider-neutral; `provider.proxmox` is only
-# understood by the Proxmox provider and is refused under any other `name`.
+# `Network` with the provider's part inline in `spec.provider` (ADR-0070, ADR-0071).
+# Everything outside `provider` is provider-neutral; `provider.spec` is typed for the
+# provider named by `provider.type`, and a key that provider does not have is refused.
 #
 # The document never names the infrastructure endpoint: it is realized by the
 # zone provider the runtime has configured, which today is a Proxmox node
@@ -32,8 +32,8 @@ spec:
   subnet: 10.80.0.0/24
   gateway: 10.80.0.1
   provider:
-    name: proxmox
-    proxmox:
+    type: proxmox
+    spec:
       zone: lab
       alias: "lab network 1"
       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
@@ -50,5 +50,5 @@ kind: Network
 metadata: { name: labnet2 }
 spec:
   provider:
-    name: proxmox
-    proxmox: { zone: lab }
+    type: proxmox
+    spec: { zone: lab }

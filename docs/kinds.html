@@ -702,7 +702,7 @@ spec:
   type: vm
   vm:
     disk: delonix-vm-base:ubuntu-24.04
-    provider: { name: libvirt }                    # `vm` accepts any backend (unlike `microvm`)
+    provider: { type: libvirt }                    # `vm` accepts any backend (unlike `microvm`)
     restartPolicy: always
     vcpus: 2
     memory: 4G
@@ -744,7 +744,7 @@ spec:
     resources: { vcpus: 2, memory: 2G }
     network: { name: wl-net, mode: nat, staticIp: 192.168.122.61 }
     cloudInit: { hostname: wl-vm-grouped }
-    provider: { name: libvirt, libvirt: { machine: q35 } }
+    provider: { type: libvirt, spec: { machine: q35 } }
 ---
 # ---------------------------------------------------------------------------
 # type: microvm — a VirtualMachine on the microVM hypervisor; the backend is FORCED to cloud-hypervisor
@@ -758,7 +758,7 @@ spec:
   type: microvm
   microvm:
     disk: delonix-vm-base:ubuntu-24.04  # needs an image that boots on Cloud Hypervisor (not the libvirt-only k8s golden)
-    provider: { name: cloud-hypervisor }           # optional: only the value cloud-hypervisor is accepted here
+    provider: { type: cloud-hypervisor }           # optional: only the value cloud-hypervisor is accepted here
     vcpus: 2
     memory: 2G
     network: wl-net
@@ -2376,10 +2376,12 @@ spec:
     userData: null              # your own cloud-init user-data (path/@path) — replaces the generated one
 
   # The hypervisor, and what only that hypervisor understands. Everything above is
-  # provider-neutral; the vendor block under `provider` is refused for any other `name`.
+  # provider-neutral. `type` picks the provider (omit the whole block = the configured
+  # default / auto-detection); `spec` is typed per provider, and a key the type does
+  # not have is refused.
   provider:
-    name: null                   # cloud-hypervisor | libvirt | proxmox | null (auto)
-    libvirt:                     # libvirt only: full XML parity, all optional
+    type: libvirt                # cloud-hypervisor | libvirt | proxmox
+    spec:                        # libvirt: full XML parity, all optional
       machine: null                 # machine type (default q35)
       cpuModel: null                # host-passthrough (default) | host-model | a named model
       cpuTopology: null             # { sockets: 1, cores: 4, threads: 2 }
@@ -2440,7 +2442,7 @@ metadata:
   namespace: default                    # isolation namespace (enforced on the Cloud Hypervisor backend only)
 spec:
   disk: delonix-vm-base:ubuntu-24.04    # base image: a name in the VM image store, or a path (an overlay is made per VM)
-  provider: { name: libvirt }                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
+  provider: { type: libvirt }                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
   restartPolicy: always                 # no | on-failure | always
   vcpus: 4                              # omitted =&gt; the image&#x27;s own default, else 1
   memory: 4G                            # &quot;512M&quot; | &quot;2G&quot; | &quot;2Gi&quot; (k8s-style suffix accepted)
@@ -2521,8 +2523,8 @@ spec:
     # seed: /path/seed.iso              # prebuilt seed — see `prebuilt-seed`
 
   provider:                             # the hypervisor, and what only it understands
-    name: libvirt
-    libvirt:
+    type: libvirt
+    spec:
       machine: q35
       cpuModel: host-model
       cpuTopology: { sockets: 1, cores: 2, threads: 1 }
@@ -2546,7 +2548,7 @@ metadata:
   name: bridge-vm
 spec:
   disk: delonix-vm-base:ubuntu-24.04
-  provider: { name: libvirt }
+  provider: { type: libvirt }
   netMode: bridge
   bridge: br0                           # host bridge / libvirt network to attach to
   vcpus: 2
@@ -2561,7 +2563,7 @@ metadata:
   name: direct-kernel
 spec:
   disk: delonix-vm-base:fedora-42
-  provider: { name: cloud-hypervisor }
+  provider: { type: cloud-hypervisor }
   network: vm-net
   kernel: /var/lib/delonix/kernels/vmlinuz-6.14.0     # direct kernel boot
   initrd: /var/lib/delonix/kernels/initramfs-6.14.0.img
@@ -2578,7 +2580,7 @@ metadata:
   name: firmware-boot
 spec:
   disk: delonix-vm-base:ubuntu-24.04
-  provider: { name: cloud-hypervisor }
+  provider: { type: cloud-hypervisor }
   network: vm-net
   firmware: /usr/local/share/delonix/CLOUDHV.fd       # UEFI firmware path
   vcpus: 2
@@ -2605,8 +2607,8 @@ metadata:
 spec:
   disk: delonix-vm-base:ubuntu-24.04
   provider:
-    name: libvirt
-    libvirt:
+    type: libvirt
+    spec:
       xml: |
         &lt;domain type=&#x27;kvm&#x27;&gt;
           &lt;name&gt;raw-domain&lt;/name&gt;
@@ -3798,9 +3800,9 @@ spec:
 <h2 id='networkzone'>NetworkZone</h2>
 <p class='lang-pt'>Uma zona da SDN do próprio Proxmox VE e as vnets dentro dela. O documento não nomeia a infraestrutura: realiza-o o provider de zonas configurado (hoje um nó Proxmox registado por <code>DELONIX_PROXMOX_*</code>); sem nenhum, o <code>apply</code> recusa. Sem actualização no lugar: o <code>apply</code> garante as vnets listadas, e o teardown remove as vnets, depois a zona.</p><p class='lang-en'>A zone of Proxmox VE's own SDN and the vnets inside it. The document never names the infrastructure: the configured zone provider realizes it (today a Proxmox node registered through <code>DELONIX_PROXMOX_*</code>); with none, <code>apply</code> refuses. No update in place: <code>apply</code> ensures the listed vnets, and teardown removes the vnets, then the zone.</p>
 <pre><code># A segment realized by a cluster provider — Proxmox VE&#x27;s own SDN — written as a
-# `Network` with the provider&#x27;s part inline in `spec.provider` (ADR-0070).
-# Everything outside `provider` is provider-neutral; `provider.proxmox` is only
-# understood by the Proxmox provider and is refused under any other `name`.
+# `Network` with the provider&#x27;s part inline in `spec.provider` (ADR-0070, ADR-0071).
+# Everything outside `provider` is provider-neutral; `provider.spec` is typed for the
+# provider named by `provider.type`, and a key that provider does not have is refused.
 #
 # The document never names the infrastructure endpoint: it is realized by the
 # zone provider the runtime has configured, which today is a Proxmox node
@@ -3831,8 +3833,8 @@ spec:
   subnet: 10.80.0.0/24
   gateway: 10.80.0.1
   provider:
-    name: proxmox
-    proxmox:
+    type: proxmox
+    spec:
       zone: lab
       alias: &quot;lab network 1&quot;
       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
@@ -3849,8 +3851,8 @@ kind: Network
 metadata: { name: labnet2 }
 spec:
   provider:
-    name: proxmox
-    proxmox: { zone: lab }</code></pre>
+    type: proxmox
+    spec: { zone: lab }</code></pre>
 <h2 id='networkgateway'>NetworkGateway</h2>
 <p class='lang-pt'>Aliases e regras de filtro numa firewall de perímetro (ADR-0051), hoje o OPNsense, registado por <code>DELONIX_OPNSENSE_URL</code> e um par key/secret de API. Aliases entram antes das regras e saem depois delas; a identidade de uma regra é a sua <code>description</code>. Uma alteração ao spec é remover e voltar a aplicar.</p><p class='lang-en'>Aliases and filter rules on a perimeter firewall (ADR-0051), today OPNsense, registered through <code>DELONIX_OPNSENSE_URL</code> and an API key/secret pair. Aliases go in before rules and come out after them; a rule's identity is its <code>description</code>. A spec change is a remove and re-apply.</p>
 <pre><code># kind: NetworkGateway — aliases and filter rules on a perimeter firewall

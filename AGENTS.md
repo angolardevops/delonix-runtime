@@ -5236,6 +5236,19 @@ de re-exec, para um terceiro não nascer com metade).
 - O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
   com scope, refresh operacional do plan de VM, OpenStack).
 
+## O bloco `provider` é `type` + `spec` (ADR-0070/0071, 2026-10-03)
+
+- O que só um fabricante entende vive **inline** no recurso: `spec.provider: { type, spec }`.
+  `type` (`libvirt`/`cloud-hypervisor`/`proxmox`) substitui o `backend`; `spec` é tipado por
+  provider **e** por recurso e uma chave que o `type` não tem é recusada. `ref` está reservado até
+  o nó ter alvos nomeados (o `providers.yaml` do ADR-0054 tem um alvo por tipo).
+- `Network` com `provider.type: proxmox` é um segmento SDN: as redes que nomeiam a mesma zona
+  fundem-se, ao carregar, no único `NetworkZone` que o executor já reconcilia
+  (`cmd/network_provider.rs`). `kind: NetworkZone` carrega, anunciado como superado.
+- As grafias anteriores (`backend`, o grupo `libvirt:`, `provider: { name, libvirt }`, os campos
+  planos) normalizam para o mesmo e são reportadas; **um segundo executor nunca**. Uma `cpuTopology`
+  que não multiplica para `vcpus` é recusada: o genérico é a intenção.
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como
