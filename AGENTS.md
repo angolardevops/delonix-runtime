@@ -8783,3 +8783,42 @@ ilegível), e o serviço de exemplo eram duas sondas. Tudo com exit 0.
   DX-8101** (o PID 1 fica em `D`, `wb_wait_for_completion`): é o ADR-0056 D4, não é dos
   templates. Medido aqui com um `sleep` que não escreveu nada, enquanto outra corrida enchia o
   disco. Repetir o comando resolve.
+
+## A anti-spoof nunca filtrou nada, e passou para uma tabela `bridge` (2026-10-02)
+
+Encontrado pelo spike do ADR-0065 (IPv6) e confirmado contra o motor. A regra era
+`ip dlxing fwdeny iifname <veth> ip saddr != <ip> drop`, uma por porta, e o contador
+ficava a zero: o tráfego entre duas portas da mesma bridge só chega à camada IP pelo
+`br_netfilter`, e aí o `iifname` é a BRIDGE, nunca a porta. Medido: um container com
+`NET_ADMIN` forjou a origem e chegou ao vizinho (3/3); forjando o endereço de um membro
+de outra namespace furou o isolamento (0 pacotes com o seu endereço, 3 com o forjado).
+A correcção da auditoria #3 para o tap das VMs («a mesma regra do veth») herdou o
+defeito. **Lição: uma regra de segurança só está provada quando um pacote forjado é
+contado a cair** — a auditoria leu o ruleset e viu a regra lá.
+
+- **`table bridge dlxspoof`, hook `prerouting`**, onde o `iifname` é a porta. Prende
+  por porta o MAC (`macs`), a origem IPv4 exacta (`src`) ou um prefixo autorizado
+  (`srcpfx`, intervalos), e o IP e o MAC do emissor ARP. DHCP e sondas ARP de `0.0.0.0`
+  passam (uma VM não tem endereço antes do lease); frames 802.1Q/802.1ad de uma porta
+  presa caem. Um conjunto lido em JSON (`nft -j`) é o que o `spoof_forget` usa para
+  levar os elementos de uma porta: os nomes de porta reutilizam-se.
+- **Containers**: o `attach`/`attach-extra` do holder prendem o veth ao IP e ao MAC lido
+  na netns. **VMs**: o cliente envia `spoofbind <tap> <ip> <mac>` depois do `vmtap`, para
+  TODAS as VMs com lease — a namespace `default` incluída, que a linha `vmtap` curta
+  nunca levava. Um plano de controlo de um binário anterior não conhece o verbo: avisa
+  e segue (era tão inerte antes como depois).
+- **Nós Kind**: o kindnet encaminha o CIDR do cluster sem masquerade, por isso o tráfego
+  de pods entre nós sai com a origem do pod. Depois de os nós estarem `Ready`, o
+  `cluster create` lê o `.spec.podCIDR` de cada nó, exige que seja um prefixo canónico,
+  dentro do `podSubnet` e ESTRITAMENTE mais estreito, e autoriza-o só na interface desse
+  nó (`spoofallow`), guardando-o em `Container.allowed_sources` para o `start` o repor.
+  Medido num cluster de 2 nós: ping pod↔pod entre nós 3/3 nos dois sentidos; o worker
+  com origem no PodCIDR do control-plane é cortado (o `curl` esgota o tempo, contador
+  +3) e com o seu próprio recebe o RST. **Armadilha do teste**: contra o IP de um NÓ o
+  kindnet faz masquerade e a origem forjada nunca chega ao fio — o destino tem de estar
+  dentro do CIDR dos pods.
+- **Upgrade**: a regra é instalada pelo plano de controlo; só pega num nó depois de
+  `delonix net netns down` + `up`.
+- **Por fazer (PR seguinte)**: prefixos autorizados para containers que fazem de router
+  e um opt-out — os dois só com autorização do administrador na política do nó e
+  auditados; o tenant não os liga.

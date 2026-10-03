@@ -4149,6 +4149,15 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
+            // The attach re-pins the port to its own address only; the prefixes
+            // the engine authorised (a Kind node's PodCIDR) come back from the
+            // record, or a restarted node would drop every pod packet it routes.
+            if !c.allowed_sources.is_empty() {
+                if let Err(e) = infra::spoof_allow(&c.id, &c.allowed_sources) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(e.into());
+                }
+            }
             warn_if_namespace_isolation_inert(&c.namespace);
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
             // nsenter doesn't run from the reexec'd process.
