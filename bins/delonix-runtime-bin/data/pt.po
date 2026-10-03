@@ -15239,3 +15239,13 @@ msgstr "Aloca o volume neste pool de armazenamento (ver `delonix get storagepool
 
 msgid "Size asked of the pool (e.g. `10g`) — only with `--pool`"
 msgstr "Tamanho pedido ao pool (ex.: `10g`) — só com `--pool`"
+
+# ---- ADR-0069 items 3-4: plan digest for every Kind, provider-aware VM plan ----
+msgid "Apply only if this is still the plan: the `planDigest` of each change from `stack plan -o json` (repeatable). A change whose digest, recomputed now, is not among them is a stale plan — refused before anything is written."
+msgstr "Aplica só se o plano ainda for este: o `planDigest` de cada mudança do `stack plan -o json` (repetível). Uma mudança cujo digest, recalculado agora, não esteja entre eles é um plano obsoleto — recusada antes de se escrever seja o que for."
+
+msgid "--plan-digest was given, and the manifest has nothing to check it against"
+msgstr "--plan-digest foi dado, e o manifesto não tem nada contra que o verificar"
+
+msgid "warning: could not ask the provider whether VM '{name}' exists: {err}"
+msgstr "aviso: não foi possível perguntar ao provider se a VM '{name}' existe: {err}"
