@@ -3469,8 +3469,15 @@
           "type": "integer"
         },
         "provider": {
-          "description": "`pinggy` | `ngrok` | `cloudflare`.",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "`pinggy` | `ngrok` | `cloudflare`.",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
         },
         "token": {
           "default": null,

@@ -87,6 +87,76 @@ pub(crate) struct TunnelSpec {
     insecure_skip_tls_verify: bool,
 }
 
+/// Keys of `provider.spec` of a tunnel, by provider: what only that service
+/// understands. `insecureSkipTlsVerify` is about the LOCAL backend and stays
+/// provider-neutral; `localPort` is the intent.
+const TUNNEL_PROVIDER_TYPES: &[&str] = &["pinggy", "ngrok", "cloudflare"];
+const TUNNEL_PROVIDER_SPEC: &[(&str, &str)] = &[
+    ("hostname", "hostname"),
+    ("token", "token"),
+    ("tokenSecretRef", "tokenSecretRef"),
+];
+
+/// Normalizes `spec.provider: { type, spec }` (ADR-0071) to the scalar form
+/// plus the flat fields the executor reads. A scalar `provider: cloudflare` is
+/// the selection-only spelling and passes untouched. A key in `provider.spec`
+/// that is also written flat is a contradiction, not a precedence rule.
+pub(crate) fn lower_tunnel_provider(docs: &mut [ManifestDoc]) -> Result<()> {
+    use serde_yaml::Value;
+    for doc in docs.iter_mut().filter(|d| d.kind == k::GATEWAY) {
+        let name = doc.metadata.name.clone();
+        let bad = |msg: String| Error::Invalid(format!("Gateway '{name}': {msg}"));
+        let Value::Mapping(spec) = &mut doc.spec else {
+            continue;
+        };
+        let Some(Value::Mapping(p)) = spec.get("provider").cloned() else {
+            continue;
+        };
+        for key in p.keys().filter_map(Value::as_str) {
+            if !matches!(key, "type" | "spec") {
+                return Err(bad(format!("spec.provider.{key}: unknown field (a tunnel provider block is `type` + `spec`)")));
+            }
+        }
+        let ty = p
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("spec.provider.type is required".into()))?
+            .to_string();
+        if !TUNNEL_PROVIDER_TYPES.contains(&ty.as_str()) {
+            return Err(bad(format!(
+                "spec.provider.type '{ty}' is not a tunnel provider (known: {})",
+                TUNNEL_PROVIDER_TYPES.join(", ")
+            )));
+        }
+        match p.get("spec") {
+            None | Some(Value::Null) => {}
+            Some(Value::Mapping(block)) => {
+                for key in block.keys().filter_map(Value::as_str) {
+                    let Some((_, flat)) = TUNNEL_PROVIDER_SPEC.iter().find(|(f, _)| *f == key)
+                    else {
+                        return Err(bad(format!(
+                            "spec.provider.spec.{key}: not a tunnel provider field"
+                        )));
+                    };
+                    if spec.contains_key(*flat) {
+                        return Err(bad(format!(
+                            "'{flat}' is written both in spec.provider.spec and at the top of spec — say it once"
+                        )));
+                    }
+                }
+                for (from, to) in TUNNEL_PROVIDER_SPEC {
+                    if let Some(v) = block.get(*from) {
+                        spec.insert(Value::from(*to), v.clone());
+                    }
+                }
+            }
+            Some(_) => return Err(bad("spec.provider.spec must be a mapping".into())),
+        }
+        spec.insert(Value::from("provider"), Value::from(ty));
+    }
+    Ok(())
+}
+
 pub const TUNNEL_SPEC_FIELDS: &[&str] = &[
     "provider",
     "localPort",
@@ -1233,6 +1303,61 @@ pub(crate) fn cmd_rm(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    fn gw(spec: &str) -> Vec<ManifestDoc> {
+        vec![serde_yaml::from_str(&format!(
+            "apiVersion: gateway.delonix.io/v1alpha1\nkind: Gateway\nmetadata: {{ name: t }}\nspec: {spec}\n"
+        ))
+        .unwrap()]
+    }
+
+    #[test]
+    fn type_and_spec_lower_to_the_scalar_and_flat_fields_the_executor_reads() {
+        let mut d = gw("{ localPort: 80, provider: { type: cloudflare, spec: { tokenSecretRef: s, hostname: a.example } } }");
+        lower_tunnel_provider(&mut d).unwrap();
+        let spec = &d[0].spec;
+        assert_eq!(spec["provider"], serde_yaml::Value::from("cloudflare"));
+        assert_eq!(spec["tokenSecretRef"], serde_yaml::Value::from("s"));
+        assert_eq!(spec["hostname"], serde_yaml::Value::from("a.example"));
+        // The selection-only scalar passes untouched.
+        let mut d = gw("{ localPort: 80, provider: pinggy }");
+        lower_tunnel_provider(&mut d).unwrap();
+        assert_eq!(d[0].spec["provider"], serde_yaml::Value::from("pinggy"));
+    }
+
+    #[test]
+    fn a_tunnel_provider_block_is_checked_not_trusted() {
+        for (spec, needle) in [
+            (
+                "{ localPort: 80, provider: { spec: {} } }",
+                "type is required",
+            ),
+            (
+                "{ localPort: 80, provider: { type: ngrokk } }",
+                "not a tunnel provider",
+            ),
+            (
+                "{ localPort: 80, provider: { type: ngrok, ref: x } }",
+                "provider.ref",
+            ),
+            (
+                "{ localPort: 80, provider: { type: ngrok, spec: { region: eu } } }",
+                "spec.region",
+            ),
+            (
+                "{ localPort: 80, hostname: a, provider: { type: ngrok, spec: { hostname: b } } }",
+                "say it once",
+            ),
+            (
+                "{ localPort: 80, provider: { type: ngrok, spec: [] } }",
+                "must be a mapping",
+            ),
+        ] {
+            let mut d = gw(spec);
+            let e = lower_tunnel_provider(&mut d).unwrap_err().to_string();
+            assert!(e.contains(needle), "{spec}: {e}");
+        }
+    }
+
     use super::*;
 
     #[test]

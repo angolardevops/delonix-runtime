@@ -13,14 +13,16 @@
 # Your own domain (a stable https://app.example.org): the domain's DNS must be
 # on Cloudflare (a free account is enough). Create a tunnel in the dashboard
 # with a public hostname whose service is http://localhost:__PORT__, keep its token in a
-# Delonix secret, and uncomment the two lines below. README.md, "On the
+# Delonix secret, and uncomment the `spec:` block below. README.md, "On the
 # internet without a public IP", has every step.
 apiVersion: gateway.delonix.io/v1alpha1
 kind: Gateway
 metadata:
   name: __NAME__-tunnel
 spec:
-  provider: cloudflare
+  provider:
+    type: cloudflare
+    # spec:
+    #   tokenSecretRef: __NAME__-tunnel   # the secret's `token` key holds the tunnel token
+    #   hostname: app.example.org         # informational: the route lives in the Cloudflare dashboard
   localPort: __PORT__
-  # tokenSecretRef: __NAME__-tunnel   # the secret's `token` key holds the tunnel token
-  # hostname: app.example.org         # informational: the route lives in the Cloudflare dashboard
