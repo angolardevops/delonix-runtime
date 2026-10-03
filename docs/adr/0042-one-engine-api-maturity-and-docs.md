@@ -1,6 +1,6 @@
 # ADR-0042: One engine API — one version number, Richardson maturity, published docs
 
-- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C started 2026-09-25: `delonix-node-api` exists on the socket and serves `NodeService.ListProviders` as gRPC and HTTP/JSON (ADR-0050 D5); since 2026-10-02 (slice C1) also `GetNodeInfo`, `GetHealth`, `GetCapacity` and `GET /openapi.json` (the committed generated document, embedded at build time). Since slice C2 also `/docs` (Swagger UI 5.33.1) and `/redoc` (ReDoc 2.5.4), from files embedded in the binary — byte-identical to the npm packages, in `third_party/node-api-docs/`, checked against its `SHA256SUMS` by `build.rs` — under a Content-Security-Policy that allows only the socket (measured in a browser: ReDoc's footer logo from `cdn.redoc.ly` is blocked before any request leaves). **Slice C3 (2026-10-03)** closes step C with the transcoding spike's result (see «Spike result: REST transcoding» below): the REST routes are generated at build time from the `google.api.http` annotations. **Step E started 2026-10-03 (slice E1, network reads)**: `NetworkService.GetNetwork` and `ListNetworks` are served on both encodings. A network belongs to the node: it is reported in `default`, and another namespace has none. `Realized` is read from the dataplane record; the implementation (driver, bridge, gateway) travels under `spec.extensions.by_provider["linux"]`. With a resource and a list on the socket, three step D conventions gained their first producer: `meta.etag` is the `ETag` header and a matching `If-None-Match` is `304`; `label_selector` (equality grammar; set-based forms refused); `page.page_size`/`page.page_token` with the next page as a `next` link, mirrored in the `Link` header. `Network` and `ListNetworksResponse` gained `links`. The four network mutations answer `UNIMPLEMENTED`: they return an `Operation`, which needs the persisted operation record first. **Step D started 2026-10-02 (slice D1)**: every REST error is an RFC 9457 `application/problem+json` document built by the engine's `codes::problem` (with `grpc_status`), and the published OpenAPI declares it — `scripts/contract_gate.py` applies one documented transform (`problem_json`) to the plugin's output, which only knows `google.rpc.Status`; gRPC keeps `google.rpc.Status`. New codes DX-4001 (no route), DX-6001 (not served yet, HTTP 501) and DX-9005 (internal). A method a path does not answer is 405 with `Allow` and a problem document. **Slice D2**: `Link` in the contract (`rel`, `href`, `method`), `GET /v1` (`GetApiRoot`: the API version and a link to every resource served, and only those), `links` on `NodeInfo`, `Health`, `Capacity` and `ListProvidersResponse` (a filtered list's `self` keeps the filter), and every JSON answer mirrors its `links` in an RFC 8288 `Link` header read back from the body. Still to come in D: `ETag`/`If-Match`, pagination, idempotency — they matter once mutations and lists are served (step E). `GET /v1` moved to step D: the entry point is made of `links`, which D puts in the contract, and serving it before would publish a shape the OpenAPI does not declare. **Transcoding spike result**: the proto3 JSON of every message is generated from the same files (`pbjson`, proto field names = the OpenAPI's `naming=proto`); the HTTP route of a `google.api.http` annotation is written by hand per RPC for now (one exists), and a generic transcoder over the annotations is the next slice of C. The `delonix-node-proto` crate is not split out: with one consumer it would be the dead scaffolding ADR-0040 P1 refuses, so the stubs live in `delonix_node_api::proto` as the CRI's do
+- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C started 2026-09-25: `delonix-node-api` exists on the socket and serves `NodeService.ListProviders` as gRPC and HTTP/JSON (ADR-0050 D5); since 2026-10-02 (slice C1) also `GetNodeInfo`, `GetHealth`, `GetCapacity` and `GET /openapi.json` (the committed generated document, embedded at build time). Since slice C2 also `/docs` (Swagger UI 5.33.1) and `/redoc` (ReDoc 2.5.4), from files embedded in the binary — byte-identical to the npm packages, in `third_party/node-api-docs/`, checked against its `SHA256SUMS` by `build.rs` — under a Content-Security-Policy that allows only the socket (measured in a browser: ReDoc's footer logo from `cdn.redoc.ly` is blocked before any request leaves). **Slice C3 (2026-10-03)** closes step C with the transcoding spike's result (see «Spike result: REST transcoding» below): the REST routes are generated at build time from the `google.api.http` annotations. **Step E started 2026-10-03 (slice E1, network reads)**: `NetworkService.GetNetwork` and `ListNetworks` are served on both encodings. A network belongs to the node: it is reported in `default`, and another namespace has none. `Realized` is read from the dataplane record; the implementation (driver, bridge, gateway) travels under `spec.extensions.by_provider["linux"]`. With a resource and a list on the socket, three step D conventions gained their first producer: `meta.etag` is the `ETag` header and a matching `If-None-Match` is `304`; `label_selector` (equality grammar; set-based forms refused); `page.page_size`/`page.page_token` with the next page as a `next` link, mirrored in the `Link` header. `Network` and `ListNetworksResponse` gained `links`. The four network mutations answer `UNIMPLEMENTED`: they return an `Operation`, which needs the persisted operation record first. **Slice E2 (2026-10-03, the operation record and the first mutations)**: `NetworkService.CreateNetwork` and `DeleteNetwork` are served, and `OperationService.GetOperation` and `ListOperations` with them — see «Slice E2: the operation record» below. `ConnectContainer`/`DisconnectContainer` (they answer a `Container`, which the container wave brings), `WatchOperation` and `CancelOperation` still answer `UNIMPLEMENTED`. **Step D started 2026-10-02 (slice D1)**: every REST error is an RFC 9457 `application/problem+json` document built by the engine's `codes::problem` (with `grpc_status`), and the published OpenAPI declares it — `scripts/contract_gate.py` applies one documented transform (`problem_json`) to the plugin's output, which only knows `google.rpc.Status`; gRPC keeps `google.rpc.Status`. New codes DX-4001 (no route), DX-6001 (not served yet, HTTP 501) and DX-9005 (internal). A method a path does not answer is 405 with `Allow` and a problem document. **Slice D2**: `Link` in the contract (`rel`, `href`, `method`), `GET /v1` (`GetApiRoot`: the API version and a link to every resource served, and only those), `links` on `NodeInfo`, `Health`, `Capacity` and `ListProvidersResponse` (a filtered list's `self` keeps the filter), and every JSON answer mirrors its `links` in an RFC 8288 `Link` header read back from the body. Still to come in D: `ETag`/`If-Match`, pagination, idempotency — they matter once mutations and lists are served (step E). `GET /v1` moved to step D: the entry point is made of `links`, which D puts in the contract, and serving it before would publish a shape the OpenAPI does not declare. **Transcoding spike result**: the proto3 JSON of every message is generated from the same files (`pbjson`, proto field names = the OpenAPI's `naming=proto`); the HTTP route of a `google.api.http` annotation is written by hand per RPC for now (one exists), and a generic transcoder over the annotations is the next slice of C. The `delonix-node-proto` crate is not split out: with one consumer it would be the dead scaffolding ADR-0040 P1 refuses, so the stubs live in `delonix_node_api::proto` as the CRI's do
 - **Date:** 2026-09-17
 - **Deciders:** Walter (owner)
 - **Builds on, does not reopen:** ADR-0040 D4 (one contract in `proto/delonix/node/v1`, gRPC
@@ -184,3 +184,58 @@ Not carried by the REST encoding yet: the three server-streaming RPCs (`WatchEve
 watch) answer `501` and name gRPC, which serves streams on the same socket. `additional_bindings`
 fail the build instead of being dropped.
 
+## Slice E2: the operation record (step E, 2026-10-03)
+
+**What is served.** `POST /v1/namespaces/default/networks` (`CreateNetwork`),
+`DELETE /v1/namespaces/default/networks/{name}` (`DeleteNetwork`),
+`GET /v1/operations/{id}` and `GET /v1/operations`, on both encodings.
+
+**The record.** One file per operation, `<state root>/operations/<id>.json`,
+written as `RUNNING` before the work starts and rewritten when it ends. It names
+the process doing the work (pid and start time). A reader that finds an
+unfinished record whose owner is gone ends it `FAILED` with reason `Interrupted`
+and writes that back — the server is socket-activated and has no supervisor to
+do it. A finished record is removed seven days after it ended, when a new
+operation begins.
+
+**What is refused before an operation exists, and what is the operation.** What
+can be decided without touching anything is the error itself, and writes no
+record: a request that is wrong (name, subnet, namespace, topology), a name
+already taken (`ALREADY_EXISTS`, 409), an `etag` that does not match (`ABORTED`,
+412), a network something is attached to (`FAILED_PRECONDITION`, 409, DX-5307,
+naming what is attached). A failure of the work is the operation, `FAILED`, with
+the engine's class in `error.reason` and its number in `error.metadata["dx"]`.
+
+**Idempotency.** A `request_id` gives the operation the id `r-<request_id>`,
+created exclusively (`link(2)`): of two requests with one `request_id`, one
+begins. The same request sent again is answered with that operation, whatever
+its state — before the checks the first request itself made fail (a create's
+"already exists", a delete's "not found"). A `request_id` that already answered
+another verb or target is refused. It is 1 to 64 characters of letters, digits,
+`.`, `_` and `-`, because it is part of a file name. On REST the
+`Idempotency-Key` header is the request's `request_id`, and `If-Match` its
+`etag`; a header and a body field that disagree are refused.
+
+**The REST answer.** The `Operation`, with `Location: /v1/operations/{id}`:
+`202 Accepted` while it runs, `200` once it has ended. Both network mutations
+end before they answer, so they answer `200` — a client reads `state`, not the
+status. The table in D2 says `201 Created` for a `POST` on a collection; an RPC
+that returns an `Operation` does not answer the resource, so it does not answer
+`201`. An operation that created something links it as `target`.
+
+**One write path.** The work is `delonix_sdn::netops` — the declarative record,
+then the dataplane record, the rollback when the second fails, and the in-use
+check — and the CLI's `network create`/`network rm` go through the same
+functions. Only the `bridge` topology is created through the API; `overlay` is
+refused by name (501).
+
+**A defect this found.** `NetworkStore::create_with_cidr` did not check the
+name: measured on v4.4.0, `delonix network create '../evil' --subnet
+10.231.0.0/24` wrote the record outside `networks/` and exited 0. The check
+moved into the store (`NetworkStore::validate_name`), with a test, before a
+name could arrive by socket.
+
+**Not validated.** A server killed in the middle of a create, on a real socket:
+the `Interrupted` path is proven with a record written by hand whose owner is a
+process that exited. `Operation.result` (the typed result as `Any`) and
+`trace_id` are left empty.

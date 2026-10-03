@@ -7,10 +7,15 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
+use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
 use crate::proto::v1::{
     ApiRoot, Capacity, Event, GetApiRootRequest, GetCapacityRequest, GetHealthRequest,
     GetNodeInfoRequest, Health, ListProvidersRequest, ListProvidersResponse, NodeInfo,
     WatchEventsRequest,
+};
+use crate::proto::v1::{
+    CancelOperationRequest, GetOperationRequest, ListOperationsRequest, ListOperationsResponse,
+    WatchOperationRequest,
 };
 use crate::proto::v1::{
     ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
@@ -178,16 +183,26 @@ impl NetworkService for NodeApi {
 
     async fn create_network(
         &self,
-        _req: Request<CreateNetworkRequest>,
+        req: Request<CreateNetworkRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("NetworkService", "CreateNetwork"))
+        let req = req.into_inner();
+        blocking("network create", move || {
+            crate::network_ops::create_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn delete_network(
         &self,
-        _req: Request<DeleteNetworkRequest>,
+        req: Request<DeleteNetworkRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("NetworkService", "DeleteNetwork"))
+        let req = req.into_inner();
+        blocking("network delete", move || {
+            crate::network_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn connect_container(
@@ -202,6 +217,50 @@ impl NetworkService for NodeApi {
         _req: Request<DisconnectContainerRequest>,
     ) -> Result<Response<Container>, Status> {
         Err(unserved("NetworkService", "DisconnectContainer"))
+    }
+}
+
+#[tonic::async_trait]
+impl OperationService for NodeApi {
+    async fn get_operation(
+        &self,
+        req: Request<GetOperationRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let id = req.into_inner().id;
+        blocking("operation", move || {
+            crate::operations::get_in(&node::state_root(), &id)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_operations(
+        &self,
+        req: Request<ListOperationsRequest>,
+    ) -> Result<Response<ListOperationsResponse>, Status> {
+        let req = req.into_inner();
+        blocking("operations", move || {
+            crate::operations::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    type WatchOperationStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<Operation, Status>> + Send + 'static>>;
+
+    async fn watch_operation(
+        &self,
+        _req: Request<WatchOperationRequest>,
+    ) -> Result<Response<Self::WatchOperationStream>, Status> {
+        Err(unserved("OperationService", "WatchOperation"))
+    }
+
+    async fn cancel_operation(
+        &self,
+        _req: Request<CancelOperationRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("OperationService", "CancelOperation"))
     }
 }
 
@@ -233,6 +292,10 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", NetworkServiceServer::<NodeApi>::NAME),
             NetworkServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", OperationServiceServer::<NodeApi>::NAME),
+            OperationServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -261,6 +324,18 @@ async fn rest(
         .get(hyper::header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
+    // Read before the body is taken: a borrow of the request held across an
+    // await would make this future not `Send`.
+    let (idempotency_key, if_match) = {
+        let header = |name: &str| {
+            req.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        (header("idempotency-key"), header("if-match"))
+    };
     let answer = async {
         let body = axum::body::to_bytes(req.into_body(), MAX_BODY)
             .await
@@ -270,19 +345,87 @@ async fn rest(
                     route.rpc
                 ))
             })?;
-        let input = transcode::bind(route, &vars, query.as_deref(), &body)?;
+        let mut input = transcode::bind(route, &vars, query.as_deref(), &body)?;
+        if MUTATIONS.contains(&route.rpc) {
+            from_header(&mut input, "request_id", "Idempotency-Key", idempotency_key)?;
+            from_header(
+                &mut input,
+                "etag",
+                "If-Match",
+                if_match.map(|v| v.trim_start_matches("W/").trim_matches('"').to_string()),
+            )?;
+        }
         match route.service {
             "NodeService" => transcode::dispatch_node_service(&NodeApi, route.rpc, input).await,
             "NetworkService" => {
                 transcode::dispatch_network_service(&NodeApi, route.rpc, input).await
             }
+            "OperationService" => {
+                transcode::dispatch_operation_service(&NodeApi, route.rpc, input).await
+            }
             _ => Err(transcode::not_served(route)),
         }
     };
     match answer.await {
+        Ok(body) if MUTATIONS.contains(&route.rpc) => acknowledged(with_link_header_of(body)),
         Ok(body) => with_etag(with_link_header_of(body), if_none_match.as_deref()),
         Err(status) => problem(status, &path),
     }
+}
+
+/// The RPCs that answer an `Operation` and read the two request headers of
+/// ADR-0042 D2: `Idempotency-Key` (the request's `request_id`) and `If-Match`
+/// (its `etag`). A header on any other route is not read, and `If-Match` on a
+/// request with no `etag` field is refused.
+const MUTATIONS: &[&str] = &["CreateNetwork", "DeleteNetwork"];
+
+/// Puts a header's value in the request field it stands for. The same value
+/// in both places is fine; two different ones are refused — which of them the
+/// server obeyed would be a guess.
+fn from_header(
+    input: &mut serde_json::Value,
+    field: &str,
+    header: &str,
+    value: Option<String>,
+) -> Result<(), Status> {
+    let (Some(value), Some(msg)) = (value, input.as_object_mut()) else {
+        return Ok(());
+    };
+    if header == "If-Match" && value == "*" {
+        return Ok(());
+    }
+    match msg.get(field).and_then(|v| v.as_str()) {
+        Some(sent) if !sent.is_empty() && sent != value => Err(Status::invalid_argument(format!(
+            "the {header} header ('{value}') and the request's {field} ('{sent}') disagree"
+        ))),
+        _ => {
+            msg.insert(field.to_string(), value.into());
+            Ok(())
+        }
+    }
+}
+
+/// The answer to a mutation (ADR-0042 D2): the `Operation`, with `Location`
+/// naming it. `202 Accepted` while it runs; `200` once it has ended — the
+/// body says how.
+fn acknowledged(
+    (body, mut res): (serde_json::Value, axum::response::Response),
+) -> axum::response::Response {
+    let running = matches!(
+        body.get("state").and_then(|s| s.as_str()),
+        Some("OPERATION_STATE_PENDING" | "OPERATION_STATE_RUNNING")
+    );
+    if running {
+        *res.status_mut() = hyper::StatusCode::ACCEPTED;
+    }
+    if let Some(v) = body
+        .get("id")
+        .and_then(|i| i.as_str())
+        .and_then(|id| hyper::header::HeaderValue::from_str(&format!("/v1/operations/{id}")).ok())
+    {
+        res.headers_mut().insert(hyper::header::LOCATION, v);
+    }
+    res
 }
 
 /// ADR-0042 D2, concurrency: a resource's `meta.etag` is its `ETag` header,
@@ -347,7 +490,7 @@ async fn fallback(req: axum::extract::Request) -> axum::response::Response {
     }
     let path = req.uri().path().to_string();
     problem(
-        Status::not_found(format!("route {} {path} on the node API", req.method())),
+        no_route(format!("route {} {path} on the node API", req.method())),
         &path,
     )
 }
@@ -403,7 +546,7 @@ async fn openapi_json() -> axum::response::Response {
 fn method_not_allowed(method: &str, path: &str, allow: &[&str]) -> axum::response::Response {
     let allow = allow.join(", ");
     let mut res = problem_as(
-        Status::not_found(format!(
+        no_route(format!(
             "route {method} {path} on the node API (this path answers {allow})"
         )),
         path,
@@ -415,6 +558,17 @@ fn method_not_allowed(method: &str, path: &str, allow: &[&str]) -> axum::respons
     res
 }
 
+/// No handler for this method and path: `NOT_FOUND` carrying DX-4001, which
+/// tells it apart from a resource that does not exist (DX-4000).
+fn no_route(msg: String) -> Status {
+    let mut status = Status::not_found(msg);
+    status.metadata_mut().insert(
+        crate::network_ops::DX_METADATA,
+        tonic::metadata::MetadataValue::from_static("4001"),
+    );
+    status
+}
+
 /// A failure as the engine's error, with its dictionary number, and the HTTP
 /// status the REST encoding answers with. `UNIMPLEMENTED` is 501 — the
 /// operation is in the contract and this version does not serve it, and a 503
@@ -423,14 +577,42 @@ fn method_not_allowed(method: &str, path: &str, allow: &[&str]) -> axum::respons
 pub fn engine_error(status: &Status) -> (delonix_model::Error, hyper::StatusCode) {
     use delonix_model::Error;
     let msg = status.message().to_string();
+    // A failure that came from the engine carries its dictionary number: the
+    // document says that code, and the status is its class's.
+    if let Some(number) = status
+        .metadata()
+        .get(crate::network_ops::DX_METADATA)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u16>().ok())
+    {
+        let inner = match number / 1000 {
+            1 | 2 => Error::Invalid(msg),
+            3 => Error::NotRunning(msg),
+            4 => Error::NotFound(msg),
+            5 => Error::Conflict(msg),
+            6 => Error::Unavailable(msg),
+            7 => Error::PermissionDenied(msg),
+            8 => Error::Timeout(msg),
+            _ => Error::Runtime {
+                context: "node-api",
+                message: msg,
+            },
+        };
+        let err = Error::coded(number, inner);
+        let http = hyper::StatusCode::from_u16(err.class().http_status())
+            .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+        return (err, http);
+    }
     match status.code() {
+        tonic::Code::AlreadyExists => (Error::Conflict(msg), hyper::StatusCode::CONFLICT),
+        // A failed concurrency check (`If-Match`): 412, never a silent overwrite.
+        tonic::Code::Aborted => (Error::Conflict(msg), hyper::StatusCode::PRECONDITION_FAILED),
         tonic::Code::InvalidArgument | tonic::Code::FailedPrecondition => {
             (Error::Invalid(msg), hyper::StatusCode::BAD_REQUEST)
         }
-        tonic::Code::NotFound => (
-            Error::coded(4001, Error::NotFound(msg)),
-            hyper::StatusCode::NOT_FOUND,
-        ),
+        // A resource that is not there. A PATH that is not there carries
+        // DX-4001 in its metadata ([`no_route`]) and was answered above.
+        tonic::Code::NotFound => (Error::NotFound(msg), hyper::StatusCode::NOT_FOUND),
         tonic::Code::Unimplemented => (
             Error::coded(6001, Error::Unavailable(msg)),
             hyper::StatusCode::NOT_IMPLEMENTED,

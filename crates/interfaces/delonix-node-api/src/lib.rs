@@ -23,6 +23,13 @@
 //! `If-None-Match` is 304), a list takes `label_selector` ([`selector`]) and
 //! pages by name, with the next page as a link.
 //!
+//! Step E, the first mutations: `CreateNetwork` and `DeleteNetwork`
+//! ([`network_ops`]) answer an `Operation` persisted under the state root
+//! before the work starts ([`operations`]), read back with
+//! `OperationService.GetOperation` and `ListOperations`. `request_id` (REST:
+//! `Idempotency-Key`) makes a retry the first answer; `etag` (REST:
+//! `If-Match`) makes a stale delete 412.
+//!
 //! The REST routes are not written by hand: `build.rs` generates the route
 //! table and the dispatchers from the `google.api.http` annotations
 //! ([`transcode`]), for every RPC of the contract. A route of a service this
@@ -56,8 +63,10 @@ pub mod proto {
 }
 
 pub mod docs;
+pub mod network_ops;
 pub mod networks;
 pub mod node;
+pub mod operations;
 pub mod providers;
 pub mod selector;
 mod service;

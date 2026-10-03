@@ -51,7 +51,7 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
     let mut nets = delonix_node_api::proto::v1::network_service_client::NetworkServiceClient::new(
         channel.clone(),
     );
-    let mut cli = NodeServiceClient::new(channel);
+    let mut cli = NodeServiceClient::new(channel.clone());
 
     let all = cli
         .list_providers(ListProvidersRequest::default())
@@ -167,11 +167,52 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .await
         .expect_err("no such network");
     assert_eq!(missing.code(), tonic::Code::NotFound);
+    // The mutations are served (their work is covered where the state root is
+    // the test's own); over the wire, here, only what they refuse before
+    // touching anything: this test runs against the process's state root.
     let create = nets
-        .create_network(delonix_node_api::proto::v1::CreateNetworkRequest::default())
+        .create_network(delonix_node_api::proto::v1::CreateNetworkRequest {
+            namespace: "no-such-namespace".into(),
+            name: "x".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("a network is created in default");
+    assert_eq!(create.code(), tonic::Code::InvalidArgument);
+    let delete = nets
+        .delete_network(delonix_node_api::proto::v1::DeleteNetworkRequest {
+            namespace: "no-such-namespace".into(),
+            name: "x".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("a network is removed in default");
+    assert_eq!(delete.code(), tonic::Code::InvalidArgument);
+    let connect = nets
+        .connect_container(delonix_node_api::proto::v1::ConnectContainerRequest::default())
         .await
         .expect_err("not served yet");
-    assert_eq!(create.code(), tonic::Code::Unimplemented);
+    assert_eq!(connect.code(), tonic::Code::Unimplemented);
+
+    // The operation record, over gRPC: an id nothing was ever given is NOT_FOUND.
+    let mut ops =
+        delonix_node_api::proto::v1::operation_service_client::OperationServiceClient::new(
+            channel.clone(),
+        );
+    let missing = ops
+        .get_operation(delonix_node_api::proto::v1::GetOperationRequest {
+            id: "op-no-such-operation".into(),
+        })
+        .await
+        .expect_err("no such operation");
+    assert_eq!(missing.code(), tonic::Code::NotFound);
+    let cancel = ops
+        .cancel_operation(delonix_node_api::proto::v1::CancelOperationRequest {
+            id: "op-no-such-operation".into(),
+        })
+        .await
+        .expect_err("not served yet");
+    assert_eq!(cancel.code(), tonic::Code::Unimplemented);
 
     // ADR-0042 D2: the entry point, on the gRPC encoding too.
     let root = cli
@@ -560,7 +601,8 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
     for (method, path) in [
         ("GET", "/v1/namespaces/default/containers"),
         ("POST", "/v1/namespaces/default/containers/web:start"),
-        ("DELETE", "/v1/namespaces/default/networks/lab"),
+        ("POST", "/v1/namespaces/default/networks/lab:connect"),
+        ("POST", "/v1/operations/op-1:cancel"),
         ("POST", "/v1/images:pull"),
         ("GET", "/v1/events:watch"),
     ] {
@@ -570,6 +612,21 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         assert_eq!(v["grpc_status"], 12, "{v}");
         assert_eq!(v["instance"], path, "{v}");
     }
+    // The network mutations are served. This router answers from the
+    // process's state root, so only what they refuse before touching anything
+    // is driven here: a network lives in `default`.
+    for (method, path, body) in [
+        ("POST", "/v1/namespaces/outro/networks", r#"{"name":"lab"}"#),
+        ("DELETE", "/v1/namespaces/outro/networks/lab", ""),
+    ] {
+        let (status, _, v) = call(method, path, body).await;
+        assert_eq!(status, 400, "{method} {path}: {v}");
+        assert_eq!(v["grpc_status"], 3, "{v}");
+    }
+    // An operation nobody was given: the RESOURCE is missing (DX-4000), which
+    // is not the missing ROUTE (DX-4001).
+    let (status, _, v) = call("GET", "/v1/operations/op-no-such-operation", "").await;
+    assert_eq!((status, v["dx"].as_str()), (404, Some("DX-4000")), "{v}");
     let (status, allow, v) = call("GET", "/v1/namespaces/default/containers/web:start", "").await;
     assert_eq!((status, allow.as_deref()), (405, Some("POST")), "{v}");
     let (status, allow, _) = call("PUT", "/v1/namespaces/default/containers/web", "").await;
