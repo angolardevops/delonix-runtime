@@ -251,7 +251,7 @@ fn spec_fields(spec: &SystemContainerSpecDoc) -> Result<BTreeMap<String, String>
 /// opposite of what it asked. A privileged container on a remote node is a
 /// decision of its own (ADR-0058), so the request fails before anything is
 /// pulled or created.
-fn reject_privilege(doc: &ManifestDoc) -> Result<()> {
+pub(crate) fn reject_privilege(doc: &ManifestDoc) -> Result<()> {
     const NOT_HERE: &[&str] = &["unprivileged", "privileged", "features", "nesting"];
     let serde_yaml::Value::Mapping(map) = &doc.spec else {
         return Ok(());
@@ -1138,9 +1138,14 @@ mod tests {
                 "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\n\
                  metadata: {{name: t}}\nspec: {{image: alpine:3.20, {field}}}\n"
             );
-            let docs = manifest::load_str(&text, "test").unwrap();
-            let err = desired(&docs[0]).unwrap_err();
+            // Refused when the manifest is loaded — before the unknown-field
+            // check can call it a spelling mistake.
+            let err = manifest::load_str(&text, "test").unwrap_err();
             assert_eq!(err.number(), 1540, "{field}: {err}");
+            // And by the Kind itself, for a document that did not come
+            // through the loader.
+            let doc: ManifestDoc = serde_yaml::from_str(&text).unwrap();
+            assert_eq!(desired(&doc).unwrap_err().number(), 1540, "{field}");
         }
         let docs = manifest::load_str(
             "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\n\
