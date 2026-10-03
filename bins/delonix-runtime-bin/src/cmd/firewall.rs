@@ -446,10 +446,49 @@ fn rule_spec(r: &FwRule) -> String {
 /// other's rule is live in `nft` right now but silently missing from the
 /// persisted record, so it vanishes on the next `container start` (which
 /// only re-applies what's persisted).
+/// The container a policy names — or, when no container has that name, the POD of
+/// that name seen as one target ([`super::pod::pod_view`]). Read-only.
+pub(crate) fn load_governed(store: &Store, target: &str) -> Result<Container> {
+    match store.load(target) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            let e: Error = e.into();
+            if e.is_not_found() {
+                if let Some((_, view)) = super::pod::pod_view(store, target)? {
+                    return Ok(view);
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+/// The key to hand [`update_locked`] for a record found by scanning: the pod's
+/// name for a pod member (its policy lives on the pod, not on the member), the
+/// container's id otherwise.
+pub(crate) fn governed_key(c: &Container) -> String {
+    c.pod
+        .as_deref()
+        .and_then(super::pod::pod_of_netns)
+        .map(str::to_string)
+        .unwrap_or_else(|| c.id.clone())
+}
+
 pub(crate) fn update_locked<F>(store: &Store, id_or_name: &str, f: F) -> Result<Container>
 where
     F: FnOnce(&mut Container) -> Result<bool>,
 {
+    // A pod is governed as ONE target: the closure runs on its view (netns id, pod
+    // address) and only the firewall and annotations are written back to the head
+    // member, under the head's lock.
+    if let Err(e) = store.load(id_or_name) {
+        let e: Error = e.into();
+        if e.is_not_found() {
+            if let Some((head_id, view)) = super::pod::pod_view(store, id_or_name)? {
+                return update_pod_locked(store, id_or_name, &head_id, view, f);
+            }
+        }
+    }
     let mut err = None;
     let c = store.update(id_or_name, |c| match f(c) {
         Ok(commit) => commit,
@@ -461,6 +500,42 @@ where
     match err {
         Some(e) => Err(e),
         None => Ok(c),
+    }
+}
+
+fn update_pod_locked<F>(
+    store: &Store,
+    pod: &str,
+    head_id: &str,
+    view: Container,
+    f: F,
+) -> Result<Container>
+where
+    F: FnOnce(&mut Container) -> Result<bool>,
+{
+    let ip = view.ip.clone().unwrap_or_default();
+    let mut err = None;
+    let mut out = view;
+    store.update(head_id, |head| {
+        let mut v = super::pod::as_pod_view(head, pod, &ip);
+        match f(&mut v) {
+            Ok(commit) => {
+                if commit {
+                    head.firewall = v.firewall.clone();
+                    head.annotations = v.annotations.clone();
+                }
+                out = v;
+                commit
+            }
+            Err(e) => {
+                err = Some(e);
+                false
+            }
+        }
+    })?;
+    match err {
+        Some(e) => Err(e),
+        None => Ok(out),
     }
 }
 
@@ -1248,7 +1323,7 @@ pub(crate) fn held_targets(docs: &[ManifestDoc]) -> Option<Vec<String>> {
         policy_targets(docs)
             .into_iter()
             .filter(|t| {
-                super::util::find(&store, t).is_ok_and(|c| {
+                load_governed(&store, t).is_ok_and(|c| {
                     c.annotations
                         .contains_key(super::container::POLICY_HOLD_ANNOTATION)
                 })
@@ -1266,7 +1341,7 @@ pub(crate) fn release_policy_holds(docs: &[ManifestDoc]) -> Result<usize> {
     let (_, store) = super::util::open_stores()?;
     let mut released = 0;
     for target in policy_targets(docs) {
-        let Ok(c) = super::util::find(&store, target) else {
+        let Ok(c) = load_governed(&store, target) else {
             continue;
         };
         if !c
@@ -1276,7 +1351,7 @@ pub(crate) fn release_policy_holds(docs: &[ManifestDoc]) -> Result<usize> {
             continue;
         }
         let declared = declared_directions(docs, target);
-        update_locked(&store, &c.id, |c| {
+        update_locked(&store, target, |c| {
             // The annotation goes first: while it is there the dataplane is held
             // closed whatever is applied.
             c.annotations
@@ -1658,7 +1733,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             }
             continue;
         }
-        let Ok(c) = store.load(&spec.target) else {
+        let Ok(c) = load_governed(&store, &spec.target) else {
             continue; // target not created yet — the plan will say Create
         };
         let Some(fw) = &c.firewall else { continue };
@@ -1813,7 +1888,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 /// OPEN, across a tenant boundary, without a word — the qualified
 /// `<namespace>/<name>` form is the way to say which one you meant.
 fn workload_cidr(store: &Store, name: &str) -> Result<String> {
-    let c = store.load(name).map_err(|e| match e.into_root() {
+    let c = load_governed(store, name).map_err(|e| match e.into_root() {
         // The store says "no such container"; here the useful sentence names
         // the ROLE the missing thing was playing, so keep it.
         Error::NotFound(_) => Error::Invalid(super::po::tf(

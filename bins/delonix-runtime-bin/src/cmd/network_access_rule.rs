@@ -194,7 +194,7 @@ pub(crate) fn remove_by_origin_anywhere(store: &Store, origin: &str) -> Result<(
         if !fw.rules.iter().any(|r| r.origin.as_deref() == Some(origin)) {
             continue;
         }
-        update_locked(store, &c.id, |c| {
+        update_locked(store, &super::firewall::governed_key(&c), |c| {
             let mut fw = super::container::firewall_or_new(c);
             fw.rules.retain(|r| r.origin.as_deref() != Some(origin));
             super::container::apply_firewall_everywhere(c, &fw)?;

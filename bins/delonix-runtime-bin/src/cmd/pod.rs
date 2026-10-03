@@ -35,6 +35,12 @@ use super::util::open_stores;
 /// Label that ties a container to its pod (membership, derived state).
 pub(crate) const POD_LABEL: &str = "delonix.io/pod";
 
+/// The network the manifest DECLARED for the pod (`spec.network`), on every
+/// member. A member's own record says `--net host` (it joins the pod's netns), so
+/// reading the network back from it could never equal a declared custom network:
+/// every second apply of a pod on `network: appnet` planned a replace.
+pub(crate) const POD_NETWORK_LABEL: &str = "delonix.io/pod-network";
+
 /// The address the pod's shared netns actually got, recorded on each member at create time.
 ///
 /// `ls`/`describe`/`rm` used to RECOMPUTE it with `infra::container_ip`, which hardcodes the
@@ -249,9 +255,17 @@ pub fn run(action: PodCmd) -> Result<()> {
 
 /// Applies the `kind: Pod` documents of a manifest.
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    // The pods some policy document governs are created CLOSED (ADR-0069 D6).
+    let governed = super::firewall::policy_targets(docs);
     for doc in manifest::of_kind(docs, k::POD) {
         let spec: PodSpec = manifest::spec_of(doc)?;
-        create_pod(&doc.metadata.name, doc.metadata.namespace.clone(), spec)?;
+        let hold = governed.contains(doc.metadata.name.as_str());
+        create_pod(
+            &doc.metadata.name,
+            doc.metadata.namespace.clone(),
+            spec,
+            hold,
+        )?;
     }
     Ok(())
 }
@@ -316,7 +330,7 @@ fn check_pod_namespace(name: &str, want: &str, have: &str) -> Result<()> {
     )))
 }
 
-fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()> {
+fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec, hold: bool) -> Result<()> {
     valid_pod_name(name)?;
     let (images, store) = open_stores()?;
 
@@ -358,10 +372,25 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     })?;
     apply_pod_namespace_isolation(&netns, &ip, &ns)?;
     container::warn_if_namespace_isolation_inert(&ns);
+    // A governed pod's address is closed BEFORE any member exists to use it; if the
+    // chain cannot be installed the pod is not started.
+    if hold {
+        let closed = container::policy_hold_firewall(&ns);
+        if let Err(e) = delonix_sdn::infra::apply_firewall_all(&netns, &[ip.as_str()], &closed) {
+            infra::detach_container(&netns, &ip);
+            return Err(Error::Runtime {
+                context: "pod",
+                message: format!(
+                    "pod '{name}' could not be created closed (policy hold), so it was not started: {e}"
+                ),
+            });
+        }
+    }
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
     // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them
     // (via `pod_infra_pid`), so the pod shares System V/POSIX IPC + the hostname.
+    let declared_network = spec.network.clone();
     let mut members = container::pod_member_run_opts(name, namespace, spec, &netns)?;
     // Record the address the pod REALLY got, so nothing downstream has to guess it (see
     // [`POD_IP_LABEL`]). Set here and not in `pod_member_run_opts` because the attach —
@@ -369,6 +398,8 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     // fixed but before it is called.
     for opts in members.iter_mut() {
         opts.labels.push(format!("{POD_IP_LABEL}={ip}"));
+        opts.labels
+            .push(format!("{POD_NETWORK_LABEL}={declared_network}"));
     }
     let count = members.len();
     let first = members.remove(0);
@@ -384,6 +415,21 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     }) {
         let _ = remove_pod(name, true);
         return Err(e);
+    }
+    // The hold lives on the head member's record, like every other pod-level
+    // fact (ownership, last-applied), and goes in as soon as it exists so a
+    // restart of the pod cannot reopen it.
+    if hold {
+        if let Some((head_id, _)) = pod_view(&store, name)? {
+            store.update(&head_id, |h| {
+                h.firewall = Some(container::policy_hold_firewall(&h.namespace));
+                h.annotations.insert(
+                    container::POLICY_HOLD_ANNOTATION.to_string(),
+                    "1".to_string(),
+                );
+                true
+            })?;
+        }
     }
     // The cgroup-delegation warning is about the ENVIRONMENT the members share,
     // and member one has just answered it — either it warned or there was
@@ -432,6 +478,54 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
     Ok(out)
 }
 
+/// The pod seen as ONE firewall target (ADR-0069): the head member's record
+/// wearing the identity of the shared netns — `id` is the netns name the chain is
+/// keyed on, `ip` the pod's address. Returns `(head id, view)`, or `None` when
+/// there is no such pod. The view is what policy code mutates; only its
+/// `firewall` and `annotations` are written back to the head (where a pod's
+/// ownership and last-applied already live).
+pub(crate) fn pod_view(
+    store: &delonix_state::Store,
+    pod: &str,
+) -> Result<Option<(String, Container)>> {
+    let members = members_of(store, pod)?;
+    let Some(head) = members.first() else {
+        return Ok(None);
+    };
+    let netns = pod_netns_name(pod);
+    let ip = pod_ip(&members, &netns);
+    Ok(Some((head.id.clone(), as_pod_view(head, pod, &ip))))
+}
+
+/// The pure half of [`pod_view`].
+pub(crate) fn as_pod_view(head: &Container, pod: &str, ip: &str) -> Container {
+    let mut view = head.clone();
+    view.id = pod_netns_name(pod);
+    view.name = pod.to_string();
+    view.ip = Some(ip.to_string());
+    view.extra_networks.clear();
+    view
+}
+
+/// The pod a netns name (`pod-<name>`) belongs to.
+pub(crate) fn pod_of_netns(netns: &str) -> Option<&str> {
+    netns.strip_prefix("pod-")
+}
+
+/// What to enforce on a pod's address: the persisted firewall of its head member
+/// (a policy, or the hold) when there is one, else the namespace isolation alone.
+fn pod_firewall_to_enforce(pod: &str, ns: &str) -> Option<delonix_model::records::ContainerFw> {
+    let (_images, store) = open_stores().ok()?;
+    let (_, view) = pod_view(&store, pod).ok().flatten()?;
+    if view
+        .annotations
+        .contains_key(container::POLICY_HOLD_ANNOTATION)
+    {
+        return Some(container::policy_hold_firewall(ns));
+    }
+    view.firewall
+}
+
 /// Installs namespace isolation on a pod's SHARED netns address.
 ///
 /// Pods were half-wired: `attach_container` above takes the namespace, so the
@@ -470,6 +564,18 @@ pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> 
         on_attached: &|_| {},
         register_expose: &|_, _, _, _| Ok(()),
     };
+    // A pod that already carries a policy (or the hold) gets THAT back when its
+    // netns is recreated — a holder respawn must not reopen it.
+    if let Some(fw) = pod_of_netns(netns).and_then(|p| pod_firewall_to_enforce(p, ns)) {
+        return delonix_sdn::infra::apply_firewall_all(netns, &[ip], &fw).map_err(|e| {
+            Error::Runtime {
+                context: "pod",
+                message: format!(
+                    "the pod's firewall could not be reapplied, so it was not started: {e}"
+                ),
+            }
+        });
+    }
     delonix_compute::network::isolate_shared_netns(&net, netns, ip, ns).map_err(|e| {
         Error::Runtime {
             context: "pod",
@@ -592,6 +698,15 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     })
 }
 
+/// The network a pod was declared on, as the reconciler compares it.
+fn declared_network_of(members: &[Container]) -> String {
+    members
+        .first()
+        .and_then(|c| c.labels.get(POD_NETWORK_LABEL).cloned())
+        .or_else(|| members.first().and_then(|c| c.net_mode.clone()))
+        .unwrap_or_else(|| "host".into())
+}
+
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     let (_images, store) = open_stores()?;
     let pods = pods_by_label(&store)?;
@@ -610,13 +725,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
                 .collect();
             let mut f = BTreeMap::new();
             f.insert("containers".into(), member_key(&mut names));
-            f.insert(
-                "network".into(),
-                members
-                    .first()
-                    .and_then(|c| c.net_mode.clone())
-                    .unwrap_or_else(|| "host".into()),
-            );
+            // The declared network when the member carries it; a pod created before
+            // the label existed falls back to what its record says (`host`).
+            f.insert("network".into(), declared_network_of(&members));
             f.insert(
                 "restartPolicy".into(),
                 members
@@ -1024,6 +1135,25 @@ pub fn netnsconnect(port_str: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pods_declared_network_is_read_back_from_its_label_not_from_the_members_host_mode() {
+        let mut c = delonix_compute::Container::new(
+            "x".into(),
+            "p-a".into(),
+            "alpine".into(),
+            vec![],
+            "0".into(),
+        );
+        c.net_mode = Some("host".into());
+        c.labels.insert(POD_LABEL.into(), "p".into());
+        c.labels.insert(POD_NETWORK_LABEL.into(), "appnet".into());
+        assert_eq!(declared_network_of(std::slice::from_ref(&c)), "appnet");
+        // A pod created before the label existed keeps reading what its record says.
+        c.labels.remove(POD_NETWORK_LABEL);
+        assert_eq!(declared_network_of(std::slice::from_ref(&c)), "host");
+        assert_eq!(declared_network_of(&[]), "host");
+    }
+
     #[test]
     fn the_same_pod_name_in_another_namespace_is_a_conflict() {
         assert!(check_pod_namespace("p", "default", "").is_ok());

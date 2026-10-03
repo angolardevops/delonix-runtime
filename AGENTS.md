@@ -5245,7 +5245,13 @@ de re-exec, para um terceiro não nascer com metade).
   o que as políticas escrevem vai para o REGISTO (`apply_firewall_everywhere`).
 - `release_policy_holds` corre depois das camadas de política e abre ao que elas dizem; uma
   direcção não declarada volta ao default aberto. Se uma camada falha, o workload fica fechado e
-  o apply diz-o; o apply seguinte liberta-o. Só containers; Pods/VMs por fazer.
+  o apply diz-o; o apply seguinte liberta-o. Containers e Pods; VMs/system containers por fazer
+  (a firewall deles é a do provider).
+- **Um Pod é UM alvo de política**: `firewall::update_locked`/`load_governed` resolvem um nome que
+  não é container para a vista do pod (`pod::pod_view`: registo do membro-cabeça com o netns
+  partilhado como id e o IP do pod); só `firewall` e `annotations` voltam ao membro-cabeça. A rede
+  declarada de um Pod viaja nos membros (`delonix.io/pod-network`) — ler `net_mode` do membro dava
+  sempre `host` e todo o segundo apply de um pod numa rede custom pedia `--replace`.
 - Cenário `policy_hold` do `scripts/chaos.sh` (lab = raízes isoladas, `DELONIX_ROOT` e
   `DELONIX_NET_RUNTIME_DIR`): a falha da política tem de ser DEPOIS de os containers existirem
   (um CIDR impossível numa `NetworkAccessRule`; uma referência a um container inexistente é

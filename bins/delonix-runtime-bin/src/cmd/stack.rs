@@ -2909,6 +2909,27 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
     )
 }
 
+/// Why a container-scope policy cannot target `target`, when it names a VM
+/// declared in the same manifest (and no Container of that name).
+fn container_scope_target_problem(
+    kind: &str,
+    name: &str,
+    target: &str,
+    plain: &std::collections::HashSet<String>,
+    vms: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if plain.contains(target) {
+        return None;
+    }
+    if vms.contains(target) {
+        return Some(super::po::tf(
+            "{kind} '{name}' → target '{target}' is a VirtualMachine — use `scope: vm`, which puts the policy on the provider's firewall",
+            &[("kind", kind), ("name", name), ("target", target)],
+        ));
+    }
+    None
+}
+
 /// PURE core of `validate_graph`: receives what already exists on the machine as
 /// explicit lists (instead of reading the stores), so the tests are
 /// deterministic and do not depend on the real state of the dev machine.
@@ -2965,6 +2986,13 @@ fn validate_graph_full(
     // names it as its backend (ADR-0046), and `Dependency` documents already say
     // «containers/VMs».
     let mut containers = declared(&[k::CONTAINER, k::POD, k::VM]);
+    // What a container-scope policy CANNOT govern, declared in this very manifest:
+    // a VM (its firewall is the provider's, `scope: vm`). It used to pass this
+    // check and fail at apply with «no such container», after the layers before
+    // the policy had already created things. A Pod IS governable: it is one
+    // target, with the shared netns for identity (`pod::pod_view`).
+    let plain_containers = declared(&[k::CONTAINER]);
+    let declared_vms = declared(&[k::VM]);
     let mut secrets = declared(&[k::SECRET]);
     let mut system_containers = declared(&[k::SYSTEM_CONTAINER]);
     system_containers.extend(existing_system_containers.iter().cloned());
@@ -3227,6 +3255,14 @@ fn validate_graph_full(
                                 &[("kind", &doc.kind), ("name", name), ("target", target)],
                             ));
                         }
+                    } else if let Some(why) = container_scope_target_problem(
+                        &doc.kind,
+                        name,
+                        target,
+                        &plain_containers,
+                        &declared_vms,
+                    ) {
+                        issues.push(why);
                     } else if !containers.contains(target) {
                         issues.push(super::po::tf(
                             "{kind} '{name}' → target '{target}' is not a declared or existing Container",
@@ -3248,7 +3284,15 @@ fn validate_graph_full(
                 // No `scope: network` for this Kind — a rule always targets a
                 // container, never a network's egress policy.
                 if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
-                    if !containers.contains(target) {
+                    if let Some(why) = container_scope_target_problem(
+                        &doc.kind,
+                        name,
+                        target,
+                        &plain_containers,
+                        &declared_vms,
+                    ) {
+                        issues.push(why);
+                    } else if !containers.contains(target) {
                         issues.push(super::po::tf(
                             "{kind} '{name}' → target '{target}' is not a declared or existing Container",
                             &[("kind", &doc.kind), ("name", name), ("target", target)],
@@ -3455,6 +3499,49 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_container_scope_policy_naming_a_vm_is_refused_but_a_pod_is_a_valid_target() {
+        let d = manifest::load_str(
+            "\
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: pp }
+spec: { containers: [{ name: a, image: alpine }] }
+---
+apiVersion: delonix.io/v1
+kind: VirtualMachine
+metadata: { name: vv }
+spec: { disk: x }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: cc }
+spec: { image: alpine }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: p1 }
+spec: { target: pp, direction: ingress, defaultPolicy: deny, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkAccessRule
+metadata: { name: r1 }
+spec: { target: vv, direction: ingress, port: '80' }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: ok }
+spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
+",
+            "t",
+        )
+        .unwrap();
+        let issues = validate_graph_with(&d, &[], &[], &[], &[]);
+        // The VM is refused; the Pod `pp` (named by `p1`) and the Container are not.
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("scope: vm"), "{issues:?}");
+    }
+
     /// **A hot field that nobody compares never converges.**
     ///
     /// `hot_fields(k)` says «this one applies without recreating the resource»
