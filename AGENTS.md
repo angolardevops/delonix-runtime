@@ -5218,6 +5218,24 @@ divergência só existe num processo filho com uid mapeado. Corrigido com `infra
 os filhos que precisam dele) e `cmd::container::reexec_env` (uma lista partilhada pelos DOIS sítios
 de re-exec, para um terceiro não nascer com metade).
 
+## Manifestos estritos, App com impressão digital, Service pronto (ADR-0069, 2026-10-03)
+
+- **Um campo que o motor não entende RECUSA o manifesto antes de qualquer efeito**
+  (`manifest::load`), incluindo os itens de `spec.containers[]` de um Pod
+  (`POD_CONTAINER_FIELDS`: probes e `lifecycle` não existem e já não se perdem em silêncio).
+  `stack validate` usa `load_lenient` para relatar; `DELONIX_MANIFEST_LENIENT=1` é a válvula
+  explícita. O contador de avisos é por thread: um teste que o lê usa `thread_unknown_fields`,
+  nunca o global (flaky em paralelo).
+- **`kind: App` converge**: `desired()` calcula a impressão digital das entradas (builder +
+  árvore de fontes), `actual()` lê o registo `<state>/apps/<nome>.json` só enquanto a tag aponta
+  para o digest gravado, e o `apply` salta o build quando coincidem.
+- **`kind: Service`**: só entram `Running` e, havendo health check, `healthy`.
+- **Plan**: um store ilegível (VM, volumes com âmbito, presença de containers) é erro, não «vazio».
+- **Pod**: o mesmo nome noutra namespace é `Conflict`, não «already exists».
+- **CNI**: prazo de 60 s (`DELONIX_CNI_TIMEOUT_SECS`) e 1 MiB por stream.
+- O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
+  com scope, refresh operacional do plan de VM, OpenStack).
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como

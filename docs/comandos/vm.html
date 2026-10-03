@@ -865,7 +865,7 @@ Options:
           After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)
 
       --wait
-          After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout
+          After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running
 
       --boot-timeout &lt;BOOT_TIMEOUT&gt;
           Seconds to wait with --wait (default 120)
