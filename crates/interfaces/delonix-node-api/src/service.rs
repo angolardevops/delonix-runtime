@@ -1,9 +1,7 @@
 //! `NodeService` — what answers on the socket, gRPC and HTTP/JSON alike.
 
-use std::collections::HashMap;
 use std::pin::Pin;
 
-use axum::extract::Query;
 use axum::response::IntoResponse;
 use tonic::{Request, Response, Status};
 
@@ -138,9 +136,13 @@ impl NodeService for NodeApi {
     }
 }
 
-/// The router both transports share: the JSON routes first, the gRPC service
-/// merged in (tonic's routes are an axum router underneath). Exposed for the
-/// in-process tests, which drive it with `tower::ServiceExt::oneshot`.
+/// The router both transports share. The contract's REST routes are not
+/// listed here: they are resolved against the table `build.rs` generates from
+/// the `google.api.http` annotations ([`crate::transcode`]), in the fallback —
+/// a template such as `{name}:start` is not something an axum route spells.
+/// The gRPC service is merged in (tonic's routes are an axum router
+/// underneath). Exposed for the in-process tests, which drive it with
+/// `tower::ServiceExt::oneshot`.
 pub fn router() -> axum::Router {
     use tonic::server::NamedService;
     // The gRPC service is mounted the way tonic's own `Routes` mounts it — one
@@ -150,23 +152,6 @@ pub fn router() -> axum::Router {
     // which a REST client reads as "served, nothing there". The fallback below
     // keeps that answer for gRPC callers and gives HTTP callers a 404.
     axum::Router::new()
-        .route("/v1/providers", axum::routing::get(http_list_providers))
-        .route(
-            "/v1",
-            axum::routing::get(|| json("/v1", async { Ok::<_, Status>(node::api_root()) })),
-        )
-        .route(
-            "/v1/node",
-            axum::routing::get(|| json("/v1/node", node_info())),
-        )
-        .route(
-            "/v1/node/health",
-            axum::routing::get(|| json("/v1/node/health", health())),
-        )
-        .route(
-            "/v1/node/capacity",
-            axum::routing::get(|| json("/v1/node/capacity", capacity())),
-        )
         .route("/openapi.json", axum::routing::get(openapi_json))
         .route("/docs", axum::routing::get(crate::docs::swagger))
         .route("/redoc", axum::routing::get(crate::docs::redoc))
@@ -176,14 +161,64 @@ pub fn router() -> axum::Router {
             NodeServiceServer::new(NodeApi),
         )
         .fallback(fallback)
-        .method_not_allowed_fallback(method_not_allowed)
+        .method_not_allowed_fallback(|req: axum::extract::Request| async move {
+            let path = req.uri().path().to_string();
+            method_not_allowed(req.method().as_str(), &path, &["GET"])
+        })
 }
 
-/// What an unknown path gets: a gRPC caller (content-type `application/grpc…`)
+/// The largest request body the REST encoding reads.
+const MAX_BODY: usize = 1024 * 1024;
+
+/// A request for one of the contract's REST routes: bound, dispatched to the
+/// service method the gRPC encoding calls, answered as JSON. A route of a
+/// service this engine does not serve yet is 501 (DX-6001) — in the contract,
+/// not here yet — which is a different answer from a path the contract does
+/// not have (404).
+async fn rest(
+    route: &'static crate::transcode::Route,
+    vars: Vec<(&'static str, String)>,
+    req: axum::extract::Request,
+) -> axum::response::Response {
+    use crate::transcode;
+    let path = req.uri().path().to_string();
+    let query = req.uri().query().map(str::to_string);
+    let answer = async {
+        let body = axum::body::to_bytes(req.into_body(), MAX_BODY)
+            .await
+            .map_err(|_| {
+                Status::invalid_argument(format!(
+                    "{}: the request body is larger than {MAX_BODY} bytes",
+                    route.rpc
+                ))
+            })?;
+        let input = transcode::bind(route, &vars, query.as_deref(), &body)?;
+        match route.service {
+            "NodeService" => transcode::dispatch_node_service(&NodeApi, route.rpc, input).await,
+            _ => Err(transcode::not_served(route)),
+        }
+    };
+    match answer.await {
+        Ok(body) => with_link_header(body),
+        Err(status) => problem(status, &path),
+    }
+}
+
+/// Everything the router has no route for. One of the contract's REST routes
+/// is served ([`rest`]); a contract path on another method is 405 with the
+/// methods the contract maps; and an unknown path gets: a gRPC caller (content-type `application/grpc…`)
 /// the wire-level UNIMPLEMENTED tonic would give; anyone else a 404 carrying a
 /// problem document (DX-4001, `application/problem+json`) — never a 200 with
 /// nothing in it.
 async fn fallback(req: axum::extract::Request) -> axum::response::Response {
+    use crate::transcode::Resolved;
+    match crate::transcode::resolve(req.method().as_str(), req.uri().path()) {
+        Resolved::Route(route, vars) => return rest(route, vars, req).await,
+        Resolved::OtherMethods(allow) => {
+            return method_not_allowed(req.method().as_str(), req.uri().path(), &allow)
+        }
+        Resolved::Unknown => {}
+    }
     let is_grpc = req
         .headers()
         .get(hyper::header::CONTENT_TYPE)
@@ -204,23 +239,10 @@ async fn fallback(req: axum::extract::Request) -> axum::response::Response {
     )
 }
 
-/// One RPC's answer as its `google.api.http` JSON: the message, or the error
-/// as an RFC 9457 problem document.
-async fn json<T: serde::Serialize>(
-    path: &str,
-    answer: impl std::future::Future<Output = Result<T, Status>>,
-) -> axum::response::Response {
-    match answer.await {
-        Ok(msg) => with_link_header(&msg),
-        Err(status) => problem(status, path),
-    }
-}
-
-/// A message as its JSON with the RFC 8288 `Link` header mirroring its own
-/// `links` (ADR-0042 D2) — read back from the JSON just serialized, so the
-/// header and the body cannot disagree.
-fn with_link_header<T: serde::Serialize>(msg: &T) -> axum::response::Response {
-    let body = serde_json::to_value(msg).unwrap_or(serde_json::Value::Null);
+/// A message's JSON with the RFC 8288 `Link` header mirroring its own `links`
+/// (ADR-0042 D2) — read from the body being sent, so the header and the body
+/// cannot disagree.
+fn with_link_header(body: serde_json::Value) -> axum::response::Response {
     let header = link_header(&body);
     let mut res = (hyper::StatusCode::OK, axum::Json(body)).into_response();
     if let Some(v) = header.and_then(|h| hyper::header::HeaderValue::from_str(&h).ok()) {
@@ -263,36 +285,21 @@ async fn openapi_json() -> axum::response::Response {
 }
 
 /// A path this socket serves, on a method it does not: 405 with `Allow` and a
-/// problem document (DX-4001: no handler for this method and path). Every REST
-/// route of this socket is `GET` today — a route that gains another method
-/// changes this, and `the_rest_routes_are_get_only` says so.
-async fn method_not_allowed(req: axum::extract::Request) -> axum::response::Response {
-    let path = req.uri().path().to_string();
+/// problem document (DX-4001: no handler for this method and path). `allow` is
+/// what the contract maps for the path, or `GET` for the documentation routes.
+fn method_not_allowed(method: &str, path: &str, allow: &[&str]) -> axum::response::Response {
+    let allow = allow.join(", ");
     let mut res = problem_as(
         Status::not_found(format!(
-            "route {} {path} on the node API (this path answers GET)",
-            req.method()
+            "route {method} {path} on the node API (this path answers {allow})"
         )),
-        &path,
+        path,
         Some(hyper::StatusCode::METHOD_NOT_ALLOWED),
     );
-    res.headers_mut().insert(
-        hyper::header::ALLOW,
-        hyper::header::HeaderValue::from_static("GET"),
-    );
-    res
-}
-
-/// `GET /v1/providers[?kind=]` — the `google.api.http` mapping of
-/// `ListProviders`, written by hand (one route today; see the crate docs).
-async fn http_list_providers(Query(q): Query<HashMap<String, String>>) -> axum::response::Response {
-    let req = ListProvidersRequest {
-        kind: q.get("kind").cloned().unwrap_or_default(),
-    };
-    match list_providers(req).await {
-        Ok(resp) => with_link_header(&resp),
-        Err(status) => problem(status, "/v1/providers"),
+    if let Ok(v) = hyper::header::HeaderValue::from_str(&allow) {
+        res.headers_mut().insert(hyper::header::ALLOW, v);
     }
+    res
 }
 
 /// A failure as the engine's error, with its dictionary number, and the HTTP

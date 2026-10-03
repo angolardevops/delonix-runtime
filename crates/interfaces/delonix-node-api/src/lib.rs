@@ -18,6 +18,12 @@
 //! engine's `codes::problem` — the same `DX-` codes the CLI exits with — which
 //! is what the published OpenAPI declares (ADR-0042 D2).
 //!
+//! The REST routes are not written by hand: `build.rs` generates the route
+//! table and the dispatchers from the `google.api.http` annotations
+//! ([`transcode`]), for every RPC of the contract. A route of a service this
+//! engine does not serve yet answers 501 (DX-6001), a path the contract does
+//! not have 404 (DX-4001).
+//!
 //! Both encodings come from the same `proto/` files: the gRPC stubs and the
 //! proto3 JSON (`pbjson`, proto field names — what the published OpenAPI
 //! declares). The HTTP route for a `google.api.http` annotation is written by
@@ -44,6 +50,7 @@ pub mod docs;
 pub mod node;
 pub mod providers;
 mod service;
+pub mod transcode;
 
 pub use service::{
     capacity, health, link_header, list_providers, node_info, openapi_document, router, NodeApi,

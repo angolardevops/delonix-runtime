@@ -1,6 +1,6 @@
 # ADR-0042: One engine API — one version number, Richardson maturity, published docs
 
-- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C started 2026-09-25: `delonix-node-api` exists on the socket and serves `NodeService.ListProviders` as gRPC and HTTP/JSON (ADR-0050 D5); since 2026-10-02 (slice C1) also `GetNodeInfo`, `GetHealth`, `GetCapacity` and `GET /openapi.json` (the committed generated document, embedded at build time). Since slice C2 also `/docs` (Swagger UI 5.33.1) and `/redoc` (ReDoc 2.5.4), from files embedded in the binary — byte-identical to the npm packages, in `third_party/node-api-docs/`, checked against its `SHA256SUMS` by `build.rs` — under a Content-Security-Policy that allows only the socket (measured in a browser: ReDoc's footer logo from `cdn.redoc.ly` is blocked before any request leaves). Still to come in C: a generic transcoder over the `google.api.http` annotations. **Step D started 2026-10-02 (slice D1)**: every REST error is an RFC 9457 `application/problem+json` document built by the engine's `codes::problem` (with `grpc_status`), and the published OpenAPI declares it — `scripts/contract_gate.py` applies one documented transform (`problem_json`) to the plugin's output, which only knows `google.rpc.Status`; gRPC keeps `google.rpc.Status`. New codes DX-4001 (no route), DX-6001 (not served yet, HTTP 501) and DX-9005 (internal). A method a path does not answer is 405 with `Allow` and a problem document. **Slice D2**: `Link` in the contract (`rel`, `href`, `method`), `GET /v1` (`GetApiRoot`: the API version and a link to every resource served, and only those), `links` on `NodeInfo`, `Health`, `Capacity` and `ListProvidersResponse` (a filtered list's `self` keeps the filter), and every JSON answer mirrors its `links` in an RFC 8288 `Link` header read back from the body. Still to come in D: `ETag`/`If-Match`, pagination, idempotency — they matter once mutations and lists are served (step E). `GET /v1` moved to step D: the entry point is made of `links`, which D puts in the contract, and serving it before would publish a shape the OpenAPI does not declare. **Transcoding spike result**: the proto3 JSON of every message is generated from the same files (`pbjson`, proto field names = the OpenAPI's `naming=proto`); the HTTP route of a `google.api.http` annotation is written by hand per RPC for now (one exists), and a generic transcoder over the annotations is the next slice of C. The `delonix-node-proto` crate is not split out: with one consumer it would be the dead scaffolding ADR-0040 P1 refuses, so the stubs live in `delonix_node_api::proto` as the CRI's do
+- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C started 2026-09-25: `delonix-node-api` exists on the socket and serves `NodeService.ListProviders` as gRPC and HTTP/JSON (ADR-0050 D5); since 2026-10-02 (slice C1) also `GetNodeInfo`, `GetHealth`, `GetCapacity` and `GET /openapi.json` (the committed generated document, embedded at build time). Since slice C2 also `/docs` (Swagger UI 5.33.1) and `/redoc` (ReDoc 2.5.4), from files embedded in the binary — byte-identical to the npm packages, in `third_party/node-api-docs/`, checked against its `SHA256SUMS` by `build.rs` — under a Content-Security-Policy that allows only the socket (measured in a browser: ReDoc's footer logo from `cdn.redoc.ly` is blocked before any request leaves). **Slice C3 (2026-10-03)** closes step C with the transcoding spike's result (see «Spike result: REST transcoding» below): the REST routes are generated at build time from the `google.api.http` annotations. **Step D started 2026-10-02 (slice D1)**: every REST error is an RFC 9457 `application/problem+json` document built by the engine's `codes::problem` (with `grpc_status`), and the published OpenAPI declares it — `scripts/contract_gate.py` applies one documented transform (`problem_json`) to the plugin's output, which only knows `google.rpc.Status`; gRPC keeps `google.rpc.Status`. New codes DX-4001 (no route), DX-6001 (not served yet, HTTP 501) and DX-9005 (internal). A method a path does not answer is 405 with `Allow` and a problem document. **Slice D2**: `Link` in the contract (`rel`, `href`, `method`), `GET /v1` (`GetApiRoot`: the API version and a link to every resource served, and only those), `links` on `NodeInfo`, `Health`, `Capacity` and `ListProvidersResponse` (a filtered list's `self` keeps the filter), and every JSON answer mirrors its `links` in an RFC 8288 `Link` header read back from the body. Still to come in D: `ETag`/`If-Match`, pagination, idempotency — they matter once mutations and lists are served (step E). `GET /v1` moved to step D: the entry point is made of `links`, which D puts in the contract, and serving it before would publish a shape the OpenAPI does not declare. **Transcoding spike result**: the proto3 JSON of every message is generated from the same files (`pbjson`, proto field names = the OpenAPI's `naming=proto`); the HTTP route of a `google.api.http` annotation is written by hand per RPC for now (one exists), and a generic transcoder over the annotations is the next slice of C. The `delonix-node-proto` crate is not split out: with one consumer it would be the dead scaffolding ADR-0040 P1 refuses, so the stubs live in `delonix_node_api::proto` as the CRI's do
 - **Date:** 2026-09-17
 - **Deciders:** Walter (owner)
 - **Builds on, does not reopen:** ADR-0040 D4 (one contract in `proto/delonix/node/v1`, gRPC
@@ -138,6 +138,7 @@ Each step is one PR, measured, with the E2E battery green.
   the way grpc-gateway does in Go. Step C spikes the options — a build-time generator of
   `axum` routes from the annotations, or hand-written routes calling the same service
   implementation under a test that compares them with the OpenAPI — and records the result.
+  **Decided by the step C spike — see «Spike result: REST transcoding» below.**
 - **The stability tier of each service** (ADR-0041 D3).
 - **The manifest `apiVersion`** (D1).
 
@@ -148,3 +149,38 @@ Each step is one PR, measured, with the E2E battery green.
 - A library consumer of `delonix-image` that used the HTTP helpers keeps its own copy.
 - The contract grows a `Link` message and a `links` field on resources and `Operation`
   (additive; `buf breaking` stays green).
+
+## Spike result: REST transcoding (step C, 2026-10-03)
+
+The first option won: **a build-time generator**. `delonix-node-api/build.rs` reads the
+descriptor set the stubs are built from and writes one row per RPC that carries a
+`google.api.http` rule (method, path template, body rule, the request fields a query string
+may bind) and one dispatcher per service; `transcode.rs` is the part that is the same for every
+RPC — matching, binding path, query and body into the request message, calling the service
+method the gRPC encoding calls.
+
+What the spike measured, and what decided it:
+
+- **axum cannot spell the contract's paths.** 23 of the 57 mapped RPCs use a custom verb
+  (`/v1/namespaces/{namespace}/containers/{name}:start`, `/v1/images:pull`), and axum 0.7
+  matches a parameter per whole segment. Hand-written axum routes were not an option for those;
+  the generated table has its own matcher, where a plain `{name}` never takes a value with a
+  `:` in it, so `…/web:start` is the `:start` route and never the container named `web:start`.
+- **No new dependency.** `google.api.http` is extension 72295728 of `MethodOptions`, which
+  `prost-types` drops; the generator declares the few descriptor messages it needs with `prost`
+  (already in the tree) and that tag as an ordinary field.
+- **The whole contract is in the table, served or not.** A route of a service this engine does
+  not serve yet answers `501` with DX-6001; a path the contract does not have answers `404`
+  with DX-4001; a contract path on another method answers `405` with the methods the contract
+  maps. Before this, every unserved route was a 404, indistinguishable from a typo.
+- **Binding follows `google/api/http.proto`**, and refuses what it does not understand: an
+  unknown query parameter, a query parameter on a `body: "*"` route, a body on a route without
+  one, a body field that disagrees with the path, `true`/`false` and numbers checked against the
+  field's type.
+- **The comparison the second option wanted is kept as a test**: the generated table and the
+  published OpenAPI list the same 57 operations, method for method and path for path.
+
+Not carried by the REST encoding yet: the three server-streaming RPCs (`WatchEvents`, logs, operation
+watch) answer `501` and name gRPC, which serves streams on the same socket. `additional_bindings`
+fail the build instead of being dropped.
+

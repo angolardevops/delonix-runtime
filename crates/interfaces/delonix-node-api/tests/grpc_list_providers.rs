@@ -457,3 +457,105 @@ async fn a_client_navigates_from_the_root_by_its_links() {
         .iter()
         .any(|x| x["rel"] == "self" && x["href"] == "/v1/providers?kind=network"));
 }
+
+/// ADR-0042 step C: the REST routes are generated from the `google.api.http`
+/// annotations, and the published OpenAPI is generated from the same ones — so
+/// the two list the same operations, method for method and path for path.
+#[test]
+fn the_generated_routes_are_the_published_openapi_operations() {
+    use delonix_node_api::transcode::ROUTES;
+    let paths = delonix_node_api::openapi_document()["paths"]
+        .as_object()
+        .expect("paths");
+    let mut published = std::collections::BTreeSet::new();
+    for (path, item) in paths {
+        for (method, op) in item.as_object().unwrap() {
+            published.insert((
+                method.to_uppercase(),
+                path.clone(),
+                op["operationId"].as_str().unwrap_or_default().to_string(),
+            ));
+        }
+    }
+    let generated: std::collections::BTreeSet<_> = ROUTES
+        .iter()
+        .map(|r| {
+            (
+                r.method.to_string(),
+                r.template.to_string(),
+                format!("{}_{}", r.service, r.rpc),
+            )
+        })
+        .collect();
+    assert_eq!(generated.len(), ROUTES.len(), "no route is listed twice");
+    assert_eq!(generated, published);
+}
+
+/// A route of the contract this engine does not serve yet is 501 with DX-6001
+/// — "in the contract, not here yet" — and never the 404 of a path the
+/// contract does not have. Custom verbs (`{name}:start`) resolve, a contract
+/// path on another method is 405 with the methods the contract maps, and a
+/// query parameter the request does not have is refused.
+#[tokio::test]
+async fn contract_routes_resolve_and_say_what_is_not_served() {
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let app = delonix_node_api::router();
+    let call = |method: &'static str, path: &'static str, body: &'static str| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = res.status().as_u16();
+            let allow = res
+                .headers()
+                .get("allow")
+                .map(|v| v.to_str().unwrap().to_string());
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            (
+                status,
+                allow,
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            )
+        }
+    };
+    for (method, path) in [
+        ("GET", "/v1/namespaces/default/containers"),
+        ("POST", "/v1/namespaces/default/containers/web:start"),
+        ("DELETE", "/v1/namespaces/default/networks/lab"),
+        ("POST", "/v1/images:pull"),
+        ("GET", "/v1/events:watch"),
+    ] {
+        let (status, _, v) = call(method, path, "").await;
+        assert_eq!(status, 501, "{method} {path}: {v}");
+        assert_eq!(v["dx"], "DX-6001", "{v}");
+        assert_eq!(v["grpc_status"], 12, "{v}");
+        assert_eq!(v["instance"], path, "{v}");
+    }
+    let (status, allow, v) = call("GET", "/v1/namespaces/default/containers/web:start", "").await;
+    assert_eq!((status, allow.as_deref()), (405, Some("POST")), "{v}");
+    let (status, allow, _) = call("PUT", "/v1/namespaces/default/containers/web", "").await;
+    assert_eq!(status, 405);
+    assert_eq!(allow.as_deref(), Some("DELETE, GET, PATCH"));
+    let (status, _, v) = call("GET", "/v1/providers?kindd=network", "").await;
+    assert_eq!(status, 400, "{v}");
+    assert!(
+        v["detail"]
+            .as_str()
+            .unwrap()
+            .contains("unknown query parameter 'kindd'"),
+        "{v}"
+    );
+    let (status, _, v) = call("GET", "/v1/node", "{}").await;
+    assert_eq!(status, 400, "a GET route takes no body: {v}");
+    let (status, _, v) = call("GET", "/v1/namespaces/default/nothing", "").await;
+    assert_eq!((status, v["dx"].as_str()), (404, Some("DX-4001")), "{v}");
+}
