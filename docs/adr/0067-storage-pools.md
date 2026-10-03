@@ -373,3 +373,39 @@ merges.
    capability row per driver (with question 1's split), instead of one provider per driver. The
    drivers share the node, the allowlist and the helper; separate provider ids would multiply matrix
    columns full of `unsupported-by-provider` for the other domains.
+
+## Addendum 2026-10-03 — P0 built: the port, the allowlist, `kind: StoragePool` and the `dir` driver
+
+- **What was built**: the `delonix-storage` context (`StoragePoolDriver` with probe, allocate,
+  release and usage; the registry of drivers by id; the administrator's allowlist; the owner
+  stamp), the `dir` driver in `delonix-volume` (`pool_dir.rs`), `kind: StoragePool`
+  (`cmd/storage_pool.rs`, also the composition root that registers the drivers), `spec.pool` +
+  `spec.size` on `kind: Volume`, and `volume create --pool --size`. Codes DX-1217, DX-1218,
+  DX-1219, DX-4203, DX-5201, DX-5202, DX-6203, DX-6204 and DX-7201.
+- **The context carries no YAML parser.** The allowlist is YAML, and a context may not depend on
+  `serde_yaml` (`arch_fitness.py`). `allowlist::load` takes the decoder from the composition
+  root (`allowlist::Decode`); the file checks (owner, mode) stay in the context.
+- **A field that is the administrator's is refused when the manifest is loaded.** With strict
+  manifests (ADR-0069) the unknown-field check spoke first: `spec: { driver: dir, path: … }`
+  answered DX-1000 «unknown field — check the spelling». The refusal by name (DX-1217) now runs
+  in `manifest::refused_by_name`, before that check, as the `SystemContainer` privilege fields do.
+- **Measured live** (isolated root, a `dir` pool on `/dev/shm`, the section «storage: kind
+  StoragePool e volumes num pool» of `scripts/e2e.sh`, 12 checks): no allowlist → 69 (DX-6203);
+  an administrator's field in the manifest → DX-1217; a pool the allowlist lacks → 77 (DX-7201);
+  an allowlist others can write → DX-1218; apply, then a plan with no difference; a volume's
+  data inside the pool with the engine's stamp; a volume above `maxVolumeBytes` → 77; one above
+  the over-allocation ceiling → 5 (DX-5202), nothing created; a directory with data and no stamp
+  is never adopted (5) and stays intact; `delete storagepools` with volumes → 5 naming them;
+  `volume rm` releases the volume and the pool's directory stays; by manifest, pool and volume
+  apply, the plan sees no drift, and `stack destroy` takes the volume and stops using the pool.
+- **The 95 % refusal was met by accident**: the first live run put the pool on the host's own
+  disk, which was 95 % full, and every allocation was refused with DX-5202 — D6 working. The
+  battery's pool lives on `/dev/shm` for that reason.
+- **An empty directory with the volume's name and no stamp IS taken** (an apply that died between
+  `mkdir` and the stamp leaves one); a directory with anything in it is not. Written in the
+  driver, with a unit test; the battery covers the second case.
+- **Not validated**: a pool on a filesystem other than tmpfs and the host's ext4; the helper and
+  every block driver (P1–P6, which need root and a lab VM); a container writing into a pool
+  volume (the checks read the directories, not a workload's writes); the capability cells stay
+  as they were (the P0 row says «none yet»).
+

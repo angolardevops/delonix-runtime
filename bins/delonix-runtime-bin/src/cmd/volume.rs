@@ -58,6 +58,14 @@ pub(crate) struct VolumeSpec {
     /// to exist already (ADR-0009). Absent, this Kind behaves exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     provision: Option<super::provision::ProvisionSpec>,
+    /// The storage pool this volume is allocated in (ADR-0067) — the NAME of a
+    /// `kind: StoragePool`. Needs `size`; exclusive with every other backing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pool: Option<String>,
+    /// The size asked of the pool (`10G`). Only with `pool`: a volume outside
+    /// a pool has a `quota`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<String>,
 }
 
 /// `spec.share` — the volume this one is carved out of.
@@ -118,6 +126,64 @@ impl VolumeSpec {
         )))
     }
 
+    /// Refuses a `pool:` that comes with another backing, and a `size` without
+    /// a pool. A volume in a pool is the pool's: an `nfs:` block, a `share:`,
+    /// a `device`, another driver or a `provision:` beside it are two answers
+    /// to where the data lives, and honouring one of them in silence is the
+    /// defect this engine keeps removing. `quota` is refused too: in a pool
+    /// the size IS the limit, and two numbers for it would disagree.
+    pub(crate) fn check_pool_exclusivity(&self, name: &str) -> Result<()> {
+        let refuse = |text: String| -> Result<()> {
+            Err(delonix_storage::Error::InvalidPoolRequest(text).into())
+        };
+        if self.pool.is_none() {
+            if self.size.is_some() {
+                return refuse(super::po::tf(
+                    "volume '{name}': `size` only applies to a volume in a storage pool \
+                     (`pool:`) — outside a pool, use `quota`",
+                    &[("name", name)],
+                ));
+            }
+            return Ok(());
+        }
+        let mut clash: Vec<&str> = Vec::new();
+        if self.share.is_some() {
+            clash.push("share");
+        }
+        if self.nfs.is_some() || self.cifs.is_some() || self.webdav.is_some() {
+            clash.push("nfs/cifs/webdav");
+        }
+        if self.provision.is_some() {
+            clash.push("provision");
+        }
+        if self.device.is_some() {
+            clash.push("device");
+        }
+        if self.options.is_some() {
+            clash.push("mountOptions");
+        }
+        if self.driver != default_driver() {
+            clash.push("driver");
+        }
+        if self.quota.is_some() {
+            clash.push("quota");
+        }
+        if !clash.is_empty() {
+            return refuse(super::po::tf(
+                "volume '{name}': a volume in a storage pool cannot also declare {fields} — the \
+                 pool is what backs it, and `size` is its limit",
+                &[("name", name), ("fields", &clash.join(", "))],
+            ));
+        }
+        if self.size.is_none() {
+            return refuse(super::po::tf(
+                "volume '{name}': a volume in a storage pool needs a `size` (e.g. 10G)",
+                &[("name", name)],
+            ));
+        }
+        Ok(())
+    }
+
     /// The network-share block, if any — `(type, block)`.
     ///
     /// **Exactly one, or none.** Two blocks are two different mounts asked of
@@ -174,6 +240,9 @@ pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
     "webdav",
     // Optional provisioning of what the share block consumes.
     "provision",
+    // A volume allocated in a storage pool (ADR-0067).
+    "pool",
+    "size",
 ];
 
 /// Fields the reconciler compares for a `kind: Volume`. `quota` is the only one
@@ -188,6 +257,7 @@ pub(crate) const RECONCILED_VOLUME_FIELDS: &[&str] = &[
     "quota",
     "alertPct",
     "parent",
+    "pool",
     "labels",
 ];
 
@@ -240,6 +310,19 @@ fn desired_volume_fields(
     if let Some(p) = spec.share_from() {
         f.insert("parent".into(), p.to_string());
     }
+    // A volume in a pool: the pool is COLD (a volume never moves between
+    // pools — the data is in the first one), and the size is compared as the
+    // quota the record keeps it in, so growing it converges hot.
+    if let Some(pool) = &spec.pool {
+        f.insert("pool".into(), pool.clone());
+        if let Some(bytes) = spec
+            .size
+            .as_deref()
+            .and_then(delonix_volume::parse_size_bytes)
+        {
+            f.insert("quota".into(), bytes.to_string());
+        }
+    }
     Ok(f)
 }
 
@@ -261,6 +344,9 @@ fn actual_volume_fields(v: &delonix_volume::Volume) -> std::collections::BTreeMa
     }
     if let Some(p) = &v.parent {
         f.insert("parent".into(), p.clone());
+    }
+    if let Some(p) = &v.pool {
+        f.insert("pool".into(), p.clone());
     }
     f
 }
@@ -310,6 +396,18 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                 )))
             }
         }
+    }
+    // A volume in a pool goes back through the pool: a new size is checked
+    // against the administrator's cap and the pool's ceiling, exactly as the
+    // first allocation was.
+    if let Some(pool) = current.pool.as_deref() {
+        let size = quota.ok_or_else(|| {
+            Error::Invalid(format!(
+                "volume/{name}: a volume in a storage pool keeps a size"
+            ))
+        })?;
+        super::storage_pool::ensure_volume(&store, name, pool, &size.to_string(), alert)?;
+        return Ok(());
     }
     // `privileged: false`, the same as `create_volume`'s own call: the hard
     // ext4-loopback cap belongs to the root model, and a declarative apply must
@@ -395,6 +493,7 @@ pub(crate) fn stamp(
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VolumeSpec = manifest::spec_of(doc)?;
     spec.check_share_exclusivity()?;
+    spec.check_pool_exclusivity(&doc.metadata.name)?;
     // Only a share WITH an owner is qualified. An unscoped one is a plain root
     // volume, and `actual()` names every root volume bare — qualifying it here
     // would leave a resource the plan can never match: eternal `Adopt` drift,
@@ -518,6 +617,16 @@ pub enum VolumeCmd {
         /// Namespace that will own the share (default: the unscoped root) — only with `--parent`.
         #[arg(short = 'n', long, requires = "parent", add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
+        /// Allocate the volume in this storage pool (see `delonix get storagepools`).
+        #[arg(
+            long,
+            requires = "size",
+            conflicts_with_all = ["parent", "driver", "opt", "quota"]
+        )]
+        pool: Option<String>,
+        /// Size asked of the pool (e.g. `10g`) — only with `--pool`.
+        #[arg(long, requires = "pool")]
+        size: Option<String>,
     },
     /// List the volumes.
     Ls {
@@ -666,6 +775,8 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             alert_pct,
             parent,
             namespace,
+            pool,
+            size,
         } => cmd_create(
             &store,
             &name,
@@ -676,6 +787,8 @@ pub fn run(action: VolumeCmd) -> Result<()> {
                 alert_pct,
                 parent,
                 namespace,
+                pool,
+                size,
             },
         ),
         VolumeCmd::Ls {
@@ -760,6 +873,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let name = &doc.metadata.name;
         let spec: VolumeSpec = manifest::spec_of(doc)?;
         spec.check_share_exclusivity()?;
+        spec.check_pool_exclusivity(name)?;
+        // A volume in a storage pool is allocated by the pool's driver; the
+        // one implementation is `storage_pool::ensure_volume`, which the CLI's
+        // `--pool` calls too.
+        if let (Some(pool), Some(size)) = (spec.pool.as_deref(), spec.size.as_deref()) {
+            super::storage_pool::ensure_volume(&store, name, pool, size, spec.alert_pct)?;
+            println!("volume/{name}: {}", super::po::t("ensured"));
+            continue;
+        }
         // A share is carved out of another volume instead of being created here:
         // it mounts nothing, and the directory it points at belongs to the
         // parent. `sharevolume` owns that path — this is the same delegation
@@ -999,6 +1121,8 @@ struct CreateArgs {
     alert_pct: Option<u8>,
     parent: Option<String>,
     namespace: Option<String>,
+    pool: Option<String>,
+    size: Option<String>,
 }
 
 /// The four network drivers `--opt` configures. `local` is not here on
@@ -1046,6 +1170,13 @@ fn parse_driver_opts(opt: &[String]) -> Result<std::collections::BTreeMap<String
 /// `clap`'s `conflicts_with` on `--parent` already rules out a mix with
 /// `--driver`/`--opt`; this just picks the one that is left.
 fn cmd_create(store: &VolumeStore, name: &str, a: CreateArgs) -> Result<()> {
+    // `clap` already requires the two together and keeps them apart from the
+    // other shapes; the same function the manifest's `pool:` calls.
+    if let (Some(pool), Some(size)) = (a.pool.as_deref(), a.size.as_deref()) {
+        let vol = super::storage_pool::ensure_volume(store, name, pool, size, a.alert_pct)?;
+        println!("{}", vol.name);
+        return Ok(());
+    }
     if let Some(from) = a.parent {
         // The parent has to exist and be reachable from the UNSCOPED store —
         // same rule `apply_share` already enforces for the manifest path.
@@ -1159,6 +1290,9 @@ struct VolumeLsRow {
     /// place to read).
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<String>,
+    /// The storage pool the volume is allocated in, if any (ADR-0067).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pool: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     quota_bytes: Option<u64>,
 }
@@ -1251,6 +1385,7 @@ fn cmd_ls(
                     used_by,
                     namespace: ns,
                     parent: v.parent,
+                    pool: v.pool,
                     quota_bytes: v.quota_bytes,
                 }
             })
@@ -1373,6 +1508,7 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
     // this is the "Storage"/parent field `sharevolume describe` used to be
     // the only place to see).
     d.field_opt("Parent", v.parent.as_deref());
+    d.field_opt("Pool", v.pool.as_deref());
     if v.parent.is_none() {
         d.field("Driver", &v.driver);
     }
@@ -2054,6 +2190,11 @@ pub(crate) fn cmd_rm_with(
             super::po::t("destroyed the provisioned storage"),
         );
     }
+    // A volume in a storage pool: its data goes back through the pool's driver,
+    // which deletes only what carries this engine's stamp. BEFORE the record,
+    // for the same reason as the remote above — the record is what says which
+    // pool holds it, and a release that fails leaves the volume fully visible.
+    super::storage_pool::release_volume(&vol)?;
     store.remove_with(name, Some(&delonix_linux::remove_tree_mapped))?;
     // A network-storage volume's NAS username+password live in a sidecar file
     // this store never touches (see `storage::remove_credentials`) — a plain
@@ -2182,8 +2323,11 @@ mod tests {
         .unwrap();
         let share: super::VolumeSpec =
             serde_yaml::from_str("share:\n  from: nas\nquota: 5G\nalertPct: 90\n").unwrap();
+        // A volume in a storage pool (ADR-0067): `pool` is compared, `size`
+        // travels as the quota.
+        let pooled: super::VolumeSpec = serde_yaml::from_str("pool: fast\nsize: 1G\n").unwrap();
         let mut seen = std::collections::BTreeSet::new();
-        for spec in [&net, &share] {
+        for spec in [&net, &share, &pooled] {
             let f = super::desired_volume_fields("dados", spec).unwrap();
             for k in f.keys() {
                 assert!(

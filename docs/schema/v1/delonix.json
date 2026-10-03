@@ -1676,6 +1676,20 @@
       },
       "type": "object"
     },
+    "Overcommit": {
+      "description": "`spec.overcommit`.",
+      "properties": {
+        "maxRatio": {
+          "description": "Allocated sizes over capacity. `1.0` (default) allows no over-allocation.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "maxRatio"
+      ],
+      "type": "object"
+    },
     "OwnerSpec": {
       "properties": {
         "gid": {
@@ -3057,6 +3071,39 @@
           },
           "type": "array"
         },
+        "storagePools": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/StoragePoolSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "systemContainers": {
           "items": {
             "additionalProperties": false,
@@ -3221,6 +3268,34 @@
             "type": "object"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "StoragePoolSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: StoragePool`.",
+      "properties": {
+        "alertPct": {
+          "description": "Percentage of the pool in use above which an allocation warns (default 80).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "overcommit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Overcommit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How far the sizes allocated in the pool may exceed its capacity."
         }
       },
       "type": "object"
@@ -4091,6 +4166,13 @@
           "description": "NFS export. One of the three network-share blocks — the block's NAME is\nthe type, so a type cannot contradict its own declaration (the same shape\n`kind: Workload` uses for `spec.container`/`spec.vm`)."
         },
         "options": {},
+        "pool": {
+          "description": "The storage pool this volume is allocated in (ADR-0067) — the NAME of a\n`kind: StoragePool`. Needs `size`; exclusive with every other backing.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "provision": {
           "anyOf": [
             {
@@ -4119,6 +4201,13 @@
           ],
           "default": null,
           "description": "A subdirectory carved out of ANOTHER volume, with its own name, quota and\nconsumers — what `kind: ShareVolume` used to be a Kind of its own for.\n\nIt is a block and not a Kind because a share IS a volume: it was already\nregistered as one (`VolumeStore::register_external`), and the separate\nKind only added a second record whose one unique field was the parent's\nname. The block sits beside `nfs:`/`cifs:`/`webdav:` and is exclusive\nwith them for the reason `net_share` gives: a volume is one mount, and a\nshare does not mount anything — it points inside a mount someone else made."
+        },
+        "size": {
+          "description": "The size asked of the pool (`10G`). Only with `pool`: a volume outside\na pool has a `quota`.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "webdav": {
           "anyOf": [
@@ -4729,6 +4818,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "StoragePool"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "storage.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/StoragePoolSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -4840,6 +4954,7 @@
         "Secret",
         "Service",
         "Stack",
+        "StoragePool",
         "SystemContainer",
         "Tunnel",
         "VirtualMachine",

@@ -305,6 +305,9 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         k::NETWORK_ZONE => &["applied", "reservations", "dns"],
         // `ippool::apply_one` overwrites the definition and keeps the leases.
         k::IPPOOL => &["addresses", "announce", "interface"],
+        // The use of a pool is two numbers in a record; the pool itself is
+        // never recreated by the engine.
+        k::STORAGE_POOL => &["maxRatio", "alertPct"],
         // Every comparable field of `policy.json` converges hot: `apply_one`
         // (in `cmd::policy`) rewrites the whole file, which needs no restart
         // of anything — the ceiling just takes effect on the next admission.

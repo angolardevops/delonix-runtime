@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 28 crates.
+[README.md](README.md) para a arquitectura dos 29 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -241,7 +241,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 
 ```
 crates/foundation/   delonix-model, delonix-net-rules
-crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-node, delonix-security-runtime
+crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-storage, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
@@ -7570,6 +7570,32 @@ sabia calcular (`delonix provider ls -o json`).
 - **F6 do ADR-0059 adiada (decisão do dono, 2026-10-03)**: `PlanStack`/`ApplyStack` no socket
   esperam pela P5 do ADR-0040; o ratchet `self_exec_sites` não sobe por causa dela. Adendo no ADR-0059.
 
+## Pools de armazenamento: a P0 do ADR-0067 (`kind: StoragePool`, driver `dir`, 2026-10-03)
+
+- **Quem decide o quê**: o administrador declara os pools numa allowlist
+  (`/etc/delonix/storage-pools.yaml`, ou `DELONIX_STORAGE_POOLS_FILE`); um manifesto só NOMEIA um
+  pool. `driver`, `path`, `device` e os outros campos do administrador num `kind: StoragePool`
+  são recusados pelo nome (DX-1217) no carregamento do manifesto, antes da verificação de campos
+  desconhecidos — a mesma regra dos campos de privilégio do `SystemContainer`.
+- **O motor nunca cria nem destrói um pool.** `delete storagepools` deixa de o usar; o directório e
+  o que lá está ficam. Com volumes do motor lá dentro, recusa (DX-5201) e nomeia-os.
+- **Posse por marca, nunca pelo nome**: cada volume de pool leva `.delonix-volume.json` com o dono
+  (uid e state root). Um directório com dados e sem marca nunca é adoptado; um directório VAZIO
+  com o nome do volume é tomado (é o que um apply morto entre o `mkdir` e a marca deixa).
+- **Recusa antes de encher**: acima de 95% de ocupação do pool não se aloca (DX-5202), e a soma
+  dos tamanhos alocados não passa `overcommit.maxRatio` × capacidade. Um volume acima do
+  `maxVolumeBytes` do administrador é 77 (DX-7201).
+- **O contexto `delonix-storage` não traz parser YAML**: a raiz de composição
+  (`cmd/storage_pool.rs`) entrega-lhe o descodificador. O portão de arquitectura recusa
+  `serde_yaml` num contexto.
+- **A allowlist é recusada** se o grupo ou todos lhe puderem escrever, ou se não for do root nem de
+  quem corre o motor (DX-1218). Sem allowlist, um pool é 69 (DX-6203), nunca «não há pools».
+- **Gate**: a secção «storage: kind StoragePool e volumes num pool» do `scripts/e2e.sh` (12
+  checks). O pool da bateria vive em `/dev/shm`: no disco do host, a 95%, o próprio motor recusava
+  todas as alocações — a regra a funcionar, e a tapar os outros checks.
+- **Não validado**: o helper e os drivers de bloco (P1–P6, que precisam de root e de uma VM de
+  lab), e um container a escrever num volume de pool.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -7587,7 +7613,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (28 crates)
+## Arquitetura (29 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -7600,6 +7626,7 @@ antes de qualquer commit:
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API. Desde a P4b.3b do ADR-0044, também os use cases da VM (`vm::VmEngine`: create, stop, start, status, list, remove e os verbos de dia 2), genéricos sobre o `StateRepository<Vm>` e os portos `VmBackends`/`LocalDiskImages`/`SeedBuilder`/`VmNetwork`; o `delonix-vm` monta o engine e mantém as funções públicas como invólucros. Desde a P4b.4a, também o registo de backends de VM (`vm_registry`: `seed`, `register_backend`, a auto-detecção, `backend_for`, o `mac_for`), semeado pela raiz de composição com os backends em que confia para responder `available()` localmente |
 | `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-networking` | contexto Networking (`networking.delonix.io`, ADR-0059 D7): as portas de rede por papel (`GatewayProvider`, `NetworkZoneProvider`), os seus registos por nome e as marcas de posse dos objectos remotos. Saíram do `delonix-sdn` no F2a do ADR-0059, com a forma que o `VmBackend` teve na P4b.2; o `delonix-sdn` reexporta os três módulos, e o OPNsense e o Proxmox deixaram de depender do dataplane nativo |
+| `delonix-storage` | contexto Storage (`storage.delonix.io`, ADR-0067): a porta que um driver de pool de armazenamento implementa (`StoragePoolDriver`: sondar, alocar, libertar, uso), o registo de drivers por nome, a allowlist do administrador (`/etc/delonix/storage-pools.yaml`, lida com o descodificador que a raiz de composição lhe entrega — o contexto não traz um parser YAML) e a marca de posse de um volume de pool. O driver `dir` vive no `delonix-volume`; os de bloco (btrfs, ZFS, LVM-thin) entram como crates de provider |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | a raiz de composição das VMs até à P5 (ADR-0044 P4b.4): semeia o registo do compute com os backends locais, monta o `VmEngine` por chamada (`JsonStore`, disco e seed locais, rede) e mantém as funções públicas como invólucros. Desde a P4b.4c já não tem nenhum backend: os dois locais são crates de provider |

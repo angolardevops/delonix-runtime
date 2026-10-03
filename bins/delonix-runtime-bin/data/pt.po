@@ -15151,3 +15151,91 @@ msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--
 
 msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
 msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."
+
+# ADR-0067: storage pools (dicionário de códigos e ajuda)
+msgid "the storage pool request cannot be served as written"
+msgstr "o pedido de pool de armazenamento não pode ser servido como está escrito"
+
+msgid "A `kind: StoragePool`, a `spec.pool` or a `--pool` carries something a pool request may not: a device, a path or a command (those are the administrator's, in the allowlist), a size that is missing or does not parse, or a pool beside another backing for the same volume (ADR-0067 D2)."
+msgstr "Um `kind: StoragePool`, um `spec.pool` ou um `--pool` traz algo que um pedido de pool não pode trazer: um dispositivo, um caminho ou um comando (esses são do administrador, na allowlist), um tamanho em falta ou que não se lê, ou um pool ao lado de outro suporte para o mesmo volume (ADR-0067 D2)."
+
+msgid "Name only the pool; give the volume a `size`; and keep `pool` apart from `nfs`/`cifs`/`webdav`/`share`/`provision`/`quota`."
+msgstr "Nomeia só o pool; dá um `size` ao volume; e mantém `pool` separado de `nfs`/`cifs`/`webdav`/`share`/`provision`/`quota`."
+
+msgid "the storage pool allowlist cannot be used"
+msgstr "a allowlist de pools de armazenamento não pode ser usada"
+
+msgid "The administrator's allowlist of storage pools exists and is refused: it does not parse, names a field nobody defined, an entry lacks what its driver needs, or the file can be written by someone other than its owner (ADR-0067 D3)."
+msgstr "A allowlist de pools de armazenamento do administrador existe e é recusada: não se lê, nomeia um campo que ninguém definiu, falta a uma entrada o que o seu driver precisa, ou o ficheiro pode ser escrito por alguém que não é o dono (ADR-0067 D3)."
+
+msgid "Fix the file the message names (`/etc/delonix/storage-pools.yaml` unless DELONIX_STORAGE_POOLS_FILE says otherwise) and keep it mode 0644, owned by root or by the user running the engine."
+msgstr "Corrige o ficheiro que a mensagem nomeia (`/etc/delonix/storage-pools.yaml`, a não ser que DELONIX_STORAGE_POOLS_FILE diga outro) e mantém-no com modo 0644, do root ou do utilizador que corre o motor."
+
+msgid "storage pool driver registration refused"
+msgstr "registo de driver de pool de armazenamento recusado"
+
+msgid "A storage pool driver was registered with no id. A programming error in the process that registered it, not in what was asked."
+msgstr "Um driver de pool de armazenamento foi registado sem id. É um erro de programação no processo que o registou, não no que foi pedido."
+
+msgid "Report it: the composition root registers the drivers, and one of them has an empty id."
+msgstr "Reporta-o: a raiz de composição regista os drivers, e um deles tem o id vazio."
+
+msgid "no such storage pool"
+msgstr "esse pool de armazenamento não existe"
+
+msgid "No `kind: StoragePool` with that name is in use on this node. The administrator's allowlist says which pools may be used; a pool is used once a `kind: StoragePool` names it."
+msgstr "Não há nenhum `kind: StoragePool` com esse nome em uso neste nó. A allowlist do administrador diz que pools podem ser usados; um pool passa a ser usado quando um `kind: StoragePool` o nomeia."
+
+msgid "List them with `delonix get storagepools`, and apply a `kind: StoragePool` with that name."
+msgstr "Lista-os com `delonix get storagepools`, e aplica um `kind: StoragePool` com esse nome."
+
+msgid "the storage pool holds something that stands in the way"
+msgstr "o pool de armazenamento tem algo no caminho"
+
+msgid "The pool still holds volumes of this engine, or the object a driver was asked to create or release exists in the pool without this engine's stamp for this state root. An object is never adopted or deleted by its name (ADR-0067 D5)."
+msgstr "O pool ainda tem volumes deste motor, ou o objecto que foi pedido a um driver para criar ou libertar existe no pool sem a marca deste motor para este state root. Um objecto nunca é adoptado nem apagado pelo nome (ADR-0067 D5)."
+
+msgid "Remove the volumes the message lists first; for an object that is not this engine's, pick another volume name or have its owner remove it."
+msgstr "Remove primeiro os volumes que a mensagem lista; para um objecto que não é deste motor, escolhe outro nome de volume ou pede ao dono que o remova."
+
+msgid "the storage pool cannot take this volume"
+msgstr "o pool de armazenamento não pode receber este volume"
+
+msgid "The sum of the sizes allocated in the pool would pass its over-allocation ceiling (`overcommit.maxRatio` times its capacity), or the pool is already above 95% full (ADR-0067 D6)."
+msgstr "A soma dos tamanhos alocados no pool passaria o seu tecto de sobre-alocação (`overcommit.maxRatio` vezes a capacidade), ou o pool já está acima de 95% de ocupação (ADR-0067 D6)."
+
+msgid "Free space in the pool, ask for a smaller volume, or raise `overcommit.maxRatio` in the `kind: StoragePool` knowing a full pool fails every volume in it."
+msgstr "Liberta espaço no pool, pede um volume mais pequeno, ou sobe o `overcommit.maxRatio` no `kind: StoragePool` sabendo que um pool cheio faz falhar todos os volumes que lá estão."
+
+msgid "the storage pool cannot be used on this host"
+msgstr "o pool de armazenamento não pode ser usado neste host"
+
+msgid "No allowlist of storage pools exists on this node, the pool's driver is not built in this version, or the probe found the backing object missing or not writable. Nothing was created."
+msgstr "Não existe allowlist de pools de armazenamento neste nó, o driver do pool não está construído nesta versão, ou a sonda encontrou o objecto de suporte em falta ou sem escrita. Nada foi criado."
+
+msgid "Follow the remedy in the message: have the administrator declare the pool in `/etc/delonix/storage-pools.yaml`, create its directory, or give this user write access to it."
+msgstr "Segue o remédio da mensagem: pede ao administrador que declare o pool em `/etc/delonix/storage-pools.yaml`, cria o directório dele, ou dá a este utilizador acesso de escrita."
+
+msgid "the state of the storage pool could not be determined"
+msgstr "não foi possível determinar o estado do pool de armazenamento"
+
+msgid "The listing that would say whether the pool is usable needs a privilege this process does not have, or the allowlist could not be read. An empty answer obtained without the privilege to list is never read as «no pools» (ADR-0067 D3.5)."
+msgstr "A listagem que diria se o pool é utilizável precisa de um privilégio que este processo não tem, ou a allowlist não pôde ser lida. Uma resposta vazia obtida sem o privilégio para listar nunca é lida como «não há pools» (ADR-0067 D3.5)."
+
+msgid "Follow the remedy in the message; nothing was created or changed."
+msgstr "Segue o remédio da mensagem; nada foi criado nem alterado."
+
+msgid "the administrator's allowlist does not permit this"
+msgstr "a allowlist do administrador não permite isto"
+
+msgid "The pool is not in the administrator's allowlist of storage pools, or the volume asked for is larger than the pool's `maxVolumeBytes`. A manifest can only use what the administrator declared (ADR-0067 D3)."
+msgstr "O pool não está na allowlist de pools de armazenamento do administrador, ou o volume pedido é maior do que o `maxVolumeBytes` do pool. Um manifesto só pode usar o que o administrador declarou (ADR-0067 D3)."
+
+msgid "Ask the administrator to add the pool to `/etc/delonix/storage-pools.yaml` or to raise its `maxVolumeBytes`; or use a pool `delonix get storagepools` lists."
+msgstr "Pede ao administrador que acrescente o pool a `/etc/delonix/storage-pools.yaml` ou que suba o `maxVolumeBytes`; ou usa um pool que o `delonix get storagepools` liste."
+
+msgid "Allocate the volume in this storage pool (see `delonix get storagepools`)"
+msgstr "Aloca o volume neste pool de armazenamento (ver `delonix get storagepools`)"
+
+msgid "Size asked of the pool (e.g. `10g`) — only with `--pool`"
+msgstr "Tamanho pedido ao pool (ex.: `10g`) — só com `--pool`"

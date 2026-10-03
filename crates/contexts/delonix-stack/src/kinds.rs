@@ -63,6 +63,9 @@ pub const RUNTIME_POLICY: &str = "RuntimePolicy";
 pub const NETWORK: &str = "Network";
 pub const NETWORK_ROUTE: &str = "NetworkRoute";
 pub const NETWORK_ZONE: &str = "NetworkZone";
+/// The use of a storage pool the administrator declared (ADR-0067). A node
+/// resource: it names a pool of the allowlist, never a device or a path.
+pub const STORAGE_POOL: &str = "StoragePool";
 pub const VOLUME: &str = "Volume";
 pub const IMAGE: &str = "Image";
 pub const APP: &str = "App";
@@ -378,6 +381,25 @@ const FACTS: &[KindFacts] = &[
         // Proxmox cluster this realizes against carries no `delonix.io/stack`
         // label of its own to stamp — the zone/vnets are PENDING config in
         // `/cluster/sdn/*`, not a local resource.
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        // ADR-0067. BEFORE `Volume`: a volume with `spec.pool` is allocated in
+        // a pool that has to be in use by then, and the teardown — the reverse
+        // of this order — removes the volumes before it stops using the pool.
+        kind: STORAGE_POOL,
+        plural: "storagepools",
+        short: &["sp"],
+        api_version: "storage.delonix.io/v1alpha1",
+        domain: Domain::Storage,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "storagePools",
+        converges: true,
+        teardown: true,
+        // A pool is a node resource. Who divides it among anyone is whoever
+        // consumes the engine, with volumes and sizes.
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {

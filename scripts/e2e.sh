@@ -811,6 +811,55 @@ check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volume snapshot create 
 check "snapshot rm" ok "$BIN" volume snapshot rm "$VOL" s1
 
 ########################################
+section "storage: kind StoragePool e volumes num pool (ADR-0067 P0)"
+########################################
+# The administrator declares a pool in an allowlist; a manifest only NAMES it.
+# The pool lives on /dev/shm, not under $OUT: the engine refuses to allocate in
+# a pool above 95% full, and the disk a developer runs this on often is — the
+# refusal is the engine working, and it would hide every other check here.
+SPD="/dev/shm/dlx-e2e-pool-$PFX"; SPF="$OUT/storage-pools-$PFX.yaml"; SPW="$OUT/sp-$PFX"
+mkdir -p "$SPW"
+sp() { env DELONIX_STORAGE_POOLS_FILE="$SPF" "$BIN" "$@"; }
+sp_fns="$(declare -f sp); BIN='$BIN' SPF='$SPF'"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: { alertPct: 85 }\n' "$PFX" >"$SPW/pool.yaml"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: { driver: dir, path: /srv/x }\n' "$PFX" >"$SPW/admin.yaml"
+printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: outro-%s }\nspec: {}\n' "$PFX" >"$SPW/other.yaml"
+rm -f "$SPF"
+check "StoragePool sem allowlist no nó recusa com 69 (DX-6203), nada criado" ok bash -c \
+  "$sp_fns; out=\$(sp stack apply -f '$SPW/pool.yaml' 2>&1); rc=\$?; [[ \$rc == 69 ]] && grep -q DX-6203 <<<\"\$out\""
+if mkdir -p "$SPD" 2>/dev/null; then
+  printf 'pools:\n  media-%s:\n    driver: dir\n    path: %s\n    maxVolumeBytes: 64G\n' "$PFX" "$SPD" >"$SPF"; chmod 644 "$SPF"
+  check "um campo do administrador no manifesto (driver, path) é recusado pelo nome: DX-1217, não «unknown field»" ok bash -c \
+    "$sp_fns; out=\$(sp stack apply -f '$SPW/admin.yaml' 2>&1); rc=\$?; [[ \$rc == 1 ]] && grep -q DX-1217 <<<\"\$out\" && ! grep -q 'check the spelling' <<<\"\$out\""
+  check "um pool que a allowlist não tem é recusado com 77 (DX-7201)" 77 sp stack apply -f "$SPW/other.yaml"
+  chmod 666 "$SPF"
+  check "uma allowlist que outros podem escrever é recusada (DX-1218)" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/pool.yaml' 2>&1 | grep -q DX-1218"
+  chmod 644 "$SPF"
+  check "stack apply do StoragePool: fica em uso e o plano seguinte não vê deriva" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/pool.yaml' >/dev/null 2>&1 && sp get storagepools | grep -q 'media-$PFX .*AVAILABLE' && sp stack plan -f '$SPW/pool.yaml' --detailed-exitcode >/dev/null 2>&1"
+  check "volume create --pool --size: os dados ficam DENTRO do pool, com a marca do motor" ok bash -c \
+    "$sp_fns; sp volume create 'spv-$PFX' --pool 'media-$PFX' --size 64M >/dev/null 2>&1 && [[ -d '$SPD/spv-$PFX/_data' && -f '$SPD/spv-$PFX/.delonix-volume.json' ]] && sp volume inspect 'spv-$PFX' | grep -q '$SPD/spv-$PFX/_data'"
+  check "um volume maior do que o maxVolumeBytes do administrador é recusado com 77" 77 \
+    sp volume create "spbig-$PFX" --pool "media-$PFX" --size 100G
+  check "um volume que passa o tecto de sobre-alocação do pool é recusado com 5 (DX-5202)" ok bash -c \
+    "$sp_fns; out=\$(sp volume create 'spover-$PFX' --pool 'media-$PFX' --size 63G 2>&1); rc=\$?; [[ \$rc == 5 ]] && grep -q DX-5202 <<<\"\$out\" && [[ ! -e '$SPD/spover-$PFX' ]]"
+  mkdir -p "$SPD/spalheio-$PFX"; echo dados >"$SPD/spalheio-$PFX/keep"
+  check "um directório com dados e sem a marca do motor nunca é adoptado pelo nome (5), e fica intacto" ok bash -c \
+    "$sp_fns; sp volume create 'spalheio-$PFX' --pool 'media-$PFX' --size 16M >/dev/null 2>&1; rc=\$?; [[ \$rc == 5 ]] && [[ \$(cat '$SPD/spalheio-$PFX/keep') == dados ]]"
+  check "delete storagepools com volumes lá dentro recusa (5) e nomeia-os" ok bash -c \
+    "$sp_fns; out=\$(sp delete storagepools 'media-$PFX' 2>&1); rc=\$?; [[ \$rc == 5 ]] && grep -q 'spv-$PFX' <<<\"\$out\""
+  check "volume rm liberta o volume do pool; delete deixa de usar o pool e o directório do pool fica" ok bash -c \
+    "$sp_fns; sp volume rm 'spv-$PFX' >/dev/null 2>&1 && [[ ! -e '$SPD/spv-$PFX' ]] && sp delete storagepools 'media-$PFX' >/dev/null 2>&1 && [[ -d '$SPD' && -f '$SPD/spalheio-$PFX/keep' ]]"
+  printf 'apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media-%s }\nspec: {}\n---\napiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: { name: spm-%s }\nspec: { pool: media-%s, size: 32M }\n' "$PFX" "$PFX" "$PFX" >"$SPW/stack.yaml"
+  check "por manifesto: pool e volume aplicam, o plano não vê deriva, e o destroy leva o volume, deixa de usar o pool e deixa o directório do pool" ok bash -c \
+    "$sp_fns; sp stack apply -f '$SPW/stack.yaml' >/dev/null 2>&1 && [[ -d '$SPD/spm-$PFX/_data' ]] && sp stack plan -f '$SPW/stack.yaml' --detailed-exitcode >/dev/null 2>&1 && sp stack destroy -f '$SPW/stack.yaml' >/dev/null 2>&1 && [[ ! -e '$SPD/spm-$PFX' && -d '$SPD' ]] && sp get storagepools | grep 'media-$PFX ' | grep -qw no"
+  rm -rf "$SPD"
+else
+  skip "storage pools" "não foi possível criar um directório em /dev/shm para o pool"
+fi
+rm -f "$SPF"
+
 section "volume create: --driver/--opt (Sprint 6 — fusão do --type/--server/--share)"
 ########################################
 # `storage`/`sharevolume` tinham ZERO checks executados — o balde dos

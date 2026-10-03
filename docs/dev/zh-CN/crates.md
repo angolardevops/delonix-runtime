@@ -33,13 +33,14 @@
 <!-- dev-docs:begin crates-table -->
 | Crate | 层 | 路径 | 二进制 | 依赖（引擎 crate） | 被使用于 |
 |---|---|---|---|---|---|
-| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
+| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-compute`, `delonix-networking`, `delonix-runtime-bin`, `delonix-sdn` |
 | `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-model`, `delonix-net-rules`, `delonix-node` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-state`, `delonix-vm`, `delonix-volume` |
 | `delonix-networking` | Contexts | `crates/contexts/delonix-networking` | — | `delonix-compute`, `delonix-model`, `delonix-net-rules` | `delonix-opnsense`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn` |
 | `delonix-node` | Contexts | `crates/contexts/delonix-node` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-node-api`, `delonix-node-api-bin`, `delonix-oci`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-security-runtime`, `delonix-state`, `delonix-vm`, `delonix-volume` |
 | `delonix-security-runtime` | Contexts | `crates/contexts/delonix-security-runtime` | — | `delonix-model`, `delonix-node` | `delonix-runtime-bin` |
 | `delonix-stack` | Contexts | `crates/contexts/delonix-stack` | — | `delonix-model` | `delonix-runtime-bin` |
+| `delonix-storage` | Contexts | `crates/contexts/delonix-storage` | — | `delonix-model` | `delonix-runtime-bin`, `delonix-volume` |
 | `delonix-linux` | Adapters | `crates/adapters/delonix-linux` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
 | `delonix-oci` | Adapters | `crates/adapters/delonix-oci` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-cri`, `delonix-mgmt`, `delonix-runtime-bin`, `delonix-scanner` |
 | `delonix-scanner` | Adapters | `crates/adapters/delonix-scanner` | — | `delonix-model`, `delonix-oci` | `delonix-mgmt`, `delonix-runtime-bin` |
@@ -47,7 +48,7 @@
 | `delonix-state` | Adapters | `crates/adapters/delonix-state` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
 | `delonix-telemetry` | Adapters | `crates/adapters/delonix-telemetry` | — | — | `delonix-cri`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-node-api-bin`, `delonix-runtime-bin` |
 | `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
-| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
+| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state`, `delonix-storage` | `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
 | `delonix-opnsense` | Providers | `crates/providers/delonix-opnsense` | — | `delonix-compute`, `delonix-model`, `delonix-networking` | `delonix-node-api`, `delonix-runtime-bin` |
 | `delonix-provider-cloud-hypervisor` | Providers | `crates/providers/delonix-provider-cloud-hypervisor` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-vm` |
 | `delonix-provider-libvirt` | Providers | `crates/providers/delonix-provider-libvirt` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-vm` |
@@ -60,7 +61,7 @@
 | `delonix-mcp-bin` | Binaries | `bins/delonix-mcp-bin` | `delonix-mcp` | `delonix-mcp`, `delonix-node`, `delonix-telemetry` | — |
 | `delonix-mgmt-bin` | Binaries | `bins/delonix-mgmt-bin` | `delonix-mgmt` | `delonix-mgmt`, `delonix-node`, `delonix-telemetry` | — |
 | `delonix-node-api-bin` | Binaries | `bins/delonix-node-api-bin` | `delonix-node-api` | `delonix-node`, `delonix-node-api`, `delonix-telemetry` | — |
-| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-net-rules`, `delonix-networking`, `delonix-node`, `delonix-oci`, `delonix-opnsense`, `delonix-proxmox`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
+| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-net-rules`, `delonix-networking`, `delonix-node`, `delonix-oci`, `delonix-opnsense`, `delonix-proxmox`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
 <!-- dev-docs:end crates-table -->
 
 ## 基础层（Foundation）

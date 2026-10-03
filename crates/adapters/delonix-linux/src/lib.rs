@@ -3752,7 +3752,8 @@ fn pending_image_owners(rootfs: &str) -> Vec<delonix_compute::owners::Owner> {
 /// The targets of the NAMED volumes that are still empty.
 ///
 /// A named volume is recognised by its shape on disk — `<volumes>/<name>/_data`
-/// with the store's `meta.json` beside it — so a bind mount of a host path is
+/// with the store's `meta.json` beside it, or a storage pool's `<name>/_data`
+/// with the pool's owner stamp beside it — so a bind mount of a host path is
 /// never one, whatever it is called. Empty is what makes it safe to give to the
 /// container's user: there is no file in it whose ownership could be changed.
 fn empty_named_volumes(mounts: &[Mount]) -> Vec<String> {
@@ -3764,10 +3765,12 @@ fn empty_named_volumes(mounts: &[Mount]) -> Vec<String> {
 }
 
 fn is_empty_named_volume(source: &std::path::Path) -> bool {
+    // A volume in a storage pool has the same shape with the pool's owner
+    // stamp beside it instead of the store's record (ADR-0067).
     let named = source.file_name().is_some_and(|n| n == "_data")
-        && source
-            .parent()
-            .is_some_and(|p| p.join("meta.json").is_file());
+        && source.parent().is_some_and(|p| {
+            p.join("meta.json").is_file() || p.join(".delonix-volume.json").is_file()
+        });
     named
         && std::fs::read_dir(source)
             .map(|mut d| d.next().is_none())
@@ -9969,6 +9972,10 @@ mod tests {
         std::fs::write(tmp.path().join("vol/meta.json"), b"{}").unwrap();
         let bind = tmp.path().join("proj/_data");
         std::fs::create_dir_all(&bind).unwrap();
+        let pooled = tmp.path().join("pool/db/_data");
+        std::fs::create_dir_all(&pooled).unwrap();
+        std::fs::write(tmp.path().join("pool/db/.delonix-volume.json"), b"{}").unwrap();
+        assert!(is_empty_named_volume(&pooled));
         let mount = |src: &std::path::Path, target: &str, readonly: bool| Mount {
             source: src.to_string_lossy().into_owned(),
             target: target.into(),

@@ -84,6 +84,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
         k::SERVICE => cmd::service::spec_with_defaults(doc),
         k::IPPOOL => cmd::ippool::spec_with_defaults(doc),
+        k::STORAGE_POOL => cmd::storage_pool::spec_with_defaults(doc),
         k::VOLUME => cmd::volume::spec_with_defaults(doc),
         // Secret DOES get a round-trip, and its values are redacted on the way
         // (`secret::spec_with_defaults`). It used to be the one Kind skipped
@@ -409,6 +410,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
         k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
         k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
+        k::STORAGE_POOL => Some(crate::cmd::storage_pool::STORAGE_POOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
@@ -445,6 +447,11 @@ pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'stati
 fn refused_by_name(doc: &ManifestDoc) -> Result<()> {
     if doc.kind == k::SYSTEM_CONTAINER {
         crate::cmd::system_container::reject_privilege(doc)?;
+    }
+    // A pool's driver, path or device is the administrator's (ADR-0067 D3):
+    // DX-1217 naming the field, not «unknown field».
+    if doc.kind == k::STORAGE_POOL {
+        crate::cmd::storage_pool::refuse_admin_fields(doc)?;
     }
     Ok(())
 }
@@ -1487,6 +1494,15 @@ spec: {}
             assert_eq!(err.number(), 1540, "{err}");
             assert!(!err.to_string().contains("not understood"), "{err}");
         }
+        // The same for a pool field that is the administrator's.
+        std::fs::write(
+            &p,
+            "apiVersion: storage.delonix.io/v1alpha1\nkind: StoragePool\nmetadata: { name: media }\nspec: { driver: dir, path: /srv/x }\n",
+        )
+        .unwrap();
+        let err = load(&p).unwrap_err();
+        assert_eq!(err.number(), 1217, "{err}");
+        assert!(err.to_string().contains("`driver`") && err.to_string().contains("`path`"));
         // Inside a Stack too.
         std::fs::write(
             &p,
@@ -1676,6 +1692,7 @@ spec: { image: nginx }
             "networks" => ("{ driver: bridge }", "Network"),
             "networkRoutes" => ("{ from: a, to: b }", "NetworkRoute"),
             "networkZones" => ("{ vnets: [{ name: prod }] }", "NetworkZone"),
+            "storagePools" => ("{ alertPct: 85 }", "StoragePool"),
             "volumes" => ("{}", "Volume"),
             "images" => ("{ pull: alpine }", "Image"),
             "apps" => ("{ source: ., image: shop }", "App"),

@@ -1138,6 +1138,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
     delonix_node[&quot;delonix-node&quot;]
     delonix_security_runtime[&quot;delonix-security-runtime&quot;]
     delonix_stack[&quot;delonix-stack&quot;]
+    delonix_storage[&quot;delonix-storage&quot;]
   end
   subgraph adapter[&quot;Adapters&quot;]
     delonix_linux[&quot;delonix-linux&quot;]
@@ -1257,6 +1258,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_runtime_bin --&gt; delonix_security_runtime
   delonix_runtime_bin --&gt; delonix_stack
   delonix_runtime_bin --&gt; delonix_state
+  delonix_runtime_bin --&gt; delonix_storage
   delonix_runtime_bin --&gt; delonix_telemetry
   delonix_runtime_bin --&gt; delonix_truenas
   delonix_runtime_bin --&gt; delonix_vm
@@ -1275,6 +1277,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_state --&gt; delonix_compute
   delonix_state --&gt; delonix_model
   delonix_state --&gt; delonix_node
+  delonix_storage --&gt; delonix_model
   delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
@@ -1286,6 +1289,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_volume --&gt; delonix_model
   delonix_volume --&gt; delonix_node
   delonix_volume --&gt; delonix_state
+  delonix_volume --&gt; delonix_storage
   class delonix_compute block
   class delonix_cri iface
   class delonix_linux block
@@ -1310,6 +1314,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   class delonix_security_runtime block
   class delonix_stack block
   class delonix_state block
+  class delonix_storage block
   class delonix_telemetry block
   class delonix_truenas external
   class delonix_vm block

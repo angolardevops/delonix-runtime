@@ -1061,6 +1061,7 @@ dependencies = [
  "delonix-security-runtime",
  "delonix-stack",
  "delonix-state",
+ "delonix-storage",
  "delonix-telemetry",
  "delonix-truenas",
  "delonix-vm",
@@ -1157,6 +1158,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-storage"
+version = "4.5.0"
+dependencies = [
+ "delonix-model",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "delonix-telemetry"
 version = "4.5.0"
 dependencies = [
@@ -1204,6 +1218,8 @@ dependencies = [
  "delonix-model",
  "delonix-node",
  "delonix-state",
+ "delonix-storage",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

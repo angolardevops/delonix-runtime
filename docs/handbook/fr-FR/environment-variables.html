@@ -478,6 +478,13 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <td>Doit désigner un fichier existant — ne se rabat jamais sur un autre. Le premier fichier trouvé est la configuration ; les fichiers ne sont jamais fusionnés. Un fichier illisible fait échouer une requête de VM sans <code>--backend</code> au lieu de deviner un provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td>Chemin de la liste des pools de stockage autorisés par l’administrateur (ADR-0067 D3), à la place de <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
+<td>Un chemin.</td>
+<td>Le fichier est refusé lorsque son groupe ou tout le monde peut y écrire, ou lorsqu’il n’appartient ni à root ni à l’utilisateur qui exécute le moteur. Un fichier absent signifie qu’aucun pool n’a été déclaré.</td>
+</tr>
+<tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (l’avertissement rootless-sans-délégation et <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>Fait taire les avertissements sur l’absence de délégation de cgroup et sur un container sans aucun plafond mémoire nulle part.</td>

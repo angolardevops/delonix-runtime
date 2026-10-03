@@ -479,6 +479,13 @@ and how to tear the isolated infra down, is in
 <td>Must name an existing file — never falls back to another one. The first file found is the configuration; files are never merged. A file that cannot be read makes a VM request without <code>--backend</code> fail instead of guessing a provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
+<td>Path to the administrator's storage pool allowlist (ADR-0067 D3), instead of <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
+<td>A path.</td>
+<td>The file is refused when its group or everyone can write it, or when it belongs to neither root nor the user running the engine. A file that does not exist means no pool was declared.</td>
+</tr>
+<tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the rootless-without-delegation warning and <code>warn_if_unprotected_memory</code>), <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/kindmode.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>kindmode.<wbr>rs</code></a></td>
 <td>Silences the warnings about missing cgroup delegation and about a container with no memory ceiling anywhere.</td>

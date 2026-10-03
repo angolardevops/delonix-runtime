@@ -1600,6 +1600,15 @@ spec:
           - name: prod
             alias: &quot;Production VLAN&quot;
 
+  # A storage pool the node&#x27;s administrator declared in
+  # /etc/delonix/storage-pools.yaml (ADR-0067). The Stack only says the engine
+  # uses it, and how far it may be over-allocated; the driver and what backs
+  # the pool are the administrator&#x27;s and are refused here by name.
+  storagePools:
+    - name: fast
+      spec:
+        alertPct: 85
+
   volumes:
     - name: db-data
       spec:

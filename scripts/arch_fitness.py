@@ -58,6 +58,7 @@ LAYERS = {
     "delonix-stack": CONTEXT,
     "delonix-compute": CONTEXT,
     "delonix-networking": CONTEXT,  # ADR-0059 D7: the network role ports and their registries
+    "delonix-storage": CONTEXT,  # ADR-0067 D1: the storage pool port, its registry and the allowlist
     "delonix-node": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)

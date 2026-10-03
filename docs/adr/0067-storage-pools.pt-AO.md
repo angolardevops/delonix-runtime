@@ -377,3 +377,11 @@ superfície de pedidos do auxiliar antes de a P1 fundir.
    do nó, uma linha de capacidade por driver (com a divisão da pergunta 1), em vez de um provider
    por driver. Os drivers partilham o nó, a lista e o auxiliar; ids separados multiplicariam
    colunas da matriz cheias de `unsupported-by-provider` nos outros domínios.
+
+## Adendo 2026-10-03 — P0 construído
+
+O contexto `delonix-storage`, o driver `dir`, o `kind: StoragePool`, `spec.pool`/`spec.size` no
+`kind: Volume` e `volume create --pool --size` estão construídos e medidos ao vivo (12 checks na
+bateria, com um pool em `/dev/shm`). O texto canónico do adendo, com o que foi medido e o que não
+foi validado, está em `0067-storage-pools.md`.
+

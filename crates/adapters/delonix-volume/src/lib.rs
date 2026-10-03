@@ -13,6 +13,7 @@ use delonix_compute::Mount;
 use delonix_state::write_atomic;
 
 mod error;
+pub mod pool_dir;
 pub mod provider_report;
 pub use error::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,13 @@ pub struct Volume {
     /// deserializing as what it is — a volume that is nobody's subdirectory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// The storage pool this volume was allocated in (`kind: Volume` with
+    /// `spec.pool`, ADR-0067). Its data lives in the pool, at `mountpoint`, and
+    /// goes back through the pool's driver when the volume is removed.
+    ///
+    /// `#[serde(default)]`: every `meta.json` already on disk is a volume in no pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
 }
 
 /// The drivers that mount a network share (as opposed to `local`/loopback).
@@ -453,9 +461,36 @@ impl VolumeStore {
                 labels: BTreeMap::new(),
                 annotations: BTreeMap::new(),
                 parent: parent.map(str::to_string),
+                pool: None,
             }
         };
         write_meta(&self.meta_path(name), &vol)?;
+        Ok(vol)
+    }
+
+    /// Registers a volume a storage pool driver allocated (ADR-0067): the data
+    /// is at `mountpoint`, inside the pool, and `size_bytes` is the size that
+    /// was asked of the pool, kept as this volume's quota.
+    ///
+    /// The record is written AFTER the driver allocated: the object in the pool
+    /// carries the engine's stamp, so an apply that dies in between finds it
+    /// again and adopts it, while a record with nothing behind it would be a
+    /// volume that mounts an empty directory. Re-registering keeps the pool the
+    /// volume is in — it never moves.
+    pub fn register_in_pool(
+        &self,
+        name: &str,
+        mountpoint: &std::path::Path,
+        size_bytes: u64,
+        alert_pct: Option<u8>,
+        pool: &str,
+    ) -> Result<Volume> {
+        let mut vol =
+            self.register_external(name, mountpoint, Some(size_bytes), alert_pct, None)?;
+        if vol.pool.as_deref() != Some(pool) {
+            vol.pool = Some(pool.to_string());
+            write_meta(&self.meta_path(name), &vol)?;
+        }
         Ok(vol)
     }
 
@@ -498,6 +533,7 @@ impl VolumeStore {
             // A volume created here owns its own data directory; only
             // `register_external` carves one out of another volume.
             parent: None,
+            pool: None,
         };
         // Mount BEFORE persisting: if NFS fails, we don't leave an orphan volume.
         if let Err(e) = self.ensure_mounted(&vol) {

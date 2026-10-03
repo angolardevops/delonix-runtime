@@ -404,6 +404,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
                 k::SERVICE => super::service::desired(doc)?,
                 k::IPPOOL => super::ippool::desired(doc)?,
+                k::STORAGE_POOL => super::storage_pool::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
                 k::IMAGE => super::image::desired(doc)?,
                 k::APP => super::app::desired(doc)?,
@@ -443,6 +444,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::netroute::actual()?);
     out.extend(super::service::actual()?);
     out.extend(super::ippool::actual()?);
+    out.extend(super::storage_pool::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
     out.extend(super::app::actual(docs)?);
@@ -732,6 +734,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IPPOOL, super::ippool::RECONCILED_IPPOOL_FIELDS),
+        (
+            k::STORAGE_POOL,
+            super::storage_pool::RECONCILED_STORAGE_POOL_FIELDS,
+        ),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
         (k::APP, super::app::RECONCILED_APP_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
@@ -1400,6 +1406,7 @@ fn presence(
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
         k::SERVICE => super::service::presence_of(doc),
         k::IPPOOL => super::ippool::presence_of(doc),
+        k::STORAGE_POOL => super::storage_pool::presence_of(doc),
         k::NETWORK_GATEWAY => super::network_gateway::presence_of(doc),
         k::NETWORK_ZONE => super::network_zone::presence_of(doc),
         k::SYSTEM_CONTAINER => super::system_container::presence_of(doc),
@@ -1979,6 +1986,11 @@ fn run_layers_inner(
     // Cluster-native SDN before anything that might attach to it — mirrors
     // NETWORK's own early position.
     layers.run(k::NETWORK_ZONE, "🗺", || super::network_zone::apply(docs))?;
+    // Before the volumes: one with `spec.pool` is allocated in a pool that has
+    // to be in use by then.
+    layers.run(k::STORAGE_POOL, "🗄️", || {
+        super::storage_pool::apply(docs)
+    })?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
@@ -2109,6 +2121,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
         k::SERVICE => super::service::remove_for_replace(name),
         k::IPPOOL => super::ippool::remove_for_replace(name),
+        k::STORAGE_POOL => super::storage_pool::remove_for_replace(name),
         k::HTTP_ROUTE | k::INGRESS => super::httproute::remove_for_prune(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
@@ -2432,6 +2445,18 @@ fn converge_and_stamp(
                         })?;
                     super::ippool::converge_doc(doc)?
                 }
+                k::STORAGE_POOL => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "StoragePool/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::storage_pool::converge_doc(doc)?
+                }
                 // Same shape as a firewall policy: `apply_one` is already
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
@@ -2531,6 +2556,7 @@ fn stamp_all(
             k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::SYSTEM_CONTAINER => super::system_container::stamp(&d.name, stack, &d.fields),
             k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
+            k::STORAGE_POOL => super::storage_pool::stamp(&d.name, stack, &d.fields),
             k::HTTP_ROUTE | k::INGRESS => {
                 super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
             }
