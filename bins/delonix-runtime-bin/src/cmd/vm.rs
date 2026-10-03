@@ -747,7 +747,7 @@ pub enum VmCmd {
         /// After starting, attach to the serial console to watch the boot live (Ctrl-D to detach).
         #[arg(long)]
         console: bool,
-        /// After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout.
+        /// After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running.
         #[arg(long)]
         wait: bool,
         /// Seconds to wait with --wait (default 120).
@@ -2686,7 +2686,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     &base,
                     &vm.name,
                     std::time::Duration::from_secs(boot_timeout),
-                );
+                )?;
             }
             let fresh = delonix_vm::status(&base, &vm.name).ok();
             let ip = fresh.as_ref().and_then(|v| v.ip.clone());
@@ -3508,7 +3508,14 @@ fn fmt_open_ports(ip: Option<&str>) -> String {
 /// itself on — measured, on an image whose firmware fails before the kernel.
 /// There the address is the START of the question and the answer is an ARP
 /// probe on the SDN.
-fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
+///
+/// A deadline that passes without the VM answering is an ERROR (DX-8503, exit
+/// 124), not a warning: `--wait` is the flag a script uses to know the VM is
+/// usable, and a `0` there let the next step run against a guest that never
+/// booted. The VM is left running — the timeout may just be too short — and
+/// the message says so. The two outcomes that make no claim (user-mode
+/// networking, and an address this host cannot probe) stay successes.
+fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) -> Result<()> {
     let start = std::time::Instant::now();
     let deadline = start + timeout;
     let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -3548,7 +3555,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                                 "vm '{name}' started — ip {ip}, which could not be verified from here",
                                 &[("name", name), ("ip", &ip)],
                             ));
-                            return;
+                            return Ok(());
                         }
                     }
                 } else {
@@ -3562,7 +3569,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                         "vm '{name}' is up — ip {ip}",
                         &[("name", name), ("ip", &ip)],
                     ));
-                    return;
+                    return Ok(());
                 }
             }
             // libvirt user-mode never gives an IP: after a short start, steer
@@ -3582,24 +3589,24 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                     "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in",
                     &[("name", name)],
                 ));
-                return;
+                return Ok(());
             }
         }
         if std::time::Instant::now() >= deadline {
             if tty {
                 eprint!("\r\x1b[K");
             }
-            match &silent_at {
-                Some(ip) => super::output::warn(&super::po::tf(
+            let why = match &silent_at {
+                Some(ip) => super::po::tf(
                     "vm '{name}' is running but never answered at {ip} — that address is computed from the MAC, not observed, so it exists whether or not the guest booted; `delonix vm console {name}` to watch the boot",
                     &[("name", name), ("ip", ip)],
-                )),
-                None => super::output::warn(&super::po::tf(
+                ),
+                None => super::po::tf(
                     "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch",
                     &[("name", name)],
-                )),
-            }
-            return;
+                ),
+            };
+            return Err(Error::coded(8503, Error::Timeout(why)));
         }
         if tty {
             eprint!(
