@@ -1,0 +1,115 @@
+#!/bin/bash
+# Per-clone secrets for the FreePBX image, once, on the clone's first boot.
+#
+# Every clone of a golden image shares whatever the build left in it. For a
+# PBX that is not a detail: an admin password or an AMI secret shared by every
+# clone -- and published, if it were a literal in this repository -- is how
+# PBXs on the internet get used for toll fraud. So nothing here is baked:
+#
+#   * the web admin login `admin` gets a password on first boot. If whoever
+#     created the VM wrote one to /etc/delonix/freepbx-admin-password (a
+#     cloud-init `write_files`, e.g. from a platform that derives it), that is
+#     used and the file is removed; otherwise a random one is generated. Either
+#     way it ends up in /root/freepbx-admin.txt (0600) and nowhere else.
+#   * the AMI secret (AMPMGRPASS) is regenerated, and FreePBX rewrites
+#     manager.conf with it.
+#   * the private keys the install bakes in -- FreePBX's CA and default TLS
+#     certificate, the API's OAuth signing key, Debian's snakeoil key -- are
+#     regenerated under the clone's hostname.
+#
+# Runs from delonix-freepbx-first-boot.service; the stamp makes it once.
+set -euo pipefail
+exec > >(tee -a /var/log/delonix-freepbx-first-boot.log) 2>&1
+STAMP=/var/lib/delonix/freepbx-first-boot.done
+[ -f "$STAMP" ] && exit 0
+echo "=== delonix freepbx first boot: $(date -Is) ==="
+
+for i in $(seq 1 90); do
+  if mysql -N asterisk -e 'SELECT 1' >/dev/null 2>&1 && asterisk -rx "core show version" >/dev/null 2>&1; then
+    break
+  fi
+  [ "$i" -eq 90 ] && { echo "!! MariaDB/Asterisk never came up; nothing rotated"; exit 1; }
+  sleep 2
+done
+
+rand() { openssl rand -base64 36 | tr -d '/+=\n' | head -c "$1"; }
+
+# --- the web admin login ----------------------------------------------------
+GIVEN=/etc/delonix/freepbx-admin-password
+if [ -s "$GIVEN" ]; then
+  PASS=$(head -n1 "$GIVEN" | tr -d '\r\n')
+  SRC="given at creation"
+else
+  PASS=$(rand 24)
+  SRC="generated on first boot"
+fi
+[ "${#PASS}" -ge 12 ] || { echo "!! the admin password is shorter than 12 characters; refusing it"; exit 1; }
+# The password travels to MariaDB on stdin, never on a command line.
+{
+  printf "DELETE FROM ampusers WHERE username='admin';\n"
+  printf "INSERT INTO ampusers SET username='admin', password_sha1=SHA1('%s'), extension_low='', extension_high='', deptname='', sections='*';\n" \
+    "$(printf '%s' "$PASS" | sed "s/'/''/g")"
+} | mysql asterisk
+umask 077
+printf 'FreePBX web admin (%s)\nuser: admin\npassword: %s\n' "$SRC" "$PASS" > /root/freepbx-admin.txt
+rm -f "$GIVEN"
+unset PASS
+echo "==> admin password set ($SRC)"
+
+# --- the AMI secret ---------------------------------------------------------
+# Into the settings table on stdin, like the admin password -- never argv,
+# where any local user reading `ps` would see it.
+#
+# Order matters, measured on a clone (2026-09-30): `fwconsole reload` logs in
+# to the AMI with the secret from the DATABASE, while Asterisk still holds the
+# old one from manager.conf -- "Unable to connect to Asterisk Manager", and the
+# first boot died there. So the new secret goes to Asterisk first (manager.conf
+# + `manager reload`), and FreePBX regenerates the file afterwards with the
+# same value.
+AMI_NEW=$(rand 32)
+printf "UPDATE freepbx_settings SET value='%s' WHERE keyword='AMPMGRPASS';\n" "$AMI_NEW" | mysql asterisk
+[ "$(grep -c '^secret *= ' /etc/asterisk/manager.conf)" = 1 ] \
+  || { echo "!! manager.conf does not have exactly one secret line"; exit 1; }
+AMI_NEW=$AMI_NEW awk '/^secret *= / { print "secret = " ENVIRON["AMI_NEW"]; next } { print }' \
+  /etc/asterisk/manager.conf > /etc/asterisk/manager.conf.new
+chown --reference=/etc/asterisk/manager.conf /etc/asterisk/manager.conf.new
+chmod --reference=/etc/asterisk/manager.conf /etc/asterisk/manager.conf.new
+mv /etc/asterisk/manager.conf.new /etc/asterisk/manager.conf
+unset AMI_NEW
+asterisk -rx "manager reload" >/dev/null
+fwconsole reload >/dev/null
+echo "==> AMI secret regenerated and manager.conf rewritten"
+
+# --- keys and certificates --------------------------------------------------
+# Measured on the first stock build (2026-09-30): the install leaves private
+# keys in the image that every clone would share -- the API's OAuth signing key
+# (anyone holding the image could mint API tokens for any clone), FreePBX's
+# local CA and its default TLS certificate (CN = the build VM), and Debian's
+# snakeoil key that Apache serves TLS with. Each is regenerated here, through
+# the vendor's own paths, under the clone's hostname.
+umask 022
+K=/etc/asterisk/keys
+# certman's `--generate` reuses an existing CA, and the CA key is the shared
+# one: remove the CA first (removeCA also drops the self-signed certificates),
+# then let certman make a new CA and default certificate.
+# Measured on a clone: this php run does remove the CA and the self-signed
+# certificates, then exits 151 with no output (from FreePBX's own shutdown).
+# So its effect is checked, not its exit status.
+php -r 'include "/etc/freepbx.conf"; \FreePBX::create()->Certman->removeCA();' || true
+[ ! -e "$K/ca.key" ] && [ ! -e "$K/default.key" ] \
+  || { echo "!! the build's CA or default certificate is still there"; exit 1; }
+fwconsole certificates --generate
+# The API module regenerates its key pair on install when the files are gone;
+# the OAuth encryption key is created on first use (not baked, removed anyway).
+rm -f "$K/api_oauth.key" "$K/api_oauth_public.key" "$K/oauth_encryption.key"
+fwconsole ma install api
+[ -s "$K/api_oauth.key" ] || { echo "!! the API key was not regenerated"; exit 1; }
+make-ssl-cert generate-default-snakeoil --force-overwrite
+fwconsole chown >/dev/null 2>&1 || true
+systemctl reload apache2 >/dev/null 2>&1 || true
+fwconsole reload >/dev/null
+echo "==> CA, default certificate, API key and snakeoil key regenerated for $(hostname)"
+
+mkdir -p "$(dirname "$STAMP")"
+date -Is > "$STAMP"
+echo "=== done ==="

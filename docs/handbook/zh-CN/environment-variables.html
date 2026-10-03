@@ -245,6 +245,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
+<td>节点 API 的 socket</td>
+<td><code>--addr</code> &gt; <code>DELONIX_NODE_API_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
+</tr>
+<tr>
 <td>Docker API 的 socket</td>
 <td><code>--addr</code> &gt; <code>DELONIX_DOCKER_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-docker.<wbr>sock</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
@@ -261,7 +266,7 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td>VM 的 backend</td>
-<td><code>--backend</code>（或镜像自带的 <code>HYPERVISOR</code>） &gt; <code>DELONIX_VM_BACKEND</code> &gt; providers 文件中的 <code>defaultProvider</code>（ADR-0054） &gt; <code>vm default-backend --set</code> &gt; 自动检测（仅在没有 providers 文件时）</td>
+<td><code>--backend</code>（或镜像自带的 <code>HYPERVISOR</code>） &gt; <code>DELONIX_VM_BACKEND</code> &gt; providers 文件中的 <code>defaultProvider</code>（ADR-0054；由 <code>vm default-backend --set</code> 写入） &gt; 旧的 <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; 自动检测。无法读取的 providers 文件会让这次选择失败，而不是落到下一项</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -354,7 +359,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td><code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mgmt</code> 和 <code>delonix-mcp</code> 的日志过滤器。</td>
+<td><code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code> 和 <code>delonix-mcp</code> 的日志过滤器。</td>
 <td>一个 <code>tracing</code> 过滤表达式（<code>debug</code>、<code>warn</code>、<code>delonix_sdn=debug</code>）。回退到 <code>RUST_LOG</code>，再回退到 <code>info</code>。</td>
 <td>日志写到 stderr；stdout 留给命令的输出。</td>
 </tr>
@@ -420,6 +425,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>本地管理 API（<code>delonix serve api</code>）的 socket。</td>
 <td><code>unix://&lt;path&gt;</code>。默认 <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-mgmt.<wbr>sock</code>。</td>
 <td><code>--addr</code> 优先。这个 API 仅限本地（调用方的 uid）。</td>
+</tr>
+<tr>
+<td><code>DELONIX_NODE_API_ADDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>；由 <code>cmd/serve.rs:run</code> 转发</td>
+<td>节点 API（<code>delonix serve node-api</code>，以 gRPC 和 HTTP/JSON 提供的 <code>delonix.node.v1</code> 契约）的 socket。</td>
+<td><code>unix://&lt;path&gt;</code>。默认 <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code>。</td>
+<td><code>--addr</code> 优先。仅限本地（调用方的 uid）。</td>
 </tr>
 <tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>
@@ -512,6 +524,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>重新给 SDN 上的容器分配 IPv6 地址。</td>
 <td><code>1</code> → 启用；其他任何值 → 容器里的 IPv6 被禁用，转发被拒绝。</td>
 <td><strong>没有任何防火墙规则、namespace 隔离或 <code>Dependency</code> 会应用到 IPv6 上</strong>——每一条策略都只针对 IPv4。安全警告。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，<em>«Bloco 0 do plano 33 (v0.37.1)»</em>。</td>
+</tr>
+<tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>即使内核不过滤 bridge 内部的流量（未加载 <code>br_netfilter</code>，或 <code>bridge-nf-call-iptables=0</code>），也让具名 namespace 里的工作负载带着告警跑起来。不设置时请求会被拒绝（DX-6305，退出码 69），因为隔离规则装上了却什么都不拦。只有 <code>1</code> 才打开。</td>
+<td><code>1</code> → 带着告警跑；其他取值（或未设置）→ 拒绝。</td>
+<td>隔离规则装上了却什么都不拦。见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 中 «O isolamento de namespace é INERTE sem <code>br_netfilter</code>» 一节。</td>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
@@ -621,7 +640,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a>（判定在 <code>admission_verdict</code> 中；<code>MemAvailable</code> 来自 <code>delonix_node::<wbr>mem_available_mib</code>）</td>
 <td>为宿主机保留、不给 VM 用的内存量：如果一个 VM 的内存加上这份保留超过了 <code>MemAvailable</code>，就会被拒绝。</td>
 <td>单位 MiB；默认 <code>2048</code>；一个解析不了的值会回退到 2048。</td>
 <td>调低它有让宿主机 OOM-kill 东西的风险。</td>
@@ -946,6 +965,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>设置并行目录遍历用多少个 worker。</td>
 <td>一个正整数；<code>1</code> → 顺序遍历。未设置 → CPU 数量，有上限。</td>
 <td>并行遍历和顺序遍历给出<strong>相同</strong>的总量（用不同 worker 看到的硬链接测试过）；这个变量存在是为了在特定宿主机上证明这一点，也是当某个文件系统在并发 <code>readdir</code> 下表现异常时的逃生舱。</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code>（glibc）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>，由那些常驻的进程在启动时调用（网络的 pin 和 control、<code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code>、Docker API 切片、L7 ingress 代理）</td>
+<td>glibc 自己对 malloc arena 数量的上限。未设置时，这些进程会自己把它限制为 2，因为 glibc 的默认行为会为每个发生争用的线程保留一个 64 MiB 的堆。</td>
+<td>一个正整数；由 glibc 读取，而不是引擎。</td>
+<td>设置了它，引擎就不去碰它：运维者的值优先。</td>
 </tr>
 </tbody>
 </table></div>

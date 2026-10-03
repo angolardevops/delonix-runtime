@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">架构</p>
-<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/project-structure.html">阅读英文页面</a></span></div><h1 id="project-structure">项目结构</h1>
+<h1 id="project-structure">项目结构</h1>
 <p><strong>阅读之前：</strong><a href="build-and-test.html">克隆、构建与测试</a> —— 你已经有一份能构建的 checkout，也知道
 有哪些门禁存在。</p>
 <p>本页是这个仓库的地图：每一个顶层文件和目录是什么、谁在什么时候改动它，以及哪些部分是<strong>生成
@@ -254,11 +254,12 @@ th:first-child,td:first-child{white-space:nowrap}
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, MCP server
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
+│   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
+│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -447,7 +448,7 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>带用例的限界上下文：Compute，带着 <code>Container</code> 和 <code>Vm</code> 记录（<code>delonix-compute</code>），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（<code>delonix-node</code>）——，Stack——Kind、协调器、revision（<code>delonix-stack</code>）——，以及节点的安全决策（<code>delonix-security-runtime</code>）。</td>
+<td>带用例的限界上下文：Compute，带着 <code>Container</code> 和 <code>Vm</code> 记录、<code>container run</code> 用例和 VM 用例（<code>delonix-compute</code>），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（<code>delonix-node</code>）——，Stack——Kind、协调器、revision（<code>delonix-stack</code>）——，以及节点的安全决策（<code>delonix-security-runtime</code>）。</td>
 <td>改变引擎决策方式的功能。</td>
 <td><a href="crates.html">各个 crate</a></td>
 </tr>
@@ -459,13 +460,13 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>端口背后的远程系统：作为 <code>VmBackend</code> 的一个 Proxmox VE 节点（<code>delonix-proxmox</code>），以及 TrueNAS 的资源制备（<code>delonix-truenas</code>）。</td>
+<td>端口背后的远程系统：一个 Proxmox VE 节点，作为 <code>VmBackend</code> 和 <code>SystemContainerProvider</code>，连同它的逐客户机防火墙和它的 SDN（<code>delonix-proxmox</code>）；一台作为 <code>GatewayProvider</code> 的 OPNsense 设备（<code>delonix-opnsense</code>）；以及 TrueNAS 的资源制备（<code>delonix-truenas</code>）。</td>
 <td>对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a></td>
-<td>暴露引擎的服务器：Kubernetes CRI（<code>delonix-cri</code>，同时也提供 <code>delonix-cri</code> 这个二进制程序）、本地管理 API（<code>delonix-mgmt</code>）以及 MCP 服务器（<code>delonix-mcp</code>）。</td>
+<td>暴露引擎的服务器：Kubernetes CRI（<code>delonix-cri</code>，同时也提供 <code>delonix-cri</code> 这个二进制程序）、本地管理 API（<code>delonix-mgmt</code>）、节点契约服务器（<code>delonix-node-api</code>）以及 MCP 服务器（<code>delonix-mcp</code>）。</td>
 <td>对这几种协议之一的改动。</td>
 <td><a href="cloud-native-standards.html">云原生标准</a></td>
 </tr>
@@ -486,6 +487,12 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><code>delonix-mgmt</code> 二进制程序：一个覆盖在 <code>delonix-mgmt</code> 之上的很薄的 <code>main.rs</code>。</td>
 <td>很少改动；逻辑活在接口层的那个 crate 里。</td>
 <td><a href="crates.html">各个 crate</a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-node-api-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr></code></a></td>
+<td><code>delonix-node-api</code> 二进制程序：一个覆盖在 <code>delonix-node-api</code> 之上的很薄的 <code>main.rs</code>（在一个 unix 套接字上的节点契约，ADR-0040 P5）。</td>
+<td>很少改动；逻辑活在接口层的那个 crate 里。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0050-libvirt-linux-providers-capability-catalog.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/</code></a></td>
@@ -605,9 +612,9 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>，清单的 JSON Schema，从代码<strong>生成</strong>（ADR-0007）。</td>
-<td>一个清单类型变化时运行 <code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code>。</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
+<td><code>v1/delonix.json</code>，清单的 JSON Schema，从代码<strong>生成</strong>（ADR-0007）；以及 <code>v1/providers.json</code>，节点 providers 文件的 JSON Schema（ADR-0054）。</td>
+<td>一个清单类型变化时运行 <code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code>；providers 文件变化时运行 <code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code>。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0054-provider-configuration-file.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -624,7 +631,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <tbody>
 <tr>
 <td><code>scripts/</code></td>
-<td>各个门禁（<code>arch_fitness.py</code>、<code>lang_ratchet.py</code>、<code>contract_gate.py</code>、<code>version_gate.py</code>、<code>docs_cli_gate.py</code>、<code>cli-tree.sh</code>、<code>dev_docs.py</code>）及其基线（<code>arch_baseline.json</code>、<code>lang_baseline.json</code>、<code>cli_baseline.tsv</code>）、各个生成器（<code>dev_docs_site.py</code>、<code>gen-releases.sh</code>、<code>sbom.py</code>）、各个测试装置（<code>e2e.sh</code>、<code>chaos.sh</code>、<code>critest.sh</code>、<code>bench.sh</code>、<code>coverage.sh</code>）、安装脚本 <code>install.sh</code>、<code>appliances/</code> 下的一体机镜像构建，以及 <code>spikes/</code> 下的 spike 探针。</td>
+<td>各个门禁（<code>arch_fitness.py</code>、<code>lang_ratchet.py</code>、<code>contract_gate.py</code>、<code>version_gate.py</code>、<code>docs_cli_gate.py</code>、<code>cli-tree.sh</code>、<code>dev_docs.py</code>、<code>tmp_roots_gate.py</code>）及其基线（<code>arch_baseline.json</code>、<code>lang_baseline.json</code>、<code>cli_baseline.tsv</code>、<code>tmp_roots_baseline.json</code>）、各个生成器（<code>dev_docs_site.py</code>、<code>gen-releases.sh</code>、<code>sbom.py</code>）、各个测试装置（<code>e2e.sh</code>、<code>chaos.sh</code>、<code>critest.sh</code>、<code>bench.sh</code>、<code>coverage.sh</code>）、安装脚本 <code>install.sh</code>、<code>appliances/</code> 下的一体机镜像构建，以及 <code>spikes/</code> 下的 spike 探针。</td>
 <td>任何改动会移动一个棘轮（ratchet）的人（在同一个提交里降低基线）；其余情况由维护者负责。</td>
 <td><a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
@@ -704,6 +711,18 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><code>test</code> 作业，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a> 里的测试 <code>o_schema_publicado_esta_em_dia_com_o_codigo</code></td>
 </tr>
 <tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
+<td><code>v1/providers.json</code></td>
+<td><code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code></td>
+<td><code>test</code> 作业，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>providers_config.<wbr>rs</code></a> 里的测试 <code>the_published_providers_schema_is_the_generated_one</code></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/providers" target="_blank" rel="noopener"><code>docs/providers/</code></a></td>
+<td><code>capability-matrix.md</code></td>
+<td><code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code></td>
+<td><code>test</code> 作业，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/provider.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>provider.<wbr>rs</code></a> 里的测试 <code>the_published_matrix_is_the_generated_one</code></td>
+</tr>
+<tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
 <td>每一个页面</td>
 <td><code>python3 docs/gen.py</code>（需要 <code>cargo build --release -p delonix-runtime-bin</code>）</td>
@@ -741,9 +760,9 @@ th:first-child,td:first-child{white-space:nowrap}
 </tr>
 <tr>
 <td><code>scripts/</code></td>
-<td><code>cli_baseline.tsv</code>、<code>arch_baseline.json</code>、<code>lang_baseline.json</code></td>
-<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>、<code>arch_fitness.<wbr>py --update</code>、<code>lang_ratchet.<wbr>py --update</code></td>
-<td><code>cli surface</code>（<code>cli-tree.sh --gate</code>）、<code>arch fitness</code>、<code>lang ratchet</code> 作业</td>
+<td><code>cli_baseline.tsv</code>、<code>arch_baseline.json</code>、<code>lang_baseline.json</code>、<code>tmp_roots_baseline.json</code></td>
+<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>、<code>arch_fitness.<wbr>py --update</code>、<code>lang_ratchet.<wbr>py --update</code>、<code>tmp_roots_gate.<wbr>py --dir &lt;dir&gt; --update</code></td>
+<td><code>cli surface</code>（<code>cli-tree.sh --gate</code>）、<code>arch fitness</code>、<code>lang ratchet</code> 作业；<code>tmp_roots_gate.py</code> 由 <code>test</code> 作业检查</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>

@@ -253,7 +253,7 @@ below, or when a table names a path that no longer exists.</p>
 │   ├── foundation/               pure shared types and rules (no mechanism)
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
-│   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
+│   ├── providers/                remote systems behind ports (Proxmox VE, OPNsense, TrueNAS)
 │   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
@@ -447,7 +447,7 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Bounded contexts with the use cases: Compute, with the <code>Container</code> and <code>Vm</code> records (<code>delonix-compute</code>), the node's own helpers — event log, host and process checks, server dispatch (<code>delonix-node</code>) —, Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
+<td>Bounded contexts with the use cases: Compute, with the <code>Container</code> and <code>Vm</code> records, the <code>container run</code> use case and the VM use cases (<code>delonix-compute</code>), the node's own helpers — event log, host and process checks, server dispatch (<code>delonix-node</code>) —, Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
 <td>Features that change what the engine decides.</td>
 <td><a href="crates.html">The crates</a></td>
 </tr>
@@ -459,7 +459,7 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>Remote systems behind a port: a Proxmox VE node as a <code>VmBackend</code> (<code>delonix-proxmox</code>) and TrueNAS provisioning (<code>delonix-truenas</code>).</td>
+<td>Remote systems behind a port: a Proxmox VE node as a <code>VmBackend</code> and a <code>SystemContainerProvider</code>, its own per-guest firewall and SDN (<code>delonix-proxmox</code>), an OPNsense appliance as a <code>GatewayProvider</code> (<code>delonix-opnsense</code>), and TrueNAS provisioning (<code>delonix-truenas</code>).</td>
 <td>Changes to a provider integration; a new provider enters here as a port implementation.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
@@ -611,9 +611,9 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>, the manifest JSON Schema, <strong>generated</strong> from the code (ADR-0007).</td>
-<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> when a manifest type changes.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
+<td><code>v1/delonix.json</code>, the manifest JSON Schema, <strong>generated</strong> from the code (ADR-0007), and <code>v1/providers.json</code>, the JSON Schema of the node's providers file (ADR-0054).</td>
+<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> when a manifest type changes; <code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code> when the providers file changes.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0054-provider-configuration-file.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0054-provider-configuration-file.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -710,6 +710,18 @@ expect CI to fail if you edit the output by hand.</p>
 <td><code>test</code> job, test <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
 </tr>
 <tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
+<td><code>v1/providers.json</code></td>
+<td><code>delonix provider config schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>providers.<wbr>json</code></td>
+<td><code>test</code> job, test <code>the_published_providers_schema_is_the_generated_one</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/providers_config.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>providers_config.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/providers" target="_blank" rel="noopener"><code>docs/providers/</code></a></td>
+<td><code>capability-matrix.md</code></td>
+<td><code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code></td>
+<td><code>test</code> job, test <code>the_published_matrix_is_the_generated_one</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/provider.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>provider.<wbr>rs</code></a></td>
+</tr>
+<tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
 <td>every page</td>
 <td><code>python3 docs/gen.py</code> (needs <code>cargo build --release -p delonix-runtime-bin</code>)</td>
@@ -747,9 +759,9 @@ expect CI to fail if you edit the output by hand.</p>
 </tr>
 <tr>
 <td><code>scripts/</code></td>
-<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code></td>
-<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code></td>
-<td><code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code> jobs</td>
+<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>tmp_roots_baseline.json</code></td>
+<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code>, <code>tmp_roots_gate.<wbr>py --dir &lt;dir&gt; --update</code></td>
+<td><code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code> jobs; the <code>test</code> job for <code>tmp_roots_gate.py</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>

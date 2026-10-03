@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
+<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
 # 准备你的环境
 
 **阅读之前：**[从这里开始](start-here.md#day-0-in-30-minutes)（第 0 天）和 [Linux 基础](linux-foundations.md) —— 下面这些宿主机陷阱，都是用用户命名空间和 cgroup 委派的术语来解释的。
@@ -25,8 +25,9 @@ issue 之前，先读一读 [已知的宿主机陷阱](#known-host-traps) 这一
 
 ### `protoc`（构建必需）
 
-`crates/interfaces/delonix-cri/build.rs` 用 `tonic-build`/`prost` 编译 Kubernetes CRI
-的 protobuf，这需要 `PATH` 上有 Protocol Buffers 编译器。`delonix` 这个二进制程序依赖
+`crates/interfaces/delonix-cri/build.rs` 编译 Kubernetes CRI 的 protobuf，
+`crates/interfaces/delonix-node-api/build.rs` 编译 `proto/delonix/node/v1` 里的节点契约，两者都用
+`tonic-build`/`prost`，这需要 `PATH` 上有 Protocol Buffers 编译器。`delonix` 这个二进制程序依赖
 `delonix-cri`，所以**如果没有它，一次普通的 `cargo build --workspace` 就会失败**：
 
 ```bash
@@ -61,7 +62,7 @@ sudo dnf install protobuf-compiler
 | **cgroup v2**（统一层级） | 资源限制和统计都是写到 `/sys/fs/cgroup` 里的 | `stat -fc %T /sys/fs/cgroup` 会打印出 `cgroup2fs` |
 | **无特权 user 命名空间** | rootless 模型的基础：引擎只在自己的 user 命名空间*里面*才是「root」 | `unshare -r -n true` 能成功执行 |
 | **`/dev/net/tun`** | `slirp4netns`（rootless 网络）和 VM 的 tap 设备 | `test -e /dev/net/tun` |
-| 带新 mount API 和 `lowerdir+` 的 **overlayfs**（Linux **6.5** 或更新） | 容器的根文件系统是用 `fsopen`/`fsconfig`/`fsmount` 构建出来的 overlay 挂载，每一层调用一次 `lowerdir+` —— 见 [ADR-0037](../adr/0037-overlay-mount-new-api.md) | `uname -r` |
+| 带新 mount API 和 `lowerdir+` 的 **overlayfs**（Linux **6.5** 或更新） | 容器的根文件系统是用 `fsopen`/`fsconfig`/`fsmount` 构建出来的 overlay 挂载，每一层调用一次 `lowerdir+` —— 见 [ADR-0037](../../adr/0037-overlay-mount-new-api.md) | `uname -r` |
 | 已加载 **`br_netfilter`**，`net.bridge.bridge-nf-call-iptables=1` | 命名空间隔离是在 nftables 的 `forward` 链里强制执行的；没有这个模块，同一网桥上两个容器之间的流量就永远到不了它们，隔离会悄无声息地失效 | `delonix system doctor` |
 | **KVM**（`/dev/kvm`） | 只有 microVM 才需要 —— 见 [构建 microVM](microvm-setup.md) | `test -w /dev/kvm` |
 
@@ -73,7 +74,7 @@ sudo dnf install protobuf-compiler
 
 ## 宿主机软件包
 
-唯一的真相来源是 [`scripts/install.sh`](../../scripts/install.sh)，它同时也是官方安装
+唯一的真相来源是 [`scripts/install.sh`](../../../scripts/install.sh)，它同时也是官方安装
 脚本（作为发布资产发布出去）。它通过 `/etc/os-release` 检测包管理器，支持 **apt**（Debian、
 Ubuntu 及其衍生版）、**dnf**（Fedora、RHEL、CentOS Stream、Rocky、AlmaLinux）、**zypper**
 （openSUSE、SLES）和 **pacman**（Arch 及其衍生版）。安装脚本会为 **x86_64** 和 **aarch64**
@@ -173,7 +174,8 @@ bash scripts/install.sh --no-binary
 
 资源限制只有在你用来运行引擎的那个 shell 本身位于一个**受委派**的 cgroup 里时，才能
 到达内核。这是 cgroup v2 的规则，不是 Delonix 的限制 —— rootless 的 Podman 也有同样的
-要求。没有委派的情况下，引擎会做两种不同的事，取决于用的是哪个 flag：
+要求。缺少某个 flag 所需的控制器时，`container run` 会拒绝执行，而不是不受限制地运行；
+根据 flag 的不同，有两种探测：
 
 - `-m`/`--memory`、`-c`/`--cpus` 和 `--cpu-weight`：`container run` 会在创建任何东西之前就
   **拒绝**执行，报出一个点名修法的错误，退出码是 **69**（`Error::Unavailable`，

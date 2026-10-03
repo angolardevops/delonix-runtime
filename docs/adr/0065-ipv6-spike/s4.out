@@ -1,0 +1,23 @@
+## slirp log:
+sent tapfd=5 for tap0
+WARNING: Support for IPv6 is experimental
+received tapfd=5
+## addresses:
+fd00::1c48:35ff:fef7:b456/64 scope global dynamic
+fe80::1c48:35ff:fef7:b456/64 scope link \
+10.0.2.100/24
+## v6 routes:
+fd00::/64 dev tap0 proto kernel metric 256 expires 86395sec pref medium
+fe80::/64 dev tap0 proto kernel metric 256 pref medium
+default via fe80::2 dev tap0 proto ra metric 1024 expires 1795sec hoplimit 64 pref medium
+## accept_ra tap0=1 forwarding all=0
+ping6 slirp gw fd00::2: OK
+DNS via fd00::3 : timed out
+DNS AAAA via 10.0.2.3 : rcode 0 answers 2
+ping6 Internet: FAIL ()
+tcp6 Internet 443: [Errno 101] Network is unreachable
+tcp4 Internet 443: OK
+## hostfwd via api with v6 guest_addr:
+   {"error":{"desc":"bad request: add_hostfwd: bad arguments.guest_addr"}}
+   {"error":{"desc":"bad request: add_hostfwd: bad arguments.host_addr"}}
+   {"entries":[]}

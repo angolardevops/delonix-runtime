@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a class="on" aria-current="page" href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">环境与构建</p>
-<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/build-and-test.html">阅读英文页面</a></span></div><h1 id="clone-build-and-test">克隆、构建与测试</h1>
+<h1 id="clone-build-and-test">克隆、构建与测试</h1>
 <p><strong>阅读之前：</strong> <a href="environment.html">准备你的环境</a>：固定的工具链、<code>protoc</code>，以及一台能通过其检查的主机。</p>
 <p>本页假设你手上已经是<a href="environment.html">准备你的环境</a>里那台主机：固定的 Rust 工具链和 <code>protoc</code>。读完之后，你就能构建并安装你的这棵树、在本地跑通每一个 CI 门禁，并且在不触碰真实引擎状态的情况下运行 E2E 测试和 chaos 测试装置（harness）。</p>
 <p>这里的一切都从你 checkout 出来的根目录运行——理想情况下是一个 <strong>git worktree</strong>：一个拥有自己分支的独立工作目录，每个任务一个，从 <code>origin/main</code> 创建出来（命令见<a href="start-here.html#2-open-a-worktree-from-originmain">从这里开始，第 2 步</a>；规则见<a href="contributing-workflow.html#one-worktree-per-task">贡献工作流</a>）。</p>
@@ -253,15 +253,84 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 <td><code>delonix-mgmt-bin</code></td>
 <td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-mgmt</code></td>
 </tr>
+<tr>
+<td><code>delonix-node-api</code></td>
+<td><code>delonix-node-api-bin</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-node-api</code></td>
+</tr>
 </tbody>
 </table></div>
-<p>发布工作流构建的正是这四个包。如果你设置了 <code>CARGO_TARGET_DIR</code>，二进制程序会落到那里，而不是 <code>target/</code> 下。</p>
+<p>发布工作流构建的正是这五个包。如果你设置了 <code>CARGO_TARGET_DIR</code>，二进制程序会落到那里，而不是 <code>target/</code> 下。</p>
 <p>两条实用的提示：</p>
 <ul>
 <li><strong>永远测试你自己构建出来的那个二进制程序</strong>（<code>./target/debug/delonix</code>），绝不要用你
   <code>PATH</code> 上的那个 <code>delonix</code>——那是一个已安装的发布版，往往落后好几个版本。</li>
 <li>如果你同时在多个 worktree 里工作，把它们都指向同一个共享的 <code>CARGO_TARGET_DIR</code> 能省磁盘空间，但两个同时在上面跑的构建会互相等待，还可能让彼此的产物失效。每个 worktree 单独一个 target 目录，第一次会慢一些，之后则是可预测的。</li>
 </ul>
+<h2 id="the-makefile">Makefile<a class="hanchor" href="#the-makefile" aria-label="#">#</a></h2>
+<p>仓库根目录的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> 把本页的命令串成一个生命周期。它不引入自己的构建逻辑：<code>make build</code>
+运行的就是上面的 <code>cargo build</code>，只是按这台机器选好了并行数和优先级。</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">make bootstrap        # 每台机器一次：固定的 Rust 工具链、C/C++ 编译器、protoc、sccache
+make doctor           # 同样的检查，但不做任何修改（缺少必需项时退出码为 1）
+make build            # 五个二进制，release 配置
+make install          # 构建后安装到当前用户的 ~/.local/bin（下文选项 B）
+make install-system   # 用 sudo 把已构建好的产物安装到 /usr/local/bin（下文选项 C）
+make uninstall        # 删除 `make install` 写入的内容
+make ci               # 格式检查、脚本 gate、clippy、测试
+make help             # 所有目标
+</code></pre></div>
+<p>安装了 <code>cargo-nextest</code> 时，<code>make test</code> 会使用它（<code>make bootstrap</code> 会安装），并通过 <code>cargo test --doc</code> 运行文档测试；在本 workspace 上实测，2682 个测试用时 24 秒，<code>cargo test</code> 为 126 秒。<code>NEXTEST=0</code> 强制使用普通的 <code>cargo test</code>。<code>dev</code> 配置只保留行号表（<code>debug = "line-tables-only"</code>）：冷启动的 <code>cargo test --workspace --no-run</code> 从 71 秒、8.5 GiB 的 target 降到 44 秒、4.9 GiB，调试器不再显示局部变量。</p>
+<p><strong><code>make install</code> 写入什么。</strong> <code>~/.local/bin</code> 中的五个二进制；由已安装的二进制生成、放在
+<code>~/.local/share</code> 下的 shell 补全和手册页；以及 <code>~/.config/delonix/env.sh</code>，它导出
+<code>DELONIX_BIN</code>（已安装的 CLI）、<code>DELONIX_ROOT</code>（state root），并在 <code>PATH</code> 中缺少
+<code>~/.local/bin</code> 时把它加上。<code>~/.bashrc</code> 和 <code>~/.zshrc</code> 中一个带标记的代码块会加载这个文件；
+<code>make uninstall</code> 删除该代码块，文件恢复原样。<code>SHELL_RC=0</code> 只写环境文件，不动你的 shell 文件；
+<code>make install DELONIX_ROOT=&lt;dir&gt;</code> 让开发构建使用自己的 state root，与已安装的发行版分开。
+只要导出了 <code>DELONIX_BIN</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> 检查的就是已安装的
+二进制——针对你的源码树运行它们之前先取消该变量。</p>
+<p><code>make install-system</code> 只复制已经构建好的二进制（绝不在 <code>sudo</code> 下编译），并且在引擎进程仍在运行时
+拒绝执行，原因见选项 C；<code>FORCE=1</code> 可以强制。在 Ubuntu 23.10+ 上，<code>make apparmor</code> 写入选项 B
+中描述的 <code>delonix-dev</code> 配置。</p>
+<p><strong>构建调优。</strong> 这些设置只改变 cargo 用多大力气，不改变它的产物，所以 <code>make build</code> 和直接运行
+<code>cargo build</code> 可以共用一个 target 目录，不会互相重新编译对方的产物。<code>make info</code> 打印解析出的结果。</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JOBS=&lt;n&gt;</code></td>
+<td>你的 cargo 配置中的 <code>jobs</code>；没有配置时为 <code>min(核心数, (可用内存 − 2 GiB) /<wbr> 3 GiB)</code></td>
+<td>并行的 <code>rustc</code>/链接器进程数。本 workspace 中一个大型测试二进制的链接器实测占用 1.5–1.9 GiB，<code>delonix</code> 的 release <code>rustc</code> 为 2.4 GiB</td>
+</tr>
+<tr>
+<td><code>LOWPRIO=0</code></td>
+<td>构建在 <code>nice -n 19 ionice -c2 -n7</code> 下运行</td>
+<td>以正常的 CPU 和磁盘优先级运行</td>
+</tr>
+<tr>
+<td><code>SCCACHE=0</code></td>
+<td><code>sccache</code> 在 <code>PATH</code> 中且你的 cargo 配置没有指定 wrapper 时会被使用</td>
+<td>不使用共享编译缓存（它也缓存 <code>ring</code> 和 <code>zstd-sys</code> 的 C 目标文件）</td>
+</tr>
+<tr>
+<td><code>PROFILE=debug|release-ci</code></td>
+<td><code>release</code></td>
+<td>dev 配置，或 <code>release-ci</code>（thin LTO，16 个 codegen 单元：五个二进制实测 114 秒对 188 秒，二进制 38 MiB 对 32 MiB）。发布版本和性能 gate 仍使用 <code>release</code></td>
+</tr>
+<tr>
+<td><code>LINKER=mold|lld</code></td>
+<td>工具链默认值——固定的工具链在 x86_64 上使用 LLD</td>
+<td>会设置 <code>RUSTFLAGS</code>，因此全部重新编译一次，直接运行的 <code>cargo</code> 也不再共用结果</td>
+</tr>
+</tbody>
+</table></div>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 不属于这个生命周期：它安装已发布的版本，并让主机做好运行容器和虚拟机的准备，
+不需要工具链。</p>
 <h2 id="installing-your-build-locally">在本地安装你的构建<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
 <p>大多数改动根本不需要一个已安装的构建：直接在你的 worktree 里跑
 <code>./target/debug/delonix</code> 就够了。只有当你需要一条稳定路径时才安装——比如一个 systemd unit、另一个 shell 里的脚本、一个和 <code>delonix-cri</code> 对话的 kubelet。安装前后，都要确认<strong>你正在跑的是哪个构建</strong>：</p>
@@ -271,7 +340,7 @@ command -v delonix                  # which `delonix` your shell would run inste
 <p><code>commit:</code> 这一行来自 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a>（<code>DELONIX_GIT_HASH</code>、
 <code>DELONIX_GIT_SINCE</code>）。在两次发布之间，每一次构建携带的都是同一个版本号，所以 commit 是把你的构建和已发布版本区分开的唯一办法。</p>
 <h3 id="how-delonix-finds-its-server-binaries"><code>delonix</code> 如何找到它的服务器二进制程序<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
-<p><code>delonix serve cri</code>、<code>delonix serve api</code> 和 <code>delonix mcp</code> 本身并不包含这些服务器：它们会 <code>exec</code> <code>delonix-cri</code>、<code>delonix-mgmt</code> 和 <code>delonix-mcp</code>
+<p><code>delonix serve cri</code>、<code>delonix serve api</code>、<code>delonix serve node-api</code> 和 <code>delonix mcp</code> 本身并不包含这些服务器：它们会 <code>exec</code> <code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-node-api</code> 和 <code>delonix-mcp</code>
 （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a> 里的 <code>exec_server</code>）。查找顺序是：</p>
 <ol>
 <li>与正在运行的这个 <code>delonix</code> <strong>同目录下</strong>的同名文件；</li>
@@ -280,12 +349,13 @@ command -v delonix                  # which `delonix` your shell would run inste
 <p><code>delonix</code> 会通过 <code>DELONIX_DISPATCH_VERSION</code> 把自己的版本号传给服务器，一个来自不同发布版本的服务器会拒绝启动。它还会通过 <code>DELONIX_BIN</code> 传入自己的路径，这样服务器就能回调同一个 CLI。一个被直接启动的服务器（比如被某个 unit 启动）会依次通过
 <code>DELONIX_BIN</code>、自己同目录下的一个 <code>delonix</code>、再到 <code>PATH</code>
 （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a> 里的 <code>cli_bin</code>）来找到 CLI。
-<strong>把同一次构建产出的这四个二进制程序放在一起</strong>；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。</p>
+<strong>把同一次构建产出的这五个二进制程序放在一起</strong>；混用你的构建和一个发布版会被拒绝，或者会跑一些你本不打算测试的代码。</p>
 <p><code>delonix cluster kubeadm</code> 和 <code>delonix image vm build</code> 用它们自己的顺序去找
 <code>delonix-cri</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a> 里的
 <code>resolve_cri_bin</code>）：<code>--cri-bin</code>，然后是 <code>delonix</code> 同目录下，然后——如果当前目录在一个源码 checkout 里面——是一次 <code>cargo build --release -p delonix-cri</code>，只有到最后才会去下载已发布的产物。</p>
-<p>在安装它们之前，先把这四个都构建出来：</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+<p>在安装它们之前，先把这五个都构建出来：</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 </code></pre></div>
 <h3 id="option-a-run-it-from-the-worktree-safest">方案 A——直接从 worktree 运行（最安全）<a class="hanchor" href="#option-a-run-it-from-the-worktree-safest" aria-label="#">#</a></h3>
 <p>什么都不会被拷贝，所以你 checkout 之外的任何东西都不会意外用上它：</p>
@@ -298,7 +368,7 @@ Ubuntu 23.10+ 上，这条路径需要一份自己的 AppArmor profile（见
 <h3 id="option-b-install-for-your-user-in-localbin">方案 B——为你自己的用户安装到 <code>~/.local/bin</code><a class="hanchor" href="#option-b-install-for-your-user-in-localbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix &amp;&amp; delonix --version
 </code></pre></div>
@@ -318,7 +388,7 @@ delonix man --dir ~/.local/share/man
 </code></pre></div>
 <h3 id="option-c-system-install-in-usrlocalbin">方案 C——系统级安装到 <code>/usr/local/bin</code><a class="hanchor" href="#option-c-system-install-in-usrlocalbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 </code></pre></div>
 <p><strong>只在一台没有任何 Delonix 工作负载在使用的机器上这样做。</strong> 已安装的二进制程序不只是一个命令：</p>
 <ul>
@@ -417,7 +487,8 @@ delonix system info       # state root, rootless, cgroup delegation, network inf
 <a href="#isolating-the-engines-state">隔离引擎的状态</a>），你的构建还会读取的其他每一个变量，见<a href="environment-variables.html">环境变量</a>。</p>
 <h3 id="uninstall-and-roll-back">卸载与回滚<a class="hanchor" href="#uninstall-and-roll-back" aria-label="#">#</a></h3>
 <p><code>install.sh</code> 里没有卸载标志。把你拷贝过去的东西删掉：</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 </code></pre></div>
@@ -580,6 +651,11 @@ cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_ve
 <td>任何一个测试失败</td>
 </tr>
 <tr>
+<td><code>test</code></td>
+<td><code>mkdir -p /<wbr>tmp/<wbr>t &amp;&amp; TMPDIR=/<wbr>tmp/<wbr>t cargo test --workspace --locked --no-fail-fast &amp;&amp; python3 scripts/<wbr>tmp_roots_gate.<wbr>py --dir /<wbr>tmp/<wbr>t --list</code></td>
+<td>测试在它们的临时目录里留下了不属于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>tmp_roots_baseline.<wbr>json</code></a> 中已知债务的东西——一个新的泄漏、某个已知泄漏变多了，或者某个已知泄漏变少了却没有降低基线（<code>--update</code>）。基线是托管运行器留下的内容，而泄漏可能取决于宿主机（一个在缺少 <code>qemu-img</code> 时提前返回的测试曾经跳过了它的清理）。自从这笔债务还清以来基线就是空的：测试把它的临时目录放在一个在 <code>Drop</code> 时删除它的守卫里（<code>tempfile::TempDir</code>），这样删除在提前 <code>return</code> 和断言失败时也会执行；所以本地运行请用 <code>--list</code> 来对比</td>
+</tr>
+<tr>
 <td><code>deny</code></td>
 <td><code>cargo deny check advisories licenses sources</code></td>
 <td>一条 RUSTSEC 安全公告、一个不被允许的许可证或来源（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>）</td>
@@ -662,6 +738,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 <ul>
 <li><a href="#clone">克隆</a></li>
 <li><a href="#build">构建</a></li>
+<li><a href="#the-makefile">Makefile</a></li>
 <li><a href="#installing-your-build-locally">在本地安装你的构建</a><ul>
 <li><a href="#how-delonix-finds-its-server-binaries">delonix 如何找到它的服务器二进制程序</a></li>
 <li><a href="#option-a-run-it-from-the-worktree-safest">方案 A——直接从 worktree 运行（最安全）</a></li>

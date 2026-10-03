@@ -764,8 +764,9 @@ issus du fichier ; <code>cloud_init: true</code> ; <code>built_by: "delonix &l
 rien à hériter, et le code refuse de deviner).</p>
 <p><code>vm create</code> applique les valeurs par défaut enregistrées uniquement là où l'appelant n'a pas décidé :
 les options <code>--vcpus</code>/<code>--memory</code> l'emportent sur <code>VCPUS</code>/<code>MEMORY</code> ; pour le backend, <code>--backend</code> &gt;
-le <code>HYPERVISOR</code> de l'image &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-détection
-(<code>resolve_vm_defaults</code> dans <code>cmd/vm.rs</code>, et <code>delonix_vm::create_with</code>).</p>
+le <code>HYPERVISOR</code> de l'image &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du nœud (fichier des
+providers, que <code>vm default-backend --set</code> écrit) &gt; l'ancien défaut par racine &gt; auto-détection
+(<code>resolve_vm_defaults</code> dans <code>cmd/vm.rs</code>, et <code>delonix_vm::standing_backend_choice</code>).</p>
 <p><strong>Hors ligne par défaut, et pourquoi.</strong> Un <code>RUN</code> qui accède à Internet produit une image différente
 selon le moment où il s'est exécuté. <code>--network</code> est opt-in, car la chose la plus courante que veut
 un VMfile est d'installer un paquet. Avec <code>--network</code>, l'appliance de libguestfs obtient son réseau

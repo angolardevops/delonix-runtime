@@ -220,6 +220,97 @@ pub(crate) fn enforce(root: &Path, resource: &str, r: &Request<'_>) -> Result<()
     }
 }
 
+/// A canonical `a.b.c.d/len` (host bits clear), parsed. `None` for anything
+/// else, including the bare address and the legacy two-octet form.
+fn canonical_prefix(s: &str) -> Option<delonix_sdn::Cidr> {
+    if !s.contains('/') || s.split('/').next()?.split('.').count() != 4 {
+        return None;
+    }
+    let c = delonix_sdn::Cidr::parse(s)?;
+    (format!("{}/{}", delonix_sdn::Cidr::fmt_u32(c.base), c.len) == s).then_some(c)
+}
+
+/// The anti-spoofing GRANTS a request asks for, checked against the node
+/// policy (`allowedSourcePrefixes`, `allowSourceCheckOptOut`) before anything
+/// is created.
+///
+/// The reverse of [`enforce`]: that one is a ceiling, where no policy means
+/// nothing is refused; this is a permission, where no policy means nothing is
+/// granted — the owner's rule that a tenant cannot switch the protection off on
+/// their own. `mode: warn` does not change it: a grant is not a rule that can be
+/// rolled out by «would have refused». Every refusal is written to the event log.
+pub(crate) fn authorise_source_overrides(
+    root: &Path,
+    resource: &str,
+    prefixes: &[String],
+    opt_out: bool,
+) -> Result<()> {
+    if prefixes.is_empty() && !opt_out {
+        return Ok(());
+    }
+    let policy = load(root)?;
+    let granted: Vec<delonix_sdn::Cidr> = policy
+        .as_ref()
+        .map(|p| {
+            p.allowed_source_prefixes
+                .iter()
+                .filter_map(|g| canonical_prefix(g))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut refused = Vec::new();
+    for p in prefixes {
+        match canonical_prefix(p) {
+            None => refused.push(super::po::tf(
+                "--allow-source {prefix}: not a canonical a.b.c.d/len prefix",
+                &[("prefix", p)],
+            )),
+            Some(c) if !granted.iter().any(|g| g.len <= c.len && g.contains(c.base)) => refused
+                .push(super::po::tf(
+                    "--allow-source {prefix}: not inside any prefix this node's policy grants \
+                     (allowedSourcePrefixes)",
+                    &[("prefix", p)],
+                )),
+            Some(_) => {}
+        }
+    }
+    if opt_out
+        && !policy
+            .as_ref()
+            .is_some_and(|p| p.allow_source_check_opt_out)
+    {
+        refused.push(
+            super::po::t(
+                "--no-source-check: this node's policy does not grant it (allowSourceCheckOptOut)",
+            )
+            .to_string(),
+        );
+    }
+    if refused.is_empty() {
+        return Ok(());
+    }
+    let detail = refused.join("; ");
+    delonix_node::events::emit(
+        root,
+        "container",
+        "source-override-refused",
+        "-",
+        resource,
+        Some(&detail),
+    );
+    Err(Error::coded(
+        7801,
+        Error::PermissionDenied(format!(
+            "{}\n  {}",
+            super::po::tf(
+                "refused by this node's runtime policy ({path}):",
+                &[("path", &path(root).display().to_string())],
+            ),
+            refused.join("\n  ")
+        )),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // `kind: RuntimePolicy`
 // ---------------------------------------------------------------------------
@@ -253,6 +344,14 @@ pub struct RuntimePolicySpec {
     /// Hosts a `vm create --url-img` qcow2 may be fetched from. Empty = no opinion.
     #[serde(default)]
     pub allowed_image_url_hosts: Vec<String>,
+    /// Source prefixes a container may be authorised to use (`--allow-source`).
+    /// A GRANT: empty = none.
+    #[serde(default)]
+    pub allowed_source_prefixes: Vec<String>,
+    /// Lets a container switch the source check off (`--no-source-check`). A
+    /// GRANT: absent = refused.
+    #[serde(default)]
+    pub allow_source_check_opt_out: bool,
 }
 
 /// Names accepted in the `spec` of `kind: RuntimePolicy` (unknown-field warning,
@@ -267,6 +366,8 @@ pub const RUNTIME_POLICY_SPEC_FIELDS: &[&str] = &[
     "denyDevicePassthrough",
     "denyLatestVmImage",
     "allowedImageUrlHosts",
+    "allowedSourcePrefixes",
+    "allowSourceCheckOptOut",
 ];
 pub const RECONCILED_RUNTIME_POLICY_FIELDS: &[&str] = RUNTIME_POLICY_SPEC_FIELDS;
 
@@ -292,6 +393,8 @@ pub(crate) fn to_security_policy(spec: &RuntimePolicySpec) -> Result<SecurityPol
         deny_device_passthrough: spec.deny_device_passthrough,
         deny_latest_vm_image: spec.deny_latest_vm_image,
         allowed_image_url_hosts: spec.allowed_image_url_hosts.clone(),
+        allowed_source_prefixes: spec.allowed_source_prefixes.clone(),
+        allow_source_check_opt_out: spec.allow_source_check_opt_out,
     })
 }
 
@@ -307,6 +410,15 @@ fn mode_label(m: srt::policy::Mode) -> &'static str {
 fn deny_flag(b: bool) -> &'static str {
     if b {
         "deny"
+    } else {
+        "-"
+    }
+}
+
+/// A GRANT rendered as what it allows — the reverse of [`deny_flag`].
+fn grant_flag(b: bool) -> &'static str {
+    if b {
+        "allow"
     } else {
         "-"
     }
@@ -342,6 +454,14 @@ fn fields_of(p: &SecurityPolicy) -> BTreeMap<String, String> {
     f.insert(
         "allowedImageUrlHosts".into(),
         sorted_joined(&p.allowed_image_url_hosts),
+    );
+    f.insert(
+        "allowedSourcePrefixes".into(),
+        sorted_joined(&p.allowed_source_prefixes),
+    );
+    f.insert(
+        "allowSourceCheckOptOut".into(),
+        p.allow_source_check_opt_out.to_string(),
     );
     f
 }
@@ -465,6 +585,10 @@ struct LsRow {
     deny_latest_vm_image: bool,
     #[serde(rename = "allowedImageUrlHosts")]
     allowed_image_url_hosts: Vec<String>,
+    #[serde(rename = "allowedSourcePrefixes")]
+    allowed_source_prefixes: Vec<String>,
+    #[serde(rename = "allowSourceCheckOptOut")]
+    allow_source_check_opt_out: bool,
     path: String,
 }
 
@@ -478,6 +602,8 @@ fn ls_row(root: &Path, p: &SecurityPolicy) -> LsRow {
         deny_device_passthrough: p.deny_device_passthrough,
         deny_latest_vm_image: p.deny_latest_vm_image,
         allowed_image_url_hosts: p.allowed_image_url_hosts.clone(),
+        allowed_source_prefixes: p.allowed_source_prefixes.clone(),
+        allow_source_check_opt_out: p.allow_source_check_opt_out,
         path: path(root).display().to_string(),
     }
 }
@@ -500,6 +626,8 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
         "PASSTHROUGH",
         "LATEST-VM",
         "URL-HOSTS",
+        "SRC-PREFIXES",
+        "SRC-CHECK-OFF",
     ]);
     if let Some(p) = &current {
         t.row(vec![
@@ -511,6 +639,8 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
             deny_flag(p.deny_device_passthrough).to_string(),
             deny_flag(p.deny_latest_vm_image).to_string(),
             list_or_dash(&p.allowed_image_url_hosts),
+            list_or_dash(&p.allowed_source_prefixes),
+            grant_flag(p.allow_source_check_opt_out).to_string(),
         ]);
     }
     t.print();
@@ -561,6 +691,8 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 d.field("Passthrough", deny_flag(p.deny_device_passthrough));
                 d.field("Latest VM tag", deny_flag(p.deny_latest_vm_image));
                 d.list("URL hosts", &p.allowed_image_url_hosts);
+                d.list("Src prefixes", &p.allowed_source_prefixes);
+                d.field("Src check off", grant_flag(p.allow_source_check_opt_out));
             }
         }
         d.print();
@@ -604,7 +736,8 @@ fn summarize(p: &SecurityPolicy) -> String {
     super::po::tf(
         "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} \
          allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} \
-         allowedImageUrlHosts=[{hosts}]",
+         allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] \
+         allowSourceCheckOptOut={srcoff}",
         &[
             ("mode", mode_label(p.mode)),
             ("priv", &p.deny_privileged.to_string()),
@@ -614,6 +747,8 @@ fn summarize(p: &SecurityPolicy) -> String {
             ("pass", &p.deny_device_passthrough.to_string()),
             ("vmtag", &p.deny_latest_vm_image.to_string()),
             ("hosts", &p.allowed_image_url_hosts.join(", ")),
+            ("srcp", &p.allowed_source_prefixes.join(", ")),
+            ("srcoff", &p.allow_source_check_opt_out.to_string()),
         ],
     )
 }
@@ -823,6 +958,8 @@ mod tests {
             deny_device_passthrough: true,
             deny_latest_vm_image: true,
             allowed_image_url_hosts: vec!["x".into()],
+            allowed_source_prefixes: vec!["10.99.0.0/16".into()],
+            allow_source_check_opt_out: true,
         };
         let v = serde_yaml::to_value(&spec).unwrap();
         let serde_yaml::Value::Mapping(m) = v else {

@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a class="on" aria-current="page" href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">参考</p>
-<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/cloud-native-standards.html">阅读英文页面</a></span></div><h1 id="cloud-native-standards-layer-by-layer">云原生标准，逐层展开</h1>
+<h1 id="cloud-native-standards-layer-by-layer">云原生标准，逐层展开</h1>
 <p><strong>阅读前须知：</strong> <a href="cloud-native-primer.html">云原生入门</a>（引擎如何使用每一种机制）和<a href="architecture.html">架构</a>（下面点名的那些 crate）。这是一页参考资料：只读你会碰到的那一节标准。</p>
 <p>一个容器与微虚拟机引擎并不是单单一份规范。它是一叠层，而大多数层都有一个开放标准：有的来自
 <strong>OCI</strong>（Open Container Initiative，开放容器倡议）、有的来自 Kubernetes SIG 和 <strong>CNCF</strong>
@@ -304,7 +304,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <ul>
 <li>没有针对 Delonix 跑过 runtime-spec 的合规套件。也没法跑：不存在一个消费 bundle 的入口
   点可以拿来跑它。</li>
-<li><strong>没有实现 OCI 钩子。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>（提议中）记录了
+<li><strong>没有实现 OCI 钩子。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a>（提议中）记录了
   原因：没有具体的消费者，而且运行一个由容器 spec 点名的宿主机二进制文件，属于本项目已经
   拿一次 spike 挡在前面的那类安全问题。<code>delonix-linux</code> 里那个进程内的 <code>StartedHook</code> 闭包
   看起来相似，但它不是 OCI 那套协议。</li>
@@ -334,7 +334,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <li><strong>层作为 overlay 的下层（lower）</strong>：<code>ImageStore::prepare_overlay</code>（<code>src/overlay.rs</code>）
   在容器自己的 <code>merged/</code> 旁边写出一份 <code>overlay-lowers</code> 文件，容器自己的 init 会挂载它。
   层在容器之间是共享的，而不是被复制的（参见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里关于容器共享层的记录，以及关于
-  挂载 API 的 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>）。</li>
+  挂载 API 的 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>）。</li>
 <li><strong>按魔数识别层的媒体类型</strong>：<code>src/registry.rs</code> 里紧挨着 <code>DOCKER_MANIFEST_MEDIA_TYPE</code> 的
   那个辅助函数会检测 gzip、zstd 或纯 tar。</li>
 <li><strong>写出 image layout</strong>：<code>write_oci_archive</code>（<code>src/save.rs</code>），由 <code>delonix image save</code>
@@ -430,7 +430,7 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
   <code>Cgroupfs</code>。它的文档注释记录了逼出这个答案的那次测量（2026-09-15，k8s
   1.36.4）：什么也不回答会让 kubelet 默认走 <code>systemd</code>，systemd 会从空的 pod slice 里
   丢掉 <code>cpuset</code>，然后 kubelet 就会陷入循环杀 pod。</li>
-<li><strong>kubelet 的资源模型</strong>：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>。
+<li><strong>kubelet 的资源模型</strong>：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>。
   kubelet 的 <code>cgroup_parent</code> 由 <code>KubeCgroupParent::parse</code>
   （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>）校验，并在
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> 里被消费；<code>delonix-linux</code> 有
@@ -446,7 +446,7 @@ exec/attach/端口转发、统计信息）和一个 <code>ImageService</code>。
 </ul>
 <p><strong>合规状态／缺口。</strong></p>
 <ul>
-<li><strong>用上游的 <code>critest</code> 测量过</strong>（<a href="cri-conformance.html">docs/cri-conformance.md</a>）：
+<li><strong>用上游的 <code>critest</code> 测量过</strong>（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）：
   cri-tools <code>critest</code> <strong>v1.36.0</strong>，引擎 <code>delonix-cri</code> <strong>v0.63.1</strong>，rootless，
   <strong>2026-08-25</strong>：在跑过的 103 项规格里（套件总共 122 项），<strong>79 通过、24 失败、19
   跳过</strong>。那份文档里按领域列出的失败：AppArmor 按容器级别的 profile、挂载传播
@@ -539,15 +539,15 @@ Controller 插件。</p>
   <code>HostVolumes</code> 实现了 compute 上下文（context）的 <code>StorageProvider</code> 端口
   （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>）。</li>
 <li>网络存储（NFS、CIFS/SMB、WebDAV）以卷的形式挂载，以及一个针对 NAS API 的存储
-  配置器（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>，crate
+  配置器（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>，crate
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>）。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 未实现，出于决策：
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>（提议中）。一个 CSI Node 插件是一个
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a>（提议中）。一个 CSI Node 插件是一个
 常驻服务，而引擎按设计是无守护进程（daemonless）的。这份 ADR 只有在一个具体需求明确点名
 CSI 这个协议、<strong>并且</strong>守护进程这个问题本身已经有一份被接受的 ADR 时，才会重新开启。它还
 记录了一条不需要在这里写任何代码的现实路径（针对同一台服务器的一个外部 NFS 配置器）。</p>
-<p><strong>从哪里开始读。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
+<p><strong>从哪里开始读。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> →
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume/src/lib.rs</code></a> →
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 里的 <code>StorageProvider</code>。</p>
 <hr />
@@ -576,7 +576,7 @@ spec 的<strong>消费者</strong>，而绝不是一个驱动发现工具：</p>
 <ul>
 <li><strong>钩子没有被执行。</strong> 一个尽力而为（best-effort）的 <code>ldconfig -r &lt;rootfs&gt;</code> 取代了
   通常的 <code>createContainer</code> 钩子，一个声明了钩子的 spec 会产生一条可见的警告。这是
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a> 唯一点名的代价。</li>
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a> 唯一点名的代价。</li>
 <li>模块注释里记录了一次针对 <code>nvidia-ctk</code> 1.20.0（<code>cdiVersion</code> 0.7.0）的 spec 所做的
   测量：顶层的 <code>containerEdits</code> 携带了大多数设备节点和全部挂载点，所以只读取按设备
   的编辑会破坏 CUDA。这条注释没有写日期，这次也没有为本页重新测量。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>
@@ -596,13 +596,13 @@ API 兼容。</p>
 <p><strong>一个实现必须做到什么</strong>（引擎自己定的规则）：</p>
 <ul>
 <li>发布从代码生成出来的清单 schema，而不是手写的
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。</li>
 <li>用三方差异比对来规划（plan）、应用（apply）并检测漂移（drift），绝不悄悄忽略任何一个
   字段。</li>
 <li>在同一个本地套接字上，用 gRPC 和 HTTP/JSON 同时服务同一份节点契约，OpenAPI 文档从
   protobuf 生成
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，
-  提议中；<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>）。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，
+  提议中；<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0041-node-local-contract-for-the-control-plane-agent.md" target="_blank" rel="noopener">ADR-0041</a>）。</li>
 </ul>
 <p><strong>Delonix 是怎么实现它的。</strong></p>
 <ul>
@@ -611,7 +611,9 @@ API 兼容。</p>
   <code>src/reconcile.rs</code>。</li>
 <li>发布的 schema：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>。</li>
 <li>节点契约：<code>proto/delonix/node/v1/*.proto</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是生成出来的,
-  由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 检查。</li>
+  由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 检查。它由 <code>delonix serve node-api</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>）
+  部分地提供服务：<code>NodeService.ListProviders</code> 以 gRPC 和 <code>GET /v1/providers</code> 的形式提供；其余 RPC
+  都回答 <code>UNIMPLEMENTED</code>。</li>
 </ul>
 <p><strong>合规状态／缺口。</strong> 由 CI 把关（schema 测试、<code>contract_gate.py</code>），而不是靠一个外部
 套件。参见<a href="architecture.html">架构</a>和<a href="system-design-interview.html">系统设计</a>。</p>
@@ -749,7 +751,7 @@ trace（追踪）、metrics（指标）和 log（日志）的项目，用 OTLP �
   simple-signing 载荷作为 <code>.sig</code> artifact；<code>verify_signature</code>（在
   <code>image pull --verify &lt;key&gt;</code> 和 <code>image verify</code> 背后）会检查签名，并检查载荷里
   点名的是不是那个镜像的摘要。虚拟机镜像用的是同一套机制
-  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>）。</li>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a>）。</li>
 <li><strong>镜像扫描</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/lib.rs</code></a>。<code>extract_sbom</code> 直接从
   CAS 里的层读取 <code>apk</code>/<code>dpkg</code> 的数据库（以及 Python 的依赖清单），不需要运行这个
   镜像；<code>advisories_from_osv</code> 摄入 OSV 的信息流。</li>
@@ -806,8 +808,8 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
   （virtio-fs 需要 <code>virtiofsd</code> 守护进程，而这个还没有接进来）。</li>
 <li><code>delonix-vm-base:fedora-42</code> 在 Cloud Hypervisor 的 EDK2 下启动不起来，包括厂商
   原始的那份镜像也一样（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，2026-08-12）；直接内核启动是可行的。</li>
-<li>实时迁移是一个 NO-GO（不予采纳）：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>。</li>
-<li>已发布的虚拟机镜像只有 amd64：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>。</li>
+<li>实时迁移是一个 NO-GO（不予采纳）：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>。</li>
+<li>已发布的虚拟机镜像只有 amd64：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>。</li>
 </ul>
 <p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的
 <code>trait VmBackend</code> 和 <code>create_with</code> → <code>src/cloudinit.rs</code> →
@@ -844,7 +846,7 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。</p>
 <code>cpu memory pids</code>，<code>Delegate=yes</code> 的 scope 也拿不到更多。补救办法是由 root 给
 <code>user@.service</code> 加一个 drop-in（<code>Delegate=cpu cpuset io memory pids</code>）。参见
 <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">准备你的环境</a>
-和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>。</p>
+和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>。</p>
 <p><strong>从哪里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的
 <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
 <code>transient_scope_argv</code>。</p>
@@ -860,7 +862,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <code>delonix-mcp</code>，也就是 <code>delonix mcp serve</code>），建立在 <code>rmcp</code> crate 之上：</p>
 <ul>
 <li><strong>只有 stdio</strong>：作为 AI 客户端的一个前台子进程，stdin 关闭时它就退出。它不是一个
-  守护进程（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</li>
+  守护进程（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）。</li>
 <li>工具的输入是有类型的、经过 schema 校验的；输出是 JSON 文本。工具带有一个风险等级
   （<code>src/risk.rs</code>），调用会被审计（<code>src/audit.rs</code>）。</li>
 <li>唯一的主体（principal）是本地 uid，与 <code>delonix-mgmt</code> 用的是同一条边界。</li>
@@ -888,7 +890,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>OCI Runtime Spec</td>
 <td><code>delonix-linux</code>（原生机制）；通过 <code>build_runtime_spec</code> 实现的 <code>image export</code> bundle</td>
 <td>部分实现——能生产 bundle，但不是一个消费 bundle 的运行时；没有钩子</td>
-<td>13.1，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
+<td>13.1，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0033-oci-runtime-hooks.md" target="_blank" rel="noopener">ADR-0033</a></td>
 </tr>
 <tr>
 <td>OCI Image Spec</td>
@@ -906,7 +908,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>CRI（<code>runtime.v1</code>）</td>
 <td><code>delonix-cri</code></td>
 <td>部分实现——critest v1.36.0：79/103 通过，引擎 v0.63.1，2026-08-25；kubelet 1.36.4 已于 2026-09-15 验证</td>
-<td><a href="cri-conformance.html">cri-conformance.md</a>，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">cri-conformance.md</a>，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
 <td>CNI</td>
@@ -918,7 +920,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>CSI</td>
 <td>无（<code>kind: Volume</code>、<code>delonix-volume</code>、<code>delonix-truenas</code>）</td>
 <td>未实现——需要一个守护进程</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a></td>
 </tr>
 <tr>
 <td>CDI</td>
@@ -930,7 +932,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>引擎自有 Kind 与节点契约</td>
 <td><code>delonix-stack</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a></td>
 <td>已实现（自有 API）——由 CI 把关</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
 </tr>
 <tr>
 <td>Docker 引擎 API（事实标准）</td>
@@ -966,7 +968,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>签名（与 cosign 兼容，minisign）</td>
 <td><code>delonix-oci::sign</code>；<code>release.yml</code> 里的 minisign</td>
 <td>部分实现——只有基于密钥的方式；没有无密钥签名，没有透明日志</td>
-<td>13.13，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
+<td>13.13，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0017-signing-vm-images.md" target="_blank" rel="noopener">ADR-0017</a></td>
 </tr>
 <tr>
 <td>SLSA 来源证明</td>
@@ -978,7 +980,7 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>KVM / virtio / UEFI</td>
 <td><code>delonix-vm</code>（Cloud Hypervisor、libvirt）</td>
 <td>已实现——Cloud Hypervisor 上没有 virtio-9p；没有实时迁移</td>
-<td>13.14，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
+<td>13.14，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a></td>
 </tr>
 <tr>
 <td>cloud-init NoCloud</td>
@@ -990,19 +992,19 @@ JSON-RPC 协议，AI 客户端通过它调用服务器暴露出来的<em>工具�
 <td>cgroup v2 + systemd 委派（Linux）</td>
 <td><code>delonix-linux</code></td>
 <td>已实现——限制生效需要一个已委派的 scope</td>
-<td>13.15，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
+<td>13.15，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a></td>
 </tr>
 <tr>
 <td>MCP（不是 CNCF 标准）</td>
 <td><code>delonix-mcp</code></td>
 <td>部分实现——只有 stdio</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a></td>
 </tr>
 </tbody>
 </table></div>
 <p>当你改动这些组件里的某一个时，在同一个 pull request 里更新它对应的表格行和它所在的那一节。
 如果你重新跑了一次合规测试套件，请把数字、日期和版本号一起换掉，并且先更新对应的源文档
-（关于 CRI 的是 <a href="cri-conformance.html">docs/cri-conformance.md</a>）。</p>
+（关于 CRI 的是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>）。</p>
 <hr />
 <p><strong>下一篇：</strong> <a href="environment-variables.html">环境变量（<code>DELONIX_*</code>）</a>——代码读取的每一个 <code>DELONIX_*</code> 变量、它的默认值，以及哪些会降低边界。</p>
 <nav class="pager"><a href="publishing-docs.html"><span>← 上一页</span>发布文档</a><a class="next" href="environment-variables.html"><span>下一页 →</span>环境变量（DELONIX_*）</a></nav>

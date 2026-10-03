@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:a509235c85941dead7c564eb0fe69325be76ad29f67752755461f3637af80128 -->
+<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
 # Clonar, compilar e testar
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md): a toolchain fixada, o `protoc`, e um host que passa nas suas verificações.
@@ -36,8 +36,9 @@ O workspace produz estes binários, a partir destes pacotes:
 | `delonix-cri` | `delonix-cri` | `target/<profile>/delonix-cri` |
 | `delonix-mcp` | `delonix-mcp-bin` | `target/<profile>/delonix-mcp` |
 | `delonix-mgmt` | `delonix-mgmt-bin` | `target/<profile>/delonix-mgmt` |
+| `delonix-node-api` | `delonix-node-api-bin` | `target/<profile>/delonix-node-api` |
 
-O workflow de release compila exactamente estes quatro pacotes. Se definires `CARGO_TARGET_DIR`, os
+O workflow de release compila exactamente estes cinco pacotes. Se definires `CARGO_TARGET_DIR`, os
 binários vão para lá em vez de `target/`.
 
 Duas notas práticas:
@@ -48,6 +49,55 @@ Duas notas práticas:
   disco, mas dois builds a correr ao mesmo tempo sobre ele esperam um pelo outro e podem invalidar os
   artefactos um do outro. Um directório de target por worktree é mais lento da primeira vez e
   previsível depois disso.
+
+## O Makefile
+
+O `Makefile` na raiz junta os comandos desta página num só ciclo de vida. Não acrescenta lógica
+de build própria: `make build` corre o `cargo build` mostrado acima, com o número de jobs e a
+prioridade escolhidos para a máquina.
+
+```bash
+make bootstrap        # uma vez por máquina: toolchain de Rust fixada, compiladores C/C++, protoc, sccache
+make doctor           # as mesmas verificações, sem mudar nada (sai com 1 quando falta algo obrigatório)
+make build            # os cinco binários, perfil release
+make install          # compila e instala para o teu utilizador em ~/.local/bin (Opção B abaixo)
+make install-system   # instala a árvore já compilada em /usr/local/bin com sudo (Opção C abaixo)
+make uninstall        # remove o que o `make install` escreveu
+make ci               # verificação de formato, gates de script, clippy, testes
+make help             # todos os alvos
+```
+
+O `make test` usa o `cargo-nextest` quando está instalado (o `make bootstrap` instala-o) e corre os doctests por `cargo test --doc`; medido neste workspace, os 2682 testes levam 24 s contra 126 s com `cargo test`. `NEXTEST=0` força o `cargo test` simples. O perfil `dev` guarda só tabelas de linhas (`debug = "line-tables-only"`): um `cargo test --workspace --no-run` a frio passou de 71 s e 8,5 GiB de target para 44 s e 4,9 GiB, e um debugger deixa de mostrar variáveis locais.
+
+**O que o `make install` escreve.** Os cinco binários em `~/.local/bin`, a completion de shell e
+as páginas de manual geradas pelo binário instalado em `~/.local/share`, e
+`~/.config/delonix/env.sh`, que exporta `DELONIX_BIN` (a CLI instalada), `DELONIX_ROOT` (o state
+root) e acrescenta `~/.local/bin` ao `PATH` quando falta. Um bloco marcado em `~/.bashrc` e
+`~/.zshrc` carrega esse ficheiro; o `make uninstall` remove o bloco e deixa os ficheiros como
+estavam. `SHELL_RC=0` escreve o ficheiro de ambiente sem tocar nos teus ficheiros de shell, e
+`make install DELONIX_ROOT=<dir>` dá à build de desenvolvimento um state root próprio, longe de
+uma release instalada. Enquanto `DELONIX_BIN` estiver exportada, o `scripts/cli-tree.sh` e o
+`scripts/docs_cli_gate.py` inspeccionam o binário instalado — retira-a antes de os correres
+contra a tua árvore.
+
+O `make install-system` copia binários já compilados (nunca compila sob `sudo`) e recusa enquanto
+houver processos do motor a correr, pelas razões listadas na Opção C; `FORCE=1` ultrapassa a
+recusa. Em Ubuntu 23.10+ o `make apparmor` escreve o perfil `delonix-dev` descrito na Opção B.
+
+**Afinação do build.** Estas definições mudam o esforço do cargo, nunca o que ele produz, por isso
+o `make build` e um `cargo build` simples partilham um directório de target sem recompilar os
+artefactos um do outro. O `make info` imprime o que foi resolvido.
+
+| Variável | Omissão | Efeito |
+|---|---|---|
+| `JOBS=<n>` | o `jobs` da tua configuração do cargo; sem ela, `min(núcleos, (RAM disponível − 2 GiB) / 3 GiB)` | processos `rustc`/linker em paralelo. Um linker num binário de teste grande deste workspace foi medido em 1,5–1,9 GiB, o `rustc` release do `delonix` em 2,4 GiB |
+| `LOWPRIO=0` | os builds correm sob `nice -n 19 ionice -c2 -n7` | corre com prioridade normal de CPU e disco |
+| `SCCACHE=0` | o `sccache` é usado quando está no `PATH` e a tua configuração do cargo não nomeia um wrapper | compila sem a cache partilhada (que também guarda os objectos C do `ring` e do `zstd-sys`) |
+| `PROFILE=debug\|release-ci` | `release` | o perfil dev, ou `release-ci` (thin LTO, 16 unidades de codegen: medido 114 s contra 188 s para os cinco binários, um binário de 38 MiB em vez de 32). A release publicada e o perf gate mantêm `release` |
+| `LINKER=mold\|lld` | a omissão da toolchain — LLD em x86_64 com a toolchain fixada | define `RUSTFLAGS`, por isso tudo recompila uma vez e um `cargo` simples deixa de partilhar o resultado |
+
+O `scripts/install.sh` não faz parte deste ciclo: instala uma release publicada e prepara um host
+para correr containers e VMs, e não precisa de toolchain.
 
 ## Instalar a tua build localmente
 
@@ -67,8 +117,9 @@ commit é a única forma de distinguir a tua build da publicada.
 
 ### Como o `delonix` encontra os seus binários de servidor
 
-`delonix serve cri`, `delonix serve api` e `delonix mcp` não contêm os servidores: fazem `exec` de
-`delonix-cri`, `delonix-mgmt` e `delonix-mcp` (`exec_server` em
+`delonix serve cri`, `delonix serve api`, `delonix serve node-api` e `delonix mcp` não contêm os
+servidores: fazem `exec` de `delonix-cri`, `delonix-mgmt`, `delonix-node-api` e `delonix-mcp`
+(`exec_server` em
 `bins/delonix-runtime-bin/src/cmd/serve.rs`). A procura é:
 
 1. o ficheiro com esse nome **ao lado do `delonix` em execução**;
@@ -78,7 +129,7 @@ O `delonix` passa ao servidor a sua própria versão em `DELONIX_DISPATCH_VERSIO
 outra release recusa-se a arrancar. Passa-se também a si próprio em `DELONIX_BIN`, para que o
 servidor volte a chamar a mesma CLI. Um servidor arrancado directamente (por exemplo por uma unit)
 encontra a CLI através de `DELONIX_BIN`, depois de um `delonix` ao seu lado, depois do `PATH`
-(`cli_bin` em `crates/contexts/delonix-node/src/dispatch.rs`). **Mantém juntos os quatro
+(`cli_bin` em `crates/contexts/delonix-node/src/dispatch.rs`). **Mantém juntos os cinco
 binários de uma mesma build**; uma mistura da tua build com uma release é recusada, ou corre código
 que não querias testar.
 
@@ -87,10 +138,11 @@ que não querias testar.
 do `delonix`, depois um `cargo build --release -p delonix-cri` se o directório actual estiver dentro
 de uma checkout do código-fonte, e só então um download do asset publicado.
 
-Compila os quatro antes de os instalares:
+Compila os cinco antes de os instalares:
 
 ```bash
-cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin \
+  -p delonix-node-api-bin
 ```
 
 ### Opção A — corrê-la a partir do worktree (a mais segura)
@@ -111,7 +163,7 @@ caminho precisa do seu próprio perfil AppArmor (ver
 ```bash
 install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api ~/.local/bin/
 hash -r                              # forget the path your shell cached
 command -v delonix && delonix --version
 ```
@@ -150,7 +202,7 @@ delonix man --dir ~/.local/share/man
 
 ```bash
 sudo install -m 0755 target/release/delonix target/release/delonix-cri \
-  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+  target/release/delonix-mgmt target/release/delonix-mcp target/release/delonix-node-api /usr/local/bin/
 ```
 
 **Só numa máquina onde nenhum workload Delonix esteja em uso.** O binário instalado não é só um
@@ -227,7 +279,8 @@ build lê.
 Não há flag de desinstalação no `install.sh`. Remove o que copiaste:
 
 ```bash
-rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp \
+  ~/.local/bin/delonix-node-api
 hash -r
 sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
 ```
@@ -303,6 +356,7 @@ correspondem ao que tocaste antes de fazeres push; corre todos antes de pedires 
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | um comando `delonix …` citado na documentação actual não existe na árvore do binário |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | qualquer aviso |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | qualquer teste falha |
+| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | os testes deixam no seu directório temporário algo que não é a dívida conhecida em `scripts/tmp_roots_baseline.json` — uma fuga nova, mais de uma conhecida, ou menos de uma sem baixar a linha de base (`--update`). A linha de base é o que o runner alojado deixa, e uma fuga pode depender do host (um teste que retornava cedo quando faltava o `qemu-img` saltava a sua limpeza). A linha de base está vazia desde que a dívida foi paga: um teste guarda o seu directório temporário num guarda que o remove no `Drop` (`tempfile::TempDir`), de modo que a remoção corre também num `return` antecipado e num assert falhado; por isso compara uma corrida local com `--list` |
 | `deny` | `cargo deny check advisories licenses sources` | um aviso RUSTSEC, uma licença ou fonte não permitida (`deny.toml`) |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | o site em commit não é o que o gerador produz a partir deste binário |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` e `./target/release/delonix stack validate -f examples/<file>.yaml` | um exemplo publicado usa uma forma obsoleta ou tem referências por resolver |

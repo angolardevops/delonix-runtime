@@ -1,4 +1,4 @@
-<!-- translated-from: publishing-docs.md sha256:e7464ba7b5b1c113bb55466d80c2d833cf32878863e3e6f711e35fbc59b0b281 -->
+<!-- translated-from: publishing-docs.md sha256:cbfc23fbab090933245166f0c98f167e920b47b6c555e923325a501e70f85133 -->
 # 发布文档
 
 **阅读之前：** [贡献工作流](contributing-workflow.md)、[发布与稳定性](releases-and-stability.md)（一个被推送的标签会做什么——本页的 *发布时会发生什么* 一节正是它对应的文档说明）以及项目结构页里的[生成 vs 手写对照表](project-structure.md#generated-vs-hand-written)。
@@ -82,11 +82,11 @@ python3 scripts/dev_docs.py --check    # exit 1 when docs/dev is stale (CI job `
 
 ## 发布时会发生什么
 
-发布工作流（`.github/workflows/release.yml`）只在有人要求时才运行（`gh workflow run release.yml -f tag=v4.4.0`）——单单推送一个标签什么都不会发生。就文档而言，它会：
+发布工作流（`.github/workflows/release.yml`）只在有人要求时才运行（`gh workflow run release.yml -f tag=v4.5.0`）——单单推送一个标签什么都不会发生。就文档而言，它会：
 
 1. 针对发布构建重新生成用户站点，如果 `docs/` 有差异就**失败**；
 2. 以 `docs/releases/<tag>.md` 作为正文发布 GitHub Release（如果该文件不存在，就用生成的说明）；
-3. 检出 `main`，跑 `scripts/gen-releases.sh`（`docs/RELEASES.md` 附录）和 `scripts/dev_docs.py`（手册的事实部分），如果有变化，就把两者一起提交到 `main`，并带上 `[skip ci]`。
+3. 检出 `main`，跑 `scripts/gen-releases.sh`（`docs/RELEASES.md` 附录）、`scripts/dev_docs.py`（手册的事实部分）和 `scripts/dev_docs_site.py`（手册站点，`markdown` 装在一个 virtualenv 里），把有变化的内容提交到 `main`，并带上 `[skip ci]`。这些生成器在 Python 3.12 上运行（`actions/setup-python`，只从这一步开始生效），因为该 job 自己的 runner 自带的 Python 没有 `tomllib`。如果某个生成器失败，这一步仍然会提交已经重新生成的部分，然后**失败**，并点名是哪个生成器——一次绿色的 release 运行，除非这一步也是绿色，否则不再意味着手册已经重新生成。
 
 手册的**叙述**部分不会被 CI 重新生成。在一次发布被发布并验证之后，会有一个由维护者手动触发的评审步骤，读取上一个标签和新标签之间的改动以及发布说明，只更新那些改动所影响到的手册页面，并为此开一个拉取请求。当没有任何结构性或流程性的东西发生变化时，那次评审的结论就是"没什么要更新的"，并明确说出来。
 

@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
+<!-- translated-from: troubleshooting.md sha256:e6b6ffdfe6f14754379cb99db51d518a86130a8d88e7be7d69b42a9608f30fad -->
 # Diagnóstico de problemas
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md) (armadilhas do host) e [Clonar, compilar e testar](build-and-test.md#the-gates-ci-runs) (os gates, e isolar o estado do motor).
@@ -23,8 +23,9 @@ ferramenta já te disse o que está errado*, num texto que ainda não reconheces
 | `FAIL <tag> is published but this commit does not contain it` | `scripts/version_gate.py` | [O ramo é anterior à tag mais recente](#the-version-gate-refuses-your-branch) |
 | `FAIL Cargo.toml says X, above Y, and docs/releases/vX.md does not exist` | `scripts/version_gate.py` | [Um bump de versão sem commit de release](#the-version-gate-refuses-your-branch) |
 | `FAIL  buf format` / `buf lint` / `buf breaking against …` / `has no google.api.http mapping` / `openapi.yaml is not the generated one` | `scripts/contract_gate.py` | [O gate do contrato do nó](#the-node-contract-gate) |
+| `FAIL  new leak: <name> (N left) — a test no longer cleans up after itself` | `scripts/tmp_roots_gate.py` | [Os testes deixaram algo no directório temporário](#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy) |
 | `unshare()` falha, `EPERM` | AppArmor + user namespaces | [Preparar o teu ambiente § AppArmor](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary) |
-| `-m`/`--cpus`/`--cpu-weight` recusados, saída `69` | delegação de cgroup | [Preparar o teu ambiente § Delegação de cgroup](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
+| `-m`/`--cpus`/`--cpu-weight`, ou `--cpuset`/`--io-weight`/`--device-*`, recusados, saída `69` | delegação de cgroup (os controladores `cpuset`/`io` para o segundo grupo) | [Preparar o teu ambiente § Delegação de cgroup](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
 | `path must be shorter than SUN_LEN` | `DELONIX_NET_RUNTIME_DIR` demasiado longo | [Clonar, compilar e testar § Isolar o estado do motor](build-and-test.md#isolating-the-engines-state) |
 | Um gate falha contra um diff que não escreveste, ou um build termina depressa demais | uma cache de build partilhada ou obsoleta | [Uma cache de build partilhada ou obsoleta](#a-shared-or-stale-build-cache) |
 | O binário responde com uma versão antiga ou um comando que não existe | um `delonix` obsoleto no `PATH` | [Preparar o teu ambiente § Um PATH obsoleto](environment.md#a-stale-delonix-on-your-path) |
@@ -136,6 +137,43 @@ estável — vê [Fluxo de contribuição § Quando escrever um
 ADR](contributing-workflow.md#when-to-write-an-adr). Se o que de facto mudou é a saída do
 gerador (um campo novo, um RPC novo), `python3 scripts/contract_gate.py --update` regenera
 `docs/api/openapi.yaml`; comita-o no mesmo commit que a mudança ao `.proto`.
+
+### Os testes deixaram algo no directório temporário (`tmp_roots_gate.py`)
+
+O job `test` corre o `cargo test --workspace` com o `TMPDIR` a apontar para um directório vazio só
+seu, e depois julga o que ficou lá dentro contra o `scripts/tmp_roots_baseline.json`. Os nomes são
+normalizados (cada sequência de dígitos passa a `N`), por isso a mesma fuga tem o mesmo nome em cada
+corrida:
+
+```
+FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+```
+
+A linha de base está vazia, por isso qualquer entrada é uma fuga nova. As outras duas mensagens
+(`more of a known leak`, `fixed or reduced … — lower the baseline`) só aparecem se voltar a ser
+registada dívida.
+
+O mesmo job corre o gate uma segunda vez sobre o próprio `/tmp`: um teste que faz bind de um socket
+Unix precisa de um caminho curto (o `sun_path` tem 108 bytes) e põe-no lá, onde o recenseamento do
+`TMPDIR` nunca olha. O `/tmp` de um runner não está vazio, por isso é listado mesmo antes do
+`cargo test` e só o que é novo depois disso é julgado (`--before`), contra a mesma linha de base
+vazia. Os dois recenseamentos correm também quando um teste **falhou** — é exactamente aí que uma
+limpeza na última linha de um teste nunca corre —, por isso um teste vermelho pode vir com um
+relatório de fuga próprio. Reproduz localmente com um directório novo só teu, e lista o que lá está
+em vez de o julgar — uma fuga pode depender do host (um teste que retorna cedo quando falta uma ferramenta):
+
+```bash
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
+```
+
+A correcção está no teste, não na linha de base: guarda o directório num `tempfile::TempDir`, para
+que a remoção corra também num `return` antecipado e num assert falhado — para um socket,
+`tempfile::tempdir_in("/tmp")` em vez de um caminho `/tmp` literal com o pid — vê
+[Convenções de código](coding-conventions.md) (*Um teste remove a sua pasta temporária em todas
+as saídas*).
 
 ## Uma cache de build partilhada ou obsoleta
 

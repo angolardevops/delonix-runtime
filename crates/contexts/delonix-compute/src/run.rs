@@ -391,6 +391,8 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
     // ---- security ----
     c.read_only = o.read_only;
     c.cap_add = o.cap_add.clone();
+    c.allowed_sources = o.allow_source.clone();
+    c.source_check_disabled = o.no_source_check;
     c.cap_drop = o.cap_drop.clone();
     // In ROOTLESS `--no-userns` is refused rather than obeyed: without privileges the
     // user namespace is what GRANTS the capabilities every other namespace needs, so

@@ -282,7 +282,7 @@ script and in <a href="build-and-test.html">Clone, build and test</a>, not here.
 </tr>
 <tr>
 <td>VM backend</td>
-<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>defaultProvider</code> in the providers file (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; auto-detection (only with no providers file)</td>
+<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>defaultProvider</code> in the providers file (ADR-0054; <code>vm default-backend --set</code> writes it) &gt; the legacy <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; auto-detection. A providers file that cannot be read makes the choice fail instead of falling through</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -383,7 +383,7 @@ and how to tear the isolated infra down, is in
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Log filter for <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code>.</td>
+<td>Log filter for <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> and <code>delonix-mcp</code>.</td>
 <td>A <code>tracing</code> filter expression (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Falls back to <code>RUST_LOG</code>, then <code>info</code>.</td>
 <td>Logs go to stderr; stdout is kept for command output.</td>
 </tr>
@@ -552,11 +552,32 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <td><strong>No firewall rule, namespace isolation or <code>Dependency</code> applies to IPv6</strong> — every policy is IPv4-only. Security warning. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Runs a workload in a named namespace even when the kernel does not filter traffic inside a bridge (<code>br_netfilter</code> not loaded, or <code>bridge-nf-call-iptables=0</code>), with a warning. Without it the request is refused (DX-6305, exit 69), because the isolation would be installed and enforce nothing. Only <code>1</code> opens it.</td>
+<td><code>1</code> → run with a warning; anything else (or unset) → refused.</td>
+<td>The isolation rules are installed and enforce nothing. See <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, and with <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> even when the container's cgroup lacks the <code>cpuset</code>/<code>io</code> controller (<code>preflight_controller_limits</code>), instead of refusing (exit 69).</td>
 <td>Set (any value) → run, unlimited, with a warning.</td>
 <td>The kernel never sees the limits. See <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_MANIFEST_LENIENT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>manifest.<wbr>rs:manifest_lenient</code></a></td>
+<td>Loads a manifest that has fields the engine does not understand, warning about them, instead of refusing it before any effect (ADR-0069 D1).</td>
+<td><code>1</code> → lenient. Anything else, or unset → a not-understood field refuses the manifest.</td>
+<td>For a manifest written for a newer binary. A typo (<code>memroy:</code>) is also "not understood": prefer fixing the spelling. <code>stack validate</code> always reports instead of refusing.</td>
+</tr>
+<tr>
+<td><code>DELONIX_CNI_TIMEOUT_SECS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>cni.<wbr>rs:invoke</code></a></td>
+<td>Deadline for one CNI plugin invocation; a plugin still running at the deadline is killed and reaped.</td>
+<td>Positive integer seconds. Default 60; a value that does not parse, or 0, falls back to the default silently.</td>
+<td>Output of a plugin is capped at 1 MiB per stream regardless.</td>
 </tr>
 <tr>
 <td><code>DELONIX_INSECURE_BESTEFFORT</code></td>
@@ -661,7 +682,7 @@ already exists until it is booted again.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (the verdict is <code>admission_verdict</code>; <code>MemAvailable</code> comes from <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Memory kept free for the host when admitting a VM: a VM is refused if its memory plus this reserve exceeds <code>MemAvailable</code>.</td>
 <td>MiB; default <code>2048</code>; an unparsable value falls back to 2048.</td>
 <td>Lowering it risks the host OOM-killing things.</td>
@@ -993,6 +1014,13 @@ are test settings — see <a href="#test-only">Test-only</a>.</p>
 <td>Sets how many workers the parallel directory walk uses.</td>
 <td>A positive integer; <code>1</code> → the sequential walk. Unset → the number of CPUs, capped.</td>
 <td>The parallel and sequential walks give the SAME total (tested with hardlinks seen by different workers); the variable exists to prove it on a given host, and as the escape hatch if a filesystem misbehaves under concurrent <code>readdir</code>.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, called at start-up by the processes that stay up (the network pin and control, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, the Docker API slice, the L7 ingress proxy)</td>
+<td>glibc's own cap on malloc arenas. Unset, those processes cap it at 2 themselves, because the glibc default reserves a 64 MiB heap per contending thread.</td>
+<td>A positive integer; read by glibc, not by the engine.</td>
+<td>Set it and the engine leaves it alone: the operator's value wins.</td>
 </tr>
 </tbody>
 </table></div>

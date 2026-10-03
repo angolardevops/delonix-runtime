@@ -309,6 +309,23 @@ pub const POD_SPEC_FIELDS: &[&str] = &[
     "hostAliases",
 ];
 
+/// Keys accepted in one `spec.containers[]` entry. Anything else (`livenessProbe`,
+/// `readinessProbe`, `startupProbe`, `lifecycle`, a typo) has no effect in this
+/// engine, so it is refused instead of silently dropped.
+pub const POD_CONTAINER_FIELDS: &[&str] = &[
+    "name",
+    "image",
+    "command",
+    "args",
+    "workingDir",
+    "ports",
+    "env",
+    "volumeMounts",
+    "resources",
+    "securityContext",
+    "tty",
+];
+
 /// k8s CPU quantity → docker-style core count: `"500m"` → `"0.5"`, `"2"` → `"2"`.
 pub fn cpu_quantity_to_cores(q: &str) -> String {
     if let Some(m) = q.strip_suffix('m') {

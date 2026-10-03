@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:b5a2233cec9f575cc201a08988e44f84c483edc92591778fb2b44afc200baaec -->
+<!-- translated-from: adding-a-kind.md sha256:8efb7affc6ae1e813bc29c234a856c1d66d405e01f157324f10dc3f2de4d657f -->
 # 新增一个 Kind
 
 **阅读之前：**[编码规范](coding-conventions.md)、[架构](architecture.md) 和 [各个 crate](crates.md#delonix-stack) —— 本页假设你已经知道 `delonix-stack` 拥有什么、以及为什么规划（planning）是纯函数式的。
@@ -8,7 +8,7 @@ Kind 是这个引擎能理解的声明式资源 —— `Container`、`Volume`、
 分支：描述这个 Kind 是什么的那张表、应用它的代码，以及让 `stack plan`/`apply` 能像对待
 其他 Kind 一样对待它的协调器接线。本页依序走一遍这个过程，全程以一个真实的 Kind ——
 **`Service`**（ADR-0032）—— 作为完整示例。它不是最新的 Kind（`IPPool`、`NetworkGateway`、
-`NetworkZone` 和 `RuntimePolicy` 都是在它之后出现的），但它是唯一一次性用到全部路径的
+`NetworkZone`、`RuntimePolicy` 和 `SystemContainer` 都是在它之后出现的），但它是唯一一次性用到全部路径的
 Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己的注册表。更新的那些 Kind 也走过
 同样的步骤；下面引用的每个文件都是从代码树里读到的，不是凭对旧结构的记忆写的。
 
@@ -171,6 +171,13 @@ delonix manifest schema > docs/schema/v1/delonix.json
 `service::apply_one` 已经会完整覆写这条记录，不需要重启 —— `Service` 身上没有什么是「冷」
 的。一个没被写进 `hot_fields` 的字段照样会出现在规划里；只不过它会强制走 `Action::Replace`
 （没有 `--replace <Kind>/<name>` 就会被拒绝），而不是 `Action::Update`。
+
+有些字段只能**单向**实时收敛。系统容器的根卷可以在运行中的容器上扩大，但永远不能缩小，所以
+`SystemContainer.rootfs` 被列在 `grow_only_fields` 里，而不是 `hot_fields` 里：当两边都是
+数字、且新值不比旧值小时，`is_hot_change` 把一个只增长（grow-only）字段视为热字段，否则视为
+冷字段，因此缩小会规划出一次 `Replace`。如果你的 Kind 自己的 apply 也要判断某个改动是否需要
+重建，就去问同一个函数 —— `cmd/system_container.rs` 里的 `cold_changes` 就是这么做的 ——
+否则 `plan` 和 `apply` 会得出不一致的结论。
 
 `cmd/stack.rs` 里有三个测试，让这张表对齐 `kinds.rs` 那张表，也让它们彼此对齐：
 

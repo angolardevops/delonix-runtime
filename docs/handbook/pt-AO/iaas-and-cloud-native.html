@@ -371,9 +371,11 @@ kernel, aos hipervisores e ao armazenamento que o motor conduz através das suas
   (<code>cas.rs</code>).</li>
 <li><strong>Kernel</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> (processos, namespaces, cgroups, mounts) e
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (bridges, nftables, DNS).</li>
-<li><strong>Hipervisores</strong> — o trait <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
-<li><strong>Providers remotos</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted e implementado)
-  e <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009, Accepted). Um backend OpenStack é ainda só uma
+<li><strong>Hipervisores</strong> — o trait <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>,
+  implementado pelos backends locais em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
+<li><strong>Providers remotos</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted e implementado),
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-opnsense" target="_blank" rel="noopener"><code>crates/providers/delonix-opnsense</code></a> (ADR-0051) e <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009,
+  Accepted). Um backend OpenStack é ainda só uma
   proposta (ADR-0039, Proposed, condicionado a um spike).</li>
 <li><strong>Registo</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>.</li>
 </ul>
@@ -398,11 +400,13 @@ repositório, e nada em <code>crates/</code>, <code>bins/</code> ou <code>proto/
   suas regras já são impostas por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);</li>
 <li>expõe as <strong>mesmas operações através de várias portas</strong>: a CLI, o contrato de nó, o CRI e o MCP.</li>
 </ul>
-<p>Uma ressalva sobre o contrato de nó, para não ires à procura de um servidor que não existe:
+<p>Uma ressalva sobre o contrato de nó, para não esperares do servidor mais do que ele responde:
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> está marcado como <em>DRAFT contract for ADR-0040</em>. O contrato, o
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado a partir dele, e o seu gate de CI (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>)
-existem; nenhum crate serve ainda o <code>NodeService</code>. O ADR-0042 (<strong>Accepted</strong>, passos A e B
-entregues) fixa como essa API é versionada e documentada quando o servidor chegar.</p>
+existem, e o <code>delonix serve node-api</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>) serve-o num socket
+local — mas hoje só o <code>NodeService.ListProviders</code> responde; os outros RPCs respondem
+<code>UNIMPLEMENTED</code>. O ADR-0042 (<strong>Accepted</strong>; passos A e B entregues, passo C começado com este
+servidor) fixa como essa API é versionada e documentada à medida que mais dela é servida.</p>
 <h3 id="what-it-deliberately-does-not-do">O que deliberadamente não faz<a class="hanchor" href="#what-it-deliberately-does-not-do" aria-label="#">#</a></h3>
 <p>A regra canónica é a secção <em>«Identidade e fronteira do motor»</em> no topo do
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: o motor não conhece <strong>nenhum consumidor</strong> — nem plataformas,
@@ -551,7 +555,7 @@ comando não é uma capacidade de plataforma.</p>
 <p><strong>No Delonix.</strong> As mesmas operações são expostas pela CLI, pelo CRI (<code>delonix serve cri</code>,
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>), pelo socket de gestão local (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>),
 pelo servidor MCP (<code>delonix mcp serve</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>) e pelo contrato de nó
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, rascunho). O contrato é a fonte de verdade tanto para as suas
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, rascunho, servido em parte por <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>). O contrato é a fonte de verdade tanto para as suas
 codificações gRPC como HTTP/JSON, e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> é gerado a partir dele, nunca editado
 à mão (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>). O ADR-0040 (<strong>Proposed</strong>) regista honestamente a lacuna de
 hoje: várias destas portas ainda voltam a correr o binário da CLI como subprocesso em vez de
@@ -597,7 +601,8 @@ providers, interfaces e binários, e o directório é a camada (<a class="src" h
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, <code>bins/</code>). A
 direcção permitida está escrita uma vez, em <code>ALLOWED</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, e a CI
 impõe-na. As portas são traits em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> e <code>VmBackend</code> em
-<code>delonix-vm</code>; o ADR-0008 (<strong>Accepted</strong>) tornou os backends de VM registáveis, que é como um nó
+<code>vm_backend.rs</code> do mesmo crate; os casos de uso de VM que as chamam são o <code>VmEngine</code> em <code>vm.rs</code>, e
+o <code>delonix-vm</code> implementa as portas para este nó. O ADR-0008 (<strong>Accepted</strong>) tornou os backends de VM registáveis, que é como um nó
 Proxmox remoto se tornou mais um backend.</p>
 <p><strong>O que te pede.</strong> Um provider novo entra como implementação de uma porta. Um crate novo entra na
 tabela <code>LAYERS</code> e no directório da sua camada no mesmo commit, e só pode depender na direcção

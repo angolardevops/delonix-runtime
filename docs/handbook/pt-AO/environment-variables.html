@@ -283,7 +283,7 @@ script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aq
 </tr>
 <tr>
 <td>Backend de VM</td>
-<td><code>--backend</code> (ou o <code>HYPERVISOR</code> da imagem) &gt; <code>DELONIX_VM_BACKEND</code> &gt; o <code>defaultProvider</code> do ficheiro de providers (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; auto-detecção (só sem ficheiro de providers)</td>
+<td><code>--backend</code> (ou o <code>HYPERVISOR</code> da imagem) &gt; <code>DELONIX_VM_BACKEND</code> &gt; o <code>defaultProvider</code> do ficheiro de providers (ADR-0054; o <code>vm default-backend --set</code> escreve-o) &gt; o legado <code>&lt;DELONIX_ROOT&gt;/<wbr>vm-default-backend</code> &gt; auto-detecção. Um ficheiro de providers que não se consegue ler faz a escolha falhar em vez de cair para o seguinte</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -385,7 +385,7 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <tr>
 <td><code>DELONIX_LOG</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs:init</code></a></td>
-<td>Filtro de logs para <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code> e <code>delonix-mcp</code>.</td>
+<td>Filtro de logs para <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code> e <code>delonix-mcp</code>.</td>
 <td>Uma expressão de filtro do <code>tracing</code> (<code>debug</code>, <code>warn</code>, <code>delonix_sdn=debug</code>). Recorre a <code>RUST_LOG</code> e depois a <code>info</code>.</td>
 <td>Os logs vão para o stderr; o stdout fica reservado à saída dos comandos.</td>
 </tr>
@@ -555,6 +555,13 @@ antes de usares uma delas.</p>
 <td><strong>Nenhuma regra de firewall, isolamento de namespace ou <code>Dependency</code> se aplica ao IPv6</strong> — todas as políticas são só IPv4. Aviso de segurança. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Corre um workload numa namespace com nome mesmo quando o kernel não filtra o tráfego dentro de uma bridge (<code>br_netfilter</code> não carregado, ou <code>bridge-nf-call-iptables=0</code>), com um aviso. Sem ela o pedido é recusado (DX-6305, saída 69), porque o isolamento seria instalado e não imporia nada. Só <code>1</code> a abre.</td>
+<td><code>1</code> → corre com um aviso; qualquer outro valor (ou ausente) → recusado.</td>
+<td>As regras de isolamento são instaladas e não impõem nada. Ver o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Corre um container com <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> mesmo quando esta sessão não tem delegação de cgroup, e com <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> mesmo quando falta ao cgroup do container o controlador <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), em vez de recusar (saída 69).</td>
@@ -664,7 +671,7 @@ até ele voltar a arrancar.</p>
 </tr>
 <tr>
 <td><code>DELONIX_VM_RESERVE_MIB</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:vm_admission_check</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:admission_check</code></a> (o veredicto é o <code>admission_verdict</code>; o <code>MemAvailable</code> vem do <code>delonix_node::<wbr>mem_available_mib</code>)</td>
 <td>Memória mantida livre para o host ao admitir uma VM: uma VM é recusada se a sua memória mais esta reserva exceder o <code>MemAvailable</code>.</td>
 <td>MiB; omissão <code>2048</code>; um valor que não se consegue interpretar recorre a 2048.</td>
 <td>Baixá-la arrisca que o host mate processos por OOM.</td>
@@ -996,6 +1003,13 @@ definições de teste — ver <a href="#test-only">Só para testes</a>.</p>
 <td>Define quantos workers a varredura paralela de directórios usa.</td>
 <td>Um inteiro positivo; <code>1</code> → a varredura sequencial. Não definida → o número de CPUs, com tecto.</td>
 <td>As varreduras paralela e sequencial dão o MESMO total (testado com hardlinks vistos por workers diferentes); a variável existe para o provar num host dado, e como escapatória se um sistema de ficheiros se comportar mal sob <code>readdir</code> concorrente.</td>
+</tr>
+<tr>
+<td><code>MALLOC_ARENA_MAX</code> (glibc)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/alloc_tuning.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>alloc_tuning.<wbr>rs:limit_malloc_arenas</code></a>, chamada no arranque pelos processos que ficam de pé (o pin e o control da rede, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, a fatia da API Docker, o proxy de ingress L7)</td>
+<td>O tecto do próprio glibc para as arenas do malloc. Sem ela, esses processos põem o tecto em 2 eles mesmos, porque a omissão do glibc reserva um heap de 64 MiB por thread em contenção.</td>
+<td>Um inteiro positivo; lido pelo glibc, não pelo motor.</td>
+<td>Se a definires, o motor não lhe toca: o valor do operador ganha.</td>
 </tr>
 </tbody>
 </table></div>

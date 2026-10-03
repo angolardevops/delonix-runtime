@@ -307,6 +307,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "boot",
     "cloudInit",
     "libvirt",
+    "provider",
 ];
 
 /// Re-deserializes a `kind: VirtualMachine` document's spec, accepting BOTH the historic
@@ -380,6 +381,191 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// `spec.provider` — the ONE place a manifest says which hypervisor realizes the
+/// VM and carries what only that hypervisor understands (ADR-0071).
+///
+/// ```yaml
+/// provider:
+///   type: libvirt        # which provider; replaces the top-level `backend`
+///   spec:                # typed per provider AND per resource; unknown keys are refused
+///     machine: q35
+///     xml: "<domain>…"
+/// ```
+///
+/// Everything outside this block is provider-neutral (disk, resources, network,
+/// cloud-init). The node has one target per provider type (`providers.yaml`,
+/// ADR-0054), so `type` selects it and there is no separate `ref` — a field the
+/// engine would accept and ignore is not a feature. A `spec` key that the named
+/// type does not have is an error, never a field the other backend ignores.
+const VM_PROVIDER_TYPES: &[&str] = &["libvirt", "cloud-hypervisor", "proxmox"];
+
+/// The older spelling (`provider: { name, libvirt: {…} }`): vendor key = type,
+/// its mapping = spec. Still normalized, reported by [`legacy_provider_spellings`].
+const VM_PROVIDER_LEGACY_VENDORS: &[&str] = &["libvirt"];
+
+/// `provider.spec` keys of a VM -> the flat field each becomes, by provider
+/// type. Only libvirt has VM-specific keys today; the others are `[]` on purpose
+/// (`spec: {}` is valid, any key is refused) until one is implemented and proven.
+const VM_PROVIDER_LIBVIRT: &[(&str, &str)] = &[
+    ("machine", "machine"),
+    ("cpuModel", "cpuModel"),
+    ("cpuTopology", "cpuTopology"),
+    ("tpm", "tpm"),
+    ("video", "video"),
+    ("bootOrder", "bootOrder"),
+    ("extraDisks", "extraDisks"),
+    ("extraNics", "extraNics"),
+    ("xmlOverlay", "libvirtXmlOverlay"),
+    ("xml", "libvirtXml"),
+];
+
+fn vm_provider_spec_keys(ty: &str) -> &'static [(&'static str, &'static str)] {
+    if ty == "libvirt" {
+        VM_PROVIDER_LIBVIRT
+    } else {
+        &[]
+    }
+}
+
+/// Problems in `spec.provider`, as dotted paths for the unknown-field report.
+fn provider_block_problems(spec: &serde_yaml::Value) -> Vec<String> {
+    use serde_yaml::Value;
+    let Some(Value::Mapping(p)) = spec.get("provider") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let legacy_name = p.get("name").and_then(|v| v.as_str());
+    let ty = p.get("type").and_then(|v| v.as_str()).or(legacy_name);
+    if let Some(t) = ty {
+        if !VM_PROVIDER_TYPES.contains(&t) {
+            out.push(format!(
+                "provider.type ('{t}' is not a provider; known: {})",
+                VM_PROVIDER_TYPES.join(", ")
+            ));
+        }
+        if let Some(flat) = spec.get("backend").and_then(|v| v.as_str()) {
+            if flat != t {
+                out.push(format!(
+                    "provider.type ('{t}') contradicts backend: '{flat}' — say it once"
+                ));
+            }
+        }
+    }
+    for (k, v) in p {
+        let Some(key) = k.as_str() else { continue };
+        match key {
+            "type" | "name" => {}
+            "spec" => match v {
+                Value::Mapping(block) => {
+                    let Some(t) = ty else {
+                        if !block.is_empty() {
+                            out.push("provider.spec (needs provider.type)".to_string());
+                        }
+                        continue;
+                    };
+                    for sub in block.keys().filter_map(|s| s.as_str()) {
+                        if !vm_provider_spec_keys(t)
+                            .iter()
+                            .any(|(from, _)| *from == sub)
+                        {
+                            out.push(format!("provider.spec.{sub} (not a '{t}' VM field)"));
+                        }
+                    }
+                }
+                Value::Null => {}
+                _ => out.push("provider.spec (must be a mapping)".to_string()),
+            },
+            vendor if VM_PROVIDER_LEGACY_VENDORS.contains(&vendor) => {
+                if ty.is_some_and(|t| t != vendor) {
+                    out.push(format!(
+                        "provider.{vendor} (provider.name is '{}', so this block is for another hypervisor)",
+                        ty.unwrap_or_default()
+                    ));
+                }
+                if let Value::Mapping(block) = v {
+                    for sub in block.keys().filter_map(|s| s.as_str()) {
+                        if !VM_PROVIDER_LIBVIRT.iter().any(|(from, _)| *from == sub) {
+                            out.push(format!("provider.{vendor}.{sub}"));
+                        }
+                    }
+                }
+            }
+            other => out.push(format!("provider.{other}")),
+        }
+    }
+    out.extend(topology_contradiction(spec));
+    out
+}
+
+/// A CPU topology that does not multiply out to the declared vCPU count is two
+/// answers to one question; the generic `vcpus` is not silently overridden.
+fn topology_contradiction(spec: &serde_yaml::Value) -> Option<String> {
+    let flat = normalize_vm_spec(spec.clone());
+    let vcpus = flat.get("vcpus")?.as_u64()?;
+    let t = flat.get("cpuTopology").filter(|t| t.is_mapping())?;
+    let n = |k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_u64())
+            .filter(|n| *n > 0)
+            .unwrap_or(1)
+    };
+    let product = n("sockets") * n("cores") * n("threads");
+    (product != vcpus).then(|| {
+        format!(
+            "provider.spec.cpuTopology ({product} CPUs) contradicts vcpus: {vcpus} — they must agree"
+        )
+    })
+}
+
+/// The older spellings of what now lives under `spec.provider`: the flat
+/// vendor fields, the `libvirt:` group and the top-level `backend`. Still
+/// accepted and lowered to the same fields; reported so a manifest moves to the
+/// one canonical shape.
+pub(crate) fn legacy_provider_spellings(spec: &serde_yaml::Value) -> Vec<String> {
+    let serde_yaml::Value::Mapping(m) = spec else {
+        return Vec::new();
+    };
+    const FLAT: &[&str] = &[
+        "backend",
+        "machine",
+        "cpuModel",
+        "cpu_model",
+        "cpuTopology",
+        "cpu_topology",
+        "tpm",
+        "video",
+        "bootOrder",
+        "boot_order",
+        "extraDisks",
+        "extra_disks",
+        "extraNics",
+        "extra_nics",
+        "libvirtXmlOverlay",
+        "libvirt_xml_overlay",
+        "libvirtXml",
+        "libvirt_xml",
+        "libvirt",
+    ];
+    let mut out: Vec<String> = m
+        .keys()
+        .filter_map(|k| k.as_str())
+        .filter(|k| FLAT.contains(k))
+        .map(str::to_string)
+        .collect();
+    if let Some(serde_yaml::Value::Mapping(p)) = m.get("provider") {
+        if p.contains_key("name")
+            || VM_PROVIDER_LEGACY_VENDORS
+                .iter()
+                .any(|v| p.contains_key(*v))
+        {
+            out.push(
+                "provider.name/provider.<vendor> (now provider.type + provider.spec)".to_string(),
+            );
+        }
+    }
+    out
+}
+
 /// Sub-keys accepted inside the grouped `network:` mapping.
 const VM_NETWORK_KEYS: &[&str] = &["name", "mode", "bridge", "staticIp", "allowMacSpoofing"];
 
@@ -412,6 +598,7 @@ pub(crate) fn unknown_group_keys(spec: &serde_yaml::Value) -> Vec<String> {
     for (group, pairs) in VM_GROUPS {
         scan(group, &|k| pairs.iter().any(|(from, _)| *from == k));
     }
+    out.extend(provider_block_problems(spec));
     out
 }
 
@@ -442,6 +629,33 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         hoist(m, &net, "bridge", "bridge");
         hoist(m, &net, "staticIp", "ip");
         hoist(m, &net, "allowMacSpoofing", "allowMacSpoofing");
+    }
+    if let Some(Value::Mapping(p)) = m.get("provider").cloned() {
+        m.remove("provider");
+        let set_backend = |m: &mut serde_yaml::Mapping, ty: &str| {
+            if m.get("backend").is_none_or(Value::is_null) {
+                m.insert(Value::from("backend"), Value::from(ty));
+            }
+        };
+        // Canonical: `type` + `spec`.
+        if let Some(ty) = p.get("type").and_then(Value::as_str) {
+            set_backend(m, ty);
+            if let Some(Value::Mapping(block)) = p.get("spec") {
+                for (from, to) in vm_provider_spec_keys(ty) {
+                    hoist(m, block, from, to);
+                }
+            }
+        }
+        // Older spelling: `name` and/or a vendor block.
+        hoist(m, &p, "name", "backend");
+        for vendor in VM_PROVIDER_LEGACY_VENDORS {
+            if let Some(Value::Mapping(block)) = p.get(*vendor) {
+                set_backend(m, vendor);
+                for (from, to) in VM_PROVIDER_LIBVIRT {
+                    hoist(m, block, from, to);
+                }
+            }
+        }
     }
     for (group, pairs) in VM_GROUPS {
         if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
@@ -629,7 +843,7 @@ pub enum VmCmd {
         /// After starting, attach to the serial console to watch the boot live (Ctrl-D to detach).
         #[arg(long)]
         console: bool,
-        /// After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout.
+        /// After starting, wait (with a spinner) until the VM answers, up to --boot-timeout; if it never does, exit 124 (DX-8503) and leave the VM running.
         #[arg(long)]
         wait: bool,
         /// Seconds to wait with --wait (default 120).
@@ -1179,7 +1393,8 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// machine, so every one of these is a `Replace` that `apply` refuses without
 /// `--replace`. Refusing is the point — recreating a VM throws away its overlay
 /// disk, which is everything the guest wrote since it was created.
-pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "network", "backend"];
+pub(crate) const RECONCILED_VM_FIELDS: &[&str] =
+    &["disk", "vcpus", "memory", "network", "backend", "labels"];
 
 /// The spec fields this manifest declares that the reconciler does NOT compare
 /// — named, on a VM that already exists, instead of dropped in silence.
@@ -1307,14 +1522,21 @@ fn desired_vm_fields(
 /// What the manifest declares, for the reconciler.
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VmSpec = vm_spec_of(doc)?;
+    let mut fields = desired_vm_fields(
+        &super::vmimage::VmImageStore::open(state_root())?,
+        &doc.metadata.name,
+        &spec,
+    );
+    // `metadata.labels` of the document — see `network::desired`. Measured
+    // before this: a VM applied with labels carried the ownership stamp and
+    // nothing the manifest had declared.
+    if let Some(labels) = super::reconcile::user_labels_field(&doc.metadata.labels) {
+        fields.insert(super::reconcile::LABELS_FIELD.into(), labels);
+    }
     Ok(super::reconcile::Desired {
         kind: k::VM.into(),
         name: doc.metadata.name.clone(),
-        fields: desired_vm_fields(
-            &super::vmimage::VmImageStore::open(state_root())?,
-            &doc.metadata.name,
-            &spec,
-        ),
+        fields,
         converges: true,
         ownable: true,
     })
@@ -1329,8 +1551,10 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// plan does not use would make planning slow for nothing.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     let base = state_root();
-    Ok(delonix_vm::list(&base)
-        .unwrap_or_default()
+    // An unreadable store is an ERROR, not an empty machine: an empty list plans
+    // `Create` for every declared VM, and a second VM of the same name on a
+    // provider that still has the first.
+    Ok(delonix_vm::list(&base)?
         .into_iter()
         .map(|vm| {
             let mut f = std::collections::BTreeMap::new();
@@ -1339,6 +1563,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("memory".into(), vm.memory.clone());
             f.insert("network".into(), vm.network.clone());
             f.insert("backend".into(), vm.backend.clone());
+            if let Some(labels) = super::reconcile::user_labels_field(&vm.labels) {
+                f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+            }
             super::reconcile::Actual {
                 kind: k::VM.into(),
                 name: vm.name.clone(),
@@ -1752,7 +1979,16 @@ pub(crate) fn stamp(
         delonix_state::JsonStore::open(state_root().join("vms"))?;
     let encoded = super::reconcile::encode_last_applied(fields);
     let created = created.map(super::reconcile::encode_last_applied);
+    // The document's own labels go on with the stamp: the one step every
+    // applied VM passes through, created or adopted.
+    let own = super::reconcile::labels_delta(
+        None,
+        fields
+            .get(super::reconcile::LABELS_FIELD)
+            .map(String::as_str),
+    );
     st.update(name, |vm| {
+        set_labels(&mut vm.labels, &own);
         vm.labels
             .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
         vm.labels
@@ -1765,6 +2001,50 @@ pub(crate) fn stamp(
         }
         true
     })?;
+    Ok(())
+}
+
+/// Sets and removes labels on a VM record — the shape `labels_delta` gives.
+fn set_labels(
+    labels: &mut std::collections::BTreeMap<String, String>,
+    delta: &[(String, Option<String>)],
+) {
+    for (key, value) in delta {
+        match value {
+            Some(v) => {
+                labels.insert(key.clone(), v.clone());
+            }
+            None => {
+                labels.remove(key);
+            }
+        }
+    }
+}
+
+/// Applies the hot part of a plan. A VM's labels are the only field that
+/// converges in place: they are bookkeeping on the record, and the guest is
+/// not touched. Anything else reaching here is a bug in
+/// `reconcile::hot_fields`, and is refused instead of half-applied.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
+        delonix_state::JsonStore::open(state_root().join("vms"))?;
+    for d in diffs {
+        match d.field.as_str() {
+            "labels" => {
+                let delta = super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref());
+                st.update(name, |vm| {
+                    set_labels(&mut vm.labels, &delta);
+                    true
+                })?;
+            }
+            other => {
+                return Err(Error::Invalid(format!(
+                    "vm/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2108,6 +2388,18 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         let vm = delonix_vm::create(&base, &cfg)?;
         warn_if_mac_spoofing_allowed(&vm);
         println!("{}", super::po::tf("vm/{name}: ensured", &[("name", name)]));
+        // The document's own labels, for the path that does not stamp (`vm
+        // apply` outside a stack). Additive — removal is the plan's.
+        let own = super::reconcile::user_labels_field(&doc.metadata.labels);
+        let delta = super::reconcile::labels_delta(None, own.as_deref());
+        if !delta.is_empty() {
+            let st: delonix_state::JsonStore<delonix_compute::Vm> =
+                delonix_state::JsonStore::open(base.join("vms"))?;
+            st.update(name, |vm| {
+                set_labels(&mut vm.labels, &delta);
+                true
+            })?;
+        }
     }
     Ok(())
 }
@@ -2494,7 +2786,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     &base,
                     &vm.name,
                     std::time::Duration::from_secs(boot_timeout),
-                );
+                )?;
             }
             let fresh = delonix_vm::status(&base, &vm.name).ok();
             let ip = fresh.as_ref().and_then(|v| v.ip.clone());
@@ -3316,7 +3608,14 @@ fn fmt_open_ports(ip: Option<&str>) -> String {
 /// itself on — measured, on an image whose firmware fails before the kernel.
 /// There the address is the START of the question and the answer is an ARP
 /// probe on the SDN.
-fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
+///
+/// A deadline that passes without the VM answering is an ERROR (DX-8503, exit
+/// 124), not a warning: `--wait` is the flag a script uses to know the VM is
+/// usable, and a `0` there let the next step run against a guest that never
+/// booted. The VM is left running — the timeout may just be too short — and
+/// the message says so. The two outcomes that make no claim (user-mode
+/// networking, and an address this host cannot probe) stay successes.
+fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) -> Result<()> {
     let start = std::time::Instant::now();
     let deadline = start + timeout;
     let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -3356,7 +3655,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                                 "vm '{name}' started — ip {ip}, which could not be verified from here",
                                 &[("name", name), ("ip", &ip)],
                             ));
-                            return;
+                            return Ok(());
                         }
                     }
                 } else {
@@ -3370,7 +3669,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                         "vm '{name}' is up — ip {ip}",
                         &[("name", name), ("ip", &ip)],
                     ));
-                    return;
+                    return Ok(());
                 }
             }
             // libvirt user-mode never gives an IP: after a short start, steer
@@ -3390,24 +3689,24 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                     "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in",
                     &[("name", name)],
                 ));
-                return;
+                return Ok(());
             }
         }
         if std::time::Instant::now() >= deadline {
             if tty {
                 eprint!("\r\x1b[K");
             }
-            match &silent_at {
-                Some(ip) => super::output::warn(&super::po::tf(
+            let why = match &silent_at {
+                Some(ip) => super::po::tf(
                     "vm '{name}' is running but never answered at {ip} — that address is computed from the MAC, not observed, so it exists whether or not the guest booted; `delonix vm console {name}` to watch the boot",
                     &[("name", name), ("ip", ip)],
-                )),
-                None => super::output::warn(&super::po::tf(
+                ),
+                None => super::po::tf(
                     "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch",
                     &[("name", name)],
-                )),
-            }
-            return;
+                ),
+            };
+            return Err(Error::coded(8503, Error::Timeout(why)));
         }
         if tty {
             eprint!(
@@ -4326,6 +4625,16 @@ fn describe_one(
     d.field("Backend", &vm.backend);
     d.field("Created", output::fmt_local(vm.created_unix));
     d.field("Age", output::fmt_age(vm.created_unix));
+    // As `container describe` prints them: without this a label on a VM — the
+    // stack that owns it included — was visible nowhere.
+    if vm.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, v) in &vm.labels {
+            d.item(format!("{k}={v}"));
+        }
+    }
     d.field(
         "PID",
         vm.pid
@@ -4518,6 +4827,117 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    fn y(t: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(t).unwrap()
+    }
+
+    #[test]
+    fn type_and_spec_lower_to_the_same_flat_fields_as_the_older_spellings() {
+        let new = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { type: libvirt, spec: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let legacy = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { name: libvirt, libvirt: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let flat = super::normalize_vm_spec(y(
+            "disk: d\nbackend: libvirt\nmachine: q35\ntpm: true\nlibvirtXml: '<domain/>'\nlibvirtXmlOverlay: ['<a/>']",
+        ));
+        assert_eq!(new, flat);
+        assert_eq!(legacy, flat);
+    }
+
+    #[test]
+    fn spec_keys_are_per_provider_type_and_the_other_types_have_none_yet() {
+        let p = super::provider_block_problems(&y(
+            "provider: { type: cloud-hypervisor, spec: { machine: q35 } }",
+        ));
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].starts_with("provider.spec.machine"), "{p:?}");
+        assert!(
+            super::provider_block_problems(&y("provider: { type: proxmox, spec: {} }")).is_empty()
+        );
+        assert!(super::provider_block_problems(&y(
+            "provider: { type: libvirt, spec: { machine: q35 } }"
+        ))
+        .is_empty());
+        let p = super::provider_block_problems(&y("provider: { type: vmware }"));
+        assert!(p[0].contains("is not a provider"), "{p:?}");
+        let p = super::provider_block_problems(&y("provider: { spec: { machine: q35 } }"));
+        assert_eq!(p, vec!["provider.spec (needs provider.type)".to_string()]);
+        let p = super::provider_block_problems(&y("provider: { ref: pve }"));
+        assert_eq!(p, vec!["provider.ref".to_string()]);
+    }
+
+    #[test]
+    fn a_type_that_contradicts_the_flat_backend_is_refused_not_resolved_by_precedence() {
+        let p = super::provider_block_problems(&y("backend: proxmox\nprovider: { type: libvirt }"));
+        assert!(p.iter().any(|m| m.contains("contradicts backend")), "{p:?}");
+    }
+
+    #[test]
+    fn a_cpu_topology_that_does_not_multiply_to_vcpus_is_a_contradiction() {
+        let bad = y("vcpus: 4\nprovider: { type: libvirt, spec: { cpuTopology: { sockets: 1, cores: 2, threads: 1 } } }");
+        let p = super::provider_block_problems(&bad);
+        assert!(p.iter().any(|m| m.contains("contradicts vcpus")), "{p:?}");
+        let ok = y("resources: { vcpus: 4 }\nprovider: { type: libvirt, spec: { cpuTopology: { sockets: 1, cores: 2, threads: 2 } } }");
+        assert!(super::provider_block_problems(&ok).is_empty());
+        // No declared vcpus: nothing to contradict.
+        assert!(super::provider_block_problems(&y(
+            "provider: { type: libvirt, spec: { cpuTopology: { cores: 3 } } }"
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn provider_block_lowers_to_the_same_flat_fields_as_the_old_spellings() {
+        let new = normalize_vm_spec(y(
+            "disk: d\nprovider: { name: libvirt, libvirt: { machine: q35, tpm: true, xml: '<domain/>', xmlOverlay: ['<a/>'] } }",
+        ));
+        let old = super::normalize_vm_spec(y(
+            "disk: d\nbackend: libvirt\nmachine: q35\ntpm: true\nlibvirtXml: '<domain/>'\nlibvirtXmlOverlay: ['<a/>']",
+        ));
+        assert_eq!(new, old);
+    }
+
+    #[test]
+    fn a_vendor_block_alone_selects_its_provider() {
+        let v = super::normalize_vm_spec(y("disk: d\nprovider: { libvirt: { machine: q35 } }"));
+        assert_eq!(v["backend"], serde_yaml::Value::from("libvirt"));
+        let v = super::normalize_vm_spec(y(
+            "disk: d\nprovider: { name: null, libvirt: { tpm: true } }",
+        ));
+        assert_eq!(v["backend"], serde_yaml::Value::from("libvirt"));
+    }
+
+    #[test]
+    fn a_vendor_block_for_another_hypervisor_is_a_problem_not_an_ignored_field() {
+        let p = super::provider_block_problems(&y(
+            "provider: { name: cloud-hypervisor, libvirt: { machine: q35 } }",
+        ));
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].starts_with("provider.libvirt"), "{p:?}");
+        let p = super::provider_block_problems(&y(
+            "provider: { name: libvirt, libvirt: { machin: q35 } }",
+        ));
+        assert_eq!(p, vec!["provider.libvirt.machin".to_string()]);
+        let p = super::provider_block_problems(&y("provider: { vmware: {} }"));
+        assert_eq!(p, vec!["provider.vmware".to_string()]);
+        assert!(super::provider_block_problems(&y("provider: { name: proxmox }")).is_empty());
+    }
+
+    #[test]
+    fn the_old_spellings_are_reported_so_a_manifest_moves_to_provider() {
+        let l = super::legacy_provider_spellings(&y("backend: libvirt\nmachine: q35\ndisk: d"));
+        assert_eq!(l, vec!["backend".to_string(), "machine".to_string()]);
+        assert!(
+            super::legacy_provider_spellings(&y("disk: d\nprovider: { type: libvirt }")).is_empty()
+        );
+        assert_eq!(
+            super::legacy_provider_spellings(&y("provider: { name: libvirt }")).len(),
+            1
+        );
+    }
+
     use super::{valid_migrate_memory_spec, valid_migrate_network_name};
 
     #[test]
@@ -5050,6 +5470,30 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
                 "'{comparado}' é comparado e não devia estar na lista: {listados}"
             );
         }
+    }
+
+    /// A label change on a VM record sets what is declared, removes what no
+    /// longer is, and leaves the engine's own labels where they are.
+    #[test]
+    fn a_vm_label_change_is_bookkeeping_on_the_record() {
+        let mut labels: std::collections::BTreeMap<String, String> = [
+            ("app".to_string(), "web".to_string()),
+            ("tier".to_string(), "front".to_string()),
+            ("delonix.io/stack".to_string(), "shop".to_string()),
+        ]
+        .into();
+        let delta = crate::cmd::reconcile::labels_delta(
+            Some(r#"{"app":"web","tier":"front"}"#),
+            Some(r#"{"app":"api"}"#),
+        );
+        super::set_labels(&mut labels, &delta);
+        assert_eq!(labels.get("app").map(String::as_str), Some("api"));
+        assert!(!labels.contains_key("tier"));
+        assert_eq!(
+            labels.get("delonix.io/stack").map(String::as_str),
+            Some("shop")
+        );
+        assert!(RECONCILED_VM_FIELDS.contains(&"labels"));
     }
 
     /// A manifest that declares ONLY what the reconciler compares has nothing

@@ -446,10 +446,49 @@ fn rule_spec(r: &FwRule) -> String {
 /// other's rule is live in `nft` right now but silently missing from the
 /// persisted record, so it vanishes on the next `container start` (which
 /// only re-applies what's persisted).
+/// The container a policy names — or, when no container has that name, the POD of
+/// that name seen as one target ([`super::pod::pod_view`]). Read-only.
+pub(crate) fn load_governed(store: &Store, target: &str) -> Result<Container> {
+    match store.load(target) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            let e: Error = e.into();
+            if e.is_not_found() {
+                if let Some((_, view)) = super::pod::pod_view(store, target)? {
+                    return Ok(view);
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+/// The key to hand [`update_locked`] for a record found by scanning: the pod's
+/// name for a pod member (its policy lives on the pod, not on the member), the
+/// container's id otherwise.
+pub(crate) fn governed_key(c: &Container) -> String {
+    c.pod
+        .as_deref()
+        .and_then(super::pod::pod_of_netns)
+        .map(str::to_string)
+        .unwrap_or_else(|| c.id.clone())
+}
+
 pub(crate) fn update_locked<F>(store: &Store, id_or_name: &str, f: F) -> Result<Container>
 where
     F: FnOnce(&mut Container) -> Result<bool>,
 {
+    // A pod is governed as ONE target: the closure runs on its view (netns id, pod
+    // address) and only the firewall and annotations are written back to the head
+    // member, under the head's lock.
+    if let Err(e) = store.load(id_or_name) {
+        let e: Error = e.into();
+        if e.is_not_found() {
+            if let Some((head_id, view)) = super::pod::pod_view(store, id_or_name)? {
+                return update_pod_locked(store, id_or_name, &head_id, view, f);
+            }
+        }
+    }
     let mut err = None;
     let c = store.update(id_or_name, |c| match f(c) {
         Ok(commit) => commit,
@@ -461,6 +500,42 @@ where
     match err {
         Some(e) => Err(e),
         None => Ok(c),
+    }
+}
+
+fn update_pod_locked<F>(
+    store: &Store,
+    pod: &str,
+    head_id: &str,
+    view: Container,
+    f: F,
+) -> Result<Container>
+where
+    F: FnOnce(&mut Container) -> Result<bool>,
+{
+    let ip = view.ip.clone().unwrap_or_default();
+    let mut err = None;
+    let mut out = view;
+    store.update(head_id, |head| {
+        let mut v = super::pod::as_pod_view(head, pod, &ip);
+        match f(&mut v) {
+            Ok(commit) => {
+                if commit {
+                    head.firewall = v.firewall.clone();
+                    head.annotations = v.annotations.clone();
+                }
+                out = v;
+                commit
+            }
+            Err(e) => {
+                err = Some(e);
+                false
+            }
+        }
+    })?;
+    match err {
+        Some(e) => Err(e),
+        None => Ok(out),
     }
 }
 
@@ -1163,6 +1238,141 @@ fn or_any(s: &str) -> String {
     }
 }
 
+/// The containers some policy document in this manifest governs: the `target` of
+/// a `NetworkPolicy` (a `Dependency` has already been lowered to one) or a
+/// `NetworkAccessRule`, in the default container scope. These are the workloads
+/// that must not carry traffic before their policy is in place (ADR-0069).
+pub(crate) fn policy_targets(docs: &[ManifestDoc]) -> std::collections::BTreeSet<&str> {
+    let mut out = std::collections::BTreeSet::new();
+    for doc in docs {
+        match doc.kind.as_str() {
+            k::FIREWALL_POLICY => {
+                if let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) {
+                    if spec.scope.as_deref().unwrap_or("container") == "container" {
+                        if let Some(t) = doc.spec.get("target").and_then(|v| v.as_str()) {
+                            out.insert(t);
+                        }
+                    }
+                }
+            }
+            k::NETWORK_ACCESS_RULE => {
+                if let Some(t) = doc.spec.get("target").and_then(|v| v.as_str()) {
+                    out.insert(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The directions (`in`/`out`) the manifest sets a default policy for on `target`.
+fn declared_directions(
+    docs: &[ManifestDoc],
+    target: &str,
+) -> std::collections::BTreeSet<&'static str> {
+    let mut out = std::collections::BTreeSet::new();
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
+        if doc.spec.get("target").and_then(|v| v.as_str()) != Some(target) {
+            continue;
+        }
+        if doc
+            .spec
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s != "container")
+        {
+            continue;
+        }
+        match doc.spec.get("direction").and_then(|v| v.as_str()) {
+            Some("ingress") => {
+                out.insert("in");
+            }
+            Some("egress") => {
+                out.insert("out");
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// What a held container's policies become when the held state ends: a
+/// direction the manifest declared keeps what its policy document set; one it
+/// did not declare returns to the unset default (open), which is exactly what the
+/// container would have had without the hold.
+fn released_policies(
+    fw: &delonix_model::records::ContainerFw,
+    declared: &std::collections::BTreeSet<&'static str>,
+) -> delonix_model::records::ContainerFw {
+    let mut out = fw.clone();
+    if !declared.contains("in") {
+        out.policy_in.clear();
+    }
+    if !declared.contains("out") {
+        out.policy_out.clear();
+    }
+    out
+}
+
+/// Names of the governed containers that are still closed. `None` when the
+/// store cannot be read (the caller then says nothing rather than guessing).
+pub(crate) fn held_targets(docs: &[ManifestDoc]) -> Option<Vec<String>> {
+    let (_, store) = super::util::open_stores().ok()?;
+    Some(
+        policy_targets(docs)
+            .into_iter()
+            .filter(|t| {
+                load_governed(&store, t).is_ok_and(|c| {
+                    c.annotations
+                        .contains_key(super::container::POLICY_HOLD_ANNOTATION)
+                })
+            })
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+/// Ends the hold on every container this manifest governs, after the policy
+/// layers ran. Idempotent: a container without the hold annotation is skipped,
+/// so a second apply is a no-op, and a first apply that failed before reaching
+/// this leaves the containers closed for the next one to release.
+pub(crate) fn release_policy_holds(docs: &[ManifestDoc]) -> Result<usize> {
+    let (_, store) = super::util::open_stores()?;
+    let mut released = 0;
+    for target in policy_targets(docs) {
+        let Ok(c) = load_governed(&store, target) else {
+            continue;
+        };
+        if !c
+            .annotations
+            .contains_key(super::container::POLICY_HOLD_ANNOTATION)
+        {
+            continue;
+        }
+        let declared = declared_directions(docs, target);
+        update_locked(&store, target, |c| {
+            // The annotation goes first: while it is there the dataplane is held
+            // closed whatever is applied.
+            c.annotations
+                .remove(super::container::POLICY_HOLD_ANNOTATION);
+            let fw = released_policies(&super::container::firewall_or_new(c), &declared);
+            let empty = firewall_disposable(c, &fw);
+            if let Some(ip) = c.ip.clone().filter(|s| !s.is_empty()) {
+                if empty {
+                    infra::clear_firewall(&ip);
+                } else {
+                    super::container::apply_firewall_everywhere(c, &fw)?;
+                }
+            }
+            c.firewall = if empty { None } else { Some(fw) };
+            Ok(true)
+        })?;
+        released += 1;
+    }
+    Ok(released)
+}
+
 pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
     let mut removed = 0usize;
     let mut nothing_to_clear = false;
@@ -1523,7 +1733,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             }
             continue;
         }
-        let Ok(c) = store.load(&spec.target) else {
+        let Ok(c) = load_governed(&store, &spec.target) else {
             continue; // target not created yet — the plan will say Create
         };
         let Some(fw) = &c.firewall else { continue };
@@ -1678,7 +1888,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 /// OPEN, across a tenant boundary, without a word — the qualified
 /// `<namespace>/<name>` form is the way to say which one you meant.
 fn workload_cidr(store: &Store, name: &str) -> Result<String> {
-    let c = store.load(name).map_err(|e| match e.into_root() {
+    let c = load_governed(store, name).map_err(|e| match e.into_root() {
         // The store says "no such container"; here the useful sentence names
         // the ROLE the missing thing was playing, so keep it.
         Error::NotFound(_) => Error::Invalid(super::po::tf(
@@ -2119,6 +2329,73 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    fn docs_of(yaml: &str) -> Vec<ManifestDoc> {
+        manifest::load_str(yaml, "t").unwrap()
+    }
+
+    const HOLD_MANIFEST: &str = "\
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec: { image: alpine }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: free }
+spec: { image: alpine }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: p }
+spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkAccessRule
+metadata: { name: r }
+spec: { target: db, direction: egress, port: '53' }
+";
+
+    #[test]
+    fn only_the_containers_a_policy_names_are_governed() {
+        let d = docs_of(HOLD_MANIFEST);
+        let t: Vec<_> = policy_targets(&d).into_iter().collect();
+        assert_eq!(
+            t,
+            vec!["db", "web"],
+            "a NetworkAccessRule target counts; an unnamed container does not"
+        );
+    }
+
+    #[test]
+    fn a_direction_the_manifest_never_declared_returns_to_open_and_a_declared_one_keeps_its_policy()
+    {
+        let d = docs_of(HOLD_MANIFEST);
+        let declared = declared_directions(&d, "web");
+        assert_eq!(declared.iter().copied().collect::<Vec<_>>(), vec!["in"]);
+        let held = super::super::container::policy_hold_firewall("default");
+        // The policy document already set `in`; `out` is still the hold's deny.
+        let after = released_policies(&held, &declared);
+        assert_eq!(after.policy_in, "deny", "declared: untouched");
+        assert_eq!(after.policy_out, "", "undeclared: back to the open default");
+        // A rule-only target (a NetworkAccessRule): nothing declared, both open.
+        let after = released_policies(&held, &declared_directions(&d, "db"));
+        assert_eq!(
+            (after.policy_in.as_str(), after.policy_out.as_str()),
+            ("", "")
+        );
+    }
+
+    #[test]
+    fn the_hold_is_written_with_policies_an_older_holder_enforces() {
+        let h = super::super::container::policy_hold_firewall("teamA");
+        assert!(h.enabled && h.rules.is_empty());
+        assert_eq!(
+            (h.policy_in.as_str(), h.policy_out.as_str()),
+            ("deny", "deny")
+        );
+        assert_eq!(h.namespace, "teamA");
+    }
+
     use super::*;
 
     fn vm_spec(yaml: &str) -> FwDocSpec {

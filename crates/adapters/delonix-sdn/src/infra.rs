@@ -2331,6 +2331,21 @@ fn validate_control_tokens(parts: &[&str]) -> Result<()> {
                 }
             }
         }
+        ["spoofbind", _, ip, mac] => {
+            if !control_ipv4_ok(ip) {
+                return refuse("spoofbind ip", ip);
+            }
+            if *mac != "-" && !control_mac_ok(mac) {
+                return refuse("spoofbind mac", mac);
+            }
+        }
+        ["spoofallow", _, cidrs] if *cidrs != "-" => {
+            for c in cidrs.split(',') {
+                if !control_ipv4_cidr_ok(c) {
+                    return refuse("spoofallow prefix", c);
+                }
+            }
+        }
         ["netrate", _, rate, burst] => {
             if !control_count_ok(rate) {
                 return refuse("netrate rate", rate);
@@ -2544,6 +2559,25 @@ fn handle_control(line: &str) -> String {
             do_vmtap(tap, bridge, gateway, Some(ip), Some(ns))
         }
         ["vmtapdel", tap] => do_vmtapdel(tap),
+        // Anti-spoofing (see `SPOOF_TABLE`). `spoofbind` pins a VM tap the
+        // client names; containers are pinned by `attach` itself.
+        ["spoofbind", port, ip, mac] => {
+            let port = sanitize(port);
+            spoof_bind(&port, ip, (*mac != "-").then_some(*mac))
+        }
+        ["spoofoff", netns] => {
+            spoof_off_port(&vh_name(&sanitize(netns)));
+            Ok(())
+        }
+        ["spoofallow", netns, cidrs] => {
+            let port = vh_name(&sanitize(netns));
+            let list: Vec<&str> = if *cidrs == "-" {
+                Vec::new()
+            } else {
+                cidrs.split(',').collect()
+            };
+            spoof_allow_port(&port, &list)
+        }
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
         ["lbclear", vip] => do_lbclear(vip),
@@ -3320,7 +3354,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     // latent; the fix will be an anti-spoof exception for the pod-CIDR when the
     // container is a cluster node (alongside the inter-node routing work).
     clear_antispoof(&vh);
-    run_ok("nft", &antispoof_rule_args(&vh, ip));
+    spoof_bind(&vh, ip, mac_in_netns(&netns, "eth0").as_deref())?;
     // Namespace isolation: registers the IP in @dlxall + @dlxns_<ns> (the
     // container's fw_chain_body references these sets). Behavior unchanged
     // for everything in `default` (the same namespace contains all = open SDN).
@@ -3334,6 +3368,7 @@ fn do_detach(netns: &str) -> Result<()> {
     let netns = sanitize(netns);
     let vh = vh_name(&netns);
     clear_antispoof(&vh);
+    spoof_forget(&vh);
     run_ok("ip", &["netns", "del", &netns]);
     run_ok("ip", &["link", "del", &vh]);
     Ok(())
@@ -3405,7 +3440,7 @@ fn do_attach_extra(
     }
     // ANTI-SPOOFING also on the additional interface (same per-IP guarantee as eth0).
     clear_antispoof(&vh);
-    run_ok("nft", &antispoof_rule_args(&vh, ip));
+    spoof_bind(&vh, ip, mac_in_netns(&netns, &ifname).as_deref())?;
     // Namespace isolation on the ADDITIONAL IP too. Its absence here was a real
     // bypass, not a theoretical one: the cross-namespace drop only fires for sources in
     // `@dlxall`, so two containers in different namespaces, both connected to a shared
@@ -3423,6 +3458,7 @@ fn do_detach_extra(netns: &str, ifname: &str) -> Result<()> {
     let ifname = sanitize(ifname);
     let vh = vh_name_extra(&netns, &ifname);
     clear_antispoof(&vh);
+    spoof_forget(&vh);
     run_ok("ip", &["link", "del", &vh]);
     Ok(())
 }
@@ -3467,34 +3503,246 @@ fn do_netrate_clear(vh: &str) {
     );
 }
 
-/// The anti-spoofing rule for an interface pinned to a single address: anything
-/// arriving on `iface` whose source is not `ip` is dropped.
+/// The table that holds the anti-spoofing rules, family `bridge`.
 ///
-/// ONE definition shared by all three attach paths (container veth, extra veth,
-/// VM tap). They had drifted apart before — the VM tap simply never got the rule,
-/// which let a guest kernel forge a source address and bypass namespace isolation
-/// and `kind: Dependency` alike. Keeping the argv in a single function is also
-/// what lets `clear_antispoof` stay in step with what is emitted: the same
-/// generator-and-reader-share-the-format discipline `fw_rule_tail` already
-/// follows.
-fn antispoof_rule_args<'a>(iface: &'a str, ip: &'a str) -> [&'a str; 12] {
-    [
-        "insert",
-        "rule",
-        "ip",
-        INGRESS_TABLE,
-        "fwdeny",
-        "iifname",
-        iface,
-        "ip",
-        "saddr",
-        "!=",
-        ip,
-        "drop",
-    ]
+/// # Why a bridge table, and why the `ip` rule it replaces never matched
+///
+/// Until 2026-10-02 anti-spoofing was one `ip dlxing fwdeny` rule per port —
+/// `iifname <veth> ip saddr != <ip> drop` — and it never dropped a packet.
+/// Traffic between two ports of the same bridge reaches the IP layer only
+/// through `br_netfilter`, and there `iifname` is the BRIDGE, never the port,
+/// so a rule naming the port cannot match. Measured against the engine: a
+/// container with `NET_ADMIN` forged a source and reached its neighbour (3/3),
+/// and by forging the address of a member of another namespace it walked
+/// through namespace isolation (0 packets with its own address, 3 with the
+/// forged one). Every policy in this engine keys off the source address.
+///
+/// In a `bridge` table at `prerouting` the input interface IS the port, the
+/// frame is seen before the bridge forwards it (to a neighbour or up to the
+/// holder), and nothing depends on `br_netfilter`. Per port it pins:
+///
+/// - the MAC (`macs`) — a forged source MAC poisons the bridge's forwarding
+///   table and steals the frames meant for another workload;
+/// - the IPv4 source, exact (`src`) or an administrator-authorised prefix
+///   (`srcpfx`, a Kind node's own PodCIDR, a router's declared prefixes);
+/// - the ARP sender IP and sender MAC, the same two facts.
+///
+/// DHCP from `0.0.0.0` and ARP probes from `0.0.0.0` stay allowed: a VM has
+/// no address until our DHCP server gives it one. VLAN-tagged frames from a
+/// pinned port are dropped, so a spoofed source cannot ride inside a tag.
+pub const SPOOF_TABLE: &str = "dlxspoof";
+
+/// The whole `bridge dlxspoof` table, created once per holder (see
+/// [`ensure_spoof_table`]). A set lookup with `accept` ends only THIS chain,
+/// which is exactly the scope wanted: every other hook still runs.
+fn spoof_table_script() -> String {
+    format!(
+        "table bridge {SPOOF_TABLE} {{
+  set ports {{ type ifname; }}
+  set macports {{ type ifname; }}
+  set macs {{ type ifname . ether_addr; }}
+  set src {{ type ifname . ipv4_addr; }}
+  set srcpfx {{ type ifname . ipv4_addr; flags interval; }}
+  chain pre {{
+    type filter hook prerouting priority -300; policy accept;
+    iifname @macports iifname . ether saddr != @macs counter drop
+    iifname @macports ether type arp iifname . arp saddr ether != @macs counter drop
+    iifname @ports ether type {{ 8021q, 8021ad }} counter drop
+    iifname @ports ip saddr 0.0.0.0 udp dport 67 accept
+    iifname @ports ether type arp arp saddr ip 0.0.0.0 accept
+    iifname @ports ether type ip iifname . ip saddr @src accept
+    iifname @ports ether type ip iifname . ip saddr @srcpfx accept
+    iifname @ports ether type ip counter drop
+    iifname @ports ether type arp iifname . arp saddr ip @src accept
+    iifname @ports ether type arp iifname . arp saddr ip @srcpfx accept
+    iifname @ports ether type arp counter drop
+  }}
+}}
+"
+    )
 }
 
-/// Removes a veth's anti-spoofing rules from the `forward` (idempotency).
+/// Creates the anti-spoofing table if this holder does not have it yet. A
+/// table block re-applied would APPEND its rules a second time, so this checks
+/// first and creates the whole thing in one `nft -f` transaction.
+fn ensure_spoof_table() -> Result<()> {
+    if run("nft", &["list", "table", "bridge", SPOOF_TABLE]).is_ok() {
+        return Ok(());
+    }
+    apply_nft_stdin(&spoof_table_script())
+}
+
+/// The elements of `set` (as `nft -j list set` prints them) that belong to
+/// `port`, rendered back in the form `nft delete element` accepts. Pure, so
+/// the parsing is tested against the real JSON shape.
+fn spoof_elements_of(json: &str, port: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let Some(items) = v.get("nftables").and_then(|n| n.as_array()) else {
+        return out;
+    };
+    for item in items {
+        let Some(elems) = item
+            .get("set")
+            .and_then(|s| s.get("elem"))
+            .and_then(|e| e.as_array())
+        else {
+            continue;
+        };
+        for e in elems {
+            // A counter or comment wraps the value in `{"elem": {"val": …}}`.
+            let val = e.get("elem").and_then(|x| x.get("val")).unwrap_or(e);
+            match val {
+                serde_json::Value::String(name) if name == port => {
+                    out.push(format!("\"{name}\""));
+                }
+                serde_json::Value::Object(o) => {
+                    let Some(parts) = o.get("concat").and_then(|c| c.as_array()) else {
+                        continue;
+                    };
+                    if parts.first().and_then(|p| p.as_str()) != Some(port) {
+                        continue;
+                    }
+                    let rest = match parts.get(1) {
+                        Some(serde_json::Value::String(a)) => a.clone(),
+                        Some(serde_json::Value::Object(p)) => {
+                            let pfx = p.get("prefix");
+                            match (
+                                pfx.and_then(|x| x.get("addr")).and_then(|a| a.as_str()),
+                                pfx.and_then(|x| x.get("len")).and_then(|l| l.as_u64()),
+                            ) {
+                                (Some(a), Some(l)) => format!("{a}/{l}"),
+                                _ => continue,
+                            }
+                        }
+                        _ => continue,
+                    };
+                    out.push(format!("\"{port}\" . {rest}"));
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Every element of the anti-spoofing sets that names `port` is removed. Used
+/// before a (re)bind and on detach: port names are reused (a VM's tap across
+/// restarts, a netns hash), and an element left behind would pin the NEXT
+/// workload on that name to the previous one's address.
+fn spoof_forget(port: &str) {
+    for set in ["ports", "macports", "macs", "src", "srcpfx"] {
+        let listed = crate::capture("nft", &["-j", "list", "set", "bridge", SPOOF_TABLE, set])
+            .unwrap_or_default();
+        for el in spoof_elements_of(&listed, port) {
+            run_ok(
+                "nft",
+                &[
+                    "delete",
+                    "element",
+                    "bridge",
+                    SPOOF_TABLE,
+                    set,
+                    &format!("{{ {el} }}"),
+                ],
+            );
+        }
+    }
+}
+
+/// Pins `port` to `ip` (and to `mac`, when known): from now on a frame
+/// arriving on it with another source is dropped. Replaces whatever the port
+/// was pinned to before; authorised prefixes ([`spoof_allow_port`]) are set
+/// separately and survive only through their own call.
+fn spoof_bind(port: &str, ip: &str, mac: Option<&str>) -> Result<()> {
+    ensure_spoof_table()?;
+    spoof_forget(port);
+    let mut script = format!(
+        "add element bridge {SPOOF_TABLE} src {{ \"{port}\" . {ip} }}\n\
+         add element bridge {SPOOF_TABLE} ports {{ \"{port}\" }}\n"
+    );
+    if let Some(mac) = mac {
+        script.push_str(&format!(
+            "add element bridge {SPOOF_TABLE} macs {{ \"{port}\" . {mac} }}\n\
+             add element bridge {SPOOF_TABLE} macports {{ \"{port}\" }}\n"
+        ));
+    }
+    // One transaction: a port must never be in `ports` without its address,
+    // which would drop all of its traffic.
+    apply_nft_stdin(&script)
+}
+
+/// Replaces the authorised source PREFIXES of `port` (none = `-`). The exact
+/// address and the MAC pinned by [`spoof_bind`] are left alone.
+fn spoof_allow_port(port: &str, cidrs: &[&str]) -> Result<()> {
+    ensure_spoof_table()?;
+    let listed = crate::capture(
+        "nft",
+        &["-j", "list", "set", "bridge", SPOOF_TABLE, "srcpfx"],
+    )
+    .unwrap_or_default();
+    let mut script = String::new();
+    for el in spoof_elements_of(&listed, port) {
+        script.push_str(&format!(
+            "delete element bridge {SPOOF_TABLE} srcpfx {{ {el} }}\n"
+        ));
+    }
+    for c in cidrs {
+        script.push_str(&format!(
+            "add element bridge {SPOOF_TABLE} srcpfx {{ \"{port}\" . {c} }}\n"
+        ));
+    }
+    if script.is_empty() {
+        return Ok(());
+    }
+    apply_nft_stdin(&script)
+}
+
+/// Takes `port` out of the pinned sets (`ports`, `macports`): nothing it sends
+/// is checked any more. Its address elements stay, harmless without the port in
+/// `ports`, and are cleared with the rest on detach.
+fn spoof_off_port(port: &str) {
+    for set in ["ports", "macports"] {
+        run_ok(
+            "nft",
+            &[
+                "delete",
+                "element",
+                "bridge",
+                SPOOF_TABLE,
+                set,
+                &format!("{{ \"{port}\" }}"),
+            ],
+        );
+    }
+}
+
+/// The MAC of `ifname` inside `netns`, as `ip -o link` prints it.
+fn mac_in_netns(netns: &str, ifname: &str) -> Option<String> {
+    let out = crate::capture("ip", &["-n", netns, "-o", "link", "show", "dev", ifname]).ok()?;
+    let mut it = out.split_whitespace();
+    while let Some(t) = it.next() {
+        if t == "link/ether" {
+            return it.next().map(str::to_string).filter(|m| control_mac_ok(m));
+        }
+    }
+    None
+}
+
+/// A strict `aa:bb:cc:dd:ee:ff`.
+fn control_mac_ok(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Removes the legacy `ip dlxing fwdeny` anti-spoofing rule of a port, the one
+/// that never matched (see [`SPOOF_TABLE`]). Kept so a holder that ran an older
+/// binary sheds the dead rule the next time the port is attached or detached.
 fn clear_antispoof(vh: &str) {
     let listed = crate::capture(
         "nft",
@@ -3561,8 +3809,10 @@ fn do_vmtap(
         // — or one belonging to a peer of the target namespace — and walks
         // straight through the isolation. The bridge forwards on MAC and does not
         // look at the IP, so this is the only place it can be caught.
+        // The anti-spoofing binding itself is the `spoofbind` line `vm_attach`
+        // sends right after this one, for EVERY VM with a lease — the default
+        // namespace included, which this namespaced form never reaches.
         clear_antispoof(&tap);
-        run_ok("nft", &antispoof_rule_args(&tap, ip));
         ns_set_join(ip, ns);
     }
     Ok(())
@@ -3575,6 +3825,7 @@ fn do_vmtapdel(tap: &str) -> Result<()> {
     // for a veth: tap names are reused across VM restarts, and a leftover rule
     // pinned to the previous VM's address would silently blackhole the next one.
     clear_antispoof(&tap);
+    spoof_forget(&tap);
     run_ok("ip", &["link", "del", &tap]);
     Ok(())
 }
@@ -6087,7 +6338,7 @@ pub fn network_list() -> Vec<NetDef> {
 /// [`network_list`] under an explicit state root — for the `NetworkStore`,
 /// which is opened on a root of its own and has to see the `NetDef`s of THAT
 /// root when it picks a free `/16` (see [`crate::used_bases`]).
-pub(crate) fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
+pub fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
     let dir = root.join("ingress").join("networks");
     let mut v: Vec<NetDef> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -6971,6 +7222,70 @@ fn vm_isolation_derivable(
 /// model: [`dhcp_lease_ip`] turns them into the address the guest WILL get, so
 /// the membership (in the holder) and the chain (here) can both be installed
 /// now rather than after a lease nobody watches for.
+/// The `spoofbind` control line for a VM tap. Pure, so the form is tested.
+fn spoofbind_line(tap: &str, ip: &str, mac: &str) -> String {
+    let mac = mac.to_ascii_lowercase();
+    let mac = if control_mac_ok(&mac) {
+        mac
+    } else {
+        "-".to_string()
+    };
+    format!("spoofbind {tap} {ip} {mac}")
+}
+
+/// A control plane that does not know a verb answers with this text; an older
+/// binary is the only way to get it for a verb this one sends.
+fn is_unknown_verb(e: &Error) -> bool {
+    e.to_string().contains("invalid control command")
+}
+
+/// Replaces the source prefixes the container attached as `netns` may use on
+/// its primary interface, beyond its own address (empty = none). The engine
+/// calls it for a Kind node's own PodCIDR; nothing else reaches it unless the
+/// node policy authorised it. Validated again by the holder.
+pub fn spoof_allow(netns: &str, cidrs: &[String]) -> Result<()> {
+    for c in cidrs {
+        if !control_ipv4_cidr_ok(c) {
+            return Err(Error::InvalidControlCommand(format!(
+                "authorised source prefix {c:?} is not a.b.c.d/len"
+            )));
+        }
+    }
+    let list = if cidrs.is_empty() {
+        "-".to_string()
+    } else {
+        cidrs.join(",")
+    };
+    tolerate_old_control(control_send(&format!(
+        "spoofallow {} {list}",
+        sanitize(netns)
+    )))
+}
+
+/// Switches anti-spoofing OFF for the container attached as `netns`: its port
+/// leaves the pinned sets, so any source and MAC pass. The engine reaches it
+/// only for a container whose node policy granted `allowSourceCheckOptOut`.
+pub fn spoof_off(netns: &str) -> Result<()> {
+    tolerate_old_control(control_send(&format!("spoofoff {}", sanitize(netns))))
+}
+
+/// A control plane started by an older binary does not know the anti-spoofing
+/// verbs — and it does not filter spoofed sources at all, so an override has
+/// nothing to change there. Answering with an error would fail a `start` of a
+/// Kind node after an in-place upgrade; this says it instead.
+fn tolerate_old_control(r: Result<()>) -> Result<()> {
+    match r {
+        Err(e) if is_unknown_verb(&e) => {
+            tracing::warn!(
+                "this node's network control plane predates bridge anti-spoofing; \
+                 run `delonix net netns down` then `up` to enable it"
+            );
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<String> {
     // `bridge_addr`, deliberately, and it is worth saying why it is not the
     // declared gateway: a VM gets address, mask and router from OUR DHCP server
@@ -7011,6 +7326,27 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
         release(&owner);
         restore_lease(&prefix, &owner, previous_lease);
         return Err(e);
+    }
+    // Anti-spoofing for EVERY VM with a lease, the default namespace included
+    // (the short `vmtap` line carries no address, so the holder cannot do it
+    // there). A guest kernel is not ours: without this pin it can put any
+    // source or MAC on the wire. See `SPOOF_TABLE`.
+    if let Some(ip) = &lease {
+        if let Err(e) = control_send(&spoofbind_line(&tap, ip, mac)) {
+            if is_unknown_verb(&e) {
+                // A control plane started by an older binary: it never filtered
+                // spoofed sources either, so the VM is no worse off than before
+                // this release — but say it, with the way out.
+                tracing::warn!(
+                    vm,
+                    "this node's network control plane predates bridge anti-spoofing; \
+                     run `delonix net netns down` then `up` to enable it"
+                );
+            } else {
+                vm_detach(vm, Some(ip));
+                return Err(e);
+            }
+        }
     }
     // The chain is what actually DROPS cross-namespace traffic; the set
     // membership above only makes the VM visible to everyone else's rules. A
@@ -8256,6 +8592,25 @@ fn dns_state_serves(status: Option<&str>) -> bool {
     matches!(status, Some("Running") | Some("Paused") | Some("Created"))
 }
 
+/// Whether a container may be a backend of a `kind: Service`.
+///
+/// Running is not ready. A name resolves as soon as the container is alive (a
+/// client of ONE container wants the address early); a Service load-spreads, so
+/// handing out a member that is `Starting` or `Unhealthy` sends a share of the
+/// traffic to something that cannot answer. A container with no health check
+/// declared has nothing to wait for: it is ready when it runs. A paused or
+/// not-yet-started one is never a backend.
+fn service_member_ready(
+    status: Option<&str>,
+    has_health_check: bool,
+    health: Option<&str>,
+) -> bool {
+    if status != Some("Running") {
+        return false;
+    }
+    !has_health_check || health == Some("healthy")
+}
+
 /// One resolvable name, with everything needed to decide WHO may resolve it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DnsEntry {
@@ -8370,11 +8725,14 @@ fn build_dns_index() -> DnsIndex {
     // Collected alongside the container loop below, for the `kind: Service`
     // pass at the end — a SECOND directory read would just re-parse the same
     // files this loop already opened.
-    let mut container_summaries: Vec<(
+    // (labels, namespace, address, ready) of each serving container.
+    type ContainerSummary = (
         std::collections::BTreeMap<String, String>,
         String,
         [u8; 4],
-    )> = Vec::new();
+        bool,
+    );
+    let mut container_summaries: Vec<ContainerSummary> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -8430,7 +8788,12 @@ fn build_dns_index() -> DnsIndex {
                         .collect()
                 })
                 .unwrap_or_default();
-            container_summaries.push((container_labels, ns.clone(), ip));
+            let ready = service_member_ready(
+                v["status"].as_str(),
+                !v["health"].is_null(),
+                v["health_state"]["health"].as_str(),
+            );
+            container_summaries.push((container_labels, ns.clone(), ip, ready));
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -8533,11 +8896,12 @@ fn build_dns_index() -> DnsIndex {
     for def in service_list() {
         let ips: Vec<[u8; 4]> = container_summaries
             .iter()
-            .filter(|(labels, ns, _)| {
-                ns.eq_ignore_ascii_case(&def.namespace)
+            .filter(|(labels, ns, _, ready)| {
+                *ready
+                    && ns.eq_ignore_ascii_case(&def.namespace)
                     && crate::matches_labels(labels, &def.match_labels)
             })
-            .map(|(_, _, ip)| *ip)
+            .map(|(_, _, ip, _)| *ip)
             .collect();
         // An empty match is not an error here (ADR-0032: "applies to nothing,
         // warns loudly, succeeds") — the warning is the CALLER's job (the
@@ -8889,6 +9253,24 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_service_member_must_be_ready_not_merely_running() {
+        assert!(service_member_ready(Some("Running"), false, None));
+        assert!(service_member_ready(Some("Running"), true, Some("healthy")));
+        assert!(!service_member_ready(
+            Some("Running"),
+            true,
+            Some("starting")
+        ));
+        assert!(!service_member_ready(Some("Running"), true, None));
+        assert!(!service_member_ready(
+            Some("Running"),
+            true,
+            Some("unhealthy")
+        ));
+        assert!(!service_member_ready(Some("Paused"), false, None));
+        assert!(!service_member_ready(Some("Created"), false, None));
+    }
     #[test]
     fn deleting_an_absent_route_element_is_success_but_add_is_not() {
         let enoent = "Error: Could not process rule: No such file or directory";
@@ -10820,31 +11202,82 @@ Inter-|   Receive                                                |  Transmit
         assert!(dhcp_lease_ip("", "52:54:00:ab:cd:ef").is_none());
     }
 
-    /// Achado de auditoria (MÉDIO): o `tap` de uma VM não levava regra
-    /// anti-spoofing, ao contrário do veth de um container. O kernel do
-    /// convidado não é nosso, logo pode pôr no fio o endereço de origem que
-    /// quiser — e TODA a política deste motor (isolamento cross-namespace,
-    /// `kind: Dependency`) decide pelo IP de origem. A regra tem de ser
-    /// exactamente a mesma do veth, senão a fronteira vale para uns e não
-    /// para outros.
-    #[test]
-    fn a_regra_antispoof_e_a_mesma_para_veth_e_para_tap_de_vm() {
-        let veth = super::antispoof_rule_args("dlxn1a2b", "10.200.0.7");
-        let tap = super::antispoof_rule_args("vt01", "10.200.254.42");
+    /// The JSON `nft -j list set` really prints (nft 1.0.9, captured
+    /// 2026-10-02): a plain set lists names, a concatenation `concat` pairs, and
+    /// an interval set the prefix as an object.
+    const SPOOF_PORTS_JSON: &str = r#"{"nftables": [{"metainfo": {"version": "1.0.9", "release_name": "Old Doc Yak #3", "json_schema_version": 1}}, {"set": {"family": "bridge", "name": "ports", "table": "dlxspoof", "type": "ifname", "handle": 1, "elem": ["vh1", "vh2"]}}]}"#;
+    const SPOOF_SRC_JSON: &str = r#"{"nftables": [{"metainfo": {"version": "1.0.9", "release_name": "Old Doc Yak #3", "json_schema_version": 1}}, {"set": {"family": "bridge", "name": "src", "table": "dlxspoof", "type": ["ifname", "ipv4_addr"], "handle": 3, "elem": [{"concat": ["vh1", "10.200.0.7"]}, {"concat": ["vh2", "10.200.0.8"]}]}}]}"#;
+    const SPOOF_PFX_JSON: &str = r#"{"nftables": [{"metainfo": {"version": "1.0.9", "release_name": "Old Doc Yak #3", "json_schema_version": 1}}, {"set": {"family": "bridge", "name": "srcpfx", "table": "dlxspoof", "type": ["ifname", "ipv4_addr"], "handle": 4, "flags": ["interval"], "elem": [{"concat": ["vh1", {"prefix": {"addr": "10.244.1.0", "len": 24}}]}, {"concat": ["vh2", {"prefix": {"addr": "10.244.2.0", "len": 24}}]}]}}]}"#;
+    const SPOOF_MACS_JSON: &str = r#"{"nftables": [{"metainfo": {"version": "1.0.9", "release_name": "Old Doc Yak #3", "json_schema_version": 1}}, {"set": {"family": "bridge", "name": "macs", "table": "dlxspoof", "type": ["ifname", "ether_addr"], "handle": 2, "elem": [{"concat": ["vh1", "02:42:ac:11:00:02"]}]}}]}"#;
 
-        // Mesma FORMA nos dois (só interface e endereço mudam).
-        assert_eq!(veth.len(), tap.len());
-        assert_eq!(veth[5], "iifname");
-        assert_eq!(tap[5], "iifname");
-        assert_eq!(tap[6], "vt01");
-        assert_eq!(tap[10], "10.200.254.42");
-        // O verdicto tem de ser `drop` sobre "origem != o endereço atribuído".
-        assert_eq!(&tap[7..10], &["ip", "saddr", "!="]);
-        assert_eq!(tap[11], "drop");
-        // Vai para a chain que o `clear_antispoof` também varre, senão a
-        // remoção nunca encontraria a regra que a criação emitiu.
-        assert_eq!(tap[4], "fwdeny");
-        assert_eq!(tap[3], super::INGRESS_TABLE);
+    /// Forgetting a port must find exactly its elements in every set, in the
+    /// form `nft delete element` takes, and never a neighbour's: an element
+    /// left behind pins the next workload on a reused name to the previous
+    /// address, and one taken from a neighbour un-pins it.
+    #[test]
+    fn spoof_elements_are_found_per_port_in_every_set_shape() {
+        assert_eq!(
+            super::spoof_elements_of(SPOOF_PORTS_JSON, "vh1"),
+            vec!["\"vh1\""]
+        );
+        assert_eq!(
+            super::spoof_elements_of(SPOOF_SRC_JSON, "vh1"),
+            vec!["\"vh1\" . 10.200.0.7"]
+        );
+        assert_eq!(
+            super::spoof_elements_of(SPOOF_PFX_JSON, "vh2"),
+            vec!["\"vh2\" . 10.244.2.0/24"]
+        );
+        assert_eq!(
+            super::spoof_elements_of(SPOOF_MACS_JSON, "vh1"),
+            vec!["\"vh1\" . 02:42:ac:11:00:02"]
+        );
+        assert!(super::spoof_elements_of(SPOOF_MACS_JSON, "vh2").is_empty());
+        assert!(super::spoof_elements_of("not json", "vh1").is_empty());
+    }
+
+    /// The order IS the policy. The MAC checks come before the DHCP/ARP-probe
+    /// exceptions (a `0.0.0.0` source must not carry a forged MAC), and every
+    /// `drop` for a family comes after its `accept`s, or an authorised prefix
+    /// would be dropped before it is looked up.
+    #[test]
+    fn the_spoof_table_checks_the_mac_first_and_drops_last() {
+        let t = super::spoof_table_script();
+        let at = |needle: &str| {
+            t.find(needle)
+                .unwrap_or_else(|| panic!("missing: {needle}"))
+        };
+        let mac = at("ether saddr != @macs");
+        let dhcp = at("ip saddr 0.0.0.0 udp dport 67 accept");
+        let src = at("ip saddr @src accept");
+        let pfx = at("ip saddr @srcpfx accept");
+        let ip_drop = at("ether type ip counter drop");
+        assert!(mac < dhcp && dhcp < src && src < pfx && pfx < ip_drop);
+        assert!(at("arp saddr ip @srcpfx accept") < at("ether type arp counter drop"));
+        assert!(t.contains("hook prerouting"), "{t}");
+        assert!(
+            t.contains("8021q"),
+            "a tagged frame must not carry a spoofed source past the check"
+        );
+        assert!(t.starts_with(&format!("table bridge {}", super::SPOOF_TABLE)));
+    }
+
+    #[test]
+    fn spoof_control_lines_are_validated() {
+        let ok = |l: &str| {
+            super::validate_control_tokens(&l.split_whitespace().collect::<Vec<_>>()).is_ok()
+        };
+        assert!(ok("spoofbind vt01 10.200.254.42 52:54:00:0a:ac:c5"));
+        assert!(ok("spoofbind vt01 10.200.254.42 -"));
+        assert!(!ok("spoofbind vt01 10.200.254 -"));
+        assert!(!ok("spoofbind vt01 10.200.254.42 52:54:00:0a:ac"));
+        assert!(ok("spoofallow node1 10.244.1.0/24"));
+        assert!(ok("spoofallow node1 10.244.1.0/24,192.168.50.0/24"));
+        assert!(ok("spoofallow node1 -"));
+        assert!(!ok("spoofallow node1 10.244.1.0"));
+        assert!(!ok("spoofallow node1 10.244.1.0/24,;rm"));
+        assert!(super::control_mac_ok("aa:BB:cc:00:11:22"));
+        assert!(!super::control_mac_ok("aa:bb:cc:00:11"));
     }
 
     /// A VM with nothing to isolate must keep emitting the OLD line, so a holder

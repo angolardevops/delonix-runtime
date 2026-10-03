@@ -269,37 +269,103 @@ fn invoke(
     envs: &[(String, String)],
     stdin_json: &str,
 ) -> Result<(bool, String, String)> {
-    use std::io::Write;
-    let mut child = Command::new(plugin)
-        .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+    let mut cmd = Command::new(plugin);
+    cmd.envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let timeout = std::env::var("DELONIX_CNI_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map_or(PLUGIN_TIMEOUT, std::time::Duration::from_secs);
+    run_bounded(cmd, stdin_json, timeout, PLUGIN_MAX_OUTPUT).map_err(|e| match e {
+        Error::Command { context, message } => Error::Command {
+            context,
+            message: format!("{}: {message}", plugin.display()),
+        },
+        other => other,
+    })
+}
+
+/// A plugin that neither answers nor exits must not hold the pod (or the
+/// kubelet's RunPodSandbox) forever.
+const PLUGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Per stream. A plugin result is a few KiB of JSON; a runaway writer is cut here.
+const PLUGIN_MAX_OUTPUT: u64 = 1 << 20;
+
+/// Runs `cmd` with `stdin_json` on stdin, a deadline and a cap on each output
+/// stream. On timeout the child is killed and reaped before returning, so no
+/// plugin process outlives the error.
+fn run_bounded(
+    mut cmd: Command,
+    stdin_json: &str,
+    timeout: std::time::Duration,
+    max_output: u64,
+) -> Result<(bool, String, String)> {
+    use std::io::{Read, Write};
+    let err = |context: &'static str, e: &dyn std::fmt::Display| Error::Command {
+        context,
+        message: e.to_string(),
+    };
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::Command {
-            context: "cni-spawn",
-            message: format!("{}: {e}", plugin.display()),
-        })?;
-    child
+        .map_err(|e| err("cni-spawn", &e))?;
+    // Written from a thread: a plugin that never reads stdin must not block us
+    // before the deadline starts counting.
+    let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| Error::Command {
-            context: "cni-stdin",
-            message: "no stdin".into(),
-        })?
-        .write_all(stdin_json.as_bytes())
-        .map_err(|e| Error::Command {
-            context: "cni-stdin",
-            message: e.to_string(),
-        })?;
-    let out = child.wait_with_output().map_err(|e| Error::Command {
-        context: "cni-wait",
-        message: e.to_string(),
-    })?;
+        .ok_or_else(|| err("cni-stdin", &"no stdin"))?;
+    let payload = stdin_json.to_owned();
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(payload.as_bytes());
+    });
+    let drain = |mut r: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = (&mut r).take(max_output).read_to_end(&mut buf);
+            // Keep draining past the cap so the plugin is not blocked on a full pipe.
+            let _ = std::io::copy(&mut r, &mut std::io::sink());
+            buf
+        })
+    };
+    let out_h = drain(Box::new(
+        child
+            .stdout
+            .take()
+            .ok_or_else(|| err("cni-stdout", &"no stdout"))?,
+    ));
+    let err_h = drain(Box::new(
+        child
+            .stderr
+            .take()
+            .ok_or_else(|| err("cni-stderr", &"no stderr"))?,
+    ));
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait().map_err(|e| err("cni-wait", &e))? {
+            Some(st) => break st,
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err(
+                    "cni-timeout",
+                    &format!(
+                        "plugin did not finish within {}s and was killed",
+                        timeout.as_secs()
+                    ),
+                ));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    };
+    let out = out_h.join().unwrap_or_default();
+    let er = err_h.join().unwrap_or_default();
     Ok((
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
+        status.success(),
+        String::from_utf8_lossy(&out).into_owned(),
+        String::from_utf8_lossy(&er).into_owned(),
     ))
 }
 
@@ -603,6 +669,46 @@ pub fn detach_named_netns(net: Option<&NetConfList>, name: &str, container_id: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sh(script: &str) -> Command {
+        let mut c = Command::new("sh");
+        c.args(["-c", script]);
+        c
+    }
+
+    #[test]
+    fn a_plugin_that_never_exits_is_killed_at_the_deadline() {
+        let t0 = std::time::Instant::now();
+        let e = run_bounded(
+            sh("sleep 30"),
+            "{}",
+            std::time::Duration::from_millis(300),
+            1024,
+        )
+        .unwrap_err();
+        assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+        assert!(e.to_string().contains("killed"), "{e}");
+    }
+
+    #[test]
+    fn a_plugin_that_ignores_stdin_does_not_block_the_caller() {
+        let big = "x".repeat(4 << 20);
+        let r = run_bounded(sh("echo ok"), &big, std::time::Duration::from_secs(5), 1024).unwrap();
+        assert!(r.0 && r.1.trim() == "ok");
+    }
+
+    #[test]
+    fn output_is_capped_but_the_plugin_is_not_blocked() {
+        let r = run_bounded(
+            sh("head -c 3000000 /dev/zero"),
+            "{}",
+            std::time::Duration::from_secs(10),
+            4096,
+        )
+        .unwrap();
+        assert!(r.0);
+        assert_eq!(r.1.len(), 4096);
+    }
 
     const CONFLIST: &str = r#"{
         "cniVersion": "1.0.0",

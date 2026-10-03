@@ -284,13 +284,21 @@ This section keeps only the parts that shape the <em>structure</em> below:</p>
 <ul>
 <li><strong>Providers sit behind ports.</strong> The Linux kernel, Cloud Hypervisor and libvirt, Proxmox VE
   and the Kubernetes CRI are reached through a trait, never through <code>if provider == …</code> spread
-  across the code. Today's ports: <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) and the
-  compute ports in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>launch.rs</code>
-  (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>, <code>RunHost</code>, <code>NetworkProvider</code>,
-  <code>VmNetwork</code>, <code>WorkloadRuntime</code>). An OpenStack backend is designed
+  across the code. Today's ports: <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a>,
+  re-exported by <code>delonix-vm</code>, which still holds the backend registry), the VM provider port
+  (<code>VmProvider</code> in <code>vm_provider.rs</code>, ADR-0044), the system-container port
+  (<code>SystemContainerProvider</code> in <code>system_container.rs</code>, ADR-0058), the compute ports in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>launch.rs</code> (<code>ImageStore</code>,
+  <code>StorageProvider</code>, <code>DeviceResolver</code>, <code>RunHost</code>, <code>NetworkProvider</code>, <code>VmNetwork</code>,
+  <code>WorkloadRuntime</code>, and <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code> for the VM use cases),
+  and the two remote network ports in <code>delonix-sdn</code>: <code>GatewayProvider</code>
+  (<code>src/gateway.rs</code>, ADR-0051) and <code>NetworkZoneProvider</code> (<code>src/network_zone.rs</code>, ADR-0049).
+  What each provider can do is answered against one versioned capability catalog
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/capability.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/capability.rs</code></a>, ADR-0050; <code>delonix provider ls</code>). An OpenStack backend is designed
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>, <em>Proposed</em>) but has no crate yet.</li>
 <li><strong>One set of operations, several interfaces</strong> — the CLI, the CRI, the local management API, MCP
-  and a Docker Engine API slice, with the node contract as the intended single API (see
+  and a Docker Engine API slice, with the node contract (now served in part by <code>delonix-node-api</code>)
+  as the intended single API (see
   <a href="#one-set-of-operations-several-interfaces">below</a>); observability goes through
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a>.</li>
 <li><strong>Daemonless and rootless-first decide the process model</strong> — what must persist belongs to systemd
@@ -335,8 +343,8 @@ This section keeps only the parts that shape the <em>structure</em> below:</p>
 <td><code>inline_versions</code></td>
 </tr>
 <tr>
-<td>Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, <code>println!</code> in libraries, process-environment writes, adapters importing the shared <code>Error</code> as their own</td>
-<td>the ratchet patterns (<code>SELF_EXEC</code>, <code>PRINTS</code>, <code>ENV_WRITES</code>, <code>SHARED_ERROR</code>, …), baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a></td>
+<td>Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, <code>println!</code> in libraries, process-environment writes, adapters importing the shared <code>Error</code> as their own, a context crate running an external program (<code>Command::new</code> under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>, baseline 0)</td>
+<td>the ratchet patterns (<code>SELF_EXEC</code>, <code>PRINTS</code>, <code>ENV_WRITES</code>, <code>SHARED_ERROR</code>, <code>CONTEXT_SPAWNS</code>, …), baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a></td>
 </tr>
 </tbody>
 </table></div>
@@ -370,12 +378,12 @@ network-facing API of its own, and everything remote it reaches is reached <em>o
   SYSD[&quot;systemd&lt;br/&gt;&lt;small&gt;user or system manager&lt;/small&gt;&quot;]
   REG[&quot;OCI registries&lt;br/&gt;&lt;small&gt;public or private&lt;/small&gt;&quot;]
   HV[&quot;local hypervisors&lt;br/&gt;&lt;small&gt;Cloud Hypervisor, libvirt/QEMU&lt;/small&gt;&quot;]
-  RMT[&quot;remote management APIs&lt;br/&gt;&lt;small&gt;one Proxmox VE node, TrueNAS SCALE&lt;/small&gt;&quot;]
+  RMT[&quot;remote management APIs&lt;br/&gt;&lt;small&gt;a Proxmox VE node and its cluster, OPNsense, TrueNAS SCALE&lt;/small&gt;&quot;]
   SSH[&quot;remote hosts&lt;br/&gt;&lt;small&gt;kubeadm cluster nodes&lt;/small&gt;&quot;]
   OBS[&quot;observability backends&lt;br/&gt;&lt;small&gt;OTLP collector, Prometheus&lt;/small&gt;&quot;]
   OP --&gt;|&quot;argv, exit classes&quot;| ENG
   KL --&gt;|&quot;CRI runtime.v1: gRPC on a unix socket&quot;| ENG
-  LC --&gt;|&quot;HTTP+JSON on a unix socket, same uid&quot;| ENG
+  LC --&gt;|&quot;HTTP+JSON or gRPC on a unix socket, same uid&quot;| ENG
   AI --&gt;|&quot;MCP: JSON-RPC over stdio&quot;| ENG
   ENG --&gt;|&quot;syscalls; ip, nft, nsenter&quot;| KER
   ENG --&gt;|&quot;units, timers, transient scopes&quot;| SYSD
@@ -413,7 +421,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </tr>
 <tr>
 <td>local program → engine</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_blocking</code>, the <code>axum</code> router)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_blocking</code>, the <code>axum</code> router); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_blocking</code>, the node contract)</td>
 </tr>
 <tr>
 <td>AI client → engine</td>
@@ -437,7 +445,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </tr>
 <tr>
 <td>engine → remote management APIs</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>src/<wbr>lib.<wbr>rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>engine → remote hosts</td>
@@ -450,7 +458,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </tbody>
 </table></div>
 <h2 id="level-2-containers-executables-and-processes">Level 2 — Containers: executables and processes<a class="hanchor" href="#level-2-containers-executables-and-processes" aria-label="#">#</a></h2>
-<p>In C4 a <em>container</em> is something that runs. The build ships four executables (see the generated
+<p>In C4 a <em>container</em> is something that runs. The build ships five executables (see the generated
 count in the <a href="index.html">handbook README</a>); several more <strong>processes</strong> appear per workload or per
 node, each with an owner. The three figures below split that picture by concern: who enters the
 engine, what one container costs in processes, and the rootless network infrastructure.</p>
@@ -490,8 +498,9 @@ engine, what one container costs in processes, and the rootless network infrastr
 </tr>
 </tbody>
 </table></div>
-<p>Four doors lead into the engine, but only the one-shot <code>delonix</code> process ever creates a
-container: the multi-threaded servers run the CLI back for that.</p>
+<p>Five doors lead into the engine, but only the one-shot <code>delonix</code> process ever creates a
+container: the multi-threaded servers run the CLI back for that. (<code>delonix-node-api</code> does not
+create anything yet: its one served RPC, <code>ListProviders</code>, only reads.)</p>
 <pre class="mermaid">flowchart LR
   OP(&quot;operator&quot;)
   KL(&quot;kubelet&quot;)
@@ -503,6 +512,7 @@ container: the multi-threaded servers run the CLI back for that.</p>
       CRI[&quot;delonix-cri&lt;br/&gt;&lt;small&gt;CRI server, long-lived&lt;/small&gt;&quot;]
       MGMT[&quot;delonix-mgmt&lt;br/&gt;&lt;small&gt;management API, long-lived&lt;/small&gt;&quot;]
       MCP[&quot;delonix-mcp&lt;br/&gt;&lt;small&gt;MCP server, one per session&lt;/small&gt;&quot;]
+      NAPI[&quot;delonix-node-api&lt;br/&gt;&lt;small&gt;node contract, long-lived&lt;/small&gt;&quot;]
     end
     ST[(&quot;state root&lt;br/&gt;&lt;small&gt;DELONIX_ROOT&lt;/small&gt;&quot;)]
   end
@@ -510,12 +520,13 @@ container: the multi-threaded servers run the CLI back for that.</p>
   KL --&gt;|&quot;gRPC, SO_PEERCRED&quot;| CRI
   LC --&gt;|&quot;HTTP+JSON, SO_PEERCRED&quot;| MGMT
   AI --&gt;|&quot;JSON-RPC over stdio&quot;| MCP
-  CLI -.-&gt;|&quot;exec: serve cri, serve api, mcp&quot;| SRV
+  LC --&gt;|&quot;gRPC or HTTP/JSON, SO_PEERCRED&quot;| NAPI
+  CLI -.-&gt;|&quot;exec: serve cri, serve api, serve node-api, mcp&quot;| SRV
   SRV -.-&gt;|&quot;spawn: delonix __apirun, stop, rm, net netns attach&quot;| CLI
   CLI --&gt;|&quot;records under flock&quot;| ST
   SRV --&gt;|&quot;reads records&quot;| ST
   class OP,KL,LC,AI person
-  class CLI,CRI,MGMT,MCP block
+  class CLI,CRI,MGMT,MCP,NAPI block
   class ST store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -713,6 +724,11 @@ the holder, on <code>virbr0</code> in the host's network namespace.</p>
 <td>one AI-client session (a child process on stdio); <code>delonix mcp</code> <code>exec</code>s it</td>
 </tr>
 <tr>
+<td><code>delonix-node-api</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> → <code>delonix_node_api::<wbr>serve_blocking</code></td>
+<td>a service; <code>delonix serve node-api</code> <code>exec</code>s it</td>
+</tr>
+<tr>
 <td>Docker API slice</td>
 <td><code>cmd/serve.rs</code> → <code>cmd::dockerapi::run</code>, <strong>inside</strong> the <code>delonix</code> process</td>
 <td>while <code>delonix serve docker-api</code> runs</td>
@@ -816,9 +832,9 @@ moves); pin gone (tear down and rebuild).</p>
 </tr>
 <tr>
 <td><strong>Node contract</strong> <code>delonix.node.v1</code></td>
-<td>gRPC <strong>and</strong> HTTP/JSON on one unix socket</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a></td>
-<td><strong>contract only</strong> — no server yet</td>
+<td>gRPC <strong>and</strong> HTTP/JSON on one unix socket, <code>0600</code> + <code>SO_PEERCRED</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>; served by <code>delonix_node_api::<wbr>serve_blocking</code> (<code>delonix serve node-api</code>)</td>
+<td><strong>served in part</strong> — only <code>NodeService.<wbr>ListProviders</code> (also <code>GET /v1/providers</code>); the other <code>NodeService</code> RPCs answer <code>UNIMPLEMENTED</code> naming the step that brings them</td>
 </tr>
 </tbody>
 </table></div>
@@ -931,10 +947,9 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
 <ul>
 <li><strong>P0 is done.</strong> Every crate lives in its layer's directory, versions are workspace-level, and
   the fitness gate runs in CI.</li>
-<li><strong>P1 is done as a contract, not as a server.</strong> <code>proto/delonix/node/v1/*.proto</code> exists, the
-  OpenAPI document <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it, and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>
-  guards both. <strong>Nothing serves the contract yet</strong> — no crate references <code>delonix.node.v1</code>
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> D1 says the same).</li>
+<li><strong>P1 is done as a contract.</strong> <code>proto/delonix/node/v1/*.proto</code> exists, the OpenAPI document
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it, and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> guards both. The
+  server came with P5 (below).</li>
 <li><strong>P2 has started.</strong> <code>delonix-model</code> (the shared <code>Error</code> and its <code>DX_*</code> codes, generated names,
   exit classes, the numbered code dictionary, the secret model, and — since #405 — the plain-data
   records <code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code> with their validators, <code>default_namespace</code> and the
@@ -960,7 +975,7 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   write files through <code>delonix-state</code> (<code>delonix-linux</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>,
   <code>delonix-oci</code>, <code>delonix-volume</code>) are declared exceptions until P4 gives them a
   <code>StateRepository</code> port (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>).</li>
-<li><strong>P4 is under way; P5–P7 have not started.</strong> ADR-0044 (accepted 2026-09-24) decides how P4 is
+<li><strong>P4 and P5 are under way; P6–P7 have not started.</strong> ADR-0044 (accepted 2026-09-24) decides how P4 is
   done. <strong>#420</strong> landed the <code>StateRepository&lt;T&gt;</code> port
   (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>), and <code>delonix-linux</code> already uses it for
   <code>wait_and_record</code>/<code>stop</code>/<code>persist_stop</code>/<code>remove</code>, which is why its exception in
@@ -968,8 +983,27 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   the VM provider port (<code>VmSpec</code>, <code>Extensions</code>, <code>Provider</code>, <code>VmProvider</code> in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_provider.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_provider.rs</code></a>, P4b slice 1), and <code>delonix-vm</code> implements
   it for the two local backends (<code>LocalVmProvider</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/provider.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/provider.rs</code></a>)
-  by reusing its existing <code>create_with</code>/<code>stop</code>/<code>start</code> rather than a second orchestration; moving
-  each backend into its own provider crate is P4b slice 2. The remaining exceptions in the table above name the phase that removes each.</li>
+  by reusing its existing <code>create_with</code>/<code>stop</code>/<code>start</code> rather than a second orchestration.
+  <strong>#517</strong> (P4b slice 2) moved the <code>VmBackend</code> port and its types into the compute context
+  (<code>vm_backend.rs</code>, <code>vm_error.rs</code>, <code>vm_firewall.rs</code>); <code>delonix-vm</code> re-exports every name, and
+  <code>delonix-proxmox</code> now depends on <code>delonix-compute</code> instead of <code>delonix-vm</code>: it hands the
+  composition root a <code>BackendRegistration</code> (<code>registration()</code>), and
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> registers it. <strong>#596</strong> (P4b.3a) took the
+  backend knowledge out of the VM orchestration, behind three ports declared in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> — <code>VmBackends</code> (the registry as the use cases
+  see it), <code>LocalDiskImages</code> (the <code>qemu-img</code> overlay), <code>SeedBuilder</code> (the <code>cloud-localds</code> seed) —
+  implemented in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a>; the live disk backup became
+  <code>VmBackend::backup_disk_live</code>. <strong>#597</strong> (P4b.3b) moved the use cases themselves into
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a> as methods of <code>VmEngine</code>, generic over a
+  <code>StateRepository&lt;Vm&gt;</code> and those ports; <code>delonix-vm</code> assembles an engine per call over its
+  <code>JsonStore</code> and keeps its public functions as wrappers, so no caller changed. The registry,
+  the two local backends and the <code>delonix-vm</code> → <code>delonix-state</code> exception stay in the adapter
+  until P4b.4 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/discovery/61_P4B_PLANO_MEDIDO.md" target="_blank" rel="noopener"><code>docs/discovery/61_P4B_PLANO_MEDIDO.md</code></a>). The remaining exceptions in
+  the table above name the phase that removes each.</li>
+<li><strong>P5 has started.</strong> <code>delonix-node-api</code> (#525, ADR-0050 D5) serves the node contract on a unix
+  socket, as gRPC and HTTP/JSON from the same <code>.proto</code> files; today only
+  <code>NodeService.ListProviders</code> answers. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> records it as the interface that
+  replaces <code>delonix-mgmt</code>.</li>
 </ul>
 <h3 id="records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
 <blockquote>
@@ -1021,18 +1055,20 @@ below has every edge).</p>
 outlined region: the context crate · solid arrow: a call through the named port.</p>
 </blockquote>
 <p><code>container run</code> is the reference path: the context decides through ports, and the binary chooses
-which adapter answers each port.</p>
+which adapter answers each port. The VM use cases follow the same shape one step removed:
+<code>delonix-vm</code> builds a <code>VmEngine</code> per call and hands it its own implementations of the VM ports.</p>
 <pre class="mermaid">flowchart LR
   CMD[&quot;delonix binary&lt;br/&gt;&lt;small&gt;cmd_run and run(): composition root&lt;/small&gt;&quot;]
   subgraph CX[&quot;delonix-compute — context&quot;]
     UC[&quot;use cases&lt;br/&gt;&lt;small&gt;resolve_run, build_record, wire_network, launch::start&lt;/small&gt;&quot;]
+    VE[&quot;VM use cases&lt;br/&gt;&lt;small&gt;vm::VmEngine&lt;/small&gt;&quot;]
   end
   HI[&quot;HostImages&lt;br/&gt;&lt;small&gt;delonix-oci&lt;/small&gt;&quot;]
   HV[&quot;HostVolumes&lt;br/&gt;&lt;small&gt;delonix-volume&lt;/small&gt;&quot;]
   HD[&quot;HostDevices, HostRuntime&lt;br/&gt;&lt;small&gt;delonix-linux&lt;/small&gt;&quot;]
   HW[&quot;HostWorkload&lt;br/&gt;&lt;small&gt;delonix-linux&lt;/small&gt;&quot;]
   HN[&quot;HostNetwork&lt;br/&gt;&lt;small&gt;delonix-sdn&lt;/small&gt;&quot;]
-  VM[&quot;delonix-vm&lt;br/&gt;&lt;small&gt;VmBackend registry&lt;/small&gt;&quot;]
+  VM[&quot;delonix-vm&lt;br/&gt;&lt;small&gt;registry, local backends, local_ports&lt;/small&gt;&quot;]
   HVN[&quot;HostVmNetwork&lt;br/&gt;&lt;small&gt;delonix-sdn&lt;/small&gt;&quot;]
   CMD --&gt;|&quot;calls with the adapters&quot;| UC
   UC --&gt;|&quot;ImageStore&quot;| HI
@@ -1040,9 +1076,11 @@ which adapter answers each port.</p>
   UC --&gt;|&quot;DeviceResolver, RunHost&quot;| HD
   UC --&gt;|&quot;NetworkProvider&quot;| HN
   UC --&gt;|&quot;WorkloadRuntime&quot;| HW
-  CMD --&gt;|&quot;set_network, register_backend&quot;| VM
-  VM --&gt;|&quot;VmNetwork&quot;| HVN
-  class CMD,UC,HI,HV,HD,HW,HN,VM,HVN block
+  CMD --&gt;|&quot;set_network, register_backend, create_with…&quot;| VM
+  VM --&gt;|&quot;builds per call&quot;| VE
+  VE --&gt;|&quot;VmBackends, LocalDiskImages, SeedBuilder&quot;| VM
+  VE --&gt;|&quot;VmNetwork&quot;| HVN
+  class CMD,UC,VE,HI,HV,HD,HW,HN,VM,HVN block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -1050,7 +1088,9 @@ classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <p>Ports: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>,
-<code>DeviceResolver</code>, <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) and <code>launch.rs</code> (<code>WorkloadRuntime</code>).
+<code>DeviceResolver</code>, <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>,
+<code>SeedBuilder</code>) and <code>launch.rs</code> (<code>WorkloadRuntime</code>). The VM use cases: <code>vm.rs</code> (<code>VmEngine</code>); their
+adapter side: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a> and <code>engine</code> in <code>src/lib.rs</code>.
 Implementations: <code>delonix-oci/src/run_images.rs</code>, <code>delonix-volume/src/lib.rs</code>,
 <code>delonix-linux/src/{cdi,run_host,workload}.rs</code>, <code>delonix-sdn/src/{run_network,vm_network}.rs</code>.
 Wiring: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs::cmd_run</code></a> and
@@ -1070,9 +1110,13 @@ a declared exception.</p>
   MG[&quot;delonix-mgmt&lt;br/&gt;&lt;small&gt;HTTP router, dashstats&lt;/small&gt;&quot;]
   MC[&quot;delonix-mcp&lt;br/&gt;&lt;small&gt;MCP tools, audit log&lt;/small&gt;&quot;]
   CX[&quot;contexts&lt;br/&gt;&lt;small&gt;compute, stack, security-runtime&lt;/small&gt;&quot;]
-  AD[&quot;adapters and providers&lt;br/&gt;&lt;small&gt;linux, oci, sdn, vm, volume, scanner, proxmox, truenas&lt;/small&gt;&quot;]
+  NB[&quot;delonix-node-api-bin&lt;br/&gt;&lt;small&gt;executable delonix-node-api&lt;/small&gt;&quot;]
+  NA[&quot;delonix-node-api&lt;br/&gt;&lt;small&gt;gRPC + HTTP/JSON of delonix.node.v1&lt;/small&gt;&quot;]
+  AD[&quot;adapters and providers&lt;br/&gt;&lt;small&gt;linux, oci, sdn, vm, volume, scanner, proxmox, opnsense, truenas&lt;/small&gt;&quot;]
   ST[&quot;delonix-state&lt;br/&gt;&lt;small&gt;Store, SecretStore&lt;/small&gt;&quot;]
   MB --&gt;|&quot;serve_blocking&quot;| MG
+  NB --&gt;|&quot;serve_blocking&quot;| NA
+  NA --&gt;|&quot;provider reports for ListProviders&quot;| AD
   PB --&gt;|&quot;serve_stdio&quot;| MC
   RB --&gt;|&quot;dashstats::collect for dashboard&quot;| MG
   MC --&gt;|&quot;dashstats — declared exception until P5&quot;| MG
@@ -1084,7 +1128,7 @@ a declared exception.</p>
   MC --&gt;|&quot;reads VMs, volumes, networks&quot;| AD
   CRI --&gt;|&quot;container records&quot;| ST
   MG --&gt;|&quot;container records, secret count&quot;| ST
-  class RB,MB,PB,CRI,MG,MC,CX,AD,ST block
+  class RB,MB,PB,NB,CRI,MG,MC,NA,CX,AD,ST block
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
 classDef block fill:#ffffff,stroke:#cc2823,color:#191513
@@ -1194,6 +1238,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_node_api --&gt; delonix_opnsense
   delonix_node_api --&gt; delonix_proxmox
   delonix_node_api --&gt; delonix_sdn
+  delonix_node_api --&gt; delonix_state
   delonix_node_api --&gt; delonix_vm
   delonix_node_api --&gt; delonix_volume
   delonix_node_api_bin --&gt; delonix_node
@@ -1335,8 +1380,8 @@ answer "does A depend on B", and read the per-layer figures above to understand 
    (<code>delonix-sdn</code>), <code>newuidmap</code>/<code>newgidmap</code> (<code>delonix-linux</code>, <code>pin_userns</code>), <code>qemu-img</code>,
    <code>virsh</code>, <code>cloud-localds</code> (<code>delonix-vm</code>), <code>busctl</code> for systemd transient scopes
    (<code>delonix-linux</code>), <code>ssh</code>/<code>scp</code> (<code>cmd/remote.rs</code>).</li>
-<li><strong>HTTP to a remote management system lives only in providers.</strong> <code>delonix-proxmox</code> and
-   <code>delonix-truenas</code> depend on <code>reqwest</code> for that. Two adapters also speak HTTP, for other reasons:
+<li><strong>HTTP to a remote management system lives only in providers.</strong> <code>delonix-proxmox</code>,
+   <code>delonix-opnsense</code> and <code>delonix-truenas</code> depend on <code>reqwest</code> for that. Two adapters also speak HTTP, for other reasons:
    <code>delonix-oci</code> has its own OCI registry client (<code>src/registry.rs</code>, <code>reqwest</code> in its
    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), and <code>delonix-telemetry</code> exports OTLP over HTTP. No context crate does.</li>
 </ol>
@@ -1538,17 +1583,23 @@ process.</p>
 </pre>
 <h2 id="known-limitations">Known limitations<a class="hanchor" href="#known-limitations" aria-label="#">#</a></h2>
 <blockquote>
-<p><strong>Note — the node contract is not served.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is gated and generates
-OpenAPI, but no process answers it. Integrations today use the CLI, the CRI, the local
-management API or MCP.</p>
+<p><strong>Note — the node contract is served only in part.</strong> <code>delonix-node-api</code> answers
+<code>NodeService.ListProviders</code> (gRPC, and <code>GET /v1/providers</code> as HTTP/JSON); every other RPC of
+<code>NodeService</code> answers <code>UNIMPLEMENTED</code>, and the contract's other services are not registered on
+the socket. The HTTP route is written by hand per RPC; a generic transcoder over the
+<code>google.api.http</code> annotations is the next step of ADR-0042. Integrations today use the CLI, the
+CRI, the local management API or MCP for everything else.</p>
 <p><strong>Note — the servers still run the CLI.</strong> <code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code> start
 workloads by re-executing <code>delonix</code>. This keeps <code>clone</code> out of multi-threaded processes, at the
 cost of a process per operation and error text crossing a process boundary.</p>
 <p><strong>Note — adapters still reach the state files directly.</strong> <code>delonix-linux</code>, <code>delonix-vm</code>,
 <code>delonix-sdn</code>, <code>delonix-oci</code> and <code>delonix-volume</code> depend on <code>delonix-state</code> as declared
 exceptions. The <code>StateRepository</code> port that removes them exists since #420
-(<code>delonix-model/src/ports.rs</code>, ADR-0044 D6), and so far only <code>delonix-linux</code> goes through it for
-part of its lifecycle; the other four still open the stores directly until their P4 slice lands.</p>
+(<code>delonix-model/src/ports.rs</code>, ADR-0044 D6). <code>delonix-linux</code> goes through it for part of its
+lifecycle, and the VM use cases in <code>delonix-compute</code> only see a <code>StateRepository&lt;Vm&gt;</code> — but
+<code>delonix-vm</code> still opens the <code>JsonStore</code> it hands them (and writes the libvirt XML and the
+default-backend file itself), so its exception stays until P4b.4. The other three still open
+the stores directly until their P4 slice lands.</p>
 <p><strong>Note — <code>macvlan</code>/<code>ipvlan</code> are declared, not realized.</strong> <code>network create</code> records them and
 reports <code>Realized=False</code> with reason <code>DriverNotImplemented</code>
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>): their physical plane needs <code>CAP_NET_ADMIN</code> in
@@ -1596,7 +1647,11 @@ code cannot be collected.</p>
 </tr>
 <tr>
 <td>VMs</td>
-<td><code>delonix-vm/src/lib.rs</code> (<code>VmBackend</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>), <code>cloudinit.rs</code>; <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code></td>
+<td><code>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code> (<code>VmEngine</code>, the use cases), <code>vm_backend.rs</code> (<code>VmBackend</code>), <code>ports.rs</code> (<code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>); <code>delonix-vm/src/lib.rs</code> (<code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>select_for_create</code>, <code>engine</code>), <code>local_ports.rs</code>, <code>cloudinit.rs</code>; <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmbackends.rs</code></td>
+</tr>
+<tr>
+<td>System containers on a remote node</td>
+<td><code>delonix-compute/<wbr>src/<wbr>system_container.<wbr>rs</code> (<code>SystemContainerProvider</code>); <code>delonix-proxmox/<wbr>src/<wbr>lxc.<wbr>rs</code>; <code>cmd/system_container.rs</code></td>
 </tr>
 <tr>
 <td>Declarative apply</td>
@@ -1616,7 +1671,11 @@ code cannot be collected.</p>
 </tr>
 <tr>
 <td>Node contract</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>; the server in <code>delonix-node-api/<wbr>src/<wbr>{lib,service,providers}.<wbr>rs</code></td>
+</tr>
+<tr>
+<td>Providers and their capabilities</td>
+<td><code>delonix-compute/<wbr>src/<wbr>capability.<wbr>rs</code> (the catalog), <code>cmd/provider.rs</code> (<code>provider ls/<wbr>describe/<wbr>matrix</code>), <code>cmd/providers_config.rs</code> (<code>providers.yaml</code>, ADR-0054)</td>
 </tr>
 <tr>
 <td>Architecture rules</td>

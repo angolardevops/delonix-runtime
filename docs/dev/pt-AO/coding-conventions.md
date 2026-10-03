@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:17684e2bd319eed3fd3635fa9f0cf0c6bf13df67d1293ff7da3fba96e25e4bb7 -->
+<!-- translated-from: coding-conventions.md sha256:50b85758b88cf149781f761a5c92e9c36da32dde808de1be682545215de8f6cd -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -163,8 +163,8 @@ comentário `// why` ao lado, como farias para qualquer outra excepção (vê [�
   `NetworkProvider`, `StorageProvider`, `ImageRegistry`, `ImageStore`, … As que existem hoje estão
   em `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`,
   `DeviceResolver`, `RunHost`, `VmNetwork`, `NetworkProvider`) e em `.../launch.rs`
-  (`WorkloadRuntime`). O `VmBackend` mais antigo em `crates/adapters/delonix-vm/src/lib.rs` deve
-  passar a `VmProvider` na P4.
+  (`WorkloadRuntime`). O `VmBackend` mais antigo (`crates/contexts/delonix-compute/src/vm_backend.rs`)
+  coexiste com o `VmProvider` do ADR-0044 (`vm_provider.rs`) enquanto a P4 passa os backends para ele.
 - **As implementações de host de uma porta chamam-se `Host<Thing>`.** **Convenção (observada)**:
   `delonix-linux/src/workload.rs:HostWorkload` (implementa `WorkloadRuntime`),
   `delonix-sdn/src/run_network.rs:HostNetwork` (implementa `NetworkProvider`),
@@ -361,7 +361,8 @@ crates que descrevem já existam.
 | Cliente de registo, CAS, layers, overlay, build de imagens | `delonix-oci` (adapter) | ADR-0040 D2.3 |
 | SBOM / CVE | `delonix-scanner` (adapter) | ADR-0040 D2.3 |
 | Tracing, OpenTelemetry, configuração do registo Prometheus | `delonix-telemetry` (adapter) | ADR-0040 D2.3 |
-| Um backend de VM local (Cloud Hypervisor, libvirt) | `delonix-vm` (adapter) | ADR-0008 |
+| O que uma operação de VM decide (create, stop, start, status, remove, verbos de dia-2) | `delonix-compute` (context): `vm.rs` (`VmEngine`), a chegar aos backends, ao disco e ao seed só através de `VmBackends`/`LocalDiskImages`/`SeedBuilder`; nenhum `Command::new` num context (`context_spawns`, linha de base 0) | ADR-0044 P4b.3 (#596, #597) |
+| Um backend de VM local (Cloud Hypervisor, libvirt), e as implementações das portas de VM deste nó | `delonix-vm` (adapter): `lib.rs`, `local_ports.rs` | ADR-0008; ADR-0044 P4b.3 |
 | Um provider remoto ou conectável (API de hypervisor, API de NAS) | um crate de provider em `crates/providers/`. **Escreve primeiro um ADR** | ADR-0008, ADR-0009; [Fluxo de contribuição](contributing-workflow.md#when-to-write-an-adr) |
 | Um RPC do CRI | `delonix-cri` (interface) | AGENTS.md |
 | A API de gestão local, `/metrics` | `delonix-mgmt` (interface) | ADR-0010 |
@@ -416,7 +417,7 @@ crates que descrevem já existam.
 - **O conhecimento específico de um backend vive no backend.** Por exemplo,
   `VmBackend::ip_is_predicted()` responde se o IP de uma VM foi previsto, em vez de o ponto de
   chamada verificar `backend.contains("cloud-hypervisor")`. **Decidido**: ADR-0008, citado no doc
-  comment em `crates/adapters/delonix-vm/src/lib.rs`.
+  comment em `crates/contexts/delonix-compute/src/vm_backend.rs`.
 - **Um adapter não depende de outro adapter.** O que precisa de outra preocupação entra como hook ou
   como porta, ligado pela raiz de composição. **Imposto (gate)**: `ALLOWED` (adapter → foundation,
   context). **Convenção (observada)**: o doc comment de

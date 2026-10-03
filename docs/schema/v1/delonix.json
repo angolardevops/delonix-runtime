@@ -1604,6 +1604,7 @@
           },
           "type": "array"
         },
+        "provider": {},
         "subnet": {
           "type": [
             "string",
@@ -2210,6 +2211,11 @@
       "additionalProperties": false,
       "description": "`spec` of `kind: RuntimePolicy` — a field-for-field mirror of\n[`SecurityPolicy`]; see the module doc for why it is a separate type.",
       "properties": {
+        "allowSourceCheckOptOut": {
+          "default": false,
+          "description": "Lets a container switch the source check off (`--no-source-check`). A\nGRANT: absent = refused.",
+          "type": "boolean"
+        },
         "allowedImageUrlHosts": {
           "default": [],
           "description": "Hosts a `vm create --url-img` qcow2 may be fetched from. Empty = no opinion.",
@@ -2221,6 +2227,14 @@
         "allowedRegistries": {
           "default": [],
           "description": "Only these registries may be pulled from. Empty = no opinion.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowedSourcePrefixes": {
+          "default": [],
+          "description": "Source prefixes a container may be authorised to use (`--allow-source`).\nA GRANT: empty = none.",
           "items": {
             "type": "string"
           },
@@ -3455,8 +3469,15 @@
           "type": "integer"
         },
         "provider": {
-          "description": "`pinggy` | `ngrok` | `cloudflare`.",
-          "type": "string"
+          "anyOf": [
+            {
+              "description": "`pinggy` | `ngrok` | `cloudflare`.",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
         },
         "token": {
           "default": null,
@@ -3850,6 +3871,7 @@
             }
           ]
         },
+        "provider": {},
         "requiredCapabilities": {
           "default": [],
           "description": "Capabilities the backend must support on this host, by catalog name\n(`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider\nls` lists them; CLI `--require`). An unknown name is refused as invalid;\na backend that lacks one is refused before anything is created, and\nauto-detection only picks a backend that has them all (ADR-0050 D6).",

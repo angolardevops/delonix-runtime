@@ -189,6 +189,89 @@ fn node_exec_capture(c: &Container, script: &str) -> Result<(i32, String)> {
     Ok((code, out))
 }
 
+/// Is `node_cidr` a node PodCIDR the anti-spoofing table may authorise for a
+/// cluster whose pod subnet is `cluster_cidr`? A canonical prefix, inside the
+/// cluster's, and STRICTLY narrower: the cluster CIDR itself would let one
+/// node forge every other node's pods.
+fn node_pod_cidr_ok(node_cidr: &str, cluster_cidr: &str) -> bool {
+    let (Some(node), Some(cluster)) = (
+        delonix_sdn::Cidr::parse(node_cidr),
+        delonix_sdn::Cidr::parse(cluster_cidr),
+    ) else {
+        return false;
+    };
+    node_cidr.contains('/')
+        && format!("{}/{}", delonix_sdn::Cidr::fmt_u32(node.base), node.len) == node_cidr
+        && node.len > cluster.len
+        && cluster.contains(node.base)
+}
+
+/// The `name<TAB>podCIDR` lines `kubectl get nodes` prints with the jsonpath
+/// below. A node without a PodCIDR yet gives an empty second field.
+fn parse_node_pod_cidrs(out: &str) -> Vec<(String, String)> {
+    out.lines()
+        .filter_map(|l| {
+            let (name, cidr) = l.split_once('\t')?;
+            Some((name.trim().to_string(), cidr.trim().to_string()))
+        })
+        .filter(|(n, _)| !n.is_empty())
+        .collect()
+}
+
+/// Gives each node of a multi-node cluster its own PodCIDR as an authorised
+/// source on its own interface (see `delonix_sdn::infra::SPOOF_TABLE`), and
+/// records it so a `start` re-applies it. The PodCIDR is what the cluster's
+/// controller-manager assigned (`.spec.podCIDR`), read from the API, and is
+/// checked against the cluster's pod subnet before it reaches the holder.
+///
+/// A CNI with its own address management and native routing (not kindnet's
+/// `.spec.podCIDR`) would still be cut; an encapsulating one is not, because
+/// the outer source is the node's own address.
+fn authorise_node_pod_cidrs(
+    store: &Store,
+    cp: &Container,
+    cluster: &str,
+    pod_subnet: &str,
+) -> Result<()> {
+    let (code, out) = node_exec_capture(
+        cp,
+        "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes \
+         -o jsonpath='{range .items[*]}{.metadata.name}{\"\\t\"}{.spec.podCIDR}{\"\\n\"}{end}'",
+    )?;
+    if code != 0 {
+        return Err(Error::Invalid(format!(
+            "cluster {cluster}: could not read the nodes' PodCIDRs: {}",
+            out.trim()
+        )));
+    }
+    for (node, cidr) in parse_node_pod_cidrs(&out) {
+        if cidr.is_empty() {
+            return Err(Error::Invalid(format!(
+                "cluster {cluster}: node {node} has no PodCIDR assigned, so its pods' traffic \
+                 to other nodes would be dropped as spoofed"
+            )));
+        }
+        if !node_pod_cidr_ok(&cidr, pod_subnet) {
+            return Err(Error::Invalid(format!(
+                "cluster {cluster}: node {node} reports PodCIDR {cidr}, which is not a prefix \
+                 strictly inside the cluster's pod subnet {pod_subnet}; refusing to authorise it"
+            )));
+        }
+        let Some(c) = store.list()?.into_iter().find(|c| {
+            c.name == node
+                && c.labels.get("io.x-k8s.kind.cluster").map(String::as_str) == Some(cluster)
+        }) else {
+            continue;
+        };
+        delonix_sdn::infra::spoof_allow(&c.id, std::slice::from_ref(&cidr))?;
+        store.update(&c.id, |rec| {
+            rec.allowed_sources = vec![cidr.clone()];
+            true
+        })?;
+    }
+    Ok(())
+}
+
 /// The `cluster_dir` of a node, from its label — `node_exec_capture` does not
 /// have the `cfg` at hand.
 fn cluster_dir_of(c: &Container) -> std::path::PathBuf {
@@ -902,6 +985,11 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
             ),
             espera,
         )?;
+        // Pod traffic between nodes leaves each node with the POD's address as its
+        // source (kindnet routes the cluster CIDR without masquerade), and the
+        // bridge anti-spoofing table drops any source a port was not given. Each
+        // node gets its own PodCIDR on its own interface — never the cluster's.
+        authorise_node_pod_cidrs(store, &c, &cfg.name, &cfg.pod_subnet)?;
         p.ok();
     }
 
@@ -2385,5 +2473,54 @@ mod tests {
         // frente — nunca fingir uma versão que não foi lida.
         assert_eq!(k8s_version_from_image("sha256:abcdef"), None);
         assert_eq!(k8s_version_from_image("myregistry.local/node:custom"), None);
+    }
+}
+
+#[cfg(test)]
+mod pod_cidr_tests {
+    use super::{node_pod_cidr_ok, parse_node_pod_cidrs};
+
+    /// A node may only ever be given a slice of the cluster's pod subnet: its
+    /// own PodCIDR. The whole subnet would let it forge every other node's pods.
+    #[test]
+    fn only_a_strictly_narrower_slice_of_the_pod_subnet_is_authorised() {
+        assert!(node_pod_cidr_ok("10.244.1.0/24", "10.244.0.0/16"));
+        assert!(
+            !node_pod_cidr_ok("10.244.0.0/16", "10.244.0.0/16"),
+            "the cluster's own CIDR"
+        );
+        assert!(
+            !node_pod_cidr_ok("10.0.0.0/8", "10.244.0.0/16"),
+            "wider than the cluster"
+        );
+        assert!(
+            !node_pod_cidr_ok("10.245.1.0/24", "10.244.0.0/16"),
+            "outside the cluster"
+        );
+        assert!(
+            !node_pod_cidr_ok("10.244.1.5/24", "10.244.0.0/16"),
+            "host bits set"
+        );
+        assert!(
+            !node_pod_cidr_ok("10.244.1.0", "10.244.0.0/16"),
+            "no length"
+        );
+        assert!(!node_pod_cidr_ok("garbage", "10.244.0.0/16"));
+    }
+
+    #[test]
+    fn the_kubectl_lines_give_each_node_and_its_pod_cidr() {
+        let out = "aspf-control-plane\t10.244.0.0/24\naspf-worker\t10.244.1.0/24\nnew-node\t\n";
+        assert_eq!(
+            parse_node_pod_cidrs(out),
+            vec![
+                (
+                    "aspf-control-plane".to_string(),
+                    "10.244.0.0/24".to_string()
+                ),
+                ("aspf-worker".to_string(), "10.244.1.0/24".to_string()),
+                ("new-node".to_string(), String::new()),
+            ]
+        );
     }
 }

@@ -230,9 +230,10 @@ fails you can tell a host prerequisite from an engine bug.</p>
 <p>Install <a href="https://rustup.rs/"><code>rustup</code></a> and let it pick up the pinned channel; do not override it
 with <code>stable</code>. CI uses exactly the same file (<code>rustup show</code> in every job).</p>
 <h3 id="protoc-required-to-build"><code>protoc</code> (required to build)<a class="hanchor" href="#protoc-required-to-build" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compiles the Kubernetes CRI protobuf with
-<code>tonic-build</code>/<code>prost</code>, which needs the Protocol Buffers compiler on <code>PATH</code>. The <code>delonix</code> binary
-depends on <code>delonix-cri</code>, so <strong>a plain <code>cargo build --workspace</code> fails without it</strong>:</p>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compiles the Kubernetes CRI protobuf, and
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api/build.rs</code></a> the node contract in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a>, both
+with <code>tonic-build</code>/<code>prost</code>, which needs the Protocol Buffers compiler on <code>PATH</code>. The <code>delonix</code>
+binary depends on <code>delonix-cri</code>, so <strong>a plain <code>cargo build --workspace</code> fails without it</strong>:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash"># Debian / Ubuntu
 sudo apt install protobuf-compiler
 # Fedora / RHEL family
@@ -435,7 +436,8 @@ default, <code>~/.local/bin/delonix</code> with <code>--user</code>). A binary y
 <h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation: some limits are refused, others are not enforced<a class="hanchor" href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced" aria-label="#">#</a></h3>
 <p>Resource limits only reach the kernel if the shell you run the engine from sits in a <strong>delegated</strong>
 cgroup. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the same
-requirement. Without delegation the engine does two different things, depending on the flag:</p>
+requirement. Without the controller a flag needs, <code>container run</code> refuses rather than run
+unlimited; there are two probes, depending on the flag:</p>
 <ul>
 <li><code>-m</code>/<code>--memory</code>, <code>-c</code>/<code>--cpus</code> and <code>--cpu-weight</code>: <code>container run</code> <strong>refuses</strong> before creating
   anything, with an error that names the fix, and exits <strong>69</strong> (<code>Error::Unavailable</code>, the

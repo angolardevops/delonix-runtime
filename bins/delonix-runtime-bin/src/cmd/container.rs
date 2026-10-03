@@ -328,7 +328,10 @@ pub(crate) fn created_specs(
         .into_iter()
         .filter_map(|c| {
             let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
-            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+            Some((
+                manifest::scoped_plan_name(&c.namespace, &c.name),
+                super::reconcile::decode_last_applied(raw)?,
+            ))
         })
         .collect())
 }
@@ -652,7 +655,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     };
     Ok(super::reconcile::Desired {
         kind: k::CONTAINER.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields,
         converges: true,
         ownable: true,
@@ -672,7 +675,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
             kind: k::CONTAINER.into(),
-            name: c.name.clone(),
+            name: manifest::scoped_plan_name(&c.namespace, &c.name),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: c
@@ -1003,7 +1006,7 @@ fn valid_container_name(name: &str) -> bool {
 // language — the context returns them as data and never prints.
 #[cfg(test)]
 use delonix_compute::pod::HostAlias;
-pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
+pub(crate) use delonix_compute::pod::{PodSpec, POD_CONTAINER_FIELDS, POD_SPEC_FIELDS};
 
 /// Prints each translation notice ONCE per invocation.
 ///
@@ -1229,6 +1232,15 @@ pub enum ContainerCmd {
         /// Drop a capability. Repeatable.
         #[arg(long = "cap-drop")]
         cap_drop: Vec<String>,
+        /// Let this container send from a source prefix besides its own address, for
+        /// a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix
+        /// the node policy grants (`allowedSourcePrefixes`); every use is logged.
+        #[arg(long = "allow-source", value_name = "PREFIX")]
+        allow_source: Vec<String>,
+        /// Switch anti-spoofing off for this container. Exceptional: only when the
+        /// node policy grants it (`allowSourceCheckOptOut`); every use is logged.
+        #[arg(long = "no-source-check")]
+        no_source_check: bool,
         /// Security options (docker-style), repeatable:
         /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
         /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
@@ -1732,6 +1744,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             read_only,
             cap_add,
             cap_drop,
+            allow_source,
+            no_source_check,
             security_opt,
             apparmor,
             selinux,
@@ -1781,6 +1795,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: false,
                 detach,
                 name,
                 hostname,
@@ -1821,6 +1836,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 read_only,
                 cap_add,
                 cap_drop,
+                allow_source,
+                no_source_check,
                 security_opt,
                 apparmor,
                 selinux,
@@ -1978,8 +1995,10 @@ pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
+    let governed = super::firewall::policy_targets(docs);
     for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
+        let hold = governed.contains(name.as_str());
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
         let pod_shaped = doc.spec.get("containers").is_some();
@@ -1996,6 +2015,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             let pod: PodSpec = manifest::spec_of(doc)?;
             let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
             opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
+            opts.policy_hold = hold;
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -2005,6 +2025,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             &images,
             &store,
             RunOpts {
+                policy_hold: hold,
                 detach: spec.detach,
                 name: Some(name.clone()),
                 hostname: spec.hostname,
@@ -2180,6 +2201,29 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 }
 
 pub(crate) use delonix_compute::RunOpts;
+
+/// Applies a container's anti-spoofing grants to the port its attach just
+/// pinned: extra source prefixes, or the check switched off. Each use is
+/// written to the event log — the opt-out is exceptional and must leave a trail.
+/// Nothing to do (and nothing logged) for a container with neither.
+fn apply_source_overrides(id: &str, name: &str, prefixes: &[String], off: bool) -> Result<()> {
+    let root = super::util::state_root();
+    if off {
+        infra::spoof_off(id)?;
+        delonix_node::events::emit(&root, "container", "source-check-off", id, name, None);
+    } else if !prefixes.is_empty() {
+        infra::spoof_allow(id, prefixes)?;
+        delonix_node::events::emit(
+            &root,
+            "container",
+            "source-prefixes-allowed",
+            id,
+            name,
+            Some(&prefixes.join(",")),
+        );
+    }
+    Ok(())
+}
 
 /// Refuses `--namespace <ns>` when the kernel is not filtering intra-bridge
 /// traffic — the precondition namespace isolation silently depends on (see the
@@ -2412,6 +2456,101 @@ fn controller_limits_decision(
     Err(delonix_model::Error::Unavailable(msg))
 }
 
+/// Refuses `--device-read/write-bps/iops` when no block device can be resolved
+/// for the store this container's rootfs will live in — `io.max` caps ONE named
+/// disk, and with none to name the limit does not exist.
+///
+/// # Why
+///
+/// [`preflight_controller_limits`] proves the `io` controller is there; that is
+/// half of it. The engine used to take the device from `/var/lib/delonix`,
+/// `/var/lib` or `/` whatever the store in use, and skip `io.max` without a
+/// word when all three were anonymous (major 0: btrfs, overlayfs, tmpfs).
+/// Measured 2026-09-27 as root with the store on another disk: `io.max` named
+/// the disk of `/var/lib/delonix`, and `dd` under `--device-write-bps 5mb` wrote
+/// at 1.9 GB/s, exit 0, no warning. The runtime now resolves the device from
+/// the container's own rootfs; this refuses up front when that answer is none.
+///
+/// `store` is `<root>/containers`, the parent of every container's rootfs.
+/// Only probed when a `--device-*` flag was given. Same escape hatch as the
+/// other two limit pre-flights.
+fn preflight_io_device(opts: &RunOpts, store: &std::path::Path) -> Result<()> {
+    if opts.io_max.is_none() {
+        return Ok(());
+    }
+    let escape_hatch = std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some();
+    io_device_decision(store, runtime::io_device_of(store).as_deref(), escape_hatch)
+}
+
+/// The decision `preflight_io_device` makes, pure so the refusal is tested
+/// without a btrfs mount — including the answer that must not come back: `Ok`
+/// with no device.
+fn io_device_decision(
+    store: &std::path::Path,
+    device: Option<&str>,
+    escape_hatch: bool,
+) -> Result<()> {
+    if device.is_some() {
+        return Ok(());
+    }
+    let flags = "--device-read-bps, --device-write-bps, --device-read-iops, --device-write-iops";
+    let store = store.display().to_string();
+    if escape_hatch {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "warning: {flags} cannot be enforced: no block device could be resolved for the \
+                 container store at {store}, so the kernel will not see the limit — continuing \
+                 unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set",
+                &[("flags", flags), ("store", &store)],
+            )
+        );
+        return Ok(());
+    }
+    Err(delonix_model::Error::Unavailable(super::po::tf(
+        "{flags} cannot be enforced: no block device could be resolved for the container store \
+         at {store} — io.max caps one named disk, and this filesystem reports none (btrfs, \
+         overlayfs and tmpfs do not have one) — so the limit would not exist while this command \
+         reports success. Put the store (DELONIX_ROOT) on a filesystem backed by a block device, \
+         or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit.",
+        &[("flags", flags), ("store", &store)],
+    )))
+}
+
+#[cfg(test)]
+mod io_device_preflight_tests {
+    use super::io_device_decision;
+    use std::path::Path;
+
+    /// THE regression: `--device-*` with no resolvable device used to run with
+    /// no cap and exit 0. Reverting to that makes this `Ok` and fails.
+    #[test]
+    fn no_device_refuses_with_exit_69() {
+        let err = io_device_decision(Path::new("/srv/btrfs/delonix/containers"), None, false)
+            .expect_err("no device must refuse, not run uncapped");
+        assert_eq!(delonix_model::exitcode::for_error(&err), 69, "{err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("/srv/btrfs/delonix/containers"), "{msg}");
+        assert!(msg.contains("--device-write-bps"), "{msg}");
+        assert!(msg.contains("DELONIX_ALLOW_UNENFORCED_LIMITS"), "{msg}");
+    }
+
+    #[test]
+    fn a_resolved_device_passes() {
+        assert!(io_device_decision(
+            Path::new("/var/lib/delonix/containers"),
+            Some("259:0"),
+            false
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn the_escape_hatch_runs_unenforced() {
+        assert!(io_device_decision(Path::new("/srv/btrfs/delonix/containers"), None, true).is_ok());
+    }
+}
+
 #[cfg(test)]
 mod controller_limits_preflight_tests {
     use super::{controller_limits_decision, controllers_wanted, RunOpts};
@@ -2597,10 +2736,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             opts.net.is_empty() || opts.net == "host",
         ),
     )?;
+    // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
+    // the ceiling above, absent from the policy means NOT granted.
+    super::policy::authorise_source_overrides(
+        &super::util::state_root(),
+        opts.name.as_deref().unwrap_or(&opts.image),
+        &opts.allow_source,
+        opts.no_source_check,
+    )?;
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
     preflight_controller_limits(&opts)?;
+    preflight_io_device(&opts, &images.root().join("containers"))?;
     // The combinations of flags that cannot mean anything, refused before any
     // side effect — see `delonix_compute::preflight` for the two that used to be
     // checked only after the workload had run, or never.
@@ -2789,7 +2937,22 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &[("p", profile)],
         ))
     };
-    let on_attached = |namespace: &str| refuse_if_namespace_isolation_inert(namespace);
+    let (allow_source, no_source_check) =
+        (opts_copy.allow_source.clone(), opts_copy.no_source_check);
+    let override_name = cname.clone();
+    let on_attached = |namespace: &str| {
+        // A named namespace on a host that does not filter bridge traffic is
+        // refused (DX-6305) before anything else is applied to the port.
+        refuse_if_namespace_isolation_inert(namespace)?;
+        // The attach pinned the port to the container's own address; the grants
+        // the policy authorised in the preflight are applied on top. A failure
+        // leaves the port pinned (fail-closed) and says so.
+        if let Err(e) = apply_source_overrides(&id, &override_name, &allow_source, no_source_check)
+        {
+            super::output::error(&e.to_string());
+        }
+        Ok(())
+    };
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
     };
@@ -2845,6 +3008,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mounts = resolved.mounts;
     let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
+    // A container some policy document governs is born CLOSED (ADR-0069): the
+    // chain exists before the process does, and the record carries the same state
+    // so a restart cannot reopen it. `stack apply` releases it after the policy
+    // layers; a failed apply leaves it closed.
+    if opts_copy.policy_hold {
+        c.firewall = Some(policy_hold_firewall(&c.namespace));
+        c.annotations
+            .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
 
     let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
@@ -2862,6 +3034,21 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             );
             print_notices(&notices);
             let (netns, ip) = attached?;
+            if let Some(fw) = c.firewall.as_ref().filter(|_| opts_copy.policy_hold) {
+                // Before the re-exec starts the process: no packet of this
+                // container ever meets an open chain. If the chain cannot be
+                // installed the container is not started (fail closed).
+                if let Err(e) = infra::apply_firewall_all(&c.id, &[ip.as_str()], fw) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(Error::Runtime {
+                        context: "run",
+                        message: format!(
+                            "'{}' could not be created closed (policy hold), so it was not started: {e}",
+                            c.name
+                        ),
+                    });
+                }
+            }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
@@ -3941,6 +4128,22 @@ pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::record
 /// rm`/`clear` used to leave it in), the next `egress deny` then built a chain that
 /// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
 /// with nothing reporting it.
+/// Annotation on a container that is closed until its policy is applied.
+pub(crate) const POLICY_HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
+/// The closed state: default-deny both ways, no rules. Written with the policy
+/// fields the dataplane has always understood, so a holder from before this
+/// change enforces it too instead of ignoring an unknown field.
+pub(crate) fn policy_hold_firewall(namespace: &str) -> delonix_model::records::ContainerFw {
+    delonix_model::records::ContainerFw {
+        enabled: true,
+        policy_in: "deny".to_string(),
+        policy_out: "deny".to_string(),
+        rules: Vec::new(),
+        namespace: namespace.to_string(),
+    }
+}
+
 pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
     let mut fw = c.firewall.clone().unwrap_or_default();
     // Also for an EXISTING record: one written with the wrong namespace is
@@ -3955,6 +4158,14 @@ pub(crate) fn apply_firewall_everywhere(
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
+    // While a container is held, whatever the policy documents write goes to its
+    // RECORD (the intended state) and the dataplane keeps the closed chain: a
+    // policy that has applied its default but not yet its rules must not open a
+    // door the next document was going to shut. The release applies the record.
+    if c.annotations.contains_key(POLICY_HOLD_ANNOTATION) {
+        return infra::apply_firewall_all(&c.id, &refs, &policy_hold_firewall(&c.namespace))
+            .map_err(Into::into);
+    }
     infra::apply_firewall_all(&c.id, &refs, fw).map_err(Into::into)
 }
 
@@ -4069,6 +4280,15 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
+            // The attach re-pins the port to its own address only; the prefixes
+            // the engine authorised (a Kind node's PodCIDR) come back from the
+            // record, or a restarted node would drop every pod packet it routes.
+            if let Err(e) =
+                apply_source_overrides(&c.id, &c.name, &c.allowed_sources, c.source_check_disabled)
+            {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
+            }
             if let Err(e) = refuse_if_namespace_isolation_inert(&c.namespace) {
                 infra::detach_container(&c.id, &ip);
                 return Err(e);

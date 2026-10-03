@@ -22,8 +22,9 @@ what is wrong*, in text you did not recognise yet.
 | `FAIL <tag> is published but this commit does not contain it` | `scripts/version_gate.py` | [The branch predates the newest tag](#the-version-gate-refuses-your-branch) |
 | `FAIL Cargo.toml says X, above Y, and docs/releases/vX.md does not exist` | `scripts/version_gate.py` | [A version bump with no release commit](#the-version-gate-refuses-your-branch) |
 | `FAIL  buf format` / `buf lint` / `buf breaking against …` / `has no google.api.http mapping` / `openapi.yaml is not the generated one` | `scripts/contract_gate.py` | [The node contract gate](#the-node-contract-gate) |
+| `FAIL  new leak: <name> (N left) — a test no longer cleans up after itself` | `scripts/tmp_roots_gate.py` | [The tests left something in the temp dir](#the-tests-left-something-in-the-temp-dir-tmp_roots_gatepy) |
 | `unshare()` fails, `EPERM` | AppArmor + user namespaces | [Preparing your environment § AppArmor](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary) |
-| `-m`/`--cpus`/`--cpu-weight` refused, exit `69` | cgroup delegation | [Preparing your environment § cgroup delegation](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
+| `-m`/`--cpus`/`--cpu-weight`, or `--cpuset`/`--io-weight`/`--device-*`, refused, exit `69` | cgroup delegation (the `cpuset`/`io` controllers for the second group) | [Preparing your environment § cgroup delegation](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) |
 | `path must be shorter than SUN_LEN` | `DELONIX_NET_RUNTIME_DIR` too long | [Clone, build and test § Isolating the engine's state](build-and-test.md#isolating-the-engines-state) |
 | A gate fails against a diff you did not write, or a build finishes suspiciously fast | a stale or shared `CARGO_TARGET_DIR` | [A shared or stale build cache](#a-shared-or-stale-build-cache) |
 | The binary answers with an old version or a command that does not exist | a stale `delonix` on `PATH` | [Preparing your environment § A stale PATH](environment.md#a-stale-delonix-on-your-path) |
@@ -133,6 +134,41 @@ contract — see [Contribution workflow § When to write an ADR](contributing-wo
 If what actually changed is generator output (a new field, a new RPC), `python3
 scripts/contract_gate.py --update` regenerates `docs/api/openapi.yaml`; commit it in the same
 commit as the `.proto` change.
+
+### The tests left something in the temp dir (`tmp_roots_gate.py`)
+
+The `test` job runs `cargo test --workspace` with `TMPDIR` pointing at an empty directory of its
+own, then judges what is left in it against `scripts/tmp_roots_baseline.json`. Names are
+normalised (every run of digits becomes `N`), so the same leak has the same name on every run:
+
+```
+FAIL  new leak: delonix-foo-N (1 left) — a test no longer cleans up after itself
+```
+
+The baseline is empty, so any entry at all is a new leak. The two other messages
+(`more of a known leak`, `fixed or reduced … — lower the baseline`) only appear if debt is ever
+recorded again.
+
+The same job runs the gate a second time on `/tmp` itself: a test that binds a Unix socket needs a
+short path (`sun_path` is 108 bytes) and puts it there, where the `TMPDIR` census never looks.
+`/tmp` on a runner is not empty, so it is listed just before `cargo test` and only what is new
+afterwards is judged (`--before`), against the same empty baseline. Both censuses also run when a
+test **failed** — that is exactly when a cleanup on a test's last line never runs — so a red test
+can come with a leak report of its own. Reproduce locally with a fresh directory of your own, and list what is there
+instead of judging it — a leak can depend on the host (a test that returns early when a tool is
+missing):
+
+```bash
+mkdir -p "$PWD/target/test-tmp" && ls -A /tmp > "$PWD/target/tmp-before.txt"
+TMPDIR="$PWD/target/test-tmp" cargo test --workspace --locked --no-fail-fast
+python3 scripts/tmp_roots_gate.py --dir "$PWD/target/test-tmp" --list
+python3 scripts/tmp_roots_gate.py --dir /tmp --before "$PWD/target/tmp-before.txt" --list
+```
+
+The fix is in the test, not in the baseline: hold the directory in a `tempfile::TempDir`, so the
+removal also runs on an early `return` and on a failed assert — for a socket,
+`tempfile::tempdir_in("/tmp")` rather than a literal `/tmp` path with the pid — see
+[Coding conventions](coding-conventions.md) (*A test removes its temporary directory on every exit*).
 
 ## A shared or stale build cache
 

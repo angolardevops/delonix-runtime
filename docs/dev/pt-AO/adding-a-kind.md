@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:b5a2233cec9f575cc201a08988e44f84c483edc92591778fb2b44afc200baaec -->
+<!-- translated-from: adding-a-kind.md sha256:8efb7affc6ae1e813bc29c234a856c1d66d405e01f157324f10dc3f2de4d657f -->
 # Acrescentar um Kind
 
 **Antes de leres:** [Convenções de código](coding-conventions.md), [Arquitectura](architecture.md) e [Os crates](crates.md#delonix-stack) — esta página assume que sabes o que o `delonix-stack` possui e porque é que o planeamento é puro.
@@ -8,8 +8,8 @@ aí fora (o `delonix api-resources` lista-os todos). Acrescentar um toca em mais
 braço de `match`: a tabela que descreve o que o Kind É, o código que o aplica, e a fiação do
 reconciliador que deixa o `stack plan`/`apply` tratá-lo como qualquer outro Kind. Esta página
 percorre isso pela ordem, com um Kind real — **`Service`** (ADR-0032) — como exemplo trabalhado do
-princípio ao fim. Não é o Kind mais recente (o `IPPool`, o `NetworkGateway`, o `NetworkZone` e o
-`RuntimePolicy` vieram depois), mas é o que exercita todos os caminhos de uma vez: primário,
+princípio ao fim. Não é o Kind mais recente (o `IPPool`, o `NetworkGateway`, o `NetworkZone`, o
+`RuntimePolicy` e o `SystemContainer` vieram depois), mas é o que exercita todos os caminhos de uma vez: primário,
 convergente, removível, com namespace e com registo próprio. Todo o ficheiro citado abaixo é lido
 da árvore, não da memória de uma disposição antiga.
 
@@ -182,6 +182,14 @@ chama "estritamente pior do que declarar o replace à cabeça". O `Service` list
 precisar de reiniciar nada — nada num `Service` é frio. Um campo deixado fora de `hot_fields`
 continua a aparecer no plano; só força `Action::Replace` (recusado sem `--replace <Kind>/<nome>`)
 em vez de `Action::Update`.
+
+Alguns campos convergem ao vivo **só num sentido**. O volume de raiz de um container de sistema
+pode crescer com o container a correr e nunca encolher, por isso o `SystemContainer.rootfs` está
+listado em `grow_only_fields`, não em `hot_fields`: o `is_hot_change` trata um campo só-a-crescer
+como quente quando os dois lados são números e o novo não é menor, e como frio no resto dos casos,
+pelo que encolher planeia um `Replace`. Se o próprio apply do teu Kind também decide se uma
+mudança exige recriar, pergunta à mesma função — como faz o `cold_changes` em
+`cmd/system_container.rs` — ou o `plan` e o `apply` vão discordar.
 
 Três testes em `cmd/stack.rs` mantêm esta tabela honesta contra a tabela de `kinds.rs` e umas
 contra as outras:
