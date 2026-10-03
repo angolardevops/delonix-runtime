@@ -41,19 +41,23 @@ spec:
     sshKeys: []                 # authorized public keys: "ssh-ed25519 AAAA…" or "@/path"
     userData: null              # your own cloud-init user-data (path/@path) — replaces the generated one
 
-  # Advanced libvirt knobs (libvirt backend only): full XML parity, all optional.
-  libvirt:
-    backend: null                # cloud-hypervisor | libvirt | null (auto)
-    machine: null                 # machine type (default q35)
-    cpuModel: null                # host-passthrough (default) | host-model | a named model
-    cpuTopology: null             # { sockets: 1, cores: 4, threads: 2 }
-    tpm: false                    # add an emulated TPM 2.0
-    video: null                   # virtio | qxl | vga | none
-    bootOrder: []                 # e.g. [cdrom, hd]
-    extraDisks: []                # [{ source: /data/d.qcow2, bus: virtio, format: qcow2, readOnly: false }]
-    extraNics: []                 # [{ type: bridge, source: br0, model: virtio }]
-    xmlOverlay: []                # raw <device> XML fragments (trusted manifests only)
-    xml: null                     # full <domain> XML, used verbatim (ultimate escape hatch)
+  # The hypervisor, and what only that hypervisor understands. Everything above is
+  # provider-neutral. `type` picks the provider (omit the whole block = the configured
+  # default / auto-detection); `spec` is typed per provider, and a key the type does
+  # not have is refused.
+  provider:
+    type: libvirt                # cloud-hypervisor | libvirt | proxmox
+    spec:                        # libvirt: full XML parity, all optional
+      machine: null                 # machine type (default q35)
+      cpuModel: null                # host-passthrough (default) | host-model | a named model
+      cpuTopology: null             # { sockets: 1, cores: 4, threads: 2 }
+      tpm: false                    # add an emulated TPM 2.0
+      video: null                   # virtio | qxl | vga | none
+      bootOrder: []                 # e.g. [cdrom, hd]
+      extraDisks: []                # [{ source: /data/d.qcow2, bus: virtio, format: qcow2, readOnly: false }]
+      extraNics: []                 # [{ type: bridge, source: br0, model: virtio }]
+      xmlOverlay: []                # raw <device> XML fragments (trusted manifests only)
+      xml: null                     # full <domain> XML, used verbatim (ultimate escape hatch)
 
   devices: []                   # VFIO PCI passthrough (sysfs paths) — backend-agnostic (CH + libvirt)
   volumes: []                   # 9p mounts from a Volume/Storage: [{ name: data, target: /data, readOnly: false }]

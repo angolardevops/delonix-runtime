@@ -1776,6 +1776,60 @@ else
 fi
 
 ########################################
+
+section "network: anti-spoofing na bridge — origem e MAC forjados são bloqueados"
+########################################
+# Until 2026-10-02 the anti-spoof rule lived in `table ip` and never matched:
+# with br_netfilter the IP layer sees the BRIDGE as the input interface, not
+# the port. Measured against the engine, a container with NET_ADMIN forged its
+# source, reached its neighbour (3/3) and crossed namespace isolation by
+# forging a member of the other namespace (0 packets with its own address, 3
+# with the forged one). The table is now `bridge dlxspoof`, at prerouting.
+#
+# Every check counts echo requests RECEIVED by the target (Icmp InEchos), not
+# the sender's rc: a ping whose reply is dropped also fails, and a check on the
+# rc would pass on a defect that delivers the forged packet.
+AS="as-$PFX"; A1="as1-$PFX"; A2="as2-$PFX"; A3="as3-$PFX"; A4="as4-$PFX"
+echos_of() { "$BIN" container exec "$1" awk '/^Icmp:/{getline; print $10}' /proc/net/snmp 2>/dev/null; }
+ip_of() { "$BIN" container inspect "$1" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["ip"])'; }
+if "$BIN" network create "$AS" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A1" --cap-add NET_ADMIN --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A2" --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A3" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$A4" --namespace asteam --net "$AS" "$IMG" sleep 900 >/dev/null 2>&1; then
+  I2=$(ip_of "$A2"); I3=$(ip_of "$A3"); I4=$(ip_of "$A4")
+  e0=$(echos_of "$A2"); "$BIN" container exec "$A1" ping -c3 -W1 "$I2" >/dev/null 2>&1
+  check "antispoof: o tráfego legítimo chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 3
+  e0=$(echos_of "$A2")
+  "$BIN" container exec "$A1" sh -c "ip addr add ${I2%.*}.250/16 dev eth0; ping -c3 -W1 -I ${I2%.*}.250 $I2" >/dev/null 2>&1
+  check "antispoof: origem forjada não chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 0
+  e0=$(echos_of "$A3")
+  "$BIN" container exec "$A1" sh -c "ip addr add $I4/16 dev eth0; ping -c3 -W1 -I $I4 $I3" >/dev/null 2>&1
+  check "antispoof: forjar um membro de outra namespace não fura o isolamento" ok \
+    test "$(( $(echos_of "$A3") - e0 ))" -eq 0
+  "$BIN" container exec "$A1" sh -c "ip addr del ${I2%.*}.250/16 dev eth0; ip addr del $I4/16 dev eth0" >/dev/null 2>&1
+  e0=$(echos_of "$A4"); "$BIN" container exec "$A3" ping -c3 -W1 "$I4" >/dev/null 2>&1
+  check "antispoof: a mesma namespace continua aberta" ok test "$(( $(echos_of "$A4") - e0 ))" -eq 3
+  "$BIN" container stop "$A2" >/dev/null 2>&1; "$BIN" container start "$A2" >/dev/null 2>&1
+  # Wait for the CONDITION, not a sleep: a counter read before the restarted
+  # container answers `exec` comes back empty and the arithmetic fails.
+  for _ in $(seq 1 50); do [ -n "$(echos_of "$A2")" ] && break; sleep 0.2; done
+  # The restarted container has a NEW veth and MAC; flush the sender's
+  # neighbour cache or its pings go to the old MAC and prove nothing.
+  I2=$(ip_of "$A2"); e0=$(echos_of "$A2")
+  "$BIN" container exec "$A1" sh -c "ip neigh flush all; ping -c3 -W1 $I2" >/dev/null 2>&1
+  check "antispoof: depois de um start o vizinho continua alcançável" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 3
+  e0=$(echos_of "$A2")
+  # Same flush, on both sides: without it a stale neighbour entry loses the
+  # packets with or without anti-spoofing, and the check passes on the defect.
+  "$BIN" container exec "$A2" ip neigh flush all >/dev/null 2>&1
+  "$BIN" container exec "$A1" sh -c "ip link set eth0 down; ip link set eth0 address 02:00:00:00:be:ef; ip link set eth0 up; ip neigh flush all; ping -c3 -W1 $I2" >/dev/null 2>&1
+  check "antispoof: MAC forjado não chega ao vizinho" ok test "$(( $(echos_of "$A2") - e0 ))" -eq 0
+else
+  skip "antispoof" "não foi possível preparar a rede e os containers (imagem ou rede)"
+fi
+for c in "$A1" "$A2" "$A3" "$A4"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
+"$BIN" network rm "$AS" >/dev/null 2>&1
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
@@ -3760,6 +3814,18 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
+    # D6 (docs/discovery/65_PLANO_MATURIDADE.md): a `--wait` that runs out of
+    # time is an ERROR. The disk is empty, so the guest never answers; the
+    # create must say so with exit 124 (DX-8503) and leave the VM running.
+    # Before, it printed a warning and exited 0 — a script's next step ran
+    # against a guest that never booted.
+    WVM="$CVM-w"
+    check "CH: vm create --wait que esgota o tempo sai com 124" 124 \
+      "$BIN" vm create "$WVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M \
+      --wait --boot-timeout 5
+    check "CH: e a VM fica a correr" ok bash -c \
+      "'$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$WVM' and v['status']=='Running' for v in json.load(sys.stdin)) else 1)\""
+    "$BIN" delete vm "$WVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1

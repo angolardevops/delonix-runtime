@@ -559,6 +559,20 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <td>The kernel never sees the limits. See <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_MANIFEST_LENIENT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>manifest.<wbr>rs:manifest_lenient</code></a></td>
+<td>Loads a manifest that has fields the engine does not understand, warning about them, instead of refusing it before any effect (ADR-0069 D1).</td>
+<td><code>1</code> → lenient. Anything else, or unset → a not-understood field refuses the manifest.</td>
+<td>For a manifest written for a newer binary. A typo (<code>memroy:</code>) is also "not understood": prefer fixing the spelling. <code>stack validate</code> always reports instead of refusing.</td>
+</tr>
+<tr>
+<td><code>DELONIX_CNI_TIMEOUT_SECS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>cni.<wbr>rs:invoke</code></a></td>
+<td>Deadline for one CNI plugin invocation; a plugin still running at the deadline is killed and reaped.</td>
+<td>Positive integer seconds. Default 60; a value that does not parse, or 0, falls back to the default silently.</td>
+<td>Output of a plugin is capped at 1 MiB per stream regardless.</td>
+</tr>
+<tr>
 <td><code>DELONIX_INSECURE_BESTEFFORT</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs:insecure_besteffort</code></a></td>
 <td>Skips the fail-closed confinement verification (seccomp, capabilities, <code>no_new_privs</code>) that runs before <code>execve</code> in a container's init and in <code>exec</code>.</td>

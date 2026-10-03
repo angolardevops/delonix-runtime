@@ -328,7 +328,10 @@ pub(crate) fn created_specs(
         .into_iter()
         .filter_map(|c| {
             let raw = c.annotations.get(super::conditions::CREATED_SPEC)?;
-            Some((c.name.clone(), super::reconcile::decode_last_applied(raw)?))
+            Some((
+                manifest::scoped_plan_name(&c.namespace, &c.name),
+                super::reconcile::decode_last_applied(raw)?,
+            ))
         })
         .collect())
 }
@@ -652,7 +655,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     };
     Ok(super::reconcile::Desired {
         kind: k::CONTAINER.into(),
-        name: doc.metadata.name.clone(),
+        name: manifest::plan_name(doc),
         fields,
         converges: true,
         ownable: true,
@@ -672,7 +675,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
             kind: k::CONTAINER.into(),
-            name: c.name.clone(),
+            name: manifest::scoped_plan_name(&c.namespace, &c.name),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: c
@@ -1003,7 +1006,7 @@ fn valid_container_name(name: &str) -> bool {
 // language — the context returns them as data and never prints.
 #[cfg(test)]
 use delonix_compute::pod::HostAlias;
-pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
+pub(crate) use delonix_compute::pod::{PodSpec, POD_CONTAINER_FIELDS, POD_SPEC_FIELDS};
 
 /// Prints each translation notice ONCE per invocation.
 ///
@@ -4146,6 +4149,15 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
+            // The attach re-pins the port to its own address only; the prefixes
+            // the engine authorised (a Kind node's PodCIDR) come back from the
+            // record, or a restarted node would drop every pod packet it routes.
+            if !c.allowed_sources.is_empty() {
+                if let Err(e) = infra::spoof_allow(&c.id, &c.allowed_sources) {
+                    infra::detach_container(&c.id, &ip);
+                    return Err(e.into());
+                }
+            }
             warn_if_namespace_isolation_inert(&c.namespace);
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
             // nsenter doesn't run from the reexec'd process.
