@@ -203,6 +203,8 @@ struct CpuTopologySpec {
 /// One entry of `spec.extraDisks`.
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct ExtraDiskSpec {
+    /// Stable name of this disk: what `provider.spec.devices.<name>` refers to.
+    name: Option<String>,
     /// Host path of the disk image.
     source: String,
     /// `disk` (default) or `cdrom`.
@@ -221,6 +223,8 @@ struct ExtraDiskSpec {
 /// One entry of `spec.extraNics`.
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct ExtraNicSpec {
+    /// Stable name of this NIC: what `provider.spec.devices.<name>` refers to.
+    name: Option<String>,
     /// `network` (libvirt network), `bridge` (host bridge) or `user`.
     #[serde(rename = "type", alias = "kind")]
     kind: String,
@@ -415,6 +419,7 @@ const VM_PROVIDER_LIBVIRT: &[(&str, &str)] = &[
     ("bootOrder", "bootOrder"),
     ("extraDisks", "extraDisks"),
     ("extraNics", "extraNics"),
+    ("devices", "devices"),
     ("xmlOverlay", "libvirtXmlOverlay"),
     ("xml", "libvirtXml"),
 ];
@@ -427,11 +432,143 @@ fn vm_provider_spec_keys(ty: &str) -> &'static [(&'static str, &'static str)] {
     }
 }
 
+/// Options a provider block may set per named disk / NIC (ADR-0071 §4.3).
+const DISK_DEVICE_OPTIONS: &[&str] = &["device", "bus", "format", "target"];
+const NIC_DEVICE_OPTIONS: &[&str] = &["model", "mac"];
+
+/// A device name: stable identity of an extra disk or NIC, what
+/// `provider.spec.devices` is keyed by. Lowercase, digits and `-`.
+fn valid_device_name(n: &str) -> bool {
+    !n.is_empty()
+        && n.len() <= 32
+        && n.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && n.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// The `extraDisks`/`extraNics` lists of a raw spec, wherever they were written
+/// (flat or under `provider.spec`).
+fn device_lists(spec: &serde_yaml::Value) -> (Vec<serde_yaml::Value>, Vec<serde_yaml::Value>) {
+    let pick = |key: &str| -> Vec<serde_yaml::Value> {
+        spec.get(key)
+            .or_else(|| {
+                spec.get("provider")
+                    .and_then(|p| p.get("spec"))
+                    .and_then(|b| b.get(key))
+            })
+            .and_then(|v| v.as_sequence())
+            .cloned()
+            .unwrap_or_default()
+    };
+    (pick("extraDisks"), pick("extraNics"))
+}
+
+/// Problems with device names and with `provider.spec.devices`: a bad or
+/// repeated name, options for a name nothing carries, an option the item
+/// already says, an option that is not one for that kind of device.
+fn device_problems(spec: &serde_yaml::Value) -> Vec<String> {
+    use serde_yaml::Value;
+    let (disks, nics) = device_lists(spec);
+    let mut out = Vec::new();
+    let mut kinds: std::collections::BTreeMap<String, (&str, Value)> = Default::default();
+    for (list, kind, label) in [(&disks, "disk", "extraDisks"), (&nics, "nic", "extraNics")] {
+        for (i, item) in list.iter().enumerate() {
+            let Some(n) = item.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !valid_device_name(n) {
+                out.push(format!(
+                    "{label}[{i}].name ('{n}' must be lowercase letters, digits and '-', at most 32)"
+                ));
+            } else if kinds.contains_key(n) {
+                // The first one keeps the name; the repeat is the problem.
+                out.push(format!(
+                    "{label}[{i}].name ('{n}' is used by another disk or NIC)"
+                ));
+            } else {
+                kinds.insert(n.to_string(), (kind, item.clone()));
+            }
+        }
+    }
+    let devices = spec
+        .get("provider")
+        .and_then(|p| p.get("spec"))
+        .and_then(|b| b.get("devices"));
+    match devices {
+        None | Some(Value::Null) => {}
+        Some(Value::Mapping(d)) => {
+            for (k, opts) in d {
+                let Some(name) = k.as_str() else { continue };
+                let Some((kind, item)) = kinds.get(name) else {
+                    out.push(format!(
+                        "provider.spec.devices.{name} (no extraDisks/extraNics item is named '{name}')"
+                    ));
+                    continue;
+                };
+                let allowed = if *kind == "disk" {
+                    DISK_DEVICE_OPTIONS
+                } else {
+                    NIC_DEVICE_OPTIONS
+                };
+                let Value::Mapping(o) = opts else {
+                    out.push(format!("provider.spec.devices.{name} (must be a mapping)"));
+                    continue;
+                };
+                for (ok, ov) in o {
+                    let Some(opt) = ok.as_str() else { continue };
+                    if !allowed.contains(&opt) {
+                        out.push(format!(
+                            "provider.spec.devices.{name}.{opt} (not an option of a {kind}; known: {})",
+                            allowed.join(", ")
+                        ));
+                    } else if item.get(opt).is_some_and(|v| !v.is_null() && v != ov) {
+                        out.push(format!(
+                            "provider.spec.devices.{name}.{opt} (the item already sets it — say it once)"
+                        ));
+                    }
+                }
+            }
+        }
+        Some(_) => out.push("provider.spec.devices (must be a mapping)".to_string()),
+    }
+    out
+}
+
+/// Folds `devices.<name>.<option>` into the extra disk / NIC of that name and
+/// drops the `devices` key, so the one executor reads the item as it always did.
+/// Pure; problems (unknown name, contradiction) are `device_problems`' to report.
+fn merge_device_options(m: &mut serde_yaml::Mapping) {
+    use serde_yaml::Value;
+    let Some(Value::Mapping(devices)) = m.remove("devices") else {
+        return;
+    };
+    for list_key in ["extraDisks", "extraNics"] {
+        let Some(Value::Sequence(items)) = m.get_mut(list_key) else {
+            continue;
+        };
+        for item in items.iter_mut() {
+            let Value::Mapping(im) = item else { continue };
+            let Some(name) = im.get("name").and_then(Value::as_str).map(str::to_string) else {
+                continue;
+            };
+            if let Some(Value::Mapping(opts)) = devices.get(name.as_str()) {
+                for (k, v) in opts {
+                    if !im.contains_key(k) {
+                        im.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Problems in `spec.provider`, as dotted paths for the unknown-field report.
 fn provider_block_problems(spec: &serde_yaml::Value) -> Vec<String> {
     use serde_yaml::Value;
     let Some(Value::Mapping(p)) = spec.get("provider") else {
-        return Vec::new();
+        return device_problems(spec);
     };
     let mut out = Vec::new();
     let legacy_name = p.get("name").and_then(|v| v.as_str());
@@ -494,6 +631,7 @@ fn provider_block_problems(spec: &serde_yaml::Value) -> Vec<String> {
         }
     }
     out.extend(topology_contradiction(spec));
+    out.extend(device_problems(spec));
     out
 }
 
@@ -657,6 +795,7 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
             }
         }
     }
+    merge_device_options(m);
     for (group, pairs) in VM_GROUPS {
         if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
             for (from, to) in pairs.iter() {
@@ -5696,6 +5835,54 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
 
 #[cfg(test)]
 mod ephemeral_tests {
+    fn yaml(s: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn device_options_keyed_by_name_fold_into_the_item() {
+        let spec = yaml(
+            "provider: { type: libvirt, spec: { extraDisks: [ {name: data, source: /d.qcow2} ], \
+             extraNics: [ {name: mgmt, type: bridge, source: br0} ], \
+             devices: { data: {bus: sata, target: sdb}, mgmt: {model: e1000} } } }",
+        );
+        assert!(
+            device_problems(&spec).is_empty(),
+            "{:?}",
+            device_problems(&spec)
+        );
+        let flat = normalize_vm_spec(spec);
+        let d = &flat["extraDisks"][0];
+        assert_eq!(d["bus"].as_str(), Some("sata"));
+        assert_eq!(d["target"].as_str(), Some("sdb"));
+        assert_eq!(flat["extraNics"][0]["model"].as_str(), Some("e1000"));
+        assert!(flat.get("devices").is_none());
+    }
+
+    #[test]
+    fn device_options_for_a_name_nothing_carries_are_refused_by_name() {
+        let spec = yaml(
+            "provider: { type: libvirt, spec: { extraDisks: [ {name: data, source: /d} ], \
+             devices: { dta: {bus: sata} } } }",
+        );
+        let p = device_problems(&spec);
+        assert!(p.iter().any(|x| x.contains("devices.dta")), "{p:?}");
+    }
+
+    #[test]
+    fn device_names_must_be_valid_and_unique_and_options_must_not_repeat_the_item() {
+        let spec = yaml(
+            "extraDisks: [ {name: Data, source: /a}, {name: x, source: /b, bus: ide} ]\n\
+             extraNics: [ {name: x, type: user} ]\n\
+             provider: { type: libvirt, spec: { devices: { x: {bus: sata, size: 1} } } }",
+        );
+        let p = device_problems(&spec).join(" | ");
+        assert!(p.contains("extraDisks[0].name ('Data'"), "{p}");
+        assert!(p.contains("is used by another disk or NIC"), "{p}");
+        assert!(p.contains("devices.x.bus (the item already sets it"), "{p}");
+        assert!(p.contains("devices.x.size (not an option"), "{p}");
+    }
+
     use super::*;
 
     #[test]
