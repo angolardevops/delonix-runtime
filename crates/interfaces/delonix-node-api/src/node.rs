@@ -13,7 +13,7 @@ use delonix_compute::capability::{HealthStatus, ProviderKind, ProviderReport};
 use delonix_model::records::Status;
 
 use crate::proto::v1::{
-    Capacity, Condition, ConditionStatus, FilesystemCapacity, Health, NodeInfo,
+    ApiRoot, Capacity, Condition, ConditionStatus, FilesystemCapacity, Health, Link, NodeInfo,
 };
 
 /// The engine's state root: the parent of the container store's default root
@@ -28,6 +28,38 @@ pub fn state_root() -> PathBuf {
 
 /// The contract's API identity (ADR-0042 D1).
 pub const API_VERSION: &str = "delonix.node.v1";
+
+/// A `GET` link. Every link this socket offers today is a `GET`: the served
+/// routes are read-only (`the_rest_routes_are_get_only`).
+pub fn link(rel: &str, href: &str) -> Link {
+    Link {
+        rel: rel.to_string(),
+        href: href.to_string(),
+        method: "GET".to_string(),
+    }
+}
+
+/// `GetApiRoot` (ADR-0042 D2): the version and a link to every resource this
+/// socket serves — and only those: a link to an operation the server would
+/// answer 501 is a promise it does not keep.
+pub fn api_root() -> ApiRoot {
+    ApiRoot {
+        api_version: API_VERSION.to_string(),
+        links: vec![
+            link("self", "/v1"),
+            link("node", "/v1/node"),
+            link("health", "/v1/node/health"),
+            link("capacity", "/v1/node/capacity"),
+            link("providers", "/v1/providers"),
+            link("networks", "/v1/namespaces/default/networks"),
+            link("volumes", "/v1/namespaces/default/volumes"),
+            link("operations", "/v1/operations"),
+            link("openapi", "/openapi.json"),
+            link("docs", "/docs"),
+            link("redoc", "/redoc"),
+        ],
+    }
+}
 
 fn read_trimmed(path: &str) -> Option<String> {
     std::fs::read_to_string(path)
@@ -84,6 +116,12 @@ pub fn node_info(reports: &[ProviderReport]) -> NodeInfo {
         cgroup_driver: "cgroupfs".to_string(),
         cgroup_delegated: delonix_linux::cgroup_limits_apply(),
         supported_workload_types: supported_workload_types(reports),
+        links: vec![
+            link("self", "/v1/node"),
+            link("root", "/v1"),
+            link("health", "/v1/node/health"),
+            link("capacity", "/v1/node/capacity"),
+        ],
     }
 }
 
@@ -237,6 +275,7 @@ pub fn health_from(store: Condition, cgroup_delegated: bool, reports: &[Provider
     Health {
         overall: worst(&conditions) as i32,
         conditions,
+        links: vec![link("self", "/v1/node/health"), link("node", "/v1/node")],
     }
 }
 
@@ -422,6 +461,7 @@ pub fn capacity() -> Capacity {
     }
 
     c.unmeasured = unmeasured.into_iter().map(str::to_string).collect();
+    c.links = vec![link("self", "/v1/node/capacity"), link("node", "/v1/node")];
     c
 }
 

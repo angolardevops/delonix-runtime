@@ -6315,7 +6315,7 @@ pub fn network_list() -> Vec<NetDef> {
 /// [`network_list`] under an explicit state root — for the `NetworkStore`,
 /// which is opened on a root of its own and has to see the `NetDef`s of THAT
 /// root when it picks a free `/16` (see [`crate::used_bases`]).
-pub(crate) fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
+pub fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
     let dir = root.join("ingress").join("networks");
     let mut v: Vec<NetDef> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {

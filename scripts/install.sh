@@ -3,6 +3,12 @@
 #
 #   curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
 #
+# This script installs a PUBLISHED release: the signed `delonix` binary, its
+# companion binaries, and the runtime tools and host configuration they need.
+# It never compiles and needs no toolchain. Building and installing from a
+# source checkout is the Makefile's job (`make bootstrap`, `make build`,
+# `make install`).
+#
 # Objectivo: um utilizador SEM experiência de sysadmin acaba com uma instalação
 # 100% funcional — binário + TODAS as dependências de runtime (containers E VMs)
 # + a configuração de host que o modo rootless exige (subuid/subgid, AppArmor).
@@ -256,7 +262,7 @@ ARCH=$(uname -m)
 case "$ARCH" in
   x86_64|aarch64) ;;
   arm64) ARCH=aarch64 ;; # some kernels/containers report arm64 for the same CPU
-  *) die "no prebuilt binary for $ARCH yet (only x86_64 and aarch64). Build from source: cargo build --release -p delonix-runtime-bin" ;;
+  *) die "no prebuilt binary for $ARCH yet (only x86_64 and aarch64). Build from a source checkout: make bootstrap && make install" ;;
 esac
 
 # O utilizador REAL (o script pode correr sob sudo já): é para ele que se

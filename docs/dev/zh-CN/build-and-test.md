@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:e3064f16c3cd8456faff94b7b2e482d8957a320e5a93071573df9e38ba594950 -->
+<!-- translated-from: build-and-test.md sha256:5df2927c11b5bdb95b1685c335d2e369105a0e3a9b320e19ee8d44658d4bb917 -->
 # 克隆、构建与测试
 
 **阅读之前：** [准备你的环境](environment.md)：固定的工具链、`protoc`，以及一台能通过其检查的主机。
@@ -40,6 +40,51 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 - **永远测试你自己构建出来的那个二进制程序**（`./target/debug/delonix`），绝不要用你
   `PATH` 上的那个 `delonix`——那是一个已安装的发布版，往往落后好几个版本。
 - 如果你同时在多个 worktree 里工作，把它们都指向同一个共享的 `CARGO_TARGET_DIR` 能省磁盘空间，但两个同时在上面跑的构建会互相等待，还可能让彼此的产物失效。每个 worktree 单独一个 target 目录，第一次会慢一些，之后则是可预测的。
+
+## Makefile
+
+仓库根目录的 `Makefile` 把本页的命令串成一个生命周期。它不引入自己的构建逻辑：`make build`
+运行的就是上面的 `cargo build`，只是按这台机器选好了并行数和优先级。
+
+```bash
+make bootstrap        # 每台机器一次：固定的 Rust 工具链、C/C++ 编译器、protoc、sccache
+make doctor           # 同样的检查，但不做任何修改（缺少必需项时退出码为 1）
+make build            # 五个二进制，release 配置
+make install          # 构建后安装到当前用户的 ~/.local/bin（下文选项 B）
+make install-system   # 用 sudo 把已构建好的产物安装到 /usr/local/bin（下文选项 C）
+make uninstall        # 删除 `make install` 写入的内容
+make ci               # 格式检查、脚本 gate、clippy、测试
+make help             # 所有目标
+```
+
+安装了 `cargo-nextest` 时，`make test` 会使用它（`make bootstrap` 会安装），并通过 `cargo test --doc` 运行文档测试；在本 workspace 上实测，2682 个测试用时 24 秒，`cargo test` 为 126 秒。`NEXTEST=0` 强制使用普通的 `cargo test`。`dev` 配置只保留行号表（`debug = "line-tables-only"`）：冷启动的 `cargo test --workspace --no-run` 从 71 秒、8.5 GiB 的 target 降到 44 秒、4.9 GiB，调试器不再显示局部变量。
+
+**`make install` 写入什么。** `~/.local/bin` 中的五个二进制；由已安装的二进制生成、放在
+`~/.local/share` 下的 shell 补全和手册页；以及 `~/.config/delonix/env.sh`，它导出
+`DELONIX_BIN`（已安装的 CLI）、`DELONIX_ROOT`（state root），并在 `PATH` 中缺少
+`~/.local/bin` 时把它加上。`~/.bashrc` 和 `~/.zshrc` 中一个带标记的代码块会加载这个文件；
+`make uninstall` 删除该代码块，文件恢复原样。`SHELL_RC=0` 只写环境文件，不动你的 shell 文件；
+`make install DELONIX_ROOT=<dir>` 让开发构建使用自己的 state root，与已安装的发行版分开。
+只要导出了 `DELONIX_BIN`，`scripts/cli-tree.sh` 和 `scripts/docs_cli_gate.py` 检查的就是已安装的
+二进制——针对你的源码树运行它们之前先取消该变量。
+
+`make install-system` 只复制已经构建好的二进制（绝不在 `sudo` 下编译），并且在引擎进程仍在运行时
+拒绝执行，原因见选项 C；`FORCE=1` 可以强制。在 Ubuntu 23.10+ 上，`make apparmor` 写入选项 B
+中描述的 `delonix-dev` 配置。
+
+**构建调优。** 这些设置只改变 cargo 用多大力气，不改变它的产物，所以 `make build` 和直接运行
+`cargo build` 可以共用一个 target 目录，不会互相重新编译对方的产物。`make info` 打印解析出的结果。
+
+| 变量 | 默认值 | 作用 |
+|---|---|---|
+| `JOBS=<n>` | 你的 cargo 配置中的 `jobs`；没有配置时为 `min(核心数, (可用内存 − 2 GiB) / 3 GiB)` | 并行的 `rustc`/链接器进程数。本 workspace 中一个大型测试二进制的链接器实测占用 1.5–1.9 GiB，`delonix` 的 release `rustc` 为 2.4 GiB |
+| `LOWPRIO=0` | 构建在 `nice -n 19 ionice -c2 -n7` 下运行 | 以正常的 CPU 和磁盘优先级运行 |
+| `SCCACHE=0` | `sccache` 在 `PATH` 中且你的 cargo 配置没有指定 wrapper 时会被使用 | 不使用共享编译缓存（它也缓存 `ring` 和 `zstd-sys` 的 C 目标文件） |
+| `PROFILE=debug\|release-ci` | `release` | dev 配置，或 `release-ci`（thin LTO，16 个 codegen 单元：五个二进制实测 114 秒对 188 秒，二进制 38 MiB 对 32 MiB）。发布版本和性能 gate 仍使用 `release` |
+| `LINKER=mold\|lld` | 工具链默认值——固定的工具链在 x86_64 上使用 LLD | 会设置 `RUSTFLAGS`，因此全部重新编译一次，直接运行的 `cargo` 也不再共用结果 |
+
+`scripts/install.sh` 不属于这个生命周期：它安装已发布的版本，并让主机做好运行容器和虚拟机的准备，
+不需要工具链。
 
 ## 在本地安装你的构建
 
