@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-primer.md sha256:a9064f13ecba90c0cc4992eccd73ec17bf783621b44ed9ce4319b3b07ee11793 -->
+<!-- translated-from: cloud-native-primer.md sha256:ff70ff4a081bb315c8edab09bc1ac0ce7ce154a7475fb3467a6b8c998f7f5d24 -->
 # Introdução ao cloud native
 
 **Antes de leres:** [Fundações de Linux](linux-foundations.md) (namespaces, cgroups v2, descritores de ficheiro) e [IaaS e cloud native](iaas-and-cloud-native.md) (do que é responsável o motor).
@@ -206,8 +206,9 @@ plugin (`bridge`, `host-local`, `portmap`, …) com comandos `ADD`/`DEL` e uma c
 - Saída e reencaminhamento de portas: `slirp_attach` e `slirp_add_hostfwd` em
   `crates/adapters/delonix-sdn/src/lib.rs` (que arrancam o `slirp4netns`); a publicação dentro do
   holder em `publish_port`/`do_publish` (`infra.rs`).
-- Firewall: `table ip dlxing` com as base chains `fwguard`, `fwdeny`, `fwcont` e o verdict map
-  `fwmap` (`FWMAP`), gerado em `infra.rs` (`do_firewall`, `apply_firewall_all`, `ns_set_join`
+- Firewall: `table ip dlxing` com as base chains `fwguard`, `fwdeny`, `fwout` (pela origem) e
+  `fwcont` (pelo destino), ambas a consultar o verdict map `fwmap` (`FWMAP`), gerado em `infra.rs`
+  (`fw_dispatch_chains`, `do_firewall`, `apply_firewall_all`, `ns_set_join`
   para os sets de isolamento de namespace).
 - DNS interno (nome padrão `<name>.<namespace>.svc.delonix.internal`, o antigo
   `<name>.<namespace>.delonix.internal` ainda responde; `service_fqdn`, `parse_internal_name`):
@@ -283,8 +284,9 @@ etiquetado `cidata` com `user-data`, `meta-data` e opcionalmente `network-config
 
 **No Delonix**
 
-- A porta é `VmBackend` em `crates/adapters/delonix-vm/src/lib.rs`, implementada por
-  `CloudHypervisorBackend` e `LibvirtBackend` aí e por `ProxmoxBackend` em
+- A porta é `VmBackend` em `crates/contexts/delonix-compute/src/vm_backend.rs` (reexportada pelo
+  `delonix-vm`), implementada por `CloudHypervisorBackend` e `LibvirtBackend` em
+  `crates/adapters/delonix-vm/src/lib.rs` e por `ProxmoxBackend` em
   `crates/providers/delonix-proxmox` ([ADR-0008](../../adr/0008-proxmox-vm-backend.md)).
 - Ordem de procura do firmware do Cloud Hypervisor: `DEFAULT_CH_FIRMWARES` (EDK2 `CLOUDHV.fd`
   antes do `hypervisor-fw`); a linha de comandos do VMM é construída em `boot_ch`.

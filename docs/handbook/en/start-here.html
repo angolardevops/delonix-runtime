@@ -414,7 +414,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
     Q --&gt;|images, registry, build| OCI[delonix-oci&lt;br/&gt;+ cmd/build.rs, cmd/image.rs]
     Q --&gt;|VMs| VM{local or remote?}
     VM --&gt;|Cloud Hypervisor / libvirt / cloud-init| DVM[delonix-vm]
-    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements VmBackend]
+    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements a port]
     Q --&gt;|what the kubelet sees| CRI[delonix-cri]
     Q --&gt;|a new crate| CRATE[LAYERS in arch_fitness.py&lt;br/&gt;+ crates/LAYER/ + root Cargo.toml]
     PROV --&gt; ADR
@@ -461,13 +461,13 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>VM behaviour on this node</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the <code>VmBackend</code> trait and the backend registry), <code>cloudinit.rs</code>; CLI in <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td>What an operation decides: the use cases in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a> (<code>VmEngine</code>). How it is done here: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (the backends and their registry), <code>local_ports.rs</code>, <code>cloudinit.rs</code>; the <code>VmBackend</code> trait itself in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs</code></a>; CLI in <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
 <td><a href="microvm-setup.html">Building microVMs</a>, <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits as ports</a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (backends are registrable)</td>
 </tr>
 <tr>
 <td><strong>A new VM backend or storage provider behind a remote API</strong></td>
-<td>A new crate under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, implementing a port; registered at the composition root (<code>cmd/vmbackends.rs</code>)</td>
+<td>A new crate under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, implementing a port; registered at the composition root (<code>cmd/vmbackends.rs</code>, <code>cmd/gatewayproviders.rs</code>), configured from the providers file (<code>cmd/providers_config.rs</code>), and answering the capability catalog with a report listed both in <code>cmd/provider.rs</code> and in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/providers.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>providers.<wbr>rs</code></a> (a test keeps the two equal)</td>
 <td><a href="crates.html#providers">Providers</a>, <a href="architecture.html#layers-and-the-allowed-direction">Layers</a></td>
 <td>ADR first (<a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a>); <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
 </tr>

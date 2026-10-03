@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
+<!-- translated-from: environment.md sha256:48dc092d2600678174aee750d5009a3ebc92a97a103a34294f5ac3cfa2103f27 -->
 # Preparar o teu ambiente
 
 **Antes de leres:** [Começa aqui](start-here.md#day-0-in-30-minutes) (Dia 0) e [Fundações de Linux](linux-foundations.md) — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.
@@ -25,7 +25,8 @@ Instala o [`rustup`](https://rustup.rs/) e deixa-o apanhar o canal fixado; não 
 
 ### `protoc` (necessário para compilar)
 
-O `crates/interfaces/delonix-cri/build.rs` compila o protobuf do CRI do Kubernetes com
+O `crates/interfaces/delonix-cri/build.rs` compila o protobuf do CRI do Kubernetes, e o
+`crates/interfaces/delonix-node-api/build.rs` o contrato de nó em `proto/delonix/node/v1`, ambos com
 `tonic-build`/`prost`, que precisa do compilador de Protocol Buffers no `PATH`. O binário `delonix`
 depende do `delonix-cri`, por isso **um simples `cargo build --workspace` falha sem ele**:
 
@@ -177,7 +178,8 @@ Opções, da menos para a mais invasiva:
 
 Os limites de recursos só chegam ao kernel se a shell a partir da qual corres o motor estiver num
 cgroup **delegado**. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless
-tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, conforme a flag:
+tem o mesmo requisito. Sem o controlador de que uma flag precisa, o `container run` recusa em vez de
+correr sem limite; há duas sondas, conforme a flag:
 
 - `-m`/`--memory`, `-c`/`--cpus` e `--cpu-weight`: o `container run` **recusa** antes de criar
   seja o que for, com um erro que diz como corrigir, e sai com **69** (`Error::Unavailable`, a

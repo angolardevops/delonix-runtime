@@ -227,7 +227,7 @@ git log --oneline -- &lt;path you will touch&gt;          # what was already dec
 </code></pre></div>
 <p>读一读你要动的那块区域的历史，不是走形式：这个代码库有很大一部分，就是尝试过、测量过、
 改动过的东西的记录。已经决定过或者已经移除的东西，不会因为不知情就被重做一遍。完整的记录
-在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>（按区域组织）和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> 里。</p>
+在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>（按区域组织）和 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> 里。</p>
 <h2 id="one-worktree-per-task">一个任务一个 worktree<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
 <p>常常有好几个人和工具同时在同一个 clone 上工作。在一个共享的 checkout 里编辑，已经在这里
 真真切切地造成过损失：改动被吸收进别人的提交、<code>HEAD</code> 在一个任务进行到一半时切换了分支，
@@ -290,7 +290,7 @@ git worktree list
 crate 里的测试还会检查命令的 help 是否有葡萄牙语条目 —— 加一个新命令或 flag 时记得加上。</p>
 <h2 id="architecture-rules-the-gates-enforce">门禁强制执行的架构规则<a class="hanchor" href="#architecture-rules-the-gates-enforce" aria-label="#">#</a></h2>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（CI 的 <code>arch</code> job）强制执行
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> 里定下来的结构。
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> 里定下来的结构。
 每个 crate 所在的层，以及允许的依赖方向，列在<a href="architecture.html">架构</a>里。这对一次改动意味着：</p>
 <ul>
 <li><strong>引擎不认识任何消费者。</strong> 在 <code>crates/</code>、<code>bins/</code>、<code>proto/</code> 或者清单里，包括注释在内，
@@ -339,7 +339,7 @@ Record，再动代码，比如：</p>
 <li>对节点契约、清单 schema 的稳定性，或者分层结构的改动。</li>
 </ul>
 <p>在已有边界之内的日常功能，不需要 ADR。格式和现有清单都在
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> 里：一个决定一个文件，<code>NNNN-title.md</code>，用英文写。
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> 里：一个决定一个文件，<code>NNNN-title.md</code>，用英文写。
 <strong>已被接受的 ADR 永远不会被重写</strong> —— 只会被一份新的 ADR 取代。</p>
 <h2 id="adding-or-changing-a-cli-command">新增或修改一个 CLI 命令<a class="hanchor" href="#adding-or-changing-a-cli-command" aria-label="#">#</a></h2>
 <ul>
@@ -367,12 +367,12 @@ Record，再动代码，比如：</p>
 <li>一个提交对应一个逻辑改动；提交信息里要说清楚<strong>为什么</strong>这么改 —— diff 本身已经说明了
   改了什么。</li>
 <li>有对应 issue 的话，要引用它。</li>
-<li>针对 <code>main</code> 开 PR，并填好<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">模板</a>：你跑过什么；
+<li>针对 <code>main</code> 开 PR，并填好<a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">模板</a>：你跑过什么；
   如果涉及运行时、命名空间、cgroup 或网络相关的代码，还要写你在一台真实宿主机上<strong>实机</strong>
   跑过什么，带上命令和它的输出。</li>
 <li>「能编译」和「命令返回了 0」都不能算一个改动的收尾。要说清楚证明了什么，同样明确地
   说清楚没有验证过什么、为什么没验证。</li>
-<li>每一个改动都由 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> 里列出的代码所有者
+<li>每一个改动都由 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> 里列出的代码所有者
   评审。</li>
 </ul>
 <h2 id="security-sensitive-changes">涉及安全的改动<a class="hanchor" href="#security-sensitive-changes" aria-label="#">#</a></h2>
@@ -380,7 +380,7 @@ Record，再动代码，比如：</p>
 套接字、<code>setns</code>/<code>unshare</code>、capability 或 seccomp 处理，或者由用户/清单输入驱动的路径
 处理 —— 要在 PR 里明确点出来。这些会得到额外的评审。</p>
 <p>如果你发现的是一个<strong>漏洞</strong>而不是一个 bug —— 提权、命名空间逃逸、命令注入、路径穿越 ——
-不要开一个公开的 issue 或 PR。按照 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> 的流程走（GitHub
+不要开一个公开的 issue 或 PR。按照 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> 的流程走（GitHub
 私密漏洞报告）。</p>
 <hr />
 <p><strong>下一篇：</strong><a href="releases-and-stability.html">发布与稳定性</a> —— 推送一个 tag 会发生什么，以及

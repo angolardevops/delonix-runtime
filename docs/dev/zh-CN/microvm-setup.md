@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:5e00934168ce8abaeb7e284855fff4df09522a9379b0b302800bcea4178b5543 -->
+<!-- translated-from: microvm-setup.md sha256:1bdc6dc5407aca36b67bfc85db87ae040be56261e156204a812ada36979bcc8a -->
 # 构建 microVM
 
 **阅读之前：**[准备你的环境](environment.md)、[克隆、构建与测试](build-and-test.md)、[云原生入门中的虚拟化一节](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init)，以及[Delonixfile 与 VMfile](delonixfile-and-vmfile.md#part-2-vmfile)的第 2 部分。
@@ -124,11 +124,12 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 
 ### 端口与注册表
 
-`VmBackend`（`crates/adapters/delonix-vm/src/lib.rs`）是每一个 hypervisor 都要实现的端口：
+`VmBackend`（`crates/contexts/delonix-compute/src/vm_backend.rs`，由 `delonix-vm` 重新导出）是每一个 hypervisor 都要实现的端口：
 `id`、`available`、`boot`、`is_running`、`ip`、`stop`，再加上一批有默认实现的方法
 （`destroy`、`pause`、`unpause`、`resume`、`snapshot`/`restore`/`snapshots`/`delete_snapshot`、
 `preserve_snapshots`、`ip_is_predicted`、`manages_own_storage`、`auto_selectable`、
-`disk_health`）。一个无法兑现的默认实现会带着一条消息 **fail closed**（失败即拒绝），
+`disk_health`，以及较新的 `current_handle`、`resize_cold`、`guest_info`、`move_to_node`、
+`update_cloud_init`、`apply_firewall`/`read_firewall`）。一个无法兑现的默认实现会带着一条消息 **fail closed**（失败即拒绝），
 而绝不会悄悄地什么都不做。
 
 各个后端存放在一个注册表（`BACKENDS`）里，而不是一个 `match` 里：
@@ -147,15 +148,23 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 
 ### 新建虚拟机时的选取优先级
 
-来自 `delonix_vm::create_with` 和 `resolve_vm_defaults`（`cmd/vm.rs`），第一个命中的生效：
+来自 `resolve_vm_defaults`（`cmd/vm.rs`）和 `select_for_create`
+（`crates/adapters/delonix-vm/src/lib.rs`，VM 用例经由 `VmBackends::select` 调用到它），
+第一个命中的生效：
 
 1. `--backend`（或者清单里的 `backend:`）。
 2. 镜像自己的 `HYPERVISOR`（由一次 VMfile 构建记录下来），前提是 `--disk` 指向的是一个本地
    镜像。
 3. `DELONIX_VM_BACKEND`（整个会话范围）。
-4. `delonix vm default-backend --set <backend>`（整台机器范围，存放在
-   `<DELONIX_ROOT>/vm-default-backend`）。
-5. 能力启发式规则：有 `volumes` ⇒ `libvirt`（只有 libvirt 支持 virtio-9p）；一个没有
+4. 节点 providers 文件（`providers.yaml`，ADR-0054）里的 `defaultProvider`，由
+   `delonix vm default-backend --set <backend>` 写入。查找顺序是 `DELONIX_PROVIDERS_CONFIG`，
+   否则 `$XDG_CONFIG_HOME/delonix/providers.yaml`（或 `~/.config/…`），否则
+   `/etc/delonix/providers.yaml`；第一个找到的胜出。一个读不了的文件会让不带 `--backend` 的 VM
+   请求失败，而不是去猜；一个本进程无法提供的默认值（没有目标的 `proxmox`）会点名失败，而不是
+   退回到一个本地 hypervisor。
+5. 旧的按根目录保存的默认值 `<DELONIX_ROOT>/vm-default-backend`，来自 providers 文件出现之前；
+   `vm default-backend` 会说明答案何时来自它，而 `--set` 会把它挪进文件。
+6. 能力启发式规则：有 `volumes` ⇒ `libvirt`（只有 libvirt 支持 virtio-9p）；一个没有
    `--kernel` 的云镜像 ⇒ **如果 libvirt 可用**就选 `libvirt`；否则走自动检测——选中第一个
    已安装、且标记为可自动选取的已注册后端（先 CH，再 libvirt）。
 
@@ -167,22 +176,34 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR" "$TMPDIR"
 $ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
-default backend set to cloud-hypervisor
+default provider set to cloud-hypervisor in /home/you/.config/delonix/providers.yaml
 $ delonix vm default-backend --set bogus
-error invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+error[DX-1503] invalid argument: unknown VM backend: 'bogus' (use 'cloud-hypervisor', 'libvirt')
+$ delonix provider config show
+File:             /home/you/.config/delonix/providers.yaml
+Default provider: cloud-hypervisor (file)
+Providers:
+  cloud-hypervisor  from file
 $ delonix vm default-backend --clear
-default backend cleared (falls back to auto-detection)
+default provider cleared in /home/you/.config/delonix/providers.yaml (falls back to auto-detection)
 ```
+
+`delonix provider config validate` 在不联系任何东西的前提下，检查这个文件以及它指向的东西（一个只有
+属主可读的 token 文件、一个确实存在的 CA）；`delonix provider config schema` 打印它的 JSON Schema。
 
 ### Proxmox VE（远程）
 
-当通过环境变量做了配置时，`bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured`
-会在启动时注册 Proxmox 后端（配置有误只是一条警告，绝不会让无关的命令因此失败）：
+当做了配置时——通过 providers 文件里的一个 `type: proxmox` 条目，或者通过下面的环境变量——
+`bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured` 会在启动时注册 Proxmox 后端
+（配置有误只是一条警告，绝不会让无关的命令因此失败）。`DELONIX_PROXMOX_*` 变量的完整列表，包括
+基于文件的凭据（`DELONIX_PROXMOX_TOKEN_FILE`、`DELONIX_PROXMOX_PASSWORD_FILE`）以及本地镜像
+上传到的存储（`DELONIX_PROXMOX_IMPORT_STORAGE`、`DELONIX_PROXMOX_DISK_STORAGE`），见
+[环境变量 § Proxmox VE](environment-variables.md#proxmox-ve)：
 
 | 变量 | 含义 |
 |---|---|
 | `DELONIX_PROXMOX_URL` | API 的基础 URL，例如 `https://pve.example:8006`。不设置 = 不注册这个后端。 |
-| `DELONIX_PROXMOX_NODE` | 必填。这个后端所对应的那唯一一个节点（就是 `GET /nodes` 里给它起的名字）。 |
+| `DELONIX_PROXMOX_NODE` | 必填。这个后端通过它连接的那个节点（就是 `GET /nodes` 里给它起的名字）；之后每台 VM 都在它实际运行所在的集群节点上被寻址（ADR-0053）。 |
 | `DELONIX_PROXMOX_SECRET` | 首选的凭据方式：一个带有 `tokenId`+`tokenSecret`（或 `username`+`password`）的 `kind: Secret` 的名字。 |
 | `DELONIX_PROXMOX_TOKEN_ID` + `DELONIX_PROXMOX_TOKEN` | 来自环境变量的 API token。 |
 | `DELONIX_PROXMOX_USER` + `DELONIX_PROXMOX_PASSWORD` | 密码登录（ticket 方式，在 401 时重新认证）。 |
@@ -192,9 +213,10 @@ default backend cleared (falls back to auto-detection)
 
 没有配置的情况下，`--backend proxmox` 会回答说这个后端"在这次构建里不可用"，并说明该
 设置什么（*已运行*）。这个后端拥有自己的存储（`manages_own_storage`），所以不会生成本地
-overlay 或 NoCloud seed；`--hostname`/`--ssh-key` 会被送到节点自己的 cloud-init 里，而
-`--user-data` 会被拒绝。设计与限制：[ADR-0008](../adr/0008-proxmox-vm-backend.md)。一个
-OpenStack 后端**仅仅是提议阶段**（[ADR-0039](../adr/0039-openstack-vm-backend.md)）；还没有
+overlay 或 NoCloud seed；一个指向引擎自己存储里某个镜像的 `--disk` 会被上传到节点的导入存储，
+并以它创建 VM（ADR-0057）；`--hostname`/`--ssh-key` 会被送到节点自己的 cloud-init 里，而
+`--user-data` 会被拒绝。设计与限制：[ADR-0008](../../adr/0008-proxmox-vm-backend.md)。一个
+OpenStack 后端**仅仅是提议阶段**（[ADR-0039](../../adr/0039-openstack-vm-backend.md)）；还没有
 任何代码。
 
 ---
@@ -252,7 +274,7 @@ build 两部分，例如 `42-1.1`）、`--k8s-version`、`--offline`、`--no-k8s
 `vm.yaml`；`scripts/verify-images.sh` 会在一个隔离的 `DELONIX_ROOT` 里构建它们，并把 qcow2
 读回来做核实（`--self-test` 证明它的检查确实能失败）。软件包安装、黄金配方的各个
 profile、启动构建出来的镜像，以及 appliance 构建器，都**还没有被验证过**（v4.2.0 发布
-说明）。镜像构建只支持 amd64（[ADR-0018](../adr/0018-vm-images-stay-amd64.md)）。
+说明）。镜像构建只支持 amd64（[ADR-0018](../../adr/0018-vm-images-stay-amd64.md)）。
 
 ### 转换与导入
 
@@ -278,7 +300,8 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 ```
 
-发生了什么（`cmd/vm.rs` → `delonix_vm::create_with`）：
+发生了什么（`cmd/vm.rs` → `delonix_vm::create_with`，一个包装器：它在本节点的端口之上构建一个
+`delonix_compute::vm::VmEngine`，并调用其 `create_with`）：
 
 1. 在解析任何镜像之前，先强制执行**节点策略**（`policy::enforce`）。
 2. **磁盘解析**（`resolve_image_ref`）：`--url-img` 优先（下载、缓存，并在提供了
@@ -293,7 +316,9 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
    除 `default` 以外的 `--namespace` 会被拒绝（这台虚拟机活在 `virbr0` 上，在 Delonix SDN
    之外）。
 6. **Overlay**：`<root>/vms/<name>.qcow2`，一个叠在 base 之上的瘦身 qcow2
-   （`prepare_local_overlay`）；`--disk-size <GiB>` 可以把它撑大，但不能比 base 还小。
+   （`LocalDiskImages` 端口，由 `QemuImgDisks` → `crates/adapters/delonix-vm/src/local_ports.rs`
+   里的 `prepare_local_overlay` 实现；对于自己管理存储的后端会跳过这一步）；`--disk-size <GiB>`
+   可以把它撑大，但不能比 base 还小。
 7. **启动**：调用该后端的 `boot`。`create` 是幂等的：一台已存在且正在运行的虚拟机会被原样
    返回。
 
@@ -319,7 +344,7 @@ delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
 | `delonix vm stop <name>` | 保留磁盘、记录和快照。libvirt：domain 会被 undefine（快照元数据会先被保留下来） |
 | `delonix vm start <name>` / `restart <name>` | 从记录重建启动配置并复用 overlay；`start` 一台正在运行的虚拟机是空操作，`restart` 总会重新启动 |
 | `delonix vm pause` / `unpause <name>` | 挂起各 vCPU，内存留在 RAM 里；CH 和 libvirt 都支持 |
-| `delonix vm migrate <name> --host <h> --network <n>` | 通过 SSH 对另一台宿主机做 stop-copy-start；有真实停机时间（[ADR-0031](../adr/0031-live-vm-migration-no-go.md) 说明了为什么实时迁移不在范围内） |
+| `delonix vm migrate <name> --host <h> --network <n>` | 通过 SSH 对另一台宿主机做 stop-copy-start；有真实停机时间（[ADR-0031](../../adr/0031-live-vm-migration-no-go.md) 说明了为什么实时迁移不在范围内） |
 | `delonix vm prune` | 回收没有任何虚拟机记录认领的状态 |
 
 ### 快照
@@ -342,7 +367,7 @@ define 它都会变）。
 `kind: VirtualMachine`（`compute.delonix.io/v1alpha1`）映照着 `vm create`；一份带完整注释
 的例子是 `examples/vm.yaml`。带 `type: microvm` 的 `kind: Workload` 会降解为一个
 `VirtualMachine`，后端被**强制**为 `cloud-hypervisor`；要求换成别的后端是一个错误
-（[ADR-0006](../adr/0006-workload-type-microvm.md)）。下面两个都在一个临时根目录里
+（[ADR-0006](../../adr/0006-workload-type-microvm.md)）。下面两个都在一个临时根目录里
 *运行过*：
 
 ```yaml
@@ -429,7 +454,10 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 
 | 领域 | 路径 |
 |---|---|
-| 端口、注册表、CH 和 libvirt 后端、`create_with`、快照、固件查找 | `crates/adapters/delonix-vm/src/lib.rs` |
+| 端口 | `crates/contexts/delonix-compute/src/vm_backend.rs` |
+| VM 用例（`VmEngine`：create、stop、start、status、list、remove、快照、day-2 动词）及其端口（`VmBackends`、`LocalDiskImages`、`SeedBuilder`） | `crates/contexts/delonix-compute/src/vm.rs`、`ports.rs` |
+| 注册表、CH 和 libvirt 后端、后端选择、固件查找、公开的包装器（`create_with`、`stop`……） | `crates/adapters/delonix-vm/src/lib.rs` |
+| 适配器对 VM 端口的实现（`RegistryBackends`、`QemuImgDisks`、`CloudLocaldsSeed`） | `crates/adapters/delonix-vm/src/local_ports.rs` |
 | NoCloud seed 的生成 | `crates/adapters/delonix-vm/src/cloudinit.rs` |
 | Proxmox 后端 | `crates/providers/delonix-proxmox/` |
 | `vm` CLI、`kind: VirtualMachine`、`vm reach` | `bins/delonix-runtime-bin/src/cmd/vm.rs` |
@@ -442,7 +470,7 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 
 ### 新增一个后端
 
-先读 [ADR-0008](../adr/0008-proxmox-vm-backend.md)；它就是模板。简单说：
+先读 [ADR-0008](../../adr/0008-proxmox-vm-backend.md)；它就是模板。简单说：
 
 - 如果要对接一个远程 API，就把 `VmBackend` 实现在**它自己的 crate** 里（这样引擎 crate 就
   不会沾上 HTTP 客户端），放在它所属层的目录下，并登记进 `scripts/arch_fitness.py`
@@ -455,7 +483,7 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 - 不支持的动词就让它们停留在 fail-closed 的默认实现上；在创建任何东西之前，先按名字拒绝
   不支持的 `VmConfig` 字段。
 - 不要发布一个从没被人看着它启动过虚拟机的后端。新的后端和 hypervisor 边界都要走一份 ADR
-  （[docs/adr/](../adr/)）。
+  （[docs/adr/](../../adr/)）。
 
 ### 测试
 
@@ -465,6 +493,10 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
   `cmd/vmfile.rs` 里的解析器/脚手架测试。运行 `cargo test -p delonix-vm` 和
   `cargo test -p delonix-runtime-bin vmfile`（关于 `protoc` 和目标目录，见
   [克隆、构建与测试](build-and-test.md)）。
+- **针对假端口的用例测试**——编排（`VmEngine`）在 `delonix-compute`（`vm::tests`）里测试，
+  用的是一个内存中的 store、一个会记录自己收到的调用的后端，以及一个假的磁盘和 seed，所以对
+  `create`、`stop` 或 `status` 的决定所做的改动不需要任何 hypervisor：
+  `cargo test -p delonix-compute vm::`。
 - **`scripts/e2e.sh`**——`vm` 相关的几个部分不需要 hypervisor 就能跑（列出、拒绝场景），
   在条件具备时还会在 libvirt 上（需要 `virsh`、`qemu-img` 和一个可用的 `qemu:///system`）
   和 Cloud Hypervisor 上跑一遍跨 stop/start 的快照。它默认会隔离两个状态根目录；如果只

@@ -361,9 +361,11 @@ th:first-child,td:first-child{white-space:nowrap}
   原子写入、加密的密钥保管库），以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a> 中的镜像存储（<code>cas.rs</code>）。</li>
 <li><strong>内核（Kernel）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>（进程、命名空间、cgroup、挂载）和
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a>（网桥、nftables、DNS）。</li>
-<li><strong>Hypervisor（Hypervisors）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 中的 <code>VmBackend</code> trait。</li>
+<li><strong>Hypervisor（Hypervisors）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> 中的
+  <code>VmBackend</code> trait，由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的本地后端实现。</li>
 <li><strong>远程 provider（Remote providers）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a>（ADR-0008，
-  已接受并已实现）和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>（ADR-0009，已接受）。一个 OpenStack
+  已接受并已实现）、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-opnsense" target="_blank" rel="noopener"><code>crates/providers/delonix-opnsense</code></a>（ADR-0051）和
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a>（ADR-0009，已接受）。一个 OpenStack
   后端目前只是一份提案（ADR-0039，提议中，需先完成一次 spike 才能推进）。</li>
 <li><strong>镜像仓库（Registry）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>。</li>
 </ul>
@@ -387,13 +389,15 @@ th:first-child,td:first-child{white-space:nowrap}
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（<code>LAYERS</code>、<code>ALLOWED</code>）强制执行；</li>
 <li>把<strong>同一套操作通过多扇门</strong>暴露出来：CLI、节点契约、CRI 和 MCP。</li>
 </ul>
-<p>关于节点契约有一点要提醒，免得你去找一个并不存在的服务器：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a>
+<p>关于节点契约有一点要提醒，免得你对服务器期望过高：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a>
 被标记为<em>ADR-0040 的草案契约</em>。这份契约、由它生成的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>，以及它的 CI
-门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>）都已经存在；但目前还没有任何 crate 在提供 <code>NodeService</code>
-服务。ADR-0042（<strong>已接受</strong>，A、B 两步已交付）确定了当服务器真正落地时，这份 API 该如何做
-版本管理和文档化。</p>
+门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>）都已经存在，<code>delonix serve node-api</code>
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a>）也在一个本地套接字上提供它——但目前只有
+<code>NodeService.ListProviders</code> 会回答；其余 RPC 都回答 <code>UNIMPLEMENTED</code>。ADR-0042（<strong>已接受</strong>；
+A、B 两步已交付，C 步随这个服务器开始）确定了这份 API 在逐步提供更多内容时该如何做版本管理和
+文档化。</p>
 <h3 id="what-it-deliberately-does-not-do">它刻意不做的事<a class="hanchor" href="#what-it-deliberately-does-not-do" aria-label="#">#</a></h3>
-<p>权威规则是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 顶部的 <em>«Identidade e fronteira do motor»</em> 一节：
+<p>权威规则是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 顶部的 <em>«Identidade e fronteira do motor»</em> 一节：
 引擎<strong>不认识任何消费者</strong>——没有平台、控制平面、控制台或代理——也没有<strong>租户、账户、方案、
 配额或计费</strong>的概念。来自某个消费者的需求，只能以对任何客户端都说得通的通用引擎能力的形式进入。</p>
 <p>ADR-0010（<strong>已拒绝</strong>，2026-08-10）是让管理 API 保持<strong>本地化</strong>的决定：一个 unix 套接字，
@@ -531,7 +535,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <p><strong>在 Delonix 中。</strong> 同一套操作由 CLI、CRI（<code>delonix serve cri</code>、
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>）、本地管理套接字（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>）、
 MCP 服务器（<code>delonix mcp serve</code>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>），以及节点契约
-（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>，草案）共同暴露。这份契约是 gRPC 和 HTTP/JSON 这两种编码方式
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>，草案，由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/interfaces/delonix-node-api</code></a> 部分提供服务）共同暴露。这份契约是 gRPC 和 HTTP/JSON 这两种编码方式
 共同的真相来源，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是从它生成出来的，绝不手工编辑
 （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>）。ADR-0040（<strong>提议中</strong>）诚实地记录了今天的差距：这几扇门里
 有好几扇，至今仍是把 CLI 二进制文件当作子进程重新运行，而不是调用一个用例——
@@ -570,7 +574,8 @@ adapters、providers、interfaces 和 binaries，目录本身就是这个层（<
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>、
 <code>bins/</code>）。允许的依赖方向只写在一个地方，即 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 里的 <code>ALLOWED</code>，
 由 CI 强制执行。端口是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 中的各个 trait，
-以及 <code>delonix-vm</code> 中的 <code>VmBackend</code>；ADR-0008（<strong>已接受</strong>）让 VM 后端变得可注册，
+以及同一个 crate 的 <code>vm_backend.rs</code> 中的 <code>VmBackend</code>；调用它们的 VM 用例是 <code>vm.rs</code> 中的
+<code>VmEngine</code>，而 <code>delonix-vm</code> 为本节点实现这些端口。ADR-0008（<strong>已接受</strong>）让 VM 后端变得可注册，
 这正是一个远程 Proxmox 节点得以成为又一个后端的方式。</p>
 <p><strong>它对你的要求。</strong> 一个新的 provider，要以一个端口的实现的形式进入。一个新 crate
 要在同一个提交里同时进入 <code>LAYERS</code> 表和它所在那个层的目录，并且只能沿着允许的方向去依赖。

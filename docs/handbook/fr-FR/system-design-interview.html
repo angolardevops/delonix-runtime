@@ -327,7 +327,7 @@ vers lequel les autres convergent.</p>
 <tr>
 <td>Contrat de nœud <code>delonix.node.v1</code></td>
 <td>gRPC <strong>et</strong> HTTP/JSON sur la <strong>même</strong> socket unix locale</td>
-<td>tout client local (conception ; pas encore servi)</td>
+<td>tout client local (servi en partie : seulement <code>ListProviders</code>, par <code>delonix-node-api</code>)</td>
 </tr>
 <tr>
 <td>CRI <code>runtime.v1</code></td>
@@ -537,18 +537,29 @@ du pin (<code>publish …</code> sur la socket de contrôle).</p>
 la politique par container coûte la même chose quel que soit le nombre de containers :</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-text">forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
-forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
+forward priority  -6  fwout     ip saddr vmap @fwmap
+forward priority  -5  fwcont    ip daddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 </code></pre></div>
-<p><code>fwcont</code> a deux règles ; les règles de chaque container vivent dans sa propre chaîne, atteinte via la
-verdict map <code>fwmap</code> indexée par IP. Le trafic <strong>entre</strong> réseaux est rejeté par paire, sauf si une
+<p>Les règles de chaque container vivent dans sa propre chaîne, atteinte via la verdict map <code>fwmap</code>
+indexée par IP — une fois par <strong>source</strong> (<code>fwout</code>) et une fois par <strong>destination</strong> (<code>fwcont</code>). Ce sont
+deux base chains à dessein : un <code>accept</code> dans une chaîne atteinte par saut ne termine que la base chain
+qui a sauté, alors qu'un <code>drop</code> est définitif partout, donc la politique d'egress de la source décide
+d'abord et celle d'ingress de la destination décide encore ensuite. Avec une seule base chain portant
+les deux recherches, l'<code>accept</code> de la destination terminait le parcours et l'<code>egress deny</code> de la source
+ne s'exécutait jamais (<code>fw_dispatch_chains</code> dans <code>infra.rs</code> ; une table construite par un holder plus
+ancien est migrée sur place par <code>fw_dispatch_migration_script</code>). Le trafic <strong>entre</strong> réseaux est rejeté par paire, sauf si une
 <code>NetworkRoute</code> place la paire dans <code>@netpair</code> — une route dit que le paquet <em>peut</em> traverser, et la
 chaîne par container décide encore s'il est <em>autorisé</em>.</p>
 <p><strong>L'isolation par namespace</strong> vit dans la chaîne de chaque container : les membres de
 <code>@dlxns&lt;hash&gt;</code> (même namespace) sont acceptés, et les <strong>nouvelles</strong> connexions depuis toute autre
 adresse de container (<code>@dlxall</code>) sont rejetées ; les réponses passent toujours, car le rejet ne
-correspond qu'à <code>ct state new</code>. Une politique d'ingress explicite remplace ce comportement par
-défaut. L'IPv6 dans le SDN est refusé par défaut (<code>table ip6</code> avec <code>policy drop</code>), car toutes les
+correspond qu'à <code>ct state new</code>. Ce rejet est un garde-fou qu'aucune règle
+entrante ne retire : les règles explicites sont émises avant lui, donc un <code>deny</code> n'ouvre jamais rien
+et un <code>allow</code> explicite (par exemple un <code>kind: Dependency</code>) admet toujours le seul pair qu'il nomme
+(<code>fw_chain_body</code> dans <code>infra.rs</code>). Une spec de pare-feu contenant une règle invalide est refusée en
+entier, et une isolation par namespace qui ne s'applique pas refuse <code>run</code>, <code>start</code> et <code>pod create</code> et
+défait l'attach, au lieu d'avertir. L'IPv6 dans le SDN est refusé par défaut (<code>table ip6</code> avec <code>policy drop</code>), car toutes les
 règles ci-dessus sont IPv4.</p>
 <blockquote>
 <p><strong>Légende</strong> — les participants sont des processus ; les flèches pleines sont des appels, des lignes de socket, des forks ou des clones (l'étiquette précise lequel) ; les flèches en pointillés sont des réponses ou des octets renvoyés ; une auto-flèche est un travail interne à ce processus ; les notes marquent un état ou une attente.</p>
@@ -636,6 +647,13 @@ particularités propres au provider traitées par le provider.</p>
   de la CLI uniquement lorsqu'il est configuré). Un enregistrement porte une closure de factory et un
   drapeau <code>auto_selectable</code>, de sorte que l'auto-détection ne construit jamais — et donc n'authentifie
   jamais — un backend distant. L'enregistrement ne fait aucune I/O.</li>
+<li><strong>Les cas d'usage à part du mécanisme.</strong> Ce que décide <code>create</code>, <code>stop</code> ou <code>status</code> vit dans le
+  context de compute sous la forme de <code>VmEngine</code>, à qui l'on remet un store d'enregistrements et
+  trois ports (<code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>) et qui n'exécute jamais lui-même de
+  programme ; l'adapter répond à ces ports avec son registre, <code>qemu-img</code> et <code>cloud-localds</code>.
+  L'orchestration se teste donc contre des faux, et une règle propre à un hyperviseur (la
+  désactivation de l'anti-spoof de libvirt, un domaine laissé sans enregistrement) doit être une
+  réponse de port plutôt qu'un <code>if</code> dans le cas d'usage (ADR-0044 P4b.3).</li>
 <li><strong>Le réseau d'une VM.</strong> Cloud Hypervisor s'exécute dans le netns du pin et obtient un <code>tap</code> sur un
   bridge réseau à travers le port <code>VmNetwork</code>, que le SDN implémente (<code>HostVmNetwork</code>) ; <code>delonix-vm</code>
   ne dépend pas de <code>delonix-sdn</code>. Comme le serveur DHCP est celui du moteur et qu'il est
@@ -649,11 +667,13 @@ particularités propres au provider traitées par le provider.</p>
   locaux la réalisent sous forme d'une ISO NoCloud dont le <code>network-config</code> associe la NIC principale
   par <strong>MAC</strong>, et un backend distant peut la réaliser nativement.</li>
 </ul>
-<p><strong>Où cela se trouve dans le code :</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>VmBackend</code>,
-<code>BackendRegistration</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>auto_detect</code>,
+<p><strong>Où cela se trouve dans le code :</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_backend.rs</code></a> (<code>VmBackend</code>,
+<code>BackendRegistration</code>) ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a> (<code>VmEngine</code>) ;
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/local_ports.rs</code></a> (<code>RegistryBackends</code>, <code>QemuImgDisks</code>,
+<code>CloudLocaldsSeed</code>) ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>select_for_create</code>, <code>auto_detect</code>,
 <code>backend_for</code>, <code>CloudHypervisorBackend</code>, <code>LibvirtBackend</code>, <code>launch_vmm</code>, <code>DEFAULT_CH_FIRMWARES</code>,
 <code>set_network</code>) ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a> (<code>generate_seed_iso</code>) ;
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>) ;
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>VmNetwork</code>, <code>VmBackends</code>, <code>LocalDiskImages</code>, <code>SeedBuilder</code>) ;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/vm_network.rs</code></a> (<code>HostVmNetwork</code>) ;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>sdn_reachable</code>, <code>dhcp_lease_ip</code>) ;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> (<code>ProxmoxBackend</code>) ;
@@ -819,7 +839,7 @@ propriété d'un label, et faire de la planification une fonction pure.</p>
 <h2 id="8-follow-up-questions">8. Questions de suivi<a class="hanchor" href="#8-follow-up-questions" aria-label="#">#</a></h2>
 <p><strong>Pourquoi ne pas ajouter un petit daemon pour les événements et les redémarrages ?</strong>
 Parce que chaque processus résident est un domaine de défaillance et une surface d'attaque. Le
-journal d'événements est un fichier en ajout seul (<code>delonix_runtime_core::events</code>), les redémarrages
+journal d'événements est un fichier en ajout seul (<code>delonix_node::events</code>), les redémarrages
 appartiennent au superviseur de chaque container, et la persistance au démarrage est une unit systemd
 par charge de travail (<code>delonix system boot</code>). Un daemon exige son propre ADR démontrant ce que les
 alternatives n'ont pas pu faire — voir <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> pour un cas

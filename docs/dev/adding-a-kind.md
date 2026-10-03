@@ -7,8 +7,8 @@ and so on (`delonix api-resources` lists them all). Adding one touches more than
 `match` arm: the table that describes what the Kind IS, the code that applies it, and the
 reconciler wiring that lets `stack plan`/`apply` treat it like every other Kind. This page
 walks through that in order, with a real Kind — **`Service`** (ADR-0032) — as the worked
-example throughout. It is not the newest Kind (`IPPool`, `NetworkGateway`, `NetworkZone` and
-`RuntimePolicy` came after it), but it is the one that exercises every path at once: primary,
+example throughout. It is not the newest Kind (`IPPool`, `NetworkGateway`, `NetworkZone`,
+`RuntimePolicy` and `SystemContainer` came after it), but it is the one that exercises every path at once: primary,
 converging, removable, namespaced, and backed by a registry of its own. The newer Kinds went
 through the same steps; every file cited below is read from the tree, not from memory of an
 older layout.
@@ -175,6 +175,13 @@ halfway, which the module doc calls "strictly worse than declaring the replace u
 the record with no restart needed — nothing about a `Service` is cold. A field left out of
 `hot_fields` still shows up in the plan; it just forces `Action::Replace` (refused without
 `--replace <Kind>/<name>`) instead of `Action::Update`.
+
+Some fields converge live in **one direction only**. A system container's root volume can be grown
+on a running container and never shrunk, so `SystemContainer.rootfs` is listed in
+`grow_only_fields`, not in `hot_fields`: `is_hot_change` treats a grow-only field as hot when both
+sides are numbers and the new one is not smaller, and as cold otherwise, so a shrink plans a
+`Replace`. If your Kind's own apply also decides whether a change needs a recreate, ask the same
+function — `cold_changes` in `cmd/system_container.rs` does — or `plan` and `apply` will disagree.
 
 Three tests in `cmd/stack.rs` keep this table honest against the `kinds.rs` table and against
 each other:

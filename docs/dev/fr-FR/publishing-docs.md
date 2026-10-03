@@ -1,4 +1,4 @@
-<!-- translated-from: publishing-docs.md sha256:e7464ba7b5b1c113bb55466d80c2d833cf32878863e3e6f711e35fbc59b0b281 -->
+<!-- translated-from: publishing-docs.md sha256:cbfc23fbab090933245166f0c98f167e920b47b6c555e923325a501e70f85133 -->
 # Publier la documentation
 
 **Avant de lire :** [Flux de contribution](contributing-workflow.md), [Releases et stabilité](releases-and-stability.md) (ce que fait la publication d'une release — la section *Ce qui se passe au moment de la release* de cette page en est la moitié documentation) et la [table généré vs écrit à la main](project-structure.md#generated-vs-hand-written) dans Structure du projet.
@@ -121,15 +121,20 @@ résultat avec elle.
 ## Ce qui se passe au moment de la release
 
 Le workflow de release (`.github/workflows/release.yml`) s'exécute quand on le demande
-(`gh workflow run release.yml -f tag=v4.4.0`) — un tag poussé seul ne fait rien. Pour la
+(`gh workflow run release.yml -f tag=v4.5.0`) — un tag poussé seul ne fait rien. Pour la
 documentation, il :
 
 1. régénère le site utilisateur contre le build de release et **échoue** si `docs/` diffère ;
 2. publie la GitHub Release avec `docs/releases/<tag>.md` comme notes (ou des notes générées lorsque
    ce fichier n'existe pas) ;
-3. fait un checkout de `main`, exécute `scripts/gen-releases.sh` (l'annexe `docs/RELEASES.md`) et
-   `scripts/dev_docs.py` (les faits du manuel), puis commite les deux sur `main` avec `[skip ci]`
-   lorsqu'ils ont changé.
+3. fait un checkout de `main`, exécute `scripts/gen-releases.sh` (l'annexe `docs/RELEASES.md`),
+   `scripts/dev_docs.py` (les faits du manuel) et `scripts/dev_docs_site.py` (le site du manuel,
+   avec `markdown` dans un virtualenv), puis commite ce qui a changé sur `main` avec `[skip ci]`.
+   Les générateurs tournent sous Python 3.12 (`actions/setup-python`, seulement à partir de cette
+   étape), parce que le runner du job lui-même fournit un Python sans `tomllib`. Si un générateur
+   échoue, l'étape commite quand même ce qui a été régénéré puis **échoue**, en nommant le
+   générateur — un run de release vert ne veut plus dire que le manuel a été régénéré, à moins que
+   cette étape soit verte elle aussi.
 
 Le **récit** du manuel n'est pas régénéré par la CI. Une fois une release publiée et validée, une
 étape de relecture menée par un mainteneur lit les changements entre le tag précédent et le nouveau

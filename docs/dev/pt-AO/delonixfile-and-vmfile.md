@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:40e8ce16ae06683b26d6f4cd83f6266c6b58c55570381c2f91aee3bb1d09acc5 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:6f5d44ef1d7d75962027fe64967cfba35f970ea114637b5c570bd74fb528b750 -->
 # Delonixfile e VMfile
 
 **Antes de leres:** [Clonar, construir e testar](build-and-test.md) (um binário e um state root
@@ -399,8 +399,9 @@ recusa-se a adivinhar).
 
 O `vm create` aplica os defaults registados só onde quem chama não decidiu: as flags
 `--vcpus`/`--memory` ganham a `VCPUS`/`MEMORY`; para o backend, `--backend` > o `HYPERVISOR` da
-imagem > `DELONIX_VM_BACKEND` > `vm default-backend` > auto-detecção (`resolve_vm_defaults` em
-`cmd/vm.rs`, e `delonix_vm::create_with`).
+imagem > `DELONIX_VM_BACKEND` > o `defaultProvider` do nó (ficheiro de providers, que o
+`vm default-backend --set` escreve) > o default legado por raiz > auto-detecção (`resolve_vm_defaults`
+em `cmd/vm.rs`, e `delonix_vm::standing_backend_choice`).
 
 **Offline por omissão, e porquê.** Um `RUN` que chega à internet produz uma imagem diferente
 conforme a altura em que correu. O `--network` é opt-in porque a coisa mais comum que um VMfile quer

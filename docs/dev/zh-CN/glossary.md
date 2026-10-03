@@ -1,4 +1,4 @@
-<!-- translated-from: glossary.md sha256:d7eafa64fdd49da297f0db08240898eafeb97292834d5c229bc98cd4d97d7053 -->
+<!-- translated-from: glossary.md sha256:92c4e642171d5eba335314e4b3aa06168a922809f3a8b2cc71332697e036a2db -->
 # 术语表
 
 **阅读前须知：** 没有——这是一份参考资料。看别的页面时把它放在旁边随时查。
@@ -15,6 +15,8 @@
 
 **Apply / plan / prune（应用／规划／修剪）** —— 声明式收敛（convergence）的三个动词。`delonix plan` 展示一次 apply 会改变什么，但什么都不改变（有变化时 `--detailed-exitcode` 会退出码 2）；`delonix apply` 会让清单（manifest）收敛；`--prune` 还会移除那些 stack 拥有、但清单里已经不再声明的东西，默认永远不会跑。见：`crates/contexts/delonix-stack/src/reconcile.rs::plan`，[声明式协调](cloud-native-primer.md#48-declarative-reconciliation)。
 
+**能力目录（Capability catalog）** —— 运维者可以向一个 provider 请求的那些事情的版本化清单（重启一台 VM、一次热迁移、一个按工作负载的防火墙……），也是任何「这个 provider 覆盖了 X」这类说法的分母。每个 provider 都用六种状态之一来回答每一个条目，而 `supported` 必须引用它的证据（一个测试、e2e 测试组里的一节、一个混沌场景或一个实机测试），一个 CLI 测试会检查被引用的东西确实存在。`delonix provider ls` 在本机上测量这些回答；`delonix provider matrix` 打印声明的视图，发布为 `docs/providers/capability-matrix.md`。见：`crates/contexts/delonix-compute/src/capability.rs`，[ADR-0050](../../adr/0050-libvirt-linux-providers-capability-catalog.md)。
+
 **CAS（content-addressed storage，内容寻址存储）** —— 镜像 blob 的存储：每一个 blob 都以它的 digest 为地址，存放在 state root 下的 `blobs/sha256/<hex>` 里，所以相同的内容只存一份。完整性是在内容**进入**这个 store 时检查的，而不是在读取的时候：一次 pull 会拿 manifest、config 和每一层去对照期望的 digest 做比较（`crates/adapters/delonix-oci/src/registry.rs` 里的 `verify_manifest_digest` 和各处 digest 比较）。`Cas::read` 是一次普通的文件读取，不会重新算 hash；`Cas::verify` 会按需重新算 hash。见：`crates/adapters/delonix-oci/src/cas.rs::Cas`，[磁盘上的状态](architecture.md#state-on-disk)。
 
 **CDI（Container Device Interface，容器设备接口）** —— 一份 CNCF 规范，描述怎么把一个设备（通常是 GPU）暴露给容器。Delonix 只**消费**已经由厂商工具生成好的 spec，把它们转换成和 `-v`/`--device` 一样的挂载和设备节点；它自己从来不去发现驱动。见：`crates/adapters/delonix-linux/src/cdi.rs`。
@@ -23,7 +25,7 @@
 
 **CNI（Container Network Interface，容器网络接口）** —— Kubernetes 用来给一个 pod 配置网络的插件标准。Delonix 可以针对一个命名的网络 namespace 跑一个节点的 CNI 插件链，这就是一个 CRI pod sandbox 拿到网络的方式。见：`crates/adapters/delonix-sdn/src/cni.rs::attach_named_netns`，[容器网络](cloud-native-primer.md#45-container-networking)。
 
-**契约（节点契约，Contract）** —— 单个节点的 API，用 Protocol Buffers 定义在 `proto/delonix/node/v1/` 下（包名 `delonix.node.v1`），并从它生成一份 OpenAPI 文档 `docs/api/openapi.yaml`。`scripts/contract_gate.py` 会守护格式、lint、跟上一个 tag 的兼容性，以及生成出来的 OpenAPI。这是一份已发布的契约；目前还没有服务端实现它。见：[重构进行到哪一步了](architecture.md#where-the-restructuring-stands)，[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)。
+**契约（节点契约，Contract）** —— 单个节点的 API，用 Protocol Buffers 定义在 `proto/delonix/node/v1/` 下（包名 `delonix.node.v1`），并从它生成一份 OpenAPI 文档 `docs/api/openapi.yaml`。`scripts/contract_gate.py` 会守护格式、lint、跟上一个 tag 的兼容性，以及生成出来的 OpenAPI。这是一份已发布的契约，部分地提供了服务：`delonix serve node-api`（`crates/interfaces/delonix-node-api`）会回答 `NodeService.ListProviders`，其余每一个 RPC 都回答 `UNIMPLEMENTED`。见：[重构进行到哪一步了](architecture.md#where-the-restructuring-stands)，[ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md)。
 
 **控制进程（Control process）** —— rootless 网络基础设施里可重启的那一半：引擎的二进制文件以内部参数 `netns control`（不是一个面向用户的命令）启动，跑在 pin 持有的那些 namespace 里，监听一个 `0600` 权限的 unix 控制 socket（只接受引擎自己的 uid），一次处理一个请求地完成 attach、发布端口、防火墙改动、DNS 和 DHCP。杀掉它不会打扰正在运行的工作负载；下一条命令会重启它。见：`crates/adapters/delonix-sdn/src/infra.rs::start_control`、`control_loop`；另见 **Holder / pin**。
 
@@ -59,9 +61,11 @@
 
 **Overlay / lowerdir（覆盖层／下层目录）** —— overlayfs 会把只读的镜像层（那些 `lowerdir`）叠在每个容器自己的可写 `upper` 目录之下。Delonix 把每一个镜像层解包一次，放在 `layers/` 下面，那个镜像的每一个容器都共享它们；容器目录里放着 `upper/`、`work/`、`merged/`，以及一个列出各层的 `overlay-lowers` 文件。挂载是在容器自己的 user namespace 里、用新的 mount API 完成的，每一层调用一次 `lowerdir+`，这样有很多层的镜像就不会撞上经典 `mount(2)` 选项长度的上限。见：`crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay`，`crates/adapters/delonix-linux/src/lib.rs::mount_overlay_if_marked`，[ADR-0037](../../adr/0037-overlay-mount-new-api.md)。
 
-**端口（Port，六边形架构里的 port）** —— 一个用例（use case）需要的、由某个 adapter 或 provider 实现的 trait，这样领域代码就永远不用点名一个具体的机制。例子：`VmBackend`，以及 compute 层的端口 `ImageStore`、`StorageProvider`、`NetworkProvider`、`WorkloadRuntime`。见：`crates/contexts/delonix-compute/src/ports.rs`、`launch.rs`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
+**端口（Port，六边形架构里的 port）** —— 一个用例（use case）需要的、由某个 adapter 或 provider 实现的 trait，这样领域代码就永远不用点名一个具体的机制。例子：`VmBackend`，以及 compute 层的端口 `ImageStore`、`StorageProvider`、`NetworkProvider`、`WorkloadRuntime`，以及供 VM 用例使用的 `VmBackends`、`LocalDiskImages`、`SeedBuilder`。见：`crates/contexts/delonix-compute/src/ports.rs`、`launch.rs`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
 
-**Provider** —— `crates/providers/` 下的一个 crate，针对**一个远端管理 API**（目前是 Proxmox VE 和 TrueNAS）实现一个端口，自己带着 HTTP 客户端。一个新的 provider 是作为某个端口的实现进入的，注册在组合根（composition root）——绝不会是代码里的 `if provider == …`——而且需要一份 ADR。见：[Provider](crates.md#providers)，[ADR-0008](../../adr/0008-proxmox-vm-backend.md)，[ADR-0009](../../adr/0009-truenas-storage-provisioner.md)。
+**Provider** —— `crates/providers/` 下的一个 crate，针对**一个远端管理 API**（目前是 Proxmox VE、OPNsense 和 TrueNAS）实现一个端口，自己带着 HTTP 客户端。一个新的 provider 是作为某个端口的实现进入的，注册在组合根（composition root）——绝不会是代码里的 `if provider == …`——而且需要一份 ADR。见：[Provider](crates.md#providers)，[ADR-0008](../../adr/0008-proxmox-vm-backend.md)，[ADR-0009](../../adr/0009-truenas-storage-provisioner.md)，[ADR-0051](../../adr/0051-opnsense-firewall-provider.md)。
+
+**Providers 文件（providers file）** —— `providers.yaml`（`apiVersion: config.delonix.io/v1`）：每个节点一个文件，说明这个节点有哪些 provider、引擎如何到达每一个，以及一个没有点名任何 provider 的请求由哪一个来服务（`defaultProvider`）。找到的第一个文件胜出，文件之间从不合并（`DELONIX_PROVIDERS_CONFIG`，然后 `$XDG_CONFIG_HOME/delonix/`，然后 `/etc/delonix/`）；未知的键、或直接写在文件里的密钥，会被点名拒绝。见：`bins/delonix-runtime-bin/src/cmd/providers_config.rs`、`delonix provider config show|validate|schema`，[ADR-0054](../../adr/0054-provider-configuration-file.md)。
 
 **棘轮（Ratchet）** —— 一个针对债务计数器的门禁（gate），当数字**上升**时会失败，而且当它**下降**、却没有在同一个 commit 里把提交过的基线（baseline）一起调低时，也会失败——这样进展就会被记录下来，永远不会丢失。`scripts/lang_ratchet.py`（代码里的葡萄牙语）和 `scripts/arch_fitness.py` 里的债务棘轮都是这么工作的；两者都有 `--list` 和 `--update`。见：[架构规则](contributing-workflow.md#architecture-rules-the-gates-enforce)。
 
@@ -79,11 +83,15 @@
 
 **Supervisor（监督进程）** —— `container run -d` fork 出来、作为容器真正父进程的那个进程：它会等待容器，记录它真实的退出状态（以及一个 `OOMKilled` 的原因），并应用 `--restart` 策略。因为它要 `fork`，所以必须从一个单线程的进程里启动；服务端会先重新执行一次干净的 `delonix`。见：`crates/adapters/delonix-linux/src/supervise.rs::run_supervised`，`crates/adapters/delonix-linux/src/lib.rs::wait_and_record`。
 
+**System container（系统容器）** —— 在一个远端 provider 上作为一个单元运行的完整用户空间（目前是 Proxmox VE 节点上的一个 LXC 容器），声明为 `kind: SystemContainer`。它**不是** `kind: Container`：provider 不提供 `exec`、日志或退出状态，引擎的数据平面也够不到它，所以它的语义更接近一台 VM（快照、备份、克隆、在节点之间迁移）。镜像由引擎自己拉取；由节点来运行它；在节点上手工做的改动就是漂移（drift）。始终是非特权的。见：`crates/contexts/delonix-compute/src/system_container.rs::SystemContainerProvider`、`crates/providers/delonix-proxmox/src/lxc.rs`、`bins/delonix-runtime-bin/src/cmd/system_container.rs`，[ADR-0058](../../adr/0058-proxmox-lxc-is-not-a-container-provider.md)。
+
 **userns（user namespace，用户命名空间）** —— 映射用户 id 的 Linux namespace，让一个进程只对它自己 namespace 拥有的对象有 root 权限。它是 rootless 运行的基石，在较新的 Ubuntu 上，位于预期路径之外的二进制文件可能会被 AppArmor 挡住，不能用它。见：[Linux namespace](cloud-native-primer.md#41-linux-namespaces-and-rootless-operation)，[AppArmor](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary)，`namespaces(7)` 和 `user_namespaces(7)`。
 
 **Verdict map（判决映射表）** —— 一个从 key 映射到判决（`jump`、`accept`……）的 nftables map，让一个包只需要一次查找就能找到自己的规则，而不用每个工作负载一条规则地遍历过去。Delonix 用 `fwmap`（一个工作负载的地址 → 它的防火墙链）和 `netpair`（一对网桥 → 一条打开两个网络之间路由的豁免）。见：`crates/adapters/delonix-sdn/src/infra.rs::FWMAP`、`NETPAIR_MAP`。
 
-**VmBackend** —— 每一个 VM backend 都要实现的端口（`boot`、`stop`、`destroy`、`is_running`、`ip`、暂停和快照……）。Cloud Hypervisor 和 libvirt 是默认注册好的；一个远端 provider 会在组合根注册。注册本身不做任何 I/O，而且自动检测是在构建任何东西**之前**先按注册信息过滤，所以一个远端 backend 只有在被选中时才会去连接。见：`crates/adapters/delonix-vm/src/lib.rs::VmBackend`、`register_backend`、`select_backend`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
+**VmBackend** —— 每一个 VM backend 都要实现的端口（`boot`、`stop`、`destroy`、`is_running`、`ip`、暂停和快照……）。它定义在计算上下文里，并由 `delonix-vm` 重新导出。Cloud Hypervisor 和 libvirt 是默认注册好的；一个远端 provider 会把一份注册信息交给组合根，由组合根去注册。注册本身不做任何 I/O，而且自动检测是在构建任何东西**之前**先按注册信息过滤，所以一个远端 backend 只有在被选中时才会去连接。见：`crates/contexts/delonix-compute/src/vm_backend.rs::VmBackend`、`crates/adapters/delonix-vm/src/lib.rs::register_backend`、`select_backend`，[作为端口（port）的 trait](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry)。
+
+**VmEngine** —— 作为计算上下文中一个结构体之方法的 VM 用例（create、stop、start、status、list、remove 以及 day-2 动词），对交给它的端口泛型化：一个 `StateRepository<Vm>`、`VmBackends`、`LocalDiskImages`、`SeedBuilder` 以及可选的 `VmNetwork`。它从不打开 store、从不运行命令、从不点名某个 backend；`delonix-vm` 每次调用都在自己的实现之上构建一个，并把自己的公开函数保留为包装器（ADR-0044 P4b.3）。见：`crates/contexts/delonix-compute/src/vm.rs::VmEngine`、`crates/adapters/delonix-vm/src/local_ports.rs`。
 
 **Workload（工作负载）** —— 两个相关的东西。`kind: Workload` 是一个糖衣 Kind，`spec.type: container|pod|vm|microvm`，在加载时会降级成对应的 Kind（[ADR-0001](../../adr/0001-workload-kind-schema.md)）。`delonix workload` 是把容器和 VM 放在一起列出、对它们操作的 day-2 命令组（`ls`、`describe`、`stop`、`rm`，[ADR-0002](../../adr/0002-compute-driver-trait.md)）。见：`crates/contexts/delonix-stack/src/kinds.rs::WORKLOAD_LOWERS_TO`，`bins/delonix-runtime-bin/src/cmd/workload.rs`。
 

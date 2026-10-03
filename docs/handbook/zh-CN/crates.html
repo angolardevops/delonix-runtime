@@ -343,7 +343,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state</code></a></td>
 <td>—</td>
 <td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code></td>
-<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
 <td><code>delonix-telemetry</code></td>
@@ -438,7 +438,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-opnsense</code>, <code>delonix-proxmox</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-opnsense</code>, <code>delonix-proxmox</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td><code>delonix-node-api-bin</code></td>
 </tr>
 <tr>
@@ -661,7 +661,8 @@ derive 宏）。</p>
 归属、额外网络、磁盘和网卡），每个入口点都会转换成的运行规格
 （<code>RunOpts</code>），以及把 <code>container run</code> 这个用例表达为端口之上一系列纯步骤——
 预检、解析、构建记录、接线网络、启动。它同时持有 Pod 规格类型及其到
-<code>RunOpts</code> 的转换，还有工作负载的 IPv4 网段。这些记录是从被移除的
+<code>RunOpts</code> 的转换、工作负载的 IPv4 网段，以及——自 ADR-0044 P4b.3b（#597）起——
+虚拟机用例（<code>vm::VmEngine</code>：create、stop、start、status、list、remove 以及 day-2 动词）。这些记录是从被移除的
 <code>delonix-runtime-core</code>（#406）移过来的。它<strong>不</strong>负责派生进程、拉取镜像或
 配置网络；它调用适配器实现的 trait。</p>
 <p><strong>关键模块</strong></p>
@@ -703,7 +704,11 @@ derive 宏）。</p>
 </tr>
 <tr>
 <td><code>ports</code></td>
-<td><code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>NetworkProvider</code>、<code>VmNetwork</code></td>
+<td><code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>NetworkProvider</code>、<code>VmNetwork</code>，以及虚拟机用例的三个端口：<code>VmBackends</code>（用例眼中的后端注册表）、<code>LocalDiskImages</code>（本地 overlay）、<code>SeedBuilder</code>（NoCloud seed）</td>
+</tr>
+<tr>
+<td><code>vm</code></td>
+<td>作为 <code>VmEngine&lt;'a, R, B, D, S&gt;</code> 方法的虚拟机用例，它接收状态根目录、一个 <code>StateRepository&lt;Vm&gt;</code>、上面那三个端口以及可选的 <code>VmNetwork</code>；还有它们用到的纯函数部分（<code>valid_vm_name</code>、<code>vm_namespace_of</code>、<code>admission_verdict</code>、<code>resolve_required_capabilities</code>、<code>boot_spec_of</code>/<code>config_from</code>、<code>adopt_pid_starttime</code>/<code>argv_is_vmm_for</code>）</td>
 </tr>
 <tr>
 <td><code>pod</code></td>
@@ -712,6 +717,22 @@ derive 宏）。</p>
 <tr>
 <td><code>notice</code></td>
 <td><code>Notice</code>，作为数据返回而不是直接打印出来的警告</td>
+</tr>
+<tr>
+<td><code>capability</code>、<code>capability_host</code></td>
+<td>带版本的能力目录（ADR-0050）：<code>Capability</code>、<code>CapabilityState</code>、<code>ProviderReport</code>、<code>CATALOG_VERSION</code>；以及每个提供者报告都复用的那个「此工具是否在 <code>PATH</code> 上」探测</td>
+</tr>
+<tr>
+<td><code>vm_backend</code>、<code>vm_error</code>、<code>vm_firewall</code></td>
+<td><code>VmBackend</code> 端口及 <code>VmConfig</code>、<code>BackendRegistration</code>/<code>BackendFactory</code>、虚拟机错误分组，以及按虚拟机的防火墙策略（ADR-0052）——由 ADR-0044 P4b.2 从 <code>delonix-vm</code> 移到这里，并在那边重新导出</td>
+</tr>
+<tr>
+<td><code>vm_provider</code></td>
+<td>ADR-0044 的虚拟机提供者端口：<code>VmSpec</code>、<code>Extensions</code>、<code>Provider</code>、<code>VmProvider</code></td>
+</tr>
+<tr>
+<td><code>system_container</code></td>
+<td>ADR-0058 的系统容器提供者端口（<code>SystemContainerSpec</code>、<code>SystemContainerProvider</code>：create、start、stop、destroy、observe、resize、快照、<code>grow_rootfs</code>、备份、<code>clone_as</code>、<code>move_to</code>、防火墙）——系统容器不是 <code>Container</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -790,10 +811,26 @@ derive 宏）。</p>
 <td>无 root 网络上 VM tap 的端口</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>ports.<wbr>rs:VmNetwork</code></a></td>
 </tr>
+<tr>
+<td><code>vm::VmEngine</code></td>
+<td>建立在注入端口之上的虚拟机用例；从不打开 store、从不运行命令、从不点名某个后端</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:VmEngine</code></a></td>
+</tr>
+<tr>
+<td><code>vm::valid_vm_name</code></td>
+<td>在引擎边界处校验名字（由 <code>delonix-vm</code> 重新导出）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:valid_vm_name</code></a></td>
+</tr>
+<tr>
+<td><code>ports::VmBackends</code>、<code>ports::LocalDiskImages</code>、<code>ports::SeedBuilder</code></td>
+<td>虚拟机用例向后端注册表、向 <code>qemu-img</code>、向 <code>cloud-localds</code> 要求的东西</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>ports.<wbr>rs</code></a></td>
+</tr>
 </tbody>
 </table></div>
 <p><strong>与……对话。</strong> 只直接调用 <code>delonix-model</code> 和 <code>delonix-node</code>
-（记录用到的 <code>safe_to_signal</code>，测试里用到的 <code>generate_id</code>）。其余一切都
+（记录用到的 <code>safe_to_signal</code>，测试里用到的 <code>generate_id</code>；虚拟机用例用到的
+<code>proc_starttime</code> 和 <code>mem_available_mib</code>）。其余一切都
 经由它的端口到达，由各适配器实现：</p>
 <div class="tablewrap"><table>
 <thead>
@@ -831,6 +868,22 @@ derive 宏）。</p>
 <td><code>VmNetwork</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/vm_network.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>vm_network.<wbr>rs:HostVmNetwork</code></a></td>
 </tr>
+<tr>
+<td><code>VmBackends</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs:RegistryBackends</code></a>（建立在注册表之上，注册表在 P4b.4 之前留在 <code>delonix-vm</code> 里）</td>
+</tr>
+<tr>
+<td><code>LocalDiskImages</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs:QemuImgDisks</code></a></td>
+</tr>
+<tr>
+<td><code>SeedBuilder</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/local_ports.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>local_ports.<wbr>rs:CloudLocaldsSeed</code></a></td>
+</tr>
+<tr>
+<td><code>StateRepository&lt;Vm&gt;</code></td>
+<td><code>delonix_state::<wbr>JsonStore&lt;Vm&gt;</code>，由 <code>delonix-vm</code> 传入（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> 中的 <code>engine</code>）</td>
+</tr>
 </tbody>
 </table></div>
 <p><strong>值得留意的外部依赖。</strong> <code>serde</code>、<code>schemars</code>（Cargo.toml 注释：规格类型的
@@ -838,9 +891,11 @@ JSON Schema 就在其定义旁边推导出来，这样发布的 schema 就不会
 产生偏差）。</p>
 <p><strong>测试。</strong> 使用假端口实现（<code>network.rs</code>、<code>launch.rs</code>、<code>run.rs</code> 中的
 <code>FakeNet</code>、<code>FakeRuntime</code>、<code>Fake</code>）的内联单元测试——用例在没有内核的情况下
-也能测试。</p>
+也能测试。<code>vm::tests</code> 对虚拟机用例做同样的事：一个内存中的 store、一个记录自己收到哪些
+调用的后端，以及一个假的磁盘和 seed。</p>
 <p><strong>从这里开始读。</strong> <code>src/record.rs</code>（<code>Container</code> 和 <code>Vm</code> 结构体），然后是
-<code>src/ports.rs</code>，再是 <code>src/run.rs</code>，最后是 <code>src/launch.rs</code>。</p>
+<code>src/ports.rs</code>，再是 <code>src/run.rs</code>，最后是 <code>src/launch.rs</code>。虚拟机的话，看 <code>src/vm.rs</code>
+（<code>VmEngine::create_with</code>）。</p>
 <p><strong>陷阱。</strong></p>
 <ul>
 <li><code>Container.userns</code> 说的是这个容器是否<strong>创建</strong>了自己的用户命名空间，
@@ -869,6 +924,13 @@ JSON Schema 就在其定义旁边推导出来，这样发布的 schema 就不会
 </li>
 <li><code>wire_network</code> 必须在 <code>launch::start</code> <strong>之前</strong>运行；它的模块文档
   记录了：否则一个受监督的 <code>-d</code> 启动会漏掉网络设置。</li>
+<li>用例对它们的端口是<strong>泛型</strong>的（<code>resolve_run&lt;I, S, D, H&gt;</code>、
+  <code>VmEngine&lt;'a, R, B, D, S&gt;</code>），而不是接收 <code>&amp;dyn</code> 端口：<code>StateRepository&lt;T&gt;</code> 有一个泛型
+  方法（<code>update&lt;F&gt;</code>），所以它不能做成 trait 对象（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/discovery/61_P4B_PLANO_MEDIDO.md" target="_blank" rel="noopener"><code>docs/discovery/61_P4B_PLANO_MEDIDO.md</code></a>，
+  P4b.3 附录）。</li>
+<li>上下文从不运行程序。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会统计 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a> 下的
+  <code>Command::new</code>（<code>context_spawns</code>，基线为 0）：虚拟机用例之所以能搬到这里，只是因为
+  <code>qemu-img</code> 和 <code>cloud-localds</code> 被放到了 <code>LocalDiskImages</code> 和 <code>SeedBuilder</code> 之后。</li>
 </ul>
 <h3 id="delonix-node"><code>delonix-node</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-node" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-node" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 节点上下文（crate 文档，ADR-0040 D2.2）：节点自身的、被多个
@@ -889,7 +951,7 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 <tbody>
 <tr>
 <td><code>host</code>（私有，在 crate 根重新导出）</td>
-<td><code>now_unix</code>、<code>in_initial_userns</code>、<code>initial_uid_map</code>、<code>is_rootless</code>、<code>fmt_local_ts</code>、<code>is_alive</code>、<code>proc_starttime</code>、<code>safe_to_signal</code>、<code>generate_id</code>、<code>self_bin</code></td>
+<td><code>now_unix</code>、<code>in_initial_userns</code>、<code>initial_uid_map</code>、<code>is_rootless</code>、<code>fmt_local_ts</code>、<code>is_alive</code>、<code>proc_starttime</code>、<code>safe_to_signal</code>、<code>generate_id</code>、<code>self_bin</code>、<code>mem_available_mib</code>（宿主机的 <code>MemAvailable</code>，为虚拟机准入检查而读取）</td>
 </tr>
 <tr>
 <td><code>events</code></td>
@@ -1028,6 +1090,11 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs:hot_fields_for</code></a></td>
 </tr>
 <tr>
+<td><code>reconcile::<wbr>is_hot_change</code></td>
+<td>某一个字段变更能否热收敛：热字段总是可以，只增长字段（目前是 <code>SystemContainer.rootfs</code>）只有在数值不缩小时才可以</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs:is_hot_change</code></a></td>
+</tr>
+<tr>
 <td><code>revision::record</code>、<code>revision::list</code></td>
 <td>apply 历史</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/revision.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>revision.<wbr>rs</code></a></td>
@@ -1044,7 +1111,9 @@ crate 都需要、否则就得各自复制一份的东西——只追加写入�
 <p><strong>陷阱。</strong> 新增一个 Kind 不只是在 <code>kinds.rs</code> 里加一行：CLI 里还有
 按 Kind 各自的代码（<code>cmd/stack.rs</code> 里的 <code>desired_of</code>/<code>actual_of</code>、
 <code>converge_and_stamp</code>、<code>destroy_one</code>），以及各自带测试的 schema/补全表。
-改动这张表之后要跑一遍 <code>delonix-runtime-bin</code> 的完整测试套件。</p>
+改动这张表之后要跑一遍 <code>delonix-runtime-bin</code> 的完整测试套件。一个由自己的 apply
+来判断某个改动是否需要重建的 Kind，必须去问 <code>is_hot_change</code>，就像
+<code>cmd/system_container.rs</code> 那样，这样 <code>plan</code> 和 <code>apply</code> 就永远不会得出不同的结论。</p>
 <h3 id="delonix-security-runtime"><code>delonix-security-runtime</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-security-runtime" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-security-runtime" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 节点自身的安全<strong>决策</strong>：策略文件、针对容器和虚拟机的单一准入
 评估、安全事件、可解释的安全态势评分，以及文本中 secret 的脱敏。全部都是
@@ -1181,6 +1250,14 @@ crate 文档中的一个文档测试。</p>
 <tr>
 <td><code>regulate</code>、<code>resource_advice</code>、<code>workload_view</code></td>
 <td>资源压力、宿主机建议、请求值与实际生效值的对照视图</td>
+</tr>
+<tr>
+<td><code>usage</code></td>
+<td>工作负载累计计数器的一次采样（<code>cgroup_sample</code>、<code>process_sample</code>），读不到的内容在 <code>Unmeasured</code> 中点名说明，而不是报告为零——这就是 MCP 的 <code>workload.usage</code> 返回的东西</td>
+</tr>
+<tr>
+<td><code>provider_report</code></td>
+<td>Linux 提供者针对容器和 Pod 对能力目录的回答</td>
 </tr>
 </tbody>
 </table></div>
@@ -1380,6 +1457,11 @@ systemd scope）、<code>apparmor_parser</code>、<code>ldconfig</code>、<code>
 <td>cosign 风格的验证</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/sign.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>sign.<wbr>rs:verify_signature</code></a></td>
 </tr>
+<tr>
+<td><code>write_oci_media_archive</code></td>
+<td>使用 OCI 媒体类型的 OCI 布局归档（存储里的 blob 逐字节原样保留，只重写清单），Proxmox VE 节点接受这种归档；<code>image save</code> 仍使用 <code>write_oci_archive</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/save.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>save.<wbr>rs:write_oci_media_archive</code></a></td>
+</tr>
 </tbody>
 </table></div>
 <p><strong>与……对话。</strong> <code>delonix-model</code>——自身的错误会转换成它的 <code>Error</code>
@@ -1403,6 +1485,10 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 <li>容器启动所依据的根文件系统是共享层之上的一个 overlay，带一个标记
   文件；挂载动作本身发生在容器自己的 init 里
   （<code>delonix_linux::mount_overlay_if_marked</code>），而不是在这里。</li>
+<li>blob 上传<strong>会重试，但不会续传</strong>：每次尝试都先发一个 <code>HEAD</code>（镜像仓库
+  已有的 blob 不会发送第二次），然后在一个 <code>PUT</code> 里从第 0 字节重新发送整个
+  blob。相比之下，拉取会用 <code>Range</code> 续传。被中断的上传会报告它进行到了哪里
+  （<code>connection lost with N of M bytes sent</code>，见 <code>registry.rs</code>）。</li>
 </ul>
 <h3 id="delonix-sdn"><code>delonix-sdn</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-sdn" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 无 root 的 SDN 和防火墙。一个长寿命的 <em>pin</em> 进程持有一个
@@ -1410,7 +1496,9 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 控制套接字，并拥有网桥、nftables 规则、DHCP 和内部 DNS；一个
 <code>slirp4netns</code> 把该命名空间桥接到宿主机。它还覆盖了在没有自定义网络时
 <code>-p</code> 所用的按容器 slirp 路径、IPAM、CNI 插件的执行、WireGuard overlay，
-以及可选的 eBPF 流量统计。它重新导出 <code>delonix-net-rules</code>。它不派生容器。</p>
+以及可选的 eBPF 流量统计。它还定义了远程网络提供者的端口及其注册表
+（<code>GatewayProvider</code>、<code>NetworkZoneProvider</code>），以及这些提供者在自己创建的
+对象上盖的归属标记。它重新导出 <code>delonix-net-rules</code>。它不派生容器。</p>
 <p><strong>关键模块</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -1459,6 +1547,26 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 <tr>
 <td><code>pin_userns</code></td>
 <td>pin 自身的命名空间及 id 映射</td>
+</tr>
+<tr>
+<td><code>gateway</code></td>
+<td><code>GatewayProvider</code> 端口及其注册表（ADR-0051），用于通过自身 API 访问的边界设备</td>
+</tr>
+<tr>
+<td><code>network_zone</code></td>
+<td><code>NetworkZoneProvider</code> 端口及其注册表，用于集群自身的 SDN（ADR-0049 附录）</td>
+</tr>
+<tr>
+<td><code>ownership</code></td>
+<td><code>OwnerMark</code>：引擎在远程提供者上创建的对象如何被认作自己的——靠标记，而不是靠名字</td>
+</tr>
+<tr>
+<td><code>gc</code></td>
+<td><code>find_strays</code>/<code>terminate</code>：状态根已不存在的网络基础设施（pin、control、slirp），供 <code>net netns gc</code> 使用</td>
+</tr>
+<tr>
+<td><code>provider_report</code></td>
+<td>网络提供者对能力目录的回答</td>
 </tr>
 </tbody>
 </table></div>
@@ -1541,11 +1649,16 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
   <code>apply_firewall_all</code>。</li>
 </ul>
 <h3 id="delonix-vm"><code>delonix-vm</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-vm" aria-label="#">#</a></h3>
-<p><strong>用途。</strong> 微虚拟机和虚拟机，位于 <code>VmBackend</code> trait 与一个运行时
-<strong>注册表</strong>（backend registry）之后。Cloud Hypervisor 和 libvirt 是本地
-后端；一个远程后端从该 crate 之外把自己注册进去。它拥有虚拟机记录、
-启动与生命周期、快照、cloud-init 种子的生成，以及后端选择（显式指定、
-默认文件，或自动检测）。它不持有 HTTP 客户端或 provider 凭据。</p>
+<p><strong>用途。</strong> 本节点上的微虚拟机和虚拟机：位于 <code>VmBackend</code> trait（自 ADR-0044 P4b.2
+起定义在 <code>delonix-compute</code> 中，并在这里重新导出）之后的两个本地后端（Cloud
+Hypervisor 和 libvirt）、运行时的后端<strong>注册表</strong>（backend registry，在 P4b.4 之前
+留在这里），以及后端选择（显式指定、默认文件，或自动检测）。远程后端由组合根
+（composition root）注册，所用的注册项由其提供者 crate 构建。自 P4b.3（#596、#597）
+起，虚拟机用例——create、stop、start、status、list、remove、快照以及其他 day-2
+动词——都位于 <code>delonix_compute::vm::VmEngine</code> 中；本 crate 实现它们调用的端口
+（<code>local_ports.rs</code>），每次调用都在自己的 <code>JsonStore&lt;Vm&gt;</code> 之上组装一个 engine，并把自己的
+公开函数（<code>create_with</code>、<code>stop</code>、<code>start</code>……）保留为一行的包装器，因此没有任何调用方需要
+改动。它不持有 HTTP 客户端或 provider 凭据。</p>
 <p><strong>关键模块</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -1557,11 +1670,27 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 <tbody>
 <tr>
 <td><code>lib.rs</code></td>
-<td><code>VmConfig</code>、<code>VmBackend</code>、注册表、<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>、<code>create_with</code>、<code>start</code>/<code>stop</code>/<code>remove</code>、快照、<code>status</code>/<code>list</code></td>
+<td><code>VmConfig</code>/<code>VmBackend</code> 的重新导出、注册表（<code>BACKENDS</code>、<code>register_backend</code>、<code>select_backend</code>、<code>select_for_create</code>、<code>backend_for</code>）、<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>、默认后端文件，以及建立在 <code>engine(base)</code> 之上的生命周期包装器</td>
+</tr>
+<tr>
+<td><code>local_ports</code></td>
+<td>本适配器对虚拟机用例各端口的实现：<code>RegistryBackends</code>（<code>VmBackends</code>，建立在注册表之上）、<code>QemuImgDisks</code>（<code>LocalDiskImages</code>，qcow2 overlay）、<code>CloudLocaldsSeed</code>（<code>SeedBuilder</code>）</td>
 </tr>
 <tr>
 <td><code>cloudinit</code></td>
 <td><code>build_user_data</code>、<code>build_network_config</code>、<code>generate_seed_iso</code></td>
+</tr>
+<tr>
+<td><code>capabilities</code></td>
+<td>每个本地后端针对能力目录声明的内容，以及把声明的「是」变成「本宿主机上没有」的宿主机探测</td>
+</tr>
+<tr>
+<td><code>provider</code></td>
+<td>ADR-0044 <code>VmProvider</code> 端口上的两个本地后端（<code>LocalVmProvider</code>）</td>
+</tr>
+<tr>
+<td><code>firewall</code></td>
+<td>重新导出 <code>delonix_compute::<wbr>vm_firewall</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -1577,13 +1706,18 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 <tbody>
 <tr>
 <td><code>VmBackend</code></td>
-<td>后端端口（<code>boot</code>、<code>stop</code>、<code>destroy</code>、<code>resume</code>、<code>snapshot</code>、<code>ip</code>、<code>manages_own_storage</code>、<code>auto_selectable</code>……）</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:VmBackend</code></a></td>
+<td>后端端口（<code>boot</code>、<code>stop</code>、<code>destroy</code>、<code>resume</code>、<code>snapshot</code>、<code>ip</code>、<code>manages_own_storage</code>、<code>auto_selectable</code>……），重新导出</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs:VmBackend</code></a></td>
 </tr>
 <tr>
-<td><code>register_backend</code>、<code>BackendRegistration</code></td>
-<td>通过工厂函数添加一个后端</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><code>register_backend</code></td>
+<td>通过它的 <code>BackendRegistration</code> 添加一个后端</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:register_backend</code></a></td>
+</tr>
+<tr>
+<td><code>provider_reports</code></td>
+<td>每个已注册后端的能力报告，供 <code>provider ls</code> 使用</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:provider_reports</code></a></td>
 </tr>
 <tr>
 <td><code>set_network</code></td>
@@ -1592,38 +1726,41 @@ OCI 镜像类型）、<code>sha2</code>、<code>tar</code>、<code>flate2</code>
 </tr>
 <tr>
 <td><code>VmConfig</code></td>
-<td>要创建什么</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:VmConfig</code></a></td>
+<td>要创建什么，重新导出</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_backend.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm_backend.<wbr>rs:VmConfig</code></a></td>
 </tr>
 <tr>
 <td><code>create_with</code>、<code>start</code>、<code>stop</code>、<code>remove</code>、<code>status</code>、<code>list</code></td>
-<td>生命周期管理</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td>生命周期管理：每一个都构建一个 <code>VmEngine</code>，并调用同名方法</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a>；逻辑在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs</code></a></td>
 </tr>
 <tr>
-<td><code>snapshot</code>、<code>restore</code>、<code>snapshots</code>、<code>delete_snapshot</code></td>
-<td>检查点</td>
+<td><code>snapshot</code>、<code>restore</code>、<code>snapshots</code>、<code>delete_snapshot</code>、<code>backup_disk_live</code></td>
+<td>检查点与在线磁盘备份，形态相同</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><code>valid_vm_name</code></td>
-<td>引擎边界处的名称校验</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:valid_vm_name</code></a></td>
+<td>引擎边界处的名称校验，重新导出</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>vm.<wbr>rs:valid_vm_name</code></a></td>
 </tr>
 </tbody>
 </table></div>
 <p><strong>与……对话。</strong> <code>delonix-model</code>、<code>delonix-node</code>、<code>delonix-compute</code>
-（<code>Vm</code> 记录、<code>VmNetwork</code> 端口）、<code>delonix-net-rules</code>、<code>delonix-state</code>
+（<code>Vm</code> 记录、<code>VmEngine</code> 用例，以及它所实现或调用的端口）、<code>delonix-net-rules</code>、<code>delonix-state</code>
 （<code>JsonStore&lt;Vm&gt;</code>、<code>write_atomic</code>；ADR-0040 P4 中已声明并将被移除的分层
-例外）。宿主机工具：<code>cloud-hypervisor</code>（以及它在 unix 套接字上的 HTTP
+例外——engine 经由 <code>StateRepository&lt;Vm&gt;</code> 访问 store，但 <code>engine(base)</code> 仍然自己打开它传进去的
+那个 <code>JsonStore</code>）。宿主机工具：<code>cloud-hypervisor</code>（以及它在 unix 套接字上的 HTTP
 API，比如 <code>PUT /api/v1/vm.pause</code>）、<code>virsh</code>、<code>qemu-img</code>、<code>cloud-localds</code>、
 <code>sh</code>。网络只经由已注册的 <code>VmNetwork</code> 到达；CLI 在启动时注册
 <code>delonix_sdn::vm_network::HostVmNetwork</code>
 （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>）。</p>
 <p><strong>值得留意的外部依赖。</strong> <code>libc</code>、<code>tracing</code>——刻意保持很少。</p>
-<p><strong>测试。</strong> <code>lib.rs</code> 中的内联单元测试模块。</p>
-<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的 <code>VmBackend</code> 和注册表，然后是
-<code>create_with</code>，再是某一个具体后端（<code>CloudHypervisorBackend</code>）。</p>
+<p><strong>测试。</strong> <code>lib.rs</code> 中的内联单元测试模块；用例本身在 <code>delonix-compute</code>（<code>vm::tests</code>）中
+针对假端口进行测试。</p>
+<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的注册表和 <code>src/local_ports.rs</code>，然后是
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm.rs</code></a> 中的 <code>VmEngine::create_with</code>，再是某一个具体后端
+（<code>CloudHypervisorBackend</code>）。</p>
 <p><strong>陷阱。</strong></p>
 <ul>
 <li>对 Cloud Hypervisor 来说，IP 是从 MAC 地址<strong>计算</strong>出来的，而不是
@@ -1633,13 +1770,18 @@ API，比如 <code>PUT /api/v1/vm.pause</code>）、<code>virsh</code>、<code>q
   需要解析输出的宿主机工具调用都要用它。</li>
 <li><code>stop</code> 和 <code>destroy</code> 是两个不同的 trait 方法：对于一个远程后端来说，
   destroy 还会连带删除磁盘。</li>
+<li>对虚拟机操作<em>做什么</em>的改动，放进 <code>delonix_compute::vm</code>；关于某一个 hypervisor 的知识
+  （一次 <code>virsh</code> 调用、只属于 libvirt 的 anti-spoof 退出选项、一个没有记录的遗留 domain）
+  放进后端，或放到 <code>VmBackends</code> 之后（<code>admit</code>、<code>unrecorded</code>、<code>stop_unrecorded</code>、
+  <code>remove_unrecorded</code>）。这里的包装器应当保持为一行。</li>
 </ul>
 <h3 id="delonix-volume"><code>delonix-volume</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-volume" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 命名卷（<code>&lt;root&gt;/volumes/&lt;name&gt;/_data</code>）和绑定挂载，包括 <code>-v</code>
 语法、配额与用量测量、网络存储卷（由宿主机工具挂载的 NFS/CIFS/WebDAV）、
 父卷之下的共享，以及快照。它实现了 compute 层的 <code>StorageProvider</code> 端口。
 它不创建 NAS 数据集（那是 <code>delonix-truenas</code> 的事）。</p>
-<p><strong>关键模块。</strong> 单一的 <code>lib.rs</code>。</p>
+<p><strong>关键模块。</strong> <code>lib.rs</code>，以及 <code>provider_report</code>（存储提供者对能力目录的
+回答）。</p>
 <p><strong>主要公开 API</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -1936,17 +2078,61 @@ Rust 实现的 AEAD，不依赖 C，可在 musl/aarch64 上构建）。</p>
 </ul>
 <h2 id="providers">提供者层（Providers）<a class="hanchor" href="#providers" aria-label="#">#</a></h2>
 <p>Provider 是与外部系统的管理 API 对话的后端。它们被放在适配器层之外，
-是为了让「与远程管理 API 对话」这件事不进入引擎的适配器层（两个 crate
-的 Cargo.toml 注释都这么说）。这并不是说「适配器里不能有 HTTP」：
+是为了让「与远程管理 API 对话」这件事不进入引擎的适配器层（每个
+provider crate 的 Cargo.toml 注释都这么说）。这并不是说「适配器里不能有 HTTP」：
 <code>delonix-oci</code> 就有自己的 OCI 镜像仓库客户端，<code>delonix-telemetry</code> 也是
 通过 HTTP 导出 OTLP。</p>
 <h3 id="delonix-proxmox"><code>delonix-proxmox</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-proxmox" aria-label="#">#</a></h3>
-<p><strong>用途。</strong> 一个由<strong>单个</strong> Proxmox VE 节点的 REST API 支撑、且显式指定
-节点名的 <code>VmBackend</code>。没有清单目录，也不做节点选择。它从不触碰本地磁盘
-（<code>manages_own_storage</code> 是 <code>true</code>），也从不被自动检测选中
-（<code>auto_selectable</code> 是 <code>false</code>，因为回答「是否可用？」这个问题得付出一次
-网络往返的代价）。</p>
-<p><strong>关键模块。</strong> 单一的 <code>lib.rs</code>。</p>
+<p><strong>用途。</strong> 一个通过 REST API 访问的 Proxmox VE 目标，位于引擎的四个端口
+之后：一个 <code>VmBackend</code>（虚拟机）、虚拟机或系统容器所在节点的按客户机防火墙
+（ADR-0052）、用于集群自身 SDN 的 <code>NetworkZoneProvider</code>（ADR-0049
+附录），以及用于节点 LXC 容器的 <code>SystemContainerProvider</code>（ADR-0058，
+<code>kind: SystemContainer</code>）。目标是一个显式指定的节点——没有清单目录，也不做调度——但每台
+虚拟机都按它实际运行所在的节点寻址，所以在集群内被迁移过的虚拟机仍然
+能被找到（ADR-0053）。它从不触碰本地磁盘（<code>manages_own_storage</code> 是
+<code>true</code>），也从不被自动检测选中（<code>auto_selectable</code> 是 <code>false</code>：回答
+「是否可用？」这个问题得付出一次网络往返的代价）。它对 Proxmox API 的
+覆盖是一份测量出来的矩阵，而不是一句声明（ADR-0049，
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/matrix-9.2.2.md" target="_blank" rel="noopener"><code>docs/proxmox/matrix-9.2.2.md</code></a>）。</p>
+<p><strong>关键模块</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>模块</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib.rs</code></td>
+<td><code>Target</code>、<code>Auth</code>、<code>Client</code>（所有虚拟机、磁盘、备份、guest agent 和上传调用）、任务 <code>Ledger</code>、<code>ProxmoxBackend</code>（<code>impl VmBackend</code>）、<code>registration</code>、<code>capability_report</code></td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>该 crate 的类型化错误，每个 HTTP 状态类别一个</td>
+</tr>
+<tr>
+<td><code>cluster</code></td>
+<td>目标所在集群的只读视图（<code>provider describe proxmox --probe</code>）</td>
+</tr>
+<tr>
+<td><code>vm_firewall</code></td>
+<td>节点自身的按客户机防火墙：建立在 <code>GuestFirewall</code> 之上的同一个策略引擎，分别为虚拟机（<code>QemuFirewall</code>，<code>/qemu/{vmid}/firewall/…</code>）和系统容器（<code>LxcFirewall</code>，<code>/lxc/{vmid}/firewall/…</code>）实现</td>
+</tr>
+<tr>
+<td><code>sdn</code>、<code>sdn_routing</code>、<code>sdn_lock</code></td>
+<td>集群自身的 SDN（zone、vnet、子网、控制器、fabric、DHCP、IP 预留、前缀列表、路由映射），以及被当作事务使用的全局 SDN 锁（<code>sdn_transaction</code>）</td>
+</tr>
+<tr>
+<td><code>network_zone</code></td>
+<td><code>ProxmoxNetworkZoneProvider</code>，<code>kind: NetworkZone</code> 背后的 <code>NetworkZoneProvider</code> 实现</td>
+</tr>
+<tr>
+<td><code>lxc</code></td>
+<td><code>ProxmoxSystemContainerProvider</code>，节点上的系统容器（ADR-0058）：从按其清单 digest 暂存的模板创建、start/stop/destroy、在线 <code>resize</code> 与 <code>grow_rootfs</code>、快照、节点存储上的备份、完整的 <code>clone_as</code>、离线 <code>move_to</code> 到另一个节点，以及通过 <code>LxcFirewall</code> 的防火墙</td>
+</tr>
+</tbody>
+</table></div>
 <p><strong>主要公开 API</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -1958,13 +2144,13 @@ Rust 实现的 AEAD，不依赖 C，可在 musl/aarch64 上构建）。</p>
 </thead>
 <tbody>
 <tr>
-<td><code>Target</code>、<code>Auth</code></td>
-<td>节点端点、节点名、凭据</td>
+<td><code>Target</code>、<code>Auth</code>、<code>ClientOptions</code></td>
+<td>节点端点、节点名、凭据、路由跟踪</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><code>Client</code></td>
-<td>API 客户端（<code>connect</code>、<code>create_vm</code>、<code>start</code>、<code>stop</code>、<code>destroy</code>、<code>snapshot</code>、<code>wait_task</code>……）</td>
+<td>API 客户端（<code>connect_with</code>、<code>wait_task</code>、<code>stage_import</code>、<code>stage_template</code>……）</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs:Client</code></a></td>
 </tr>
 <tr>
@@ -1973,26 +2159,110 @@ Rust 实现的 AEAD，不依赖 C，可在 musl/aarch64 上构建）。</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs:ProxmoxBackend</code></a></td>
 </tr>
 <tr>
-<td><code>register</code></td>
-<td>把该后端注册到 <code>delonix-vm</code> 的注册表里</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs:register</code></a></td>
+<td><code>ProxmoxSystemContainerProvider</code></td>
+<td><code>SystemContainerProvider</code> 的实现（<code>new(client, template_storage, rootfs_storage)</code>）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lxc.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lxc.<wbr>rs:ProxmoxSystemContainerProvider</code></a></td>
+</tr>
+<tr>
+<td><code>registration</code></td>
+<td>组合根注册的 <code>BackendRegistration</code>；在该后端被选中之前不做任何 I/O</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs:registration</code></a></td>
+</tr>
+<tr>
+<td><code>capability_report</code>、<code>network_capability_report</code></td>
+<td>该提供者针对能力目录声明的内容（只声明，从不探测）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<p><strong>与……对话。</strong> <code>delonix-vm</code>（该 trait 以及 <code>register_backend</code>；一个
-已声明的分层例外）、<code>delonix-compute</code>（<code>Vm</code> 记录）和 <code>delonix-model</code>。
-通过阻塞式的 <code>reqwest</code> 以 HTTPS 与节点通信。CLI 在启动时根据环境配置
-注册它（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured</code></a>）。</p>
+<p><strong>与……对话。</strong> <code>delonix-compute</code>（<code>VmBackend</code> 端口、<code>Vm</code> 记录、能力
+目录）、<code>delonix-model</code>，以及为 <code>NetworkZoneProvider</code> 端口而依赖的
+<code>delonix-sdn</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 中一个已声明的分层例外）。通过
+阻塞式的 <code>reqwest</code> 以 HTTPS 与节点通信。CLI 在启动时根据 providers 文件
+或环境构建它的目标并注册
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured</code></a>）。</p>
+<p><strong>值得留意的外部依赖。</strong> <code>reqwest</code>（阻塞式，rustls）、<code>serde</code>、
+<code>serde_json</code>、<code>sha2</code>（节点用来校验上传内容的校验和）。</p>
+<p><strong>测试。</strong> 内联单元测试；<code>tests/failure_injection.rs</code> 让客户端对着一个
+TLS 模拟节点运行（401/403/404/409/5xx、被截断的响应体、失败的任务、
+超时）；<code>tests/live.rs</code> 会对一个真实节点跑测试，除非设置了
+<code>DELONIX_PROXMOX_TEST_URL</code>，否则会打印一行说明并跳过（见
+<a href="environment-variables.html">环境变量</a>）。</p>
+<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的 crate 文档，然后是
+<code>Client::wait_task</code> 和 <code>task_verdict</code>，再是 <code>impl VmBackend for ProxmoxBackend</code>。</p>
+<p><strong>陷阱。</strong></p>
+<ul>
+<li>大多数操作返回的是一个任务 id，而不是结果。一个已经完成的任务，无论
+  成功与否都会报告 <code>status: stopped</code>；真正的结论要看 <code>exitstatus</code>，而
+  <code>WARNINGS: &lt;n&gt;</code> 是带警告的成功，不是失败（<code>task_verdict</code>）。</li>
+<li>丢失的应答不等于丢失的请求：任务 id 会在等待之前写入该虚拟机的账本
+  （<code>&lt;vmdir&gt;/proxmox-tasks.json</code>），传输失败之后，客户端会去查找该任务
+  或它的效果，而不是重发一个非幂等的写操作。有一个测试会读取该 crate
+  的源码，一旦发现任务路径之外的写操作就会失败。</li>
+<li>系统容器按其记录中的定位符（<code>proxmox:&lt;node&gt;:&lt;vmid&gt;</code>）寻址，但每个操作都经由
+  <code>located</code>（<code>src/lxc.rs</code>）来解析它：当容器不在记录的节点上时，会去问集群
+  （<code>/cluster/resources</code>）它在哪里，这样一次记录从未被更新的迁移会被追踪到，而不会被当作
+  已消失——那样会规划出第二个容器。</li>
+<li>特权或嵌套的系统容器按设计会被拒绝（ADR-0058）：提供者的 <code>refuse</code> 和 CLI 的
+  <code>reject_privilege</code>（清单里的 <code>unprivileged</code>、<code>privileged</code>、<code>features</code>、<code>nesting</code>）回答
+  DX-1540，而不是创建一个非特权容器然后以 0 退出。</li>
+</ul>
+<h3 id="delonix-opnsense"><code>delonix-opnsense</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-opnsense" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-opnsense" aria-label="#">#</a></h3>
+<p><strong>用途。</strong> 一个由 OPNsense 一体机自身 REST API 支撑的 <code>GatewayProvider</code>
+（ADR-0051）：用于节点出站和边界策略的防火墙别名与过滤规则，位于
+<code>kind: NetworkGateway</code> 之后。只有生成的 key/secret 对才能认证（GUI 账号
+会被一体机拒绝）。注册时不做任何 I/O；该提供者第一次被选中时才会联系
+一体机。</p>
+<p><strong>关键模块</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>模块</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib.rs</code></td>
+<td><code>Target</code>、<code>Auth</code>、<code>Client</code>（<code>ensure_alias</code>、<code>ensure_rule</code>、<code>commit</code>、<code>pending_changes</code>……）、<code>OpnsenseGatewayProvider</code>（<code>impl GatewayProvider</code>）、<code>register_with</code></td>
+</tr>
+<tr>
+<td><code>capabilities</code></td>
+<td><code>capability_report</code>，只声明，从不探测</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>该 crate 的类型化错误</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>与……对话。</strong> <code>delonix-sdn</code>（<code>GatewayProvider</code> 端口及其注册表，一个
+已声明的分层例外）、<code>delonix-compute</code>（能力目录）、<code>delonix-model</code>。
+通过阻塞式的 <code>reqwest</code> 以 HTTPS 与一体机通信。CLI 根据 providers 文件
+或环境注册它（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/gatewayproviders.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/gatewayproviders.rs</code></a>）。</p>
 <p><strong>值得留意的外部依赖。</strong> <code>reqwest</code>（阻塞式，rustls）、<code>serde</code>、
 <code>serde_json</code>。</p>
-<p><strong>测试。</strong> 内联单元测试；
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> 会对一个真实节点跑测试，
-除非设置了 <code>DELONIX_PROXMOX_TEST_URL</code>，否则会打印一行说明并跳过。</p>
-<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的 crate 文档，然后是
-<code>Client::wait_task</code>，再是 <code>impl VmBackend for ProxmoxBackend</code>。</p>
-<p><strong>陷阱。</strong> 大多数操作返回的是一个任务 id，而不是结果。一个已经完成的
-任务，无论成功与否都会报告 <code>status: stopped</code>；真正的结论要看
-<code>exitstatus</code>（<code>task_verdict</code>，crate 文档）。</p>
+<p><strong>测试。</strong> 内联单元测试；<code>tests/failure_injection.rs</code> 针对一个 TLS 模拟
+一体机（302/401/403/404、在 HTTP 200 中返回的校验失败、被截断的响应体）；
+<code>tests/live.rs</code> 针对一台真实一体机，未配置时跳过。</p>
+<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的 crate 文档（实机 spike 测量到了
+什么，以及归属规则），然后是 <code>Client::request</code>，再是
+<code>impl GatewayProvider</code>。</p>
+<p><strong>陷阱。</strong></p>
+<ul>
+<li>校验失败会以 HTTP <strong>200</strong> 加上 <code>"result":"failed"</code> 返回；
+  <code>Client::request</code> 会检查每一个 2xx 响应体里有没有它。完全没有凭据时
+  会返回 <code>302</code>（重定向到 GUI 登录页），所以客户端从不跟随重定向。</li>
+<li>一个对象属于引擎，是靠它的标记，而不是它的名字：该 crate 创建的每个
+  别名和规则都带有防火墙类别 <code>delonix-owner:&lt;token&gt;</code>
+  （<code>delonix_sdn::ownership::OwnerMark</code>）。同名但没有标记的对象会被拒绝，
+  在一体机上被改过的我们自己的对象会被报告为漂移；当有别人的变更处于
+  暂存状态时，commit 会拒绝执行，因为一体机的 apply 会推送整份配置。</li>
+<li>失败穿过 <code>GatewayProvider</code> trait 时使用 <code>delonix_model::Error::from</code>，
+  从不使用 <code>into_root</code>，后者会剥掉字典编号：在 zone 提供者上测量到，一个
+  <code>DX-5340</code> 的拒绝到达时只剩一个光秃秃的 <code>5000</code>（见
+  <code>impl GatewayProvider for OpnsenseGatewayProvider</code> 上方的注释）。</li>
+</ul>
 <h3 id="delonix-truenas"><code>delonix-truenas</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-truenas" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 在 TrueNAS SCALE 一体机上做资源配置：数据集、配额、NFS
 共享和权限，这样 <code>kind: Volume</code> 就不必靠人手工去建。它只<strong>创建</strong>存在于
@@ -2217,6 +2487,85 @@ crate 文档写明：新的本地客户端应该接到 ADR-0040/0041 的节点�
 <code>run_cli</code>，再是 <code>src/dashstats.rs</code>。</p>
 <p><strong>陷阱。</strong> 传给 CLI 的参数会被校验，拒绝以 <code>-</code> 开头的内容
 （<code>valid_arg</code>），否则一个 id 有可能被当成一个 flag 解析。</p>
+<h3 id="delonix-node-api"><code>delonix-node-api</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-node-api" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-node-api" aria-label="#">#</a></h3>
+<p><strong>用途。</strong> 在本地 unix 套接字上提供的节点契约 <code>delonix.node.v1</code>，由同一批
+<code>proto/</code> 文件同时以 gRPC 和 HTTP/JSON 提供（ADR-0040 D4、ADR-0042、
+ADR-0050 D5）。目前它回答 <code>NodeService.ListProviders</code>（以及
+<code>GET /v1/providers?kind=</code>），每个提供者一条 <code>ProviderInfo</code>，与
+<code>delonix provider ls -o json</code> 打印的相同；其他 <code>NodeService</code> RPC 回答
+<code>UNIMPLEMENTED</code>，并点明会带来它们的那一步；契约中的其他服务没有注册在
+该套接字上。套接字权限为 <code>0600</code>，每个连接都会用 <code>SO_PEERCRED</code> 与服务端
+的 uid 比对。</p>
+<p><strong>关键模块</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>模块</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib.rs</code></td>
+<td><code>serve_blocking</code>、生成的 <code>proto::v1</code>（prost/tonic 存根以及 pbjson 的 proto3 JSON）</td>
+</tr>
+<tr>
+<td><code>service</code></td>
+<td><code>NodeApi</code>（<code>impl NodeService</code>）、<code>list_providers</code>、<code>router</code>（JSON 路由和 gRPC 服务放在同一个 <code>axum</code> 路由器上）</td>
+</tr>
+<tr>
+<td><code>providers</code></td>
+<td><code>measured_reports</code>、<code>declared_reports</code>、<code>provider_info</code>：本节点的提供者，按契约承载它们的形式</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>主要公开 API</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>是什么</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>serve_blocking</code></td>
+<td>运行服务端</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>lib.<wbr>rs:serve_blocking</code></a></td>
+</tr>
+<tr>
+<td><code>router</code></td>
+<td>两种传输共享的路由器，进程内测试直接使用它</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-node-api/src/service.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-node-api/<wbr>src/<wbr>service.<wbr>rs:router</code></a></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>与……对话。</strong> 为获取能力报告而依赖 <code>delonix-vm</code>、<code>delonix-proxmox</code>、
+<code>delonix-opnsense</code>、<code>delonix-linux</code>、<code>delonix-sdn</code> 和 <code>delonix-volume</code>；
+<code>delonix-compute</code>（能力目录）、<code>delonix-node</code>（<code>peer_cred</code>、malloc arena
+调优）、<code>delonix-model</code>。它不运行 CLI。</p>
+<p><strong>值得留意的外部依赖。</strong> <code>tonic</code>、<code>prost</code>、<code>pbjson</code>/<code>pbjson-types</code>、
+<code>axum</code>、<code>hyper</code>、<code>tokio</code>；构建时用 <code>tonic-build</code> 和 <code>pbjson-build</code>（需要
+<code>protoc</code>）。</p>
+<p><strong>测试。</strong> 内联单元测试，其中包括
+<code>the_declared_providers_are_the_published_matrix</code>（提供者列表必须与 CLI
+发布在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/providers/capability-matrix.md" target="_blank" rel="noopener"><code>docs/providers/capability-matrix.md</code></a> 中的那份一致）；
+<code>tests/grpc_list_providers.rs</code> 用生成的客户端通过 unix 套接字驱动真实的
+服务端，并经由同一个路由器驱动 HTTP/JSON 路由。</p>
+<p><strong>从这里开始读。</strong> <code>src/lib.rs</code> 里的 crate 文档，然后是 <code>src/service.rs</code>
+（<code>router</code>、<code>list_providers</code>），再是 <code>src/providers.rs</code>。</p>
+<p><strong>陷阱。</strong></p>
+<ul>
+<li>提供者列表在这里被第二次组合，因为这个 crate 不能依赖 CLI 的
+  <code>cmd/provider.rs</code>；让两者保持一致的正是上面那个测试。只在一边新增的
+  提供者会让测试变红。</li>
+<li>未知路径对 HTTP 调用方返回带 <code>google.rpc.Status</code> 响应体的 404，对 gRPC
+  调用方返回 gRPC 的 <code>UNIMPLEMENTED</code>——绝不会是响应体为空的 200，而
+  tonic 自带的兜底对每条路径给出的恰恰是后者。</li>
+<li>目前每个 RPC 注解对应的 HTTP 路由是逐个手写的；下一步是基于
+  <code>google.api.http</code> 注解的通用转码器（ADR-0042）。</li>
+</ul>
 <h3 id="delonix-mcp"><code>delonix-mcp</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-mcp" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 一个 Model Context Protocol 服务端：本地 AI 控制面。只走
 stdio 传输；是某个客户端会话的子进程，绝不是守护进程。唯一的主体
@@ -2233,7 +2582,7 @@ stdio 传输；是某个客户端会话的子进程，绝不是守护进程。�
 <tbody>
 <tr>
 <td><code>lib.rs</code></td>
-<td><code>DelonixMcp</code> 各工具（<code>runtime.info</code>、<code>resource.list</code>、<code>container.restart</code>……）、<code>serve_stdio</code>、<code>doctor_checks</code></td>
+<td><code>DelonixMcp</code> 各工具（<code>runtime.info</code>、<code>resource.list</code>、<code>container.restart</code>、<code>workload.usage</code>……）、<code>serve_stdio</code>、<code>doctor_checks</code></td>
 </tr>
 <tr>
 <td><code>risk</code></td>
@@ -2351,8 +2700,16 @@ apply，还负责打印（借助 <code>po</code> 翻译目录）。隐藏的内�
 <td><code>hosts sync</code>（不是一个稳定的命令分组）以及每个状态根目录下由本引擎托管的、对宿主机 <code>/etc/hosts</code> 的那一段——与 <code>HTTPRoute</code> 上的 <code>hosts: [host]</code> 共用（ADR-0046、ADR-0048 第二阶段）；重新计算的逻辑是 <code>cmd/ingress_proxy.rs</code> 里的 <code>desired_hosts</code>/<code>sync_hosts_now</code>，由 <code>rebuild()</code> 调用</td>
 </tr>
 <tr>
-<td><code>cmd/vmbackends.rs</code></td>
-<td>注册已配置的远程虚拟机后端</td>
+<td><code>cmd/vmbackends.rs</code>、<code>cmd/gatewayproviders.rs</code>、<code>cmd/<wbr>network_zone_providers.<wbr>rs</code></td>
+<td>注册已配置的远程提供者（Proxmox VE 作为虚拟机后端和 SDN zone 提供者，OPNsense 作为网关提供者）</td>
+</tr>
+<tr>
+<td><code>cmd/system_container.rs</code></td>
+<td><code>kind: SystemContainer</code> 与 <code>systemcontainer</code> 命令组（快照、<code>clone</code>、<code>move</code>）：组合根，把 Proxmox 配置变成一个 <code>SystemContainerProvider</code>，用引擎自己的 pull 拉取镜像，维护一个定位符注册表，并在每次规划时从节点读回容器实际是什么（ADR-0058）</td>
+</tr>
+<tr>
+<td><code>cmd/provider.rs</code>、<code>cmd/providers_config.rs</code></td>
+<td>针对能力目录的 <code>provider ls/<wbr>describe/<wbr>matrix</code>；节点的 <code>providers.yaml</code>（ADR-0054）：查找、解析、<code>provider config show/<wbr>validate/<wbr>schema</code></td>
 </tr>
 <tr>
 <td><code>cmd/output.rs</code>、<code>cmd/po.rs</code></td>
@@ -2390,6 +2747,12 @@ apply，还负责打印（借助 <code>po</code> 翻译目录）。隐藏的内�
   检查清单。</li>
 <li>引擎二进制程序的隐藏动词是在 <code>clap</code> 之前对原始 <code>argv</code> 做匹配的；
   重命名一个公开命令并不会一并重命名它们。</li>
+<li><code>main</code> 会先于其他一切安装一个 SIGPIPE 处理程序（<code>install_sigpipe_handler</code>）。
+  stdout 或 stderr 被关闭（<code>delonix image ls | head</code>）时，进程仍会像默认
+  处置那样安静地结束；任何其他的断开管道——比如一个关闭了上传套接字的
+  镜像仓库——会让写操作以 <code>EPIPE</code> 失败，于是调用方的重试和错误提示得以
+  执行，而不是进程以状态 141 无声无息地死掉。该处理程序作用于整个二进制
+  程序，所以内部管道上的 <code>EPIPE</code> 现在是代码会返回的一个错误。</li>
 </ul>
 <h3 id="delonix-mgmt-bin-binary-delonix-mgmt"><code>delonix-mgmt-bin</code>（二进制程序 <code>delonix-mgmt</code>） <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-mgmt-bin-binary-delonix-mgmt" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> 本地管理 API 的可执行文件。检查分发版本，读取 <code>--addr</code> /
@@ -2400,6 +2763,15 @@ apply，还负责打印（借助 <code>po</code> 翻译目录）。隐藏的内�
 <code>delonix-telemetry</code>（<code>init</code>）。由 <code>delonix serve api</code> 运行。</p>
 <p><strong>测试。</strong> 自身没有测试。</p>
 <p><strong>从这里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin/src/main.rs</code></a>。</p>
+<h3 id="delonix-node-api-bin-binary-delonix-node-api"><code>delonix-node-api-bin</code>（二进制程序 <code>delonix-node-api</code>） <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-node-api-bin" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-node-api-bin-binary-delonix-node-api" aria-label="#">#</a></h3>
+<p><strong>用途。</strong> 节点 API 的可执行文件。先于其他一切回答 <code>--version</code>，检查
+分发版本，读取 <code>--addr</code> / <code>DELONIX_NODE_API_ADDR</code>（默认
+<code>unix:///run/delonix-node.sock</code>），然后调用
+<code>delonix_node_api::serve_blocking</code>。</p>
+<p><strong>与……对话。</strong> <code>delonix-node-api</code>、<code>delonix-node</code>（<code>dispatch</code>）、
+<code>delonix-telemetry</code>（<code>init</code>）。由 <code>delonix serve node-api</code> 运行。</p>
+<p><strong>测试。</strong> 针对版本 flag 和地址优先级的内联单元测试。</p>
+<p><strong>从这里开始读。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-node-api-bin/src/main.rs</code></a>。</p>
 <h3 id="delonix-mcp-bin-binary-delonix-mcp"><code>delonix-mcp-bin</code>（二进制程序 <code>delonix-mcp</code>） <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-mcp-bin-binary-delonix-mcp" aria-label="#">#</a></h3>
 <p><strong>用途。</strong> MCP 服务端的可执行文件。动词有 <code>serve [--transport stdio]</code>、
 <code>doctor</code>、<code>capabilities</code>。</p>
@@ -2567,18 +2939,21 @@ clone，并启动容器自己的 <code>slirp4netns</code>。</p>
 </li>
 <li><a href="#providers">提供者层（Providers）</a><ul>
 <li><a href="#delonix-proxmox">delonix-proxmox</a></li>
+<li><a href="#delonix-opnsense">delonix-opnsense</a></li>
 <li><a href="#delonix-truenas">delonix-truenas</a></li>
 </ul>
 </li>
 <li><a href="#interfaces">接口层（Interfaces）</a><ul>
 <li><a href="#delonix-cri">delonix-cri</a></li>
 <li><a href="#delonix-mgmt">delonix-mgmt</a></li>
+<li><a href="#delonix-node-api">delonix-node-api</a></li>
 <li><a href="#delonix-mcp">delonix-mcp</a></li>
 </ul>
 </li>
 <li><a href="#binaries">二进制程序层（Binaries）</a><ul>
 <li><a href="#delonix-runtime-bin-binary-delonix">delonix-runtime-bin（二进制程序 delonix）</a></li>
 <li><a href="#delonix-mgmt-bin-binary-delonix-mgmt">delonix-mgmt-bin（二进制程序 delonix-mgmt）</a></li>
+<li><a href="#delonix-node-api-bin-binary-delonix-node-api">delonix-node-api-bin（二进制程序 delonix-node-api）</a></li>
 <li><a href="#delonix-mcp-bin-binary-delonix-mcp">delonix-mcp-bin（二进制程序 delonix-mcp）</a></li>
 </ul>
 </li>

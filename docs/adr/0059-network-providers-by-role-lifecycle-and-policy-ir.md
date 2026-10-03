@@ -1238,3 +1238,22 @@ What part 1 adds:
 - **Not in this slice, decided in ADR-0064 D6**: removing the records the node leaves, through
   the DNS server's API with a credential given to the engine in `providers.yaml`. F5 (NAT, IPAM,
   DNS) is complete with this slice; F6 is next.
+
+## Addendum 2026-10-03 — F6 deferred until the plan and apply are a library
+
+- **What F6 needs**: `StackService.PlanStack`/`ApplyStack` on the node socket for network
+  documents, with the plan digest of D4 (`StackPlan` and `ApplyStackRequest` have no digest
+  field yet). The persisted `Operation` and the first mutations it depended on are on `main`
+  (ADR-0042 slice E2, #680).
+- **What is in the way**: the plan and the apply of `NetworkZone`/`NetworkGateway` live in the
+  CLI binary (`cmd/stack.rs`, `cmd/manifest.rs`, `cmd/network_zone.rs`, `cmd/network_gateway.rs`),
+  which `delonix-node-api` cannot depend on. The two ways through were put to the owner: the
+  server running the CLI back (`dispatch::cli_bin`, as the MCP's mutations do — one more
+  `self_exec_sites` on the ADR-0040 ratchet), or moving the use case into `delonix-networking`
+  behind ports first.
+- **Decision (owner, 2026-10-03)**: neither now. F6 waits for ADR-0040 P5, when the CLI's use
+  cases are callable as a library; the ratchet is not raised for it. Until then a network
+  document is planned and applied through the CLI (`stack plan -o json` carries `planDigest`,
+  `stack apply --plan-digest` refuses a stale plan — F4), and the node socket serves the
+  node's own networks (`NetworkService`).
+
