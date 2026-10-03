@@ -7490,6 +7490,30 @@ sabia calcular (`delonix provider ls -o json`).
 - **Não validado**: um servidor morto a meio de um create num socket real (o `Interrupted` está
   provado com um registo escrito à mão cujo dono é um processo que saiu).
 
+## As leituras de volumes no node API, e a F6 do ADR-0059 adiada (ADR-0042 passo E, fatia E3, 2026-10-03)
+
+- **`GetVolume` e `ListVolumes`** nas duas codificações (`delonix_node_api::volumes`). Criar e
+  remover continuam 501: o remover de um volume com dados de subuid passa por um re-exec da CLI
+  (`__rmtree`), que é a mesma pergunta da F6.
+- **Namespaces**: o store tem a raiz sem dono (onde cai todo o `volume create`) e uma sub-árvore
+  por namespace (as shares). O contrato não tem «sem namespace», por isso a raiz é reportada em
+  `default`, junto com a sub-árvore `default`; `*` lista tudo. Um nome que exista nos dois sítios
+  aparece duas vezes na lista e o `GetVolume` recusa-o (`FAILED_PRECONDITION`) — a mesma recusa
+  que um workload leva ao montar esse nome.
+- **Uso**: o `Get` mede (blocos em disco, como o `du`); a `List` NÃO mede — percorrer os dados de
+  todos os volumes de um nó a cada listagem é o custo já medido no dashboard. `used_bytes` só
+  existe quando a medição foi completa, e a condição `UsageMeasured` diz qual dos três casos:
+  `Measured`, `UnreadableDirectories` (dados de subuid, ilegíveis pelo uid do servidor) ou
+  `NotMeasuredInList`. Desconhecido nunca é zero.
+- **O `etag` é do registo, não do uso**: escrever dados num volume não muda o que ele é.
+- **`page`** passou a ser um módulo (tamanho de página, token, escape, href, fnv), usado por redes,
+  volumes e operações — eram três cópias.
+- **Correcção ao #680**: um `etag` antigo respondia `ABORTED`; o contrato (`ResourceMeta.etag`)
+  diz `FAILED_PRECONDITION`. Passa a responder isso, marcado no metadata `stale-etag`, e o REST
+  continua 412.
+- **F6 do ADR-0059 adiada (decisão do dono, 2026-10-03)**: `PlanStack`/`ApplyStack` no socket
+  esperam pela P5 do ADR-0040; o ratchet `self_exec_sites` não sobe por causa dela. Adendo no ADR-0059.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -7535,7 +7559,7 @@ antes de qualquer commit:
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
-| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` — e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
+| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` —, as leituras do `VolumeService` (`GetVolume`, `ListVolumes`, fatia E3) e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
 | `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 

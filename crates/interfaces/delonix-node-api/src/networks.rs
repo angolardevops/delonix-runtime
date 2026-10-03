@@ -23,9 +23,7 @@ use crate::selector::Selector;
 
 /// The namespace every network is reported in.
 pub const NAMESPACE: &str = "default";
-/// `page_size` when the caller sends 0, and the most one page carries.
-pub const DEFAULT_PAGE: usize = 100;
-pub const MAX_PAGE: usize = 1000;
+pub use crate::page::{DEFAULT_PAGE, MAX_PAGE};
 
 /// Whether `namespace` is one the node's networks are listed under.
 fn has_networks(namespace: &str) -> bool {
@@ -62,16 +60,7 @@ fn text(s: &str) -> pbjson_types::Value {
     }
 }
 
-/// FNV-1a, 64 bits: the etag is an opaque version of what the caller can see,
-/// stable across processes (a `std` hasher is not).
-fn fnv(text: &str) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in text.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{h:016x}")
-}
+use crate::page::fnv;
 
 /// One record as the contract's `Network`.
 pub fn message(n: &delonix_sdn::Network, realized: bool) -> Network {
@@ -192,21 +181,8 @@ pub fn get_in(root: &Path, req: &GetNetworkRequest) -> Result<Network, Status> {
 pub fn list_in(root: &Path, req: &ListNetworksRequest) -> Result<ListNetworksResponse, Status> {
     let selector = Selector::parse(&req.label_selector).map_err(Status::invalid_argument)?;
     let page = req.page.clone().unwrap_or_default();
-    let size = match page.page_size {
-        0 => DEFAULT_PAGE,
-        n if n < 0 => {
-            return Err(Status::invalid_argument(format!(
-                "page_size {n}: has to be 0 (the default, {DEFAULT_PAGE}) or more"
-            )))
-        }
-        n => (n as usize).min(MAX_PAGE),
-    };
-    let after = match page.page_token.as_str() {
-        "" => None,
-        token => Some(decode_token(token).ok_or_else(|| {
-            Status::invalid_argument(format!("page_token '{token}' was not issued by this list"))
-        })?),
-    };
+    let size = crate::page::size(&page)?;
+    let after = crate::page::after(&page)?;
     let ns = if req.namespace.is_empty() {
         NAMESPACE
     } else {
@@ -228,7 +204,7 @@ pub fn list_in(root: &Path, req: &ListNetworksRequest) -> Result<ListNetworksRes
         .map(|n| message(n, live.contains(&n.name)))
         .collect();
     let next = match (matching.next(), networks.last()) {
-        (Some(_), Some(last)) => encode_token(
+        (Some(_), Some(last)) => crate::page::encode_token(
             last.meta
                 .as_ref()
                 .map(|m| m.name.as_str())
@@ -236,27 +212,8 @@ pub fn list_in(root: &Path, req: &ListNetworksRequest) -> Result<ListNetworksRes
         ),
         _ => String::new(),
     };
-    let href = |token: &str| {
-        let mut q = Vec::new();
-        if !req.label_selector.is_empty() {
-            q.push(format!(
-                "label_selector={}",
-                query_escape(&req.label_selector)
-            ));
-        }
-        if page.page_size != 0 {
-            q.push(format!("page.page_size={}", page.page_size));
-        }
-        if !token.is_empty() {
-            q.push(format!("page.page_token={token}"));
-        }
-        let base = format!("/v1/namespaces/{}/networks", query_escape(ns));
-        if q.is_empty() {
-            base
-        } else {
-            format!("{base}?{}", q.join("&"))
-        }
-    };
+    let base = format!("/v1/namespaces/{}/networks", crate::page::escape(ns));
+    let href = |token: &str| crate::page::href(&base, &req.label_selector, &page, token);
     let mut links = vec![
         crate::node::link("self", &href(&page.page_token)),
         crate::node::link("root", "/v1"),
@@ -271,35 +228,6 @@ pub fn list_in(root: &Path, req: &ListNetworksRequest) -> Result<ListNetworksRes
         }),
         links,
     })
-}
-
-/// A page token is the last name of the page before, in hex: opaque to the
-/// caller, and nothing the server has to remember.
-fn encode_token(name: &str) -> String {
-    name.bytes().map(|b| format!("{b:02x}")).collect()
-}
-
-fn decode_token(token: &str) -> Option<String> {
-    if !token.len().is_multiple_of(2) {
-        return None;
-    }
-    let bytes: Option<Vec<u8>> = (0..token.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(token.get(i..i + 2)?, 16).ok())
-        .collect();
-    String::from_utf8(bytes?).ok()
-}
-
-/// Percent-encodes what a query value or a path segment cannot carry as is.
-fn query_escape(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'*' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 #[cfg(test)]

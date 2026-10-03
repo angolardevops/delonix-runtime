@@ -22,6 +22,21 @@ use crate::proto::v1::{CreateNetworkRequest, DeleteNetworkRequest, NetworkTopolo
 /// REST encoding answers with the same `DX-` code the CLI prints.
 pub const DX_METADATA: &str = "dx-number";
 
+/// Marks a `FAILED_PRECONDITION` as a stale `etag`, which the REST encoding
+/// answers with 412 instead of the 400 of any other failed precondition.
+pub const STALE_ETAG_METADATA: &str = "stale-etag";
+
+/// A stale `etag`: `FAILED_PRECONDITION`, as `ResourceMeta.etag` says in the
+/// contract, never a silent overwrite.
+pub fn stale_etag(msg: String) -> Status {
+    let mut status = Status::failed_precondition(msg);
+    status.metadata_mut().insert(
+        STALE_ETAG_METADATA,
+        tonic::metadata::MetadataValue::from_static("1"),
+    );
+    status
+}
+
 /// An engine error as the status both encodings answer with: the gRPC code of
 /// its class, and its dictionary number in [`DX_METADATA`].
 pub fn status_of(e: &delonix_model::Error) -> Status {
@@ -253,9 +268,7 @@ pub fn delete_with(
             .map(|m| m.etag)
             .unwrap_or_default();
         if current != req.etag {
-            // ABORTED is the gRPC code of a failed concurrency check; the REST
-            // encoding answers 412.
-            return Err(Status::aborted(format!(
+            return Err(stale_etag(format!(
                 "network '{}' changed since etag '{}' was read (it is now '{current}')",
                 req.name, req.etag
             )));
@@ -492,13 +505,14 @@ mod tests {
     }
 
     #[test]
-    fn an_etag_that_does_not_match_is_aborted_and_the_current_one_deletes() {
+    fn a_stale_etag_is_a_failed_precondition_and_the_current_one_deletes() {
         let dir = tempfile::tempdir().unwrap();
         create_with(dir.path(), &create_req("lab", ""), &record_only).unwrap();
         let mut stale = delete_req("lab");
         stale.etag = "0000000000000000".into();
         let err = delete_with(dir.path(), &stale, &nobody, &forget).unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Aborted);
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.metadata().contains_key(STALE_ETAG_METADATA));
         assert!(declared(dir.path(), "lab"));
 
         let current = crate::networks::get_in(

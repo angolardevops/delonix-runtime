@@ -67,10 +67,12 @@ pub mod network_ops;
 pub mod networks;
 pub mod node;
 pub mod operations;
+pub mod page;
 pub mod providers;
 pub mod selector;
 mod service;
 pub mod transcode;
+pub mod volumes;
 
 pub use service::{
     capacity, health, link_header, list_providers, node_info, openapi_document, router, NodeApi,

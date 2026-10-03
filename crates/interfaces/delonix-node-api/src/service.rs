@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
+use crate::proto::v1::volume_service_server::{VolumeService, VolumeServiceServer};
 use crate::proto::v1::{
     ApiRoot, Capacity, Event, GetApiRootRequest, GetCapacityRequest, GetHealthRequest,
     GetNodeInfoRequest, Health, ListProvidersRequest, ListProvidersResponse, NodeInfo,
@@ -21,6 +22,10 @@ use crate::proto::v1::{
     ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
     DisconnectContainerRequest, GetNetworkRequest, ListNetworksRequest, ListNetworksResponse,
     Network, Operation,
+};
+use crate::proto::v1::{
+    CreateVolumeRequest, DeleteVolumeRequest, GetVolumeRequest, ListVolumesRequest,
+    ListVolumesResponse, Volume,
 };
 use crate::{node, providers};
 
@@ -221,6 +226,44 @@ impl NetworkService for NodeApi {
 }
 
 #[tonic::async_trait]
+impl VolumeService for NodeApi {
+    async fn get_volume(&self, req: Request<GetVolumeRequest>) -> Result<Response<Volume>, Status> {
+        let req = req.into_inner();
+        blocking("volume", move || {
+            crate::volumes::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_volumes(
+        &self,
+        req: Request<ListVolumesRequest>,
+    ) -> Result<Response<ListVolumesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("volumes", move || {
+            crate::volumes::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn create_volume(
+        &self,
+        _req: Request<CreateVolumeRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("VolumeService", "CreateVolume"))
+    }
+
+    async fn delete_volume(
+        &self,
+        _req: Request<DeleteVolumeRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        Err(unserved("VolumeService", "DeleteVolume"))
+    }
+}
+
+#[tonic::async_trait]
 impl OperationService for NodeApi {
     async fn get_operation(
         &self,
@@ -293,6 +336,10 @@ pub fn router() -> axum::Router {
             NetworkServiceServer::new(NodeApi),
         )
         .route_service(
+            &format!("/{}/*rest", VolumeServiceServer::<NodeApi>::NAME),
+            VolumeServiceServer::new(NodeApi),
+        )
+        .route_service(
             &format!("/{}/*rest", OperationServiceServer::<NodeApi>::NAME),
             OperationServiceServer::new(NodeApi),
         )
@@ -360,6 +407,7 @@ async fn rest(
             "NetworkService" => {
                 transcode::dispatch_network_service(&NodeApi, route.rpc, input).await
             }
+            "VolumeService" => transcode::dispatch_volume_service(&NodeApi, route.rpc, input).await,
             "OperationService" => {
                 transcode::dispatch_operation_service(&NodeApi, route.rpc, input).await
             }
@@ -577,6 +625,13 @@ fn no_route(msg: String) -> Status {
 pub fn engine_error(status: &Status) -> (delonix_model::Error, hyper::StatusCode) {
     use delonix_model::Error;
     let msg = status.message().to_string();
+    // A stale `etag` (`If-Match`): 412, never a silent overwrite.
+    if status
+        .metadata()
+        .contains_key(crate::network_ops::STALE_ETAG_METADATA)
+    {
+        return (Error::Conflict(msg), hyper::StatusCode::PRECONDITION_FAILED);
+    }
     // A failure that came from the engine carries its dictionary number: the
     // document says that code, and the status is its class's.
     if let Some(number) = status
@@ -605,8 +660,6 @@ pub fn engine_error(status: &Status) -> (delonix_model::Error, hyper::StatusCode
     }
     match status.code() {
         tonic::Code::AlreadyExists => (Error::Conflict(msg), hyper::StatusCode::CONFLICT),
-        // A failed concurrency check (`If-Match`): 412, never a silent overwrite.
-        tonic::Code::Aborted => (Error::Conflict(msg), hyper::StatusCode::PRECONDITION_FAILED),
         tonic::Code::InvalidArgument | tonic::Code::FailedPrecondition => {
             (Error::Invalid(msg), hyper::StatusCode::BAD_REQUEST)
         }

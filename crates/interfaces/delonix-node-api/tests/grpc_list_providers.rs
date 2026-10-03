@@ -603,6 +603,7 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         ("POST", "/v1/namespaces/default/containers/web:start"),
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
         ("POST", "/v1/operations/op-1:cancel"),
+        ("DELETE", "/v1/namespaces/default/volumes/data"),
         ("POST", "/v1/images:pull"),
         ("GET", "/v1/events:watch"),
     ] {
@@ -623,6 +624,17 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         assert_eq!(status, 400, "{method} {path}: {v}");
         assert_eq!(v["grpc_status"], 3, "{v}");
     }
+    // The volume reads are served: a namespace nothing was ever stored in has
+    // no volumes and no volume of any name, whatever this host has.
+    let (status, _, v) = call("GET", "/v1/namespaces/no-such-namespace/volumes", "").await;
+    assert_eq!(status, 200, "{v}");
+    assert!(v["volumes"].as_array().is_none_or(|a| a.is_empty()), "{v}");
+    assert!(v["links"][0]["href"]
+        .as_str()
+        .unwrap()
+        .starts_with("/v1/namespaces/no-such-namespace/volumes"));
+    let (status, _, v) = call("GET", "/v1/namespaces/no-such-namespace/volumes/x", "").await;
+    assert_eq!((status, v["dx"].as_str()), (404, Some("DX-4000")), "{v}");
     // An operation nobody was given: the RESOURCE is missing (DX-4000), which
     // is not the missing ROUTE (DX-4001).
     let (status, _, v) = call("GET", "/v1/operations/op-no-such-operation", "").await;

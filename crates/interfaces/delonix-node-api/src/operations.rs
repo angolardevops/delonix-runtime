@@ -27,9 +27,7 @@ use crate::proto::v1::{
 
 /// How long a finished operation stays readable.
 pub const RETENTION_SECS: u64 = 7 * 24 * 3600;
-/// `page_size` when the caller sends 0, and the most one page carries.
-pub const DEFAULT_PAGE: usize = 100;
-pub const MAX_PAGE: usize = 1000;
+pub use crate::page::{DEFAULT_PAGE, MAX_PAGE};
 
 /// Where an operation is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,15 +368,7 @@ pub fn get_in(root: &Path, id: &str) -> Result<Operation, Status> {
 /// `ListOperations` under `root`: oldest first, one page at a time.
 pub fn list_in(root: &Path, req: &ListOperationsRequest) -> Result<ListOperationsResponse, Status> {
     let page = req.page.clone().unwrap_or_default();
-    let size = match page.page_size {
-        0 => DEFAULT_PAGE,
-        n if n < 0 => {
-            return Err(Status::invalid_argument(format!(
-                "page_size {n}: has to be 0 (the default, {DEFAULT_PAGE}) or more"
-            )))
-        }
-        n => (n as usize).min(MAX_PAGE),
-    };
+    let size = crate::page::size(&page)?;
     // A page token is `<created_ms>-<id>` of the last record of the page
     // before: opaque to the caller, nothing for the server to remember.
     let after = match page.page_token.as_str() {

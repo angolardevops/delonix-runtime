@@ -676,6 +676,20 @@ code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (co
   check "a Operation lê-se por id e na lista; a de um processo que já não existe lê-se FAILED/Interrupted" ok netops operations
   check "overlay (501), outro namespace, subnet inválida e um nome com '..' são recusados sem criar nada" ok netops refused
   check "DELETE com If-Match antigo é 412 e a rede fica; com o ETag actual remove-a do motor e do dataplane" ok netops delete
+  # ADR-0042 passo E: as leituras de volumes pelo contrato. Um volume criado
+  # pela CLI, com dados e uma quota, lê-se pelo socket como o motor o tem.
+  E3V="e3vol-$$"
+  "$BIN" volume create "$E3V" --quota 1G >/dev/null 2>&1
+  printf 'abcde' > "$("$BIN" volume inspect "$E3V" 2>/dev/null | sed -n 's/^ *[Mm]ountpoint: *//p' | head -1)/f" 2>/dev/null
+  VOLS="http://localhost/v1/namespaces/default/volumes"
+  check "GET …/volumes/{nome} mede o uso, traz a quota e o ETag; a lista diz que não mediu" ok env \
+    V_HDR="$(curl -s -D - -o /dev/null --unix-socket "$NODESOCK" "$VOLS/$E3V")" \
+    V_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS/$E3V")" \
+    L_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS")" E3V="$E3V" \
+    python3 -c 'import json,os; v=json.loads(os.environ["V_JSON"]); n=os.environ["E3V"]; assert v["meta"]["name"]==n and v["meta"]["namespace"]=="default", v["meta"]; assert int(v["used_bytes"])>0, v; assert int(v["spec"]["quota_bytes"])==1<<30 and "local" in v["spec"], v["spec"]; c=v["conditions"][0]; assert (c["type"],c["status"],c["reason"])==("UsageMeasured","CONDITION_STATUS_TRUE","Measured"), c; assert "etag: \""+v["meta"]["etag"]+"\"" in os.environ["V_HDR"].lower(), os.environ["V_HDR"]; l=[x for x in json.loads(os.environ["L_JSON"])["volumes"] if x["meta"]["name"]==n]; assert len(l)==1 and "used_bytes" not in l[0] and l[0]["conditions"][0]["reason"]=="NotMeasuredInList", l'
+  check "um volume que não existe é 404 DX-4000; criar e remover volumes pelo socket ainda é 501" ok bash -c \
+    "[[ \$(curl -s --unix-socket '$NODESOCK' '$VOLS/nao-existe' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"status\"],d[\"dx\"])') == '404 DX-4000' ]] && [[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE --unix-socket '$NODESOCK' '$VOLS/$E3V') == 501 ]] && '$BIN' volume inspect '$E3V' >/dev/null"
+  "$BIN" volume rm "$E3V" >/dev/null 2>&1
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \

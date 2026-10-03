@@ -202,7 +202,7 @@ operation begins.
 can be decided without touching anything is the error itself, and writes no
 record: a request that is wrong (name, subnet, namespace, topology), a name
 already taken (`ALREADY_EXISTS`, 409), an `etag` that does not match (`ABORTED`,
-412), a network something is attached to (`FAILED_PRECONDITION`, 409, DX-5307,
+412 — corrected in slice E3 to `FAILED_PRECONDITION`, the code `ResourceMeta.etag` names), a network something is attached to (`FAILED_PRECONDITION`, 409, DX-5307,
 naming what is attached). A failure of the work is the operation, `FAILED`, with
 the engine's class in `error.reason` and its number in `error.metadata["dx"]`.
 
