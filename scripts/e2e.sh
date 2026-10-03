@@ -2515,6 +2515,36 @@ check "…mede a tabela de vizinhos ARP" ok \
 check "…mede a largura da gama de portas efémeras" ok \
   bash -c "'$BIN' system doctor | grep -q 'ephemeral port range'"
 
+# ------------------------------------------------------------------------------
+# `metadata.labels` of a Network and of a Volume reach the record and converge.
+# Until 2026-10-03 only a Container received them: a network or a volume applied
+# from a manifest carried the ownership stamp and nothing the document declared.
+# The CYCLE is what proves it — apply, read the record, plan unchanged, change a
+# label, apply, read again.
+# ------------------------------------------------------------------------------
+NLDIR="$OUT/nl-labels"; mkdir -p "$NLDIR"
+nl_manifest() {
+  printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
+    "metadata: { name: nl-net, labels: $1 }" 'spec: {}' '---' \
+    'apiVersion: storage.delonix.io/v1alpha1' 'kind: Volume' \
+    "metadata: { name: nl-vol, labels: $1 }" 'spec: {}' > "$NLDIR/m.yaml"
+}
+nl_labels() { # the labels the engine has for both, as "<network>|<volume>"
+  local n v
+  n="$("$BIN" network describe nl-net 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ',')"
+  v="$("$BIN" volume describe nl-vol 2>/dev/null | grep -o 'app=[a-z]*\|tier=[a-z]*' | sort | tr '\n' ',')"
+  echo "$n|$v"
+}
+nl_manifest '{ app: web, tier: front }'
+check "stack apply: metadata.labels de um Network e de um Volume chegam ao registo" ok bash -c \
+  "cd '$NLDIR' && '$BIN' stack apply -f m.yaml >/dev/null 2>&1 && [[ \"\$($(declare -f nl_labels); BIN='$BIN' nl_labels)\" == 'app=web,tier=front,|app=web,tier=front,' ]]"
+check "um manifesto inalterado não mostra deriva nos labels (plan --detailed-exitcode = 0)" 0 \
+  bash -c "cd '$NLDIR' && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1"
+nl_manifest '{ app: api }'
+check "mudar e tirar um label é uma alteração do plano (2), converge a quente e sai do registo" ok bash -c \
+  "cd '$NLDIR' && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1; [[ \$? == 2 ]] && '$BIN' stack apply -f m.yaml >/dev/null 2>&1 && [[ \"\$($(declare -f nl_labels); BIN='$BIN' nl_labels)\" == 'app=api,|app=api,' ]] && '$BIN' stack plan -f m.yaml --detailed-exitcode >/dev/null 2>&1"
+(cd "$NLDIR" && "$BIN" stack destroy -f m.yaml >/dev/null 2>&1)
+
 # ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
 #
