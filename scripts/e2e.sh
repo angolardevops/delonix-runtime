@@ -132,6 +132,17 @@ else
   export DELONIX_ROOT="${DELONIX_ROOT:-$OUT/root}"
   export DELONIX_NET_RUNTIME_DIR="${DELONIX_NET_RUNTIME_DIR:-/tmp/dlxe2e-$$}"
   mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
+  # The node's providers file is machine state too. `install.sh` writes
+  # `/etc/delonix/providers.yaml` with a `defaultProvider`, and a standing
+  # default acts like an explicit `--backend` in every `vm create` of this
+  # battery. Measured 2026-10-03: the same commit went from 0 to 1 FAIL
+  # («vm create --require sem --backend…») between two runs, because the
+  # installer had run in between and named libvirt. An empty providers file
+  # keeps the outcome the engine's; a check that needs a provider sets its own.
+  if [[ -z "${DELONIX_PROVIDERS_CONFIG:-}" ]]; then
+    printf 'apiVersion: config.delonix.io/v1\n' >"$OUT/providers-none.yaml"
+    export DELONIX_PROVIDERS_CONFIG="$OUT/providers-none.yaml"
+  fi
   if [[ ${#DELONIX_NET_RUNTIME_DIR} -gt 80 ]]; then
     echo "FATAL: DELONIX_NET_RUNTIME_DIR tem ${#DELONIX_NET_RUNTIME_DIR} bytes;" >&2
     echo "       o socket de controlo passaria o limite de 108 do AF_UNIX." >&2
