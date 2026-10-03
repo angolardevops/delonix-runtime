@@ -4757,16 +4757,29 @@ else
 fi
 
 # --- Proxmox SDN ------------------------------------------------------------
-if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n "${DELONIX_PROXMOX_TOKEN:-}" ]]; then
+# The token reaches the engine from DELONIX_PROXMOX_TOKEN_FILE or from
+# DELONIX_PROXMOX_TOKEN. The file is the form to use for a whole battery: with
+# the variable the engine warns on stderr in EVERY command (the secret is
+# inherited by every child), and the checks elsewhere that read `2>&1` fail on
+# that line. Measured 2026-10-03: 3 FAIL with the variable, none with the file.
+# The operator's hand below (curl) reads the same secret from a 0600 header
+# file, so it is never on a command line.
+PVE_SECRET="${DELONIX_PROXMOX_TOKEN:-}"
+if [[ -z "$PVE_SECRET" && -r "${DELONIX_PROXMOX_TOKEN_FILE:-}" ]]; then
+  PVE_SECRET="$(tr -d '\r\n' < "$DELONIX_PROXMOX_TOKEN_FILE")"
+fi
+if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n "$PVE_SECRET" ]]; then
+  PVE_HDR="$RWORK/pve-auth.hdr"
+  ( umask 077; printf 'Authorization: PVEAPIToken=%s=%s\n' "$DELONIX_PROXMOX_TOKEN_ID" "$PVE_SECRET" > "$PVE_HDR" )
   pve() {  # pve <método> <caminho> [--data ...] — a mão do operador
     local m="$1" p="$2"; shift 2
-    curl -sk -X "$m" -H "Authorization: PVEAPIToken=$DELONIX_PROXMOX_TOKEN_ID=$DELONIX_PROXMOX_TOKEN" \
+    curl -sk -X "$m" -H @"$PVE_HDR" \
       "$DELONIX_PROXMOX_URL/api2/json$p" "$@"
   }
   check "NetworkZone aplica zona e vnet no cluster" ok "$BIN" apply -f "$RWORK/zone.yaml"
   check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/zone.yaml"
   check "... a vnet leva a marca de posse no alias" ok bash -c \
-    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/vnets/$VN\" | grep -q 'delonix-owner:dlx-'"
+    "curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/vnets/$VN\" | grep -q 'delonix-owner:dlx-'"
   # Uma zona que já existe e que o motor não criou: recusada, nunca adoptada.
   HZ="h$(( $$ % 100000 ))"
   pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
@@ -4775,7 +4788,7 @@ if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n 
   check "zona feita à mão com o mesmo nome: apply recusa com 5 (não adopta)" 5 \
     "$BIN" apply -f "$RWORK/zone-hand.yaml"
   check "delete desse documento deixa a zona à mão de pé" ok bash -c \
-    "'$BIN' delete networkzones '$HZ' >/dev/null; curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones/$HZ\" | grep -q '\"zone\":\"$HZ\"'"
+    "'$BIN' delete networkzones '$HZ' >/dev/null; curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones/$HZ\" | grep -q '\"zone\":\"$HZ\"'"
   pve DELETE "/cluster/sdn/zones/$HZ" >/dev/null; pve PUT /cluster/sdn >/dev/null; sleep 3
   # Uma alteração pendente de outro (staged, não aplicada): o apply recusa
   # ANTES de escrever, e a alteração do outro continua pendente, não aplicada.
@@ -4783,17 +4796,17 @@ if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n 
   check "com uma alteração SDN pendente alheia, o apply recusa com 5" 5 \
     "$BIN" apply -f "$RWORK/zone.yaml"
   check "... e a alteração alheia continua pendente (não foi empurrada)" ok bash -c \
-    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones?pending=1\" | python3 -c 'import json,sys; z=[x for x in json.load(sys.stdin)[\"data\"] if x.get(\"zone\")==\"$HZ\"]; sys.exit(0 if z and z[0].get(\"state\")==\"new\" else 1)'"
+    "curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones?pending=1\" | python3 -c 'import json,sys; z=[x for x in json.load(sys.stdin)[\"data\"] if x.get(\"zone\")==\"$HZ\"]; sys.exit(0 if z and z[0].get(\"state\")==\"new\" else 1)'"
   pve POST /cluster/sdn/rollback >/dev/null
   check "delete do NetworkZone tira a vnet e a zona dele" ok "$BIN" delete networkzones "$ZN"
   check "... e a zona já não existe no cluster" ok bash -c \
-    "! curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones\" | grep -q '\"zone\":\"$ZN\"'"
+    "! curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones\" | grep -q '\"zone\":\"$ZN\"'"
 else
   for n in "NetworkZone aplica zona e vnet com a marca de posse" \
            "zona à mão com o mesmo nome é recusada, não adoptada" \
            "alteração SDN pendente alheia recusa o apply" \
            "delete tira só a zona e as vnets do motor"; do
-    skip "$n" "sem DELONIX_PROXMOX_URL/_TOKEN_ID/_TOKEN: não há cluster Proxmox, a posse na SDN não foi medida aqui"
+    skip "$n" "sem DELONIX_PROXMOX_URL/_TOKEN_ID e _TOKEN_FILE (ou _TOKEN): não há cluster Proxmox, a posse na SDN não foi medida aqui"
   done
 fi
 
