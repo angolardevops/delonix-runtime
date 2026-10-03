@@ -63,12 +63,22 @@ propagate their failure; an unreadable store no longer plans `Create` for every 
 resource. A pod name is unique on the node, so the same name in another namespace is a
 `Conflict`, not «already exists».
 
-**D6. Policy before activation (decided, not implemented).** Today `FirewallPolicy`,
-`NetworkAccessRule` and `NetworkGateway` apply after `VM`/`Container`/`Pod` because they need the
-target's address. The fix is a prepare/activate split — attach the workload's network
-administratively blocked, install the policy, verify, then open — not a reordering of Kinds. It
-changes the dataplane attach path (`delonix-sdn`) and needs a traffic test during create; it is
-the first item of the follow-up.
+**D6. Policy before activation (implemented for containers).** A container that some
+`NetworkPolicy`, `NetworkAccessRule` or (lowered) `Dependency` in the manifest names is created
+**closed**: `RunOpts.policy_hold` makes `cmd_run` install a default-deny chain for its address
+right after the network attach and before the process exists, and the record carries the same
+state (`delonix.io/policy-hold`) so a restart cannot reopen it. While the annotation is there,
+`apply_firewall_everywhere` writes what the policy documents say to the RECORD and keeps the
+closed chain on the dataplane, so a policy that has applied its default but not yet its rules
+opens nothing. After the policy layers succeed, `release_policy_holds` removes the annotation
+and applies the record: a direction the manifest declared keeps its policy, one it did not
+returns to the open default. If a policy layer fails the workload stays closed, the apply says
+so, and the next apply releases it; a second apply of an unchanged manifest holds nothing. The
+hold is written with the policy fields the dataplane has always understood (`deny`/`deny`), so a
+holder from before this change enforces it too. Not covered: Pods, VMs and system containers
+(different attach paths, each needs its own test). Lab: `scripts/chaos.sh policy_hold` — 8
+checks pass, and with the hold disabled 3 fail, including the ping that gets through after a
+failed policy.
 
 **D7. Catalog.** Keep: `RuntimePolicy`, `Secret`, `Network`, `NetworkRoute`, `Volume`, `Image`,
 `App` (as the build operation's declarative front), `VirtualMachine`, `Pod`, `Service`,
@@ -97,7 +107,7 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
 
 ## Pending (real, with the prerequisite)
 
-1. D6 prepare/activate network attach — needs `delonix-sdn` attach path work and a live traffic test.
+1. D6 for Pods, VMs and system containers.
 2. Plan identity as `(kind, scope, name)` for Pod/Service/Container/VM (only share volumes are
    scoped today); `destroy_one` takes `(kind, name)`. Needs a `ResourceKey` through
    `reconcile.rs` and the destroy path. D5 removes the silent false success but not the

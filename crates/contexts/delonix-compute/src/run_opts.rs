@@ -23,6 +23,13 @@ pub struct RunOpts {
     #[serde(default)]
     pub user: Option<String>,
     pub net: String,
+    /// Start with the network CLOSED (default-deny both ways) until a policy
+    /// document that governs this container has been applied (ADR-0069).
+    /// Set by `stack apply` for a container some `NetworkPolicy` /
+    /// `NetworkAccessRule` / `Dependency` names; released by the stack once the
+    /// policy layers have run, and left closed if they fail.
+    #[serde(default)]
+    pub policy_hold: bool,
     /// Logical ISOLATION namespace (default `default`). See "namespace isolation" in AGENTS.md.
     #[serde(default)]
     pub namespace: Option<String>,

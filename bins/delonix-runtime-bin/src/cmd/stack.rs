@@ -1940,6 +1940,31 @@ fn run_layers(
     docs: &[manifest::ManifestDoc],
     base: &std::path::Path,
 ) -> Result<()> {
+    let result = run_layers_inner(layers, docs, base);
+    if result.is_err() {
+        // A container some policy governs is created CLOSED and only opened once
+        // the policy layers succeed. Say so when they did not: the workloads are
+        // not lost, they are waiting, and re-running the apply releases them.
+        if let Some(held) = super::firewall::held_targets(docs) {
+            if !held.is_empty() {
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "{n} workload(s) stay CLOSED (policy hold): {names} — fix the error above and apply again; the next apply releases them",
+                        &[("n", &held.len().to_string()), ("names", &held.join(", "))],
+                    )
+                );
+            }
+        }
+    }
+    result
+}
+
+fn run_layers_inner(
+    layers: &mut super::output::Layers,
+    docs: &[manifest::ManifestDoc],
+    base: &std::path::Path,
+) -> Result<()> {
     // The node's own admission ceiling, before ANYTHING else: a stricter
     // policy declared in this very manifest already governs the Container/Vm/
     // Pod layers further down, in the SAME apply — see `kinds.rs`'s row.
@@ -1971,6 +1996,18 @@ fn run_layers(
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
     })?;
+    // The workloads these policies govern were created closed; the policy is in
+    // place now, so they open — to exactly what it says (ADR-0069).
+    let released = super::firewall::release_policy_holds(docs)?;
+    if released > 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "{n} workload(s) opened: their policy is in place",
+                &[("n", &released.to_string())],
+            )
+        );
+    }
     layers.run(k::NETWORK_GATEWAY, "🛰", || {
         super::network_gateway::apply(docs)
     })?;
