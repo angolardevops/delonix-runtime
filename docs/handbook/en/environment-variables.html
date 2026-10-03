@@ -552,6 +552,13 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <td><strong>No firewall rule, namespace isolation or <code>Dependency</code> applies to IPv6</strong> — every policy is IPv4-only. Security warning. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Runs a workload in a named namespace even when the kernel does not filter traffic inside a bridge (<code>br_netfilter</code> not loaded, or <code>bridge-nf-call-iptables=0</code>), with a warning. Without it the request is refused (DX-6305, exit 69), because the isolation would be installed and enforce nothing. Only <code>1</code> opens it.</td>
+<td><code>1</code> → run with a warning; anything else (or unset) → refused.</td>
+<td>The isolation rules are installed and enforce nothing. See <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, and with <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> even when the container's cgroup lacks the <code>cpuset</code>/<code>io</code> controller (<code>preflight_controller_limits</code>), instead of refusing (exit 69).</td>

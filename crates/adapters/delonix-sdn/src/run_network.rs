@@ -251,8 +251,9 @@ pub fn launch_addresses(l: &delonix_compute::launch::Launch) -> LaunchAddresses 
 pub struct HostNetwork<'a> {
     /// The engine's state root, where networks are declared.
     pub state_root: PathBuf,
-    /// Called after a successful attach, with the container's namespace.
-    pub on_attached: &'a dyn Fn(&str),
+    /// Called after a successful attach, with the container's namespace. An
+    /// `Err` refuses the workload: the attach is undone before it is returned.
+    pub on_attached: &'a dyn Fn(&str) -> Result<()>,
     /// Registers a `--expose` route in the L7 proxy.
     pub register_expose: &'a dyn Fn(&str, &str, &str, u16) -> Result<()>,
 }
@@ -276,7 +277,12 @@ impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
             None => crate::infra::attach_container(id, network, namespace),
         }
         .map_err(delonix_model::Error::from)?;
-        (self.on_attached)(namespace);
+        if let Err(e) = (self.on_attached)(namespace) {
+            // The address and the holder reference were taken by the attach;
+            // a refusal that left them would leak a lease per attempt.
+            crate::infra::detach_container(id, &attached.1);
+            return Err(e);
+        }
         Ok(attached)
     }
 

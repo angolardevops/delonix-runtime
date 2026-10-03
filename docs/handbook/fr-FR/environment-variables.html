@@ -551,6 +551,13 @@ n’a sa place dans une configuration de production. Lisez la section de <a clas
 <td><strong>Aucune règle de pare-feu, isolation de namespace ou <code>Dependency</code> ne s’applique à IPv6</strong> — toutes les politiques sont IPv4 uniquement. Avertissement de sécurité. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Exécute un workload dans un namespace nommé même lorsque le noyau ne filtre pas le trafic à l’intérieur d’un bridge (<code>br_netfilter</code> non chargé, ou <code>bridge-nf-call-iptables=0</code>), avec un avertissement. Sans elle la demande est refusée (DX-6305, sortie 69), car l’isolation serait installée sans rien imposer. Seul <code>1</code> l’ouvre.</td>
+<td><code>1</code> → exécute avec un avertissement, toute autre valeur (ou absente) → refusé.</td>
+<td>Les règles d’isolation sont installées et n’imposent rien. Voir <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Exécute un container avec <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> même lorsque cette session n’a pas de délégation de cgroup, et avec <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> même lorsque le cgroup du container n’a pas le contrôleur <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), au lieu de refuser (code de sortie 69).</td>

@@ -370,8 +370,11 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec, hold: bool) 
             message: format!("failed to create the pod netns '{netns}': {e}"),
         })
     })?;
+    if let Err(e) = container::refuse_if_namespace_isolation_inert(&ns) {
+        infra::detach_container(&netns, &ip);
+        return Err(e);
+    }
     apply_pod_namespace_isolation(&netns, &ip, &ns)?;
-    container::warn_if_namespace_isolation_inert(&ns);
     // A governed pod's address is closed BEFORE any member exists to use it; if the
     // chain cannot be installed the pod is not started.
     if hold {
@@ -561,7 +564,7 @@ fn pod_firewall_to_enforce(pod: &str, ns: &str) -> Option<delonix_model::records
 pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> Result<()> {
     let net = delonix_sdn::run_network::HostNetwork {
         state_root: super::util::state_root(),
-        on_attached: &|_| {},
+        on_attached: &|_| Ok(()),
         register_expose: &|_, _, _, _| Ok(()),
     };
     // A pod that already carries a policy (or the hold) gets THAT back when its

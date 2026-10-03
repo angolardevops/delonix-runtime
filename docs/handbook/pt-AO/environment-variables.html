@@ -555,6 +555,13 @@ antes de usares uma delas.</p>
 <td><strong>Nenhuma regra de firewall, isolamento de namespace ou <code>Dependency</code> se aplica ao IPv6</strong> — todas as políticas são só IPv4. Aviso de segurança. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, <em>«Bloco 0 do plano 33 (v0.37.1)»</em>.</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>Corre um workload numa namespace com nome mesmo quando o kernel não filtra o tráfego dentro de uma bridge (<code>br_netfilter</code> não carregado, ou <code>bridge-nf-call-iptables=0</code>), com um aviso. Sem ela o pedido é recusado (DX-6305, saída 69), porque o isolamento seria instalado e não imporia nada. Só <code>1</code> a abre.</td>
+<td><code>1</code> → corre com um aviso; qualquer outro valor (ou ausente) → recusado.</td>
+<td>As regras de isolamento são instaladas e não impõem nada. Ver o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, «O isolamento de namespace é INERTE sem <code>br_netfilter</code>».</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>Corre um container com <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> mesmo quando esta sessão não tem delegação de cgroup, e com <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> mesmo quando falta ao cgroup do container o controlador <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), em vez de recusar (saída 69).</td>

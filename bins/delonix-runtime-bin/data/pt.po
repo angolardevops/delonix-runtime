@@ -9680,9 +9680,9 @@ msgstr "l4guard: inactiva"
 msgid "l4guard: active"
 msgstr "l4guard: activa"
 
-# --namespace sem br_netfilter — o isolamento reporta sucesso mas é inerte
-msgid "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
-msgstr "--namespace '{namespace}' está activo, mas este host não filtra tráfego de bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0) — o isolamento entre namespaces na MESMA rede reporta sucesso mas não bloqueia tráfego nenhum. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
+# --namespace sem br_netfilter — recusado (D5, DX-6305): o isolamento seria inerte
+msgid "--namespace '{namespace}' would not be enforced: this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so isolation between namespaces on the SAME network would report success and block nothing. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`); or DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose"
+msgstr "--namespace '{namespace}' não seria imposto: este host não filtra o tráfego de bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), por isso o isolamento entre namespaces na MESMA rede reportaria sucesso e não bloquearia nada. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir em /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`); ou DELONIX_ALLOW_UNENFORCED_ISOLATION=1 para correr sem isolamento de propósito"
 
 # net l4guard (comentários de exemplo do manual, `delonix man net l4guard`)
 msgid "turn on the ingress-wide DDoS guard: at most 20 new connections/s and 100 concurrent connections per source IP"
@@ -15117,6 +15117,15 @@ msgstr "  {cd}delonix stack apply -f delonix-tunnel.yaml   # opcional: um endere
 
 msgid "internet: delonix stack apply -f delonix-tunnel.yaml — a public https address with no public IP (README.md, \"On the internet without a public IP\")"
 msgstr "internet: delonix stack apply -f delonix-tunnel.yaml — um endereço https público sem IP público (README.md, \"On the internet without a public IP\")"
+
+msgid "namespace isolation would not be enforced on this host"
+msgstr "o isolamento por namespace não seria imposto neste host"
+
+msgid "A named namespace was asked for, but the kernel is not filtering traffic inside a bridge (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0). Every isolation rule would install and none would block anything."
+msgstr "Foi pedida uma namespace com nome, mas o kernel não filtra o tráfego dentro de uma bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0). Todas as regras de isolamento seriam instaladas e nenhuma bloquearia nada."
+
+msgid "Load br_netfilter and set bridge-nf-call-iptables=1 (`delonix system doctor` prints the commands, `install.sh --tune` persists them), or set DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose."
+msgstr "Carrega o br_netfilter e põe bridge-nf-call-iptables=1 (o `delonix system doctor` imprime os comandos, o `install.sh --tune` persiste-os), ou define DELONIX_ALLOW_UNENFORCED_ISOLATION=1 para correr sem isolamento de propósito."
 
 # anti-spoofing: concessões da política do nó (--allow-source, --no-source-check)
 msgid "Let this container send from a source prefix besides its own address, for a container that routes (`a.b.c.d/len`, repeatable). Only inside a prefix the node policy grants (`allowedSourcePrefixes`); every use is logged."

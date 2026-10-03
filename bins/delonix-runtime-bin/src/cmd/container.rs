@@ -2225,35 +2225,54 @@ fn apply_source_overrides(id: &str, name: &str, prefixes: &[String], off: bool) 
     Ok(())
 }
 
-/// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
-/// not actually filtering intra-bridge traffic — the precondition namespace
-/// isolation silently depends on (see the `br_netfilter` section of
-/// AGENTS.md — isolation is INERT without it, measured 2026-08-12). Without
-/// the module
-/// (or with `bridge-nf-call-iptables=0`), every rule installs, `stack ls`/
-/// the firewall listing report success, and a container in a DIFFERENT
-/// namespace on the same bridge is reachable anyway — a security property
-/// that reads as applied while it does nothing.
+/// Refuses `--namespace <ns>` when the kernel is not filtering intra-bridge
+/// traffic — the precondition namespace isolation silently depends on (see the
+/// `br_netfilter` section of AGENTS.md: isolation is INERT without it, measured
+/// 2026-08-12). Without the module (or with `bridge-nf-call-iptables=0`),
+/// every rule installs, `stack ls` and the firewall listing report success,
+/// and a container in a DIFFERENT namespace on the same bridge is reachable
+/// anyway — a security property that reads as applied while it does nothing.
 ///
-/// Called on every attach of a NAMED namespace rather than once, matching
-/// the existing style for `--network-alias`/`--expose` (see nearby): an
-/// operator who fixes the host later stops seeing it, one who does not is
-/// reminded every time, not just the first.
+/// # Why this is a refusal now, and was a warning before
 ///
-/// Never refuses — this host may be one where the fix is not in the
-/// operator's hands yet. A query failure (holder unreachable/too old) stays
-/// silent: "could not ask" is not "it's off", same discipline as
-/// `infra::network_routes_live`.
-pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
-    if namespace.is_empty() || namespace == "default" {
-        return;
+/// Owner's decision D5 of the maturity plan (in `docs/discovery/`)
+/// (2026-10-02): the warning let `run` exit 0 on a tenant boundary that did
+/// not exist, the same shape the cgroup-limit preflight already refuses
+/// (DX-6305, exit 69). `DELONIX_ALLOW_UNENFORCED_ISOLATION=1` keeps the old
+/// behaviour — a loud warning and the workload runs — for a host where the
+/// fix is not in the operator's hands yet.
+///
+/// "Could not ask" (holder unreachable or too old) is not "it is off": that
+/// answer stays silent, same discipline as `infra::network_routes_live`.
+pub(crate) fn refuse_if_namespace_isolation_inert(namespace: &str) -> Result<()> {
+    isolation_verdict(
+        namespace,
+        infra::br_netfilter_active().ok(),
+        allow_unenforced_isolation(),
+    )
+}
+
+/// The valve of [`refuse_if_namespace_isolation_inert`]. Only `1` opens it: a
+/// typo must not quietly turn a refusal back into a warning.
+fn allow_unenforced_isolation() -> bool {
+    std::env::var("DELONIX_ALLOW_UNENFORCED_ISOLATION").as_deref() == Ok("1")
+}
+
+/// The pure decision behind [`refuse_if_namespace_isolation_inert`]:
+/// `filtering` is `None` when the host could not be asked.
+fn isolation_verdict(namespace: &str, filtering: Option<bool>, allow: bool) -> Result<()> {
+    if namespace.is_empty() || namespace == "default" || filtering != Some(false) {
+        return Ok(());
     }
-    if let Ok(false) = infra::br_netfilter_active() {
-        super::output::warn(&super::po::tf(
-            "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)",
-            &[("namespace", namespace)],
-        ));
+    let why = super::po::tf(
+        "--namespace '{namespace}' would not be enforced: this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so isolation between namespaces on the SAME network would report success and block nothing. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`); or DELONIX_ALLOW_UNENFORCED_ISOLATION=1 to run without isolation on purpose",
+        &[("namespace", namespace)],
+    );
+    if allow {
+        super::output::warn(&why);
+        return Ok(());
     }
+    Err(Error::coded(6305, Error::Unavailable(why)))
 }
 
 /// Refuses `-m`/`--cpus`/`--cpu-weight` when this session has no real cgroup2
@@ -2922,7 +2941,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         (opts_copy.allow_source.clone(), opts_copy.no_source_check);
     let override_name = cname.clone();
     let on_attached = |namespace: &str| {
-        warn_if_namespace_isolation_inert(namespace);
+        // A named namespace on a host that does not filter bridge traffic is
+        // refused (DX-6305) before anything else is applied to the port.
+        refuse_if_namespace_isolation_inert(namespace)?;
         // The attach pinned the port to the container's own address; the grants
         // the policy authorised in the preflight are applied on top. A failure
         // leaves the port pinned (fail-closed) and says so.
@@ -2930,6 +2951,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         {
             super::output::error(&e.to_string());
         }
+        Ok(())
     };
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
@@ -4267,7 +4289,10 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
                 infra::detach_container(&c.id, &ip);
                 return Err(e);
             }
-            warn_if_namespace_isolation_inert(&c.namespace);
+            if let Err(e) = refuse_if_namespace_isolation_inert(&c.namespace) {
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
+            }
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
             // nsenter doesn't run from the reexec'd process.
             if let Some(port) = c.expose {
@@ -8417,5 +8442,34 @@ containers:
         let counts = super::restart_counts(root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 0);
         assert_eq!(counts.get("c2").copied().unwrap_or(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod isolation_verdict_tests {
+    use super::isolation_verdict;
+
+    #[test]
+    fn a_named_namespace_on_a_host_that_does_not_filter_is_refused_with_its_code() {
+        let e = isolation_verdict("teama", Some(false), false).unwrap_err();
+        assert_eq!(e.number(), 6305);
+        assert_eq!(delonix_model::exitcode::for_error(&e), 69);
+    }
+
+    #[test]
+    fn the_valve_turns_the_refusal_back_into_a_warning() {
+        assert!(isolation_verdict("teama", Some(false), true).is_ok());
+    }
+
+    #[test]
+    fn nothing_is_refused_when_the_host_filters_or_cannot_be_asked() {
+        assert!(isolation_verdict("teama", Some(true), false).is_ok());
+        assert!(isolation_verdict("teama", None, false).is_ok());
+    }
+
+    #[test]
+    fn the_default_namespace_is_never_refused() {
+        assert!(isolation_verdict("default", Some(false), false).is_ok());
+        assert!(isolation_verdict("", Some(false), false).is_ok());
     }
 }

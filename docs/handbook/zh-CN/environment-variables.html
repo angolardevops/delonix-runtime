@@ -526,6 +526,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td><strong>没有任何防火墙规则、namespace 隔离或 <code>Dependency</code> 会应用到 IPv6 上</strong>——每一条策略都只针对 IPv4。安全警告。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>，<em>«Bloco 0 do plano 33 (v0.37.1)»</em>。</td>
 </tr>
 <tr>
+<td><code>DELONIX_ALLOW_UNENFORCED_ISOLATION</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:refuse_if_namespace_isolation_inert</code></a></td>
+<td>即使内核不过滤 bridge 内部的流量（未加载 <code>br_netfilter</code>，或 <code>bridge-nf-call-iptables=0</code>），也让具名 namespace 里的工作负载带着告警跑起来。不设置时请求会被拒绝（DX-6305，退出码 69），因为隔离规则装上了却什么都不拦。只有 <code>1</code> 才打开。</td>
+<td><code>1</code> → 带着告警跑；其他取值（或未设置）→ 拒绝。</td>
+<td>隔离规则装上了却什么都不拦。见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 中 «O isolamento de namespace é INERTE sem <code>br_netfilter</code>» 一节。</td>
+</tr>
+<tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
 <td>即使这个会话没有 cgroup 委派，也让 <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 跑起来；即使容器的 cgroup 缺少 <code>cpuset</code>/<code>io</code> 控制器，也让 <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> 跑起来（<code>preflight_controller_limits</code>），而不是拒绝（退出码 69）。</td>

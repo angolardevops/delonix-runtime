@@ -5732,11 +5732,15 @@ não `modprobe`/`sysctl -w`: o `virt-customize` corre contra um convidado offlin
 já o fazia, mas justificava-o pelo **Kubernetes** — por isso uma imagem para rootless-only não
 tinha razão para o herdar, e não herdava. Teste a exigir os dois sysctls nas quatro distros.
 
-**Por decidir, e é decisão de política, não de código**: o motor continua sem verificar isto em
-runtime. Um `container run --namespace` num host sem o módulo (um `install.sh --no-tune`, um
-container, uma distro sem ele) continua a anunciar isolamento que não existe. Avisar é o mínimo;
-recusar seria fail-closed a sério e parte quem hoje corre assim — sem isolamento real, mas a
-correr. Merece a sua própria sessão.
+**Decidido a 2026-10-02 (D5 do plano de maturidade): recusa.** Um `--namespace`
+com nome num host que não filtra o tráfego de bridge é recusado com DX-6305 (exit 69)
+antes de o workload correr: container, pod e VM. O attach é desfeito, por isso não fica
+lease nem registo. `DELONIX_ALLOW_UNENFORCED_ISOLATION=1` mantém o comportamento antigo
+(aviso alto e o workload corre). «Não consegui perguntar» (holder em baixo ou antigo)
+continua silencioso. O gate da bateria põe o sysctl a 0 só dentro do holder ISOLADO da
+corrida, com um container a segurá-lo: uma recusa que deixa o holder vazio desmonta-o, e o
+seguinte nasce com o valor por omissão (1) — foi assim que o check da válvula passou pela
+razão errada na primeira medição.
 
 ## A classe «X não é Y» — varredura de 2026-08-05
 
