@@ -99,3 +99,4 @@ never rewritten — supersede them with a new one.
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
   the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+- **0069** — The Kind catalog after reassessment: a manifest the engine does not fully understand is refused before any effect (including Pod `containers[]` items), `App` converges on a fingerprint of its build inputs, CNI plugins are bounded, `Service` backends must be ready, and an unreadable store is an error rather than «nothing there». Records why `NetworkAccessRule`, `NetworkZone`, `Gateway`, `Container` and `KubernetesCluster` are not merged or renamed, and lists what is still pending. *Accepted*.
