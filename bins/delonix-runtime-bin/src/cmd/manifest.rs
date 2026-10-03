@@ -1390,10 +1390,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
         )
         .unwrap();
-        let antes = super::unknown_field_warnings();
+        let antes = super::thread_unknown_fields();
         super::load_lenient(&p).unwrap();
         assert_eq!(
-            super::unknown_field_warnings(),
+            super::thread_unknown_fields(),
             antes + 1,
             "carregar um manifesto com um campo inventado tem de contar UM aviso"
         );
