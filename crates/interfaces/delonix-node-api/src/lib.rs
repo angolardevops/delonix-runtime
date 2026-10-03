@@ -3,21 +3,53 @@
 //!
 //! What is served today, and it is said here so nobody reads the socket as the
 //! whole contract: `NodeService.ListProviders` (ADR-0050 D5) — the same
-//! `ProviderInfo` per provider that `delonix provider ls -o json` prints, built
-//! from the same declarations and the same host probes. The other `NodeService`
-//! RPCs answer `UNIMPLEMENTED` with the ADR step that brings them; every other
-//! service of the contract is not registered on this socket at all.
+//! `ProviderInfo` per provider that `delonix provider ls -o json` prints — the
+//! entry point `GetApiRoot` (`GET /v1`: a link to every resource served; each
+//! resource carries its own `links`, mirrored in an RFC 8288 `Link` header) and
+//! `GetNodeInfo`, `GetHealth` and `GetCapacity` (ADR-0042 step C), computed from
+//! the same functions `delonix system info` reads. `GET /openapi.json` serves
+//! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
+//! render it from UI files embedded in the binary ([`docs`]). `WatchEvents`
+//! answers `UNIMPLEMENTED` with the step that brings it; every other service of
+//! the contract is not registered on this socket at all.
+//!
+//! Errors: gRPC carries `google.rpc.Status`; the REST encoding answers every
+//! error with an RFC 9457 `application/problem+json` document built by the
+//! engine's `codes::problem` — the same `DX-` codes the CLI exits with — which
+//! is what the published OpenAPI declares (ADR-0042 D2).
+//!
+//! Step E, first wave: `NetworkService.GetNetwork` and `ListNetworks`
+//! ([`networks`]) — the resource's `etag` is the REST `ETag` (a matching
+//! `If-None-Match` is 304), a list takes `label_selector` ([`selector`]) and
+//! pages by name, with the next page as a link.
+//!
+//! Step E, the first mutations: `CreateNetwork` and `DeleteNetwork`
+//! ([`network_ops`]) answer an `Operation` persisted under the state root
+//! before the work starts ([`operations`]), read back with
+//! `OperationService.GetOperation` and `ListOperations`. `request_id` (REST:
+//! `Idempotency-Key`) makes a retry the first answer; `etag` (REST:
+//! `If-Match`) makes a stale delete 412.
+//!
+//! The REST routes are not written by hand: `build.rs` generates the route
+//! table and the dispatchers from the `google.api.http` annotations
+//! ([`transcode`]), for every RPC of the contract. A route of a service this
+//! engine does not serve yet answers 501 (DX-6001), a path the contract does
+//! not have 404 (DX-4001).
 //!
 //! Both encodings come from the same `proto/` files: the gRPC stubs and the
 //! proto3 JSON (`pbjson`, proto field names — what the published OpenAPI
 //! declares). The HTTP route for a `google.api.http` annotation is written by
-//! hand for now (`GET /v1/providers`, the only one); a generic transcoder over
-//! the annotations is the step after this one, recorded in ADR-0042.
+//! hand for now (the four GET routes of `NodeService`); a generic transcoder
+//! over the annotations is a later slice of ADR-0042 step C.
 //!
 //! `delonix serve node-api` runs the `delonix-node-api` binary, which calls
 //! [`serve_blocking`]. The socket is `0600` and every accepted connection is
 //! checked with `SO_PEERCRED` against this process's uid — the same discipline
 //! as the CRI, the management API and the holder's control socket.
+
+// A `tonic::Status` is large by nature and it is the error every service
+// method returns; the CRI crate silences this lint for the same reason.
+#![allow(clippy::result_large_err)]
 
 use delonix_model::Error;
 
@@ -30,10 +62,22 @@ pub mod proto {
     }
 }
 
+pub mod docs;
+pub mod network_ops;
+pub mod networks;
+pub mod node;
+pub mod operations;
+pub mod page;
 pub mod providers;
+pub mod selector;
 mod service;
+pub mod transcode;
+pub mod volumes;
 
-pub use service::{list_providers, router, NodeApi};
+pub use service::{
+    capacity, health, link_header, list_providers, node_info, openapi_document, router, NodeApi,
+    OPENAPI_YAML,
+};
 
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
 /// path or `unix:///path`. Same pattern as `delonix_mgmt::serve_blocking`.

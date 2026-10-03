@@ -42,7 +42,7 @@ pub(crate) const POD_LABEL: &str = "delonix.io/pod";
 /// the default bridge — the moment `spec.network` started being honored, all three reported
 /// (and `rm` *detached*) an address the pod never had. Same "membership from labels" idiom
 /// as [`POD_LABEL`]: derived state, no new store.
-pub(crate) const POD_IP_LABEL: &str = "delonix.io/pod-ip";
+pub(crate) use delonix_sdn::netops::POD_IP_LABEL;
 
 // The member's position in `spec.containers`, recorded at create time.
 //

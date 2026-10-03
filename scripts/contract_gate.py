@@ -15,8 +15,12 @@ by hand. Five checks, each failing on its own:
    bidirectional streams (`Exec`, `Console`) must NOT have one — REST serves them over
    WebSocket (ADR-0040 D4).
 5. `docs/api/openapi.yaml` is exactly what `protoc-gen-openapi` produces from the
-   contract, and no two of its paths are the same URL under different variable names
-   (OpenAPI forbids it, and a transcoder would route one of them to the wrong method).
+   contract — with ONE documented transform, `problem_json` (ADR-0042 D2): every
+   operation's error response is an RFC 9457 problem document (`application/problem+json`,
+   the `Problem` schema below) instead of the plugin's `google.rpc.Status`. gRPC keeps
+   `google.rpc.Status`; the transform is about the REST encoding only. No two paths may
+   be the same URL under different variable names (OpenAPI forbids it, and a transcoder
+   would route one of them to the wrong method).
 
     python3 scripts/contract_gate.py            # check (exit 1 on any failure)
     python3 scripts/contract_gate.py --update   # rewrite docs/api/openapi.yaml
@@ -78,6 +82,111 @@ def generate_openapi(out_dir: Path) -> subprocess.CompletedProcess:
     cmd += [f"--openapi_opt={o}" for o in OPENAPI_OPTS]
     cmd += [str(s) for s in SOURCES]
     return run(cmd)
+
+
+# What the plugin writes for every operation's error response (`default_response`).
+STATUS_DEFAULT = """                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+"""
+
+PROBLEM_DEFAULT = """                default:
+                    description: An error, as an RFC 9457 problem document (ADR-0042 D2).
+                    content:
+                        application/problem+json:
+                            schema:
+                                $ref: '#/components/schemas/Problem'
+"""
+
+# RFC 9457 plus the fields the engine adds (`delonix_model::codes::problem`, ADR-0059 D5).
+# A field with no value is left out of a document, never filled.
+PROBLEM_SCHEMA = """        Problem:
+            type: object
+            description: An error as an RFC 9457 problem document (`application/problem+json`). Built by the engine's `codes::problem` — the same document the CLI's errors map to.
+            required:
+                - type
+                - title
+                - status
+                - detail
+                - code
+                - dx
+            properties:
+                type:
+                    type: string
+                    description: The entry of `code` in the published error dictionary (`codigos.html#DX-NNNN`).
+                title:
+                    type: string
+                    description: What the code means, in one line.
+                status:
+                    type: integer
+                    format: int32
+                    description: The HTTP status of this response.
+                detail:
+                    type: string
+                    description: What happened, for this request.
+                instance:
+                    type: string
+                    description: The request path or resource the error is about.
+                code:
+                    type: string
+                    description: The engine's error class (`DX_NOT_FOUND`, `DX_INVALID_ARGUMENT`, …) — the same classes the CLI exits with.
+                dx:
+                    type: string
+                    description: The dictionary number (`DX-4001`); `delonix explain` describes it.
+                exit:
+                    type: integer
+                    format: int32
+                    description: The exit code the CLI gives this failure.
+                reason:
+                    type: string
+                    description: For a network failure, the ADR-0059 D5 reason slug.
+                provider:
+                    type: string
+                    description: The provider the failure came from, when one did.
+                role:
+                    type: string
+                    description: The provider role involved, when one was.
+                capability:
+                    type: string
+                    description: The catalog capability involved, when one was.
+                step:
+                    type: string
+                    description: The step that failed, when the operation has steps.
+                planDigest:
+                    type: string
+                    description: The plan digest an apply was given, when one was.
+                cause:
+                    type: string
+                    description: The underlying error, when there is one.
+                grpc_status:
+                    type: integer
+                    format: int32
+                    description: The gRPC status code the same failure carries on the gRPC encoding.
+"""
+
+
+def problem_json(text: str) -> str:
+    """ADR-0042 D2: every REST error response is `application/problem+json` with the
+    `Problem` schema. Refuses to run on output it does not recognise — a plugin change
+    that moved the blocks must fail the gate, not leave half the operations untouched."""
+    n = text.count(STATUS_DEFAULT)
+    if n == 0 or text.count("description: Default error response") != n:
+        raise SystemExit("contract_gate: the plugin's default error responses changed shape — "
+                         "update problem_json")
+    text = text.replace(STATUS_DEFAULT, PROBLEM_DEFAULT)
+    if "\n    schemas:\n" not in text:
+        raise SystemExit("contract_gate: no components.schemas to add Problem to")
+    # `google.rpc.Status` was referenced only by those responses: drop its schema (the
+    # name line and every line indented below it).
+    if "schemas/google.rpc.Status'" in text:
+        raise SystemExit("contract_gate: google.rpc.Status is still referenced")
+    text, dropped = re.subn(r"\n        google\.rpc\.Status:\n(?:(?: {9}.*)?\n)*", "\n", text)
+    if dropped != 1:
+        raise SystemExit("contract_gate: the google.rpc.Status schema was not found once")
+    return text.replace("\n    schemas:\n", "\n    schemas:\n" + PROBLEM_SCHEMA, 1)
 
 
 def strip_comments(text: str) -> str:
@@ -157,8 +266,12 @@ def main() -> int:
     if args.update:
         OPENAPI.parent.mkdir(parents=True, exist_ok=True)
         r = generate_openapi(OPENAPI.parent)
-        print(r.stdout + r.stderr if r.returncode else f"updated {OPENAPI.relative_to(ROOT)}")
-        return r.returncode
+        if r.returncode:
+            print(r.stdout + r.stderr)
+            return r.returncode
+        OPENAPI.write_text(problem_json(OPENAPI.read_text(encoding="utf-8")), encoding="utf-8")
+        print(f"updated {OPENAPI.relative_to(ROOT)}")
+        return 0
 
     rc = 0
 
@@ -204,7 +317,7 @@ def main() -> int:
             print("FAIL  protoc-gen-openapi")
             print(r.stdout + r.stderr)
             return 1
-        fresh = (Path(tmp) / "openapi.yaml").read_text(encoding="utf-8")
+        fresh = problem_json((Path(tmp) / "openapi.yaml").read_text(encoding="utf-8"))
     committed = OPENAPI.read_text(encoding="utf-8") if OPENAPI.is_file() else ""
     if fresh != committed:
         print("FAIL  docs/api/openapi.yaml is not the generated one — run "
