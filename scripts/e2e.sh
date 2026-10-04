@@ -4746,8 +4746,10 @@ YAML
   opn firewall/filter/apply >/dev/null
   check "delete do NetworkGateway tira o alias e a regra dele" ok \
     "$BIN" delete networkgateways "$GW"
-  check "... e no appliance não sobra a regra dele" ok bash -c \
-    "[ -z \"\$(curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | grep -o '\"description\":\"e2e $PFX\"')\" ]"
+  # The search has to ANSWER (a `rows` list) for "no such rule" to mean
+  # anything: an appliance that is down gives an empty body, not a clean one.
+  check "... e no appliance não sobra a regra dele (pesquisa respondida, regra ausente)" ok bash -c \
+    "curl -skf -m 20 -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | python3 -c 'import json,sys; rows=json.load(sys.stdin)[\"rows\"]; sys.exit(1 if any(r.get(\"description\")==\"e2e $PFX\" for r in rows) else 0)'"
 else
   for n in "NetworkGateway aplica no OPNsense com a marca de posse" \
            "regra à mão com a mesma descrição é recusada, não adoptada" \
@@ -4780,6 +4782,19 @@ if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n 
   check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/zone.yaml"
   check "... a vnet leva a marca de posse no alias" ok bash -c \
     "curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/vnets/$VN\" | grep -q 'delonix-owner:dlx-'"
+  # An absence check proves nothing unless the same read can see the zone
+  # while it exists, and unless the read answered: `pve_zone_state` prints
+  # present, absent, or unread, and only the first two are answers.
+  pve_zone_state() {  # pve_zone_state <zone>
+    curl -skf -m 20 -H @"$PVE_HDR" "$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones" | python3 -c \
+      'import json,sys
+try: d=json.load(sys.stdin)["data"]
+except Exception: print("unread"); sys.exit(0)
+print("present" if any(z.get("zone")==sys.argv[1] for z in d) else "absent")' "$1"
+  }
+  export -f pve_zone_state; export PVE_HDR
+  check "... e a leitura da lista de zonas vê a zona dele no cluster" ok bash -c \
+    "[ \"\$(pve_zone_state '$ZN')\" = present ]"
   # Uma zona que já existe e que o motor não criou: recusada, nunca adoptada.
   HZ="h$(( $$ % 100000 ))"
   pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
@@ -4799,8 +4814,8 @@ if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n 
     "curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones?pending=1\" | python3 -c 'import json,sys; z=[x for x in json.load(sys.stdin)[\"data\"] if x.get(\"zone\")==\"$HZ\"]; sys.exit(0 if z and z[0].get(\"state\")==\"new\" else 1)'"
   pve POST /cluster/sdn/rollback >/dev/null
   check "delete do NetworkZone tira a vnet e a zona dele" ok "$BIN" delete networkzones "$ZN"
-  check "... e a zona já não existe no cluster" ok bash -c \
-    "! curl -sk -H @'$PVE_HDR' \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones\" | grep -q '\"zone\":\"$ZN\"'"
+  check "... e a zona já não existe no cluster (lista lida, zona ausente)" ok bash -c \
+    "[ \"\$(pve_zone_state '$ZN')\" = absent ]"
 else
   for n in "NetworkZone aplica zona e vnet com a marca de posse" \
            "zona à mão com o mesmo nome é recusada, não adoptada" \
