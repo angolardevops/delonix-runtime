@@ -53,6 +53,19 @@ impl Drop for FileLock {
     }
 }
 
+/// The values as one unambiguous byte string: length-prefixed key and value,
+/// in key order, so `{a: "bc"}` and `{ab: "c"}` differ.
+fn canonical(data: &BTreeMap<String, String>) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (k, v) in data {
+        out.extend_from_slice(&(k.len() as u64).to_le_bytes());
+        out.extend_from_slice(k.as_bytes());
+        out.extend_from_slice(&(v.len() as u64).to_le_bytes());
+        out.extend_from_slice(v.as_bytes());
+    }
+    out
+}
+
 /// Header of the encrypted files (distinguishes from the legacy plaintext JSON format).
 const SEALED_MAGIC: &[u8] = b"DLXSEC1\n";
 
@@ -75,6 +88,29 @@ impl SecretStore {
         let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
         let vault = CredVault::open(&base)?;
         Ok(Self { root, vault })
+    }
+
+    /// Opens an existing store without creating anything: `None` when this
+    /// node has no master key, so no secret was ever stored.
+    pub fn open_existing(base: impl Into<PathBuf>) -> Result<Option<Self>> {
+        let base = base.into();
+        let root = base.join("secrets");
+        Ok(CredVault::open_existing(&base)?.map(|vault| Self { root, vault }))
+    }
+
+    /// The keyed fingerprint of a set of values (see [`CredVault::fingerprint`]).
+    pub fn fingerprint(&self, data: &BTreeMap<String, String>) -> String {
+        self.vault.fingerprint(&canonical(data))
+    }
+
+    /// [`SecretStore::fingerprint`] without opening (and so creating) a store:
+    /// `None` when this node has no master key yet, so no secret exists to
+    /// compare against.
+    pub fn fingerprint_if_keyed(
+        base: &Path,
+        data: &BTreeMap<String, String>,
+    ) -> Result<Option<String>> {
+        Ok(CredVault::open_existing(base)?.map(|v| v.fingerprint(&canonical(data))))
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -295,6 +331,32 @@ impl SecretStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_fingerprint_follows_the_values_and_is_not_the_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = SecretStore::open(tmp.path()).unwrap();
+        let a: BTreeMap<String, String> = [("A".into(), "bc".into())].into();
+        let b: BTreeMap<String, String> = [("Ab".into(), "c".into())].into();
+        let c: BTreeMap<String, String> = [("A".into(), "bd".into())].into();
+        assert_eq!(s.fingerprint(&a), s.fingerprint(&a.clone()));
+        assert_ne!(s.fingerprint(&a), s.fingerprint(&b), "boundaries count");
+        assert_ne!(s.fingerprint(&a), s.fingerprint(&c));
+        assert!(!s.fingerprint(&a).contains("bc"));
+        // Another node's key gives another fingerprint.
+        let other = tempfile::tempdir().unwrap();
+        let o = SecretStore::open(other.path()).unwrap();
+        assert_ne!(s.fingerprint(&a), o.fingerprint(&a));
+        // A node with no key yet has nothing to fingerprint against.
+        let none = tempfile::tempdir().unwrap();
+        assert!(SecretStore::fingerprint_if_keyed(none.path(), &a)
+            .unwrap()
+            .is_none());
+        assert!(
+            !none.path().join("tunnels").exists(),
+            "a plan creates nothing"
+        );
+    }
+
     #[test]
     fn the_store_assigns_the_version_from_the_values() {
         let tmp = tempfile::tempdir().unwrap();

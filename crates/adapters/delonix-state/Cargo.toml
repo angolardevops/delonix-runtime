@@ -16,6 +16,8 @@ libc = { workspace = true }
 # CredVault: XChaCha20-Poly1305 (AEAD), Rust puro — sem C, compila em musl/aarch64.
 chacha20poly1305 = { workspace = true }
 getrandom = { workspace = true }
+# The keyed fingerprint a plan compares secret values by.
+sha2 = { workspace = true }
 
 [dev-dependencies]
 # A per-test temp dir that is removed when the test ends, also on panic

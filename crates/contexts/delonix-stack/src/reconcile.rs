@@ -296,6 +296,8 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // `service::apply_one` fully overwrites the registry entry on every
         // apply — same "converges without recreating anything" shape as
         // `Image`'s ref/digest just above.
+        // The apply layer writes a Secret in place; nothing is recreated.
+        k::SECRET => &["keys", "fingerprint"],
         k::SERVICE => &["matchLabels", "port"],
         // An apply that died mid-way is finished by applying again: the
         // record's ledger says where it stopped, and the provider adopts what

@@ -501,6 +501,67 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The fields `stack plan` compares for a Secret: its key NAMES and a keyed
+/// fingerprint of its values. Never a value — a plan is printed and kept.
+pub(crate) const RECONCILED_SECRET_FIELDS: &[&str] = &["keys", "fingerprint"];
+
+/// A Secret document as the reconciler sees it.
+///
+/// Converges only when the manifest CARRIES its values (`stringData`): a plan
+/// that resolved `fromEnv` or read `fromEnvFile` would report differently
+/// depending on who ran it and from where, so those stay ensure-present.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: SecretSpec = manifest::spec_of(doc)?;
+    let carried =
+        spec.from_env.is_none() && spec.from_env_file.is_none() && !spec.string_data.is_empty();
+    let mut fields = BTreeMap::new();
+    if carried {
+        let data: BTreeMap<String, String> = spec.string_data.clone();
+        fields.insert(
+            "keys".into(),
+            data.keys().cloned().collect::<Vec<_>>().join(","),
+        );
+        // No key yet on this node: nothing is stored, the plan is a `Create`
+        // and the fingerprint is never compared.
+        if let Some(fp) = SecretStore::fingerprint_if_keyed(&state_root(), &data)? {
+            fields.insert("fingerprint".into(), fp);
+        }
+    }
+    Ok(super::reconcile::Desired {
+        kind: k::SECRET.into(),
+        name: doc.metadata.name.clone(),
+        fields,
+        converges: carried,
+        ownable: false,
+    })
+}
+
+/// What the node holds, by name. Reads nothing when the node has no key.
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let Some(store) = SecretStore::open_existing(state_root())? else {
+        return Ok(Vec::new());
+    };
+    Ok(store
+        .list()
+        .into_iter()
+        .map(|s| {
+            let mut f = BTreeMap::new();
+            f.insert(
+                "keys".into(),
+                s.data.keys().cloned().collect::<Vec<_>>().join(","),
+            );
+            f.insert("fingerprint".into(), store.fingerprint(&s.data));
+            super::reconcile::Actual {
+                kind: k::SECRET.into(),
+                name: s.name.clone(),
+                fields: f,
+                owner: None,
+                last_applied: None,
+            }
+        })
+        .collect())
+}
+
 /// Lowercase hex, no dependency — the value only needs to be valid UTF-8 to
 /// live in a `BTreeMap<String,String>`, and hex is the smallest encoding that
 /// guarantees that without pulling in a base64 crate for one call site.

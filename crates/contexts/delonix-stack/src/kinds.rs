@@ -326,10 +326,11 @@ const FACTS: &[KindFacts] = &[
         form: Form::Primary,
         in_stack: true,
         stack_group: "secrets",
-        // The state is the encrypted values, and a plan will not decrypt them to
-        // compare. The only ensure-present Kind left, and `not_converged_reason`
-        // says so in those words.
-        converges: false,
+        // Converges per DOCUMENT (`secret::desired`): one that carries its
+        // values (`stringData`) is compared by a keyed fingerprint, never by
+        // decrypting for display; one that reads `fromEnv`/`fromEnvFile` stays
+        // ensure-present, and `not_converged_reason` says why.
+        converges: true,
         teardown: false,
         namespaced: Namespaced::Never,
         presence: Presence::Registry,

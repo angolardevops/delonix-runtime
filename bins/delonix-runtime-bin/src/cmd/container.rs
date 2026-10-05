@@ -5575,6 +5575,32 @@ fn describe_one(c: &Container) {
     // Only the NAMES of the secrets — the value is never printed (the `describe`
     // is routinely pasted into issues/chats).
     d.list("Secrets", &c.secrets);
+    // What each secret's version was when this container last started, and
+    // whether it has been rotated since: the process holds the old value until
+    // the next start, which is exactly what an operator asks after a rotation.
+    if let Some(seen) = c.annotations.get("delonix.io/secret-versions") {
+        let current = delonix_state::SecretStore::open_existing(super::util::state_root())
+            .ok()
+            .flatten();
+        let lines: Vec<String> = seen
+            .split(',')
+            .filter_map(|p| p.split_once('='))
+            .map(|(n, v)| {
+                let now = current
+                    .as_ref()
+                    .and_then(|s| s.load(n).ok())
+                    .map(|s| s.version.max(1).to_string());
+                match now {
+                    Some(now) if now != v => {
+                        format!("{n}: started with v{v}, now v{now} (restart to pick it up)")
+                    }
+                    Some(_) => format!("{n}: v{v}"),
+                    None => format!("{n}: v{v} (secret no longer exists)"),
+                }
+            })
+            .collect();
+        d.list("Secret versions", &lines);
+    }
 
     if c.labels.is_empty() {
         d.field("Labels", "<none>");

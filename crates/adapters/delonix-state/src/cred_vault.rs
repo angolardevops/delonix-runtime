@@ -83,6 +83,43 @@ impl CredVault {
         Ok(CredVault { dir, key_path, key })
     }
 
+    /// Opens the vault only if its master key already exists — `None` otherwise.
+    /// For readers that must not create state (a plan).
+    pub fn open_existing(base: &Path) -> Result<Option<CredVault>> {
+        let root = base.join("tunnels");
+        let key_path = root.join("keyring.key");
+        match fs::read(&key_path) {
+            Ok(bytes) if bytes.len() == KEY_LEN => {
+                let mut key = [0u8; KEY_LEN];
+                key.copy_from_slice(&bytes);
+                Ok(Some(CredVault {
+                    dir: root.join("cred"),
+                    key_path,
+                    key,
+                }))
+            }
+            Ok(_) => Err(Error::CorruptMasterKey(key_path)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// A keyed fingerprint of `bytes`: SHA-256 over a domain tag, the master
+    /// key and the bytes, shortened to 16 hex digits. It says «same values» or
+    /// «different values» and nothing else; without the host key it cannot be
+    /// used to test a guess, which a bare hash of a short password could.
+    pub fn fingerprint(&self, bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"delonix-secret-fingerprint-v1\0");
+        h.update(self.key);
+        h.update(bytes);
+        h.finalize()[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
     fn load_or_create_key(key_path: &Path) -> Result<[u8; KEY_LEN]> {
         match fs::read(key_path) {
             Ok(bytes) if bytes.len() == KEY_LEN => {

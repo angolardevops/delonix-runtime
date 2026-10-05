@@ -135,7 +135,7 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
 5. Pod standalone: `emptyDir` on disk, `network: host|none` that mean what they say, `requests`
    admission semantics, probes/init containers. D1 makes the unsupported ones refuse; it does not
    implement them.
-6. DONE (store side): a Secret carries a `version` the store assigns on save (1 on creation, +1 when the values change, unchanged otherwise); `secret apply` reports `created`/`unchanged`/`rotated to version N (changed: KEYS)` by key name only, and `secret ls`/`inspect` show it. NOT done: `Secret` still does not converge in `stack plan` (it stays ensure-present), and workloads do not record which version they started with.
+6. DONE: a Secret carries a `version` the store assigns on save (1 on creation, +1 when the values change); `secret apply` reports `created`/`unchanged`/`rotated to version N (changed: KEYS)` by key name only. `stack plan` now converges a Secret that carries its values (`stringData`), comparing key names and a KEYED fingerprint (never a value; the node's master key is in it, and a node without one plans a `Create` and creates nothing). A Secret that reads `fromEnv`/`fromEnvFile` stays ensure-present, because a plan that read the environment would differ by who ran it. A container records the version of each `--secret` it started with (`delonix.io/secret-versions`), and `container describe` says when it has been rotated since.
 7. OpenStack spike (ADR-0039) — requires a lab cloud.
 8. CNI `VERSION`/`GC`, persisted netconf for `DEL` after a conflist change.
 9. OCI/CRI/CNI/CSI conformance suites — not run in this change; no conformance is claimed.
