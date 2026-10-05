@@ -15259,3 +15259,6 @@ msgstr "secret/{name}: sem alterações, versão {v} ({n} chave(s))"
 
 msgid "secret/{name}: rotated to version {v} (changed: {keys})"
 msgstr "secret/{name}: rodado para a versão {v} (alteradas: {keys})"
+
+msgid "its values come from fromEnv/fromEnvFile, which a plan does not read — ensured at apply"
+msgstr "os valores vêm de fromEnv/fromEnvFile, que um plano não lê — garantidos no apply"

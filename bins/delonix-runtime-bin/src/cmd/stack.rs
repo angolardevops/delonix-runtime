@@ -402,6 +402,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
+                k::SECRET => super::secret::desired(doc)?,
                 k::SERVICE => super::service::desired(doc)?,
                 k::IPPOOL => super::ippool::desired(doc)?,
                 k::STORAGE_POOL => super::storage_pool::desired(doc)?,
@@ -442,6 +443,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
+    out.extend(super::secret::actual()?);
     out.extend(super::service::actual()?);
     out.extend(super::ippool::actual()?);
     out.extend(super::storage_pool::actual()?);
@@ -608,16 +610,8 @@ pub(crate) const NOT_CONVERGED_GENERIC: &str = "not converged in this version";
 /// anything under `--l18n=pt` — a gate that only guards one language is not a
 /// gate.
 fn not_converged_reason(kind: &str) -> &'static str {
-    match kind {
-        // A secret's VALUES are the state, and they are encrypted at rest and
-        // never read back for display. A diff would either say nothing useful or
-        // decrypt to compare — and decrypting to draw a plan is not a trade
-        // worth making.
-        k::SECRET => {
-            "the state is the encrypted values, and a plan will not decrypt them to compare"
-        }
-        _ => NOT_CONVERGED_GENERIC,
-    }
+    let _ = kind;
+    NOT_CONVERGED_GENERIC
 }
 
 /// Which fields the plan compares, per converging Kind.
@@ -757,6 +751,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
+        (k::SECRET, super::secret::RECONCILED_SECRET_FIELDS),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IPPOOL, super::ippool::RECONCILED_IPPOOL_FIELDS),
         (
@@ -878,6 +873,14 @@ fn explain(c: &Change) -> Option<String> {
             Some(super::po::t("exists and belongs to no stack — will be taken over").to_string())
         }
         Action::Delete => Some(super::po::t("no longer declared in the manifest").to_string()),
+        // A Secret converges per document, so reaching here means THIS one reads
+        // its values from the environment or a file, which a plan does not.
+        Action::NotConverged if c.kind == k::SECRET => Some(
+            super::po::t(
+                "its values come from fromEnv/fromEnvFile, which a plan does not read — ensured at apply",
+            )
+            .to_string(),
+        ),
         Action::NotConverged => {
             Some(super::po::t("this Kind is ensure-present in this version").to_string())
         }
@@ -2169,6 +2172,10 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // Shared content-addressed cache: not ownable, so it never reaches a
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
+        k::SECRET => {
+            "a secret has no record of ownership to stamp, so no stack prunes or destroys it; \
+             remove one on purpose with `delonix secret rm`"
+        }
         k::APP => "an App's output is an image — shared content-addressed cache, owned by no stack",
         // A tunnel's record is keyed by a live agent.
         k::GATEWAY => "a tunnel has no labels to stamp ownership on",
@@ -2429,6 +2436,10 @@ fn converge_and_stamp(
                 k::VM => super::vm::converge(&c.name, &c.diffs)?,
                 k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
                 k::IMAGE => super::image::converge(&c.name, &c.diffs)?,
+                // The Secret layer of this same apply already wrote the new
+                // values (it runs before this step), and it is what reports the
+                // rotation by key name.
+                k::SECRET => {}
                 // A firewall policy re-applies WHOLE: `apply_fw_doc` already
                 // replaces the entire direction, so there is no per-field path
                 // to write — and writing one would be a second way to build the
@@ -2652,6 +2663,7 @@ fn stamp_all(
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
             k::IMAGE => Ok(()),
+            k::SECRET => Ok(()),
             // Same reasoning as `Image` — an App's output is shared content,
             // stamping it for one stack would hand another stack's cache an
             // owner.

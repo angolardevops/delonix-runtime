@@ -6243,6 +6243,21 @@ fn spawn(
         }
         env
     };
+    // Which VERSION of each secret this start read (`name=version`, names only
+    // — never a value), so a rotation after the start can be told apart from a
+    // container that already has it. Written with the record the spawn saves.
+    if !container.secrets.is_empty() {
+        if let Ok(ss) = delonix_state::SecretStore::open(store.base()) {
+            let seen: Vec<String> = container
+                .secrets
+                .iter()
+                .filter_map(|n| ss.load(n).ok().map(|s| format!("{n}={}", s.version.max(1))))
+                .collect();
+            container
+                .annotations
+                .insert("delonix.io/secret-versions".to_string(), seen.join(","));
+        }
+    }
     let read_only = container.read_only;
     // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
     // (see setup_rootfs). Strictly gated — the non-privileged path is identical.
