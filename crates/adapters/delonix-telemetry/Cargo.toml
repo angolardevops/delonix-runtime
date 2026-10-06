@@ -2,7 +2,7 @@
 name = "delonix-telemetry"
 version.workspace = true
 edition.workspace = true
-license = "Apache-2.0"
+license.workspace = true
 description = "Observabilidade do motor Delonix Runtime: logging estruturado, spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas."
 
 [dependencies]

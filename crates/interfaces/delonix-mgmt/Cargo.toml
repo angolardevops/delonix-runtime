@@ -1,10 +1,10 @@
 [package]
 name = "delonix-mgmt"
 version.workspace = true
-edition = "2021"
-license = "Apache-2.0"
+edition.workspace = true
+license.workspace = true
 description = "API de gestão local do Delonix Runtime (HTTP+JSON sobre unix socket)."
-repository = "https://github.com/angolardevops/delonix-runtime"
+repository.workspace = true
 
 [dependencies]
 delonix-compute = { workspace = true }
