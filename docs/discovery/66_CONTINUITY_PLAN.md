@@ -97,6 +97,57 @@ claiming maturity.
 | 0.3 | Clean the lab leftovers: the paused `opnsense-f3d` appliance, the `pve-lab-475/476` VMs, the `audvm` VM, the orphan IPAM reservation `10.250.7.0/24`, the `dlxs6` lab token (revoke), the `naas/audit-fase0` remote branch (the seven NaaS sessions are closed) | `git ls-remote` shows only `main`; the token is revoked; the VMs are accounted for |
 | 0.4 | Record that `auditoria-cobertura` is lost and rewrite F0.2 of the maturity plan from «integrate» to «rebuild» | the plan no longer depends on a branch that does not exist |
 
+### Sprint 0 — delivered 2026-10-06, measured
+
+| Measurement | Result |
+|---|---|
+| Chaos harness | **53 PASS / 0 FAIL / 1 SKIP**, rc=0. The skip is `truenas-destroy`, with no `DELONIX_CHAOS_TRUENAS_URL/USER/PASS` |
+| Battery, clean single run on `2a62608d` | **1067 PASS / 13 FAIL / 13 SKIP** — the thirteen failures were one cascade (below) |
+| Battery, same commit with the cascade's cause removed | **1081 PASS / 0 FAIL / 13 SKIP**, rc=0 |
+| Cell metric of the capability catalogue | **111 / 281 applicable = 39.5 %**, identical to the committed `capability-matrix.md` — the matrix in git is current |
+| Performance gate | **refused twice, then passed**: `delonix` **84 ms** against the machine's recorded 87 ms (×0.97, dispersion 1.9×), docker 216 ms (×0.96), podman 258 ms (×0.92). The two refusals were the gate working — the second came at load 1.70 with the line dispersed 27.3× against a ceiling of 3×, which is I/O contention that `load(1m)` does not show |
+| Free disk | 98 % used (19 G free) → **90 % (90 G free)** |
+
+**The thirteen failures were not the engine's.** The backup section's setup pulled
+a *second* image (`alpine:latest`) that the battery's image guard does not cover,
+with its output discarded. On this host the outbound link is slow: the image
+reached the store only after the section, the container was never created, and
+thirteen checks failed with `no such container` — thirteen steps past the
+problem. The store of that run had `alpine:3.19` and no `alpine:latest`, which is
+the whole cause. Fixed by using `$IMG` and making the creation a named check.
+
+**And the first run of all was void, by my own hand.** It reported sixteen
+failures, three of them in the node API. Two instances of the battery had run in
+parallel over the same `DELONIX_ROOT` — visible as two distinct `PFX` in one log,
+the same check appearing once PASS and once FAIL, and node-API checks under the
+`=== image ===` section. The three node-API failures came from that: the
+scenarios used a fixed idempotency key, so the second run was answered with the
+first run's operation — exactly what the contract promises — over a network
+`cleanup()` had just removed. Measured in isolation: 20 of 20 fail on a reused
+root, and three consecutive runs pass after the fix. Each battery run now takes a
+root of its own and aborts if another is live.
+
+**Of the four items, three are closed and one is not:**
+
+- 0.1 **done** — the numbers above, with the SHA, and every SKIP with a reason.
+- 0.2 **done** — 39.5 %, and the committed matrix needed no correction.
+- 0.3 **partly done, and the rest deliberately not**: `naas/audit-fase0` and the
+  `audvm` VM were already gone; `opnsense-f3d`, `pve-lab-475/476` and `pve-lab`
+  are **kept**, because Sprints 6 and 7 need them. The `dlxs6` lab token is still
+  to revoke — it needs the Proxmox lab up, which Sprint 6 brings. `hadata`, `pbs`
+  and `labdata` (53 G) are the live disks of existing VMs and were not touched.
+- 0.4 **done** — F0.2 of the maturity plan corrected.
+
+**What Sprint 0 says about Sprint 1**: on this commit the battery is green once
+the environment's own failure is out of the way, the chaos harness is green, and
+the engine is 3 % faster than this machine's recorded baseline. Sprint 1 may cut
+the tag.
+
+**And it took three attempts to get one performance verdict on this host**, which
+is the argument for F0.3 in one line: a measurement that depends on the machine
+being quiet cannot live on a developer's machine. The gate refusing is what kept
+two unusable runs out of the record.
+
 ### Sprint 1 — Release v5.0.0
 
 153 commits are unpublished, and carrying them is the largest risk in the repo

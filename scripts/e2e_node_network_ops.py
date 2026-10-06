@@ -17,11 +17,25 @@ import os
 import subprocess
 import sys
 import time
+import zlib
 
 BIN = os.environ["BIN"]
 SOCK = os.environ["NODESOCK"]
 ROOT = os.environ["DELONIX_ROOT"]
 NETS = "/v1/namespaces/default/networks"
+
+# The idempotency key has to be STABLE across the scenarios of one run (`replay`
+# re-sends the key `create` used, and `operations` reads the record by its id)
+# and DIFFERENT between runs. A fixed key is a trap on a state root that already
+# carries the record: the second POST is answered with the FIRST operation —
+# which is what the contract promises — while `cleanup()` has removed the network
+# in between, so the target link answers 404. Measured 2026-10-06: on a fresh
+# root the first run passes and the second fails, and 20 of 20 fail on a reused
+# one. The engine was right; the fixed key was the test's. The run is identified
+# by its state root, which the battery already makes unique per run.
+RUN = "%08x" % (zlib.crc32(ROOT.encode()) & 0xFFFFFFFF)
+CREATE_KEY = "e2op-create-" + RUN
+DELETE_KEY = "e2op-delete-" + RUN
 
 
 def call(method, path, body=None, headers=()):
@@ -64,20 +78,32 @@ def create(name, key=None, **extra):
 
 
 def cleanup(*names):
+    """Removes the networks AND the idempotency records of this run's keys.
+
+    The records have to go too, or a second run on the same state root replays
+    the first run's operation over a network `cleanup` has just removed — the
+    404 measured on 2026-10-06. `scenario_replay` must NOT call this: it depends
+    on `create`'s record still being there.
+    """
     for n in names:
         cli("network", "rm", n)
+    for key in (CREATE_KEY, DELETE_KEY):
+        try:
+            os.remove(os.path.join(ROOT, "operations", "r-" + key + ".json"))
+        except FileNotFoundError:
+            pass
 
 
 def scenario_create():
     """POST creates the network: the operation ended SUCCEEDED, Location names
     it, and the CLI and the dataplane record both have the network."""
     cleanup("e2op-a")
-    code, hdrs, op = create("e2op-a", key="e2op-create-a", labels={"app": "web"})
+    code, hdrs, op = create("e2op-a", key=CREATE_KEY, labels={"app": "web"})
     ok(code == 200, f"create answered {code}: {op}")
     ok(op["state"] == "OPERATION_STATE_SUCCEEDED", op)
     ok((op["verb"], op["target"]) == ("create", "Network/e2op-a"), op)
     ok(hdrs.get("location") == "/v1/operations/" + op["id"], hdrs)
-    ok(op["id"] == "r-e2op-create-a" and op["request_id"] == "e2op-create-a", op)
+    ok(op["id"] == "r-" + CREATE_KEY and op["request_id"] == CREATE_KEY, op)
     target = [l["href"] for l in op["links"] if l["rel"] == "target"]
     ok(target == [NETS + "/e2op-a"], op["links"])
     # The link answers, realized, with the label it was asked with.
@@ -96,12 +122,12 @@ def scenario_create():
 def scenario_replay():
     """The same request sent again is answered with the first operation; the
     same name without the key is 409; the key on another name is 400."""
-    code, _, first = create("e2op-a", key="e2op-create-a", labels={"app": "web"})
-    ok(code == 200 and first["id"] == "r-e2op-create-a", (code, first))
+    code, _, first = create("e2op-a", key=CREATE_KEY, labels={"app": "web"})
+    ok(code == 200 and first["id"] == "r-" + CREATE_KEY, (code, first))
     ok(first["state"] == "OPERATION_STATE_SUCCEEDED", first)
     code, _, doc = create("e2op-a")
     ok(code == 409 and doc["grpc_status"] == 6, (code, doc))
-    code, _, doc = create("e2op-other", key="e2op-create-a")
+    code, _, doc = create("e2op-other", key=CREATE_KEY)
     ok(code == 400, (code, doc))
     rc, _ = cli("network", "inspect", "e2op-other")
     ok(rc != 0, "a refused create left a network behind")
@@ -110,11 +136,11 @@ def scenario_replay():
 def scenario_operations():
     """The operation is readable by id and listed; an unknown id is 404; a
     record whose owner process is gone reads FAILED/Interrupted."""
-    code, _, op = call("GET", "/v1/operations/r-e2op-create-a")
+    code, _, op = call("GET", "/v1/operations/r-" + CREATE_KEY)
     ok(code == 200 and op["state"] == "OPERATION_STATE_SUCCEEDED", (code, op))
     code, hdrs, listed = call("GET", "/v1/operations")
     ok(code == 200, code)
-    ok("r-e2op-create-a" in [o["id"] for o in listed["operations"]], listed)
+    ok("r-" + CREATE_KEY in [o["id"] for o in listed["operations"]], listed)
     ok('rel="self"' in hdrs.get("link", ""), hdrs)
     code, _, doc = call("GET", "/v1/operations/nao-existe")
     ok(code == 404 and doc["dx"] == "DX-4000", (code, doc))
@@ -176,11 +202,11 @@ def scenario_delete():
     ok(rc == 0, "a refused delete removed the network")
     code, hdrs, _ = call("GET", NETS + "/e2op-a")
     etag = hdrs["etag"]
-    key = "Idempotency-Key: e2op-delete-a"
+    key = "Idempotency-Key: " + DELETE_KEY
     code, hdrs, op = call("DELETE", NETS + "/e2op-a", headers=[f"If-Match: {etag}", key])
     ok(code == 200 and op["state"] == "OPERATION_STATE_SUCCEEDED", (code, op))
     ok((op["verb"], op["target"]) == ("delete", "Network/e2op-a"), op)
-    ok(hdrs.get("location") == "/v1/operations/r-e2op-delete-a", hdrs)
+    ok(hdrs.get("location") == "/v1/operations/r-" + DELETE_KEY, hdrs)
     rc, _ = cli("network", "inspect", "e2op-a")
     ok(rc == 4, f"after the delete, network inspect answered rc={rc}, expected 4")
     defs = os.path.join(ROOT, "ingress", "networks")
