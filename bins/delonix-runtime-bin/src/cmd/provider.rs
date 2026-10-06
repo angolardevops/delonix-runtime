@@ -20,8 +20,8 @@
 
 use clap::Subcommand;
 use delonix_compute::capability::{
-    Capability, CapabilityReport, CapabilityState, Domain, ProviderKind, ProviderReport,
-    CATALOG_VERSION,
+    cell_metric, cell_metric_by_domain, Capability, CapabilityReport, CapabilityState, Domain,
+    ProviderKind, ProviderReport, CATALOG_VERSION,
 };
 use delonix_model::{Error, Result};
 
@@ -517,6 +517,48 @@ fn cell(s: &CapabilityState) -> String {
     }
 }
 
+/// The cell metric, at the TOP of the published matrix (plan 65, item F0.1).
+///
+/// One number first, then the same number per domain. It is the DECLARED view,
+/// so it does not move with the host it was generated on — which is what makes
+/// it something a ratchet can hold (`scripts/capability_ratchet.py`).
+///
+/// The line the gate parses is the one that starts with `**Cell metric`, and
+/// its shape is fixed on purpose: a gate that has to understand a markdown
+/// table is a gate that breaks on a cell containing a pipe — this file already
+/// has those.
+fn metric_section(reports: &[ProviderReport]) -> String {
+    let total = cell_metric(reports);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "**Cell metric (plan 65, level N2): {} of {} applicable cells are proved — {} %.** A cell is \
+         one capability × one provider. The denominator leaves out \
+         `unsupported-by-provider` and `requires-external-component`: those say the cell can never \
+         be filled by that provider, and counting them would reward staying silent about what a \
+         provider is not.\n\n",
+        total.proved,
+        total.applicable,
+        total.percent()
+    ));
+    out.push_str("| domain | proved (N2) | applicable | % |\n|---|---|---|---|\n");
+    for (d, m) in cell_metric_by_domain(reports) {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            d.as_str(),
+            m.proved,
+            m.applicable,
+            m.percent()
+        ));
+    }
+    out.push_str(&format!(
+        "| **all** | **{}** | **{}** | **{}** |\n\n",
+        total.proved,
+        total.applicable,
+        total.percent()
+    ));
+    out
+}
+
 /// The published matrix: one table per kind, one column per provider of that
 /// kind, one row per capability grouped by domain. Deterministic — the test
 /// compares it byte for byte with the checked-in file.
@@ -537,6 +579,7 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
          live test `live:`), `partial` (implemented with a written limit, or without live proof), \
          `unsupported-by-provider`, `requires-external-component`, `not-implemented`. See ADR-0050.\n\n",
     );
+    out.push_str(&metric_section(reports));
     for kind in [
         ProviderKind::Compute,
         ProviderKind::Network,
@@ -559,11 +602,13 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
                 .map(|s| format!("{} {}", r.count(s), s))
                 .filter(|s| !s.starts_with("0 "))
                 .collect();
+            let m = r.cell_metric();
             out.push_str(&format!(
-                "- **{}**: {} of {} — {}\n",
+                "- **{}**: N2 {} of {} applicable ({} %) — {}\n",
                 column(r),
-                r.count("supported"),
-                r.capabilities.len(),
+                m.proved,
+                m.applicable,
+                m.percent(),
                 counts.join(", ")
             ));
         }

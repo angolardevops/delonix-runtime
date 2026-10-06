@@ -279,6 +279,7 @@ cargo test -p <crate> -- --ignored <test-name>
 |---|---|
 | `fmt` | rustfmt |
 | `lang` | lang ratchet |
+| `capability` | capability ratchet |
 | `arch` | arch fitness |
 | `contract` | contract gate |
 | `version` | version gate |

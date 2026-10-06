@@ -36,6 +36,28 @@ jobs:
       - name: Identifiers, comments and user-facing messages still in Portuguese
         run: python3 scripts/lang_ratchet.py
 
+  # ---- Maturity: the catalog's cell metric, held in both directions (plan 65 F0.1) ----
+  #
+  # A cell is one (capability × provider). The number is computed from the
+  # catalog in CODE by `delonix provider matrix` and written at the top of the
+  # published matrix; this gate holds it. It fails when the metric DROPS (a cell
+  # stopped being proved) and when it RISES without the baseline rising in the
+  # same commit (the gain would not be recorded, and the next commit could undo
+  # it unnoticed) — the `lang_ratchet.py` semantics.
+  #
+  # It reads the published file rather than running the binary, which is safe
+  # because `the_published_matrix_is_the_generated_one` already fails when that
+  # file is not the binary's output. Before this gate the number came from a
+  # `grep -c` over the markdown, which counted the file's own summary lines as
+  # if they were cells.
+  capability:
+    name: capability ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Proved cells against the recorded baseline
+        run: python3 scripts/capability_ratchet.py
+
   # ---- The dependency direction of ADR-0040, enforced while the move happens ----
   # Phase P0: the rails go in BEFORE any crate moves, so the restructuring cannot
   # regress while it is under way. The rules (layer direction, purity of the
