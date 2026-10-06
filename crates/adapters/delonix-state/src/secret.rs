@@ -335,13 +335,26 @@ mod tests {
     fn the_fingerprint_follows_the_values_and_is_not_the_values() {
         let tmp = tempfile::tempdir().unwrap();
         let s = SecretStore::open(tmp.path()).unwrap();
-        let a: BTreeMap<String, String> = [("A".into(), "bc".into())].into();
-        let b: BTreeMap<String, String> = [("Ab".into(), "c".into())].into();
-        let c: BTreeMap<String, String> = [("A".into(), "bd".into())].into();
+        // The values are deliberately NOT hex. The digest is hex, so a digest
+        // that contained one of them would be leaking it — and only a non-hex
+        // value makes that question decidable. The first version of this test
+        // asked whether the digest contained "bc", which IS hex: 16 hex
+        // characters hold "bc" by chance in about 5.9 % of runs (15 adjacent
+        // pairs, 1/256 each), and arm64 drew it on the first run after the test
+        // landed. A test that fails once in seventeen runs reads as a broken
+        // engine, which is worse than the leak it was written to catch.
+        let a: BTreeMap<String, String> = [("A".into(), "zz".into())].into();
+        let b: BTreeMap<String, String> = [("Az".into(), "z".into())].into();
+        let c: BTreeMap<String, String> = [("A".into(), "zy".into())].into();
         assert_eq!(s.fingerprint(&a), s.fingerprint(&a.clone()));
+        // `canonical` writes each length before its bytes: without that, "A"+"zz"
+        // and "Az"+"z" would be the same input.
         assert_ne!(s.fingerprint(&a), s.fingerprint(&b), "boundaries count");
         assert_ne!(s.fingerprint(&a), s.fingerprint(&c));
-        assert!(!s.fingerprint(&a).contains("bc"));
+        let fp = s.fingerprint(&a);
+        assert_eq!(fp.len(), 16, "eight bytes, hex");
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!fp.contains("zz"));
         // Another node's key gives another fingerprint.
         let other = tempfile::tempdir().unwrap();
         let o = SecretStore::open(other.path()).unwrap();
