@@ -4,6 +4,449 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v5.0.0 — o `USER` da imagem é quem corre, o bloco `provider` tipado, e o contrato de nó servido
+
+Cento e oitenta commits desde a `v4.5.0` (152 sem contar os merges), de
+`#572` a `#713`.
+
+**Numerada como MAJOR por uma razão só, e está na secção seguinte**: um container
+passa a correr como o utilizador que a imagem declara. Todo o resto desta release
+é aditivo ou é uma recusa a substituir um sucesso que o motor não conseguia
+provar — mas essa mudança quebra o contrato do `container run`, e um contrato
+quebrado não sai numa MINOR.
+
+O fio condutor é o das últimas releases, levado à superfície declarativa: **o que
+o motor não consegue provar não se reporta como sucesso, e o que ele não entende
+não se engole em silêncio**. Nesta release isso chega aos manifestos (um campo
+desconhecido recusa o documento inteiro), ao isolamento (uma namespace que o host
+não imporia é recusada em vez de aplicada), aos limites (`--device-*` sem disco
+que o aceite) e ao ciclo de vida (um `rm -f` que desistiu não é ressuscitado pelo
+supervisor).
+
+---
+
+### Quebra de contrato — ler antes de actualizar
+
+**Um container corre como o `USER` da imagem** (ADR-0062, `#632`, `#633`, `#637`,
+`#638`, `#639`). Até à v4.5.0, `container run` ignorava o `USER` que a imagem
+declara e o processo corria como uid 0 — desde a v1.0.0, sem erro nem aviso.
+Medido com `haproxy:3.4-alpine`, que declara `USER haproxy`: `id` dentro do
+container respondia `uid=0`.
+
+O que muda, e o que fazer:
+
+- **Sem `--user`, o processo corre como o `USER` da imagem.** Um serviço que
+  dependia de ser root sem o pedir passa a não o ser. Para o manter, `--user 0`.
+- **Num host rootless sem intervalo de subuid só cabe um uid**: aí fica a 0 e o
+  `run` di-lo em voz alta, em vez de falhar.
+- **O `--user` deixou de entregar o sistema de ficheiros inteiro ao utilizador.**
+  A varredura antiga (`chown_tree_once("/")`) dava-lhe 940 das 986 entradas de uma
+  imagem de 15 MB — incluindo `/etc/passwd` e o próprio binário do serviço — e
+  atravessava os mounts, re-apropriando um bind mount do HOST (um ficheiro de
+  `1000:1000` passava a um subuid, e o dono deixava de conseguir escrever no seu
+  próprio ficheiro). Agora o container recebe **o que a imagem lhe dá**: um índice
+  de donos gravado ao extrair a layer, aplicado uma vez pelo init, nunca noutro
+  sistema de ficheiros. Medido depois, na mesma imagem: 2 entradas do utilizador
+  em vez de 940, camada de escrita de 56 K em vez de 13 MB, e o bind do host
+  intacto. No `odoo:20.0` (~2 GB), o primeiro arranque com `-u odoo` passou de
+  «ainda a varrer aos 16 minutos» para **1,7 s**.
+- **Um volume nomeado VAZIO** fica do dono que a imagem dá ao ponto de montagem,
+  ou do utilizador do container quando a imagem não nomeia ninguém. Um volume com
+  dados e um bind mount **nunca são tocados** — um filestore escrito como root por
+  uma corrida anterior não é migrado.
+- **O `build` segue a mesma regra**: um `RUN` corre como o `USER` em vigor nesse
+  passo (antes corria sempre como root, mesmo depois de um `USER app`), e a cache
+  de layers preserva os donos — um rebuild com cache perdia-os.
+
+Efeito lateral da mesma passagem: a extracção passou a preservar **setuid, setgid
+e sticky**. O `/tmp` de todos os containers era `777` em vez de `1777`, e um `su`
+setuid perdia o bit. Uma layer extraída por um motor anterior é corrigida a partir
+dos cabeçalhos do blob na primeira vez que uma imagem a usa.
+
+---
+
+### Mudanças de comportamento
+
+Recusas novas. Em todos estes casos o motor **aceitava e não cumpria**.
+
+**Manifestos (ADR-0069, `#682`, `#687`)**
+
+- **Um campo que o motor não entende recusa o manifesto, antes de qualquer
+  efeito** — incluindo dentro dos itens de `spec.containers[]` de um Pod, onde as
+  probes e o `lifecycle` não existem e até aqui desapareciam em silêncio.
+  `stack validate` continua a RELATAR em vez de recusar, e
+  `DELONIX_MANIFEST_LENIENT=1` é a válvula explícita.
+- **Um campo que um Kind recusa pelo NOME mantém o seu próprio código.** O
+  `unprivileged: false` de um `SystemContainer` respondia `DX-1000 unknown field —
+  check the spelling` a um campo bem escrito; agora responde `DX-1540`, que diz o
+  que o campo é.
+- **O mesmo nome de Pod noutra namespace é um conflito**, não «already exists»; e
+  `Container` e `Service` passaram a ser identificados por `(namespace, nome)` —
+  dois homónimos em namespaces diferentes deixaram de ser um recurso no plano.
+- **Um store ilegível é um erro, não uma máquina vazia** (VM, volumes, presença de
+  containers). Um `plan` que lê zero por não ter conseguido ler propunha criar
+  tudo de novo.
+
+**Isolamento e rede**
+
+- **Uma namespace com nome num host que não filtra o tráfego de bridge é recusada**
+  (`DX-6305`, exit 69, decisão D5 do plano de maturidade, `#664`). Sem
+  `br_netfilter` as chains são instaladas, os sets são preenchidos, todos os
+  comandos reportam sucesso — e a fronteira não existe. É a forma mais cara de
+  falha silenciosa que este motor pode ter, porque o que falha é uma propriedade
+  de segurança que se lê como aplicada. Válvula:
+  `DELONIX_ALLOW_UNENFORCED_ISOLATION=1`.
+- **O anti-spoofing mudou para uma tabela `bridge`, onde realmente corta**
+  (`#671`). A regra antiga (`ip … iifname <veth> ip saddr != <ip> drop`) tinha o
+  contador a zero: entre duas portas da mesma bridge, o `iifname` que a camada IP
+  vê é a BRIDGE, nunca a porta. Medido: um container com `NET_ADMIN` forjava a
+  origem e chegava ao vizinho (3/3), e forjando o endereço de um membro de outra
+  namespace furava o isolamento. Agora prende por porta o MAC, a origem IPv4 e o
+  emissor ARP. **Uma lição que fica: uma regra de segurança só está provada
+  quando um pacote forjado é contado a cair** — a auditoria que «fechou» isto
+  leu o ruleset e viu a regra lá.
+- **As concessões são do administrador, não do pedido** (`#672`):
+  `--allow-source <cidr>` e `--no-source-check` existem para um container que
+  encaminha, mas são PERMISSÕES na política do nó. Sem política, nada é concedido,
+  e `mode: warn` não concede.
+
+**Ciclo de vida**
+
+- **Um `--wait` que esgota o tempo sai com 124 (`DX-8503`) e deixa a VM a correr**
+  (decisão D6, `#661`). Antes devolvia 0: um `--wait` que não viu a VM responder
+  reportava sucesso.
+- **`--device-read-bps`/`--device-write-bps` são recusados quando não há disco que
+  os aceite** (`#663`). O `io.max` passou a nomear o disco em que o rootfs do
+  container vive; antes o limite era escrito e não aplicado.
+- **Um `rm -f` que desistiu não é ressuscitado pelo supervisor** (`#647`). Com o
+  disco saturado, um `rm -f` devolvia `DX-8101` e mantinha o registo como a regra
+  manda — e quando o processo finalmente saía, o supervisor de `--restart always`
+  reiniciava-o. A intenção de remoção passa a ficar gravada ANTES do sinal.
+- **Um `stop` que desistiu mantém o processo registado**, e um `start` que falha
+  depois de um `rm -f` leva o seu directório (`#604`, `#607`).
+- **O `slirp4netns` de um container acaba com ele** (`#646`, `#648`, `#651`). Era
+  lançado no meio do arranque e herdava os descritores do chamador, por isso ficava
+  vivo a segurar a porta publicada depois de o container sair — e o `start`
+  seguinte pendurava para sempre à espera de um EOF que só esse slirp podia dar.
+  Medido: mais de uma hora de sobrevida com o disco saturado.
+
+**Superfície declarativa**
+
+- **O bloco `provider` é `type` + `spec`** (ADR-0070, ADR-0071). O que só um
+  fabricante entende vive **inline** no recurso, tipado por provider E por
+  recurso: uma chave que o `type` não conhece é recusada. `backend:` passou a
+  `provider.type` numa `VirtualMachine`, e o grupo `libvirt:` e os campos planos
+  normalizam para o mesmo. **As grafias anteriores continuam a carregar e a
+  querer dizer o mesmo**, reportadas como superadas; repetir um campo nos dois
+  sítios é recusado.
+- **`kind: NetworkZone` passou a `kind: Network` com `spec.provider.proxmox`.**
+  As redes que nomeiam a mesma zona fundem-se no carregamento no único documento
+  que o executor já reconcilia — a zona é criada com o primeiro vnet e removida
+  com o último, sem contagem de referências. O nome antigo carrega, anunciado
+  como superado.
+- **Um workload governado por política nasce FECHADO** (ADR-0069 D6, `#685`,
+  `#686`). Um container ou Pod que uma `NetworkPolicy`, `NetworkAccessRule` ou
+  `Dependency` do manifesto nomeie é criado com a chain default-deny instalada
+  antes do processo, e só é aberto ao que as políticas dizem depois de elas
+  estarem no lugar. Se uma camada falha, o workload fica fechado e o apply di-lo.
+
+---
+
+### Novidades
+
+**Containers de sistema no Proxmox — `kind: SystemContainer`** (ADR-0058, plano
+63, `#579`, `#582`, `#583`, `#588`, `#590`–`#594`)
+
+Um LXC do Proxmox não serve `kind: Container` — a API do nó não tem `exec`, logs
+nem código de saída, e o dataplane do motor não chega lá. Entra como recurso
+próprio, com semântica próxima de uma VM: o motor puxa a imagem e escreve o
+arquivo OCI que o nó aceita, o nó corre o container, e uma edição à mão no nó é
+**deriva** (o `plan` dá 2 e o `drift` mostra-a). `memory`, `swap` e `cores` são
+quentes; o `rootfs` só cresce (encolher planeia um `Replace`). Dia 2 completo:
+snapshots (com um `restore` que espera que o nó volte a responder — medido, ~40 s
+em que o pveproxy dá 596 a quem espera), backup no storage do nó, clone, firewall
+por `kind: NetworkPolicy` com `scope: systemcontainer`, e migração entre nós
+(offline, porque o nó aborta um `restart=1` quando o init ignora o SIGTERM e
+deixa o container na origem com o `pvesh` a sair 0). `exec`, logs e código de
+saída ficam `unsupported-by-provider` com a razão escrita.
+
+**O contrato de nó passou a ser servido** (ADR-0042, `#659`, `#662`, `#669`,
+`#670`, `#673`, `#674`, `#680`, `#681`)
+
+Até aqui o `proto/delonix/node/v1` era um contrato sem um único produtor em Rust.
+Agora há `delonix serve node-api`: **gRPC e HTTP/JSON dos mesmos `.proto`**, num
+socket unix local, só o próprio uid.
+
+- `NodeService`: `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido),
+  `GetNodeInfo`, `GetHealth`, `GetCapacity`, `ListProviders`.
+- `NetworkService`: as leituras (`ETag`/`If-None-Match` com 304, `label_selector`,
+  paginação com `Link rel=next`) e as duas primeiras mutações, `CreateNetwork` e
+  `DeleteNetwork`.
+- `VolumeService`: `GetVolume` e `ListVolumes`. O `Get` mede o uso; a `List` não
+  mede, e di-lo — percorrer os dados de todos os volumes a cada listagem é um
+  custo já medido no dashboard. Desconhecido nunca é zero.
+- `OperationService`: **cada mutação responde com uma `Operation` persistida antes
+  do trabalho**. Um registo por acabar cujo dono já não existe é terminado
+  `FAILED` com razão `Interrupted` — o servidor é activado por socket e não tem
+  quem o faça por ele. `Idempotency-Key` é o `request_id` e `If-Match` o `etag`.
+- **Os erros REST são documentos RFC 9457** (`application/problem+json`),
+  construídos pelo dicionário de códigos do motor, e o OpenAPI publicado declara-o.
+- **As rotas REST são GERADAS** das anotações `google.api.http` no `build.rs`: uma
+  rota do contrato ainda não servida responde 501 (`DX-6001`), um caminho fora do
+  contrato 404.
+- `GET /openapi.json`, e as páginas `GET /docs` (Swagger UI) e `GET /redoc`,
+  servidas de ficheiros embebidos no binário — byte-idênticos aos pacotes npm,
+  conferidos contra o seu `SHA256SUMS` no build, sob uma CSP que só permite o
+  socket (medido num browser: o logo que o ReDoc busca a um CDN é bloqueado antes
+  de qualquer pedido sair).
+
+**Providers de rede por papel** (ADR-0059 F2–F5, `#614`–`#636`, `#654`, `#656`)
+
+O contrato de rede passou a ser por PAPEL, com um contexto próprio
+(`delonix-networking`): `GatewayProvider` e `SegmentProvider`, escolhidos por
+nome no `providers.yaml`. Em cima disso:
+
+- **Uma IR de política tipada** com avaliador de referência: o registo de firewall
+  ou parseia nela ou é recusado inteiro, e a chain do holder, a firewall de uma VM
+  e o filtro de perímetro de um gateway são três **descidas da mesma IR**.
+- **Um plano de rede observa o aparelho e nomeia a deriva**, tem **digest**
+  (`--plan-digest` recusa um plano velho com `DX-5390`) e um **livro de passos**
+  que retoma um apply morto a meio.
+- **Papéis novos no `NetworkGateway` e no segmento**: `nat:` (SNAT e 1:1),
+  `ipam:` (subnets, DHCP, reservas) e `dns:` (registos escritos pelo nó).
+- **Uma falha diz de que provider, papel e passo veio** — e os clientes remotos
+  deixaram de ecoar a credencial para dentro dela (fuga real, fechada com um teste
+  que faz grep nas duas).
+
+**Pools de armazenamento** (ADR-0067 P0, `#689`)
+
+`kind: StoragePool` e o contexto `delonix-storage`, com o driver `dir`. O
+administrador declara os pools numa allowlist (`/etc/delonix/storage-pools.yaml`);
+um manifesto só NOMEIA um pool, e `driver`/`path`/`device` num manifesto são
+recusados pelo nome. A posse é por marca, nunca pelo nome: um directório com dados
+e sem marca nunca é adoptado. Acima de 95 % de ocupação não se aloca (`DX-5202`).
+O motor **nunca cria nem destrói** um pool.
+
+**`delonix init`** (ADR-0061, `#625`, `#631`, `#640`–`#645`, `#649`, `#653`)
+
+- Os sete templates de aplicação geram **um serviço pequeno e completo**: uma
+  capacidade do transporte ao porto, configuração validada no arranque, prontidão
+  `starting → ready → draining`, encerramento limitado, webhooks nos dois
+  sentidos, OpenTelemetry, contrato OpenAPI com teste de deriva, e teste de
+  direcção das dependências. O gerador **verifica o que substitui**.
+- **Os três templates de edge nascem com HTTPS** (certificado gerado pelo `init`,
+  `mkcert` ou auto-assinado), dimensionados para carga, com log em JSON e
+  `request_id`. O `scripts/tls.sh` renova, instala um certificado próprio ou corre
+  o Let's Encrypt por **HTTP-01 ou DNS-01** — os dois provados contra a produção
+  real do Let's Encrypt.
+- **Cada template traz um túnel opt-in para a internet** (`delonix-tunnel.yaml`),
+  para quem não tem IP público.
+- `--port`, `--tls-port` e `--hostname` respondem na linha de comandos ao que o
+  `init` pergunta num terminal; um segundo `--up` sobre um projecto que já está de
+  pé converge-o e implanta o que foi reconstruído.
+- O template `odoo` volta a arrancar (Odoo 20 por omissão) e corre como `odoo`; o
+  `python` chama-se agora `fastapi`, com o nome antigo como alias silencioso.
+
+**Segredos versionados** (ADR-0069 item 6, `#696`, `#700`)
+
+Um `Secret` carrega uma **versão** que o store atribui (1 na criação, +1 quando os
+valores mudam), e `secret apply` reporta `created`/`unchanged`/`rotated to version
+N (changed: CHAVES)` — **pelo nome das chaves, nunca pelo valor**. O `stack plan`
+converge um Secret que traz os seus valores, comparando nomes de chave e uma
+impressão digital **com chave** (nunca um valor; a chave-mestra do nó está nela, e
+um nó sem chave planeia um `Create` e não cria nada). Um container grava a versão
+de cada `--secret` com que arrancou, e o `describe` diz quando ela foi rodada
+desde então.
+
+**Appliance FreePBX** (`#657`, `#693`): FreePBX 17 + Asterisk 22 em Debian 12,
+com segredos por clone no primeiro arranque, provada de ponta a ponta (27/27 nos
+dois modos).
+
+---
+
+### Estrutura (ADR-0044 P4b)
+
+O conhecimento dos backends saiu da orquestração e as VMs deixaram de viver num
+adaptador:
+
+- **Três portas no contexto de computação** (`LocalDiskImages`, `SeedBuilder`,
+  `VmNetwork`) e os casos de uso sobre um store injectado (`#596`, `#597`).
+- **O registo de backends** passou ao contexto, semeado pela raiz de composição
+  (`#599`).
+- **Dois crates de provider novos**: `delonix-provider-libvirt` (`#602`) e
+  `delonix-provider-cloud-hypervisor` (`#608`).
+- **`delonix-vm` ficou reduzido à raiz de composição** (`#610`), e cada provider
+  carrega as suas próprias guardas de locale.
+
+---
+
+### Desempenho
+
+Medido, por item, com a razão de cada decisão (incluindo as recusadas) no
+`AGENTS.md`:
+
+| Caminho | Antes | Depois |
+|---|---|---|
+| Memória no `pull` do `node:22` | 214 MB | **27 MB** |
+| Memória no `pull` de uma imagem de VM | 278 MB | **13 MB** |
+| Memória no `push` de uma imagem de VM | 837 MB | **10–13 MB** |
+| `push` de 4 layers a 20 MB/s | 65 s | **11 s** (em paralelo) |
+| `push` de uma tag que o registo já tem noutro repositório | 356 s | **7,0 s** (monta em vez de enviar) |
+| Build a frio de um template | 6,8 s | **2,2 s** |
+| Build com só o `COPY` mudado | 7,2 s | **1,1 s** |
+| Extracção do `node:22` no primeiro `run` | 4,3 s | **2,1 s** (layers em paralelo) |
+| `run --rm … true` com 1 GB sujo no disco | 9,5–14 s | **0,14 s** (overlay `volatile`, ADR-0056) |
+| `cluster load` em 3 nós | 33,2 s | **17,6 s** |
+
+Um `pull` cortado a meio **retoma** a partir do que já está em disco, entre
+processos (medido com um `kill -9`: o pull seguinte continuou e o digest bateu), e
+um `push` cortado continua do último bloco que o registo confirmou. Um token de
+registo emitido **anonimamente** fica em cache em disco (ADR-0060) — nunca um
+obtido com `image login`, nunca num push.
+
+---
+
+### Build e desenvolvimento
+
+- **Um `Makefile` para o ciclo do desenvolvedor**: `bootstrap`, `doctor`, `build`,
+  `install`, `ci`.
+- **O binário de release deixou de depender do caminho do checkout** — duas
+  árvores diferentes produzem o mesmo binário.
+- Perfil `dev` mais leve, perfil `release-ci`, e `nextest` no `make test`.
+- **Laboratório nocturno** (`lab.yml`): workflow num runner self-hosted com
+  preflight que falha se o host não tiver KVM, userns, cgroup delegado e
+  `br_netfilter`, e um portão que chumba um cenário que salte sem razão aceite.
+  **O runner não está registado, e o agendamento está a disparar sobre o vazio**:
+  medido a 2026-10-06, as corridas de 2026-10-04 e 2026-10-05 ficaram em fila à
+  espera de um runner que não existe e foram canceladas às 24 horas, e a de hoje
+  está em fila desde as 09:04. Registar o runner é um passo do dono.
+- Manual do contribuidor em dia com a `main`, nas quatro línguas (`#601`).
+- ADRs novos: **0060** (cache de token anónimo), **0061** (contrato dos templates),
+  **0065** (IPv6 no dataplane), **0066** (balanceador L4), **0067** (pools de
+  armazenamento), **0068** (hotplug de VM), **0069** (reavaliação do catálogo de
+  Kinds e manifestos estritos), **0070** e **0071** (o bloco `provider`). Os
+  0065, 0066 e 0068 estão aceites como decisão e **sem nada implementado** — são
+  trabalho das próximas releases, não desta.
+
+---
+
+### Consolidação e o que a medição encontrou (2026-10-06)
+
+A última passagem antes desta release consolidou o trabalho de cinco sessões
+paralelas num plano único (`docs/discovery/66_CONTINUITY_PLAN.md`) e correu as
+medições que ele exige. O que isso produziu, além dos números da secção seguinte:
+
+- **Um convidado governado por política nasce fechado, ou não nasce** (ADR-0069
+  D6, `#705`). O D6 fechava containers e Pods; uma VM e um system container
+  ficavam de fora, e a razão era real — a firewall deles é a do provider, não a
+  do holder. Agora é criado com a sua própria firewall em vigor, default-deny nos
+  dois sentidos, **antes de o convidado ter CPU**, e um backend que não o consiga
+  (`VmBackend::holds_at_boot`) **RECUSA pelo nome** (DX-1501) em vez de criar o
+  convidado aberto. Só o Proxmox a tem hoje; os dois backends locais recusam, e a
+  recusa diz onde o `scope: vm` serve.
+- **O mesmo nome de VM noutra namespace é um conflito, não «ensured»** (`#706`).
+  O registo é `vms/<nome>.json`, qualquer que seja a namespace, por isso o nome é
+  único no nó — e um manifesto que pedisse o mesmo nome noutra namespace recebia
+  `stack plan` = «1 unchanged» e `stack apply` = «ensured» com rc 0, **com a VM a
+  ficar na primeira namespace**. Numa VM a namespace É a fronteira de isolamento,
+  logo o inquilino que pedia a segunda ficava com uma VM que a primeira alcança e
+  a dele não. Passa a recusar (classe 5) antes de resolver ou criar o que seja.
+- **Duas pré-condições da bateria que faziam uma falha do AMBIENTE ler-se como
+  treze falhas do motor** (`#703`): um segundo pull de imagem com a saída
+  descartada, e chaves de idempotência fixas no node API.
+- **Um teste que perguntava ao hexadecimal** (`#702`): a verificação de que o
+  fingerprint de um segredo não deixa escapar o valor usava `"bc"`, que É hex —
+  21 falhas em 300 corridas, medido.
+- **Nove ADRs aceites** (0020, 0040, 0041, 0049, 0055, 0061, 0063, 0064, 0067) e
+  **dois novos** (0072, 0073) a fechar as duas últimas linhas da tabela do
+  ADR-0070 por medição em vez de movimento. Aceitar o 0040 desbloqueou o
+  `capability discovery` do M01.
+- **Dois gates novos sobre o próprio registo** (`#707`, `#708`): um ADR não pode
+  contradizer-se sobre o seu estado, e o índice não pode discordar do documento —
+  sete linhas discordavam, duas delas há doze dias.
+- **Uma política que se escreve pelo nome do pod lê-se pelo mesmo nome** (ADR-0069
+  pendente 1, `#713`). As mutações já aceitavam o nome do pod desde o `#705`; as
+  LEITURAS não. `net ingress ls <pod>` e `describe networkpolicies <pod>/<dir>`
+  respondiam `no such container` sobre uma política que o motor acabara de
+  aceitar com aquele nome, e o `get networkpolicies` nomeava o MEMBRO onde o
+  operador escreveu o POD — num pod de dois membros, quatro linhas, e as duas do
+  membro sem firewall a dizer «allow (default), 0 rules» por cima de uma política
+  que existe. Medido ao vivo contra `main`: a escrita passa, as três leituras
+  falham. **E o DELETE genérico não apagava**: com um `deny` em vigor,
+  `delete networkpolicies <c>/ingress` respondia rc 0 e «removed 0 inbound
+  rule(s)», as leituras continuavam a ler `deny`, e o tráfego continuava
+  bloqueado. Com isto fecha o último «STILL TO DO» do pendente 1 do ADR-0069.
+- **Um campo que o workspace já declara não se escreve à mão** (`#711`, `#712`).
+  O `inline_versions` só olhava para as versões de DEPENDÊNCIA, por isso os
+  metadados `[package]` do próprio crate não tinham guarda — e foi assim que o
+  manifesto do `delonix-mgmt` disse `version = "0.1.0"` durante dois meses e meio
+  enquanto o workspace caminhava para a 4.5.0. Os quatro campos copiados passaram
+  ao workspace e um gate novo chumba o quinto.
+
+### A evidência desta release, medida
+
+Contra a ponta desta release — o código de `0640a9c7` mais o bump desta nota —
+a 2026-10-06, neste host, com raiz de estado isolada:
+
+| Medição | Resultado |
+|---|---|
+| Bateria da CLI (`scripts/e2e.sh`) | **1097 PASS / 0 FAIL / 13 SKIP**, rc=0 |
+| Arnês de caos (`scripts/chaos.sh`) | **54 PASS / 0 FAIL / 1 SKIP**, rc=0 |
+| Portão de performance | `delonix` **81 ms** contra os 87 ms da linha de base desta máquina (×0.93, dispersão 1,3×); docker 291 ms (×1.30), podman 264 ms (×0.95) |
+| Métrica de célula do catálogo | **100 / 252 aplicáveis = 39,7 %** |
+
+O portão de performance **passou**, e o docker é a âncora que o diz: degradou
+×1.30 na mesma corrida em que o motor melhorou ×0.93, o que é ruído da bancada e
+não regressão — se o motor tivesse degradado tanto como ele, o portão recusava-se
+a julgar em vez de nos acusar.
+
+Os 13 SKIP têm razão escrita, um a um: **7** são integrações remotas sem
+credenciais neste host (4 Proxmox, 3 OPNsense), **2** são caminhos de FALHA que
+este host não consegue exercitar precisamente porque tem a ferramenta
+(`virt-customize`, `wg`), e os outros **4** dizem o que faltou — sem imagens de
+VM no store, montar NFS exige `CAP_SYS_ADMIN`, o `system boot` escreve units
+fora do `DELONIX_ROOT`, e o `init --up` de um template não completou em 180 s
+nesta ligação.
+
+**A primeira corrida desta bateria deu 13 falhas e nenhuma era do motor**: o
+setup da secção de backup puxava uma SEGUNDA imagem com a saída descartada, e
+num host de ligação lenta isso fazia treze checks chumbarem a dizer «no such
+container». Está corrigido na mesma série.
+
+### O que NÃO foi validado
+
+Dito aqui porque o implícito lê-se como provado:
+
+- **O laboratório nocturno nunca EXECUTOU**: o agendamento dispara, mas cada
+  corrida fica em fila à espera do runner `delonix-lab`, que não está registado,
+  e é cancelada às 24 horas. Toda a evidência desta release vem de corridas à
+  mão, num host de desenvolvimento — e o custo disso mediu-se nesta passagem: o
+  portão de performance precisou de **três tentativas** para dar um veredicto,
+  porque as duas primeiras pegaram a máquina com I/O a dispersar a medição 27×.
+- **A métrica de célula do catálogo de capacidades é 100 de 252 aplicáveis
+  (39,7 %)** — ou seja, 88 células estão implementadas e **não provadas**, e 64
+  não existem. A matriz (`docs/providers/capability-matrix.md`) diz, célula a
+  célula, qual é qual, e desde esta release imprime o número no topo: ele é
+  CALCULADO a partir do catálogo em código e segurado por um ratchet nos dois
+  sentidos (`scripts/capability_ratchet.py`). Até aqui era contado à mão sobre o
+  markdown, e as duas contagens que circulavam — «111 de 281» e «99 de 265» —
+  estavam ambas erradas: a primeira vinha de um `grep -c` que contava os
+  sumários do próprio ficheiro como se fossem células.
+- **Nenhuma conformidade é reclamada**: as suites OCI, CRI, CNI e CSI não
+  correram. O número do CRI publicado (79/103) é do `critest` v1.36 contra o
+  motor **v0.63.1** e não foi remedido.
+- **O IPv6, o balanceador L4 e o hotplug de VM não existem** — têm ADR aceite e
+  zero código.
+- **As pools de armazenamento estão na fase P0**: só o driver `dir`. O helper
+  privilegiado, btrfs, ZFS, LVM-thin e os discos de VM em pools precisam de root e
+  de discos numa VM de laboratório.
+- **O OpenStack não é um provider do motor**: existe o ADR-0039 em *Proposed*, sem
+  backend, e `provider.type: openstack` é recusado no carregamento.
+- O ordenamento do trabalho que fica está em
+  `docs/discovery/66_CONTINUITY_PLAN.md`.
+
+---
+
 ## v4.5.0 — rede que falha fechada, Proxmox medido rota a rota, providers num ficheiro por nó
 
 Cento e três commits desde a `v4.4.0` (110 contando os merges), de `#474` a `#576`.
