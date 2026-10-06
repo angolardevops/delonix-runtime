@@ -4010,7 +4010,17 @@ section "backup / restore por recurso"
 BKDIR="$OUT/backups"; rm -rf "$BKDIR"; mkdir -p "$BKDIR"
 BKC="bk-$PFX"; BKV="bkvol-$PFX"
 "$BIN" volume create "$BKV" >/dev/null 2>&1
-"$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1
+# `$IMG`, nunca um segundo nome: isto dizia `alpine:latest`, que o guarda de
+# imagem do topo não cobre, e por isso era um SEGUNDO pull. Quando ele falha (a
+# ligação de saída deste host é lenta), o container não existe e os treze checks
+# abaixo chumbam a dizer «no such container» — treze passos depois do sítio onde
+# o problema está. Medido a 2026-10-06, numa corrida em que a imagem só chegou
+# ao store depois desta secção.
+#
+# E é um CHECK, não um comando mudo: um `run` que falha com a saída descartada
+# faz uma falha do AMBIENTE ler-se como treze falhas do motor.
+check "o container do backup arrancou (pré-condição da secção)" ok \
+  "$BIN" container run -d --name "$BKC" -v "$BKV":/data "$IMG" sleep 300
 # Esperar que a escrita PERSISTA, e não que o comando devolva 0.
 #
 # Medido a 2026-08-28, seis ciclos: em DOIS deles um `exec` disparado logo a
