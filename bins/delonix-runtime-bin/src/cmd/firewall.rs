@@ -467,6 +467,21 @@ pub(crate) fn load_governed(store: &Store, target: &str) -> Result<Container> {
 /// The key to hand [`update_locked`] for a record found by scanning: the pod's
 /// name for a pod member (its policy lives on the pod, not on the member), the
 /// container's id otherwise.
+/// The NAME a policy is declared under: the pod's for a pod member (its policy
+/// lives on the pod, not on the member), the container's own otherwise.
+///
+/// The read side needs the name where the write side needs the key: an operator
+/// writes `net ingress allow <pod>`, and every way of reading it has to answer
+/// to that same word.
+pub(crate) fn governed_name(c: &Container) -> String {
+    c.pod
+        .as_deref()
+        .and_then(super::pod::pod_of_netns)
+        .map(str::to_string)
+        .unwrap_or_else(|| c.name.clone())
+}
+
+/// [`governed_name`]'s sibling for a WRITE: the key `update_locked` takes.
 pub(crate) fn governed_key(c: &Container) -> String {
     c.pod
         .as_deref()
@@ -948,19 +963,40 @@ struct PolicyLsRow {
 pub(crate) fn list_all_policies(output: output::OutputFormat) -> Result<()> {
     let output = super::config::resolve_output(&super::util::state_root(), output);
     let (_images, store) = open_stores()?;
-    let mut rows = Vec::new();
+    // A POD is ONE target. Its members share a netns and one address, and the
+    // policy lives on the head member — so listing the records one by one named
+    // the MEMBER where the operator wrote the POD, and said «allow (default), 0
+    // rules» on every other member. Measured 2026-10-06: a two-member pod with
+    // one ingress rule printed four rows, and two of them reported no policy
+    // over a policy that exists. A listing that denies a firewall is worse than
+    // no listing.
+    //
+    // So the records collapse by [`governed_name`], and a target keeps the
+    // record that HAS a firewall: `Some` wins over `None`, whatever order the
+    // store lists them in.
+    let mut by_target: std::collections::BTreeMap<
+        String,
+        Option<delonix_model::records::ContainerFw>,
+    > = std::collections::BTreeMap::new();
     for c in store.list()? {
         let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
         if !governed {
             continue;
         }
-        let fw = c.firewall.clone().unwrap_or_default();
+        let slot = by_target.entry(governed_name(&c)).or_insert(None);
+        if slot.is_none() {
+            *slot = c.firewall.clone();
+        }
+    }
+    let mut rows = Vec::new();
+    for (target, fw) in by_target {
+        let fw = fw.unwrap_or_default();
         for (dir, label, policy) in [
             ("in", "ingress", &fw.policy_in),
             ("out", "egress", &fw.policy_out),
         ] {
             rows.push(PolicyLsRow {
-                target: c.name.clone(),
+                target: target.clone(),
                 direction: label.into(),
                 policy: if policy.is_empty() {
                     "allow (default)".to_string()
@@ -1020,20 +1056,35 @@ pub(crate) fn cmd_describe_policy(names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// `delonix delete networkpolicies <target>/<direction>` — same semantics as
-/// `net ingress clear <target>`/`net egress clear <target>`: the policy for
-/// that ONE direction resets to allow-all, the other direction is untouched.
+/// `delonix delete networkpolicies <target>/<direction>` — the policy for that
+/// ONE direction resets to allow-all and its rules go with it; the other
+/// direction is untouched.
+///
+/// It is NOT `net ingress clear <target>`, and this doc-comment said it was.
+/// That verb removes the RULES of a direction and leaves the default to the
+/// `policy` verb, which is coherent and is what its message promises. Here the
+/// object being deleted IS the policy, so the default has to go too — measured
+/// 2026-10-06 before the fix: with a `deny` in force, this answered rc 0 and
+/// «removed 0 inbound rule(s)», `get`/`describe networkpolicies` still read
+/// `deny`, and a ping from another container was still blocked. A delete that
+/// reports success and deletes nothing.
 pub(crate) fn cmd_delete_policy(names: &[String]) -> Result<()> {
     let (_images, store) = open_stores()?;
     for name in names {
         let (target, dir) = split_policy_name(name)?;
-        clear_dir(&store, target, dir)?;
+        clear_dir_with(&store, target, dir, true)?;
     }
     Ok(())
 }
 
 pub(crate) fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
-    let c = store.load(name)?;
+    // `load_governed` and not `store.load`: every MUTATION already resolves a pod
+    // by its name (`net ingress allow <pod>` works), and only the reads did not —
+    // measured 2026-10-06, `net ingress ls <pod>` and `describe
+    // networkpolicies <pod>/<dir>` answered `no such container` for a policy the
+    // engine had just accepted under that exact name. A rule you can write and
+    // cannot see is worse than one you cannot write.
+    let c = load_governed(store, name)?;
     let fw = c.firewall.clone().unwrap_or_default();
     let policy = if dir == "in" {
         &fw.policy_in
@@ -1492,8 +1543,35 @@ pub(crate) fn release_system_container_holds(docs: &[ManifestDoc]) -> Result<usi
 }
 
 pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
+    clear_dir_with(store, name, dir, false)
+}
+
+/// [`clear_dir`], and `reset_policy` also puts that direction's default back to
+/// allow-all.
+///
+/// The two verbs promise different things, and each now does what it says:
+///
+/// * `net ingress|egress clear <target>` removes the RULES of one direction and
+///   says «removed N rule(s)». The default is the `policy` verb's to set, and
+///   that split is coherent.
+/// * `delete networkpolicies <target>/<direction>` is the Kind-generic DELETE,
+///   and its own doc already said the direction «resets to allow-all». It did
+///   not. Measured 2026-10-06 against the shipped engine: after
+///   `delete networkpolicies <c>/ingress` with a `deny` in force, the command
+///   answered rc 0 and «removed 0 inbound rule(s)», `get networkpolicies` still
+///   listed the policy, `describe` still answered it, and a ping from another
+///   container was STILL blocked. A delete that reports success and deletes
+///   nothing leaves the operator with a workload closed by a policy they just
+///   removed, and every read agreeing with the policy instead of with them.
+pub(crate) fn clear_dir_with(
+    store: &Store,
+    name: &str,
+    dir: &str,
+    reset_policy: bool,
+) -> Result<()> {
     let mut removed = 0usize;
     let mut nothing_to_clear = false;
+    let mut policy_was = String::new();
     let c = update_locked(store, name, |c| {
         let mut fw = match c.firewall.clone() {
             Some(f) => f,
@@ -1505,6 +1583,14 @@ pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
         let before = fw.rules.len();
         fw.rules.retain(|r| r.dir != dir);
         removed = before - fw.rules.len();
+        if reset_policy {
+            let slot = if dir == "in" {
+                &mut fw.policy_in
+            } else {
+                &mut fw.policy_out
+            };
+            policy_was = std::mem::take(slot);
+        }
         // If nothing is left (no rules, both policies default, the open `default`
         // namespace), drop the firewall entirely and detach it from the ingress;
         // otherwise re-apply what remains — the namespace isolation included.
@@ -1524,7 +1610,15 @@ pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
         return Ok(());
     }
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
-    println!("{}: removed {removed} {arrow} rule(s)", c.name);
+    if reset_policy && !policy_was.is_empty() {
+        println!(
+            "{}: removed {removed} {arrow} rule(s), and the {arrow} default is back to allow-all \
+             (was {policy_was})",
+            c.name
+        );
+    } else {
+        println!("{}: removed {removed} {arrow} rule(s)", c.name);
+    }
     Ok(())
 }
 
@@ -2656,6 +2750,61 @@ spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
         assert!(split_policy_name("web/sideways").is_err());
     }
 
+    /// The two verbs that clear a direction promise different things, and each
+    /// has to do what it says.
+    ///
+    /// Measured 2026-10-06 against the shipped engine: `delete networkpolicies
+    /// <c>/ingress` on a container with a `deny` in force answered rc 0 and
+    /// «removed 0 inbound rule(s)», `get networkpolicies` still listed the
+    /// policy, and the deny was still enforced on the wire. A DELETE that
+    /// reports success and deletes nothing.
+    ///
+    /// Verified to fail with the fix reverted: `clear_dir_with(.., true)` then
+    /// leaves `policy_in == "deny"` and the record keeps its firewall.
+    #[test]
+    fn the_generic_delete_resets_the_direction_and_clear_keeps_the_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // No IP: this test is about the RECORD, which is what every read shows.
+        seed(root, "cccc000000000003", "web", "default", "");
+        let store = Store::open(root).unwrap();
+        let fw = delonix_model::records::ContainerFw {
+            policy_in: "deny".into(),
+            rules: vec![rule("in", "tcp", "80", "", "allow")],
+            ..Default::default()
+        };
+        store
+            .update("cccc000000000003", |c| {
+                c.firewall = Some(fw.clone());
+                true
+            })
+            .unwrap();
+
+        // `net ingress clear` removes the RULES and says so; the default is the
+        // `policy` verb's to set, and that split is what its message promises.
+        clear_dir(&store, "web", "in").unwrap();
+        let c = store.load("cccc000000000003").unwrap();
+        let kept = c
+            .firewall
+            .as_ref()
+            .expect("a non-default policy is not disposable");
+        assert!(
+            kept.rules.is_empty(),
+            "the rules of that direction are gone"
+        );
+        assert_eq!(kept.policy_in, "deny", "`clear` does not touch the default");
+
+        // The Kind-generic DELETE resets the direction, and with nothing left
+        // the firewall goes with it — so every read agrees with the operator.
+        clear_dir_with(&store, "web", "in", true).unwrap();
+        let c = store.load("cccc000000000003").unwrap();
+        assert!(
+            c.firewall.is_none(),
+            "nothing was left to govern, so the record keeps no firewall: {:?}",
+            c.firewall
+        );
+    }
+
     /// Writes a container record straight into a temp store. Only the fields
     /// the resolver reads are set; everything else comes from `Default`, which
     /// is what keeps this test about name resolution and nothing else.
@@ -2974,6 +3123,31 @@ spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
     fn parse_port_spec_rejects_bad_proto_and_port() {
         assert!(parse_port_spec("sctp/80").is_err());
         assert!(parse_port_spec("tcp/99999").is_err());
+    }
+
+    /// The read side answers to the word the write side takes. A pod member's
+    /// policy is declared under the POD's name, so that is the name a listing
+    /// shows; a plain container answers to its own.
+    #[test]
+    fn a_pod_member_is_named_after_its_pod_and_a_container_after_itself() {
+        let mut c = sdn_container("default");
+        assert_eq!(governed_name(&c), "web", "a plain container: its own name");
+        c.pod = Some("pod-web".into());
+        assert_eq!(
+            governed_name(&c),
+            "web",
+            "a member of pod `web`: the pod's name"
+        );
+        c.name = "web-sidecar".into();
+        c.pod = Some("pod-team".into());
+        assert_eq!(
+            governed_name(&c),
+            "team",
+            "the POD's name, never the member's"
+        );
+        // A `pod` that is not a pod netns is not a pod: the member's own name stands.
+        c.pod = Some("something-else".into());
+        assert_eq!(governed_name(&c), "web-sidecar");
     }
 
     fn sdn_container(ns: &str) -> Container {

@@ -3470,6 +3470,32 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior.
   # `delonix vm rm` tinha a mesma quebra em vários pontos deste script — ver
   # `delete vm`/`describe vm` — e foi corrigido numa sessão à parte.
+  # ADR-0069 item 1: o lado da LEITURA da firewall de um pod. Um pod é UM alvo
+  # (os membros partilham a netns e o endereço, e a política vive no
+  # membro-cabeça), e até 2026-10-06 só as MUTAÇÕES o sabiam: `net ingress allow
+  # <pod>` funcionava e `net ingress ls <pod>` respondia «no such container»
+  # (rc=4), tal como o `describe networkpolicies <pod>/<dir>`. Uma regra que se
+  # escreve e não se vê é pior que uma que não se escreve.
+  #
+  # E o `get networkpolicies` nomeava o MEMBRO onde o operador escreveu o POD:
+  # num pod de dois membros imprimia QUATRO linhas, e as duas do membro sem
+  # firewall diziam «allow (default), 0 rules» por cima de uma política que
+  # existe. Uma listagem que nega uma firewall é pior que nenhuma.
+  check "net ingress allow <pod>: a mutação aceita o nome do pod" ok \
+    "$BIN" net ingress allow "p$PFX" 8099
+  check "... e o ls LÊ pelo mesmo nome, com a regra" ok bash -c "
+    out=\$('$BIN' net ingress ls 'p$PFX' 2>&1) || { printf '%s\n' \"\$out\"; exit 1; }
+    printf '%s' \"\$out\" | grep -q 'firewall for p$PFX' || { echo 'o ls não nomeia o pod'; exit 1; }
+    printf '%s' \"\$out\" | grep -q 8099 || { echo 'a regra que o allow escreveu não aparece'; exit 1; }"
+  check "... e o describe genérico também" ok bash -c "
+    '$BIN' describe networkpolicies 'p$PFX/ingress' 2>&1 | grep -q 'firewall for p$PFX'"
+  check "... e o get conta o pod UMA vez por direcção, com o nome do pod" ok bash -c "
+    out=\$('$BIN' get networkpolicies 2>&1)
+    printf '%s' \"\$out\" | grep -qE '^p$PFX +ingress' || { echo 'o get não nomeia o pod'; printf '%s\n' \"\$out\"; exit 1; }
+    n=\$(printf '%s\n' \"\$out\" | grep -cE '^p$PFX(-| )' || true)
+    [ \"\$n\" = 2 ] || { echo \"o pod deu \$n linhas, esperava 2 (uma por direcção)\"; printf '%s\n' \"\$out\"; exit 1; }"
+  "$BIN" net ingress clear "p$PFX" >/dev/null 2>&1
+
   check "describe pod" ok "$BIN" describe pod "p$PFX"
   check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
@@ -5224,6 +5250,55 @@ check "get workloads explica-se"  1 "$BIN" get workloads
 check "get de Kind inexistente"   4 "$BIN" get bananas
 # E um delete sem nome nunca pode ser lido como «todos».
 check "delete sem nome recusa"    1 "$BIN" delete pods
+
+########################################
+section "delete networkpolicies — um DELETE que reporta sucesso tem de apagar"
+########################################
+# Medido 2026-10-06 contra o motor publicado: com um `deny` em vigor,
+# `delete networkpolicies <c>/ingress` respondia rc 0 e «removed 0 inbound
+# rule(s)», o `get`/`describe networkpolicies` continuavam a ler `deny`, e um
+# ping de outro container CONTINUAVA bloqueado. O operador apaga a política que
+# fecha o workload e ele fica fechado, com todas as leituras a concordar com a
+# política em vez de com ele.
+#
+# A causa: o verbo genérico chamava a limpeza do `net ingress clear`, que remove
+# as REGRAS de uma direcção e deixa a omissão ao verbo `policy` — coerente para
+# esse verbo, e é o que a mensagem dele promete. Aqui o objecto apagado É a
+# política, por isso a omissão tem de ir com ela.
+#
+# O veredicto é o TRÁFEGO, contado como echo requests RECEBIDOS pelo alvo
+# (`Icmp InEchos`) e não pelo rc do ping: um ping cuja resposta é dropada também
+# falha, e um check pelo rc passaria sobre um defeito que entrega o pacote.
+DP="dp-$PFX"; DPS="dps-$PFX"; DPC="dpc-$PFX"
+if "$BIN" network create "$DP" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$DPS" --net "$DP" "$IMG" sleep 900 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$DPC" --net "$DP" "$IMG" sleep 900 >/dev/null 2>&1; then
+  DPIP=$(ip_of "$DPS")
+  e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
+  check "delete policy: a linha de base alcança" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 3
+  "$BIN" net ingress policy "$DPS" deny >/dev/null 2>&1
+  e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
+  check "delete policy: com deny não alcança" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 0
+  check "delete networkpolicies <c>/ingress" ok "$BIN" delete networkpolicies "$DPS/ingress"
+  check "... e o get passa a ler allow-all" ok bash -c \
+    "'$BIN' get networkpolicies 2>&1 | grep -qE '^$DPS +ingress +allow'"
+  check "... e o describe também" ok bash -c \
+    "'$BIN' describe networkpolicies '$DPS/ingress' 2>&1 | grep -q 'default policy: allow'"
+  e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
+  check "... e o deny DEIXOU de ser imposto no fio" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 3
+  # `net ingress clear` continua a ser o que a sua mensagem diz: leva as REGRAS
+  # e deixa a omissão de pé. Sem este check, alinhar os dois verbos passaria
+  # por correcção.
+  "$BIN" net ingress policy "$DPS" deny >/dev/null 2>&1
+  "$BIN" net ingress clear "$DPS" >/dev/null 2>&1
+  check "net ingress clear: a omissão da direcção FICA (deny)" ok bash -c \
+    "'$BIN' get networkpolicies 2>&1 | grep -qE '^$DPS +ingress +deny'"
+  "$BIN" delete networkpolicies "$DPS/ingress" >/dev/null 2>&1
+else
+  skip "delete networkpolicies" "não foi possível preparar a rede e os dois containers"
+fi
+for c in "$DPS" "$DPC"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
+"$BIN" network rm "$DP" >/dev/null 2>&1
 
 ########################################
 section "stack init --template --up (Sprint 7: --up passa a honrar o manifesto)"
