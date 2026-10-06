@@ -2371,11 +2371,45 @@ fn resolve_vm_disk(
 /// `base` é a pasta do MANIFESTO (não o cwd), como em `secret::apply`: é
 /// relativamente a ela que o `spec.build.context` se resolve, para um manifesto
 /// querer dizer o mesmo seja de onde for aplicado.
+/// A VM name is unique on the node: the record is `vms/<name>.json`, whatever
+/// namespace it declares, so the same name asked for in ANOTHER namespace is a
+/// different resource that cannot exist. It is the same rule a Pod already
+/// states, and for the same reason — but on a VM the namespace IS the isolation
+/// boundary (`@dlxns_<ns>`), so answering «ensured» is worse than cosmetic.
+///
+/// Measured 2026-10-06, before this: a manifest declaring `nsvm` in `teamB`
+/// over a VM of that name in `teamA` had `stack plan` print `= 1 unchanged` and
+/// `stack apply` print `vm/nsvm: ensured` with rc=0 — while the VM stayed in
+/// `teamA`, reachable by `teamA` and not by the tenant that asked for `teamB`.
+fn check_vm_namespace(name: &str, want: &str, have: &str) -> Result<()> {
+    let have = if have.is_empty() { "default" } else { have };
+    let want = if want.is_empty() { "default" } else { want };
+    if want.eq_ignore_ascii_case(have) {
+        return Ok(());
+    }
+    Err(Error::Conflict(format!(
+        "VM '{name}' already exists in namespace '{have}'; a VM name is unique on the node, so \
+         '{want}' cannot reuse it"
+    )))
+}
+
 pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
     let base = state_root();
     let images = super::vmimage::VmImageStore::open(&base)?;
+    // An unreadable store is an error, not an empty machine — the same rule the
+    // plan already follows: an empty list would make every homonym check pass.
+    let on_node = delonix_vm::list(&base)?;
     for doc in manifest::of_kind(docs, k::VM) {
         let name = &doc.metadata.name;
+        // Before anything is resolved or created: a VM of this name already on
+        // the node, in another namespace, is a different resource.
+        if let Some(existing) = on_node.iter().find(|v| &v.name == name) {
+            check_vm_namespace(
+                name,
+                doc.metadata.namespace.as_deref().unwrap_or("default"),
+                &existing.namespace,
+            )?;
+        }
         let spec: VmSpec = vm_spec_of(doc)?;
         let (disk, image_meta) = resolve_vm_disk(&images, name, &spec, base_dir)?;
         // The image's own `VCPUS`/`MEMORY`/`HYPERVISOR`, applied only where the
@@ -4981,6 +5015,24 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    /// A VM name is unique on the node, so the same name in another namespace is
+    /// a conflict — never «ensured». The comparison is case-insensitive and an
+    /// empty namespace means `default`, so a record written before namespaces
+    /// existed does not read as a conflict with `default`.
+    #[test]
+    fn the_same_vm_name_in_another_namespace_is_a_conflict() {
+        assert!(super::check_vm_namespace("v", "default", "").is_ok());
+        assert!(super::check_vm_namespace("v", "", "default").is_ok());
+        assert!(super::check_vm_namespace("v", "teamA", "teama").is_ok());
+        let msg = super::check_vm_namespace("v", "teamB", "teamA")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.contains("already exists in namespace 'teamA'") && msg.contains("'teamB'"),
+            "{msg}"
+        );
+    }
+
     fn y(t: &str) -> serde_yaml::Value {
         serde_yaml::from_str(t).unwrap()
     }

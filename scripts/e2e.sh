@@ -4039,6 +4039,61 @@ else
 fi
 
 ########################################
+section "vm: o mesmo nome noutra namespace é um conflito, não «ensured»"
+########################################
+# ADR-0069 item 2, medido a 2026-10-06: o registo de uma VM é `vms/<nome>.json`,
+# qualquer que seja a namespace que declare, por isso o nome é ÚNICO no nó — e
+# um manifesto que peça o mesmo nome noutra namespace estava a receber
+# `stack plan` = «1 unchanged» e `stack apply` = «vm/<nome>: ensured» com rc=0,
+# com a VM a ficar na PRIMEIRA namespace. Numa VM a namespace É a fronteira de
+# isolamento (`@dlxns_<ns>`), logo o inquilino que pediu a segunda ficava com uma
+# VM que a primeira alcança e a dele não. É a mesma regra que um Pod já diz, e
+# aqui a consequência é de isolamento, não cosmética.
+#
+# Precisa do Cloud Hypervisor: o libvirt RECUSA uma VM com namespace (DX-1508,
+# as VMs dele vivem fora da SDN), por isso a pré-condição — um registo em
+# `teamA` — só se consegue aqui.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: nome repetido noutra namespace" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif command -v cloud-hypervisor >/dev/null; then
+  NSW="$WORK/vm-namespace"; mkdir -p "$NSW"; NSVM="nsvm-$PFX"; NSNET="nsnet-$PFX"
+  qemu-img create -f qcow2 "$NSW/d.qcow2" 64M >/dev/null 2>&1
+  "$BIN" network create "$NSNET" >/dev/null 2>&1
+  for ns in teamA teamB; do
+    cat >"$NSW/$ns.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: $NSVM
+  namespace: $ns
+spec:
+  disk: $NSW/d.qcow2
+  memory: 128M
+  vcpus: 1
+  network: $NSNET
+  provider:
+    type: cloud-hypervisor
+YAML
+  done
+  if "$BIN" stack apply -f "$NSW/teamA.yaml" >/dev/null 2>&1; then
+    check "o mesmo nome noutra namespace é um conflito (5)" 5 \
+      "$BIN" stack apply -f "$NSW/teamB.yaml"
+    check "... e a recusa nomeia as duas namespaces" ok bash -c "
+      '$BIN' stack apply -f '$NSW/teamB.yaml' 2>&1 | grep -q \"already exists in namespace 'teamA'\""
+    check "... e a VM continua na namespace da primeira" ok bash -c "
+      '$BIN' vm ls --namespace teamA | grep -q '$NSVM'"
+  else
+    skip "vm: nome repetido noutra namespace" "o vm create CH falhou neste host (infra de rede?)"
+  fi
+  "$BIN" delete vm "$NSVM" -f >/dev/null 2>&1
+  "$BIN" network rm "$NSNET" >/dev/null 2>&1
+  rm -rf "$NSW"
+else
+  skip "vm: nome repetido noutra namespace" "sem cloud-hypervisor instalado"
+fi
+
+########################################
 section "backup / restore por recurso"
 ########################################
 # O ciclo real: arquivar, DESTRUIR os dados, repor, e confirmar que voltaram. Um
