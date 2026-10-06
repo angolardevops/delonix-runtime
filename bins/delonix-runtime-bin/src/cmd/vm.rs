@@ -2463,6 +2463,8 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // off the CLI is deliberate, and it keeps `vm console` always useful
             // here. See `VmConfig::serial_capture`.
             serial_capture: false,
+            // Governed by a `scope: vm` policy of this manifest: born closed.
+            policy_hold: super::firewall::guest_policy_targets(docs, "vm").contains(name.as_str()),
             name: name.clone(),
             // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk` —
             // o caminho no disco de uma imagem nossa, ou a tag produzida quando
@@ -2810,6 +2812,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             // 45 GiB disk-pressure incident from the same class of unreaped orphan.
             let seed_to_clean = (!vmdir_existed).then(|| vmdir.clone());
             let cfg = VmConfig {
+                policy_hold: false,
                 disk_size_gib,
                 name,
                 disk,

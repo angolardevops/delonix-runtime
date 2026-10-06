@@ -6147,6 +6147,23 @@ impl VmBackend for ProxmoxBackend {
                 }
             }
         }
+        // Created CLOSED (ADR-0069 D6): the VM's own firewall, default-deny both
+        // ways, is in force BEFORE the guest has a CPU. If it cannot be (the
+        // datacenter firewall is off, the node refuses), the VM is removed and the
+        // create fails — an open VM under a policy that says closed is the defect.
+        if cfg.policy_hold {
+            for direction in [
+                delonix_compute::vm_firewall::Direction::In,
+                delonix_compute::vm_firewall::Direction::Out,
+            ] {
+                let closed = delonix_compute::vm_firewall::Policy {
+                    direction,
+                    default_allow: false,
+                    rules: Vec::new(),
+                };
+                vm_firewall::apply(&self.client, &ledger, vmid, &closed).map_err(undo)?;
+            }
+        }
         on(CreateStage::Start);
         self.client.start(&ledger, vmid).map_err(undo)?;
         // The vmid is what every later call addresses, and the name is not: two
@@ -6597,6 +6614,10 @@ impl VmBackend for ProxmoxBackend {
     ) -> delonix_model::Result<()> {
         let ledger = Ledger::at(vmdir);
         Ok(self.on_vm(vm, |c, vmid| vm_firewall::apply(c, &ledger, vmid, policy))?)
+    }
+
+    fn holds_at_boot(&self) -> bool {
+        true
     }
 
     fn holds_vm(&self, name: &str) -> delonix_model::Result<Option<bool>> {

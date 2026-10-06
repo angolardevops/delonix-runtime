@@ -118,6 +118,18 @@ where
             None => self.backends.select(self.root, cfg, &required)?,
         };
 
+        // A held create is only honest where the firewall can be closed before the
+        // guest runs; otherwise the VM would come up open under a policy that
+        // says it is closed.
+        if cfg.policy_hold && restarting.is_none() && !backend.holds_at_boot() {
+            return Err(Error::UnsupportedByBackend(format!(
+                "the '{}' backend cannot create a VM closed (policy hold): it has no firewall of \
+                 its own that can be in force before the guest starts. A `scope: vm` policy is \
+                 for a backend that has one (proxmox)",
+                backend.id()
+            )));
+        }
+
         // Admission: refuses to boot if there is no RAM on the host (anti-overcommit).
         // Only the VMs that will REALLY boot (not the idempotent already-running one above).
         admission_check(cfg)?;
@@ -241,6 +253,10 @@ where
         vm.ip = boot.ip;
         vm.dhcp_lease_floor = boot.lease_floor;
         vm.backend = backend.id().to_string();
+        if cfg.policy_hold && restarting.is_none() {
+            vm.annotations
+                .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
+        }
         vm.devices = cfg.devices.clone();
         vm.boot = boot_spec_of(cfg);
         vm.started_unix = Some(
@@ -953,6 +969,10 @@ where
     }
 }
 
+/// Annotation on a VM created closed (`VmConfig::policy_hold`) and not yet
+/// released: its own firewall is default-deny until the policy layers ran.
+pub const POLICY_HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
 /// VM ADMISSION control: refuses to boot a VM if the requested memory does not
 /// fit in the host's `MemAvailable` minus a safety reserve. Unlike
 /// containers (with a budget in `delonix.slice`), a VM is a process
@@ -1101,6 +1121,9 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         // it, there is nothing to reapply on `vm start`, and the record does
         // not keep it.
         required_capabilities: _,
+        // Consumed at the FIRST create (the firewall it closes lives on the node and
+        // outlives a restart; the record keeps the annotation until released).
+        policy_hold: _,
         // Everything below used to exist only for the duration of `vm create`.
         kernel,
         initrd,
@@ -1182,6 +1205,7 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         // Not persisted: the requirement was checked against the backend the
         // record names when the VM was created (see `boot_spec_of`).
         required_capabilities: Vec::new(),
+        policy_hold: false,
         // For libvirt, `Vm.tap` is not a real tap: `LibvirtBackend::boot` stores
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
@@ -1388,6 +1412,8 @@ mod tests {
         running: RefCell<bool>,
         own_storage: bool,
         unrecorded: bool,
+        /// What this backend answers to [`VmBackend::holds_at_boot`].
+        holds_at_boot: bool,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1401,6 +1427,9 @@ mod tests {
         }
         fn manages_own_storage(&self) -> bool {
             self.0.own_storage
+        }
+        fn holds_at_boot(&self) -> bool {
+            self.0.holds_at_boot
         }
         fn boot(
             &self,
@@ -1566,6 +1595,57 @@ mod tests {
         let c = calls(&seen);
         assert_eq!(c.len(), 1, "{c:?}");
         assert!(c[0].starts_with("boot db /images/base.qcow2"), "{c:?}");
+    }
+
+    /// A held create on a backend with no firewall of its own is refused BEFORE
+    /// anything is built. The alternative is the defect the hold exists to
+    /// prevent: a VM up and open under a policy that says it is closed.
+    #[test]
+    fn a_held_create_is_refused_by_a_backend_that_cannot_hold_at_boot() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        let err = e
+            .create(&VmConfig {
+                policy_hold: true,
+                ..cfg("web")
+            })
+            .expect_err("a backend that cannot hold must refuse");
+        // The MESSAGE, not the variant: what the operator reads is the contract,
+        // and `arch_fitness` counts a match on an error variant outside the
+        // foundation as debt.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cannot create a VM closed") && msg.contains("proxmox"),
+            "{msg}"
+        );
+        // And nothing was built: no overlay, no seed, no boot, no record.
+        assert!(calls(&seen).is_empty(), "{:?}", calls(&seen));
+        assert!(e.repo.get("web").is_err());
+    }
+
+    /// The same create on a backend that CAN hold goes through: the refusal is
+    /// about the backend's capability, not about the hold itself.
+    #[test]
+    fn a_held_create_goes_through_on_a_backend_that_holds_at_boot() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen {
+            holds_at_boot: true,
+            ..Default::default()
+        });
+        let e = engine(root.path(), seen.clone());
+        let vm = e
+            .create(&VmConfig {
+                policy_hold: true,
+                ..cfg("web")
+            })
+            .expect("a holding backend accepts a held create");
+        assert_eq!(vm.status, Status::Running);
+        assert!(
+            calls(&seen).iter().any(|c| c.starts_with("boot web ")),
+            "{:?}",
+            calls(&seen)
+        );
     }
 
     /// A name `create` would refuse never reaches a port.

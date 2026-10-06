@@ -125,7 +125,7 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
 
 ## Pending (real, with the prerequisite)
 
-1. D6 for VMs and system containers (provider firewalls); a holder-respawn test for a held or governed pod; `net ingress|egress <pod>` on the CLI.
+1. PARTLY DONE: D6 for VMs and system containers is built — a guest a `scope: vm` or `scope: systemcontainer` policy governs is created with the provider's own firewall in force, closed both ways, before the guest has a CPU, and a backend that cannot do that (`VmBackend::holds_at_boot`) REFUSES by name (DX-1501) instead of creating the guest open. Only Proxmox holds at boot today; the two local backends refuse, and the refusal says where the scope serves. The release reads the directions the manifest declared, so an undeclared one returns to the guest's own default, and the annotation is written LAST. STILL TO DO: a holder-respawn test for a held or governed pod, and `net ingress|egress <pod>` on the CLI.
 2. Plan identity as `(kind, scope, name)` for Pod/Service/Container/VM (only share volumes are
    scoped today); `destroy_one` takes `(kind, name)`. Needs a `ResourceKey` through
    `reconcile.rs` and the destroy path. D5 removes the silent false success but not the

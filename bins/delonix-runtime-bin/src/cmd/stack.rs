@@ -2095,7 +2095,9 @@ fn run_layers_inner(
     })?;
     // The workloads these policies govern were created closed; the policy is in
     // place now, so they open — to exactly what it says (ADR-0069).
-    let released = super::firewall::release_policy_holds(docs)?;
+    let released = super::firewall::release_policy_holds(docs)?
+        + super::firewall::release_vm_holds(docs)?
+        + super::firewall::release_system_container_holds(docs)?;
     if released > 0 {
         println!(
             "{}",
