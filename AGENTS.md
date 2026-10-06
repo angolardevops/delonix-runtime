@@ -5275,8 +5275,33 @@ de re-exec, para um terceiro não nascer com metade).
   declara nada. Gates: `a_held_create_is_refused_by_a_backend_that_cannot_hold_at_boot` (chumba com
   a recusa revertida, verificado), `a_guest_is_a_target_only_through_a_policy_of_its_own_scope`
   e o check «scope: vm num backend sem firewall própria recusa» da bateria.
-  **Por fazer** deste item: `net ingress|egress <pod>` na CLI e um teste de respawn do holder com
-  um pod governado.
+  **Fechado a 2026-10-06**, e o que faltava eram as LEITURAS: as mutações já aceitavam o nome do
+  pod (`net ingress allow <pod>` escrevia a regra) e `net ingress ls <pod>` respondia «no such
+  container» (rc=4), tal como o `describe networkpolicies <pod>/<dir>`. Uma regra que se escreve e
+  não se vê é pior do que uma que não se escreve. E o `get networkpolicies` nomeava o MEMBRO onde o
+  operador escreveu o POD: num pod de dois membros imprimia QUATRO linhas, e as duas do membro sem
+  firewall diziam «allow (default), 0 rules» por cima de uma política que existe — uma listagem que
+  NEGA uma firewall. `governed_name` dá o nome por que a política foi declarada (o do pod para um
+  membro, o próprio para um container) e é o que o `list_rules` e o `list_all_policies` usam, o
+  mesmo nome que a escrita toma. Gates: os quatro checks «ADR-0069 item 1: o lado da LEITURA» da
+  bateria (três chumbam no binário 5.0.0) e o estágio `policy-hold-pod-respawn` do cenário
+  `policy_hold`, que mata o pin, repõe a infra e exige o pod recuperado COM o deny ainda imposto.
+- **Um DELETE que reporta sucesso tem de apagar — e o verbo genérico não apagava.** Medido a
+  2026-10-06 contra o motor publicado: com um `deny` em vigor, `delete networkpolicies
+  <c>/ingress` respondia **rc 0** e «removed 0 inbound rule(s)», o `get`/`describe
+  networkpolicies` continuavam a ler `deny`, e um ping de outro container CONTINUAVA bloqueado. O
+  operador apaga a política que fecha o workload e ele fica fechado, com todas as leituras a
+  concordar com a política em vez de com ele. A causa: o verbo chamava a limpeza do `net ingress
+  clear`, que remove as REGRAS de uma direcção e deixa a omissão ao verbo `policy` — coerente para
+  esse verbo, e é o que a mensagem dele promete; aqui o objecto apagado É a política, por isso a
+  omissão tem de ir com ela (`clear_dir_with(.., reset_policy: true)`, e o `firewall_disposable`
+  larga a firewall inteira quando não fica nada). O doc-comment do `cmd_delete_policy` afirmava
+  «same semantics as `net ingress clear`» — estava errado e é a origem do defeito. Gates: o
+  unitário `the_generic_delete_resets_the_direction_and_clear_keeps_the_policy` (chumba com a
+  correcção revertida, verificado) e a secção «delete networkpolicies» da bateria, cujo veredicto é
+  o TRÁFEGO contado em `Icmp InEchos` do alvo — um check pelo rc do ping passaria sobre um defeito
+  que entrega o pacote. O `net ingress clear` tem check próprio a exigir que a omissão FIQUE: sem
+  ele, alinhar os dois verbos passaria por correcção.
 - **Um Pod é UM alvo de política**: `firewall::update_locked`/`load_governed` resolvem um nome que
   não é container para a vista do pod (`pod::pod_view`: registo do membro-cabeça com o netns
   partilhado como id e o IP do pod); só `firewall` e `annotations` voltam ao membro-cabeça. A rede

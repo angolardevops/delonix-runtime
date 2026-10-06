@@ -2244,6 +2244,35 @@ print("1" if "delonix.io/policy-hold" in (d.get("annotations") or {}) else "0")'
     sleep 2
     reach "$(podip)" && bad "policy-hold-pod" "um restart do membro reabriu o pod" \
                      || ok "policy-hold-pod: um restart do membro nao reabre o pod"
+    # ADR-0069 item 1: o respawn do HOLDER com um pod GOVERNADO. A recuperacao
+    # (v0.41.0) reinicia os membros e o `container start` reaplica a firewall
+    # persistida — mas isso sao DUAS afirmacoes, e a que importa e a segunda: se
+    # a rede voltasse e a politica nao, um pod governado voltava ABERTO, que e
+    # exactamente o estado que a politica existe para impedir.
+    #
+    # E o check e NEGATIVO («o cliente nao alcanca o pod»), por isso tem de
+    # provar primeiro que a sonda funciona: com o cliente sem rede depois do
+    # respawn, «nao alcanca» passaria por nada responder. `neton phpclient`
+    # (ping ao gateway, que a politica do pod nao filtra) e essa prova.
+    local pin_b pin_a ip_a
+    pin_b=$(holder_pid)
+    kill -9 "$pin_b" 2>/dev/null; sleep 2
+    dlx net netns up >/dev/null 2>&1
+    sleep 4
+    pin_a=$(holder_pid); ip_a=$(podip)
+    if [ -z "$pin_a" ] || [ "$pin_a" = "$pin_b" ]; then
+      bad "policy-hold-pod-respawn" "o pin nao foi substituido ($pin_b → ${pin_a:-—})"
+    elif ! neton phpclient; then
+      bad "policy-hold-pod-respawn" "o CLIENTE nao recuperou a rede: um check negativo \
+sobre uma sonda morta passaria por nada responder"
+    elif [ -z "$ip_a" ] || ! neton phpod-a; then
+      bad "policy-hold-pod-respawn" "o pod nao recuperou a rede depois do respawn"
+    elif reach "$ip_a"; then
+      bad "policy-hold-pod-respawn" "a rede voltou e a politica NAO: o pod governado \
+voltou ABERTO depois do respawn do holder"
+    else
+      ok "policy-hold-pod-respawn (a sonda funciona, a rede voltou, e o deny continua em vigor — pin $pin_a)"
+    fi
   else
     bad "policy-hold-pod" "o apply com deny falhou: $(tail -2 "$dir/deny.out" | tr '\n' ' ')"
   fi
