@@ -225,6 +225,7 @@ gates: ## The script gates CI runs on the source tree (language, architecture, v
 	python3 scripts/version_gate.py
 	python3 scripts/dev_docs.py --check
 	python3 scripts/dev_docs_site.py --check
+	python3 scripts/adr_status_gate.py
 
 ci: fmt-check gates lint test ## What to run before pushing: format, gates, clippy, tests
 

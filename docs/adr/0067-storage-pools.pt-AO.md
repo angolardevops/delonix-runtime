@@ -4,7 +4,10 @@
 > `docs/adr/0067-storage-pools.md` (inglês). Os dois têm o mesmo ID, estado, decisões e
 > referências; em caso de divergência vale o inglês.
 
-- **Estado:** Proposto (2026-10-02). Nada implementado. As decisões do dono de 2026-10-02 estão
+- **Estado:** Proposto (2026-10-02), **P0 implementado** a 2026-10-03 (#689: a porta, o contexto
+  `delonix-storage`, a allowlist do administrador, o `kind: StoragePool` e o driver `dir` — ver o
+  addendum no fim). O P1–P6 precisa de root e de discos numa VM de laboratório e não está feito.
+  As decisões do dono de 2026-10-02 estão
   registadas em D3 e D5; ficam três perguntas em aberto (fim do documento).
 - **Data:** 2026-10-02
 - **Decisores:** Walter Angolar
