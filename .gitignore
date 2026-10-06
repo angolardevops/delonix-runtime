@@ -5,3 +5,18 @@ __pycache__/
 # Configuração local de ferramentas de agente (fica na máquina, não no repo).
 .claude/
 CLAUDE.md
+
+# Credenciais de um laboratório, que vivem na máquina e nunca no repo.
+#
+# Este repositório é PÚBLICO, e um ficheiro destes na raiz da árvore de trabalho
+# está a um `git add -A` de ser publicado. A regra da casa é nunca usar `git add
+# -A` — mas uma regra é uma intenção e isto é um ferrolho. Medido a 2026-10-06:
+# `opnsense-lab.env`, com a chave e o segredo da API do appliance em claro, não
+# estava ignorado por nada.
+#
+# As variáveis que a bateria e os testes ao vivo lêem (DELONIX_PROXMOX_*,
+# DELONIX_OPNSENSE_*, DELONIX_CHAOS_TRUENAS_*) exportam-se de um ficheiro assim;
+# o padrão cobre o nome que já se usa e os irmãos previsíveis.
+*-lab.env
+*.lab.env
+lab.env
