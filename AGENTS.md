@@ -5247,6 +5247,19 @@ de re-exec, para um terceiro não nascer com metade).
 - `release_policy_holds` corre depois das camadas de política e abre ao que elas dizem; uma
   direcção não declarada volta ao default aberto. Se uma camada falha, o workload fica fechado e
   o apply diz-o; o apply seguinte liberta-o. Containers e Pods.
+- **O nome de uma VM é único no NÓ, e o mesmo nome noutra namespace é um conflito (2026-10-06).**
+  O registo é `vms/<nome>.json`, qualquer que seja a namespace que declare, por isso dois
+  inquilinos não podem ter cada um a sua `web` — e um manifesto que o pedisse recebia
+  `stack plan` = «1 unchanged» e `stack apply` = «vm/web: ensured» com rc 0, **com a VM a ficar na
+  PRIMEIRA namespace**. Numa VM a namespace É a fronteira de isolamento (`@dlxns_<ns>`): o
+  inquilino que pediu a segunda ficava com uma VM que a primeira alcança e a dele não. Passa a ser
+  recusado (`Conflict`, saída 5) antes de resolver ou criar o que seja. É a MESMA regra que um Pod
+  já dizia, pela mesma razão — a netns partilhada e os nomes dos membros também não são
+  namespaced —, e por isso **dar-lhes um nome de plano com namespace seria errado**: o plano
+  passaria a crer em dois recursos que o nó não consegue ter. Quem É scoped no plano são o
+  `Container`, o `Service` e um `Volume` com `share` (`manifest::scoped_plan_name`). Gate:
+  `the_same_vm_name_in_another_namespace_is_a_conflict` e a secção «vm: o mesmo nome noutra
+  namespace é um conflito» da bateria, cujos dois primeiros checks chumbam com a recusa revertida.
 - **Um convidado nasce fechado na firewall do PROVIDER, ou não nasce.** Uma VM
   (`scope: vm`) ou um system container (`scope: systemcontainer`) que uma política do manifesto
   governa é criado com a sua própria firewall em vigor, default-deny nos dois sentidos, ANTES de o

@@ -126,10 +126,28 @@ catalog); no `Provider` Kind is added. OpenStack stays *Proposed*: no backend, n
 ## Pending (real, with the prerequisite)
 
 1. PARTLY DONE: D6 for VMs and system containers is built — a guest a `scope: vm` or `scope: systemcontainer` policy governs is created with the provider's own firewall in force, closed both ways, before the guest has a CPU, and a backend that cannot do that (`VmBackend::holds_at_boot`) REFUSES by name (DX-1501) instead of creating the guest open. Only Proxmox holds at boot today; the two local backends refuse, and the refusal says where the scope serves. The release reads the directions the manifest declared, so an undeclared one returns to the guest's own default, and the annotation is written LAST. STILL TO DO: a holder-respawn test for a held or governed pod, and `net ingress|egress <pod>` on the CLI.
-2. Plan identity as `(kind, scope, name)` for Pod/Service/Container/VM (only share volumes are
-   scoped today); `destroy_one` takes `(kind, name)`. Needs a `ResourceKey` through
-   `reconcile.rs` and the destroy path. D5 removes the silent false success but not the
-   plan-level homonym limit.
+2. RESOLVED, and the premise was wrong for two of the four — measured 2026-10-06, not reasoned:
+   - **Container, Service and a share Volume ARE scoped** (`manifest::scoped_plan_name`:
+     `<namespace>/<name>` outside `default`). Two tenants may each own a `db`, and the plan keeps
+     them as two resources.
+   - **Pod and VM must NOT be.** A pod name is unique on the node — the shared netns
+     (`pod-<name>`) and the member names (`<pod>-<member>`) are not namespaced — and a VM's record
+     is `vms/<name>.json` whatever namespace it declares. Scoping their plan name would make the
+     plan believe in two resources the node cannot hold: the second would plan `Create` forever
+     over a store key that is already taken.
+   - So the honest answer for both is a **conflict**, which the Pod already had and the VM now
+     has: a manifest asking for a VM name that the node holds in ANOTHER namespace is refused
+     (`Conflict`, exit 5), before anything is resolved or created. Before this, that manifest had
+     `stack plan` print `= 1 unchanged` and `stack apply` print `vm/<name>: ensured` with rc 0 —
+     while the VM stayed in the FIRST namespace. On a VM the namespace IS the isolation boundary
+     (`@dlxns_<ns>`), so the tenant that asked for the second got a VM the first can reach and it
+     cannot. Gates: `the_same_vm_name_in_another_namespace_is_a_conflict` and the battery section
+     «vm: o mesmo nome noutra namespace é um conflito», whose first two checks fail with the
+     refusal reverted (verified).
+   What is left is not a defect: `destroy_one` takes the PLAN name, which for a scoped Kind
+   carries the namespace and each arm splits by the convention `find` already accepts. A
+   `ResourceKey` type would make that structural instead of conventional; nothing measured
+   depends on it.
 3. DONE: `plan` asks the provider (`VmBackend::holds_vm`, Proxmox implements it) before a VM `Create`; a VM the provider holds and the registry does not is a `Conflict`. Other backends cannot enumerate and keep trusting the registry.
 4. DONE: every change carries a `planDigest` and `apply --plan-digest` refuses a stale one; each apply layer writes `apply-started`/`apply-done`/`apply-failed` to the node event log.
 5. Pod standalone: `emptyDir` on disk, `network: host|none` that mean what they say, `requests`
