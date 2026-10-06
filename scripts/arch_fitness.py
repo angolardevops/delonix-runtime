@@ -352,6 +352,45 @@ def inline_versions(pkgs: dict[str, dict]) -> list[str]:
     return bad
 
 
+def shared_package_keys() -> list[str]:
+    """The keys the root manifest offers every member through `[workspace.package]`."""
+    root = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    return sorted(root.get("workspace", {}).get("package", {}))
+
+
+def inline_package_fields(pkgs: dict[str, dict], shared: list[str]) -> list[str]:
+    """A `[package]` field written by hand where the workspace already declares it.
+
+    The sibling of `inline_versions`, for the crate's OWN metadata instead of its
+    dependencies', and it exists because of what it failed to catch: the
+    `delonix-mgmt` manifest said `version = "0.1.0"` for two and a half months
+    while the workspace walked to 4.5.0 (#704). Nothing noticed, because
+    `inline_versions` only ever looked at DEPENDENCY versions.
+
+    A copied value is not a pin: it is the workspace's value frozen on the day
+    the file was written, and the drift is silent by construction. Omitting a key
+    is fine and stays fine -- 9 of the 29 crates do not declare `repository` --
+    so this only fails on a member that writes a key the root also declares.
+    """
+    if not shared:
+        # A gate that measures nothing reads as green. If the root ever stops
+        # declaring these, say so instead of passing over every manifest.
+        return ["the root manifest declares no [workspace.package] keys — this gate guards nothing"]
+    bad: list[str] = []
+    for name, pkg in sorted(pkgs.items()):
+        manifest = tomllib.loads(Path(pkg["manifest_path"]).read_text(encoding="utf-8"))
+        table = manifest.get("package", {})
+        for key in shared:
+            value = table.get(key)
+            if value is None or (isinstance(value, dict) and value.get("workspace") is True):
+                continue
+            bad.append(
+                f"{name}: [package] {key} = {value!r} is written by hand — "
+                f"write `{key}.workspace = true` so the root stays the one place it lives"
+            )
+    return bad
+
+
 def count(
     pattern: re.Pattern[str], skip_bin: bool = True, only: tuple[str, ...] = ()
 ) -> tuple[int, list[str]]:
@@ -388,6 +427,8 @@ def main() -> int:
     pkgs = crates()
     bad, used = rule_failures(pkgs)
     bad += inline_versions(pkgs)
+    shared = shared_package_keys()
+    bad += inline_package_fields(pkgs, shared)
     bad += misplaced(pkgs)
     bad += consumer_mentions()
 
@@ -431,6 +472,8 @@ def main() -> int:
         print("\ncontext crates running an external program (Command::new):")
         for w in spawn_where:
             print(f"  {w}")
+        print("\nfields every member takes from [workspace.package]:")
+        print(f"  {', '.join(shared) or '(none — the gate would guard nothing)'}")
         print("\nexceptions still standing:")
         for (kind, a, b), (phase, reason) in sorted(EXCEPTIONS.items()):
             print(f"  [{phase}] {kind} {a} → {b}: {reason}")
