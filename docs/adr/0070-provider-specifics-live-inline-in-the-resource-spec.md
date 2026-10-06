@@ -66,3 +66,20 @@ moves reuse it by declaring their vendor tables.
 - `examples/vm.yaml`, `examples/full-virtualmachine.yaml` and `examples/full-workload.yaml` use `provider:`; the flat spellings still load, with a warning.
 - A manifest that puts a libvirt-only field under a Cloud Hypervisor or Proxmox target is refused at load time, before any provider is contacted.
 - No new Kind, trait or crate.
+
+## Addendum 2026-10-06 — the table's last two rows are closed, by two ADRs
+
+The `NetworkGateway` and `SystemContainer` rows said what their moves still
+needed. Both were measured on 2026-10-06 and both are closed, each as «D1
+satisfied by ADR-0071, Kind move rejected», with the cost written:
+
+- **ADR-0072** — the perimeter filter stays on `NetworkGateway`. The `OwnerMark`
+  of a remote object is per DECLARING RECORD and is never rewritten (ADR-0059
+  D1.5), so a `NetworkPolicy` document would be a new record: the first apply
+  would duplicate every rule on a live appliance and orphan the originals.
+- **ADR-0073** — `SystemContainer` stays its own Kind. It is `Namespaced::Never`
+  where a VM is `Always`, it is made from an OCI image where a VM is made from a
+  disk, and a merge would mean refusing roughly 28 verbs the LXC path never had.
+
+Nothing in this ADR is rewritten: the rows stated what a move would need, and
+that was true. What changed is that the need was measured and the answer is no.
