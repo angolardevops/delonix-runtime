@@ -1,7 +1,8 @@
 # ADR-0061: What a `delonix init` template promises, and how the generator keeps it
 
-- **Status:** Proposed (2026-09-30) — the application-template contract, the lock policy
-  and the generator checks are implemented on `init/templates-master`; the owner decides
+- **Status:** Proposed (2026-09-30) — the application-template contract, the lock policy and the
+  generator checks are **in `main`** (#642, and the edge/tunnel work that followed); the owner
+  decides whether the ADR becomes Accepted
 - **Date:** 2026-09-30
 - **Deciders:** Walter Angolar
 - **Relates to:** `bins/delonix-runtime-bin/src/cmd/{init,scaffold,build}.rs`, the templates

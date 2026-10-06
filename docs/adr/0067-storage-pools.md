@@ -1,7 +1,10 @@
 # ADR-0067: The engine manages storage pools — LVM-thin, ZFS, btrfs and directory, behind a port
 
-- **Status:** Proposed (2026-10-02). Nothing implemented. The owner's decisions of 2026-10-02 are
-  recorded in D3 and D5; three questions remain open (end of the document).
+- **Status:** Proposed (2026-10-02), **P0 implemented** 2026-10-03 (#689: the port, the
+  `delonix-storage` context, the administrator's allowlist, `kind: StoragePool` and the `dir`
+  driver — see the addendum at the end). P1–P6 need root and spare disks in a lab VM and are not
+  built. The owner's decisions of 2026-10-02 are recorded in D3 and D5; three questions remain
+  open (end of the document).
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** decision D2 of the maturity plan (`docs/discovery/65_PLANO_MATURIDADE.md`,
@@ -375,6 +378,14 @@ merges.
    columns full of `unsupported-by-provider` for the other domains.
 
 ## Addendum 2026-10-03 — P0 built: the port, the allowlist, `kind: StoragePool` and the `dir` driver
+
+> **The status line lied for three days** (2026-10-02 to 2026-10-06): it read
+> «Nothing implemented» while this addendum, in the same document, said P0 was
+> built and the code was in `main`. Corrected on 2026-10-06, and
+> `scripts/adr_status_gate.py` now refuses the combination. A record that is not
+> updated with the work lies in both directions — it hides what shipped and it
+> promises what did not.
+
 
 - **What was built**: the `delonix-storage` context (`StoragePoolDriver` with probe, allocate,
   release and usage; the registry of drivers by id; the administrator's allowlist; the owner
