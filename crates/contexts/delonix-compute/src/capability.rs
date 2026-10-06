@@ -1110,6 +1110,124 @@ impl ProviderReport {
             .filter(|r| r.state.label() == label)
             .count()
     }
+
+    /// This provider's share of the maturity cell metric.
+    pub fn cell_metric(&self) -> CellMetric {
+        let mut m = CellMetric::default();
+        for r in &self.capabilities {
+            m.add(&r.state);
+        }
+        m
+    }
+}
+
+/// The maturity plan's cell metric (plan 65, level N2): of the cells a provider
+/// COULD hold, how many are **proved** — `supported`, with evidence the
+/// evidence gate confirms exists.
+///
+/// The plan's filename is Portuguese, so it is named once in the docstring of
+/// `scripts/capability_ratchet.py`, which the language ratchet does not read:
+/// an ENGLISH comment that cites a Portuguese path counts as Portuguese debt,
+/// and the reference is worth keeping where it does not cost one.
+///
+/// A *cell* is one (capability × provider) pair. The denominator deliberately
+/// leaves out the two states that say the cell can never be filled by that
+/// provider — `unsupported-by-provider` (it cannot, by its nature or by a
+/// written decision) and `requires-external-component` (it needs something the
+/// engine does not ship). Counting those would make a provider look worse for
+/// honestly declaring what it is not, and better for staying silent.
+///
+/// What remains is work that exists (`supported`, `partial`), work that does
+/// not (`not-implemented`), or a declared yes this host could not confirm
+/// (`unavailable-on-host`) — and that is the set a maturity number has to
+/// measure.
+///
+/// **The published matrix is the DECLARED view**, so it never carries
+/// `unavailable-on-host`; `provider ls` on a real host can report a smaller
+/// metric, and the difference is exactly what that host is missing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct CellMetric {
+    /// Cells at N2: `supported`.
+    pub proved: usize,
+    /// Cells this provider could hold at all (the denominator).
+    pub applicable: usize,
+}
+
+impl CellMetric {
+    pub fn add(&mut self, state: &CapabilityState) {
+        match state {
+            CapabilityState::Supported { .. } => {
+                self.proved += 1;
+                self.applicable += 1;
+            }
+            CapabilityState::Partial { .. }
+            | CapabilityState::NotImplemented
+            | CapabilityState::UnavailableOnHost { .. } => self.applicable += 1,
+            CapabilityState::UnsupportedByProvider { .. }
+            | CapabilityState::RequiresExternalComponent { .. } => {}
+        }
+    }
+
+    pub fn merge(&mut self, other: CellMetric) {
+        self.proved += other.proved;
+        self.applicable += other.applicable;
+    }
+
+    /// Percent in tenths, rounded half-up with INTEGER arithmetic.
+    ///
+    /// Not `{:.1}` over an `f64`: this number is written into a file that a
+    /// test compares byte for byte and a gate parses, and a float's rounding of
+    /// an exact half is the kind of difference that shows up as a mysterious
+    /// one-digit diff rather than as an error.
+    pub fn tenths(&self) -> usize {
+        if self.applicable == 0 {
+            return 0;
+        }
+        (self.proved * 1000 + self.applicable / 2) / self.applicable
+    }
+
+    pub fn percent(&self) -> String {
+        let t = self.tenths();
+        format!("{}.{}", t / 10, t % 10)
+    }
+}
+
+/// The metric over a whole set of reports.
+pub fn cell_metric(reports: &[ProviderReport]) -> CellMetric {
+    let mut m = CellMetric::default();
+    for r in reports {
+        m.merge(r.cell_metric());
+    }
+    m
+}
+
+/// The metric per domain, in the catalog's own order.
+///
+/// The order comes from [`Capability::ALL`] and not from a second list of
+/// domains: a list that has to agree with another list is a list that stops
+/// agreeing, and this repository has paid for that more than once.
+pub fn cell_metric_by_domain(reports: &[ProviderReport]) -> Vec<(Domain, CellMetric)> {
+    let mut order: Vec<Domain> = Vec::new();
+    for c in Capability::ALL {
+        if !order.contains(&c.domain()) {
+            order.push(c.domain());
+        }
+    }
+    let mut out: Vec<(Domain, CellMetric)> = Vec::new();
+    for d in order {
+        let mut m = CellMetric::default();
+        for r in reports {
+            for cr in &r.capabilities {
+                if cr.capability.domain() == d {
+                    m.add(&cr.state);
+                }
+            }
+        }
+        if m.applicable > 0 {
+            out.push((d, m));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1249,5 +1367,103 @@ mod tests {
         assert_eq!(v["domain"], "vm-compute");
         assert_eq!(v["state"], "supported");
         assert_eq!(v["evidence"], "e2e:vm pause");
+    }
+
+    /// The denominator is the whole point of the metric, so each state is
+    /// asserted by name instead of by a total that would hide a swap.
+    #[test]
+    fn only_the_cells_a_provider_could_hold_are_in_the_denominator() {
+        use super::CapabilityState as S;
+        let mut m = CellMetric::default();
+        m.add(&S::Supported { evidence: "e" });
+        m.add(&S::Partial { detail: "d" });
+        m.add(&S::NotImplemented);
+        m.add(&S::UnavailableOnHost {
+            detail: "tool missing".into(),
+        });
+        assert_eq!((m.proved, m.applicable), (1, 4));
+
+        // The two that say "never, by this provider" are out: counting them
+        // would punish a provider for declaring what it is not.
+        let mut out = CellMetric::default();
+        out.add(&S::UnsupportedByProvider { reason: "r" });
+        out.add(&S::RequiresExternalComponent { component: "c" });
+        assert_eq!((out.proved, out.applicable), (0, 0));
+    }
+
+    /// A declared yes the host could not confirm stays in the denominator and
+    /// out of the numerator: it is a cell that EXISTS and is not proved here.
+    #[test]
+    fn a_host_that_cannot_honour_a_yes_lowers_the_metric_instead_of_hiding_it() {
+        use super::CapabilityState as S;
+        let declared = S::Supported { evidence: "e" };
+        let narrowed = declared.clone().on_host(false, "no /dev/kvm");
+        let mut a = CellMetric::default();
+        a.add(&declared);
+        let mut b = CellMetric::default();
+        b.add(&narrowed);
+        assert_eq!((a.proved, a.applicable), (1, 1));
+        assert_eq!(
+            (b.proved, b.applicable),
+            (0, 1),
+            "the cell did not disappear — it stopped being proved on this host"
+        );
+    }
+
+    /// Integer arithmetic, rounded half-up: this number is written into a file
+    /// a test compares byte for byte, and a float's half is a diff nobody can
+    /// explain.
+    #[test]
+    fn the_percent_rounds_half_up_without_a_float() {
+        let cases = [
+            ((0usize, 0usize), "0.0"),
+            ((1, 3), "33.3"),
+            ((2, 3), "66.7"),
+            ((100, 252), "39.7"),
+            ((1, 16), "6.3"),
+            ((1, 2), "50.0"),
+        ];
+        for ((proved, applicable), want) in cases {
+            let m = CellMetric { proved, applicable };
+            assert_eq!(m.percent(), want, "{proved}/{applicable}");
+        }
+    }
+
+    /// The per-domain breakdown has to add up to the total, or the table at the
+    /// top of the matrix says one thing and its own rows say another.
+    #[test]
+    fn the_domains_add_up_to_the_total() {
+        let report = ProviderReport::build(
+            "t",
+            ProviderKind::Compute,
+            true,
+            ProviderHealth {
+                status: HealthStatus::Unknown,
+                reason: "NotProbed",
+                message: String::new(),
+            },
+            |c| match c.domain() {
+                Domain::VmCompute => CapabilityState::Supported { evidence: "e" },
+                Domain::Storage => CapabilityState::UnsupportedByProvider { reason: "r" },
+                _ => CapabilityState::NotImplemented,
+            },
+        );
+        let reports = vec![report];
+        let total = cell_metric(&reports);
+        let by_domain = cell_metric_by_domain(&reports);
+        let summed = by_domain
+            .iter()
+            .fold(CellMetric::default(), |mut a, (_, m)| {
+                a.merge(*m);
+                a
+            });
+        assert_eq!(
+            (summed.proved, summed.applicable),
+            (total.proved, total.applicable)
+        );
+        assert!(
+            !by_domain.iter().any(|(d, _)| *d == Domain::Storage),
+            "a domain with no applicable cell is not a row of zeros"
+        );
     }
 }

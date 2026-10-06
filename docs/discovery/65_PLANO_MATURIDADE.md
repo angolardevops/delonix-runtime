@@ -57,7 +57,7 @@ Duas regras que este repositório já pagou caro, e que valem para todo o plano:
 |---|---|---|
 | Capacidades com prova no **melhor** provider | **73 de 141 (52 %)** | «o motor sabe fazer isto em algum lado» |
 | Capacidades com prova ou parciais, melhor provider | **115 de 141 (82 %)** | «está escrito, com ou sem prova» |
-| **Células** com prova (capacidade × provider aplicável) | **99 de 265 (37 %)** | «funciona provadamente onde promete» — **é a métrica deste plano** |
+| **Células** com prova (capacidade × provider aplicável) | **100 de 252 (39,7 %)** | «funciona provadamente onde promete» — **é a métrica deste plano**, e desde o F0.1 é CALCULADA pelo `delonix provider matrix` a partir do catálogo em código, não contada à mão sobre o markdown (o «99 de 265» de 2026-10-02 e o «111 de 281» do plano 66 eram as duas contagens manuais anteriores; a segunda vinha de um `grep -c` que contava os sumários do próprio ficheiro) |
 
 A métrica de célula é a honesta: uma capacidade provada no Proxmox e só
 `partial` no libvirt não está madura para quem corre libvirt.

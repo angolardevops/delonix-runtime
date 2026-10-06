@@ -317,6 +317,7 @@ des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige
 |---|---|
 | `fmt` | rustfmt |
 | `lang` | lang ratchet |
+| `capability` | capability ratchet |
 | `arch` | arch fitness |
 | `contract` | contract gate |
 | `version` | version gate |
