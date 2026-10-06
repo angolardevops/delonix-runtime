@@ -170,7 +170,7 @@ container runs as the image's `USER`, which breaks the `container run` contract.
 | 2.3 | ADR-0070: move `SystemContainer` to a guest Kind with `provider.proxmox` (re-expressing the ADR-0058 contract and repointing snapshot/backup/move), and the `NetworkGateway` perimeter rules to `NetworkPolicy` with a perimeter scope | a perimeter scope in the policy; the OPNsense ownership marks must carry over |
 | 2.4 | ADR-0064 D6: clean the DNS records the node leaves behind | — |
 | 2.5 | ADR-0063 D1 and D2: external IPAM controllers, and subnets changed in place | — |
-| 2.6 | Accept or close the ADRs whose work already shipped: ADR-0020 (the CLI restructuring B1–B9 is finished), ADR-0061 (the templates shipped), ADR-0040 and ADR-0041 (P0–P4 are implemented while both ADRs are still `Proposed` — M01's `capability discovery` is blocked on ADR-0040 being accepted) | owner's reading |
+| 2.6 | **DONE 2026-10-06.** The owner accepted nine: ADR-0020 and ADR-0061 (work finished), ADR-0040 and ADR-0041 (structural — P0–P4 built, P5 is Sprint 7; this unblocks M01's `capability discovery`, whose only blocker was the ADR not being accepted), and ADR-0049, 0055, 0063, 0064, 0067 (phases built, phases named open). ADR-0065, 0066 and 0068 stay `Proposed`: nothing is implemented. The eleven with no work at all still need their own decision. Two status lines were not stale but WRONG and were corrected, and a gate now refuses both an ADR that contradicts itself and an index row that disagrees with its document — seven rows did, two of them for twelve days | — |
 
 ### Sprint 3 — F0 of the maturity plan: the foundation of evidence
 

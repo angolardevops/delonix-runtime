@@ -1,6 +1,7 @@
 # ADR-0041: The node-local contract the control plane's agent consumes — coverage, promise, lifetime
 
-- **Status:** Proposed (2026-09-15)
+- **Status:** Accepted (2026-10-06, by the owner) — ADR-0040, which this one depends on, was accepted the same day. The
+  contract is served (ADR-0042 steps C, D and E); what each step still owes is listed there.
 - **Date:** 2026-09-15
 - **Deciders:** Walter (owner)
 - **Depends on:** ADR-0040 (Proposed, PR #319) — its D4 chooses the encoding

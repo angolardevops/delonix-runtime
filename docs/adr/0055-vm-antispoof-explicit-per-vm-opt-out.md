@@ -1,6 +1,8 @@
 # ADR-0055: A VM may opt out of the libvirt anti-spoofing filter — explicitly, per VM, and never by default
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06, by the owner) — the opt-out exists where the filter does, and a backend without one
+  refuses it rather than accepting and ignoring it. The node policy is what grants it
+  (`allowSourceCheckOptOut`), never the request.
 - **Date:** 2026-09-26
 - **Deciders:** Walter Angolar
 - **Relates to:** `bd7ffd9b` (the `delonix-antispoof` nwfilter, which had no ADR of its own —

@@ -1,7 +1,7 @@
 # ADR-0063: IPAM beyond Proxmox's own: external controllers, subnets changed in place, VMs as DHCP guests
 
-- **Status:** Proposed (2026-10-02). D3's defect fix is implemented in the F5b PR (#654); D1 and D2
-  are not implemented.
+- **Status:** Accepted (2026-10-06, by the owner). D3's defect fix is implemented in the F5b PR (#654); **D1 and D2 are not
+  implemented** and are named in Sprint 2 of `docs/discovery/66_CONTINUITY_PLAN.md`.
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0059 (network providers by role; F5b is its IPAM slice), ADR-0049 D3 (the
