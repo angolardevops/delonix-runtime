@@ -5287,6 +5287,32 @@ de re-exec, para um terceiro não nascer com metade).
   (um CIDR impossível numa `NetworkAccessRule`; uma referência a um container inexistente é
   apanhada antes pelo `validate_graph` e o cenário saltava). `container inspect` já emite JSON.
 
+## Porque há DOIS Kinds de convidado, e porque a política do perímetro não é uma `NetworkPolicy` (ADR-0072/0073, 2026-10-06)
+
+As duas últimas linhas da tabela do ADR-0070 — mover o perímetro do
+`NetworkGateway` para um scope da `NetworkPolicy`, e o `SystemContainer` para um
+Kind de convidado — foram **medidas e fechadas**: a parte D1 das duas já estava
+satisfeita pelo ADR-0071 (o bloco `provider` inline), e a parte de mudar o Kind
+foi recusada com o custo escrito.
+
+- **Uma política que o NÓ impõe é uma `NetworkPolicy`; uma que um APARELHO impõe
+  declara-se no `NetworkGateway` que o possui.** A razão é a posse: o `OwnerMark`
+  de um objecto remoto é **por registo declarante** e nunca é reescrito (ADR-0059
+  D1.5). Um documento `NetworkPolicy` seria um registo NOVO, logo o primeiro apply
+  duplicava cada regra num aparelho vivo e deixava as originais órfãs. A forma da
+  regra já é a mesma nos dois (as duas descem pelo mesmo `PolicyIr`); o que muda é
+  só onde se declara.
+- **O `SystemContainer` não se funde na `VirtualMachine`**, por três medições: é
+  `Namespaced::Never` onde a VM é `Always` (a isolação do motor não chega ao nó do
+  provider, ADR-0058 T7), é feito de uma **imagem OCI** onde a VM é feita de um
+  **disco**, e a fusão obrigaria a recusar pelo nome ~28 verbos que o caminho LXC
+  nunca teve (`console`, `ssh`, `vnc` incluídos). Um Kind tem UMA resposta a «é
+  namespaced?», e as duas respostas sustentam código.
+
+Um provider novo de system containers entra pelo `provider.type` do
+`SystemContainer` — é para isso que a tipagem por recurso do ADR-0071 serve — e
+não precisa de Kind nenhum novo.
+
 ## O bloco `provider` é `type` + `spec` (ADR-0070/0071, 2026-10-03)
 
 - O que só um fabricante entende vive **inline** no recurso: `spec.provider: { type, spec }`.
