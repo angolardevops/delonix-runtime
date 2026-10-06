@@ -186,6 +186,10 @@ pub struct VmConfig {
     /// is created; auto-detection only picks a backend that has them all.
     /// The contract's `required_capabilities` (ADR-0050 D6).
     pub required_capabilities: Vec<String>,
+    /// Create the VM CLOSED: its own firewall, default-deny both ways, is in
+    /// force before the guest starts (ADR-0069 D6). Only a backend whose
+    /// [`VmBackend::holds_at_boot`] is true can honour it; any other refuses.
+    pub policy_hold: bool,
 
     // --- Advanced libvirt knobs (libvirt backend only) ------------------------
     // Declarative `kind: Vm` parity with hand-written libvirt XML: typed fields
@@ -388,6 +392,13 @@ pub trait VmBackend {
     /// without a round trip per VM on every `vm ls`. Default: `None`.
     fn current_handle(&self, _vm: &Vm) -> Option<String> {
         None
+    }
+
+    /// Whether this backend can put the VM's own firewall in force, closed, BEFORE
+    /// the guest starts (`VmConfig::policy_hold`). Default `false`: a backend that
+    /// cannot refuses a held create by name, never creates an open VM.
+    fn holds_at_boot(&self) -> bool {
+        false
     }
 
     /// Whether the provider ALREADY holds a VM called `name`, whatever the

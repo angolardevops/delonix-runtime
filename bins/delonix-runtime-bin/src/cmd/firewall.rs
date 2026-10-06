@@ -12,6 +12,7 @@ use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_compute::Container;
+use delonix_model::ports::StateRepository;
 use delonix_model::records::{fw_port_ok, fw_proto_ok, fw_src_ok, FwRule};
 use delonix_model::{Error, Result};
 use delonix_sdn::infra;
@@ -1266,6 +1267,46 @@ pub(crate) fn policy_targets(docs: &[ManifestDoc]) -> std::collections::BTreeSet
     out
 }
 
+/// The VMs (`scope: vm`) or system containers (`scope: systemcontainer`) some
+/// `NetworkPolicy` of this manifest governs. Their firewall is the provider's,
+/// so they are created closed there, not in the holder (ADR-0069 D6).
+pub(crate) fn guest_policy_targets<'a>(
+    docs: &'a [ManifestDoc],
+    scope: &str,
+) -> std::collections::BTreeSet<&'a str> {
+    manifest::of_kind(docs, k::FIREWALL_POLICY)
+        .into_iter()
+        .filter(|d| d.spec.get("scope").and_then(|v| v.as_str()) == Some(scope))
+        .filter_map(|d| d.spec.get("target").and_then(|v| v.as_str()))
+        .collect()
+}
+
+/// The directions of `target` that a `scope` policy of this manifest declares.
+fn guest_declared_directions(
+    docs: &[ManifestDoc],
+    target: &str,
+    scope: &str,
+) -> std::collections::BTreeSet<&'static str> {
+    let mut out = std::collections::BTreeSet::new();
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
+        if doc.spec.get("target").and_then(|v| v.as_str()) != Some(target)
+            || doc.spec.get("scope").and_then(|v| v.as_str()) != Some(scope)
+        {
+            continue;
+        }
+        match doc.spec.get("direction").and_then(|v| v.as_str()) {
+            Some("ingress") => {
+                out.insert("in");
+            }
+            Some("egress") => {
+                out.insert("out");
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The directions (`in`/`out`) the manifest sets a default policy for on `target`.
 fn declared_directions(
     docs: &[ManifestDoc],
@@ -1319,18 +1360,38 @@ fn released_policies(
 /// store cannot be read (the caller then says nothing rather than guessing).
 pub(crate) fn held_targets(docs: &[ManifestDoc]) -> Option<Vec<String>> {
     let (_, store) = super::util::open_stores().ok()?;
-    Some(
-        policy_targets(docs)
-            .into_iter()
-            .filter(|t| {
-                load_governed(&store, t).is_ok_and(|c| {
-                    c.annotations
-                        .contains_key(super::container::POLICY_HOLD_ANNOTATION)
-                })
+    let mut out: Vec<String> = policy_targets(docs)
+        .into_iter()
+        .filter(|t| {
+            load_governed(&store, t).is_ok_and(|c| {
+                c.annotations
+                    .contains_key(super::container::POLICY_HOLD_ANNOTATION)
             })
-            .map(str::to_string)
-            .collect(),
-    )
+        })
+        .map(str::to_string)
+        .collect();
+    if let Ok(vms) =
+        delonix_state::JsonStore::<delonix_compute::Vm>::open(super::util::state_root().join("vms"))
+    {
+        out.extend(
+            guest_policy_targets(docs, "vm")
+                .into_iter()
+                .filter(|t| {
+                    vms.get(t).is_ok_and(|v| {
+                        v.annotations
+                            .contains_key(delonix_compute::vm::POLICY_HOLD_ANNOTATION)
+                    })
+                })
+                .map(str::to_string),
+        );
+    }
+    out.extend(
+        guest_policy_targets(docs, "systemcontainer")
+            .into_iter()
+            .filter(|t| super::system_container::is_held(t))
+            .map(str::to_string),
+    );
+    Some(out)
 }
 
 /// Ends the hold on every container this manifest governs, after the policy
@@ -1369,6 +1430,63 @@ pub(crate) fn release_policy_holds(docs: &[ManifestDoc]) -> Result<usize> {
             Ok(true)
         })?;
         released += 1;
+    }
+    Ok(released)
+}
+
+/// Ends the hold on every VM this manifest governs with a `scope: vm` policy,
+/// after the policy layers ran. A direction a document declared keeps what that
+/// document wrote on the node's firewall; a direction none declared goes back to
+/// open (the VM's own default, as without the hold). The annotation goes LAST: if
+/// opening a direction fails, the VM stays marked closed and the next apply tries
+/// again — never marked open while the node still drops.
+pub(crate) fn release_vm_holds(docs: &[ManifestDoc]) -> Result<usize> {
+    use delonix_vm::firewall::{Direction, Policy};
+    let root = super::util::state_root();
+    let store: delonix_state::JsonStore<delonix_compute::Vm> =
+        delonix_state::JsonStore::open(root.join("vms"))?;
+    let mut released = 0;
+    for target in guest_policy_targets(docs, "vm") {
+        let Ok(vm) = store.get(target) else { continue };
+        if !vm
+            .annotations
+            .contains_key(delonix_compute::vm::POLICY_HOLD_ANNOTATION)
+        {
+            continue;
+        }
+        let declared = guest_declared_directions(docs, target, "vm");
+        for (word, direction) in [("in", Direction::In), ("out", Direction::Out)] {
+            if declared.contains(word) {
+                continue;
+            }
+            delonix_vm::apply_firewall(
+                &root,
+                target,
+                &Policy {
+                    direction,
+                    default_allow: true,
+                    rules: Vec::new(),
+                },
+            )?;
+        }
+        store.update(target, |v| {
+            v.annotations
+                .remove(delonix_compute::vm::POLICY_HOLD_ANNOTATION);
+            true
+        })?;
+        released += 1;
+    }
+    Ok(released)
+}
+
+/// [`release_vm_holds`] for `scope: systemcontainer` policies.
+pub(crate) fn release_system_container_holds(docs: &[ManifestDoc]) -> Result<usize> {
+    let mut released = 0;
+    for target in guest_policy_targets(docs, "systemcontainer") {
+        let declared = guest_declared_directions(docs, target, "systemcontainer");
+        if super::system_container::release_hold(target, &declared)? {
+            released += 1;
+        }
     }
     Ok(released)
 }
@@ -2354,6 +2472,89 @@ kind: NetworkAccessRule
 metadata: { name: r }
 spec: { target: db, direction: egress, port: '53' }
 ";
+
+    /// A guest manifest: a VM and a system container governed by `scope`
+    /// policies, plus a container-scoped policy that must NOT make its target a
+    /// guest target, and a `scope: vm` policy on a name that is also a
+    /// container's.
+    const GUEST_MANIFEST: &str = "\
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: a }
+spec: { target: vm1, scope: vm, direction: ingress, defaultPolicy: deny, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: b }
+spec: { target: vm1, scope: vm, direction: egress, defaultPolicy: allow, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: c }
+spec: { target: sc1, scope: systemcontainer, direction: ingress, defaultPolicy: deny, rules: [] }
+---
+apiVersion: delonix.io/v1
+kind: NetworkPolicy
+metadata: { name: d }
+spec: { target: web, direction: ingress, defaultPolicy: deny, rules: [] }
+";
+
+    /// The scope is what decides, and a policy of another scope never makes a
+    /// guest a target: a VM born closed because of a container policy would be
+    /// closed with nothing to open it.
+    #[test]
+    fn a_guest_is_a_target_only_through_a_policy_of_its_own_scope() {
+        let d = docs_of(GUEST_MANIFEST);
+        assert_eq!(
+            guest_policy_targets(&d, "vm")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["vm1"]
+        );
+        assert_eq!(
+            guest_policy_targets(&d, "systemcontainer")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["sc1"]
+        );
+        // The container-scoped policy's target is not a guest target in either scope.
+        for scope in ["vm", "systemcontainer"] {
+            assert!(
+                !guest_policy_targets(&d, scope).contains("web"),
+                "a container policy leaked into scope {scope}"
+            );
+        }
+    }
+
+    /// The directions a guest's policies declare are the ones that keep what was
+    /// written; an undeclared one goes back to the guest's own default. Reading
+    /// the wrong scope here would open a direction a policy had just closed.
+    #[test]
+    fn a_guests_declared_directions_come_from_its_own_scope_only() {
+        let d = docs_of(GUEST_MANIFEST);
+        assert_eq!(
+            guest_declared_directions(&d, "vm1", "vm")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["in", "out"],
+            "both directions are declared for vm1"
+        );
+        assert_eq!(
+            guest_declared_directions(&d, "sc1", "systemcontainer")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["in"],
+            "only ingress is declared for sc1, so egress returns to open"
+        );
+        assert!(
+            guest_declared_directions(&d, "vm1", "systemcontainer").is_empty(),
+            "the same name in another scope declares nothing"
+        );
+        assert!(
+            guest_declared_directions(&d, "web", "vm").is_empty(),
+            "a container-scoped policy declares nothing for a VM"
+        );
+    }
 
     #[test]
     fn only_the_containers_a_policy_names_are_governed() {

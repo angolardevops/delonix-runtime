@@ -237,6 +237,48 @@ struct SystemContainerRecord {
     annotations: BTreeMap<String, String>,
 }
 
+/// Annotation on a system container created closed and not yet released.
+const HOLD_ANNOTATION: &str = "delonix.io/policy-hold";
+
+/// Whether the registered container is still closed by a policy hold.
+pub(crate) fn is_held(name: &str) -> bool {
+    store()
+        .and_then(|s| s.load(name).map_err(Into::into))
+        .is_ok_and(|r| r.annotations.contains_key(HOLD_ANNOTATION))
+}
+
+/// Ends the hold: every direction in `declared` keeps what its policy document
+/// wrote on the provider, every other goes back to open; the annotation goes
+/// LAST, so a failure leaves the container marked closed for the next apply.
+pub(crate) fn release_hold(
+    name: &str,
+    declared: &std::collections::BTreeSet<&'static str>,
+) -> Result<bool> {
+    if !is_held(name) {
+        return Ok(false);
+    }
+    for (word, direction) in [
+        ("in", delonix_vm::firewall::Direction::In),
+        ("out", delonix_vm::firewall::Direction::Out),
+    ] {
+        if !declared.contains(word) {
+            apply_firewall(
+                name,
+                &delonix_vm::firewall::Policy {
+                    direction,
+                    default_allow: true,
+                    rules: Vec::new(),
+                },
+            )?;
+        }
+    }
+    store()?.update(name, |r| {
+        r.annotations.remove(HOLD_ANNOTATION);
+        true
+    })?;
+    Ok(true)
+}
+
 fn store() -> Result<JsonStore<SystemContainerRecord>> {
     JsonStore::open(state_root().join("system-containers")).map_err(Into::into)
 }
@@ -539,7 +581,7 @@ fn record_fields(rec: &SystemContainerRecord) -> Result<BTreeMap<String, String>
 /// Applies one document: creates and starts the container when there is none,
 /// converges `memory`/`swap`/`cores` when there is. A cold field that differs
 /// is refused here and planned as a `Replace` by `stack plan`.
-fn apply_one(doc: &ManifestDoc) -> Result<()> {
+fn apply_one(doc: &ManifestDoc, hold: bool) -> Result<()> {
     reject_privilege(doc)?;
     let spec: SystemContainerSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
@@ -620,6 +662,40 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     rec.network = spec.network.clone();
     s.save(&name, &rec)?;
 
+    // Governed by a `scope: systemcontainer` policy of this manifest: the
+    // provider's own firewall is closed, both ways, BEFORE the first start
+    // (ADR-0069 D6). The provider leaves a created container stopped, so this is
+    // the window. If it cannot be closed the container is removed again: a
+    // container that would start open under a policy that says closed is the
+    // defect, and a record left behind would make the next apply call it done.
+    if hold {
+        let closed = |direction| delonix_vm::firewall::Policy {
+            direction,
+            default_allow: false,
+            rules: Vec::new(),
+        };
+        let shut = provider
+            .apply_firewall(&dir, &h, &closed(delonix_vm::firewall::Direction::In))
+            .and_then(|_| {
+                provider.apply_firewall(&dir, &h, &closed(delonix_vm::firewall::Direction::Out))
+            });
+        if let Err(e) = shut {
+            if let Err(e2) = provider.destroy(&dir, &h) {
+                eprintln!("warning: could not remove the container left by a failed hold: {e2}");
+            } else {
+                let _ = s.remove(&name);
+            }
+            return Err(e);
+        }
+        s.update(&name, |r| {
+            r.annotations
+                .insert(HOLD_ANNOTATION.to_string(), "1".to_string());
+            true
+        })?;
+        rec.annotations
+            .insert(HOLD_ANNOTATION.to_string(), "1".to_string());
+    }
+
     let obs = provider.start(&dir, &h, &pspec)?;
     rec.network_state = network_words(&obs.network);
     s.save(&name, &rec)?;
@@ -648,8 +724,9 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
 
 /// Applies every `kind: SystemContainer` document.
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    let governed = super::firewall::guest_policy_targets(docs, "systemcontainer");
     for doc in manifest::of_kind(docs, k::SYSTEM_CONTAINER) {
-        apply_one(doc)?;
+        apply_one(doc, governed.contains(doc.metadata.name.as_str()))?;
     }
     Ok(())
 }
@@ -657,7 +734,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 /// `converge_and_stamp`'s live-update path: the hot fields are the only ones
 /// an `Update` can carry, and `apply_one` resizes them in place.
 pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
-    apply_one(doc)
+    apply_one(doc, false)
 }
 
 pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {

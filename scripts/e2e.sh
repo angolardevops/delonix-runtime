@@ -3589,6 +3589,46 @@ if command -v cloud-hypervisor >/dev/null && command -v virsh >/dev/null; then
 else
   skip "vm create --require sem --backend (auto-selecção)" "precisa de cloud-hypervisor e libvirt instalados"
 fi
+# ADR-0069 D6 para convidados: uma VM que uma `NetworkPolicy` com `scope: vm`
+# governa nasce FECHADA, e só um backend com firewall PRÓPRIA o consegue fazer
+# antes de o convidado ter CPU. Os backends locais não têm nenhuma, por isso o
+# create é RECUSADO pelo nome — nunca uma VM de pé e ABERTA debaixo de uma
+# política que diz fechada, que é o defeito que o hold existe para evitar.
+# DX-1501 é a classe (invalid): o pedido é que não se pode cumprir aqui.
+if command -v qemu-img >/dev/null; then
+  PHW="$WORK/policy-hold-vm"; mkdir -p "$PHW"; PHVM="phvm-$PFX"
+  qemu-img create -f qcow2 "$PHW/d.qcow2" 64M >/dev/null 2>&1
+  cat >"$PHW/delonix-manifest.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: $PHVM
+spec:
+  disk: $PHW/d.qcow2
+  memory: 64M
+  vcpus: 1
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: $PHVM-p
+spec:
+  target: $PHVM
+  scope: vm
+  direction: ingress
+  defaultPolicy: deny
+  rules: []
+YAML
+  check "scope: vm num backend sem firewall própria recusa, em vez de criar a VM aberta" ok bash -c "
+    out=\$('$BIN' stack apply -f '$PHW/delonix-manifest.yaml' 2>&1) && { echo 'o apply devia ter falhado'; printf '%s\n' \"\$out\"; exit 1; }
+    printf '%s\n' \"\$out\"
+    printf '%s' \"\$out\" | grep -q 'cannot create a VM closed' || { echo 'a recusa não nomeia o motivo'; exit 1; }
+    printf '%s' \"\$out\" | grep -q 'proxmox' || { echo 'a recusa não diz onde o scope: vm serve'; exit 1; }"
+  check "... e nenhuma VM ficou para trás (4)" 4 "$BIN" describe virtualmachines "$PHVM"
+else
+  skip "scope: vm num backend local" "precisa de qemu-img para o disco de teste"
+fi
+
 # `vm resize`: tudo o que se pode recusar recusa-se ANTES de tocar num backend,
 # por isso estas classes medem-se sem hipervisor nenhum.
 check "vm resize sem --vcpus nem --memory recusa (1)" 1 "$BIN" vm resize "vm-$PFX-nada"

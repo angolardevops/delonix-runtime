@@ -5246,8 +5246,24 @@ de re-exec, para um terceiro não nascer com metade).
   o que as políticas escrevem vai para o REGISTO (`apply_firewall_everywhere`).
 - `release_policy_holds` corre depois das camadas de política e abre ao que elas dizem; uma
   direcção não declarada volta ao default aberto. Se uma camada falha, o workload fica fechado e
-  o apply diz-o; o apply seguinte liberta-o. Containers e Pods; VMs/system containers por fazer
-  (a firewall deles é a do provider).
+  o apply diz-o; o apply seguinte liberta-o. Containers e Pods.
+- **Um convidado nasce fechado na firewall do PROVIDER, ou não nasce.** Uma VM
+  (`scope: vm`) ou um system container (`scope: systemcontainer`) que uma política do manifesto
+  governa é criado com a sua própria firewall em vigor, default-deny nos dois sentidos, ANTES de o
+  convidado ter CPU — e isso só um backend com firewall própria o consegue fazer. Um que não
+  consiga **RECUSA pelo nome** (`VmBackend::holds_at_boot`, DX-1501), nunca cria a VM aberta: uma
+  VM de pé debaixo de uma política que diz fechada é o defeito que o hold existe para evitar. Hoje
+  só o Proxmox a tem; os dois backends locais recusam, e a recusa diz onde o `scope: vm` serve.
+  A libertação é a mesma dos containers — uma direcção que nenhum documento declarou volta ao
+  aberto, e a anotação sai em ÚLTIMO lugar, por isso uma falha a abrir deixa o convidado marcado
+  fechado para o apply seguinte.
+  **O `scope` é quem decide, e lê-se só no seu**: uma política de container nunca faz de um
+  convidado um alvo (nasceria fechado sem nada que o abrisse), e a mesma string noutro scope não
+  declara nada. Gates: `a_held_create_is_refused_by_a_backend_that_cannot_hold_at_boot` (chumba com
+  a recusa revertida, verificado), `a_guest_is_a_target_only_through_a_policy_of_its_own_scope`
+  e o check «scope: vm num backend sem firewall própria recusa» da bateria.
+  **Por fazer** deste item: `net ingress|egress <pod>` na CLI e um teste de respawn do holder com
+  um pod governado.
 - **Um Pod é UM alvo de política**: `firewall::update_locked`/`load_governed` resolvem um nome que
   não é container para a vista do pod (`pod::pod_view`: registo do membro-cabeça com o netns
   partilhado como id e o IP do pod); só `firewall` e `annotations` voltam ao membro-cabeça. A rede
