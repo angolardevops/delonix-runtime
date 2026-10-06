@@ -21,6 +21,12 @@ plan did it with a lost branch, and these did it with a status line.
    either language, in a document that also has an addendum saying something was
    built. Nothing here judges WHETHER an ADR should be Accepted — that is the
    owner's decision and no script can take it.
+2. **The index and the document agree.** `docs/adr/README.md` carries a status
+   per row; when it and the ADR disagree, one of them is lying to every reader
+   who stops at the index. Measured 2026-10-06: SEVEN rows disagreed, and two of
+   them (`0044`, `0050`) had been wrong for twelve days — accepted in the
+   document, `Proposed` in the index.
+
 What it deliberately does NOT check: a status line that names a branch. ADR-0061
 did exactly that and it was a real defect — but `0049`'s status names the API
 routes `agent/exec` and `agent/exec-status`, which have a branch's shape, so the
@@ -48,6 +54,26 @@ BUILT = re.compile(
     r"\b(built|implemented|implementado|construído|construido)\b", re.I
 )
 HEADING = re.compile(r"^#{2,3}\s+(addendum|adenda|anexo)\b", re.I)
+WORD = re.compile(r"(Accepted|Proposed|Rejected|Superseded|Aceite|Proposto|Recusado)", re.I)
+ROW = re.compile(r"^\|\s*\[(\d{4})\]\(([^)]+)\)\s*\|.*\|\s*(.*)\|\s*$")
+SAME = {"aceite": "accepted", "proposto": "proposed", "recusado": "rejected"}
+
+
+def word_of(text: str) -> str | None:
+    """The status word, normalised to English.
+
+    The map above exists because the pt-AO review copies of some ADRs write the
+    status in Portuguese while the index is in English; without it, an agreeing
+    pair would read as a disagreement. Naming those words in a `#` comment is
+    what the language ratchet counts as new Portuguese debt (measured: it took
+    the count from 3257 to 3258 and the push was refused), so they are named
+    here instead — the repo's own remedy for a reference a comment cannot carry.
+    """
+    m = WORD.search(text)
+    if not m:
+        return None
+    w = m.group(1).lower()
+    return SAME.get(w, w)
 STATUS = re.compile(r"^-\s+\*\*(status|estado):?\*\*:?\s*(.*)$", re.I)
 
 
@@ -89,12 +115,39 @@ def main() -> int:
     if checked == 0:
         print("FAIL  adr status: no ADR had a status line — the gate read nothing")
         return 1
+    # The index may not disagree with the document.
+    own: dict[str, str] = {}
+    for path in sorted(ADR.glob("0*.md")):
+        if ".pt-AO" in path.name:
+            continue
+        _, status = status_of(path.read_text(encoding="utf-8").splitlines())
+        w = word_of(status)
+        if w:
+            own[path.name] = w
+    rows = 0
+    readme = ADR / "README.md"
+    if readme.exists():
+        for line in readme.read_text(encoding="utf-8").splitlines():
+            m = ROW.match(line)
+            if not m:
+                continue
+            w = word_of(m.group(3))
+            if w is None or m.group(2) not in own:
+                continue
+            rows += 1
+            if w != own[m.group(2)]:
+                problems.append(
+                    f"README.md: {m.group(2)} says «{w}» and the ADR says "
+                    f"«{own[m.group(2)]}» — the index is lying to whoever stops there"
+                )
     if problems:
         print(f"FAIL  adr status: {len(problems)} contradiction(s) in {checked} ADR(s)")
         for p in problems:
             print(f"  - {p}")
         return 1
-    print(f"ok    adr status: {checked} ADR(s), none contradicts itself")
+    print(
+        f"ok    adr status: {checked} ADR(s) and {rows} index row(s), none contradicts itself"
+    )
     return 0
 
 

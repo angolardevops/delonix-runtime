@@ -1,6 +1,7 @@
 # ADR-0020: The CLI splits into three surfaces, and the declarative CRUD is written once
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06, by the owner) — the B1–B9 series is finished and the CLI carries it; `AGENTS.md`
+  records each cut and the one decision that was rejected (B9).
 - **Date:** 2026-08-26
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0005 (`-o json` is the stable contract), ADR-0007 (generated

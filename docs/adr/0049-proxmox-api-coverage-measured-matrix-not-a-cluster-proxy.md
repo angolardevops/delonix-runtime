@@ -1,6 +1,7 @@
 # ADR-0049: Proxmox API coverage is a measured, versioned matrix — and the runtime is not a cluster proxy
 
-- **Status:** Proposed — as of 2026-09-25, with each slice's state measured and dated below.
+- **Status:** Accepted (2026-10-06, by the owner) — the decision is taken; the matrix stays a
+  LIVING record, and each slice's state is measured and dated below, as of 2026-09-25.
   **Slice 0** (the versioned matrix, #474) and **slice 1** (transport, typed errors, task
   ledger, lost-answer reconciliation, TLS-mock failure injection, #475/#477/#478) are done and
   live. **Slice 2** (VM operations mapped to engine semantics) is done for every operation its

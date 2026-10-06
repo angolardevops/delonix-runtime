@@ -1,6 +1,9 @@
 # ADR-0040: Engine restructuring — layers, provider ports, and the node contract
 
-- **Status:** Proposed (2026-09-15)
+- **Status:** Accepted (2026-10-06, by the owner), with P0–P4 implemented and **P5 open** (socket activation and the
+  launcher, Sprint 7 of `docs/discovery/66_CONTINUITY_PLAN.md`). Accepting it unblocks M01's
+  `capability discovery`, which the traceability matrix records as blocked on this ADR, and
+  ADR-0041, which depends on this one in writing.
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0002 (ComputeDriver, Phase 2b trigger), ADR-0008 (VM backend registry),
   ADR-0009 (TrueNAS), ADR-0010 (remote management API — **stands**), ADR-0025 (MCP),

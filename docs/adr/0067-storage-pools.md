@@ -1,6 +1,6 @@
 # ADR-0067: The engine manages storage pools — LVM-thin, ZFS, btrfs and directory, behind a port
 
-- **Status:** Proposed (2026-10-02), **P0 implemented** 2026-10-03 (#689: the port, the
+- **Status:** Accepted (2026-10-06, by the owner), **P0 implemented** 2026-10-03 (#689: the port, the
   `delonix-storage` context, the administrator's allowlist, `kind: StoragePool` and the `dir`
   driver — see the addendum at the end). P1–P6 need root and spare disks in a lab VM and are not
   built. The owner's decisions of 2026-10-02 are recorded in D3 and D5; three questions remain

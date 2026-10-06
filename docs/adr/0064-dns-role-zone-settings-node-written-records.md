@@ -1,7 +1,8 @@
 # ADR-0064: The DNS role sets a zone's DNS settings; the node writes the records
 
-- **Status:** Proposed (2026-10-02). D1–D5 are implemented in the ADR-0059 F5c PR; D6 is decided
-  and not implemented.
+- **Status:** Accepted (2026-10-06, by the owner). D1–D5 are implemented in the ADR-0059 F5c PR; **D6 is decided and not
+  implemented** — it needs a live case against a real DNS server, and is named in Sprint 2 of
+  `docs/discovery/66_CONTINUITY_PLAN.md`.
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0059 (network providers by role; F5c is its DNS slice), ADR-0063 D1 (the

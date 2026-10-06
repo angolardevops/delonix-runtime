@@ -47,7 +47,7 @@ NOTHING_BUT_HONEST = """# ADR-0004: a third
 """
 
 
-def run(files: dict[str, str]) -> subprocess.CompletedProcess:
+def run(files: dict[str, str], readme: str | None = None) -> subprocess.CompletedProcess:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         adr = root / "docs" / "adr"
@@ -57,6 +57,8 @@ def run(files: dict[str, str]) -> subprocess.CompletedProcess:
         gate.write_text(GATE.read_text())
         for name, body in files.items():
             (adr / name).write_text(body)
+        if readme is not None:
+            (adr / "README.md").write_text(readme)
         return subprocess.run(
             [sys.executable, str(gate)], capture_output=True, text=True, cwd=root
         )
@@ -81,6 +83,25 @@ class AdrStatusGate(unittest.TestCase):
     def test_nothing_implemented_with_an_honest_addendum_passes(self):
         r = run({"0004-d.md": NOTHING_BUT_HONEST})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_the_index_disagreeing_with_the_document_fails(self):
+        """Seven rows disagreed on 2026-10-06, two of them for twelve days."""
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Proposed** — some note |\n"
+        )
+        r = run({"0001-a.md": CLEAN}, readme=readme)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("index is lying", r.stdout)
+
+    def test_the_index_agreeing_passes_and_is_counted(self):
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Accepted 2026-01-01** — note |\n"
+        )
+        r = run({"0001-a.md": CLEAN}, readme=readme)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("1 index row(s)", r.stdout)
 
     def test_a_gate_that_read_nothing_fails(self):
         """A green by absence is the failure mode this repo has paid for twice."""
