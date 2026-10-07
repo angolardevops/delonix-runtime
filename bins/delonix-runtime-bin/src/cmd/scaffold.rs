@@ -366,7 +366,7 @@ impl Plan {
 /// The first port at or after `from` that nothing on this host holds.
 fn next_free_port(from: u16) -> u16 {
     (from..=u16::MAX)
-        .find(|p| !delonix_sdn::host_port_busy("127.0.0.1", *p))
+        .find(|p| !delonix_sdn::host_port_busy("127.0.0.1", *p, delonix_sdn::Proto::Tcp))
         .unwrap_or(from)
 }
 
@@ -393,7 +393,8 @@ fn settle_port(what: &str, wanted: &str, taken: &[u16], interactive: bool) -> St
     let Ok(n) = wanted.parse::<u16>() else {
         return wanted.to_string();
     };
-    if !delonix_sdn::host_port_busy("127.0.0.1", n) && !taken.contains(&n) {
+    if !delonix_sdn::host_port_busy("127.0.0.1", n, delonix_sdn::Proto::Tcp) && !taken.contains(&n)
+    {
         return wanted.to_string();
     }
     let mut free = next_free_port(n.saturating_add(1));
@@ -417,7 +418,9 @@ fn settle_port(what: &str, wanted: &str, taken: &[u16], interactive: bool) -> St
         );
         match answer.parse::<u16>() {
             Ok(p)
-                if p > 0 && !delonix_sdn::host_port_busy("127.0.0.1", p) && !taken.contains(&p) =>
+                if p > 0
+                    && !delonix_sdn::host_port_busy("127.0.0.1", p, delonix_sdn::Proto::Tcp)
+                    && !taken.contains(&p) =>
             {
                 return p.to_string()
             }
@@ -1201,7 +1204,7 @@ fn refuse_busy_ports(plan: &Plan, name: &str) -> Result<()> {
     let is_ours = |owner: &str| owner == name || owner.starts_with(&format!("{name}-"));
     for port in std::iter::once(&plan.port).chain(plan.tls_port.iter()) {
         let Ok(n) = port.parse::<u16>() else { continue };
-        if !delonix_sdn::host_port_busy("127.0.0.1", n) {
+        if !delonix_sdn::host_port_busy("127.0.0.1", n, delonix_sdn::Proto::Tcp) {
             continue;
         }
         let owner = match own(port) {

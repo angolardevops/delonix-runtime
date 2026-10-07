@@ -399,6 +399,23 @@ fn list_key(mut items: Vec<String>) -> String {
     items.join(",")
 }
 
+/// Publish specs in the one shape both sides of a diff can be compared in: ranges
+/// expanded and the host bind address made explicit.
+///
+/// One function for `desired` and `actual` on purpose. Two copies of this
+/// normalization are how the two sides start disagreeing, and the symptom is the
+/// worst kind — eternal drift on a field whose change plans a `Replace`, which for
+/// a container means destroying and recreating it. A spec the parser refuses is
+/// left verbatim rather than dropped: it has to reach the apply, which is where it
+/// gets its error, instead of vanishing from the plan.
+fn comparable_ports(ports: &[String]) -> Vec<String> {
+    ports
+        .iter()
+        .flat_map(|p| delonix_sdn::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
+        .map(|p| delonix_sdn::normalize_publish_spec(&p).unwrap_or(p))
+        .collect()
+}
+
 /// What the manifest asks for, in comparable form.
 pub(crate) fn desired_container_fields(
     spec: &ContainerSpec,
@@ -407,13 +424,11 @@ pub(crate) fn desired_container_fields(
     f.insert("image".into(), spec.image.clone());
     // Ranges are expanded at the boundary by `run`, so the record holds
     // single ports; expand here too or `8000-8001:80-81` would diff against
-    // its own expansion forever.
-    let ports: Vec<String> = spec
-        .ports
-        .iter()
-        .flat_map(|p| delonix_sdn::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
-        .collect();
-    f.insert("ports".into(), list_key(ports));
+    // its own expansion forever. The bind address is written into the record by
+    // the same boundary pass, so it is resolved here for the same reason — a
+    // manifest saying `8080:80` against a record saying `127.0.0.1:8080:80/tcp`
+    // would be eternal drift, and a `Replace` of a container at that.
+    f.insert("ports".into(), list_key(comparable_ports(&spec.ports)));
     f.insert(
         "volumes".into(),
         list_key(spec.volumes.iter().map(|v| volume_spec_key(v)).collect()),
@@ -459,12 +474,7 @@ pub(crate) fn desired_container_fields(
 fn desired_fields_from_run_opts(o: &RunOpts) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
     f.insert("image".into(), o.image.clone());
-    let ports: Vec<String> = o
-        .ports
-        .iter()
-        .flat_map(|p| delonix_sdn::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
-        .collect();
-    f.insert("ports".into(), list_key(ports));
+    f.insert("ports".into(), list_key(comparable_ports(&o.ports)));
     f.insert(
         "volumes".into(),
         list_key(o.volumes.iter().map(|v| volume_spec_key(v)).collect()),
@@ -493,7 +503,10 @@ pub(crate) fn actual_container_fields(
 ) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
     f.insert("image".into(), c.image.clone());
-    f.insert("ports".into(), list_key(c.ports.clone()));
+    // Normalized on READ as well, so a record written before the address was
+    // persisted (a legacy `8080:80`) still compares against a normalized manifest
+    // instead of reading as drift on every plan forever.
+    f.insert("ports".into(), list_key(comparable_ports(&c.ports)));
     f.insert(
         "volumes".into(),
         list_key(
@@ -2784,16 +2797,30 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         .map(|s| delonix_sdn::expand_publish_range(s).map_err(delonix_model::Error::from))
         .collect::<Result<Vec<_>>>()?
         .concat();
+    // And the bind address becomes EXPLICIT here, in the same boundary pass, so the
+    // record keeps what was actually bound instead of a spec whose address gets
+    // re-resolved from the environment on every `start`. See
+    // `delonix_sdn::normalize_publish_spec` for the two measured directions of that
+    // bug; everything downstream (the preflight below, the slirp attach, the stored
+    // `ports`, the re-exec's spec file) reads the normalized form from here on.
+    let ports: Vec<String> = ports
+        .iter()
+        .map(|s| delonix_sdn::normalize_publish_spec(s).map_err(delonix_model::Error::from))
+        .collect::<Result<Vec<_>>>()?;
     // Validate the `-p`s BEFORE creating anything (clear error, no leftovers).
     for spec in &ports {
-        let (addr, hp, cp, _) = delonix_sdn::parse_publish_addr(spec)?;
+        let (addr, hp, cp, proto) = delonix_sdn::parse_publish_addr(spec)?;
         // A host port below 1024 is bound by the slirp as THIS unprivileged user, so
         // it fails with the slirp's opaque `add_hostfwd` JSON — after the container is
         // already up. Same treatment as the port-conflict error below: state the fact,
         // then the ways out as ready-to-copy commands.
         let bind = delonix_sdn::publish_bind_addr(addr.as_deref());
+        // The probe speaks the transport being published: `tcp/5070` and `udp/5070`
+        // are independent bindings, and this used to ask about TCP whatever the spec
+        // said — blind for every UDP publish.
+        let transport = delonix_sdn::Proto::parse(&proto)?;
         match hp.parse::<u16>() {
-            Ok(p) if !delonix_sdn::can_bind_host_port(&bind, p) => {
+            Ok(p) if !delonix_sdn::can_bind_host_port(&bind, p, transport) => {
                 return Err(Error::Invalid(super::po::tf(
                     "host port {hp} needs privilege to bind — rootless cannot publish \
                      ports below net.ipv4.ip_unprivileged_port_start\n\
@@ -2834,7 +2861,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // itself isn't in the store yet) — checking here would give a false conflict.
     if std::env::var("DELONIX_REEXEC_ID").is_err() {
         for spec in &ports {
-            let (addr, hp, cp, _) = delonix_sdn::parse_publish_addr(spec)?;
+            let (addr, hp, cp, proto) = delonix_sdn::parse_publish_addr(spec)?;
             if let Some(owner) = port_owner(store, &hp)? {
                 // Structured like the `cluster apply` recipes: the fact first,
                 // then the possible ways out as ready-to-copy commands — whoever
@@ -2866,7 +2893,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // it — measured: `delonix container run -d -p 8080:8080 <image>`
             // against a host process already on :8080 took 15s+ to fail, with the
             // raw `add_hostfwd failed` JSON as the only clue.
-            if let Some(e) = host_port_conflict_error(&hp, &cp, addr.as_deref()) {
+            if let Some(e) = host_port_conflict_error(&hp, &cp, addr.as_deref(), &proto) {
                 return Err(e);
             }
         }
@@ -3574,37 +3601,40 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
 
 /// PORTS column in `docker ps` style: `8080->80/tcp`, comma-separated.
 ///
-/// Docker prefixes the host address (`0.0.0.0:8080->80/tcp`). Not here: the
-/// effective address depends on the publication path (per-container slirp vs
-/// ingress DNAT) and on `DELONIX_PUBLISH_ADDR`, and printing a fixed `0.0.0.0`
-/// would be an exposure claim that could be false — in a column used precisely to
-/// decide whether something is exposed.
+/// The host address IS printed, Docker-style (`127.0.0.1:8080->80/tcp`), because
+/// since the publish boundary resolves and stores it the address in the spec is a
+/// FACT rather than a guess. What is still never invented is an address for a spec
+/// that does not carry one: that is a record written before the address was
+/// persisted, where the effective bind genuinely is not known from the record, and
+/// printing a fixed `0.0.0.0` there would be an exposure claim that could be false
+/// — in a column read precisely to decide whether something is exposed.
 fn fmt_ports(ports: &[String]) -> String {
     ports
         .iter()
         .map(|p| {
-            // O parser do motor, e não um `split_once(':')` cru — a forma
-            // `hostIp:hostPort:contPort` tem DOIS dois-pontos, e cortar no
-            // primeiro dá `127.0.0.1` como porta do host e `19555:80` como porta
-            // do container. Medido: um serviço restrito a loopback aparecia como
-            // `127.0.0.1->19555:80/tcp` na coluna que se lê exactamente para
-            // decidir o que está exposto.
-            // Só quando há mesmo uma porta de host. O `parse_publish_addr` aceita
-            // uma porta nua e devolve-a nas DUAS pontas, o que fazia `"80"`
-            // imprimir `80->80/tcp` em vez de `80/tcp` — apanhado pelo teste das
-            // formas antigas, e a razão de ele cobrir o caso aborrecido também.
-            let sem_proto = p.split_once('/').map(|(s, _)| s).unwrap_or(p.as_str());
-            if sem_proto.contains(':') {
+            // The engine's parser, never a raw `split_once(':')` — the
+            // `hostIp:hostPort:contPort` form has TWO colons, and cutting at the
+            // first one reads `127.0.0.1` as the host port and `19555:80` as the
+            // container port. Measured: a loopback-only service showed up as
+            // `127.0.0.1->19555:80/tcp` in the column read precisely to decide
+            // what is exposed.
+            // Only when there really is a host port. `parse_publish_addr` accepts a
+            // bare port and returns it on BOTH ends, which made `"80"` print
+            // `80->80/tcp` instead of `80/tcp` — caught by the test covering the
+            // older forms, and the reason it covers the boring case too.
+            let without_proto = p.split_once('/').map(|(s, _)| s).unwrap_or(p.as_str());
+            if without_proto.contains(':') {
                 if let Ok((addr, hp, cp, proto)) = delonix_sdn::parse_publish_addr(p) {
                     return match addr {
-                        // Com endereço explícito imprime-se a forma do docker
-                        // (`127.0.0.1:8080->80/tcp`): aqui o endereço é FACTO, veio
-                        // da spec, e é a informação que mais importa nesta coluna.
+                        // With an explicit address the Docker form is printed
+                        // (`127.0.0.1:8080->80/tcp`): here the address is a FACT, it
+                        // came from the spec, and it is the most important thing in
+                        // this column.
                         Some(a) => format!("{a}:{hp}->{cp}/{proto}"),
-                        // Sem endereço mantém-se a omissão deliberada do `0.0.0.0`
-                        // — ver o doc-comment acima: o endereço efectivo depende do
-                        // caminho de publicação e do `DELONIX_PUBLISH_ADDR`, e
-                        // inventar um seria uma afirmação de exposição talvez falsa.
+                        // No address means a record from BEFORE the address was
+                        // persisted: the deliberate omission of `0.0.0.0` stands —
+                        // see the doc comment above. A publish made by this version
+                        // never lands here.
                         None => format!("{hp}->{cp}/{proto}"),
                     };
                 }
@@ -3613,7 +3643,7 @@ fn fmt_ports(ports: &[String]) -> String {
                 Some((s, pr)) => (s, pr),
                 None => (p.as_str(), "tcp"),
             };
-            // Só a porta do container (publicada sem porta de host fixa).
+            // Container port only (published without a fixed host port).
             format!("{spec}/{proto}")
         })
         .collect::<Vec<_>>()
@@ -4197,23 +4227,28 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
 /// as a busy-port conflict goes; privilege and `port_owner` are separate checks
 /// upstream of this one). Structured like the sibling errors in this preflight:
 /// the fact first, then ready-to-copy ways out.
-fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>) -> Option<Error> {
+fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>, proto: &str) -> Option<Error> {
     let p = hp.parse::<u16>().ok()?;
     let bind = delonix_sdn::publish_bind_addr(addr);
-    if !delonix_sdn::host_port_busy(&bind, p) {
+    // Per transport, for the reason in `delonix_sdn::Proto`. An unparseable proto
+    // never reaches here (the spec was validated upstream); if it ever did, the
+    // check is SKIPPED rather than answered about the wrong transport.
+    let transport = delonix_sdn::Proto::parse(proto).ok()?;
+    if !delonix_sdn::host_port_busy(&bind, p, transport) {
         return None;
     }
     let who =
         delonix_sdn::host_port_owner_process(p).unwrap_or_else(|| "another process".to_string());
     let alt = p as u32 + 10000;
     Some(Error::Invalid(super::po::tf(
-        "port {hp} is already in use on the host by {who} — not a delonix container\n\
+        "port {hp}/{proto} is already in use on the host by {who} — not a delonix container\n\
          \n\
          fix it with ONE of these:\n\
          \x20 delonix container run -p {alt}:{cp} ...    # publish on another port\n\
          \x20 ss -tlnp | grep :{hp}    # or find and stop whoever holds it",
         &[
             ("hp", hp),
+            ("proto", proto),
             ("who", &who),
             ("alt", &alt.to_string()),
             ("cp", cp),
@@ -6033,6 +6068,11 @@ fn ingress_address(c: &Container) -> Result<String> {
 
 /// Publish a port on a LIVE container, by the right path for its network.
 pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
+    // The bind address becomes explicit before anything else, so the dataplane and
+    // the record agree and a later `start` re-publishes on the SAME address — the
+    // hot-publish path is where the measured bug bit hardest, because
+    // `DELONIX_PUBLISH_ADDR` lived only in the shell that ran this command.
+    let spec = &delonix_sdn::normalize_publish_spec(spec)?;
     let (host_addr, hp, cp, proto) = delonix_sdn::parse_publish_addr(spec)?;
     if c.ports.iter().any(|p| {
         delonix_sdn::parse_publish(p)
@@ -7285,7 +7325,7 @@ mod tests {
         let port = held.local_addr().unwrap().port();
         let hp = port.to_string();
 
-        let err = super::host_port_conflict_error(&hp, "80", None)
+        let err = super::host_port_conflict_error(&hp, "80", None, "tcp")
             .expect("a real listener holds this port right now");
         let msg = err.to_string();
         assert!(
@@ -7303,13 +7343,40 @@ mod tests {
         // not reported busy», so it is asked a few times and must hold at least once;
         // a diagnosis that NEVER clears would still fail every attempt.
         let cleared = (0..20).any(|_| {
-            let free = super::host_port_conflict_error(&hp, "80", None).is_none();
+            let free = super::host_port_conflict_error(&hp, "80", None, "tcp").is_none();
             if !free {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             free
         });
         assert!(cleared, "a freed port must not still be reported as busy");
+    }
+
+    /// The busy check answers about the TRANSPORT being published. It used to open
+    /// a `TcpListener` whatever the spec said, which made it blind for every UDP
+    /// publish — the case that matters for SIP or DNS, where the conflict then
+    /// surfaced only inside the slirp as opaque `add_hostfwd` JSON.
+    #[test]
+    fn the_conflict_check_asks_about_the_published_transport() {
+        use std::net::UdpSocket;
+        let held = UdpSocket::bind("127.0.0.1:0").expect("bind an ephemeral udp port");
+        let port = held.local_addr().unwrap().port();
+        let hp = port.to_string();
+        // A UDP publish onto a held UDP port is now caught, and the message says
+        // which transport — `port 5070` alone left the reader checking the wrong one.
+        let err = super::host_port_conflict_error(&hp, "5070", None, "udp")
+            .expect("a real udp listener holds this port right now");
+        let msg = err.to_string();
+        assert!(msg.contains(&format!("{hp}/udp")), "{msg}");
+        // And the TCP side of the same number is a different question. It is only
+        // free if no neighbour in the parallel battery holds it, so the property is
+        // asked a few times — a check that answered about UDP here would fail all.
+        let tcp_is_a_separate_question =
+            (0..5).any(|_| super::host_port_conflict_error(&hp, "5070", None, "tcp").is_none());
+        assert!(
+            tcp_is_a_separate_question,
+            "a held udp port must not read as a tcp conflict"
+        );
     }
 
     /// Ports and volumes are SETS — the order in the manifest carries no
@@ -7325,6 +7392,75 @@ mod tests {
         let a = super::desired_container_fields(&mk(vec!["8080:80", "8443:443"]));
         let b = super::desired_container_fields(&mk(vec!["8443:443", "8080:80"]));
         assert_eq!(a.get("ports"), b.get("ports"));
+    }
+
+    /// The bind address is written into the record, so the two sides of the diff
+    /// have to resolve it the SAME way or every container with a published port
+    /// reads as drifted forever — and `ports` is a hot field whose change plans a
+    /// `Replace`, which for a container means destroying and recreating it. That
+    /// is the whole reason `comparable_ports` is one function and not two.
+    ///
+    /// Covers both directions of the compatibility question: a manifest written
+    /// as `8080:80` against a record normalized by this version, and a LEGACY
+    /// record (written before the address was persisted) against the same
+    /// manifest.
+    #[test]
+    fn the_recorded_bind_address_does_not_create_eternal_drift() {
+        // The engine's own default has to be the one under test; with the variable
+        // set in the environment the two sides would still agree, but about `0.0.0.0`
+        // — which proves the parity and not the default.
+        if std::env::var_os("DELONIX_PUBLISH_ADDR").is_some() {
+            return;
+        }
+        let spec: super::ContainerSpec = serde_yaml::from_str(
+            "image: nginx
+ports: [\"8080:80\"]",
+        )
+        .unwrap();
+        let desired = super::desired_container_fields(&spec);
+
+        let mut c = delonix_compute::Container::new(
+            "cid".into(),
+            "web".into(),
+            "nginx".into(),
+            vec![],
+            super::runtime::default_memory_max(),
+        );
+        let tmp = tempfile::tempdir().unwrap();
+
+        // A record written by THIS version: the address is explicit.
+        c.ports = vec!["127.0.0.1:8080:80/tcp".into()];
+        let fresh = super::actual_container_fields(&c, tmp.path());
+        assert_eq!(
+            desired.get("ports"),
+            fresh.get("ports"),
+            "a manifest and the record it produced must not read as drift"
+        );
+
+        // A record from BEFORE the address was persisted: still has to compare
+        // equal, or upgrading the engine would report drift on every container
+        // that ever published a port.
+        c.ports = vec!["8080:80".into()];
+        let legacy = super::actual_container_fields(&c, tmp.path());
+        assert_eq!(
+            desired.get("ports"),
+            legacy.get("ports"),
+            "a legacy record must not read as drift after the upgrade"
+        );
+
+        // And a manifest that NAMES a different address is genuine drift against a
+        // loopback-bound container — the one case that must still diff, or the
+        // normalization would have swallowed a real change.
+        let exposto: super::ContainerSpec = serde_yaml::from_str(
+            "image: nginx
+ports: [\"0.0.0.0:8080:80\"]",
+        )
+        .unwrap();
+        assert_ne!(
+            super::desired_container_fields(&exposto).get("ports"),
+            fresh.get("ports"),
+            "widening the bind in the manifest has to be seen as a change"
+        );
     }
 
     /// `hostAliases` do k8s (um IP, N nomes) tem de dar o mesmo resultado que

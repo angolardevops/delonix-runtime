@@ -1766,6 +1766,83 @@ fi
 "$BIN" network rm "$NET2" >/dev/null 2>&1
 
 ########################################
+section "publish: o endereço de bind é REGISTADO e sobrevive a um start"
+########################################
+# O endereço com que uma porta publicada liga era estado USADO na publicação e
+# nunca PERSISTIDO: o registo guardava `51072:80` e o `DELONIX_PUBLISH_ADDR` era
+# relido do ambiente a cada `start`. Medido a 2026-10-07, nos dois sentidos — uma
+# porta exposta à LAN voltava em 127.0.0.1 depois de um `start` (que é o que um
+# unit do `net boot enable` corre, sem ambiente nenhum), e uma porta publicada de
+# propósito só em loopback voltava em 0.0.0.0 quando a shell do operador tinha a
+# variável exportada. Nos dois casos rc=0, sem aviso, com o `ingress ls` a
+# imprimir a linha igual antes e depois.
+#
+# O veredicto é o bind lido do KERNEL (`ss`), nunca o que o comando disse — e tem
+# de ser através de um `stop`+`start`, porque cada passo isolado devolve 0 mesmo
+# com o defeito. Um check pelo rc ficaria verde sobre o bug.
+CPB="cpb-$PFX"
+# Portas altas e pouco prováveis; se alguma estiver ocupada o troço salta com
+# razão audível em vez de chumbar por causa de um vizinho.
+P_LOOP=51081
+P_SPEC=51082
+P_ENVV=51083
+if ss -tulnH 2>/dev/null | grep -qE ":($P_LOOP|$P_SPEC|$P_ENVV) "; then
+  skip "endereço de bind persistido" "uma das portas $P_LOOP/$P_SPEC/$P_ENVV já está ocupada neste host"
+elif ! "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
+  skip "endereço de bind persistido" "não foi possível criar o container na rede custom"
+else
+  # 1) Sem endereço: liga só ao loopback, e o REGISTO di-lo (é o que torna o
+  #    `start` seguinte determinístico em vez de dependente do ambiente).
+  check "publish sem endereço liga em 127.0.0.1" ok bash -c \
+    "'$BIN' net ingress publish '$CPB' $P_LOOP:80 >/dev/null && ss -tlnH | grep -q '127.0.0.1:$P_LOOP '"
+  check "publish sem endereço NÃO liga em 0.0.0.0" ok bash -c \
+    "! ss -tlnH | grep -qE '(^|[^.0-9])0\\.0\\.0\\.0:$P_LOOP '"
+  check "o registo guarda o endereço resolvido" ok bash -c \
+    "'$BIN' net ingress ls '$CPB' | grep -q '127.0.0.1:$P_LOOP:80'"
+
+  # 2) Endereço no spec, em UDP — a forma que o `--help` não documentava e que
+  #    era a razão de alguém concluir que só havia loopback.
+  check "publish com endereço no spec liga em 0.0.0.0 (udp)" ok bash -c \
+    "'$BIN' net ingress publish '$CPB' 0.0.0.0:$P_SPEC:80/udp >/dev/null && ss -ulnH | grep -q '0.0.0.0:$P_SPEC '"
+
+  # 3) A via do env var: o endereço tem de ficar REGISTADO, senão desaparece.
+  check "publish via DELONIX_PUBLISH_ADDR liga em 0.0.0.0" ok bash -c \
+    "DELONIX_PUBLISH_ADDR=0.0.0.0 '$BIN' net ingress publish '$CPB' $P_ENVV:80 >/dev/null && ss -tlnH | grep -q '0.0.0.0:$P_ENVV '"
+  check "o endereço do env var fica no registo, não só no dataplane" ok bash -c \
+    "'$BIN' net ingress ls '$CPB' | grep -q '0.0.0.0:$P_ENVV:80'"
+
+  # O CICLO. Sem ambiente nenhum, como um unit de boot.
+  "$BIN" container stop "$CPB" >/dev/null 2>&1
+  sleep 1
+  if "$BIN" container start "$CPB" >/dev/null 2>&1; then
+    sleep 2
+    # O que o bug fazia: 0.0.0.0 → 127.0.0.1, em silêncio.
+    check "start: a porta exposta pelo spec CONTINUA em 0.0.0.0" ok bash -c \
+      "ss -ulnH | grep -q '0.0.0.0:$P_SPEC '"
+    check "start: a porta exposta pelo env var CONTINUA em 0.0.0.0" ok bash -c \
+      "ss -tlnH | grep -q '0.0.0.0:$P_ENVV '"
+    check "start: a porta de loopback CONTINUA em 127.0.0.1" ok bash -c \
+      "ss -tlnH | grep -q '127.0.0.1:$P_LOOP '"
+  else
+    check "start de um container com portas publicadas" ok false
+  fi
+
+  # O sentido INVERSO, que é o que pesa em segurança: um `start` corrido numa
+  # shell com a variável exportada não pode expor à LAN uma porta que foi
+  # publicada de propósito só em loopback.
+  "$BIN" container stop "$CPB" >/dev/null 2>&1
+  sleep 1
+  if DELONIX_PUBLISH_ADDR=0.0.0.0 "$BIN" container start "$CPB" >/dev/null 2>&1; then
+    sleep 2
+    check "start com o env var NÃO expõe uma porta publicada em loopback" ok bash -c \
+      "ss -tlnH | grep -q '127.0.0.1:$P_LOOP ' && ! ss -tlnH | grep -qE '(^|[^.0-9])0\\.0\\.0\\.0:$P_LOOP '"
+  else
+    check "start com o env var exportado" ok false
+  fi
+  "$BIN" container rm -f "$CPB" >/dev/null 2>&1
+fi
+
+########################################
 section "network: IPAM sem leases órfãos (S2, doc 62 §6 P1)"
 ########################################
 # O registo de endereços (`network ipam ls`) ANTES e DEPOIS de cada caminho de

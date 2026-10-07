@@ -414,7 +414,7 @@ Arguments:
           Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;SPEC&gt;
-          `hostPort:containerPort[/tcp|udp]` or just `port`
+          `[hostIp:]hostPort:containerPort[/tcp|udp]` or just `port`. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from another machine. Name the address to widen it: `0.0.0.0:5070:5070/udp` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). The resolved address is RECORDED, so it survives a `container start`
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -434,12 +434,20 @@ EXAMPLES:
   # high and let a proxy own :53 if you need it
   delonix net ingress publish dns 5353:53/udp
 
+  # reachable from OTHER machines: without an address the port binds to
+  # 127.0.0.1 alone
+  delonix net ingress publish sip 0.0.0.0:5070:5070/udp
+
+  # reachable from the VMs on a libvirt network, and from nowhere else — see
+  # `delonix vm reach`
+  delonix net ingress publish api 192.168.122.1:8080:80
+
 SEE ALSO:
   delonix net ingress unpublish · delonix net ingress ls · delonix container
-  update · delonix net httproute apply
+  update · delonix net httproute apply · delonix vm reach
 
   delonix › net › ingress › publish</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar uma porta pelo ingress (DNAT)</div><div class='cap lang-en'>Publish a port via ingress (DNAT)</div><pre><code>delonix net ingress publish web 8080:80</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar uma porta pelo ingress (DNAT) — sem endereço liga só a 127.0.0.1</div><div class='cap lang-en'>Publish a port via ingress (DNAT) — with no address it binds to 127.0.0.1 only</div><pre><code>delonix net ingress publish web 8080:80</code></pre></div><div class="ex"><div class='cap lang-pt'>Alcançável de outras máquinas: o endereço vai no spec e fica registado</div><div class='cap lang-en'>Reachable from other machines: the address goes in the spec, and is recorded</div><pre><code>delonix net ingress publish sip 0.0.0.0:5070:5070/udp</code></pre></div>
 <h2 id='ls'><code>ingress ls</code></h2>
 <p class='intro'>Show the inbound firewall (policy + rules) and published ports</p>
 <div class='help'><pre><code>Usage: delonix net ingress ls [OPTIONS] [CONTAINER]

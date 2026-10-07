@@ -4392,6 +4392,73 @@ respostas à mesma pergunta começam a divergir.
 regra. (Pods e VMs entraram no isolamento na v0.40.0 e a recuperação pós-respawn cobre pods
 desde a v0.41.0 — ver a secção «Isolamento de namespace».)
 
+### O endereço de bind de uma porta publicada passou a ser REGISTADO (2026-10-07)
+
+O endereço com que uma porta publicada liga era estado **usado** na publicação e nunca
+**persistido**: o registo guardava a spec como foi escrita (`51072:80`) e o
+`publish_bind_addr` voltava a resolver o `DELONIX_PUBLISH_ADDR` a cada `start`. Quinta
+ocorrência da armadilha já catalogada — *estado necessário para RECONSTRUIR o recurso tem
+de ser persistido, não só usado na criação* (`-v`, `-p` em rede custom, redes extra,
+`Container.pod`).
+
+**Medido nos dois sentidos**, com raiz isolada, contra o bind lido do kernel e não contra
+o que o comando disse:
+
+- `DELONIX_PUBLISH_ADDR=0.0.0.0 … publish 51072:80` ligou em `0.0.0.0`, gravou `51072:80`,
+  e o `container start` seguinte — o que um unit do `net boot enable` corre, sem ambiente
+  nenhum — trouxe-a de volta em `127.0.0.1`. Serviço em baixo, listagem a dizer publicado.
+- O INVERSO, que é o que pesa em segurança: uma porta publicada de propósito **sem**
+  endereço (só loopback) voltou em `0.0.0.0`, exposta à LAN inteira, porque a shell que
+  correu o `start` tinha a variável exportada. E é a dica do próprio motor (`vm reach`) que
+  ensinava a exportá-la.
+
+Nos dois casos **rc=0, sem aviso**, e o `net ingress ls` a imprimir a linha igual antes e
+depois: `51070:80` e `51072:80` eram bytes idênticos em disco com alcance oposto.
+
+**A correcção é uma só função**, `delonix_sdn::normalize_publish_spec`, aplicada na
+fronteira: a spec guardada é sempre `addr:hostPort:contPort/proto`. Idempotente, por causa
+da 2.ª passagem do re-exec de `--net <rede>`. Efeito de lado bem-vindo: o `fmt_ports` já
+dizia que **com endereço explícito o endereço é FACTO** e imprimia-o, logo o `container ls`
+passou a mostrar `0.0.0.0:55070->5070/udp` sem uma linha de código nova — na coluna que se
+lê precisamente para decidir o que está exposto. Uma spec **sem** endereço passou a querer
+dizer «registo anterior a esta versão», e só aí a omissão do `0.0.0.0` se mantém.
+
+**O reconciliador tinha de andar no mesmo passo, ou trocava-se um bug por outro pior.**
+`ports` é campo comparado e quente, e o seu diff planeia `Replace` — que num container é
+destruir e recriar. Um manifesto `8080:80` contra um registo `127.0.0.1:8080:80/tcp` era
+deriva eterna. Daí `comparable_ports`, UMA função para o `desired` e o `actual`: duas
+cópias desta normalização são como os dois lados começam a discordar. Normaliza também na
+LEITURA, para um registo legado não ler como deriva depois do upgrade; e um manifesto que
+NOMEIA outro endereço continua a ser deriva genuína, que é o caso que não podia ser
+engolido.
+
+**As sondas de porta eram TCP-only** (`can_bind_host_port`, `host_port_busy`): uma
+publicação UDP era verificada contra TCP, cega por construção, e o conflito só aparecia
+dentro do slirp como JSON opaco. Passam a receber um `delonix_sdn::Proto` — enum e não
+`&str`, para o `sctp` que o CRI consegue emitir e um typo serem **recusados** nesta
+fronteira em vez de sondados como TCP. Provou-se ao vivo e por acidente: a porta 5070/UDP
+deste host está mesmo ocupada por um `python3`, e a sonda nova nomeou-o **com o
+transporte** (`port 5070/udp is already in use … by python3`).
+
+**Três defeitos do `vm reach` apanhados pela mesma passagem** — o primeiro teria sido
+causado pela normalização se não se tivesse olhado: lia a porta de host com
+`p.split(':').next()`, que numa spec com endereço devolve `127.0.0.1` e não casa com nada
+(a MESMA armadilha que o `fmt_ports` documenta ter pago); corria `ss -tln`, logo uma
+publicação UDP era-lhe invisível, que é exactamente o caso de quem vai ver porque é que um
+SIP não responde de dentro de uma VM; e a dica de correcção ensinava o env var, a via que
+não sobrevive a um `start`.
+
+**O `--help` do `net ingress publish` não documentava a forma `hostIp:`** — aceitava-a e
+calava-se, com três exemplos e nenhum com endereço, enquanto o `container run -p`
+documenta as duas. Foi esse silêncio que quase levou alguém a concluir que só havia
+loopback e a mudar de caminho (um proxy UDP, MetalLB) por uma capacidade que já existia.
+
+**Gate**: secção «publish: o endereço de bind é REGISTADO e sobrevive a um start» do
+`scripts/e2e.sh`, verificada pela regra da casa — **10/10 com a correcção, 6/10 sem ela**,
+com as quatro falhas a serem exactamente as quatro facetas do bug. Tinha de ser o CICLO
+(`publish` → `stop` → `start`): cada passo isolado devolve 0 mesmo com o defeito, e um
+check pelo rc ficaria verde por cima dele.
+
 ### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
 
 Discovery da Fase 0 em `docs/discovery/33_GAPS_ENCONTRADOS.md`; notas em
