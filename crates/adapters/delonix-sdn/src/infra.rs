@@ -9289,11 +9289,9 @@ mod tests {
     /// `delonix net netns down` printed «DOWN» for a teardown it had not locked.
     #[test]
     fn without_the_network_lock_nothing_changes_the_infra() {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().expect("temp root");
+        let tmp = crate::testenv::TempRoot::new();
         let root = tmp.path();
         std::fs::write(root.join("ingress"), b"not a directory").expect("blocker file");
-        env.set("DELONIX_ROOT", root);
 
         let e = teardown().expect_err("teardown must refuse without the lock");
         assert!(e.to_string().contains("network lock"), "{e}");
@@ -9311,6 +9309,7 @@ mod tests {
             root.join("ingress").is_file(),
             "the blocker must be untouched"
         );
+        tmp.close();
     }
 
     /// **Um `accept` NÃO é terminal entre base chains**, e esquecê-lo partiu o
@@ -11990,10 +11989,10 @@ mod tests_restore_lease {
     use super::restore_lease;
 
     fn with_root<T>(f: impl FnOnce() -> T) -> T {
-        let mut env = crate::testenv::lock();
-        let dir = tempfile::tempdir().unwrap();
-        env.set("DELONIX_ROOT", dir.path());
-        f()
+        let root = crate::testenv::TempRoot::new();
+        let out = f();
+        root.close();
+        out
     }
 
     /// A lease the failed attach CREATED is freed — the leak the reaper was
@@ -12053,12 +12052,7 @@ mod tests_netdef_lock {
     /// stale read erased them, and a torn read made the egress miss the network.
     #[test]
     fn concurrent_netdef_writers_lose_no_write() {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", d);
-        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
+        let tmp = crate::testenv::TempRoot::with_runtime_dir();
         let def = network_create("s2lock").unwrap();
         let (bridge, prefix) = (def.bridge.clone(), def.prefix.clone());
         let n = 60;
@@ -12082,6 +12076,7 @@ mod tests_netdef_lock {
         assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
         assert!(got.gateway.is_some(), "the gateway write was lost");
         assert_eq!(got.prefix, prefix);
+        tmp.close();
     }
 
     /// `write_atomic`'s temp is not a network, EVEN when it parses. This is the

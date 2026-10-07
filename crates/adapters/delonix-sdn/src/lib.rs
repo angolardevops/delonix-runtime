@@ -186,6 +186,92 @@ pub(crate) mod testenv {
             }
         }
     }
+
+    /// A temp state root pinned into `DELONIX_ROOT` for ONE test, and removed
+    /// when the test ends — also on panic.
+    ///
+    /// # Why this is a type and not three lines per test
+    ///
+    /// The ORDER matters, and every fixture in this crate had it wrong:
+    ///
+    /// ```ignore
+    /// let mut env = crate::testenv::lock();        // dropped SECOND
+    /// let dir = tempfile::tempdir().unwrap();      // dropped FIRST
+    /// env.set("DELONIX_ROOT", dir.path());
+    /// ```
+    ///
+    /// Locals drop in reverse, so the directory went first and `DELONIX_ROOT`
+    /// kept naming a path that no longer existed until the guard dropped. The
+    /// lock serialises WRITERS of the variable; production code READS it with no
+    /// lock at all, so a concurrent test could resolve that dead root and
+    /// `create_dir_all` it back into existence — one stray `.tmpXXXXXX` in
+    /// `TMPDIR` per lost race (measured 2026-10-07: `cargo test -p delonix-sdn`
+    /// left 3, 0 and 1 entries over three runs, which is the
+    /// `scripts/tmp_roots_gate.py` flake). `TempDir`'s own `Drop` reported
+    /// nothing, because the removal had SUCCEEDED; the directory came back
+    /// afterwards.
+    ///
+    /// So this unpins the environment FIRST and removes the directory SECOND, on
+    /// both paths, and [`TempRoot::close`] makes a removal that fails fail the
+    /// test instead of leaving a leftover nobody looks at.
+    pub(crate) struct TempRoot {
+        env: Option<EnvGuard>,
+        dir: Option<tempfile::TempDir>,
+    }
+
+    impl TempRoot {
+        /// Pins `DELONIX_ROOT` at a fresh directory.
+        pub(crate) fn new() -> Self {
+            let dir = tempfile::tempdir().expect("temp root");
+            let mut env = lock();
+            env.set("DELONIX_ROOT", dir.path());
+            Self {
+                env: Some(env),
+                dir: Some(dir),
+            }
+        }
+
+        /// Pins `DELONIX_ROOT` **and** `DELONIX_NET_RUNTIME_DIR` (`<root>/run`).
+        ///
+        /// Both or neither: a test that isolates only the state root still sends
+        /// its `control_send` to this host's real holder.
+        pub(crate) fn with_runtime_dir() -> Self {
+            let mut this = Self::new();
+            let run = this.path().join("run");
+            std::fs::create_dir_all(&run).expect("runtime dir");
+            this.env().set("DELONIX_NET_RUNTIME_DIR", &run);
+            this
+        }
+
+        pub(crate) fn path(&self) -> &std::path::Path {
+            self.dir.as_ref().expect("live temp root").path()
+        }
+
+        /// The guard, for a test that pins further variables of its own.
+        pub(crate) fn env(&mut self) -> &mut EnvGuard {
+            self.env.as_mut().expect("live temp root")
+        }
+
+        /// Unpins the environment and removes the directory, FAILING the test if
+        /// it cannot be removed. Called on the way out of a passing test; the
+        /// panic path falls back to `Drop`, which cannot fail a test.
+        pub(crate) fn close(mut self) {
+            self.env.take();
+            if let Some(dir) = self.dir.take() {
+                let path = dir.path().to_path_buf();
+                dir.close()
+                    .unwrap_or_else(|e| panic!("temp root {} not removed: {e}", path.display()));
+            }
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            // Environment first, directory second — see the type's doc.
+            self.env.take();
+            self.dir.take();
+        }
+    }
 }
 
 pub use discover::{discover_ports, DiscoveredPort};
@@ -199,10 +285,27 @@ const BRIDGE: &str = "delonix0";
 /// `DELONIX_SUBNET_BASE` forces a value; otherwise it reads the persisted file; otherwise
 /// it scans the host and picks a free one.
 fn default_base() -> u8 {
+    default_base_in(&ambient_root())
+}
+
+/// [`default_base`] for an EXPLICIT root, so a caller that already knows which
+/// root it is working on never persists into another one.
+///
+/// **The bug this closes** (measured 2026-10-07): `NetworkStore::get("bridge")`
+/// resolved this cache from the process environment while the store itself lived
+/// at the root it was opened with. The two are the same path on a node, which is
+/// why nothing showed — but a `NetworkStore::open(A)` whose caller had
+/// `DELONIX_ROOT=B` read B's octet and wrote B's file, i.e. a store silently
+/// writing outside its own root. In the test suite, where `DELONIX_ROOT` points
+/// at another test's temp dir, that `create_dir_all` RE-CREATED a directory the
+/// other test had already removed, leaving a stray `.tmpXXXXXX` in `TMPDIR` on
+/// every run that lost the race (`scripts/tmp_roots_gate.py`, 3/0/1 entries over
+/// three runs). The cleanup had not failed: the directory came BACK after it.
+fn default_base_in(root: &std::path::Path) -> u8 {
     if let Ok(Ok(b)) = std::env::var("DELONIX_SUBNET_BASE").map(|s| s.trim().parse::<u8>()) {
         return b;
     }
-    let path = net_state_path();
+    let path = net_state_path_in(root);
     if let Ok(Ok(b)) = std::fs::read_to_string(&path).map(|s| s.trim().parse::<u8>()) {
         return b;
     }
@@ -214,9 +317,19 @@ fn default_base() -> u8 {
     base
 }
 
-fn net_state_path() -> std::path::PathBuf {
-    let root = std::env::var("DELONIX_ROOT").unwrap_or_else(|_| "/var/lib/delonix".into());
-    std::path::Path::new(&root).join("net").join("default-base")
+/// The root when the caller names none. Deliberately NOT `infra::base_root`:
+/// that one resolves a rootless engine to `$XDG_DATA_HOME/delonix`, and moving
+/// this cache there would re-pick the default network's `/16` on a node that
+/// already has one. Kept byte for byte as it was so this fix changes where a
+/// store with its OWN root writes, and nothing else.
+fn ambient_root() -> std::path::PathBuf {
+    std::env::var_os("DELONIX_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/var/lib/delonix"))
+}
+
+fn net_state_path_in(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("net").join("default-base")
 }
 
 /// `10.X` octets already in use in the host's routes/addresses (avoids collision with the
@@ -250,15 +363,11 @@ fn pick_free_base() -> u8 {
         .unwrap_or(201)
 }
 
-/// The `prefix`/`gateway`/`subnet` of the default network (derived from the base octet).
+/// The `prefix` of the default network (derived from the base octet). The
+/// gateway and subnet are derived in [`Network::default_bridge_in`], which has a
+/// root to resolve the octet against and reads it once for all three.
 fn default_prefix() -> String {
     format!("10.{}", default_base())
-}
-fn default_gateway() -> String {
-    format!("10.{}.0.1", default_base())
-}
-fn default_subnet() -> String {
-    format!("10.{}.0.0/16", default_base())
 }
 
 // ---- process helpers -----------------------------------------------------
@@ -829,14 +938,26 @@ impl Network {
 }
 
 impl Network {
-    /// The default network (`delonix0`).
+    /// The default network (`delonix0`), with its `/16` taken from the root the
+    /// process environment names.
     pub fn default_bridge() -> Self {
+        Self::default_bridge_in(&ambient_root())
+    }
+
+    /// [`Network::default_bridge`] for an EXPLICIT root — what a
+    /// [`NetworkStore`] uses, because it knows the root it was opened with and
+    /// must not read another one's octet (see [`default_base_in`]).
+    ///
+    /// Also the only place the octet is resolved ONCE instead of three times:
+    /// the three `default_*` helpers each went to disk on their own.
+    pub(crate) fn default_bridge_in(root: &std::path::Path) -> Self {
+        let base = default_base_in(root);
         Network {
             name: DEFAULT_NET.to_string(),
             bridge: BRIDGE.to_string(),
-            gateway: default_gateway(),
-            prefix: default_prefix(),
-            subnet: default_subnet(),
+            gateway: format!("10.{base}.0.1"),
+            prefix: format!("10.{base}"),
+            subnet: format!("10.{base}.0.0/16"),
             driver: DRIVER_BRIDGE.to_string(),
             parent: None,
             vni: None,
@@ -1071,7 +1192,7 @@ impl NetworkStore {
     /// (`driver`/`parent`/`subnet`/`gateway`/`base`) for the new drivers.
     pub fn get(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Ok(Network::default_bridge());
+            return Ok(Network::default_bridge_in(&self.root()));
         }
         let body = std::fs::read_to_string(self.path(name)).map_err(|e| {
             Error::from(delonix_model::Error::not_found_or_io(e, || {
@@ -3518,7 +3639,14 @@ mod tests {
 
         // The default network is not hashed — the two stores name it with their
         // own constant, and those must not drift apart either.
+        //
+        // Under a root of its own: `default_bridge` resolves the octet from
+        // `DELONIX_ROOT`, and reading another test's root is how this suite came
+        // to re-create a temp dir its owner had already removed
+        // (`crate::testenv::TempRoot`).
+        let root = crate::testenv::TempRoot::new();
         assert_eq!(Network::default_bridge().bridge, infra::INFRA_BRIDGE);
+        root.close();
     }
 
     #[test]
@@ -3612,6 +3740,42 @@ mod tests {
         assert!(s.create("bridge").is_err(), "nome reservado deve falhar");
         s.remove("alpha").unwrap();
         assert_eq!(s.list().unwrap().len(), 1);
+    }
+
+    /// REGRESSION: a store opened at a root persists the default network's
+    /// octet INSIDE that root — never in the one the environment names.
+    ///
+    /// `get("bridge")` used to resolve that cache from `DELONIX_ROOT` while the
+    /// store itself lived at the root it was opened with. The two are the same
+    /// path on a node, which is why nothing showed. In this suite they are not:
+    /// the store wrote into ANOTHER test's temp dir and its `create_dir_all`
+    /// RE-CREATED that directory after its owner had removed it, leaving a stray
+    /// `.tmpXXXXXX` in `TMPDIR` (`scripts/tmp_roots_gate.py`; measured
+    /// 2026-10-07 as 3, 0 and 1 entries over three runs of
+    /// `cargo test -p delonix-sdn`).
+    #[test]
+    fn the_store_persists_its_octet_inside_its_own_root() {
+        let mut ambient = crate::testenv::TempRoot::new();
+        // Otherwise the octet comes from the variable and nothing is written.
+        ambient.env().unset("DELONIX_SUBNET_BASE");
+        let own = tempfile::tempdir().unwrap();
+
+        let def = NetworkStore::open(own.path())
+            .unwrap()
+            .get("bridge")
+            .unwrap();
+
+        let cache = own.path().join("net").join("default-base");
+        let octet = std::fs::read_to_string(&cache)
+            .unwrap_or_else(|e| panic!("{} not written: {e}", cache.display()));
+        assert_eq!(def.prefix, format!("10.{}", octet.trim()));
+        assert!(
+            !ambient.path().join("net").exists(),
+            "the store wrote into the root the environment names, not its own"
+        );
+
+        own.close().expect("own root removed");
+        ambient.close();
     }
 
     #[test]
@@ -4140,13 +4304,10 @@ mod tests_single_allocator {
     use super::*;
 
     fn with_root<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", d);
-        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
-        f(d)
+        let root = crate::testenv::TempRoot::with_runtime_dir();
+        let out = f(root.path());
+        root.close();
+        out
     }
 
     #[test]

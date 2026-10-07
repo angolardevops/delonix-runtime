@@ -714,19 +714,22 @@ mod tests {
         // The lock is now crate-wide (`crate::testenv`): `infra`'s tests write
         // the same variable, and a mutex private to this module serialized
         // nothing against them — see the note on `testenv`.
-        let mut env = crate::testenv::lock();
-        // A fresh directory per call, never a fixed path. The lock above
-        // serializes within the PROCESS; nothing serializes across processes,
-        // and this workspace runs several sessions at once (one worktree per
-        // task). With a fixed path, two `cargo test -p delonix-sdn` runs delete
-        // each other's directory, and whichever is midway through this test's
-        // 2000 allocations dies writing — measured 2026-08-28, when `pgrep`
-        // caught ANOTHER session running this very test at that moment.
-        let dir = tempfile::tempdir().unwrap();
-        env.set("DELONIX_ROOT", dir.path());
-        // No explicit unset: the guard restores what it found when it drops,
-        // including «was not set».
-        f()
+        //
+        // A fresh directory per call, never a fixed path. The lock serializes
+        // within the PROCESS; nothing serializes across processes, and this
+        // workspace runs several sessions at once (one worktree per task). With
+        // a fixed path, two `cargo test -p delonix-sdn` runs delete each other's
+        // directory, and whichever is midway through this test's 2000
+        // allocations dies writing — measured 2026-08-28, when `pgrep` caught
+        // ANOTHER session running this very test at that moment.
+        //
+        // `TempRoot` unpins the variable BEFORE removing the directory and fails
+        // the test if the removal does not work — see its doc for the stray
+        // `.tmpXXXXXX` the old order left in `TMPDIR`.
+        let root = crate::testenv::TempRoot::new();
+        let out = f();
+        root.close();
+        out
     }
 
     #[test]
@@ -859,15 +862,12 @@ mod tests {
     #[test]
     fn allocate_recusa_quando_nao_consegue_trancar_o_registo() {
         use std::os::unix::fs::PermissionsExt;
-        let mut env = crate::testenv::lock();
-
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::testenv::TempRoot::new();
         let dir = tmp.path();
         // Read-only root: `ipam/` cannot be created, so the lock file cannot be
         // opened — the same shape as a full disk or a lost mount.
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-        env.set("DELONIX_ROOT", dir);
         let got = allocate("10.88", "cafe0001");
 
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -892,6 +892,7 @@ mod tests {
                 eprintln!("aviso: a correr como root, os bits de permissão não se aplicam — asserção saltada");
             }
         }
+        tmp.close();
     }
 
     #[test]
@@ -1013,13 +1014,10 @@ mod tests_transactional {
     /// without `DELONIX_NET_RUNTIME_DIR` that path would resolve to this host's
     /// real infra. With no holder, `control_send` fails fast.
     fn with_roots<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::create_dir_all(dir.join("run")).unwrap();
-        env.set("DELONIX_ROOT", dir);
-        env.set("DELONIX_NET_RUNTIME_DIR", dir.join("run"));
-        f(dir)
+        let root = crate::testenv::TempRoot::with_runtime_dir();
+        let out = f(root.path());
+        root.close();
+        out
     }
 
     fn leases_of(id: &str) -> Vec<(String, String, String)> {
@@ -1145,11 +1143,9 @@ mod tests_transactional {
     #[test]
     fn reserve_refuses_when_it_cannot_lock_the_registry() {
         use std::os::unix::fs::PermissionsExt;
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = crate::testenv::TempRoot::new();
         let dir = tmp.path();
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-        env.set("DELONIX_ROOT", dir);
         let got = reserve("10.88", "fixed00000000c1", "10.88.4.4");
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         // As root the mode bits do not apply, and then `Ok` is legitimate.
@@ -1158,6 +1154,7 @@ mod tests_transactional {
             let e = got.expect_err("reserve without the lock had to refuse");
             assert!(format!("{e}").contains("same IP to two containers"), "{e}");
         }
+        tmp.close();
     }
 
     /// Finding 4: the VM DHCP hands out `<prefix>.254.10–.249` from the MAC,
