@@ -224,7 +224,7 @@ Nothing after this sprint can be trusted without it.
 | # | Item | Note |
 |---|---|---|
 | 3.1 | F0.1 — cell metric printed by `delonix provider matrix`, with a two-way ratchet | the `lang_ratchet` pattern |
-| 3.2 | F0.2 — **rebuild** the CLI execution ratchet and the coverage (§2) | the branch is lost |
+| 3.2 | F0.2 — the **instrument is done** (2026-10-07, `scripts/cli_exec_ratchet.py`, job `cli execution ratchet`): 125 of 272 leaves invoked under an assertion — 46.0 %, from a run with PASS=1104 FAIL=0 SKIP=12. What remains is the **coverage**: `systemcontainer` 0/6, `config` 0/3, `cluster` 1/16, `net` 8/36, and `build`/`plan`/`diff`/`wait`/`policy`/`hosts` at 0 | the branch is lost, so the coverage is rebuilt, not integrated |
 | 3.3 | F0.3 — register the `delonix-lab` self-hosted runner and make the nightly actually run | **owner's step**; blocks the evidence of F1 and F2 |
 | 3.4 | F0.4 — minimal test guest image (< 100 MiB) that boots on libvirt **and** Cloud Hypervisor, runs cloud-init and answers on a port | blocks every guest-side cell |
 | 3.5 | F0.5 — re-measure CRI with `critest` v1.36 against the current engine | the published 79/103 is from v0.63.1 |

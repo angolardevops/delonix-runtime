@@ -25,16 +25,27 @@
 # que «o relatório é o produto». Medido nesse dia: PASS=529 FAIL=36 SKIP=5, e
 # `echo $?` a dizer 0 — qualquer passo de CI construído por cima era decorativo.
 #
-# ## O que o número quer dizer, e o que NÃO quer (medido 2026-09-09, v3.0.0)
+# ## O que o número quer dizer, e o que NÃO quer
 #
-# A CLI tem 276 comandos e **244 folhas invocáveis** (`scripts/cli-tree.sh
-# --leaves`). Esta bateria verifica o `--help` de **244/244 — 100%**, e agora
-# por CONSTRUÇÃO: o ciclo lê o inventário do `cli-tree.sh`, em vez da lista de
+# A bateria verifica o `--help` de **todas** as folhas invocáveis, e por
+# CONSTRUÇÃO: o ciclo lê o inventário do `cli-tree.sh`, em vez da lista de
 # grupos escrita à mão que lá estava (que dizia 100% e media 167 de 244 — 68%).
 #
-# **EXECUTA 91 — 37%.** As outras 153 têm o contrato verificado e nunca são
-# corridas, concentradas em `net` (28), `image` (25), `vm` (19), `container`
-# (16), `system` (14) e `cluster` (11).
+# **Quantas EXECUTA é outro número, e desde 2026-10-07 é um portão, não um
+# comentário.** `scripts/cli_exec_ratchet.py` deriva-o do `results.jsonl` de uma
+# corrida real — uma folha conta quando um `check`/`xfail` a invocou e julgou o
+# resultado — e chumba quando desce, quando sobe sem a linha de base subir no
+# mesmo commit, e quando uma folha NOVA entra na CLI sem decisão. Para o ver:
+#
+#   scripts/cli_exec_ratchet.py --list          # por grupo
+#   scripts/cli_exec_ratchet.py --list-missing  # as que nunca correm
+#
+# Esta linha dizia «EXECUTA 91 — 37%», medido à mão a 2026-09-09 sobre a v3.0.0
+# (244 folhas). A medição de 2026-10-07 dá **125 de 272 — 46,0%**, e os dois
+# números NÃO são comparáveis: o primeiro foi contado à mão com uma regra que
+# nunca ficou escrita. É precisamente por isso que a regra passou a estar no
+# script e o número passou a ser derivado — um número guardado num comentário
+# envelhece sem ninguém dar por isso, e este envelheceu um mês.
 #
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
 # faz a cobertura parecer melhor sem uma única folha nova exercitada — e é
