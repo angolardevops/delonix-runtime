@@ -342,13 +342,10 @@ mod lease_lifecycle_tests {
 
     /// BOTH roots isolated — the teardown talks to the control socket.
     fn with_roots<T>(f: impl FnOnce() -> T) -> T {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", d);
-        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
-        f()
+        let root = crate::testenv::TempRoot::with_runtime_dir();
+        let out = f();
+        root.close();
+        out
     }
 
     /// A container on one network, connected to a second (`network connect`).
