@@ -48,7 +48,8 @@ fn import_iptables_recusa_ficheiro_ausente() {
 #[test]
 fn attach_on_ip_recusa_endereco_fora_da_rede() {
     // The only test in this binary that reads `DELONIX_ROOT`, so a per-test
-    // dir is safe even though the variable is process-wide.
+    // dir is safe even though the variable is process-wide — re-checked
+    // 2026-10-07 against `import_iptables_*`, which touch no state root.
     let d = tempfile::tempdir().unwrap();
     std::env::set_var("DELONIX_ROOT", d.path());
 
@@ -65,4 +66,16 @@ fn attach_on_ip_recusa_endereco_fora_da_rede() {
     let t = e.to_string();
     assert!(t.contains(fora), "o erro devia nomear o IP: {t}");
     assert!(t.contains("rede-teste"), "e a rede: {t}");
+
+    // A removal that fails FAILS the test: `TempDir`'s own `Drop` ignores the
+    // error, and a cleanup that reports nothing is how a stray `.tmpXXXXXX`
+    // comes to sit in `TMPDIR` (`scripts/tmp_roots_gate.py`).
+    //
+    // The pin is deliberately NOT removed afterwards — `scripts/arch_fitness.py`
+    // ratchets the number of env writes, and a second one here would be new
+    // debt for no gain: what made a dead root dangerous was production code
+    // RESOLVING it to create state, and since 2026-10-07 the one path that did
+    // (`NetworkStore`'s default-octet cache) uses the store's own root
+    // (`delonix_sdn::testenv::TempRoot` records the whole failure).
+    d.close().expect("temp root removed");
 }
