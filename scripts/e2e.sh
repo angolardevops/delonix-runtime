@@ -4449,6 +4449,62 @@ for i in $(seq 1 40); do kill -0 "$CRIPID" 2>/dev/null || break; sleep 0.2; done
 check "serve cri morre com SIGTERM" ok bash -c "! kill -0 '$CRIPID' 2>/dev/null"
 rm -f "$CRISOCK"
 
+# --- ADR-0074 D1: um hostPort que o nó não publica é RECUSADO pelo nome -------
+# A nota acima diz que não se finge um pedido gRPC aqui. Com o `crictl` presente
+# — o cliente oficial do projecto Kubernetes — já não é fingir: é o pedido real,
+# pelo mesmo transporte que o kubelet usa.
+#
+# Medido a 2026-10-07: o `slirp4netns` RECUSA SCTP no `add_hostfwd` («bad
+# arguments.proto»), e o `portmap` do CNI fala tcp/udp. Antes desta recusa o
+# sandbox era criado, a spec `5070:5070/sctp` chegava ao container e o pod morria
+# no `StartContainer` a nomear a SPEC e não a causa, em ciclo. O veredicto aqui
+# são as DUAS metades: a recusa chega, e não fica sandbox nenhum para limpar.
+if ! command -v crictl >/dev/null 2>&1; then
+  skip "CRI: hostPort SCTP recusado" "o crictl não está instalado neste host"
+else
+  CRISOCK2="/tmp/dlx-cri-sctp-$PFX.sock"
+  CRIPID2="$(e2e_serve_up cri "$CRISOCK2")"
+  if [ -z "$CRIPID2" ] || [ ! -S "$CRISOCK2" ]; then
+    skip "CRI: hostPort SCTP recusado" "o serve cri não subiu"
+  else
+    CRICFG="$OUT/pod-sctp.json"
+    cat > "$CRICFG" <<'JSON'
+{
+  "metadata": { "name": "sip", "uid": "sctp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 2, "container_port": 5070, "host_port": 5070 } ],
+  "linux": {}
+}
+JSON
+    # A recusa chega pelo transporte, e NOMEIA a porta e o transporte — um
+    # «unsupported» seco deixaria quem lê sem saber o que mudar.
+    check "CRI: um hostPort SCTP é recusado pelo crictl" fail \
+      crictl --runtime-endpoint "unix://$CRISOCK2" runp "$CRICFG"
+    check "CRI: a recusa do SCTP nomeia a porta e o transporte" ok bash -c \
+      "crictl --runtime-endpoint 'unix://$CRISOCK2' runp '$CRICFG' 2>&1 | grep -q 5070 && \
+       crictl --runtime-endpoint 'unix://$CRISOCK2' runp '$CRICFG' 2>&1 | grep -qi sctp"
+    # A metade que diz que a recusa foi ANTES de criar: o nó não tem sandbox.
+    check "CRI: um sandbox recusado não fica para trás" ok bash -c \
+      "[ \"\$(crictl --runtime-endpoint 'unix://$CRISOCK2' pods -q 2>/dev/null | grep -c .)\" = 0 ]"
+    # E o controlo: um hostPort TCP, no mesmo nó e pelo mesmo caminho, passa —
+    # senão este troço ficaria verde com a recusa a ser de tudo.
+    CRICFG_TCP="$OUT/pod-tcp.json"
+    cat > "$CRICFG_TCP" <<'JSON'
+{
+  "metadata": { "name": "web", "uid": "tcp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 0, "container_port": 80, "host_port": 51091 } ],
+  "linux": {}
+}
+JSON
+    CRIPOD="$(crictl --runtime-endpoint "unix://$CRISOCK2" runp "$CRICFG_TCP" 2>/dev/null || true)"
+    check "CRI: um hostPort TCP continua a ser aceite (controlo)" ok bash -c \
+      "[ -n '$CRIPOD' ]"
+    [ -n "$CRIPOD" ] && crictl --runtime-endpoint "unix://$CRISOCK2" rmp -f "$CRIPOD" >/dev/null 2>&1
+  fi
+  [ -n "${CRIPID2:-}" ] && kill "$CRIPID2" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID2:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK2"
+fi
+
 # `delonix serve cri` executa o binário próprio do CRI (ADR-0040 D2.4 emendado): o
 # utilizador só conhece `delonix`, e o servidor não vive dentro dele. O `exec`
 # mantém o pid, por isso é o `delonix-cri` que se vê ao fim do socket.

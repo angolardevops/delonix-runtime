@@ -15,7 +15,9 @@
 
 use delonix_cri::cri::runtime_service_client::RuntimeServiceClient;
 use delonix_cri::cri::{
-    ListMetricDescriptorsRequest, ListPodSandboxMetricsRequest, StatusRequest, VersionRequest,
+    ListMetricDescriptorsRequest, ListPodSandboxMetricsRequest, ListPodSandboxRequest,
+    PodSandboxConfig, PodSandboxMetadata, PortMapping, Protocol, Protocol as Proto,
+    RunPodSandboxRequest, StatusRequest, VersionRequest,
 };
 
 /// A SHORT socket path: `sun_path` is 108 bytes and an agent session's
@@ -59,21 +61,7 @@ async fn o_status_chega_pelo_transporte_grpc_a_serio() {
     );
 
     // Um socket que ACEITA não é um servidor que RESPONDE — daí a chamada real.
-    let s2 = sock.clone();
-    let canal = tonic::transport::Endpoint::try_from("http://[::]:50051")
-        .unwrap()
-        .connect_with_connector(tower::service_fn(move |_| {
-            let p = s2.clone();
-            async move {
-                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
-                    tokio::net::UnixStream::connect(p).await?,
-                ))
-            }
-        }))
-        .await
-        .expect("ligar ao socket unix do servidor");
-
-    let mut cli = RuntimeServiceClient::new(canal);
+    let mut cli = connect(&sock).await;
 
     let v = cli
         .version(VersionRequest::default())
@@ -150,4 +138,108 @@ async fn o_status_chega_pelo_transporte_grpc_a_serio() {
     // O servidor não tem paragem limpa (é um `serve_blocking`); o processo de
     // teste termina e leva-o. Não se faz `join`, que penduraria.
     drop(servidor);
+}
+
+/// The connector the two tests share: a socket that ACCEPTS is not a server
+/// that ANSWERS, so every assertion here goes over a real channel.
+async fn connect(sock: &str) -> RuntimeServiceClient<tonic::transport::Channel> {
+    let s = sock.to_owned();
+    let canal = tonic::transport::Endpoint::try_from("http://[::]:50051")
+        .unwrap()
+        .connect_with_connector(tower::service_fn(move |_| {
+            let p = s.clone();
+            async move {
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                    tokio::net::UnixStream::connect(p).await?,
+                ))
+            }
+        }))
+        .await
+        .expect("connecting to the server's unix socket");
+    RuntimeServiceClient::new(canal)
+}
+
+/// ADR-0074 D1: a `hostPort` this node cannot publish is refused from
+/// `RunPodSandbox`, over the kubelet's own transport — and **nothing is left
+/// behind**, which is the half a unit test cannot prove.
+///
+/// Before this, the spec `8080:80/sctp` was stored, the sandbox was created, and
+/// the pod only died at `StartContainer` with `invalid protocol in
+/// '8080:80/sctp'`: late, after the sandbox existed, naming the spec instead of
+/// the cause, and retried by the kubelet forever. The empty-state assertion at
+/// the end is what says the refusal happens BEFORE any creation.
+#[tokio::test]
+async fn an_sctp_host_port_is_refused_over_grpc_and_leaves_nothing_behind() {
+    let (_sock_dir, sock) = short_sock();
+    let base_dir = tempfile::tempdir().unwrap();
+    let base = base_dir.path().to_path_buf();
+
+    let s = sock.clone();
+    let b = base.clone();
+    let server = std::thread::spawn(move || {
+        let _ = delonix_cri::serve_blocking(
+            b,
+            &format!("unix://{s}"),
+            delonix_cri::CapCeiling::unlimited(),
+        );
+    });
+    for _ in 0..100 {
+        if std::path::Path::new(&sock).exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        std::path::Path::new(&sock).exists(),
+        "the server never created the socket"
+    );
+
+    let mut cli = connect(&sock).await;
+
+    let cfg = |proto: Protocol, host_port: i32| PodSandboxConfig {
+        metadata: Some(PodSandboxMetadata {
+            name: "sip".into(),
+            uid: "u1".into(),
+            namespace: "default".into(),
+            attempt: 0,
+        }),
+        port_mappings: vec![PortMapping {
+            protocol: proto as i32,
+            container_port: 5070,
+            host_port,
+            host_ip: String::new(),
+        }],
+        ..Default::default()
+    };
+
+    let err = cli
+        .run_pod_sandbox(RunPodSandboxRequest {
+            config: Some(cfg(Proto::Sctp, 5070)),
+            runtime_handler: String::new(),
+        })
+        .await
+        .expect_err("an SCTP hostPort cannot be published by this node");
+    assert_eq!(
+        err.code(),
+        tonic::Code::FailedPrecondition,
+        "the class is what the kubelet turns into a pod event: {err:?}"
+    );
+    assert!(err.message().contains("5070"), "{}", err.message());
+    assert!(err.message().contains("sctp"), "{}", err.message());
+
+    // The half a unit test cannot reach: the refusal came BEFORE any creation,
+    // so the node has no sandbox to clean up.
+    let sandboxes = cli
+        .list_pod_sandbox(ListPodSandboxRequest { filter: None })
+        .await
+        .expect("ListPodSandbox over the real transport")
+        .into_inner()
+        .items;
+    assert!(
+        sandboxes.is_empty(),
+        "a refused sandbox must not exist: {sandboxes:?}"
+    );
+
+    drop(cli);
+    drop(server);
 }

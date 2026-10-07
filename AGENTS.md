@@ -3644,6 +3644,65 @@ static pod que nunca passou pelo API server.
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
   anterior a este trabalho).
 
+## Um `hostPort` que o nó não publica é RECUSADO pelo nome (ADR-0074, 2026-10-07)
+
+Encontrado a validar a resposta a «o `net ingress publish` liga em 0.0.0.0 ou só em loopback?».
+O `cri_port_specs` mapeava `Protocol::Sctp` para a string `"sctp"` e um número de protocolo
+desconhecido para `"tcp"` — ou seja **tinha opinião própria sobre o que o motor consegue
+publicar**, e estava errado nas duas.
+
+**Três medições, cada uma contra a coisa e não contra o que se lê:**
+
+1. **O dataplane rootless não sabe SCTP.** O `slirp4netns` 1.2.1 (libslirp 4.7.0), sondado pelo
+   api-socket contra um netns descartável: `tcp` e `udp` devolvem um id, `sctp` devolve
+   `bad request: add_hostfwd: bad arguments.proto`. É o DATAPLANE, não o parser. O `portmap` do
+   CNI também só fala tcp/udp, logo nenhum caminho publica SCTP.
+2. **A spec chegava mesmo ao container** (`o.ports = sb.port_mappings`), onde o
+   `parse_publish_addr` a recusava — logo o pod morria no `StartContainer`, **depois** de o
+   sandbox existir, com um erro que nomeia a SPEC (`invalid protocol in '8080:80/sctp'`) e não a
+   causa, num manifesto que é Kubernetes legal, e retentado pelo kubelet para sempre numa
+   condição que nunca pode limpar.
+3. **`hostNetwork` é mesmo a rede do host** — um container `--net host` reporta o MESMO inode
+   `net:[...]` do host e vê as interfaces do nó. Liga as portas do nó ele próprio, qualquer que
+   seja o transporte, e é por isso que recusar ali partiria um caso que FUNCIONA. É também a
+   razão de os mapeamentos não lhe serem entregues (a guarda do `run_opts_of`).
+
+A recusa vive no `RunPodSandbox`, ao lado da do `cgroup_parent` e pela razão idêntica: um
+`failed_precondition` põe o pod em `Pending` com a razão como evento, que é onde o operador
+olha. **Não um drop em silêncio** — um `hostPort` declarado e não publicado deixa o pod
+`Running` com um serviço que não responde, a família que este motor já teve de remover três
+vezes (`--network-alias`, `--security-opt seccomp=`, `-v …:z`); e um aviso iria para o journal
+do `delonix-cri`, enquanto quem pode agir lê `kubectl get pod`.
+
+**O transporte pergunta-se ao `delonix_sdn::Proto`**, a autoridade única do que o motor publica.
+Um número fora do enum do CRI é recusado PELO NÚMERO em vez de adivinhado — era um palpite sobre
+o único campo cujo trabalho é dizer o que o tráfego é.
+
+**O raio é estreito, e é isso que torna a recusa barata**: um `containerPort` sem `hostPort`
+continua a ser DESCARTADO (`m.host_port > 0`), que é a semântica correcta do k8s (é informativo)
+e é a forma que um **Service** SCTP usa — vai por kube-proxy, nunca por `hostPort`. Logo os
+serviços SCTP ficam intocados, e nenhum pod que funcione hoje passa a falhar: essa combinação
+já falhava, mais tarde e pior.
+
+**FICA ABERTO, e é a parte maior**: em modo root/CNI o `hostPort` **não é publicado para
+protocolo nenhum** — a guarda `if !sb.host_network && sb.cni_netns.is_empty()` — e nada o diz.
+Silêncio é pior que uma mensagem má, por isso é a metade mais danosa das duas. A resposta certa
+é implementar (passar os `portMappings` ao `portmap` como `runtimeConfig`, como o containerd
+faz), não recusar: recusar sem implementar parte pods que hoje pelo menos correm. É a decisão D3
+do ADR-0074, deliberadamente fora deste PR.
+
+**Prova**: 4 testes unitários, um round-trip gRPC real pelo socket unix que também afirma que
+**não fica sandbox nenhum** (a metade que diz que a recusa foi antes de criar), e um gate na
+bateria com o `crictl` — o cliente oficial do k8s — com controlo TCP ao lado. Os três testes que
+importam chumbam com a correcção revertida (os outros dois são controlos e mantêm-se verdes, de
+propósito). Ao vivo, raiz isolada: `crictl runp` com `hostPort` SCTP → `rc=1`,
+`code = FailedPrecondition`, a mensagem a nomear porta, transporte e as duas saídas; `crictl
+pods` vazio; e um `hostPort` TCP no mesmo nó criado `Ready`.
+
+**Nota do próprio auditor**: o comentário da bateria dizia que ali não se finge um pedido gRPC
+«que não sabemos fazer aqui» — e o `crictl` estava instalado. O gate novo fecha esse gap de
+passagem.
+
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
 Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM

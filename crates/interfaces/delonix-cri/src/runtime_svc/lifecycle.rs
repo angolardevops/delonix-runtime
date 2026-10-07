@@ -645,6 +645,24 @@ pub fn run_pod_sandbox(
         .as_ref()
         .map(|l| l.sysctls.iter().map(|(k, v)| format!("{k}={v}")).collect())
         .unwrap_or_default();
+    // Refused FIRST, for the same reason as the cgroup parent above: a hostPort
+    // this node cannot publish is a refusal the kubelet shows on the pod, not a
+    // sandbox left behind serving a port that will never answer. See
+    // [`publishable_port_specs`] for what cannot be published and why.
+    //
+    // Under hostNetwork there is nothing to publish, so nothing to refuse — and
+    // refusing there would break a case that WORKS. Measured 2026-10-07: a
+    // `--net host` container is in the host's REAL netns (same `net:[...]` inode,
+    // and it sees the node's own interfaces), so it binds the node's ports
+    // itself, whatever the transport. Which is also why the mappings are not
+    // handed to it at all (see `run_opts_of`'s guard) — storing specs nothing
+    // will read, and that the engine could not parse, is a landmine for whoever
+    // removes that guard later.
+    let port_mappings = if host_network {
+        Vec::new()
+    } else {
+        publishable_port_specs(&cfg.port_mappings)?
+    };
     // REAL Delonix pod: an infra container (`pod-cri-<id>`) holds the shared
     // netns ("pause"-style), which the sandbox's containers then join via
     // `--pod`. That is what gives pod networking and namespace sharing.
@@ -782,7 +800,7 @@ pub fn run_pod_sandbox(
             .as_ref()
             .map(|d| d.options.clone())
             .unwrap_or_default(),
-        port_mappings: cri_port_specs(&cfg.port_mappings),
+        port_mappings,
         cni_ip,
         cni_netns,
         cni_conf,
@@ -2437,30 +2455,75 @@ fn cri_mount_specs(mounts: &[Mount]) -> Result<Vec<String>, Status> {
     Ok(out)
 }
 
-/// Translates the CRI's `PortMapping` list into `-p` specs.
+/// Translates the CRI's `PortMapping` list into `-p` specs, REFUSING any mapping
+/// this node cannot publish.
 ///
 /// A mapping with no `host_port` is DROPPED, not published on a random port:
 /// the kubelet sends `container_port` alone for ports that are merely declared
 /// (a `containerPort` with no `hostPort`), and publishing those would expose on
-/// the node every port a pod ever named.
-fn cri_port_specs(mappings: &[PortMapping]) -> Vec<String> {
-    mappings
-        .iter()
-        .filter(|m| m.host_port > 0 && m.container_port > 0)
-        .map(|m| {
-            let proto = match Protocol::try_from(m.protocol) {
-                Ok(Protocol::Udp) => "udp",
-                Ok(Protocol::Sctp) => "sctp",
-                _ => "tcp",
-            };
-            // `host_ip` is deliberately left out of the spec: the engine's
-            // publish already concentrates the bind address decision in one
-            // place (spec > `DELONIX_PUBLISH_ADDR` > loopback), and a CRI
-            // mapping that names an address the node does not have would fail
-            // at bind time with a confusing error.
-            format!("{}:{}/{proto}", m.host_port, m.container_port)
-        })
-        .collect()
+/// the node every port a pod ever named. That drop is what keeps an SCTP
+/// `containerPort` — the shape an SCTP *Service* uses, since it goes through
+/// kube-proxy and not through a hostPort — untouched by the refusal below.
+///
+/// **The transport is asked of [`delonix_sdn::Proto`], not decided here.** This
+/// used to map `Protocol::Sctp` to the string `"sctp"` and an unknown protocol
+/// number to `"tcp"`, i.e. it held a second opinion about what the engine can
+/// publish — and it was wrong on both counts. Measured 2026-10-07:
+///
+/// * `slirp4netns` 1.2.1 (libslirp 4.7.0) REFUSES SCTP outright —
+///   `add_hostfwd` with `"proto":"sctp"` answers `bad request:
+///   add_hostfwd: bad arguments.proto`, where tcp and udp both return an id. So
+///   it is the DATAPLANE that cannot carry it, not the spec parser.
+/// * The spec reached the container anyway (`o.ports = sb.port_mappings`), where
+///   `parse_publish_addr` refused it — so the pod died at `StartContainer`, AFTER
+///   the sandbox existed, with an error naming the SPEC (`invalid protocol in
+///   '8080:80/sctp'`) and not the cause, retried by the kubelet forever on a
+///   condition that can never clear.
+///
+/// Refusing here, from `RunPodSandbox`, is the engine validating its own
+/// contract instead of trusting a caller to not ask for what it cannot do. A
+/// `failed_precondition` puts the pod in `Pending` with the reason as an event,
+/// which is where an operator looks; a silent drop would leave the pod `Running`
+/// with a port that never answers, which is the failure class this engine has
+/// already had to remove three times (`--network-alias`, `--security-opt
+/// seccomp=`, `-v …:z`).
+fn publishable_port_specs(mappings: &[PortMapping]) -> Result<Vec<String>, Status> {
+    let mut specs = Vec::new();
+    for m in mappings {
+        if m.host_port <= 0 || m.container_port <= 0 {
+            continue;
+        }
+        let name = match Protocol::try_from(m.protocol) {
+            Ok(Protocol::Tcp) => "tcp".to_string(),
+            Ok(Protocol::Udp) => "udp".to_string(),
+            Ok(Protocol::Sctp) => "sctp".to_string(),
+            // A number outside the CRI's own enum. It used to become `tcp` — a
+            // guess, about the one field whose whole job is to say what the
+            // traffic is. Named, and refused.
+            Err(_) => format!("protocol {}", m.protocol),
+        };
+        let proto = delonix_sdn::Proto::parse(&name).map_err(|_| {
+            Status::failed_precondition(format!(
+                "cannot publish hostPort {}: this node has no {} publish path \
+                 (the rootless datapath's `add_hostfwd` takes tcp or udp, and the \
+                 CNI `portmap` plugin the same) — drop the hostPort and reach the \
+                 pod through a Service, or run the pod with hostNetwork, where it \
+                 binds the node's ports itself",
+                m.host_port, name
+            ))
+        })?;
+        let proto = match proto {
+            delonix_sdn::Proto::Tcp => "tcp",
+            delonix_sdn::Proto::Udp => "udp",
+        };
+        // `host_ip` is deliberately left out of the spec: the engine's
+        // publish already concentrates the bind address decision in one
+        // place (spec > `DELONIX_PUBLISH_ADDR` > loopback), and a CRI
+        // mapping that names an address the node does not have would fail
+        // at bind time with a confusing error.
+        specs.push(format!("{}:{}/{proto}", m.host_port, m.container_port));
+    }
+    Ok(specs)
 }
 
 #[cfg(test)]
@@ -2683,6 +2746,86 @@ mod tests {
             "a privileged container gets no masked paths"
         );
         assert!(o.privileged, "`privileged: true` has to REACH the engine");
+    }
+
+    /// An SCTP `hostPort` is refused, by name, with the class the kubelet turns
+    /// into a pod event. It used to be emitted as the string `"sctp"`, reach the
+    /// container, and die at `StartContainer` with `invalid protocol in
+    /// '8080:80/sctp'` — late, after the sandbox existed, naming the spec instead
+    /// of the cause. See [`super::publishable_port_specs`] for the measurement
+    /// that says the dataplane, and not the parser, is what cannot carry it.
+    #[test]
+    fn an_sctp_host_port_is_refused_by_name() {
+        let m = PortMapping {
+            protocol: Protocol::Sctp as i32,
+            container_port: 80,
+            host_port: 8080,
+            host_ip: String::new(),
+        };
+        let err = super::publishable_port_specs(&[m]).expect_err("sctp cannot be published");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        let msg = err.message();
+        // The port, the transport, and a way out — not a bare "unsupported".
+        assert!(msg.contains("8080"), "{msg}");
+        assert!(msg.contains("sctp"), "{msg}");
+        assert!(
+            msg.contains("Service") || msg.contains("hostNetwork"),
+            "the refusal has to say what to do instead: {msg}"
+        );
+    }
+
+    /// The blast radius of the refusal above, and what makes it cheap: an SCTP
+    /// `containerPort` with NO `hostPort` is still DROPPED, not refused. That is
+    /// correct Kubernetes semantics (it is informational) and it is the shape an
+    /// SCTP *Service* uses — it goes through kube-proxy, never through a
+    /// hostPort. Refusing it would break every SCTP service on the node.
+    #[test]
+    fn an_sctp_container_port_without_a_host_port_is_still_dropped() {
+        let m = PortMapping {
+            protocol: Protocol::Sctp as i32,
+            container_port: 80,
+            host_port: 0,
+            host_ip: String::new(),
+        };
+        assert_eq!(
+            super::publishable_port_specs(&[m])
+                .expect("a bare containerPort is dropped, not refused"),
+            Vec::<String>::new()
+        );
+    }
+
+    /// tcp and udp keep translating exactly as they did, and the `host_ip` stays
+    /// out of the spec on purpose (the bind address is decided in one place).
+    #[test]
+    fn tcp_and_udp_translate_unchanged() {
+        let mk = |proto: Protocol, hp: i32, cp: i32| PortMapping {
+            protocol: proto as i32,
+            container_port: cp,
+            host_port: hp,
+            host_ip: "10.0.0.1".into(),
+        };
+        let specs = super::publishable_port_specs(&[
+            mk(Protocol::Tcp, 8080, 80),
+            mk(Protocol::Udp, 5353, 53),
+        ])
+        .expect("tcp and udp are publishable");
+        assert_eq!(specs, vec!["8080:80/tcp", "5353:53/udp"]);
+    }
+
+    /// A protocol number outside the CRI's own enum used to become `"tcp"` — a
+    /// guess about the one field whose whole job is to say what the traffic is.
+    /// Named by number, and refused.
+    #[test]
+    fn an_unknown_protocol_number_is_refused_not_published_as_tcp() {
+        let m = PortMapping {
+            protocol: 99,
+            container_port: 80,
+            host_port: 8080,
+            host_ip: String::new(),
+        };
+        let err = super::publishable_port_specs(&[m]).expect_err("99 is not a protocol");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("99"), "{}", err.message());
     }
 
     #[test]
