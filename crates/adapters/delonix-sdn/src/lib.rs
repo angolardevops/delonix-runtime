@@ -585,6 +585,63 @@ pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
         .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 
+/// The transport a published port speaks. The two host-side probes need it:
+/// `tcp/5070` and `udp/5070` are independent bindings, and asking about one tells
+/// you nothing about the other — a UDP publish onto a host port whose UDP side is
+/// already taken sailed through a TCP-only busy check and only failed later, in the
+/// slirp, with its opaque `add_hostfwd` JSON.
+///
+/// An enum and not the `&str` the specs carry, on purpose: `"sctp"` (which the CRI
+/// can emit) and a typo must be REFUSED at this boundary, not silently probed as
+/// TCP. Everything upstream already validated the string, so the conversion is a
+/// `?` and the fail-closed edge stays visible at each call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proto {
+    Tcp,
+    Udp,
+}
+
+impl Proto {
+    /// The `tcp`/`udp` of a publish spec. Anything else is an error — see the
+    /// type's doc comment for why there is no default.
+    pub fn parse(proto: &str) -> Result<Self> {
+        match proto {
+            "tcp" => Ok(Proto::Tcp),
+            "udp" => Ok(Proto::Udp),
+            other => Err(Error::InvalidPublishSpec(format!(
+                "unknown protocol '{other}' (tcp|udp)"
+            ))),
+        }
+    }
+}
+
+/// A publish spec with its host bind address made EXPLICIT: resolves it through
+/// [`publish_bind_addr`] and writes it into the spec, so the canonical
+/// `addr:hostPort:contPort/proto` is what gets stored and compared.
+///
+/// This exists because the record used to keep the spec exactly as typed, which
+/// left the bind address as state that was USED at publish time and never
+/// PERSISTED — the trap this codebase has paid for four times already (`-v`, `-p`
+/// on a custom network, extra networks, `Container.pod`). Measured 2026-10-07 on
+/// an isolated root: `DELONIX_PUBLISH_ADDR=0.0.0.0 … publish web 51072:80` bound
+/// `0.0.0.0`, stored the string `51072:80`, and the next `container start` — which
+/// is what a `net boot enable` unit runs, with no environment of its own — brought
+/// it back on `127.0.0.1`. Silently, rc 0, with `net ingress ls` printing the same
+/// row before and after. The inverse measured too, and it is the one that matters:
+/// a port published deliberately WITHOUT an address (loopback only) came back on
+/// `0.0.0.0`, exposed to the whole LAN, because the operator's shell happened to
+/// export the variable — and the engine's own `vm reach` hint is what teaches them
+/// to export it.
+///
+/// Idempotent: a spec that already names an address keeps it (the spec always wins
+/// over the environment), so re-normalizing on the `--net <network>` re-exec's
+/// second pass, or on a record written by an earlier call, changes nothing.
+pub fn normalize_publish_spec(spec: &str) -> Result<String> {
+    let (addr, host_port, cont_port, proto) = parse_publish_addr(spec)?;
+    let bind = publish_bind_addr(addr.as_deref());
+    Ok(format!("{bind}:{host_port}:{cont_port}/{proto}"))
+}
+
 /// Can this process bind `port` on `addr`, as far as PERMISSION goes? Ports below
 /// `net.ipv4.ip_unprivileged_port_start` (1024 by default) need `CAP_NET_BIND_SERVICE`,
 /// which a rootless engine does not have — and the bind that publishes a port happens
@@ -596,12 +653,20 @@ pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
 /// untouched), and only the kernel knows for sure. `EADDRINUSE` is deliberately NOT a
 /// failure here — a busy port is a different diagnosis, with its own error that names
 /// the owner, and this check must not steal it.
-pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
-    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+pub fn can_bind_host_port(addr: &str, port: u16, proto: Proto) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
     let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
-    match TcpListener::bind(SocketAddrV4::new(ip, port)) {
-        Ok(_) => true,
-        Err(e) => !matches!(e.kind(), std::io::ErrorKind::PermissionDenied),
+    let sa = SocketAddrV4::new(ip, port);
+    // The privilege threshold is the same for both transports, but the probe has to
+    // speak the one being published: a TCP probe for a UDP publish answers about a
+    // binding nobody asked for.
+    let err = match proto {
+        Proto::Tcp => TcpListener::bind(sa).err(),
+        Proto::Udp => UdpSocket::bind(sa).err(),
+    };
+    match err {
+        None => true,
+        Some(e) => !matches!(e.kind(), std::io::ErrorKind::PermissionDenied),
     }
 }
 
@@ -620,13 +685,18 @@ pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
 /// A REAL bind, not a `/proc/net/tcp` scan: only the kernel knows for sure, and a
 /// scan would miss a listener bound to a DIFFERENT address on the same port (e.g.
 /// `0.0.0.0` vs `127.0.0.1`) that would still collide with this exact bind.
-pub fn host_port_busy(addr: &str, port: u16) -> bool {
-    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+pub fn host_port_busy(addr: &str, port: u16, proto: Proto) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
     let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
-    matches!(
-        TcpListener::bind(SocketAddrV4::new(ip, port)),
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse
-    )
+    let sa = SocketAddrV4::new(ip, port);
+    // Per-transport, for the reason in [`Proto`]: a free TCP port says nothing
+    // about the UDP side of the same number, and a UDP publish used to be checked
+    // against TCP — blind by construction.
+    let err = match proto {
+        Proto::Tcp => TcpListener::bind(sa).err(),
+        Proto::Udp => UdpSocket::bind(sa).err(),
+    };
+    matches!(err, Some(e) if e.kind() == std::io::ErrorKind::AddrInUse)
 }
 
 /// Best-effort name of whatever holds `port` on the host right now (any protocol,
@@ -2458,24 +2528,40 @@ pub fn slirp_add_hostfwd(
                     // 1024, so name it here instead of leaving raw JSON as the only
                     // clue — the callers that don't preflight (ingress, compose,
                     // `container update --publish-add`, the docker API) all land here.
+                    // An unparseable proto cannot reach here (the specs are validated
+                    // upstream), and if it ever did the probes are skipped rather than
+                    // guessed at — the hint would just be absent, never wrong.
+                    let probe = Proto::parse(proto).ok();
                     let hint = match host_port.parse::<u16>() {
-                        Ok(p) if !can_bind_host_port(&host_addr, p) => format!(
-                            " — binding port {p} on the host needs privilege \
+                        Ok(p)
+                            if probe
+                                .map(|pr| !can_bind_host_port(&host_addr, p, pr))
+                                .unwrap_or(false) =>
+                        {
+                            format!(
+                                " — binding port {p} on the host needs privilege \
                              (rootless cannot publish below \
                              net.ipv4.ip_unprivileged_port_start); publish on a higher \
                              port instead, e.g. -p 8080:{guest_port}"
-                        ),
+                            )
+                        }
                         // The callers that land here WITHOUT the `container run`
                         // preflight (ingress hot-publish, `container update
                         // --publish-add`) never ruled out a host process delonix
                         // doesn't track holding the port — name it if we can,
                         // same as the preflight does.
-                        Ok(p) if host_port_busy(&host_addr, p) => format!(
-                            " — port {p} is already in use on the host by {} \
-                             (not a delonix container); publish on another port instead",
-                            host_port_owner_process(p)
-                                .unwrap_or_else(|| "another process".to_string())
-                        ),
+                        Ok(p)
+                            if probe
+                                .map(|pr| host_port_busy(&host_addr, p, pr))
+                                .unwrap_or(false) =>
+                        {
+                            format!(
+                                " — port {p}/{proto} is already in use on the host by {} \
+                                 (not a delonix container); publish on another port instead",
+                                host_port_owner_process(p)
+                                    .unwrap_or_else(|| "another process".to_string())
+                            )
+                        }
                         _ => String::new(),
                     };
                     return Err(Error::Command {
@@ -3201,14 +3287,14 @@ mod tests {
     /// shadow it with a "needs privilege" that would be plain wrong.
     #[test]
     fn can_bind_host_port_separa_privilegio_de_porta_ocupada() {
-        use super::can_bind_host_port;
+        use super::{can_bind_host_port, Proto};
         use std::net::TcpListener;
         let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
         let busy = held.local_addr().unwrap().port();
-        assert!(can_bind_host_port("127.0.0.1", busy));
+        assert!(can_bind_host_port("127.0.0.1", busy, Proto::Tcp));
         // Unprivileged and free.
         drop(held);
-        assert!(can_bind_host_port("127.0.0.1", busy));
+        assert!(can_bind_host_port("127.0.0.1", busy, Proto::Tcp));
         // A privileged port is only refused when we really lack the privilege — as
         // root (or with the sysctl lowered) the answer legitimately flips, so the
         // assertion is conditioned on what the kernel actually allows here.
@@ -3219,7 +3305,8 @@ mod tests {
             .and_then(|s| s.trim().parse::<u16>().ok())
             .unwrap_or(1024);
         if !root && low > 80 {
-            assert!(!can_bind_host_port("127.0.0.1", 80));
+            assert!(!can_bind_host_port("127.0.0.1", 80, Proto::Tcp));
+            assert!(!can_bind_host_port("127.0.0.1", 80, Proto::Udp));
         }
     }
 
@@ -3231,11 +3318,11 @@ mod tests {
     /// blew up deep inside the slirp handshake.
     #[test]
     fn host_port_busy_flags_eaddrinuse_only() {
-        use super::host_port_busy;
+        use super::{host_port_busy, Proto};
         use std::net::TcpListener;
         let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
         let busy = held.local_addr().unwrap().port();
-        assert!(host_port_busy("127.0.0.1", busy));
+        assert!(host_port_busy("127.0.0.1", busy, Proto::Tcp));
         drop(held);
         // Once released, an EPHEMERAL port can be taken by any other test running in
         // parallel before this line reads it — measured, 1 run in 12 of the
@@ -3246,9 +3333,87 @@ mod tests {
             let l = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
             let port = l.local_addr().unwrap().port();
             drop(l);
-            !host_port_busy("127.0.0.1", port)
+            !host_port_busy("127.0.0.1", port, Proto::Tcp)
         });
         assert!(freed_reads_free, "a released port kept reading busy");
+    }
+
+    /// A UDP publish has to be probed against UDP. Both checks used to open a
+    /// `TcpListener` whatever the spec said, so a host port whose UDP side was
+    /// taken read as FREE and the conflict only surfaced inside the slirp, as
+    /// opaque `add_hostfwd` JSON. The two transports are independent bindings:
+    /// the same number is busy on one and free on the other at the same time,
+    /// and that is what this asserts.
+    #[test]
+    fn the_busy_probe_answers_per_transport() {
+        use super::{host_port_busy, Proto};
+        use std::net::UdpSocket;
+        let held = UdpSocket::bind("127.0.0.1:0").expect("bind an ephemeral udp port");
+        let busy = held.local_addr().unwrap().port();
+        // The UDP side is held by us, so UDP is busy...
+        assert!(
+            host_port_busy("127.0.0.1", busy, Proto::Udp),
+            "a held udp port must read busy"
+        );
+        // ...and asking about TCP on the SAME number answers about TCP. It is
+        // free unless a neighbour happens to hold it, so a busy answer here is
+        // not the function's fault — asked of a few numbers, as the sibling
+        // test does, so the assertion is about the function and not a race.
+        let tcp_side_is_independent = (0..5).any(|_| {
+            let u = UdpSocket::bind("127.0.0.1:0").expect("bind an ephemeral udp port");
+            let port = u.local_addr().unwrap().port();
+            host_port_busy("127.0.0.1", port, Proto::Udp)
+                && !host_port_busy("127.0.0.1", port, Proto::Tcp)
+        });
+        assert!(
+            tcp_side_is_independent,
+            "udp busy never coincided with tcp free"
+        );
+    }
+
+    /// `sctp` (which the CRI can emit) and a typo are REFUSED here, never probed
+    /// as TCP — the whole point of the enum. See [`super::Proto`].
+    #[test]
+    fn an_unknown_transport_is_refused_not_assumed_tcp() {
+        use super::Proto;
+        assert_eq!(Proto::parse("tcp").unwrap(), Proto::Tcp);
+        assert_eq!(Proto::parse("udp").unwrap(), Proto::Udp);
+        for bad in ["sctp", "TCP", "", "tcp6"] {
+            assert!(Proto::parse(bad).is_err(), "{bad} should be refused");
+        }
+    }
+
+    /// The bind address becomes part of the stored spec, so it survives a
+    /// `start`. Before this the record kept the spec as typed and the address was
+    /// re-resolved from the environment on every publish — see
+    /// [`super::normalize_publish_spec`] for the two measured directions.
+    #[test]
+    fn the_normalized_spec_carries_the_resolved_bind_address() {
+        use super::normalize_publish_spec as norm;
+        // An address in the spec always wins, and is kept verbatim.
+        assert_eq!(norm("0.0.0.0:8080:80").unwrap(), "0.0.0.0:8080:80/tcp");
+        assert_eq!(
+            norm("192.168.1.10:5070:5070/udp").unwrap(),
+            "192.168.1.10:5070:5070/udp"
+        );
+        // Idempotent: the `--net <network>` re-exec normalizes a second time, and
+        // so does any record written by an earlier call.
+        let once = norm("0.0.0.0:8080:80/tcp").unwrap();
+        assert_eq!(norm(&once).unwrap(), once);
+        // Without an address, and without the env var, the safe default is what
+        // gets WRITTEN DOWN — which is the whole fix: `8080:80` no longer means
+        // "whatever the environment says at start time".
+        if std::env::var_os("DELONIX_PUBLISH_ADDR").is_none() {
+            assert_eq!(norm("8080:80").unwrap(), "127.0.0.1:8080:80/tcp");
+            // A bare port is host and container alike (the `publish web 8443`
+            // form the help documents), and it, too, gets its address written.
+            assert_eq!(norm("8443").unwrap(), "127.0.0.1:8443:8443/tcp");
+        }
+        // A spec the parser refuses is still refused — normalizing is not a
+        // place to become lenient.
+        assert!(norm("localhost:8080:80").is_err());
+        assert!(norm("0:80").is_err());
+        assert!(norm("8000-8010:80").is_err());
     }
 
     /// Best-effort resolution: while WE hold the port ourselves (this test

@@ -99,7 +99,12 @@ pub enum IngressCmd {
         /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
-        /// `hostPort:containerPort[/tcp|udp]` or just `port`.
+        /// `[hostIp:]hostPort:containerPort[/tcp|udp]` or just `port`.
+        /// SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only —
+        /// reachable from the host itself, NOT from another machine. Name the address to
+        /// widen it: `0.0.0.0:5070:5070/udp` (every interface), `192.168.1.10:8080:80`
+        /// (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`).
+        /// The resolved address is RECORDED, so it survives a `container start`.
         spec: String,
     },
     /// Remove a published host port.

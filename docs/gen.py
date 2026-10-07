@@ -1054,7 +1054,10 @@ a política por omissão, e os <em>publishes</em> DNAT. Só actua em containers 
             "allow": {"examples": [("Deixar entrar Postgres só da própria SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16")]},
             "deny": {"examples": [("Bloquear uma porta específica", "delonix net ingress deny web tcp/22")]},
             "policy": {"examples": [("Default-deny (allowlist)", "delonix net ingress policy db deny")]},
-            "publish": {"examples": [("Publicar uma porta pelo ingress (DNAT)", "delonix net ingress publish web 8080:80")]},
+            "publish": {"examples": [
+                ("Publicar uma porta pelo ingress (DNAT) — sem endereço liga só a 127.0.0.1", "delonix net ingress publish web 8080:80"),
+                ("Alcançável de outras máquinas: o endereço vai no spec e fica registado", "delonix net ingress publish sip 0.0.0.0:5070:5070/udp"),
+            ]},
             "ls": {"examples": [("Ver regras + publishes", "delonix net ingress ls db")]},
         },
     },
@@ -2992,7 +2995,10 @@ EXAMPLES_EN = {
     ("ingress", "allow"): ["Only let Postgres in from the SDN itself"],
     ("ingress", "deny"): ["Block a specific port"],
     ("ingress", "policy"): ["Default-deny (allowlist)"],
-    ("ingress", "publish"): ["Publish a port via ingress (DNAT)"],
+    ("ingress", "publish"): [
+        "Publish a port via ingress (DNAT) — with no address it binds to 127.0.0.1 only",
+        "Reachable from other machines: the address goes in the spec, and is recorded",
+    ],
     ("ingress", "ls"): ["See rules + publishes"],
     ("egress", "clear"): ["Clear that container's outbound rules"],
     ("egress", "rm"): ["Remove ONE outbound rule"],
@@ -3751,7 +3757,7 @@ delegação de cgroup v2 dedicada que um systemd aninhado (kindest/node) exige.<
 <div class="arch">
 <div class="row">
 <div class="box mut" style="flex:1"><b>host</b>portas publicadas (127.0.0.1 por omissão;
-<code>DELONIX_PUBLISH_ADDR</code> para expor)</div>
+nomeia o endereço no spec para expor — <code>0.0.0.0:8080:80</code>)</div>
 <div class="box" style="flex:1"><b>holder netns (1 por utilizador)</b>bridge delonix0 ·
 slirp4netns único · nft (DNAT «pre», firewall) · DNS interno com os nomes dos containers</div>
 <div class="box mut" style="flex:1"><b>containers</b>veth por container, ligados à bridge;
@@ -3856,7 +3862,7 @@ sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs
 <div class="arch">
 <div class="row">
 <div class="box mut" style="flex:1"><b>host</b>published ports (127.0.0.1 by default;
-<code>DELONIX_PUBLISH_ADDR</code> to expose)</div>
+name the address in the spec to expose — <code>0.0.0.0:8080:80</code>)</div>
 <div class="box" style="flex:1"><b>holder netns (1 per user)</b>delonix0 bridge ·
 single slirp4netns · nft (DNAT "pre", firewall) · internal DNS with container names</div>
 <div class="box mut" style="flex:1"><b>containers</b>one veth per container, attached to the
