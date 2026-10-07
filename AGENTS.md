@@ -30,7 +30,14 @@ porta, nunca como um `if provider == …` espalhado pelo código.
    (o supervisor de um container, o holder de rede). Um daemon novo exige um ADR com a
    evidência do que a alternativa não resolveu.
 3. **Rootless-first** — o caminho normal corre sem root. Privilégio é opt-in explícito,
-   dito ao operador, nunca um default silencioso.
+   dito ao operador, nunca um default silencioso. **E rootless-first não é rootless-only**
+   (decisão do dono, 2026-10-07): «precisa de root» NÃO é razão para deixar cair uma
+   capacidade. Quando é preciso, constrói-se atrás de **modo root** ou de **delegação de
+   cgroup**, como o `vm bridge` e os limites `--device-*` já fazem — e a recusa de hoje
+   diz-se «não implementado», nunca «impossível». A diferença não é de estilo: uma
+   mensagem que se lê como limite permanente ensina o próximo leitor a parar de procurar,
+   e já aconteceu — a recusa de SCTP no CRI nasceu a dizer «este nó não tem caminho»
+   quando o kernel aceita a regra de DNAT que o modo root escreveria (ADR-0074 D3).
 
 **O que o motor não conhece: nenhum consumidor.** O motor não sabe quem o usa. Não conhece
 plataformas, control planes, consolas nem agentes — nem os seus repositórios e crates —,
@@ -3684,12 +3691,21 @@ e é a forma que um **Service** SCTP usa — vai por kube-proxy, nunca por `host
 serviços SCTP ficam intocados, e nenhum pod que funcione hoje passa a falhar: essa combinação
 já falhava, mais tarde e pior.
 
-**FICA ABERTO, e é a parte maior**: em modo root/CNI o `hostPort` **não é publicado para
+**«Não implementado», nunca «impossível»** — e a primeira versão desta recusa errou nisso. Dizia
+«este nó não tem caminho para SCTP», o que se lê como limite permanente. Medido no mesmo dia, numa
+netns descartável: **o kernel aceita** `sctp dport 5070 counter … dnat to 10.0.0.5:5070`. Ou seja
+em modo root o motor publicava SCTP com as nftables que já escreve para o seu ingress, sem slirp
+nem portmap. A recusa fica — nada disso está construído —, mas a palavra mudou. É a doutrina do
+dono (2026-10-07): rootless-FIRST não é rootless-only, e «precisa de root» não deixa cair uma
+capacidade (ver os princípios no topo deste ficheiro).
+
+**FICA POR CONSTRUIR, e é a parte maior**: em modo root/CNI o `hostPort` **não é publicado para
 protocolo nenhum** — a guarda `if !sb.host_network && sb.cni_netns.is_empty()` — e nada o diz.
-Silêncio é pior que uma mensagem má, por isso é a metade mais danosa das duas. A resposta certa
-é implementar (passar os `portMappings` ao `portmap` como `runtimeConfig`, como o containerd
+Silêncio é pior que uma mensagem má, por isso é a metade mais danosa das duas. A resposta é
+**implementar** (passar os `portMappings` ao `portmap` como `runtimeConfig`, como o containerd
 faz), não recusar: recusar sem implementar parte pods que hoje pelo menos correm. É a decisão D3
-do ADR-0074, deliberadamente fora deste PR.
+do ADR-0074, sequenciada depois deste PR porque precisa de um nó kubeadm para medir — não adiada
+por falta de privilégio.
 
 **Prova**: 4 testes unitários, um round-trip gRPC real pelo socket unix que também afirma que
 **não fica sandbox nenhum** (a metade que diz que a recusa foi antes de criar), e um gate na

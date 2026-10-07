@@ -2474,6 +2474,20 @@ fn cri_mount_specs(mounts: &[Mount]) -> Result<Vec<String>, Status> {
 ///   `add_hostfwd` with `"proto":"sctp"` answers `bad request:
 ///   add_hostfwd: bad arguments.proto`, where tcp and udp both return an id. So
 ///   it is the DATAPLANE that cannot carry it, not the spec parser.
+///
+/// **«does not implement», never «cannot».** The engine is rootless-FIRST, not
+/// rootless-only (owner, 2026-10-07): a capability that needs root is built
+/// behind root mode or cgroup delegation, not dropped. And SCTP publishing is
+/// reachable that way — measured the same day, in a throwaway netns, the kernel
+/// accepts the engine's own DNAT for it:
+///
+/// ```text
+/// sctp dport 5070 counter packets 0 bytes 0 dnat to 10.0.0.5:5070
+/// ```
+///
+/// So this refusal is about what is BUILT on this node's publish paths, and the
+/// wording says so — a message that reads «impossible» would teach the next
+/// reader to stop looking. ADR-0074 carries the implementation path.
 /// * The spec reached the container anyway (`o.ports = sb.port_mappings`), where
 ///   `parse_publish_addr` refused it — so the pod died at `StartContainer`, AFTER
 ///   the sandbox existed, with an error naming the SPEC (`invalid protocol in
@@ -2504,11 +2518,11 @@ fn publishable_port_specs(mappings: &[PortMapping]) -> Result<Vec<String>, Statu
         };
         let proto = delonix_sdn::Proto::parse(&name).map_err(|_| {
             Status::failed_precondition(format!(
-                "cannot publish hostPort {}: this node has no {} publish path \
-                 (the rootless datapath's `add_hostfwd` takes tcp or udp, and the \
-                 CNI `portmap` plugin the same) — drop the hostPort and reach the \
-                 pod through a Service, or run the pod with hostNetwork, where it \
-                 binds the node's ports itself",
+                "cannot publish hostPort {}: this node does not implement {} \
+                 publishing (the rootless datapath's `add_hostfwd` takes tcp or \
+                 udp, and the CNI `portmap` plugin the same) — drop the hostPort \
+                 and reach the pod through a Service, or run the pod with \
+                 hostNetwork, where it binds the node's ports itself",
                 m.host_port, name
             ))
         })?;
