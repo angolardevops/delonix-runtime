@@ -4505,6 +4505,73 @@ JSON
   rm -f "$CRISOCK2"
 fi
 
+# --- ADR-0074 D3: o hostPort em modo root/CNI é PUBLICADO ----------------------
+# Até esta mudança o caminho CNI não publicava `hostPort` para protocolo NENHUM:
+# os mapeamentos eram guardados e depois descartados (a guarda do `run_opts_of`
+# salta um sandbox CNI), logo o pod subia `Running` com uma porta que não
+# respondia. Silêncio, rc=0, para tcp, udp e sctp.
+#
+# Medido a 2026-10-07 numa VM da golden `delonix-vm-k8s:1.36` (que já traz o
+# `portmap`), com o MESMO guião contra os dois binários: a `origin/main` criou o
+# sandbox com 0 regras DNAT e a porta muda; com a correcção, 3 regras e `LAB-OK`
+# pela porta do host, e 0 regras depois do `rmp`.
+#
+# Este troço precisa de root E de uma cadeia CNI que DECLARE `portMappings` — a
+# bateria corre rootless, por isso salta aqui com a razão em vez de ficar verde
+# por ausência. Para o correr: VM da golden, `/etc/cni/net.d` com uma conflist
+# `bridge` + `portmap`, e `sudo`.
+if [ "$(id -u)" != 0 ]; then
+  skip "CRI root/CNI: o hostPort é publicado" "exige root e uma conflist CNI com \`portmap\` (corre numa VM da golden delonix-vm-k8s)"
+elif ! command -v crictl >/dev/null 2>&1; then
+  skip "CRI root/CNI: o hostPort é publicado" "o crictl não está instalado"
+elif ! ls /etc/cni/net.d/*.conflist >/dev/null 2>&1 || ! grep -ql portMappings /etc/cni/net.d/*.conflist 2>/dev/null; then
+  skip "CRI root/CNI: o hostPort é publicado" "nenhuma conflist em /etc/cni/net.d declara a capacidade portMappings"
+elif [ ! -x /opt/cni/bin/portmap ]; then
+  skip "CRI root/CNI: o hostPort é publicado" "o plugin portmap não está em /opt/cni/bin"
+else
+  CRISOCK3="/run/dlx-cri-hp-$PFX.sock"
+  CRIPID3="$(e2e_serve_up cri "$CRISOCK3")"
+  if [ -z "$CRIPID3" ] || [ ! -S "$CRISOCK3" ]; then
+    skip "CRI root/CNI: o hostPort é publicado" "o serve cri não subiu"
+  else
+    C3="crictl --runtime-endpoint unix://$CRISOCK3"
+    HPCFG="$OUT/pod-hostport.json"
+    cat > "$HPCFG" <<'JSON'
+{
+  "metadata": { "name": "hp", "uid": "hp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 0, "container_port": 80, "host_port": 31080 } ],
+  "linux": {}
+}
+JSON
+    HPPOD="$($C3 runp "$HPCFG" 2>/dev/null | tail -1)"
+    check "CRI root/CNI: o sandbox com hostPort é criado" ok bash -c "[ -n '$HPPOD' ]"
+    # O veredicto são as REGRAS no kernel, não o rc do runp — a base também
+    # devolvia 0 e criava o sandbox, e era isso que escondia o defeito.
+    check "CRI root/CNI: o portmap escreveu o DNAT da porta" ok bash -c \
+      "[ \"\$(iptables -t nat -S | grep -c 'dport 31080')\" -gt 0 ]"
+    # E a prova que vale: a porta RESPONDE de dentro da netns do sandbox.
+    ip netns exec "cri-$HPPOD" sh -c \
+      'printf "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nLAB-OK\n" | nc -l -p 80 -q 2 >/dev/null 2>&1 &' 2>/dev/null
+    sleep 1
+    check "CRI root/CNI: o hostPort RESPONDE" ok bash -c \
+      "[ \"\$(curl -s --max-time 5 http://127.0.0.1:31080/ 2>/dev/null)\" = LAB-OK ]"
+    $C3 rmp -f "$HPPOD" >/dev/null 2>&1
+    # O DEL tem de desfazer: a conflist guardada leva o runtimeConfig, que é o
+    # que o portmap precisa de receber de volta.
+    check "CRI root/CNI: o rmp limpa as regras" ok bash -c \
+      "[ \"\$(iptables -t nat -S | grep -c 'dport 31080')\" = 0 ]"
+    # A recusa de uma cadeia que NÃO declara a capacidade fica no teste
+    # unitário (`a_cni_chain_that_cannot_publish_is_refused_with_the_fix`): o
+    # directório da conflist é uma constante (`cni::DEFAULT_CONF_DIR`) e não uma
+    # variável, logo não há como apontar o servidor VIVO para outra cadeia sem
+    # reescrever o /etc do nó — e um check que medisse outra coisa seria pior
+    # que a sua ausência.
+  fi
+  [ -n "${CRIPID3:-}" ] && kill "$CRIPID3" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID3:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK3"
+fi
+
 # `delonix serve cri` executa o binário próprio do CRI (ADR-0040 D2.4 emendado): o
 # utilizador só conhece `delonix`, e o servidor não vive dentro dele. O `exec`
 # mantém o pid, por isso é o `delonix-cri` que se vê ao fim do socket.

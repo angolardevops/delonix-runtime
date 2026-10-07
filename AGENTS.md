@@ -3660,10 +3660,15 @@ publicar**, e estava errado nas duas.
 
 **Três medições, cada uma contra a coisa e não contra o que se lê:**
 
-1. **O dataplane rootless não sabe SCTP.** O `slirp4netns` 1.2.1 (libslirp 4.7.0), sondado pelo
-   api-socket contra um netns descartável: `tcp` e `udp` devolvem um id, `sctp` devolve
-   `bad request: add_hostfwd: bad arguments.proto`. É o DATAPLANE, não o parser. O `portmap` do
-   CNI também só fala tcp/udp, logo nenhum caminho publica SCTP.
+1. **O dataplane ROOTLESS não sabe SCTP — e só ele.** O `slirp4netns` 1.2.1 (libslirp 4.7.0),
+   sondado pelo api-socket contra um netns descartável: `tcp` e `udp` devolvem um id, `sctp`
+   devolve `bad request: add_hostfwd: bad arguments.proto`. É o DATAPLANE, não o parser.
+   **Corrigido no mesmo dia, por medição**: esta secção começou por dizer que «o `portmap` do CNI
+   também só fala tcp/udp, logo nenhum caminho publica SCTP» — afirmação tirada da especificação
+   upstream e marcada como não medida. É FALSA. O `portmap` do `kubernetes-cni` escreve
+   `-p sctp -m sctp --dport 31070 -j DNAT`, e com o módulo `sctp` carregado um cliente SCTP real
+   no nó alcançou um servidor dentro da netns do pod. Logo o caminho root/CNI publica SCTP ponta a
+   ponta, e só o slirp rootless não consegue.
 2. **A spec chegava mesmo ao container** (`o.ports = sb.port_mappings`), onde o
    `parse_publish_addr` a recusava — logo o pod morria no `StartContainer`, **depois** de o
    sandbox existir, com um erro que nomeia a SPEC (`invalid protocol in '8080:80/sctp'`) e não a
@@ -3699,13 +3704,25 @@ nem portmap. A recusa fica — nada disso está construído —, mas a palavra m
 dono (2026-10-07): rootless-FIRST não é rootless-only, e «precisa de root» não deixa cair uma
 capacidade (ver os princípios no topo deste ficheiro).
 
-**FICA POR CONSTRUIR, e é a parte maior**: em modo root/CNI o `hostPort` **não é publicado para
-protocolo nenhum** — a guarda `if !sb.host_network && sb.cni_netns.is_empty()` — e nada o diz.
-Silêncio é pior que uma mensagem má, por isso é a metade mais danosa das duas. A resposta é
-**implementar** (passar os `portMappings` ao `portmap` como `runtimeConfig`, como o containerd
-faz), não recusar: recusar sem implementar parte pods que hoje pelo menos correm. É a decisão D3
-do ADR-0074, sequenciada depois deste PR porque precisa de um nó kubeadm para medir — não adiada
-por falta de privilégio.
+**E a recusa é POR CAMINHO, porque os caminhos diferem.** Uma resposta cega recusaria SCTP também
+em root/CNI, onde funciona. Só o ingress nativo rootless recusa um transporte, e só o que o seu
+slirp não carrega; o `hostNetwork` não julga nada.
+
+**A metade maior ficou FEITA, e era um trabalho em vez de dois**: em modo root/CNI o `hostPort`
+não era publicado para protocolo NENHUM — a guarda `if !sb.host_network && sb.cni_netns.is_empty()`
+descarta os mapeamentos — e nada o dizia. Os `portMappings` passam agora como `runtimeConfig` do
+plugin, como o containerd faz, e isso entrega tcp, udp **e** sctp de uma vez. O argumento de
+capacidade é injectado na CONFLIST, e é isso que dispensa plumbing novo nos dois caminhos: o root
+entrega a lista ao `attach_named_netns`, o rootless hex-codifica o MESMO JSON na linha de controlo
+do holder (cuja forma não muda), e guardar o resultado como a conflist do sandbox devolve ao `DEL`
+a configuração idêntica — que é o que a especificação pede a um runtime. Uma cadeia que não declare
+`portMappings` é recusada pelo nome, com a correcção: atacar e ficar calado era o silêncio que isto
+remove.
+
+**Medido no lab** (VM da golden `delonix-vm-k8s:1.36` deste repo, com o mesmo guião contra os dois
+binários): a `origin/main` criou o sandbox com **0** regras DNAT e a porta muda; com a correcção,
+**3** regras, `LAB-OK` pela porta do host, e **0** regras depois do `rmp` — que é a prova de que o
+`DEL` também recebe o `runtimeConfig`.
 
 **Prova**: 4 testes unitários, um round-trip gRPC real pelo socket unix que também afirma que
 **não fica sandbox nenhum** (a metade que diz que a recusa foi antes de criar), e um gate na

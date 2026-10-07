@@ -1,10 +1,11 @@
 # ADR-0074: A `hostPort` the node cannot publish is refused by name, and the CNI path has to publish them
 
-- **Status:** Proposed (2026-10-07). D1 and D2 are **implemented** (PR on `cri/hostport-proto`:
-  `publishable_port_specs` refuses from `RunPodSandbox`). D3 is **decided and not built**: the
-  owner stated on 2026-10-07 that the engine is rootless-first and not rootless-only, so the CNI
-  `hostPort` path is to be implemented rather than refused, and SCTP publishing in root mode is a
-  path and not a closed door. Both are sequenced after this PR, each needing a real kubeadm node.
+- **Status:** Proposed (2026-10-07). **D1, D2 and D3 are all implemented** on
+  `cri/hostport-proto`: the refusal is per path, and the CNI chain publishes `hostPort` through
+  `portmap`'s `runtimeConfig`. Measured in a lab VM from this repo's own
+  `delonix-vm-k8s:1.36` golden, against both binaries: `origin/main` created the sandbox with
+  **0** DNAT rules and a port that answered nothing; with the change, **3** rules, `LAB-OK` over
+  the host port, and 0 rules after `rmp`.
 - **Date:** 2026-10-07
 - **Deciders:** Walter Angolar
 - **Relates to:** the `delonix_sdn::Proto` authority and the recorded bind address (PR #718),
@@ -46,8 +47,13 @@ Two facts measured on 2026-10-07, both against the real thing rather than read:
    proto=sctp  -> {"error":{"desc":"bad request: add_hostfwd: bad arguments.proto"}}
    ```
 
-   It is the dataplane, not the spec parser. The CNI `portmap` plugin takes `tcp` and `udp` as
-   well, so no path publishes SCTP.
+   It is the dataplane, not the spec parser — and it is the ROOTLESS dataplane only. **Corrected
+   the same day, by measurement**: this ADR first claimed the CNI `portmap` plugin «takes tcp and
+   udp as well», from its upstream spec and flagged as unmeasured. It is false. `portmap` from
+   `kubernetes-cni` writes
+   `-p sctp -m sctp --dport 31070 -j DNAT --to-destination 10.244.0.2:5070`, and with the `sctp`
+   module loaded a real SCTP client on the node reached a server inside the pod netns through it.
+   So the root/CNI path publishes SCTP end to end, and only the rootless slirp cannot.
 
 2. **`hostNetwork` really is the host's network.** A `--net host` container reports the same
    `net:[4026531833]` inode as the host and sees the node's own interfaces. So it binds the node's
@@ -63,7 +69,10 @@ NUMBER into `"tcp"`: a guess about the one field whose job is to say what the tr
 
 ## Decision
 
-**D1 — The engine refuses a `hostPort` it cannot publish, from `RunPodSandbox`, by name.**
+**D1 — The engine refuses a `hostPort` it cannot publish, from `RunPodSandbox`, by name — and the
+judgement is PER PATH.** A blanket answer was wrong, and measuring is what showed it: the rootless
+slirp cannot carry SCTP, the CNI chain can, and `hostNetwork` publishes nothing at all. One
+refusal for all three would have closed a door that is open in root mode.
 `failed_precondition`, beside the `cgroup_parent` refusal and for the identical reason: a refusal
 the kubelet shows on the pod, not a sandbox left behind. The pod sits in `Pending` with the reason
 as an event, which is where an operator looks.
@@ -94,28 +103,22 @@ a capability.** Stated by the owner on 2026-10-07: when a capability needs the p
 built behind **root mode** or **cgroup delegation**, as an explicit opt-in, the way `vm bridge` and
 the `--device-*` limits already are. Three consequences for this ADR:
 
-1. **A refusal says «not implemented», never «impossible».** Measured the same day, in a throwaway
-   netns, the kernel accepts the engine's own DNAT for SCTP:
-
-   ```
-   sctp dport 5070 counter packets 0 bytes 0 dnat to 10.0.0.5:5070
-   ```
-
-   So SCTP publishing is reachable in root mode through the nftables the engine already writes for
-   its ingress DNAT — neither `slirp4netns` nor `portmap` is in that path. D1 still refuses,
-   because none of it is built; what changes is that the message, the doc comment and this ADR must
-   not read as a closed door. A message that says «impossible» teaches the next reader to stop
-   looking.
-2. **The CNI `hostPort` gap is to be implemented, not refused.** Pass `portMappings` to the
-   `portmap` plugin as `runtimeConfig`, which is what containerd does, and then refuse only what
-   `portmap` itself cannot do. The alternative — refusing a `hostPort` in the CNI path until that
-   exists — would make a pod that today runs-with-a-missing-port fail to start, on a node that
-   could have working TCP `hostPort`s, and it buys nothing. Leaving it silent stays rejected for
-   D1's reason: it is the same silence, only wider, because it affects every transport.
-3. **Neither is bundled into the PR that implements D1 and D2.** Both need a real kubeadm node to
-   measure — `portmap` is not even installed on the machine where this was written, so its
-   `tcp|udp` limit is still stated from its upstream spec and not probed. They are sequenced after,
-   each with its own measurement, not deferred for lack of privilege.
+1. **A refusal says «not implemented», never «impossible»** — and the first version of D1's message
+   got that wrong, which is what sent us measuring. It said the node «has no sctp publish path»,
+   reading as a permanent limit. Two measurements undid it: the kernel accepts the engine's own
+   `sctp dport 5070 … dnat` in a throwaway netns, and `portmap` publishes SCTP for real (above). A
+   message that says «impossible» teaches the next reader to stop looking.
+2. **The CNI `hostPort` gap was implemented, not refused** — and it turned out to be ONE piece of
+   work rather than two, because publishing through the chain delivers tcp, udp AND sctp at once.
+   `portMappings` now travels as the plugin's `runtimeConfig`, which is what containerd does. The
+   capability argument is injected into the CONFLIST, which is what makes both CNI paths need no
+   new plumbing: the root path hands the list to `attach_named_netns`, the rootless path
+   hex-encodes the same JSON onto the holder's control line (whose shape does not change), and
+   storing the result as the sandbox's conflist gives the `DEL` the identical config back.
+   A chain that declares no `portMappings` plugin is refused by name, with the fix — attaching
+   anyway was the silence this removes.
+3. **What stays refused, and where.** Only the rootless native ingress refuses a transport now,
+   and only the one its `slirp4netns` cannot carry. `hostNetwork` judges nothing.
 
 ## Consequences
 
@@ -131,13 +134,14 @@ the `--device-*` limits already are. Three consequences for this ADR:
 
 ## What was not measured
 
-A real kubeadm node was not available for this change: the refusal is proved by unit tests and by a
-gRPC round-trip against the real server over a unix socket (the kubelet's own transport), not by a
-kubelet scheduling an SCTP pod. `portmap` is not installed on the machine where this was written, so
-its `tcp|udp` limit is stated from its upstream spec and not probed — D3.2 must measure it before
-it is built.
+**No kubelet.** Everything here was driven by `crictl` — the Kubernetes project's own client, over
+the same transport a kubelet uses — and by unit tests and a gRPC round-trip. A kubelet scheduling
+these pods, with its retries and its own view of pod readiness, was not exercised.
 
-The SCTP DNAT of D3.1 was loaded into a kernel, in a throwaway netns, which proves the ruleset is
-accepted. It does **not** prove a packet is translated: that needs an SCTP client and server across
-the rule, and the `sctp` module is not even loaded on this host. So «reachable in root mode» is a
-measured ruleset, not a measured datapath, and whoever builds it starts by closing that gap.
+**The SCTP `hostPort` is proved on the CNI path, not on the engine's own nftables.** The lab
+measured `portmap` translating a real SCTP association. The other route — the engine writing its
+own `sctp … dnat` in root mode, which ADR-0074 D3.1 names — was only loaded into a kernel as a
+ruleset; no packet crossed it. Whoever builds that route starts by closing that gap.
+
+**One node, one chain.** The lab ran a single-node `bridge` + `portmap` chain. A real cluster CNI
+(Calico, Cilium) declaring the capability differently, and more than one node, were not measured.

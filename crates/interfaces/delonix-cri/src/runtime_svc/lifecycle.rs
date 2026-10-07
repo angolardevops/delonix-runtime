@@ -645,23 +645,34 @@ pub fn run_pod_sandbox(
         .as_ref()
         .map(|l| l.sysctls.iter().map(|(k, v)| format!("{k}={v}")).collect())
         .unwrap_or_default();
-    // Refused FIRST, for the same reason as the cgroup parent above: a hostPort
-    // this node cannot publish is a refusal the kubelet shows on the pod, not a
-    // sandbox left behind serving a port that will never answer. See
-    // [`publishable_port_specs`] for what cannot be published and why.
+    // What the kubelet ASKED for. Judged PER PATH below, because the paths
+    // genuinely differ and a blanket answer was wrong: measured 2026-10-07, the
+    // rootless `slirp4netns` refuses SCTP at `add_hostfwd` while the CNI
+    // `portmap` plugin publishes it end to end (a real SCTP client on the node
+    // reached a server inside the pod netns through its DNAT). A refusal that
+    // ignored the path would have closed a door that is open in root mode.
     //
-    // Under hostNetwork there is nothing to publish, so nothing to refuse — and
-    // refusing there would break a case that WORKS. Measured 2026-10-07: a
+    // Under hostNetwork there is nothing to publish, so nothing to judge — and
+    // refusing there would break a case that WORKS. Measured the same day: a
     // `--net host` container is in the host's REAL netns (same `net:[...]` inode,
     // and it sees the node's own interfaces), so it binds the node's ports
     // itself, whatever the transport. Which is also why the mappings are not
-    // handed to it at all (see `run_opts_of`'s guard) — storing specs nothing
-    // will read, and that the engine could not parse, is a landmine for whoever
-    // removes that guard later.
-    let port_mappings = if host_network {
+    // handed to it at all (see `run_opts_of`'s guard).
+    let asked_ports = if host_network {
         Vec::new()
     } else {
+        cri_port_mappings(&cfg.port_mappings)
+    };
+    // The specs the SLIRP path publishes, and the refusal that belongs to it.
+    // Computed before anything is created, so a transport that path cannot carry
+    // is a refusal the kubelet shows on the pod and not a sandbox left behind.
+    // The CNI branches below never read it — they publish through the chain.
+    let port_mappings = if host_network || delonix_sdn::cni::enabled_conf().is_some() {
+        Vec::new()
+    } else if delonix_linux::is_rootless() {
         publishable_port_specs(&cfg.port_mappings)?
+    } else {
+        Vec::new()
     };
     // REAL Delonix pod: an infra container (`pod-cri-<id>`) holds the shared
     // netns ("pause"-style), which the sandbox's containers then join via
@@ -681,6 +692,11 @@ pub fn run_pod_sandbox(
         let pod = format!("cri-{id}");
         let cni = delonix_sdn::cni::enabled_conf();
         if let Some(conf) = cni.filter(|_| delonix_linux::is_rootless()) {
+            refuse_chain_without_port_mappings(&conf, &asked_ports, &pod)?;
+            // The capability argument travels INSIDE the conflist, so the
+            // holder's control line keeps its shape (the JSON is hex-encoded and
+            // opaque to it) and the same bytes serve the `DEL`.
+            let conf = delonix_sdn::cni::with_port_mappings(&conf, &asked_ports);
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
             match delonix_sdn::infra::cni_attach_container(&pod, &conf_json) {
@@ -689,6 +705,9 @@ pub fn run_pod_sandbox(
                 }
                 Err(e) => return Err(Status::internal(format!("CNI ADD of sandbox {pod}: {e}"))),
             }
+            // Kept so the DEL hands the plugins the identical config, which is
+            // what the CNI spec asks of a runtime.
+            cni_conf = conf_json;
         } else if delonix_linux::is_rootless() {
             // ROOTLESS: the pod is a SHARED ingress netns (delonix0 + DHCP +
             // DNS + firewall); the sandbox's containers join via `--pod`.
@@ -721,6 +740,14 @@ pub fn run_pod_sandbox(
                     )));
                 }
             };
+            refuse_chain_without_port_mappings(&conf, &asked_ports, &pod)?;
+            // `hostPort` through the chain, which is what containerd does and
+            // what this path never did: the mappings were stored and then
+            // DROPPED (`run_opts_of`'s guard skips a CNI sandbox), so every pod
+            // came up `Running` with a port that answered nothing, for every
+            // transport. The capability argument goes into the conflist so the
+            // same bytes serve the `ADD` here and the `DEL` later.
+            let conf = delonix_sdn::cni::with_port_mappings(&conf, &asked_ports);
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
             let cidr = delonix_sdn::cni::attach_named_netns(
@@ -2501,21 +2528,81 @@ fn cri_mount_specs(mounts: &[Mount]) -> Result<Vec<String>, Status> {
 /// with a port that never answers, which is the failure class this engine has
 /// already had to remove three times (`--network-alias`, `--security-opt
 /// seccomp=`, `-v …:z`).
+/// The chain is asked to publish host ports — does it declare a plugin that can?
+///
+/// A chain without `capabilities.portMappings` cannot publish a `hostPort`, and
+/// attaching anyway is the silence this closes: until now the CNI path published
+/// NOTHING, for any transport, and the pod came up `Running` with a port that
+/// never answered. Refused by name, with the fix, instead of a pod that looks
+/// healthy and is not reachable.
+fn refuse_chain_without_port_mappings(
+    conf: &delonix_sdn::cni::NetConfList,
+    asked: &[delonix_sdn::cni::PortMapping],
+    pod: &str,
+) -> Result<(), Status> {
+    if asked.is_empty() || delonix_sdn::cni::publishes_host_ports(conf) {
+        return Ok(());
+    }
+    let ports: Vec<String> = asked
+        .iter()
+        .map(|m| format!("{}/{}", m.host_port, m.protocol))
+        .collect();
+    Err(Status::failed_precondition(format!(
+        "cannot publish hostPort(s) {} of {pod}: the node's CNI chain `{}` declares \
+         no plugin with the `portMappings` capability — add `portmap` to the \
+         conflist (`{{\"type\": \"portmap\", \"capabilities\": {{\"portMappings\": true}}}}` \
+         as its last plugin), drop the hostPort and reach the pod through a \
+         Service, or run the pod with hostNetwork",
+        ports.join(", "),
+        conf.name
+    )))
+}
+
+/// The transport name a CRI mapping asks for, as the plugins and the engine spell
+/// it. A number outside the CRI's own enum is NAMED rather than guessed — it used
+/// to become `"tcp"`, a guess about the one field whose whole job is to say what
+/// the traffic is.
+fn cri_proto_name(protocol: i32) -> String {
+    match Protocol::try_from(protocol) {
+        Ok(Protocol::Tcp) => "tcp".to_string(),
+        Ok(Protocol::Udp) => "udp".to_string(),
+        Ok(Protocol::Sctp) => "sctp".to_string(),
+        Err(_) => format!("protocol {protocol}"),
+    }
+}
+
+/// What the kubelet ASKED for, unjudged, as the CNI capability argument.
+///
+/// Judging belongs to the caller because it depends on the PATH, and the paths
+/// genuinely differ — see [`publishable_port_specs`] for the slirp one and
+/// `run_pod_sandbox` for the CNI one. A mapping with no `host_port` is dropped
+/// here, as it always was: the kubelet sends `container_port` alone for ports
+/// that are merely declared.
+///
+/// `host_ip` is CARRIED here, unlike on the slirp path where the engine decides
+/// the bind address in one place. Dropping it would publish on every interface a
+/// port the pod asked to keep on one — widening exposure in silence, which is the
+/// publish bug this engine already paid for from the other end.
+fn cri_port_mappings(mappings: &[PortMapping]) -> Vec<delonix_sdn::cni::PortMapping> {
+    mappings
+        .iter()
+        .filter(|m| m.host_port > 0 && m.container_port > 0)
+        .map(|m| delonix_sdn::cni::PortMapping {
+            host_port: m.host_port as u16,
+            container_port: m.container_port as u16,
+            protocol: cri_proto_name(m.protocol),
+            host_ip: Some(m.host_ip.clone()).filter(|a| !a.is_empty()),
+        })
+        .collect()
+}
+
 fn publishable_port_specs(mappings: &[PortMapping]) -> Result<Vec<String>, Status> {
     let mut specs = Vec::new();
     for m in mappings {
         if m.host_port <= 0 || m.container_port <= 0 {
             continue;
         }
-        let name = match Protocol::try_from(m.protocol) {
-            Ok(Protocol::Tcp) => "tcp".to_string(),
-            Ok(Protocol::Udp) => "udp".to_string(),
-            Ok(Protocol::Sctp) => "sctp".to_string(),
-            // A number outside the CRI's own enum. It used to become `tcp` — a
-            // guess, about the one field whose whole job is to say what the
-            // traffic is. Named, and refused.
-            Err(_) => format!("protocol {}", m.protocol),
-        };
+        let name = cri_proto_name(m.protocol);
         let proto = delonix_sdn::Proto::parse(&name).map_err(|_| {
             Status::failed_precondition(format!(
                 "cannot publish hostPort {}: this node does not implement {} \
@@ -2760,6 +2847,76 @@ mod tests {
             "a privileged container gets no masked paths"
         );
         assert!(o.privileged, "`privileged: true` has to REACH the engine");
+    }
+
+    /// The CNI path CARRIES what the slirp path refuses, and that asymmetry is
+    /// measured, not assumed: 2026-10-07, `portmap` from `kubernetes-cni` wrote
+    /// `-p sctp -m sctp --dport 31070 -j DNAT` and a real SCTP client on the node
+    /// reached a server inside the pod netns through it. A blanket refusal would
+    /// have closed a door that is open in root mode — the engine is
+    /// rootless-FIRST, not rootless-only.
+    #[test]
+    fn the_cni_path_carries_the_transports_the_slirp_path_refuses() {
+        let mk = |proto: Protocol, hp: i32, cp: i32, ip: &str| PortMapping {
+            protocol: proto as i32,
+            container_port: cp,
+            host_port: hp,
+            host_ip: ip.into(),
+        };
+        let asked = super::cri_port_mappings(&[
+            mk(Protocol::Tcp, 31080, 80, ""),
+            mk(Protocol::Sctp, 31070, 5070, "127.0.0.1"),
+            // A bare containerPort is still DROPPED — informational in k8s, and
+            // the shape an SCTP Service uses (it goes through kube-proxy).
+            mk(Protocol::Sctp, 0, 5080, ""),
+        ]);
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert_eq!(asked[0].protocol, "tcp");
+        assert_eq!(
+            asked[0].host_ip, None,
+            "an empty hostIp is absent, not \"\""
+        );
+        assert_eq!(asked[1].protocol, "sctp");
+        // Carried, not dropped: publishing on every interface a port the pod
+        // asked to keep on one widens exposure in silence.
+        assert_eq!(asked[1].host_ip.as_deref(), Some("127.0.0.1"));
+    }
+
+    /// A chain asked to publish that declares no `portMappings` plugin is
+    /// REFUSED with the fix, instead of attaching and staying quiet. That
+    /// silence is what the CNI path did for every transport until now: the
+    /// mappings were stored and then dropped, and the pod came up `Running`
+    /// with a port that answered nothing.
+    #[test]
+    fn a_cni_chain_that_cannot_publish_is_refused_with_the_fix() {
+        let conf = delonix_sdn::cni::parse_config(
+            r#"{"cniVersion":"1.0.0","name":"lab","plugins":[{"type":"bridge"}]}"#,
+        )
+        .unwrap();
+        let asked = vec![delonix_sdn::cni::PortMapping {
+            host_port: 31080,
+            container_port: 80,
+            protocol: "tcp".into(),
+            host_ip: None,
+        }];
+        let err = super::refuse_chain_without_port_mappings(&conf, &asked, "cri-1")
+            .expect_err("a chain without the capability cannot publish");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        let m = err.message();
+        assert!(m.contains("31080/tcp"), "{m}");
+        assert!(m.contains("portmap"), "the fix has to be named: {m}");
+        assert!(m.contains("lab"), "the chain has to be named: {m}");
+
+        // Nothing asked → nothing refused, on the very same chain.
+        assert!(super::refuse_chain_without_port_mappings(&conf, &[], "cri-1").is_ok());
+
+        // And a chain that DOES declare it is let through.
+        let ok = delonix_sdn::cni::parse_config(
+            r#"{"cniVersion":"1.0.0","name":"lab","plugins":
+                [{"type":"bridge"},{"type":"portmap","capabilities":{"portMappings":true}}]}"#,
+        )
+        .unwrap();
+        assert!(super::refuse_chain_without_port_mappings(&ok, &asked, "cri-1").is_ok());
     }
 
     /// An SCTP `hostPort` is refused, by name, with the class the kubelet turns
