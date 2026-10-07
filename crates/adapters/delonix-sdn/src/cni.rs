@@ -65,6 +65,92 @@ pub struct NetConfList {
     pub plugins: Vec<Value>,
 }
 
+/// A host port the runtime asks the chain to publish — the `portMappings`
+/// capability argument of the CNI spec.
+///
+/// Field names are the ones the plugins read (`hostPort`, `containerPort`,
+/// `protocol`, `hostIP`), so this struct IS the wire shape and there is no second
+/// place where the spelling could drift.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortMapping {
+    #[serde(rename = "hostPort")]
+    pub host_port: u16,
+    #[serde(rename = "containerPort")]
+    pub container_port: u16,
+    /// Lowercase `tcp`, `udp` or `sctp` — what the plugin expects.
+    pub protocol: String,
+    /// The address to bind on, when the caller named one. Omitted otherwise, and
+    /// the plugin then publishes on every interface.
+    ///
+    /// Carried rather than dropped BECAUSE dropping it widens the exposure in
+    /// silence: a pod that asks for `hostIP: 127.0.0.1` and gets every interface
+    /// is the publish bug this engine already paid for once, from the other end.
+    #[serde(rename = "hostIP", skip_serializing_if = "Option::is_none")]
+    pub host_ip: Option<String>,
+}
+
+/// Does any plugin in this chain DECLARE that it publishes host ports?
+///
+/// The declaration is the plugin's own `capabilities.portMappings: true`, which
+/// is how the CNI spec says a plugin advertises a capability — not a hard-coded
+/// list of plugin names here. A chain without it cannot publish a `hostPort`,
+/// and the caller has to say so instead of attaching and staying quiet.
+pub fn publishes_host_ports(net: &NetConfList) -> bool {
+    net.plugins.iter().any(|p| {
+        p.get("capabilities")
+            .and_then(|c| c.get("portMappings"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    })
+}
+
+/// A copy of the chain carrying `runtimeConfig.portMappings` on every plugin that
+/// declares the capability — the CNI spec's way for a runtime to pass a
+/// capability argument.
+///
+/// Injected into the CONFLIST rather than added as a parameter of [`add`]/[`del`]
+/// on purpose, and it is what makes the two CNI paths need no new plumbing: the
+/// root path hands the list straight to [`attach_named_netns`], and the rootless
+/// path hex-encodes the same JSON onto the holder's control line, whose shape
+/// does not change. Store the RESULT as the sandbox's conflist and the `DEL` gets
+/// the identical config back, which is what the spec asks of a runtime.
+///
+/// A plugin that does not declare the capability is left untouched: handing
+/// `runtimeConfig` to a plugin that never asked for it is how a chain starts
+/// failing on a key it does not know.
+///
+/// Measured 2026-10-07 against `portmap` from `kubernetes-cni`, by hand before
+/// any of this was written: `runtimeConfig.portMappings` plus the chain's
+/// `prevResult` makes it write real `CNI-HOSTPORT-DNAT` rules, and a `curl` to
+/// the host port answered from inside the pod netns.
+pub fn with_port_mappings(net: &NetConfList, mappings: &[PortMapping]) -> NetConfList {
+    let mut out = net.clone();
+    if mappings.is_empty() {
+        return out;
+    }
+    let value = serde_json::to_value(mappings).unwrap_or(Value::Null);
+    for plugin in out.plugins.iter_mut() {
+        let declares = plugin
+            .get("capabilities")
+            .and_then(|c| c.get("portMappings"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !declares {
+            continue;
+        }
+        if let Some(map) = plugin.as_object_mut() {
+            let mut rc = map
+                .get("runtimeConfig")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            rc.insert("portMappings".into(), value.clone());
+            map.insert("runtimeConfig".into(), Value::Object(rc));
+        }
+    }
+    out
+}
+
 /// Result of a CNI plugin (spec 1.0.0 — irrelevant fields ignored).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CniResult {
@@ -674,6 +760,97 @@ mod tests {
         let mut c = Command::new("sh");
         c.args(["-c", script]);
         c
+    }
+
+    fn chain(json: &str) -> NetConfList {
+        parse_config(json).expect("a valid conflist")
+    }
+
+    const BRIDGE_AND_PORTMAP: &str = r#"{
+      "cniVersion": "1.0.0", "name": "lab",
+      "plugins": [
+        { "type": "bridge", "bridge": "cni0" },
+        { "type": "portmap", "capabilities": { "portMappings": true } }
+      ]
+    }"#;
+
+    /// The capability argument lands ONLY on the plugin that declares the
+    /// capability — handing `runtimeConfig` to a plugin that never asked for it
+    /// is how a chain starts failing on a key it does not know. And the
+    /// declaration is read from the plugin's own `capabilities`, never from a
+    /// hard-coded list of plugin names.
+    #[test]
+    fn the_capability_argument_lands_only_on_the_plugin_that_declares_it() {
+        let net = chain(BRIDGE_AND_PORTMAP);
+        assert!(publishes_host_ports(&net));
+        let out = with_port_mappings(
+            &net,
+            &[PortMapping {
+                host_port: 31080,
+                container_port: 80,
+                protocol: "tcp".into(),
+                host_ip: None,
+            }],
+        );
+        assert!(
+            out.plugins[0].get("runtimeConfig").is_none(),
+            "the bridge declares nothing and must stay untouched: {:?}",
+            out.plugins[0]
+        );
+        let pm = out.plugins[1]["runtimeConfig"]["portMappings"][0].clone();
+        assert_eq!(pm["hostPort"], 31080);
+        assert_eq!(pm["containerPort"], 80);
+        assert_eq!(pm["protocol"], "tcp");
+        // Absent, not null: the plugin publishes on every interface when the
+        // runtime names no address, and a `"hostIP": null` is not that.
+        assert!(pm.get("hostIP").is_none(), "{pm:?}");
+        // The plugin's own fields survive — it is its config we are adding to.
+        assert_eq!(out.plugins[1]["type"], "portmap");
+    }
+
+    /// `hostIP` travels when the caller names one. Dropping it would publish on
+    /// every interface a port the pod asked to keep on one — exposure widened in
+    /// silence, which is the publish bug this engine already paid for from the
+    /// other end (the recorded bind address).
+    #[test]
+    fn a_named_bind_address_reaches_the_plugin() {
+        let out = with_port_mappings(
+            &chain(BRIDGE_AND_PORTMAP),
+            &[PortMapping {
+                host_port: 31080,
+                container_port: 80,
+                protocol: "sctp".into(),
+                host_ip: Some("127.0.0.1".into()),
+            }],
+        );
+        let pm = out.plugins[1]["runtimeConfig"]["portMappings"][0].clone();
+        assert_eq!(pm["hostIP"], "127.0.0.1");
+        // SCTP is NOT filtered here: measured 2026-10-07, `portmap` publishes it
+        // end to end. The transport that cannot carry it is the rootless slirp,
+        // and that refusal lives on that path.
+        assert_eq!(pm["protocol"], "sctp");
+    }
+
+    /// A chain with no `portMappings` plugin cannot publish, and says nothing
+    /// about it on its own — so the ANSWER has to be available to the caller.
+    /// Until this existed the CNI path published nothing, for any transport, and
+    /// the pod came up `Running` with a port that never answered.
+    #[test]
+    fn a_chain_without_the_capability_is_reported_as_unable() {
+        let bare = chain(r#"{"cniVersion":"1.0.0","name":"lab","plugins":[{"type":"bridge"}]}"#);
+        assert!(!publishes_host_ports(&bare));
+        // Declared FALSE is still unable — the key being present is not consent.
+        let off = chain(
+            r#"{"cniVersion":"1.0.0","name":"lab","plugins":
+                [{"type":"portmap","capabilities":{"portMappings":false}}]}"#,
+        );
+        assert!(!publishes_host_ports(&off));
+        // With nothing asked, injecting is a no-op and the chain is untouched.
+        let same = with_port_mappings(&bare, &[]);
+        assert_eq!(
+            serde_json::to_value(&same).unwrap(),
+            serde_json::to_value(&bare).unwrap()
+        );
     }
 
     #[test]

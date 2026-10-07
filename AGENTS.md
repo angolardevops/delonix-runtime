@@ -30,7 +30,14 @@ porta, nunca como um `if provider == …` espalhado pelo código.
    (o supervisor de um container, o holder de rede). Um daemon novo exige um ADR com a
    evidência do que a alternativa não resolveu.
 3. **Rootless-first** — o caminho normal corre sem root. Privilégio é opt-in explícito,
-   dito ao operador, nunca um default silencioso.
+   dito ao operador, nunca um default silencioso. **E rootless-first não é rootless-only**
+   (decisão do dono, 2026-10-07): «precisa de root» NÃO é razão para deixar cair uma
+   capacidade. Quando é preciso, constrói-se atrás de **modo root** ou de **delegação de
+   cgroup**, como o `vm bridge` e os limites `--device-*` já fazem — e a recusa de hoje
+   diz-se «não implementado», nunca «impossível». A diferença não é de estilo: uma
+   mensagem que se lê como limite permanente ensina o próximo leitor a parar de procurar,
+   e já aconteceu — a recusa de SCTP no CRI nasceu a dizer «este nó não tem caminho»
+   quando o kernel aceita a regra de DNAT que o modo root escreveria (ADR-0074 D3).
 
 **O que o motor não conhece: nenhum consumidor.** O motor não sabe quem o usa. Não conhece
 plataformas, control planes, consolas nem agentes — nem os seus repositórios e crates —,
@@ -3643,6 +3650,91 @@ static pod que nunca passou pelo API server.
   operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
   anterior a este trabalho).
+
+## Um `hostPort` que o nó não publica é RECUSADO pelo nome (ADR-0074, 2026-10-07)
+
+Encontrado a validar a resposta a «o `net ingress publish` liga em 0.0.0.0 ou só em loopback?».
+O `cri_port_specs` mapeava `Protocol::Sctp` para a string `"sctp"` e um número de protocolo
+desconhecido para `"tcp"` — ou seja **tinha opinião própria sobre o que o motor consegue
+publicar**, e estava errado nas duas.
+
+**Três medições, cada uma contra a coisa e não contra o que se lê:**
+
+1. **O dataplane ROOTLESS não sabe SCTP — e só ele.** O `slirp4netns` 1.2.1 (libslirp 4.7.0),
+   sondado pelo api-socket contra um netns descartável: `tcp` e `udp` devolvem um id, `sctp`
+   devolve `bad request: add_hostfwd: bad arguments.proto`. É o DATAPLANE, não o parser.
+   **Corrigido no mesmo dia, por medição**: esta secção começou por dizer que «o `portmap` do CNI
+   também só fala tcp/udp, logo nenhum caminho publica SCTP» — afirmação tirada da especificação
+   upstream e marcada como não medida. É FALSA. O `portmap` do `kubernetes-cni` escreve
+   `-p sctp -m sctp --dport 31070 -j DNAT`, e com o módulo `sctp` carregado um cliente SCTP real
+   no nó alcançou um servidor dentro da netns do pod. Logo o caminho root/CNI publica SCTP ponta a
+   ponta, e só o slirp rootless não consegue.
+2. **A spec chegava mesmo ao container** (`o.ports = sb.port_mappings`), onde o
+   `parse_publish_addr` a recusava — logo o pod morria no `StartContainer`, **depois** de o
+   sandbox existir, com um erro que nomeia a SPEC (`invalid protocol in '8080:80/sctp'`) e não a
+   causa, num manifesto que é Kubernetes legal, e retentado pelo kubelet para sempre numa
+   condição que nunca pode limpar.
+3. **`hostNetwork` é mesmo a rede do host** — um container `--net host` reporta o MESMO inode
+   `net:[...]` do host e vê as interfaces do nó. Liga as portas do nó ele próprio, qualquer que
+   seja o transporte, e é por isso que recusar ali partiria um caso que FUNCIONA. É também a
+   razão de os mapeamentos não lhe serem entregues (a guarda do `run_opts_of`).
+
+A recusa vive no `RunPodSandbox`, ao lado da do `cgroup_parent` e pela razão idêntica: um
+`failed_precondition` põe o pod em `Pending` com a razão como evento, que é onde o operador
+olha. **Não um drop em silêncio** — um `hostPort` declarado e não publicado deixa o pod
+`Running` com um serviço que não responde, a família que este motor já teve de remover três
+vezes (`--network-alias`, `--security-opt seccomp=`, `-v …:z`); e um aviso iria para o journal
+do `delonix-cri`, enquanto quem pode agir lê `kubectl get pod`.
+
+**O transporte pergunta-se ao `delonix_sdn::Proto`**, a autoridade única do que o motor publica.
+Um número fora do enum do CRI é recusado PELO NÚMERO em vez de adivinhado — era um palpite sobre
+o único campo cujo trabalho é dizer o que o tráfego é.
+
+**O raio é estreito, e é isso que torna a recusa barata**: um `containerPort` sem `hostPort`
+continua a ser DESCARTADO (`m.host_port > 0`), que é a semântica correcta do k8s (é informativo)
+e é a forma que um **Service** SCTP usa — vai por kube-proxy, nunca por `hostPort`. Logo os
+serviços SCTP ficam intocados, e nenhum pod que funcione hoje passa a falhar: essa combinação
+já falhava, mais tarde e pior.
+
+**«Não implementado», nunca «impossível»** — e a primeira versão desta recusa errou nisso. Dizia
+«este nó não tem caminho para SCTP», o que se lê como limite permanente. Medido no mesmo dia, numa
+netns descartável: **o kernel aceita** `sctp dport 5070 counter … dnat to 10.0.0.5:5070`. Ou seja
+em modo root o motor publicava SCTP com as nftables que já escreve para o seu ingress, sem slirp
+nem portmap. A recusa fica — nada disso está construído —, mas a palavra mudou. É a doutrina do
+dono (2026-10-07): rootless-FIRST não é rootless-only, e «precisa de root» não deixa cair uma
+capacidade (ver os princípios no topo deste ficheiro).
+
+**E a recusa é POR CAMINHO, porque os caminhos diferem.** Uma resposta cega recusaria SCTP também
+em root/CNI, onde funciona. Só o ingress nativo rootless recusa um transporte, e só o que o seu
+slirp não carrega; o `hostNetwork` não julga nada.
+
+**A metade maior ficou FEITA, e era um trabalho em vez de dois**: em modo root/CNI o `hostPort`
+não era publicado para protocolo NENHUM — a guarda `if !sb.host_network && sb.cni_netns.is_empty()`
+descarta os mapeamentos — e nada o dizia. Os `portMappings` passam agora como `runtimeConfig` do
+plugin, como o containerd faz, e isso entrega tcp, udp **e** sctp de uma vez. O argumento de
+capacidade é injectado na CONFLIST, e é isso que dispensa plumbing novo nos dois caminhos: o root
+entrega a lista ao `attach_named_netns`, o rootless hex-codifica o MESMO JSON na linha de controlo
+do holder (cuja forma não muda), e guardar o resultado como a conflist do sandbox devolve ao `DEL`
+a configuração idêntica — que é o que a especificação pede a um runtime. Uma cadeia que não declare
+`portMappings` é recusada pelo nome, com a correcção: atacar e ficar calado era o silêncio que isto
+remove.
+
+**Medido no lab** (VM da golden `delonix-vm-k8s:1.36` deste repo, com o mesmo guião contra os dois
+binários): a `origin/main` criou o sandbox com **0** regras DNAT e a porta muda; com a correcção,
+**3** regras, `LAB-OK` pela porta do host, e **0** regras depois do `rmp` — que é a prova de que o
+`DEL` também recebe o `runtimeConfig`.
+
+**Prova**: 4 testes unitários, um round-trip gRPC real pelo socket unix que também afirma que
+**não fica sandbox nenhum** (a metade que diz que a recusa foi antes de criar), e um gate na
+bateria com o `crictl` — o cliente oficial do k8s — com controlo TCP ao lado. Os três testes que
+importam chumbam com a correcção revertida (os outros dois são controlos e mantêm-se verdes, de
+propósito). Ao vivo, raiz isolada: `crictl runp` com `hostPort` SCTP → `rc=1`,
+`code = FailedPrecondition`, a mensagem a nomear porta, transporte e as duas saídas; `crictl
+pods` vazio; e um `hostPort` TCP no mesmo nó criado `Ready`.
+
+**Nota do próprio auditor**: o comentário da bateria dizia que ali não se finge um pedido gRPC
+«que não sabemos fazer aqui» — e o `crictl` estava instalado. O gate novo fecha esse gap de
+passagem.
 
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
