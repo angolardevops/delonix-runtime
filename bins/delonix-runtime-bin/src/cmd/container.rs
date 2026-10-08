@@ -1220,6 +1220,10 @@ pub enum ContainerCmd {
         /// Unspecified limits mean no limit under it.
         #[arg(long = "kube-cgroup-parent", hide = true)]
         kube_cgroup_parent: Option<String>,
+        /// Internal: CRI `LinuxContainerResources.oom_score_adj` (ADR 0038 item 3),
+        /// written to `/proc/<pid>/oom_score_adj` at spawn.
+        #[arg(long = "oom-score-adj", hide = true)]
+        oom_score_adj: Option<i32>,
         /// Relative I/O weight (`io.weight`, 1–10000).
         #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
         io_weight: Option<String>,
@@ -1749,6 +1753,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             cpu_weight,
             cpuset,
             kube_cgroup_parent,
+            oom_score_adj,
             io_weight,
             device_read_bps,
             device_write_bps,
@@ -1837,6 +1842,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 // (`cgroupParent`), que é quem sabe agrupar cargas.
                 cgroup_parent: None,
                 kube_cgroup_parent,
+                oom_score_adj,
                 io_weight,
                 no_supervisor: false,
                 io_max: compose_io_max(

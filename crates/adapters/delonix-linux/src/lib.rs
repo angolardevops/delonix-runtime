@@ -2922,6 +2922,26 @@ fn apply_ulimits(specs: &[String]) {
     }
 }
 
+/// Writes `/proc/self/oom_score_adj` for the init process — the CRI
+/// `LinuxContainerResources.oom_score_adj` the kubelet sets per QoS class
+/// (Guaranteed: -998, Burstable: a formula, BestEffort: 1000). ADR 0038's
+/// own decision text is "honour or refuse, never ignore"; this field had
+/// neither — it was read off the wire into `CriResources` and then never
+/// referenced again, so a Guaranteed-QoS pod's OOM-kill priority never
+/// matched what the kubelet (and `kubectl describe node`) believed was
+/// true. Clamped to the kernel's accepted range; a value outside it from a
+/// malformed manifest is corrected rather than handed to the `write` to
+/// fail on. Best-effort, same style as `apply_ulimits` right above it:
+/// lowering the value needs `CAP_SYS_RESOURCE`, still held here, before
+/// `drop_capabilities` takes it away.
+fn apply_oom_score_adj(adj: Option<i32>) {
+    let Some(adj) = adj else { return };
+    let _ = std::fs::write(
+        "/proc/self/oom_score_adj",
+        adj.clamp(-1000, 1000).to_string(),
+    );
+}
+
 /// (privileged / Kind node) Gives the container a DEDICATED, EMPTY CGROUP ROOT.
 ///
 /// On the rootless-with-network path the `ip netns exec` mounts a FRESH sysfs over
@@ -3154,6 +3174,10 @@ struct ProcessSpec<'a> {
     group_add: &'a [u32],
     ulimits: &'a [String],
     sysctls: &'a [String],
+    /// CRI `LinuxContainerResources.oom_score_adj`. `None` = leave whatever
+    /// the kernel/cgroup already gave this process (today's behavior for
+    /// everything that is not a CRI container with the field set).
+    oom_score_adj: Option<i32>,
 }
 
 /// What the container sees on disk.
@@ -3239,6 +3263,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
                 group_add,
                 ulimits,
                 sysctls,
+                oom_score_adj,
             },
         filesystem:
             FilesystemSpec {
@@ -3425,10 +3450,11 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         );
     }
     apply_ulimits(ulimits); // --ulimit (before dropping CAP_SYS_RESOURCE)
-                            // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
-                            // container's own) and before `drop_capabilities` (they are mounts, and need
-                            // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
-                            // masks the host's path or silently fails with EPERM.
+    apply_oom_score_adj(oom_score_adj); // CRI oom_score_adj, same reason/timing as --ulimit
+                                        // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
+                                        // container's own) and before `drop_capabilities` (they are mounts, and need
+                                        // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
+                                        // masks the host's path or silently fails with EPERM.
     apply_masked_paths(masked_paths);
     apply_readonly_paths(readonly_paths);
     // READY: the last mount is in. Everything that shapes this mount namespace —
@@ -6312,6 +6338,7 @@ fn spawn(
     let devices = container.devices.clone();
     let tmpfs = container.tmpfs.clone();
     let ulimits = container.ulimits.clone();
+    let oom_score_adj = container.oom_score_adj;
     let group_add = container.group_add.clone();
     let masked_paths = container.masked_paths.clone();
     let readonly_paths = container.readonly_paths.clone();
@@ -6536,6 +6563,7 @@ fn spawn(
                 group_add: &group_add,
                 ulimits: &ulimits,
                 sysctls: &sysctls,
+                oom_score_adj,
             },
             filesystem: FilesystemSpec {
                 mounts: &mounts,

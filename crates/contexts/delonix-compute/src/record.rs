@@ -592,6 +592,14 @@ pub struct Container {
     /// namespaced `sysctl`s (`--sysctl key=value`), written to `/proc/sys`.
     #[serde(default)]
     pub sysctls: Vec<String>,
+    /// CRI `LinuxContainerResources.oom_score_adj` — written to
+    /// `/proc/<pid>/oom_score_adj` at spawn (ADR 0038 item 3: "honour or
+    /// refuse, never ignore" — this field used to be read off the wire and
+    /// then dropped without either). `None` on every container not created
+    /// through the CRI with the field set, and on a record written before
+    /// this field existed.
+    #[serde(default)]
+    pub oom_score_adj: Option<i32>,
     /// A custom OCI seccomp profile, stored as its JSON CONTENT.
     ///
     /// The content and not the path, deliberately: the file lives on the host,
@@ -829,6 +837,7 @@ impl Container {
             tmpfs: Vec::new(),
             ulimits: Vec::new(),
             sysctls: Vec::new(),
+            oom_score_adj: None,
             seccomp_profile: None,
             dns_servers: Vec::new(),
             dns_searches: Vec::new(),
