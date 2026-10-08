@@ -348,6 +348,81 @@ log "binário: $BIN"
 log "versão:  $("$BIN" --version 2>&1)"
 
 ########################################
+section "guarda: o irmão SERVIDO é da release do \$BIN"
+########################################
+# O cabeçalho desta bateria já diz que são CINCO binários e porquê. Isto MEDE-O,
+# porque o aviso existia e não bastou: a 2026-10-08 uma corrida com só o
+# `delonix` construído deu FAIL=3 no troço do ADR-0074 D1, e a causa não era o
+# motor — o `exec_server` caiu para o `PATH` e serviu um `delonix-cri` de
+# 2026-09-07, um mês anterior à recusa que aqueles checks verificam. Um aviso
+# protege quem o lê; um guarda protege quem não leu.
+#
+# **Porque não basta a verificação que o motor já tem.** O
+# `delonix_node::dispatch::check_version` existe precisamente para isto e diz-se
+# «a server left on the PATH from an older install». Mas é o SERVIDOR que a
+# corre, logo um servidor obsoleto não a corre: medido no mesmo binário de
+# 2026-09-07, com `DELONIX_DISPATCH_VERSION` deliberadamente errado ele arrancou
+# de qualquer forma, e a string da variável não existe sequer no executável.
+# Uma verificação do lado do CHAMADO falha no único caso para que existe —
+# quanto mais velho o irmão, menos protege. Daí o guarda ser aqui, do lado de
+# quem mede.
+#
+# Afirma a IDENTIDADE, não a presença: o irmão de Setembro EXISTIA, e é isso que
+# o torna invisível a um `command -v`. E identidade é a RELEASE, não o caminho —
+# um irmão instalado em `/usr/local/bin` da mesma versão é equivalente e passa
+# (medido), porque o que estraga a medição é a versão divergente, não o sítio.
+#
+# E o `--version` tem de ser domado, porque num irmão obsoleto ele ARRANCA O
+# SERVIDOR em vez de imprimir (medido: rc=124 ao fim de 8 s, log
+# «delonix-cri starting»). Daí, em cada sonda: `timeout --kill-after` para o
+# grupo não sobreviver, um socket descartável e CURTO (o `sun_path` são 108
+# bytes, e o caminho de um scratchpad já passa dos 90) e um `rm -f` a seguir —
+# sem ele ficava um socket por corrida em `/tmp`, medido. Um timeout NÃO é
+# «sem veredicto»: os 4.x+ respondem (`tests/version_flag.rs`), logo um irmão
+# que não responde é obsoleto POR ESSE FACTO, e isso chumba fechado.
+
+# A versão que o irmão servido tem de ter, ou vazio se o próprio $BIN não a diz.
+e2e_sibling_version() {  # $1=caminho do irmão → ecoa a versão, ou vazio
+  local sock="/tmp/dlx-sg-$$.sock" v
+  v="$(DELONIX_CRI_ADDR="unix://$sock" DELONIX_API_ADDR="unix://$sock" \
+       DELONIX_NODE_API_ADDR="unix://$sock" \
+       timeout --kill-after=2 6 "$1" --version 2>/dev/null | head -1 | awk '{print $2}')"
+  rm -f "$sock"
+  printf '%s' "$v"
+}
+
+# O que o `exec_server` escolheria: o irmão AO LADO do executável e só depois o
+# `PATH` — a mesma ordem, senão o guarda mede um binário e a bateria serve outro.
+e2e_sibling_path() {  # $1=nome → ecoa o caminho que seria servido, ou vazio
+  local beside; beside="$(dirname "$BIN")/$1"
+  if [ -f "$beside" ]; then printf '%s' "$beside"; else command -v "$1" 2>/dev/null || true; fi
+}
+
+E2E_BIN_VER="$("$BIN" --version 2>/dev/null | head -1 | awk '{print $2}')"
+if [ -z "$E2E_BIN_VER" ]; then
+  skip "o irmão servido é da release do \$BIN" "o \$BIN não diz a versão — nada com que comparar"
+else
+  log "  versão de referência: $E2E_BIN_VER"
+  for _sib in delonix-cri delonix-mgmt delonix-mcp delonix-node-api; do
+    _sp="$(e2e_sibling_path "$_sib")"
+    if [ -z "$_sp" ]; then
+      # As secções que o precisam já saltam com a sua própria razão; aqui não há
+      # nada a medir, e um FAIL diria «está errado» onde não está.
+      skip "o $_sib servido é da release do \$BIN" \
+        "não está ao lado do \$BIN nem no PATH — nada será servido"
+      continue
+    fi
+    _sv="$(e2e_sibling_version "$_sp")"
+    # A razão vai no NOME porque é o que aparece no resumo: um FAIL aqui tem de
+    # dizer «mediste o binário errado», não deixar N secções a chumbar por uma
+    # causa que não é a delas.
+    check "o $_sib servido é da release do \$BIN ($_sp diz ${_sv:-NADA})" \
+      ok bash -c "[ '${_sv}' = '${E2E_BIN_VER}' ]"
+  done
+  unset _sib _sp _sv
+fi
+
+########################################
 section "help / superfície da CLI"
 ########################################
 check "help raiz" ok "$BIN" --help
