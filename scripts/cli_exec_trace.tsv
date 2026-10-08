@@ -1,9 +1,9 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198) — PASS=1118 FAIL=0 SKIP=13
-# commit: e1aacedf
-# executed: 126
+# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198, e1aacedf + esta serie) — PASS=1148 FAIL=0 SKIP=14 XFAIL=1 XPASS=0. Corrida ROOTLESS, e os 14 SKIP classificados ate ao ultimo: 7 pedem um appliance OPNsense (3) ou um cluster Proxmox (4); 3 este host nao os pode medir (hostPort em root/CNI, NFS com CAP_SYS_ADMIN, system boot enable escreve units fora do root isolado); 2 sao caminhos de FALHA cujo disparo e a ferramenta estar AUSENTE e este host tem-na (virt-customize, wg), logo saltam por ele ser capaz; 1 por nao haver imagens VM; 1 porque o stack init --up nao completou em 180s — e so este ultimo e lacuna de medicao, nao propriedade do host. Um SKIP nao conta folha nenhuma: o que o host nao mede nao e o que a bateria nao exercita.
+# commit: 32efdbb5
+# executed: 160
 # leaves: 272
 api-resources
 apply
@@ -13,20 +13,28 @@ backup ls
 backup remove
 backup restore
 backup schedule
+build
 cluster kubeconfig
+cluster prune
 compatibility compose
+compatibility docker
+completion editor
 completion shell
 compose config
 compose down
 compose logs
 compose ps
 compose up
+config get
+config set
+config unset
 container describe
 container exec
 container healthcheck
 container inspect
 container logs
 container port
+container prune
 container ps
 container rm
 container run
@@ -44,13 +52,16 @@ get
 image describe
 image load
 image ls
+image prune
 image pull
 image save
 image tag
 image vm ls
 init
 man
+manifest render
 manifest schema
+manifest validate
 mcp capabilities
 mcp doctor
 migrate assess
@@ -71,6 +82,7 @@ network diagnose
 network disconnect
 network inspect
 network ipam ls
+network ipam prune
 network ls
 network rm
 network route
@@ -78,16 +90,23 @@ pod attach
 pod cp
 pod create
 pod exec
+pod logs
+policy unset
 provider config schema
+provider config show
 provider config validate
 provider describe
 provider ls
 provider matrix
+secret apply
 secret create
 secret inspect
 secret ls
 secret rm
+secret rotate
+secret rotate-key
 secret set
+secret unset
 serve api
 serve cri
 serve docker-api
@@ -98,6 +117,7 @@ stack history
 stack init
 stack ls
 stack plan
+stack prune
 stack rollback
 stack validate
 stack wait
@@ -107,12 +127,21 @@ system doctor
 system events
 system features
 system info
+system metrics
+system namespace describe
+system namespace ls
+system prune
+system resources
+system setup
 system snapshot restore
+system virt
+version
 vm cloud-init
 vm create
 vm ls
 vm move
 vm pause
+vm prune
 vm resize
 vm snapshot create
 vm snapshot ls
@@ -126,8 +155,13 @@ volume create
 volume describe
 volume inspect
 volume ls
+volume prune
 volume rm
 volume snapshot create
+volume snapshot ls
+volume snapshot restore
 volume snapshot rm
 workload describe
 workload ls
+workload rm
+workload stop
