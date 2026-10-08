@@ -6501,6 +6501,43 @@ impl VmBackend for ProxmoxBackend {
         })?)
     }
 
+    /// `vm resize --disk-size` (`vm.disk.resize`): grows the VM's boot disk
+    /// through the node's own `PUT …/resize` — [`Client::resize_disk`], the
+    /// SAME call `boot()`'s import path already uses to grow a template
+    /// clone's disk at create time (`import_grow_plan`). Refused BEFORE any
+    /// call, by name and with both numbers, for the same reason that path
+    /// refuses a shrink early: the node's own refusal lands inside a task as
+    /// a generic failure, which would read like "something broke" instead
+    /// of "you cannot do this".
+    fn resize_disk(&self, vmdir: &Path, vm: &Vm, new_bytes: u64) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        let (ps, vmid) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.power_state(vmid)?, vmid))
+        })?;
+        if ps.status != "stopped" {
+            return Err(
+                delonix_compute::vm_error::Error::ResizeNeedsStopped(format!(
+                    "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: `vm resize` is a cold resize — stop it first (`delonix vm stop {}`)",
+                    vm.name, ps.status, vm.name
+                ))
+                .into(),
+            );
+        }
+        let (disk, current) = self.on_vm(vm, |c, vmid| c.boot_disk(vmid))?;
+        if new_bytes <= current {
+            return Err(delonix_compute::vm_error::Error::InvalidResize(format!(
+                "VM '{}' boot disk '{disk}' is already {current} bytes on the node — a disk can \
+                 grow, never shrink (asked for {new_bytes} bytes)",
+                vm.name
+            ))
+            .into());
+        }
+        let gib = new_bytes.div_ceil(GIB) as u32;
+        Ok(self.on_vm(vm, |c, vmid| c.resize_disk(&ledger, vmid, &disk, gib))?)
+    }
+
     /// `vm cloud-init`: the engine has checked its record; the node is asked
     /// too, because a VM started from the node's own UI would read the old
     /// drive until its next reboot. A task still in flight is waited on first.
@@ -7086,7 +7123,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it",
             },
             C::VmDiskResize => S::Partial {
-                detail: "`PUT …/resize` grows a template clone's boot disk to `diskSize` at create (live case); a shrink is refused by name; no engine verb resizes an existing VM",
+                detail: "`vm resize --disk-size` calls `PUT …/resize` on an existing VM too now, grow-only, refused before any call against the node's own recorded size; no battery/live evidence yet for the existing-VM path (the template-clone path is live-tested)",
             },
             C::VmPciPassthrough => S::UnsupportedByProvider {
                 reason: "`devices` refused by name: the guest is on another machine",

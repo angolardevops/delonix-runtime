@@ -1299,7 +1299,8 @@ pub enum VmCmd {
         #[arg(long = "ssh-key")]
         ssh_keys: Vec<String>,
     },
-    /// Change a STOPPED VM's vCPUs and/or memory for its next boot.
+    /// Change a STOPPED VM's vCPUs, memory and/or boot disk size for its
+    /// next boot.
     ///
     /// A cold resize: refused while the VM is running or paused, because a
     /// guest that only sees the change after its next reboot has not been
@@ -1308,6 +1309,11 @@ pub enum VmCmd {
     /// config is changed and read back, and the node is asked too — a VM
     /// started from its own UI is refused even if the record says stopped.
     /// A value that does not parse (`2GB`) is refused, never read as a default.
+    ///
+    /// `--disk-size` only GROWS the boot disk, never shrinks it — there is
+    /// no flag for that. Most guests pick up the new space on their own next
+    /// boot (the golden images' own cloud-init already runs `growpart`); a
+    /// guest without that needs its own `growpart`/`resize2fs` by hand.
     Resize {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
@@ -1317,6 +1323,9 @@ pub enum VmCmd {
         /// New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`).
         #[arg(long)]
         memory: Option<String>,
+        /// New boot disk size, in whole GiB — grows only, never shrinks.
+        #[arg(long = "disk-size")]
+        disk_size_gib: Option<u32>,
     },
     /// Move a VM to another node of its cluster — same VM, same record.
     ///
@@ -3350,9 +3359,14 @@ pub fn run(action: VmCmd) -> Result<()> {
             name,
             vcpus,
             memory,
+            disk_size_gib,
         } => {
-            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref())?;
-            println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
+            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref(), disk_size_gib)?;
+            print!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
+            if let Some(gib) = disk_size_gib {
+                print!(", disk >= {gib}G");
+            }
+            println!();
             Ok(())
         }
         VmCmd::Move {

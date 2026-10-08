@@ -483,6 +483,20 @@ pub trait VmBackend {
         Err(unsupported_pause(self.id(), "resize"))
     }
 
+    /// `vm resize --disk-size`: grows a STOPPED VM's boot disk to `new_bytes`
+    /// (`vm.disk.resize`). Called only after the engine has confirmed the
+    /// record says the VM is not running; the CALLER (this method) is the
+    /// one place that gets to refuse a shrink, because only it knows the
+    /// backend's own current size and how to read it back.
+    ///
+    /// Grow only, always — a filesystem does not retreat with its block
+    /// device, and silently truncating one is how a guest loses data.
+    ///
+    /// Default: unsupported (fail closed).
+    fn resize_disk(&self, _vmdir: &Path, _vm: &Vm, _new_bytes: u64) -> delonix_model::Result<()> {
+        Err(unsupported_disk_resize(self.id(), "disk resize"))
+    }
+
     /// What the guest says about itself through its agent — OS, kernel,
     /// hostname, filesystems (`vm.guest-agent`), for `vm describe`.
     ///
@@ -716,6 +730,11 @@ fn unsupported_snapshot(backend: &str, op: &str) -> delonix_model::Error {
         "{op} is not supported on the '{backend}' backend yet — use the libvirt backend"
     ))
     .into()
+}
+
+/// Fail-closed error for a backend that does not implement `vm.disk.resize`.
+fn unsupported_disk_resize(backend: &str, op: &str) -> delonix_model::Error {
+    Error::UnsupportedByBackend(format!("{op} is not supported on the '{backend}' backend")).into()
 }
 
 /// Fail-closed error for a backend with no VM firewall of its own (ADR-0052).

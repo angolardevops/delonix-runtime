@@ -365,7 +365,9 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmExtraNics => bin(S::Partial {
                 detail: "`extraNics` (network/bridge/user) reach the domain XML; never booted in the battery",
             }),
-            C::VmDiskResize => S::NotImplemented,
+            C::VmDiskResize => bin(S::Supported {
+                evidence: "check:o overlay cresceu para exactamente 1 GiB",
+            }),
             C::VmPciPassthrough => bin(S::Partial {
                 detail: "`<hostdev>` per validated PCI address; no IOMMU host in the battery",
             }),
@@ -877,6 +879,37 @@ fn qemu_agent_query(
         }
         .into()),
     }
+}
+
+/// `qemu-img info --output=json`'s `virtual-size`, in bytes — the ONLY
+/// place this backend reads a disk's current size from (never the record,
+/// which carries none). The tool call is a one-liner; the parsing it needs
+/// is [`parse_virtual_size`], pure and tested without a real `qemu-img`.
+fn qcow2_virtual_size(path: &Path) -> delonix_model::Result<u64> {
+    let out = quiet(
+        "qemu-img",
+        &["info", "--output=json", "--", &path.to_string_lossy()],
+    )
+    .map_err(|e| {
+        delonix_model::Error::from(Error::Command {
+            context: "qemu-img info",
+            message: e,
+        })
+    })?;
+    parse_virtual_size(&out).ok_or_else(|| {
+        delonix_model::Error::from(Error::Command {
+            context: "qemu-img info",
+            message: format!("no 'virtual-size' in: {out}"),
+        })
+    })
+}
+
+/// Pure: `qemu-img info --output=json`'s `"virtual-size"` field, in bytes.
+fn parse_virtual_size(json: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()?
+        .get("virtual-size")?
+        .as_u64()
 }
 
 /// `true` when a `virsh qemu-agent-command` failure MEANS "nothing is
@@ -2342,6 +2375,49 @@ impl VmBackend for LibvirtBackend {
         Ok(())
     }
 
+    /// `vm resize --disk-size` (`vm.disk.resize`): grows the overlay
+    /// `boot`/`start` always build at `vmdir/<name>.qcow2` — this backend
+    /// keeps no OTHER record of where the disk is; the domain XML just
+    /// names this same path. Re-checks `is_running` itself (the engine
+    /// already did, against the record) because this is the one resize
+    /// path that touches a FILE: a stale record saying "stopped" while
+    /// something else started the domain would otherwise let `qemu-img
+    /// resize` run against a disk QEMU holds open.
+    fn resize_disk(&self, vmdir: &Path, vm: &Vm, new_bytes: u64) -> delonix_model::Result<()> {
+        if self.is_running(vm) {
+            return Err(Error::ResizeNeedsStopped(format!(
+                "VM '{}' is running: stop it first (`delonix vm stop {}`)",
+                vm.name, vm.name
+            ))
+            .into());
+        }
+        let overlay = vmdir.join(format!("{}.qcow2", vm.name));
+        let current = qcow2_virtual_size(&overlay)?;
+        if new_bytes <= current {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' disk is already {} bytes — a disk can grow, never shrink (asked for {} bytes)",
+                vm.name, current, new_bytes
+            ))
+            .into());
+        }
+        quiet(
+            "qemu-img",
+            &[
+                "resize",
+                "--",
+                &overlay.to_string_lossy(),
+                &new_bytes.to_string(),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            delonix_model::Error::from(Error::Command {
+                context: "qemu-img resize",
+                message: e,
+            })
+        })
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         libvirt_cleanup(&vm.name)?;
         // The domain XML that `boot` wrote STAYS. It used to be deleted here,
@@ -2953,6 +3029,22 @@ mod tests {
         assert_eq!(fs[0].used_bytes, Some(1000));
         assert_eq!(fs[1].mountpoint, "/boot");
         assert_eq!(fs[1].used_bytes, None);
+    }
+
+    #[test]
+    fn parse_virtual_size_reads_the_real_qemu_img_json_shape() {
+        // Captured live on this host (`qemu-img info --output=json`), not
+        // guessed — the field this parser depends on is real.
+        let real = r#"{
+            "virtual-size": 10737418240,
+            "filename": "/vms/t.qcow2",
+            "format": "qcow2",
+            "actual-size": 200704,
+            "format-specific": {"type": "qcow2", "data": {}}
+        }"#;
+        assert_eq!(super::parse_virtual_size(real), Some(10737418240));
+        assert_eq!(super::parse_virtual_size("not json"), None);
+        assert_eq!(super::parse_virtual_size(r#"{"format":"qcow2"}"#), None);
     }
 
     #[test]

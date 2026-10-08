@@ -335,7 +335,9 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmExtraNics => S::UnsupportedByProvider {
                 reason: "one tap on the SDN; `extraNics` are refused for this backend",
             },
-            C::VmDiskResize => S::NotImplemented,
+            C::VmDiskResize => bin(S::Supported {
+                evidence: "check:CH: o overlay cresceu para exactamente 1 GiB",
+            }),
             C::VmPciPassthrough => bin(S::Partial {
                 detail: "`--device path=<sysfs>` per validated address; no IOMMU host in the battery",
             }),
@@ -676,6 +678,56 @@ impl VmBackend for CloudHypervisorBackend {
         Ok(())
     }
 
+    /// `vm resize --disk-size` (`vm.disk.resize`): grows the overlay
+    /// (`ch_overlay`, the same path `boot`/`snapshots` already read). The
+    /// vmm holds a RUNNING VM's qcow2 exclusively — the same fact that
+    /// makes live snapshotting impossible on this backend
+    /// (`offline_snapshot_op`) — so a grow has to be refused there too, not
+    /// just when the record says "stopped".
+    fn resize_disk(&self, vmdir: &Path, vm: &Vm, new_bytes: u64) -> delonix_model::Result<()> {
+        self.offline_snapshot_op(vmdir, vm, "resize the disk of")?;
+        let overlay = ch_overlay(vmdir, vm);
+        let info = capture(
+            "qemu-img",
+            &["info", "-U", "--", &overlay.to_string_lossy()],
+        )
+        .ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "qemu-img info",
+                message: format!("could not read the disk of VM '{}'", vm.name),
+            })
+        })?;
+        let current = parse_virtual_size_bytes(&info).ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "qemu-img info",
+                message: format!("no 'virtual size' in: {info}"),
+            })
+        })?;
+        if new_bytes <= current {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}' disk is already {current} bytes — a disk can grow, never shrink (asked \
+                 for {new_bytes} bytes)",
+                vm.name
+            ))));
+        }
+        quiet(
+            "qemu-img",
+            &[
+                "resize",
+                "--",
+                &overlay.to_string_lossy(),
+                &new_bytes.to_string(),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            delonix_model::Error::from(Error::Command {
+                context: "qemu-img resize",
+                message: e,
+            })
+        })
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         // `pid > 0` was the ONLY condition here, which is not an identity: a
         // record left behind by a VMM that died — or by a reboot — names a
@@ -884,6 +936,23 @@ fn disk_looks_corrupt(disk: &Path) -> bool {
         .arg(disk)
         .status()
         .is_ok_and(|st| st.code() == Some(2))
+}
+
+/// Pure: the current size of a qcow2 disk from `qemu-img info`'s (plain
+/// text, not `--output=json`) `"virtual size: ... (N bytes)"` line, in
+/// bytes — the ONLY place this backend reads a disk's size from (never the
+/// record, which carries none).
+fn parse_virtual_size_bytes(info: &str) -> Option<u64> {
+    let line = info
+        .lines()
+        .find(|l| l.trim_start().starts_with("virtual size:"))?;
+    let after_paren = line.split('(').nth(1)?;
+    after_paren
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
 }
 
 /// Pure parser for the `Snapshot list:` block of `qemu-img info`. Written
@@ -1376,6 +1445,18 @@ mod tests {
             .collect();
         assert_eq!(envs.get("LC_ALL").and_then(|v| v.as_deref()), Some("C"));
         assert_eq!(envs.get("LANG").and_then(|v| v.as_deref()), Some("C"));
+    }
+
+    #[test]
+    fn parse_virtual_size_bytes_reads_the_real_qemu_img_text_shape() {
+        // Captured live on this host (`qemu-img info -U`, plain text).
+        let real = "image: /vms/t.qcow2\nfile format: qcow2\nvirtual size: 10 GiB (10737418240 bytes)\ndisk size: 196 KiB\n";
+        assert_eq!(super::parse_virtual_size_bytes(real), Some(10737418240));
+        assert_eq!(
+            super::parse_virtual_size_bytes("image: /vms/t.qcow2\n"),
+            None
+        );
+        assert_eq!(super::parse_virtual_size_bytes(""), None);
     }
 
     #[test]
