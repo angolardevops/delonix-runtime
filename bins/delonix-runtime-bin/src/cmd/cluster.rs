@@ -1589,6 +1589,13 @@ fn apply_ssh(
 ) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(cri_bin.map(|p| p.to_path_buf()))?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
+    // The CLI running THIS command — installed on every node alongside
+    // delonix-cri, for the reason `install_cli`'s doc comment states: a node
+    // provisioned from a golden image otherwise keeps running whatever
+    // `delonix` was baked into it, no matter how new the CRI next to it is.
+    let cli_bin = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| Error::Invalid(format!("resolving this CLI's own binary path: {e}")))?;
 
     let all_hosts: Vec<&HostSpec> = spec
         .control_plane
@@ -1665,6 +1672,7 @@ fn apply_ssh(
                 let label = h.label();
                 let cri_bin = &cri_bin;
                 let cri_service = &cri_service;
+                let cli_bin = &cli_bin;
                 scope.spawn(move || {
                     prepare_host(
                         &target,
@@ -1672,6 +1680,7 @@ fn apply_ssh(
                         spec.k8s_version.as_deref(),
                         cri_bin,
                         cri_service,
+                        cli_bin,
                     )
                 })
             })
@@ -2525,6 +2534,7 @@ fn prepare_host(
     k8s_version: Option<&str>,
     cri_bin: &std::path::Path,
     cri_service: &std::path::Path,
+    cli_bin: &std::path::Path,
 ) -> Result<()> {
     for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
@@ -2535,6 +2545,56 @@ fn prepare_host(
     }
 
     install_cri(target, label, cri_bin, cri_service)?;
+    install_cli(target, label, cli_bin)?;
+    Ok(())
+}
+
+/// Remote path the `delonix` CLI lives at (the golden image's own convention —
+/// see `install.sh`).
+const REMOTE_CLI_BIN: &str = "/usr/local/bin/delonix";
+
+/// Keeps the node's `delonix` CLI in step with `install_cri`'s own `delonix-cri` —
+/// same idea, same sha256-check-then-replace shape, deliberately NOT merged
+/// into one function: a CLI binary has no systemd unit to restart.
+///
+/// Why this exists at all: a golden image bakes in a `delonix` built on
+/// whatever day the image was built, and `prepare_host` upgraded `delonix-cri`
+/// (the gRPC server) from the day it was written — but every actual container
+/// spawn goes through `delonix-cri`'s own `__apirun` re-exec, and THAT target
+/// is the node's own `delonix`, found by name, not the freshly-installed CRI.
+/// A node provisioned today from a two-month-old image was therefore running
+/// brand-new CRI protocol handling on top of two-month-old container-spawn
+/// logic — invisibly, because nothing checked, and no symptom points at a CLI
+/// mismatch (the two binaries do not fail to talk to each other; the stale
+/// one just quietly keeps whatever bugs it shipped with, user-switch-ordering
+/// bugs included). Measured live on this exact golden image
+/// (`delonix-vm-k8s:1.36`, baked-in CLI `0.66.0` from 2026-08-27): CoreDNS
+/// crash-looped with the precise symptom a 2026-09-15 fix elsewhere in this
+/// file documents as closed, because the fix never reached this node's CLI.
+fn install_cli(target: &SshTarget, label: &str, cli_bin: &std::path::Path) -> Result<()> {
+    let err = |e: Error| Error::Invalid(format!("[{label}] delonix CLI: {e}"));
+    let local = vmimage::hex_sha256_file(cli_bin)?;
+    let matches = remote::ssh_check(
+        target,
+        &format!("[ \"$(sha256sum {REMOTE_CLI_BIN} 2>/dev/null | cut -d' ' -f1)\" = \"{local}\" ]"),
+    );
+    if matches {
+        return Ok(());
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "[{label}] the node's delonix CLI differs from this one's (sha256 {sha}) — \
+             replacing it (delonix-cri re-execs it to spawn every container)",
+            &[("label", label), ("sha", &local[..12])],
+        )
+    );
+    remote::scp_to(target, cli_bin, "/tmp/delonix-cli").map_err(err)?;
+    remote::ssh_run(
+        target,
+        &format!("mv /tmp/delonix-cli {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}"),
+    )
+    .map_err(err)?;
     Ok(())
 }
 
