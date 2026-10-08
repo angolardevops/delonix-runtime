@@ -351,6 +351,22 @@ class Formatting(unittest.TestCase):
         self.assertEqual(meta["executed"], "1")
         self.assertEqual(meta["leaves"], "9")
 
+    def test_the_stamp_names_the_commit_the_run_saw_not_head(self):
+        """A re-record of an older run may not claim a commit it never saw.
+
+        `--update` stamped HEAD unconditionally, so re-recording the 160-leaf run
+        on a newer tip moved `commit:` three commits forward — one of them a
+        28-line change to the very script the run exercised. The default stays
+        HEAD, which is right while recording fresh.
+        """
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        p = d / "t.tsv"
+        self.m.write_trace(p, {"container ps"}, LEAF_SET, "host X", "deadbee")
+        self.assertEqual(self.m.read_trace(p)[1]["commit"], "deadbee")
+        q = d / "u.tsv"
+        self.m.write_trace(q, {"container ps"}, LEAF_SET, "host X")
+        self.assertEqual(self.m.read_trace(q)[1]["commit"], self.m.git_head())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

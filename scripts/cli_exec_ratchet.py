@@ -303,13 +303,29 @@ def git_head() -> str:
         return "unknown"
 
 
-def write_trace(path: pathlib.Path, executed: set[str], leaves: set[str], note: str) -> None:
+def write_trace(
+    path: pathlib.Path,
+    executed: set[str],
+    leaves: set[str],
+    note: str,
+    commit: str | None = None,
+) -> None:
+    """Write the trace, stamped with the commit the RUN saw.
+
+    `commit` defaults to HEAD, which is right while recording a fresh run and
+    WRONG while re-recording an older one: a `--update` on a newer HEAD used to
+    move the stamp to a commit the battery never saw. Measured on 2026-10-08 —
+    re-recording the 160-leaf run moved `commit:` from 32efdbb5 to 759d1ea6,
+    three commits later, one of them a 28-line change to `scripts/e2e.sh`. A
+    provenance header that names the wrong commit is worse than none: it is a
+    number nobody can date, wearing a date.
+    """
     lines = [
         "# The CLI leaves a real battery run executed and asserted (F0.2 of the",
         "# maturity plan). Derived, never edited by hand:",
         "#   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update",
         f"# recorded: {note}",
-        f"# commit: {git_head()}",
+        f"# commit: {commit or git_head()}",
         f"# executed: {len(executed)}",
         f"# leaves: {len(leaves)}",
     ]
@@ -365,6 +381,12 @@ def main() -> int:
     ap.add_argument("--from-results", nargs="+", metavar="FILE", help="derive from a battery run")
     ap.add_argument("--update", action="store_true", help="write the trace and the baseline")
     ap.add_argument("--note", default="", help="provenance note for --update (host, date, command)")
+    ap.add_argument(
+        "--commit",
+        default="",
+        metavar="SHA",
+        help="the commit the run saw (default: HEAD; name it when re-recording an older run)",
+    )
     ap.add_argument("--list", action="store_true", help="per-group breakdown")
     ap.add_argument("--list-missing", action="store_true", help="leaves never executed")
     ap.add_argument("--list-unmatched", action="store_true", help="recorded commands that resolved to no leaf")
@@ -401,7 +423,7 @@ def main() -> int:
         if not args.from_results:
             raise SystemExit("--update needs --from-results: a baseline is recorded from a run, not from itself")
         note = args.note or "unnamed run — pass --note with host, date and command"
-        write_trace(TRACE, executed, leaves, note)
+        write_trace(TRACE, executed, leaves, note, args.commit or None)
         BASELINE.write_text(json.dumps({"executed": count, "leaves": total}, indent=2) + "\n")
         print(f"recorded: {count} of {total} leaves invoked under an assertion — {percent(count, total)} %")
         if unmatched:

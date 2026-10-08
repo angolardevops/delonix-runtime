@@ -8264,6 +8264,25 @@ e é esse o ponto). O numerador sai de um trace COMMITADO com proveniência
 (`scripts/cli_exec_trace.tsv`, a forma do `docs/proxmox/trace-*.routes`), porque o runner
 alojado não corre a bateria — bloqueia userns.
 
+**A proveniência pode nomear um commit que a corrida nunca viu, e nomeou (2026-10-08).** O
+`--update` carimbava `commit:` com o HEAD, incondicionalmente. Está certo a gravar uma corrida
+fresca e **errado** a regravar uma antiga: re-gravar a corrida das 160 folhas numa ponta mais
+nova moveu o carimbo de `32efdbb5` para `759d1ea6`, três commits à frente — um deles uma
+mudança de 28 linhas ao `scripts/e2e.sh`, ou seja ao próprio script que a corrida exercitou.
+Um cabeçalho de proveniência que nomeia o commit errado é pior que nenhum: é um número que
+ninguém pode datar, com uma data vestida. `--commit <sha>` passa a nomeá-lo, o default
+continua o HEAD, e há teste verificado a chumbar com a correcção revertida
+(`'759d1ea6' != 'deadbee'`).
+
+**E uma conta de proveniência que não soma é a mesma classe de defeito.** O cabeçalho que
+este PR commitou primeiro dizia «dos 14 SKIP, 5 … e 7 …» — **12, não 14**. Os catorze,
+classificados: 7 pedem um appliance OPNsense (3) ou um cluster Proxmox (4); 3 este host não os
+pode medir (`hostPort` em root/CNI, NFS com CAP_SYS_ADMIN, `system boot enable` a escrever
+units fora do root isolado); 2 são caminhos de FALHA cujo disparo é a ferramenta estar
+AUSENTE e este host TEM-NA (`virt-customize`, `wg`), logo saltam por ele ser capaz e não por
+não ser; 1 por não haver imagens VM; e 1 porque o `stack init --up` não completou em 180 s —
+**só este último é lacuna de medição**, os outros treze são propriedades do host.
+
 **Medido a 2026-10-07 (4.5.0+185, PASS=1104 FAIL=0 SKIP=12): 125 de 272 — 46,0 %.** Os
 números desta secção e o «91 — 37%» que o cabeçalho da bateria carregava desde 2026-09-09
 **não são comparáveis com este**: foram contados à mão, sobre árvores diferentes, com uma

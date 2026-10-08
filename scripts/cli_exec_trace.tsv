@@ -1,7 +1,7 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198, e1aacedf + esta série) — PASS=1148 FAIL=0 SKIP=14 XFAIL=1 XPASS=0. Corrida ROOTLESS: dos 14 SKIP, 5 são caminhos que este host nao pode medir (CRI root/CNI, NFS com CAP_SYS_ADMIN, units de systemd fora do root isolado) e 7 pedem um appliance OPNsense ou um cluster Proxmox. Um SKIP nao conta folha nenhuma: o que o host nao mede nao e o que a bateria nao exercita.
+# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198, e1aacedf + esta serie) — PASS=1148 FAIL=0 SKIP=14 XFAIL=1 XPASS=0. Corrida ROOTLESS, e os 14 SKIP classificados ate ao ultimo: 7 pedem um appliance OPNsense (3) ou um cluster Proxmox (4); 3 este host nao os pode medir (hostPort em root/CNI, NFS com CAP_SYS_ADMIN, system boot enable escreve units fora do root isolado); 2 sao caminhos de FALHA cujo disparo e a ferramenta estar AUSENTE e este host tem-na (virt-customize, wg), logo saltam por ele ser capaz; 1 por nao haver imagens VM; 1 porque o stack init --up nao completou em 180s — e so este ultimo e lacuna de medicao, nao propriedade do host. Um SKIP nao conta folha nenhuma: o que o host nao mede nao e o que a bateria nao exercita.
 # commit: 32efdbb5
 # executed: 160
 # leaves: 272
