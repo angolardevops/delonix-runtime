@@ -82,18 +82,33 @@ pub fn dependents_of(
     out
 }
 
-/// Removes network `name`: the declarative record, the VXLAN uplink of an
-/// overlay, and the dataplane record with its bridge. Does NOT check what is
-/// attached — the caller decides that with [`dependents_of`].
+/// Removes network `name`: the dataplane record with its bridge, the VXLAN
+/// uplink of an overlay, and only then the declarative record. Does NOT
+/// check what is attached — the caller decides that with [`dependents_of`].
 ///
-/// The uplink's name is read BEFORE the record goes: it is derived from the
-/// `vni`, which only the store record carries.
+/// The uplink's name is read BEFORE anything else: it is derived from the
+/// `vni`, which only the store record carries, and the next step erases it.
+///
+/// Deliberately the DATAPLANE runs first and the declarative record last —
+/// the reverse of [`create_bridge`]'s order, and for a matching reason:
+/// `infra::network_remove`/`infra::vxlan_remove` are best-effort (they log
+/// and return rather than propagate a `netdef_lock()` contention or a dead
+/// holder), so there is no signal here to roll back ON. What used to happen
+/// erasing the store record FIRST was that a dataplane failure left the
+/// physical `NetDef` on disk — read by `network_get`, and by the
+/// prefix-conflict check a later `network create` runs — with NOTHING in
+/// `NetworkStore` pointing at it any more: the network vanished from
+/// `network ls` while a resource with its prefix kept blocking a new one,
+/// unreachable by any command. Removing the store record LAST means a
+/// dataplane failure simply leaves the network visible (and its name/prefix
+/// still taken, honestly) for an operator to retry or investigate, instead
+/// of a silently orphaned, invisible one.
 pub fn remove(store: &NetworkStore, name: &str) -> Result<()> {
     let uplink = store.get(name).ok().and_then(|n| n.vxlan_dev());
-    store.remove(name)?;
     if let Some(dev) = uplink {
         infra::vxlan_remove(&dev);
     }
     infra::network_remove(name);
+    store.remove(name)?;
     Ok(())
 }
