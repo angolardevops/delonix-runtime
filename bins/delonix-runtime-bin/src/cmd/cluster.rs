@@ -25,7 +25,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{etcd, k8s_recipes, kubeadm_config, lb, vmimage};
+use super::{etcd, k8s_recipes, kubeadm_config, lb, vm, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -836,6 +836,20 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             return super::kindmode::start(&images, &store, name.as_deref());
         }
         ClusterCmd::Destroy { ref name, force } => {
+            // VM/SSH-provisioned clusters have no destroy of their own today
+            // (KaaS capability audit, gap #10 — lived through directly while
+            // tearing down this same audit's own test cluster by hand).
+            // Checked only when a NAME is given: a VM-cluster match on an
+            // omitted name would have to disambiguate against a kind-mode
+            // cluster that might ALSO be "the only one", which is a second
+            // decision this fix does not need to make to close the gap —
+            // the omitted-name path keeps its exact previous behavior.
+            if let Some(n) = name {
+                let vms = cluster_vm_names(n)?;
+                if !vms.is_empty() {
+                    return destroy_vm_cluster(n, &vms, force);
+                }
+            }
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::destroy(&images, &store, name.as_deref(), force);
         }
@@ -1987,6 +2001,168 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
     (1..=count)
         .map(|i| format!("{cluster_name}-{role}{i}"))
         .collect()
+}
+
+/// The inverse of `vm_names`/the `<name>-lb` literal `provision_and_apply`
+/// writes: does `vm_name` belong to the cluster `cluster_name` provisioned?
+/// PURE, so the naming convention this file has in TWO places (the names it
+/// writes, and now the names a destroy has to find) cannot quietly drift
+/// apart from a single string literal changing in only one of them.
+fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
+    let Some(rest) = vm_name.strip_prefix(cluster_name) else {
+        return false;
+    };
+    let Some(suffix) = rest.strip_prefix('-') else {
+        return false;
+    };
+    suffix == "lb"
+        || ["cp", "w", "etcd"].iter().any(|role| {
+            suffix
+                .strip_prefix(role)
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
+/// Every VM this engine's own store knows about that belongs to cluster
+/// `cluster_name` — empty when the cluster was not VM/SSH-provisioned at
+/// all (the caller falls back to kind-mode's own resolution in that case).
+fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
+    Ok(delonix_vm::list(&state_root())?
+        .into_iter()
+        .filter(|vm| is_cluster_vm(&vm.name, cluster_name))
+        .map(|vm| vm.name)
+        .collect())
+}
+
+/// `cluster destroy <name>` for a VM/SSH-provisioned cluster — the half that
+/// never existed (KaaS capability audit, gap #10): `ClusterCmd::Destroy`
+/// went straight to kind-mode's own `destroy`, which only ever looks at
+/// containers carrying the `io.x-k8s.kind.cluster` label, so a cluster made
+/// of VMs had no destroy verb at all. An operator's only way to tear one
+/// down was `vm rm` on every node by hand, plus editing `~/.kube/config`
+/// themselves — exactly what this same audit's own live-validation test
+/// (`docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md` §4.6) had to do,
+/// which is how this gap went from "known" to "fixed".
+///
+/// Deliberately leaves the network alone: `--network` names a network the
+/// OPERATOR created (`cluster kubeadm`'s own `--help` says so — "no magic
+/// default"), so it is never this command's to remove, the same way
+/// kind-mode's own `delete` only removes the network IT created
+/// (`cluster_net(name)`) and never a user's.
+fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
+    if !super::prune::confirm(
+        force,
+        &super::po::tf(
+            "`cluster destroy` removes VM-provisioned cluster '{name}' — pass --force to \
+             confirm when not on a terminal",
+            &[("name", name)],
+        ),
+        Some(super::po::tf(
+            "This will remove {n} VM(s) of cluster '{name}', its cached kubeconfig, and the \
+             matching ~/.kube/config entries. The network it used is left alone — you created \
+             it, this command did not.",
+            &[("n", &vms.len().to_string()), ("name", name)],
+        )),
+        super::po::t("Continue? [y/N]"),
+    )? {
+        return Ok(());
+    }
+    super::output::info(&format!(
+        "{} \"{name}\"",
+        super::po::t("Destroying cluster")
+    ));
+    let base = state_root();
+    let mut p = super::output::Progress::new();
+    for vm_name in vms {
+        p.step(
+            &format!("{} '{vm_name}'", super::po::t("Removing VM")),
+            "🗑️",
+        );
+        vm::cmd_rm(&base, vm_name, true)?;
+        p.ok();
+    }
+    p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
+    let _ = std::fs::remove_file(
+        base.join("clusters")
+            .join(format!("{name}-kubeconfig.yaml")),
+    );
+    let _ = std::fs::remove_dir_all(base.join("clusters").join(name));
+    let local_kubeconfig =
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".kube").join("config"));
+    match local_kubeconfig.map(|dest| remove_local_kubeconfig_entries(&dest, name)) {
+        None | Some(Ok(())) => p.ok(),
+        Some(Err(e)) => {
+            p.step("", ""); // closes the cleanup step with ✗ before the warning
+            super::output::warn(&super::po::tf(
+                "could not remove kubeconfig entries for '{name}': {e}",
+                &[("name", name), ("e", &e.to_string())],
+            ));
+        }
+    }
+    drop(p);
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}' removed ({n} VM(s))",
+            &[("name", name), ("n", &vms.len().to_string())],
+        )
+    );
+    Ok(())
+}
+
+/// Removes the `clusters[]`/`contexts[]` entries named `cluster_name` and
+/// the `users[]` entry named `<cluster_name>-admin` from the kubeconfig at
+/// `dest` — the exact three names `merge_into_local_kubeconfig` writes a
+/// VM/SSH cluster's kubeconfig under (same `dest` parameter shape as that
+/// function, for the same reason: testable without mutating `$HOME`).
+/// Clears `current-context` too, if it was pointing here: left dangling, it
+/// would make a bare `kubectl` fail at EVERYTHING instead of just this one
+/// cluster. Mirrors kind-mode's own `remove_kubecontext` shape exactly; not
+/// the same function, because the two naming conventions differ (kind-mode
+/// uses ONE name for all three kinds of entry; a VM/SSH cluster's user
+/// entry is `<name>-admin`).
+fn remove_local_kubeconfig_entries(dest: &Path, cluster_name: &str) -> Result<()> {
+    use serde_yaml::Value;
+    let Ok(txt) = std::fs::read_to_string(dest) else {
+        return Ok(());
+    };
+    if txt.trim().is_empty() {
+        return Ok(());
+    }
+    let mut cfg: Value = serde_yaml::from_str(&txt).map_err(|e| {
+        Error::Invalid(format!(
+            "{} {}: {e}",
+            dest.display(),
+            super::po::t("is not valid YAML")
+        ))
+    })?;
+    let user_name = format!("{cluster_name}-admin");
+    let mut changed = false;
+    for (key, target) in [
+        ("clusters", cluster_name),
+        ("contexts", cluster_name),
+        ("users", user_name.as_str()),
+    ] {
+        if let Some(seq) = cfg.get_mut(key).and_then(|v| v.as_sequence_mut()) {
+            let before = seq.len();
+            seq.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(target));
+            changed |= seq.len() != before;
+        }
+    }
+    if cfg.get("current-context").and_then(|v| v.as_str()) == Some(cluster_name) {
+        if let Some(m) = cfg.as_mapping_mut() {
+            m.remove(Value::from("current-context"));
+        }
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    let out = serde_yaml::to_string(&cfg).map_err(|e| Error::Invalid(e.to_string()))?;
+    let tmp = dest.with_extension("delonix.tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(&tmp, dest)?;
+    Ok(())
 }
 
 /// The OCI reference to `vm pull` for a resolved `image_tag` that has no
@@ -3555,6 +3731,99 @@ users:
         assert_eq!(
             merged["current-context"], "outro",
             "an absent current-context must be filled by the cluster just created"
+        );
+    }
+
+    /// Regression (KaaS capability audit, gap #10): the naming convention a
+    /// `cluster kubeadm` VM/SSH cluster uses has to be recognized precisely —
+    /// `is_cluster_vm` is the ONE place that decides it, shared by whatever
+    /// finds the VMs to destroy and (conceptually) by `vm_names`/the `-lb`
+    /// literal that create them. A loose match here would make `cluster
+    /// destroy foo` also remove an unrelated `foobar-cp1`.
+    #[test]
+    fn is_cluster_vm_matches_the_naming_convention_exactly() {
+        for ok in [
+            "lab-cp1",
+            "lab-cp12",
+            "lab-w1",
+            "lab-w3",
+            "lab-etcd1",
+            "lab-lb",
+        ] {
+            assert!(is_cluster_vm(ok, "lab"), "{ok} should match cluster 'lab'");
+        }
+        for not_ok in [
+            "labextra-cp1", // different cluster, same prefix characters
+            "lab",          // the cluster name itself is not a node
+            "lab-",         // no role at all
+            "lab-cp",       // no index
+            "lab-cpx",      // non-numeric index
+            "lab-master1",  // not one of the roles this engine writes
+            "other-cp1",    // a different cluster entirely
+        ] {
+            assert!(
+                !is_cluster_vm(not_ok, "lab"),
+                "{not_ok} must NOT match cluster 'lab'"
+            );
+        }
+    }
+
+    /// Regression (same gap): removing a VM/SSH cluster's kubeconfig entries
+    /// has to find exactly the three names `merge_into_local_kubeconfig`
+    /// wrote (`<name>` for cluster+context, `<name>-admin` for the user),
+    /// leave every OTHER cluster's entries untouched, and clear
+    /// `current-context` only when it was actually pointing here.
+    #[test]
+    fn remove_local_kubeconfig_entries_removes_only_this_clusters_three_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
+        let dest = tmp.path().join("config");
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "doomed", &dest).unwrap();
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "survivor", &dest).unwrap();
+
+        remove_local_kubeconfig_entries(&dest, "doomed").unwrap();
+
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        let names = |key: &str| -> Vec<String> {
+            merged[key]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|e| e["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(names("clusters"), vec!["survivor"]);
+        assert_eq!(names("contexts"), vec!["survivor"]);
+        assert_eq!(names("users"), vec!["survivor-admin"]);
+        // `doomed` was the current-context (the first cluster merged always
+        // is) — clearing it, rather than leaving it dangling, is the point.
+        assert!(merged.get("current-context").is_none());
+    }
+
+    /// A removal that finds nothing to remove (a name that was never
+    /// merged, or no kubeconfig at all) is a no-op, not an error — the
+    /// caller in `destroy_vm_cluster` treats a missing kubeconfig as nothing
+    /// to clean up, the same way `fetch_kubeconfig`'s own `~/.kube/config`
+    /// handling already does.
+    #[test]
+    fn remove_local_kubeconfig_entries_tolerates_no_match_and_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("config");
+        assert!(remove_local_kubeconfig_entries(&dest, "never-existed").is_ok());
+
+        let source = tmp.path().join("admin.conf");
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        remove_local_kubeconfig_entries(&dest, "not-lab").unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(
+            merged["clusters"].as_sequence().unwrap().len(),
+            1,
+            "a non-matching name must not touch an unrelated cluster's entries"
         );
     }
 

@@ -292,6 +292,12 @@ msgstr "A apagar o cluster"
 msgid "Removing node"
 msgstr "A remover o nó"
 
+msgid "Destroying cluster"
+msgstr "A destruir o cluster"
+
+msgid "Removing VM"
+msgstr "A remover a VM"
+
 msgid "Freeing network"
 msgstr "A libertar a rede"
 
@@ -9484,6 +9490,18 @@ msgstr "removido: o que sobrou de {n} cluster(s)"
 
 msgid "could not remove context '{ctx}' from kubeconfig: {err}"
 msgstr "não consegui tirar o contexto '{ctx}' do kubeconfig: {err}"
+
+msgid "`cluster destroy` removes VM-provisioned cluster '{name}' — pass --force to confirm when not on a terminal"
+msgstr "o `cluster destroy` remove o cluster '{name}' provisionado por VM — passa --force para confirmar quando não estiveres num terminal"
+
+msgid "This will remove {n} VM(s) of cluster '{name}', its cached kubeconfig, and the matching ~/.kube/config entries. The network it used is left alone — you created it, this command did not."
+msgstr "Isto remove {n} VM(s) do cluster '{name}', o kubeconfig em cache, e as entradas correspondentes no ~/.kube/config. A rede que usava fica intocada — foste tu que a criaste, não este comando."
+
+msgid "could not remove kubeconfig entries for '{name}': {e}"
+msgstr "não consegui tirar as entradas do kubeconfig para '{name}': {e}"
+
+msgid "cluster '{name}' removed ({n} VM(s))"
+msgstr "cluster '{name}' removido ({n} VM(s))"
 
 msgid "stack \"{stack}\" declares everything it owns — nothing to prune"
 msgstr "o stack \"{stack}\" declara tudo o que possui — nada a podar"
