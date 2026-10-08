@@ -99,14 +99,18 @@ first), independent of which domain each came from:
    (§4.1). Every failure in the mount/write path was silently discarded; a tenant secret
    could survive a `container commit` or a filesystem backup.
 2. **KaaS — every real cluster is permanently `NotReady`, and the CLI reports success
-   anyway.** `PARTIALLY FIXED` (§4.2). `spec.cni` was validated and never applied; the
-   final line printed "cluster ready" unconditionally, including on the historical
-   `wait_ready: false` timing where readiness is never even checked.
+   anyway.** `FIXED for single-node, confirmed live` (§4.2, §4.6). `spec.cni` was
+   validated and never applied; the final line printed "cluster ready" unconditionally,
+   including on the historical `wait_ready: false` timing where readiness is never even
+   checked. Single-node is now genuinely fixed and proven on real libvirt/KVM; multi-node
+   is unchanged (no `--cni` escape hatch exists on `cluster kubeadm` yet to refuse it
+   safely).
 3. **CaaS — the ADR-0062 root-fallback is invisible to any external consumer.** `FIXED,
    CLI half` (§4.3). A Pod that declares `runAsNonRoot` can be running as root, with
    nothing in `ContainerStatus`/`inspect`/logs to show it.
 4. **KaaS — `oom_score_adj`/`cpuset_mems`/`unified`/hugepages silently dropped on the CRI
-   path.** `NOT FIXED` — contradicts ADR-0038's own decision text. See §8.
+   path.** `oom_score_adj` `FIXED` (§4.5); `cpuset_mems`/`unified`/hugepages still not —
+   contradicts ADR-0038's own decision text. See §8.
 5. **CaaS — multi-tenant admission is open by default, with zero warning event.** `NOT
    FIXED` — deliberate for the engine's documented single-tenant use, but a CaaS layer that
    forgets to configure both `RuntimePolicy` and `DELONIX_CRI_CAP_CEILING` gets node
@@ -118,17 +122,30 @@ first), independent of which domain each came from:
 7. **NaaS — stale DNS on Proxmox VM teardown/rename** can point to an address later
    reassigned to a different workload (ADR-0064 D6, decided, not implemented).
 8. **NaaS — asymmetric rollback in `netops::remove`** can leave an orphaned `NetDef` that
-   blocks future creates with a false `NetworkPrefixConflict`.
+   blocks future creates with a false `NetworkPrefixConflict`. `FIXED` (§4.4).
 9. **Contracts — no request anywhere carries caller identity.** `ListOperationsRequest`
    is globally unscoped. Not an active exploit today (single trusted local agent per the
    `SO_PEERCRED` model) but a real gap the moment more than one caller shares a node.
 10. **KaaS — no teardown, no backup/restore for a VM/SSH-provisioned cluster.** Destroying
     one today means manually `vm rm`-ing every VM; there is no `etcdctl snapshot` wiring
-    anywhere.
+    anywhere. **Confirmed live, the hard way** (§4.6): this audit's own test VM had to be
+    torn down by hand (`vm rm`, `network rm`, three `kubectl config delete-*` calls) for
+    exactly this reason.
 11. **Contracts — 39 of 59 RPCs unimplemented**, Container/Pod/VM/Stack/Image with zero
     served verbs — the PaaS cannot delegate to the contract for almost anything yet.
 12. **Contracts — structured errors (`ErrorDetail`) only exist inside `Operation.error`**,
     never on the synchronous error path, which is where most real errors actually surface.
+
+**Gap #13, found live and not in the original ranking** (§4.6): `cluster kubeadm`/
+`cluster apply` upgrade `delonix-cri` on a node but never the `delonix` CLI itself, and the
+CRI's `__apirun` re-exec target resolves whatever `delonix` is on the node's `PATH` — so a
+node provisioned from an old golden image runs brand-new CRI protocol handling on top of
+however old the baked-in CLI is, for every actual container spawn. This is a real,
+security-relevant correctness gap (it silently defeats any fix landed in the CLI/engine
+code after a golden image was built, ADR-0062's own root-fallback ordering fix included —
+measured live, reproducing the exact crash that fix's own commit comment describes as
+closed) that none of the four sandbox-only matrices could have found, because finding it
+required a node old enough to be out of sync with its own CRI.
 
 ## 4. Corrections implemented, with regression tests
 
@@ -241,32 +258,156 @@ cross-references the two stores for a given id — real work, not something to g
 without a kubelet in this sandbox to validate the result against. Named as a scoped
 follow-up rather than attempted half-blind.
 
+### 4.4 `fix(net)` 347cd598 — a network's record now outlives a failed dataplane removal
+
+`crates/adapters/delonix-sdn/src/netops.rs::remove` erased the `NetworkStore` record
+FIRST, then attempted the (best-effort, error-swallowing) dataplane teardown. If that
+failed partway, the physical `NetDef` stayed on disk — read by `network_get`, and by the
+prefix-conflict check a later `network create` runs — with nothing in `NetworkStore`
+pointing at it: the network vanished from `network ls` while its prefix kept blocking a
+replacement, with no command able to reach it. Exactly the inverse of `create_bridge`'s
+own already-correct rollback in the same file. Reordered so the two dataplane calls run
+first and the store record is removed last — neither depends on the other, so the reorder
+changes no other behavior, and a dataplane failure now simply leaves the network visible
+and its prefix honestly still-taken, instead of invisible-but-blocking. No new automated
+test (neither `netops` function has ever had one — they talk to a live holder over a
+control socket with no injectable seam); verified by reading, and by a clean 285/285
+`delonix-sdn` test run with the reorder in place. Found by the NaaS audit's gap #3.
+
+### 4.5 `fix(cri)` 225664a2 — `oom_score_adj` honoured instead of silently dropped
+
+ADR 0038's own text is "honour or refuse, never ignore"; `LinuxContainerResources.
+oom_score_adj` had neither — read off the CRI wire into `CriResources` and never
+referenced again anywhere (confirmed: zero references outside the raw `.proto` struct).
+Refusing it outright is not viable (every real kubelet sets it, on every pod, of every QoS
+class — refusing would fail `CreateContainer` for all of them). Wired the value through
+`CriResources` → `RunOpts` (new `oom_score_adj: Option<i32>` field, "0 means not set" —
+the same convention this struct's sibling fields already use) → `Container` (persisted,
+`#[serde(default)]`) → a new `apply_oom_score_adj`, called in `container_init` immediately
+next to `apply_ulimits` and for the identical reason (lowering the value needs
+`CAP_SYS_RESOURCE`, held at that exact point, before `drop_capabilities`). Also exposed as
+a hidden `--oom-score-adj` flag on the native CLI (mirrors the existing
+`--kube-cgroup-parent` hidden-flag pattern exactly), giving the CLI the same capability
+for free. Extended the existing `pod_limits_become_run_flags` test with a real
+Guaranteed-QoS value (`-998`) rather than adding a parallel test. No test for the actual
+`/proc/self/oom_score_adj` write: that path is process-wide state, not per-thread, and
+mutating it in a unit test would corrupt every other test running concurrently in the same
+binary — the same class of hazard `arch_fitness.py`'s `env_writes` ratchet already
+tracks for raw `std::env::set_var`. Found by the KaaS audit's gap #4 (the overall report's
+ranked gap #4).
+
+### 4.6 Live validation on a real host — what the sandbox analysis above could not do
+
+All of the above was written assuming no root/KVM were available to validate live. That
+assumption was wrong for the actual host this session ended up running on, and the user
+asked for the KaaS fix specifically to be tested with a real `delonix vm`. This section is
+that test, done with full isolation from the host's own state (see the warning below), and
+its honest result — including a real, separate gap it surfaced that was not one of the
+five fixes above.
+
+**Isolation, because this host runs production workloads.** Before touching anything, a
+read-only survey found this host running a live stack (Delonix Meet: PBX, web edge,
+Kamailio, FreeSWITCH, Postgres, Redis, Coturn, several `kaeso-odoo` containers) under the
+DEFAULT `DELONIX_ROOT`. None of it was touched. Testing used a from-scratch
+`DELONIX_ROOT` **and** a from-scratch `DELONIX_NET_RUNTIME_DIR` — this repo's own history
+(`AGENTS.md`, "Meia-isolação é pior que nenhuma") documents a real incident on this exact
+host where isolating only the first and not the second caused one test session to tear
+down another's live network holder, because the holder/slirp socket directory is keyed by
+uid, not by `DELONIX_ROOT`.
+
+**The golden VM image was imported from the host's own local copy, not downloaded.**
+`image vm import` registered the host's already-present `delonix-vm-k8s:1.36` qcow2 (a
+read-only operation on the source file) under the isolated root — 7.4s, no network egress,
+no risk to the host's own copy.
+
+**Result: the fix works.** `cluster kubeadm --control-plane 1 --workers 0 --network
+<isolated> --copy-kubeconfig` against this binary (with a freshly-built matching
+`delonix-cri` next to it) produced, for the first time, an honest and correct "cluster
+ready": the "Installing the default CNI (bridge, single node)" step ran and the node
+reached `Ready` with the control-plane taint removed, confirmed by `kubectl get nodes`
+(`Ready`, 16s old) directly against the live kubeconfig — not by trusting the CLI's own
+claim. CoreDNS's two pods were scheduled with real addresses from the pod subnet
+(`10.244.0.2`/`.3`), proof the bridge CNI is actually handing out routable IPs, not just
+reporting ready. `wait_for_cluster_ready` returned `Ok(true)` in 0.3s instead of the
+historical silent-timeout warning.
+
+**A real, separate gap this test found: `cluster kubeadm` upgrades `delonix-cri` on the
+node but never the `delonix` CLI itself — and the CRI's own re-exec target resolves
+whatever is on the node's `PATH`.** CoreDNS immediately crash-looped with `setuid(65532)
+failed — the image USER is not mapped (subuid?)` — the exact symptom a comment at
+`crates/adapters/delonix-linux/src/lib.rs:3493-3510` documents as fixed in this
+repository's current source (moving the user switch to before `drop_capabilities`, so
+`--cap-drop ALL` pods like CoreDNS do not lose `CAP_SETUID` first). Tracing it down: the
+`__apirun` child processes `delonix-cri` re-execs to actually spawn a container were
+running `/usr/local/bin/delonix` — and that binary reported **`delonix 0.66.0`, built
+2026-08-27** — the CLI baked into this golden image two months before the fix the comment
+describes, while the freshly-installed `delonix-cri` (sha256-verified as the one this
+session built) is `5.0.0`. `cluster kubeadm`'s host-prep step installs/replaces
+`delonix-cri` on the node (confirmed in the bootstrap output: `"delonix-cri differs from
+the resolved one … replacing it"`) but has no equivalent step for the `delonix` CLI the
+CRI re-execs into for the actual container-creation work — so a node provisioned today
+from an old golden image runs new CRI protocol handling on top of month-old container
+spawn logic, silently. **This is a real gap, found live, not one of the five ranked
+originally** — filed here rather than guessed at from a sandbox. Replacing
+`/usr/local/bin/delonix` on the test VM with this session's own build and recreating the
+CoreDNS pods confirmed the diagnosis (the stale binary was the cause, not a regression in
+this session's fixes), but also made the node's control-plane flap for several minutes —
+most plausibly this VM's minimal size (2 vCPU/2G, this command's own defaults) under the
+combined load of the kubeadm bootstrap, the binary swap, and concurrent `kubectl`/`ssh`
+traffic from this session, rather than anything specific to the swap itself. That part is
+reported as inconclusive, not as a finding, because it was not isolated from its own
+confound.
+
+**Teardown — by hand, because the gap is real.** `cluster kubeadm`/`cluster apply` has no
+destroy verb for a VM-provisioned cluster (KaaS gap #10, §3 above) — this session's own
+test is live proof of it: cleanup needed `vm rm` (confirmed: 3 artifacts, 679 MiB freed),
+`network rm`, `net netns down` (isolated holder), and three `kubectl config delete-*` calls
+to remove the context this test's own `--copy-kubeconfig` had merged into the user's real
+`~/.kube/config` (confirmed afterward: the user's original contexts and current-context
+were unchanged throughout — `--copy-kubeconfig` only adds, never switches). The isolated
+`DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` directories were then deleted. A final read-only
+survey confirmed the host's production containers, VMs and networks were exactly as they
+were before this test began.
+
 ## 5. Test results, exact
 
-Environment: this sandbox, no root, no KVM/hypervisor, no real network egress beyond what
-was already cached. Rust toolchain and dependency versions as pinned in `Cargo.lock` at
-`1cbe9639`. `CARGO_TARGET_DIR` isolated to this worktree throughout (per this repo's own
-multi-session-safety convention).
+Two environments ended up involved, and the results below say which is which.
+**Sandbox** (fixes 4.1–4.5, written assuming no root/KVM): Rust toolchain and dependency
+versions as pinned in `Cargo.lock` at `1cbe9639`, `CARGO_TARGET_DIR` isolated to this
+worktree throughout. **Real host** (§4.6's live validation): the same worktree's release
+build, run against real KVM/libvirt with both `DELONIX_ROOT` and
+`DELONIX_NET_RUNTIME_DIR` isolated from the host's own production state.
 
 ```
-cargo fmt --check -p delonix-linux -p delonix-runtime-bin -p delonix-compute   → clean (0 diffs)
-cargo clippy -p delonix-linux --lib --all-targets -- -D warnings               → clean
-cargo clippy -p delonix-runtime-bin --bin delonix -- -D warnings               → clean
-cargo clippy -p delonix-compute --all-targets -- -D warnings                  → clean
+cargo fmt --check -p delonix-linux -p delonix-runtime-bin -p delonix-compute -p delonix-cri -p delonix-sdn
+                                                                               → clean (0 diffs)
+cargo clippy -p delonix-linux -p delonix-runtime-bin -p delonix-compute -p delonix-cri -p delonix-sdn
+  --all-targets -- -D warnings                                                → clean
 python3 scripts/lang_ratchet.py                                               → ok (3241 comments, 1050 identifiers, 117 user_text)
 python3 scripts/arch_fitness.py                                               → ok (library_prints baseline raised 89→90, see 4.1's commit message for why; all else unchanged)
 cargo test -p delonix-linux --lib                                             → 174 passed; 0 failed
 cargo test -p delonix-runtime-bin --bin delonix cmd::cluster::                 → 47 passed; 0 failed
 cargo test -p delonix-runtime-bin --bin delonix cmd::container::               → 92 passed; 0 failed
-cargo test -p delonix-runtime-bin --bin delonix help_i18n                      → 3 passed; 0 failed
+cargo test -p delonix-runtime-bin --bin delonix (full)                        → 1161 passed; 0 failed
 cargo test -p delonix-compute --lib                                           → 84 passed; 0 failed
-cargo test --workspace --lib (final full pass, all crates)                    → 25/25 crates "test result: ok"; 0 "test result: FAILED"
+cargo test -p delonix-cri --lib                                               → 61 passed; 0 failed
+cargo test -p delonix-sdn --lib                                               → 285 passed; 0 failed
+cargo check --workspace --all-targets (repeated after every fix)              → clean, every time
+cargo test --workspace --lib (full pass, all crates, after fixes 4.1–4.3)      → 25/25 crates "test result: ok"; 0 "test result: FAILED"
 ```
 
 Each fix's regression test was individually reverted and re-run to confirm it fails
 without the fix (documented in the test's own comment and in §4 above), per this repo's
 own "prova medida, não afirmada" discipline — never trusting that a new assertion catches
 what it claims to without having watched it fail first.
+
+**Live, on the real host** (§4.6): `cluster kubeadm --control-plane 1 --workers 0` with
+this build → `kubectl get nodes` reports `Ready` (confirmed against the live kubeconfig,
+not the CLI's own claim); CoreDNS pods carry real pod-subnet IPs
+(`10.244.0.2`/`10.244.0.3`); `wait_for_cluster_ready` returns `Ok(true)` in 0.3s. This is
+the one "not validated live" caveat from the first version of this report that is now
+resolved — the other four fixes (4.1, 4.3, 4.4, 4.5) remain sandbox-proven only, for the
+reasons each one's subsection states.
 
 ## 6. Contracts prepared for future PaaS integration — status, not new work
 
@@ -312,31 +453,37 @@ and leaves written down, for whoever does that work next:
 
 ## 8. Limitations, blockers, and remaining risk — stated plainly
 
-- **This sandbox has no root, no KVM, no real network egress.** Every "not validated
-  live" note above is real: the three fixes are proven by unit tests against this engine's
-  own code (including, for the CNI fix, this engine's own CNI parser — not a hand-rolled
-  JSON check), and by a clean full-workspace test/lint/gate pass, but none of the three was
-  exercised against a live `kubeadm` bootstrap, a real mount-failure scenario, or a real
-  kubelet. Whoever has a host that can run one should re-run the KaaS matrix's own
-  suggested acceptance tests before calling gap #1/#2 fully closed.
-- **9 of the 12 ranked gaps in §3 are not fixed by this pass.** This was a deliberate
-  choice under the brief's own stated priority (security/data-loss first, within a bounded
-  session), not an oversight: `oom_score_adj` (gap #4) needs a new `RunOpts`/`Container`
-  field AND a post-spawn `/proc/<pid>/oom_score_adj` write in `delonix-linux`'s spawn path
-  — larger surface than the three landed fixes, deferred rather than rushed. The admission
-  warning event (gap #5) requires adding a new case to `delonix-security-runtime`'s
-  `Outcome`/`Category` taxonomy, which is an architectural decision inside a crate this
-  audit does not own — flagged for its actual owner rather than improvised. Gaps #6–#12 are
-  each real engineering work (a second provider-firewall path, DNS lifecycle tied to VM
-  teardown, a symmetric rollback, a contract-wide identity field, 39 RPCs, a sync-path error
-  model) that did not fit a single session on top of the four-domain inventory and the three
-  landed fixes.
+- **Fixes 4.1, 4.3, 4.4, 4.5 are sandbox-proven only — fix 4.2's single-node case is now
+  confirmed on real KVM/libvirt** (§4.6), which is the one gap this originally said needed
+  "a host that can run one." The other four's "not validated live" notes in their own
+  subsections above still stand, each for its own stated reason (a mount failure needing
+  `CAP_SYS_ADMIN`; a process-wide procfs write unsafe to exercise in a parallel test
+  runner; `netops` functions with no injectable seam to a live holder).
+- **8 of the 12 originally-ranked gaps, plus the live-only gap #13, are not fixed by this
+  pass.** Landed: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8. Not
+  landed, each for a stated reason: the admission warning event (gap #5) requires adding a
+  new case to `delonix-security-runtime`'s `Outcome`/`Category` taxonomy, which is an
+  architectural decision inside a crate this audit does not own — flagged for its actual
+  owner rather than improvised. Gaps #6, #7, #9–#12 are each real engineering work (a
+  second provider-firewall path, DNS lifecycle tied to VM teardown, a contract-wide
+  identity field, 39 RPCs, a sync-path error model, a destroy verb for VM-provisioned
+  clusters) that did not fit a single session on top of the four-domain inventory, the five
+  landed fixes, and the live validation. Gap #13 (stale CLI on golden images) was found,
+  not fixed — the right fix (does `cluster kubeadm`'s host-prep upgrade the CLI the same
+  way it already upgrades `delonix-cri`? does the CRI's re-exec need to pin an explicit
+  path instead of trusting `PATH`?) deserves its own session, not a reaction under time
+  pressure to something just discovered.
 - **The multi-node KaaS path is unchanged and still silently `NotReady`.** The fix in §4.2
   deliberately does not touch it (no `--cni` escape hatch exists yet on `cluster kubeadm`
   to add a safe refusal without breaking the documented HA example) — this is the single
   largest remaining KaaS gap, and closing it for real needs either a vendored, tested CNI
   with cross-node routing (kindnet/Calico/Flannel) or a `--cni` flag plus an explicit
   refusal, neither of which this pass attempted blind.
+- **The live validation's secondary observation (control-plane flapping after the CLI
+  swap) is reported as inconclusive, not as a finding** (§4.6) — it was not isolated from
+  the confound of a minimal 2 vCPU/2 GiB VM under concurrent `kubectl`/`ssh` load from this
+  same session, and calling it a regression without isolating that would be exactly the
+  kind of unmeasured claim this report tries not to make.
 - **Nothing here was validated against the `delonix-paas` consumer**, by design — this
   audit's scope is the Runtime only, per the brief's own instruction and this repo's
   standing doctrine.
