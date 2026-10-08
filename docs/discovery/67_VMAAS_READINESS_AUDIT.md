@@ -13,7 +13,10 @@
 > capability-matrix.md` (ADR-0050) already measures and gates in CI — it reads
 > that matrix, verifies it is current, and adds what that matrix does not
 > cover: the Runtime→PaaS *contract* boundary, cloud-init/host-guest specifics,
-> and two bugs found and fixed by actually booting VMs.
+> and three gaps/bugs found, fixed and live-validated by actually booting VMs
+> (not just unit-tested): the libvirt backend never asking QEMU Guest Agent
+> anything, `vm ssh` having no route to a Cloud Hypervisor VM's network, and
+> `vm.disk.resize` not existing on any backend.
 
 ## 1. Inventory — what "the VM base" actually is
 
@@ -69,11 +72,21 @@ with `--ssh-key @key.pub --hostname vmaaslive1 --wait`:
   deterministically from the VM's own name, and a second `vm create` on an
   interrupted name auto-heals instead of duplicating (see §6).
 
-**Not verified in this pass**: partition/filesystem growth on first boot
-(`growpart`/`resizefs`) — the capability catalog already records
-`vm.disk.resize` as `not-implemented` on every backend, and no cloud-init
-module in `cloudinit.rs` requests a resize. This is a real gap for VMaaS (a
-tenant will ask for more disk), tracked in §7, not fixed in this pass.
+**Disk growth, found missing, fixed, and verified end to end.** The
+capability catalog recorded `vm.disk.resize` as `not-implemented` on every
+backend at the start of this audit — a VMaaS tenant asking for a bigger disk
+had no path at all. Fixed (see §3) and validated against a real guest: grew
+`vmaaslive1`'s stopped disk from 3 GiB to 6 GiB (`vm resize --disk-size 6`,
+`qemu-img resize` under the hood), booted it, and `df -h /` showed the root
+filesystem **already grown to match** (2.8G → 5.8G) — the base image's own
+cloud-init `growpart`/`resize2fs` modules picked up the bigger block device
+on their own, on the very next boot, with **zero engine-side cloud-init
+change**. Repeated on libvirt with the same result, cross-confirmed through
+the newly-wired guest-agent channel (§3): `vm describe`'s `Filesystem:` line
+read `/ (ext4) 961.2 MiB / 5.43 GiB` straight from `guest-get-fsinfo` after
+the same resize-and-reboot. "Prefer an existing component" held exactly as
+hoped: the fix only had to grow the block device and trust the image's own
+cloud-init to do the rest.
 
 ## 3. Host-guest channel (§4 of the brief) — fixed one real gap, found one real bug
 
@@ -91,11 +104,30 @@ exactly the combinations that support it.
   (`org.qemu.guest_agent.0`), and `guest_info()` queries it through `virsh
   qemu-agent-command`, mirroring Proxmox's field mapping exactly. Unit-tested
   (channel always present, the "agent unreachable" phrase classifier, the
-  two pure JSON parsers); capability moved from `not-implemented` to
-  `partial` for libvirt in the published matrix — **not yet `supported`**: no
-  battery check boots a guest with a real agent and reads it back, and this
-  pass did not either (the live pass went into the SSH bug below instead).
-  Honest next step, not claimed here.
+  two pure JSON parsers) AND live-validated: the pulled `debian-bookworm`
+  image did not actually ship the agent (installed in a build recipe newer
+  than the last publish of that tag — a finding in itself, see §7), so the
+  agent was installed and started by hand inside a real, running libvirt VM
+  (`apt-get install qemu-guest-agent`, `systemctl enable --now`), and
+  `delonix describe vm` came back with real guest data pulled live through
+  the channel this fix added:
+  ```
+  Guest:
+    OS:           Debian GNU/Linux 12 (bookworm)
+    Kernel:       6.1.0-52-cloud-amd64
+    Hostname:     libvm1
+    Agent:        qemu-guest-agent 7.2.22
+    Filesystem:   /boot/efi (vfat) 11.8 MiB / 123.7 MiB
+    Filesystem:   / (ext4) 945.1 MiB / 2.60 GiB
+  ```
+  **Still `partial` in the published matrix, deliberately**: this proves the
+  mechanism works against a real agent, but it was a manual session, not an
+  automated, re-runnable check the evidence-gate test can point to — unlike
+  `vm.disk.resize` (§7), nothing here could be reduced to an empty-disk
+  battery check, because there is no agent without a real guest OS. Promoting
+  it needs either a real image pull inside `scripts/e2e.sh` (a cost this pass
+  chose not to add to the standard battery) or a dedicated opt-in `live.rs`
+  test, neither built here.
 
 - **Found and FIXED a real, reachable bug**: `delonix vm ssh` against a
   Cloud Hypervisor VM failed with "No route to host"/"Connection timed out"
@@ -198,6 +230,8 @@ exit code).
 | delete cleans EVERYTHING (process, tap/netns, overlay, record) | PASS (confirmed via `virsh -r`) | PASS (confirmed via `nsenter` into the holder) | BLOCKED |
 | `kind: VirtualMachine` (plan→apply→plan 0→drift→destroy) | PASS (12/12) | PASS (6/6, manual) | BLOCKED |
 | real guest OS, cloud-init, SSH | **PASS** | **PASS** (after the §3 fix; **FAIL** before it) | BLOCKED |
+| `vm resize --disk-size`: grow, boot, guest filesystem reflects it | **PASS** (3G→6G, `df`+guest-agent both confirm 5.8G/5.43G) | **PASS** (3G→6G, `df` confirms 5.8G) | not tested (new code, no target) |
+| `vm resize --disk-size`: refuse a shrink / a no-op size / while running | PASS (classes 1/1/5) | PASS (classes 1/1/5) | BLOCKED |
 | `kill -9` mid-`create`, 5× | PASS | PASS — zero orphan VMM process; an orphan overlay+dir is left (known class), `vm prune` reclaims it, a repeated `create` on the same name self-heals | not tested (no target) |
 | cleanup confirmed by independent observation | PASS | PASS | BLOCKED |
 
@@ -227,26 +261,31 @@ confirmed by the repository's own architecture notes; not re-verified here).
   rootless by default; the one privileged path this audit touched
   (`vm bridge`, VM↔container by IP) was explicitly NOT exercised — it needs
   root on a host this audit does not own alone.
-- **What is NOT cloud-native yet, named plainly**: a VM is not disk-growable
-  online (§2), and there is no socket-level API for a remote caller (§4) —
-  cloud-init and a YAML manifest are necessary but not sufficient for "VMaaS",
-  and this audit does not pretend otherwise.
+- **What is NOT cloud-native yet, named plainly**: a VM's disk only grows
+  COLD — stop, resize, start again (§2) — never live, and there is no
+  socket-level API for a remote caller (§4) — cloud-init and a YAML manifest
+  are necessary but not sufficient for "VMaaS", and this audit does not
+  pretend otherwise.
 
 ## 7. What is fixed, what is open
 
-### Fixed in this pass (both committed to `vmaas/auditoria`, pushed)
+### Fixed in this pass (three commits to `vmaas/auditoria`, pushed)
 
 | # | Finding | Severity | Fix | Evidence |
 |---|---|---|---|---|
-| 1 | `vm.guest-agent` not asked on libvirt despite the golden image shipping the agent | Medium (observability/day-2 gap, not a correctness bug) | virtio-serial channel on every domain + `guest_info()` via `virsh qemu-agent-command` | 4 new unit tests, clippy clean, matrix regenerated and gate-verified (`the_published_matrix_is_the_generated_one`). **Not live-booted with a real agent in this pass** — marked `partial`, not `supported`, on purpose. |
+| 1 | `vm.guest-agent` not asked on libvirt despite the golden image shipping the agent | Medium (observability/day-2 gap, not a correctness bug) | virtio-serial channel on every domain + `guest_info()` via `virsh qemu-agent-command` | 4 new unit tests, clippy clean, matrix regenerated and gate-verified. **Live-validated manually against a real agent** (§3) — real OS/kernel/hostname/version/filesystems read back. Still `partial` in the matrix: the live pass was manual, not an automated check the evidence-gate can cite (see §3's note). |
 | 2 | `vm ssh` unreachable on Cloud Hypervisor VMs (wrong netns) | **High** — breaks the engine's own documented "next step" for ~half its VM backends | wrap the `ssh` exec with the existing holder-netns `nsenter` prefix | 4 new unit tests + **live end-to-end reproduction and fix verification** (§3): "Connection timed out" → "Connection refused" (routing fixed) → `rc=0` real guest answer once cloud-init/sshd finished starting. Baseline re-confirmed broken (`Connection timed out`) immediately after, on a plain `ssh` from the same process, as a control. |
+| 3 | `vm.disk.resize` not implemented on any backend | **High** — a VMaaS day-1 requirement (bigger disk) had no path at all | `VmBackend::resize_disk` (grow-only, refused against the backend's own current size) on all three backends; `vm resize --disk-size <GiB>` | Unit tests (argv/size parsing) in all three provider crates + **a new, automated `scripts/e2e.sh` section** (empty-disk convention, like the existing snapshot sections) covering grow/refuse-shrink/refuse-while-running on BOTH local backends, 14/14 PASS — AND a full live boot-and-reboot on both backends confirming a real guest's filesystem grows automatically (§2/§3). Promoted to `supported` for libvirt and cloud-hypervisor in the published matrix, with `check:` evidence the gate verified; `partial` for Proxmox (its `PUT …/resize` for an existing VM is new code, not live-tested — no reachable node). |
 
-Both changes: `cargo fmt`/`clippy -D warnings`/`arch_fitness.py`/
+All three: `cargo fmt`/`clippy -D warnings`/`arch_fitness.py`/
 `lang_ratchet.py` clean; the pt.po entry for the one new user-facing string
-was added in the same commit (house rule). No crate boundary, dependency
-direction or privilege model changed — `serde_json` is an existing workspace
-dependency extended to one more crate that now needs to parse JSON, nothing
-new pulled in.
+was added in the same commit (house rule); the capability matrix is
+regenerated and matches `the_published_matrix_is_the_generated_one` /
+`every_supported_capability_cites_evidence_that_exists`. No crate boundary,
+dependency direction or privilege model changed — `serde_json` is an
+existing workspace dependency extended to the two crates that now need to
+parse `qemu-img`/QGA JSON, nothing new pulled in. Cell metric moved from
+100/252 (39.7%) to 102/252 (40.5%).
 
 ### Open, in priority order (none attempted in this pass — scope and ADR sequencing)
 
@@ -255,17 +294,22 @@ new pulled in.
    PaaS consumption, and the one this audit explicitly did NOT jump ahead
    of — it is Sprint 7 of the engine's own continuity plan, after work
    already in flight.
-2. **`vm.disk.resize`** (§2) — `not-implemented` on every backend. A tenant
-   asking for a bigger disk is a VMaaS day-1 requirement; needs its own
-   design (cold `qemu-img resize` + a cloud-init `growpart`/`resizefs` module
-   at minimum; a live/online path is a separate, harder question per backend).
-3. **Proxmox's full lifecycle, re-validated** — the matrix's `live:` evidence
+2. **Proxmox's full lifecycle, re-validated** — the matrix's `live:` evidence
    is from an earlier session; this audit could not refresh it (no reachable
    node). Re-run `delonix-proxmox/tests/live.rs` against the lab before
-   trusting those rows for a VMaaS launch decision.
-4. **`vm.guest-agent` on libvirt, promoted from `partial` to `supported`** —
-   boot a real guest with the agent and add the battery/live evidence the
-   matrix's evidence-gate already demands for that state.
+   trusting those rows for a VMaaS launch decision, and add live evidence
+   for the new `resize_disk` path on an existing VM specifically.
+3. **`vm.guest-agent` on libvirt, promoted from `partial` to `supported`** —
+   the mechanism is proven (§3); what is missing is an automated, re-runnable
+   check the evidence-gate can cite (a real image pull inside `scripts/e2e.sh`,
+   or a dedicated opt-in `live.rs` test).
+4. **The `delonix-vm-base:debian-bookworm` tag does not ship
+   `qemu-guest-agent`**, even though the current build recipe installs and
+   enables it (found live in §3, worked around by hand for this audit, never
+   reported before because nothing had asked the agent anything until this
+   pass). The published image needs rebuilding from the current recipe —
+   out of scope here (image publishing is a deliberate, separate action, not
+   something to do unilaterally from an audit).
 5. **CH live-disk snapshot** stays correctly `unsupported-by-provider`
    (ADR already explains why: CH's own `vm.snapshot` API saves memory
    without the disk, which cannot be restored consistently) — not a gap,
@@ -292,6 +336,14 @@ $BIN image vm pull debian-bookworm
 $BIN vm create t1 --backend cloud-hypervisor --disk delonix-vm-base:debian-bookworm \
   --memory 1G --ssh-key @key.pub --hostname t1 --wait --boot-timeout 90
 $BIN vm ssh t1 -i key -- hostname          # the fixed path
+$BIN vm ssh t1 -i key -- df -h /           # ~2.8G
+
+# Grow the disk, cold, and watch the guest's own cloud-init pick it up (§2):
+$BIN vm stop t1
+$BIN vm resize t1 --disk-size 6
+$BIN vm start t1
+$BIN vm ssh t1 -i key -- df -h /           # ~5.8G, no engine-side cloud-init change
+
 $BIN provider matrix                        # the capability report
 
 # Clean up — verify, don't assume:
@@ -321,11 +373,17 @@ rm -rf /tmp/dlxvmaas-live
 
 ## 10. What was not validated, stated plainly
 
-- Proxmox and OpenStack: no reachable target in this environment.
-- `vm.disk.resize`, `vm reach`/`vm bridge` (VM↔container by IP, needs root),
-  physical/VLAN networking: out of scope for this pass or needing a
-  privileged, shared-host action this audit chose not to take alone.
-- `vm.guest-agent` on libvirt: code-complete and unit-tested, not live-booted
-  against a real agent in this pass.
+- Proxmox and OpenStack: no reachable target in this environment — including
+  the new `resize_disk` path on an existing VM, which is new code there.
+- `vm reach`/`vm bridge` (VM↔container by IP, needs root), physical/VLAN
+  networking: out of scope for this pass or needing a privileged, shared-host
+  action this audit chose not to take alone.
+- `vm.guest-agent` on libvirt: proven live against a real agent (§3), but by
+  hand — not yet backed by an automated check the evidence-gate can cite, so
+  the matrix still says `partial`.
 - A kubelet-driven workload on a VM-backed node: not attempted — this audit
   is about the VM base itself, not the Kubernetes layer above it.
+- An **online**, no-reboot disk grow (the fix in this pass is cold: VM
+  stopped, disk grown, VM started again) — whether a running guest's
+  virtio-blk device can be told to grow live, and whether `growpart` can be
+  triggered without a reboot, was not attempted.
