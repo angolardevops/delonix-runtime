@@ -5500,6 +5500,29 @@ fn describe_one(c: &Container) {
             d.field("Crashed at", output::fmt_local(ts));
         }
     }
+    // `user_fallback_to_root` (ADR-0062) used to be an in-process `Notice`
+    // only — printed once to the CLI's stderr and otherwise lost, so a
+    // container created via CRI (the normal path for a kubelet) left no
+    // trace anywhere that an orchestrator reading `describe`/`inspect`
+    // could discover that a Pod which declared a non-root `USER` is in
+    // fact running as root. Shown unconditionally when it is `true`
+    // (never buried behind a flag) — the whole point is that it is not
+    // what the operator asked for.
+    if c.user_fallback_to_root {
+        d.field(
+            "User",
+            "0 (root) — FALLBACK: the image declares a non-root USER, but this host has no \
+             subordinate uid/gid range to map it (ADR-0062)",
+        );
+    } else if let Some(uid) = c.run_uid {
+        d.field(
+            "User",
+            match c.run_gid {
+                Some(gid) => format!("{uid}:{gid}"),
+                None => uid.to_string(),
+            },
+        );
+    }
     d.field_opt(k::POD, c.pod.as_deref());
 
     d.section("Resources");
