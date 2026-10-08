@@ -201,6 +201,56 @@ gh api repos/<owner>/<repo>/commits/<sha>/check-runs \
 # → {"total": 20, "por_sha": ["<sha>"]}   um só SHA, e é o que se quer
 ```
 
+**Um workflow que só corre por `workflow_dispatch` não é exercitado por nada, e o
+`release.yml` é esse.** Medido na `main` a 2026-10-08, depois de o #728 e o #730
+fecharem a deriva do `protoc`: **zero** referências ao `release.yml` nos 18 jobs do
+`ci.yml`, **zero** nos `scripts/`, **zero** em testes Rust. O único ficheiro fora de
+`docs/` que o nomeia é a acção que ele próprio consome. Logo a correcção do protoc
+fechou a deriva ENTRE os dois caminhos e **não** fechou isto: uma referência partida
+naquele ficheiro só aparece no `gh workflow run` seguinte — que foi exactamente como
+esta release falhou à primeira, com o CI verde o tempo todo.
+
+**E o nome engana, o que agrava.** O `ci.yml` tem um job chamado **`release verify`**
+(`release-verify`), e ele valida a tabela de maturidade do `system features` contra
+referências de ficheiro podres — nada do `release.yml`. Quem procurar «quem valida a
+release» encontra esse check verde e conclui que está coberto. *(Nota de método: a
+primeira leitura desta secção deu DOIS jobs com o mesmo nome visível, porque um `awk`
+colou dois blocos de comentário. Não há duplicados — a lista completa id→name
+desmentiu-o. O filtro que corta o que importa, outra vez.)*
+
+**O gate é escrevível, e há precedente**: o `scripts/test_tmp_roots_gate.py` já LÊ o
+`ci.yml` e chumba quando um passo deixa de correr depois de uma falha, e o
+`scripts/dev_docs.py` também lê workflows. O mesmo idioma aplicado ao `release.yml`
+responderia ao que ninguém responde hoje — que toda a `uses:` local existe, que os
+dois jobs de build instalam a toolchain antes de compilar o contrato, que os nomes de
+asset que o `install.sh` compõe são os que o workflow publica. Não é uma linha: é
+trabalho próprio, e fica escrito como tal em vez de implícito.
+
+**O piso de glibc do binário publicado é 2.34, e isso mede-se — não se deduz do
+runner.** Medido nos **15** binários da v5.0.0 (`readelf -V`, o símbolo `GLIBC_` mais
+alto): **2.34 em todos**, arm64 e `-v3` incluídos. É mais BAIXO que o 2.35 do runner
+(`ubuntu-22.04` e `ubuntu-22.04-arm`), porque o Rust liga contra o símbolo versionado
+mais antigo de que precisa e não contra o mais recente disponível. Duas consequências:
+**RHEL 9** (glibc 2.34) está coberto — que é a razão de a release pinar 22.04 em vez
+do `ubuntu-24.04-arm` do `ci.yml`, e agora está medida em vez de afirmada; e este
+número é **a sonda** que diz se um upgrade de runner, ou um pin de toolchain novo,
+arrastou o piso. O pin do `protoc` não arrastou.
+
+**A validação dos assets publicados mede cinco coisas, e a assinatura vem do
+REPOSITÓRIO.** O `SHA256SUMS` chega do mesmo URL que o binário, por isso verificá-lo
+com uma chave que veio no mesmo download prova transferência e não origem: a chave
+sai de `git show origin/main:scripts/install.sh` (`MINISIGN_PUBKEY`). As cinco são
+integridade (`sha256sum -c SHA256SUMS`, **sem `--ignore-missing`** — essa flag faz um
+asset EM FALTA ler-se como OK), origem (`minisign -Vm`, cujo trusted comment nomeia a
+tag e portanto não é reutilizável de outra release), identidade (`--version` com o
+**commit**, não só o número — `git rev-parse v<t>^{commit}`, nunca o objecto da tag),
+completude (a matriz que o `install.sh` compõe: **5** irmãos × **3** variantes = 15,
+mais `install.sh`/`SHA256SUMS`/`.minisig`/vsix/SBOM) e arquitectura (`file(1)` por
+binário — um asset `aarch64` não pode ser um x86 com o nome trocado). Dois extras
+baratos que valem: o `install.sh` publicado é `cmp` contra o da tag, e o `-v3` é
+genuinamente v3 (`file` diz `x86-64` nos dois; o que separa é o código —
+**134 561** instruções AVX2/BMI2/FMA contra **5 911** no baseline).
+
 **O custo, dito porque é o custo**: uma tag sem release passa a ser um estado
 intermédio normal, e o `version_gate` acima continua a olhar para a TAG e não
 para a release — portanto a `version` do `Cargo.toml` alinha-se no momento em que
