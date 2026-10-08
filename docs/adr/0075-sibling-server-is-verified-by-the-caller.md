@@ -1,6 +1,11 @@
 # ADR-0075: `exec_server` refuses a sibling it did not find beside itself, instead of trusting the `PATH`
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-08, by the owner). **Nothing is implemented yet**: `exec_server`
+  still takes the `PATH` fallback in silence, and D1/D2 are separate work with their own PR.
+  Accepting a decision is not the same as having it, and the measurement that motivated this ADR
+  still reproduces against a `delonix` run from a build tree. Until D1 lands, the battery guard
+  merged in `#725` measures the same hole from the outside — which protects this repo's own runs,
+  not a user's node.
 - **Date:** 2026-10-08
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0040 D2.4 as amended (each server is its own binary and `delonix serve <x>` /
