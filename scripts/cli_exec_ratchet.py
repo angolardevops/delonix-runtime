@@ -91,6 +91,27 @@ HELP_FLAGS = {"--help", "-h", "--version", "-V"}
 # is a space-joined argv, so a body arrives with its separators glued to words
 # (`container ps;`) and a word-exact match would miss the leaf.
 SEPARATORS = ";|&"
+# What ENDS a command inside a shell body, read on the RAW word.
+#
+# `SEPARATORS` alone could not do it: `unquote` strips them (and `)`) before the
+# scan ever sees the word, so the `ended` test built on the unquoted word was
+# dead code from the first commit — it can never be true. Measured 2026-10-08
+# while writing the first check with TWO invocations in one body:
+#
+#   diff <('$BIN' version …) <('$BIN' --version …)
+#
+# The first invocation really ran `version` and had its exit status judged, and
+# the leaf counted ZERO: the scan after the first engine word never stopped at
+# the `)`, walked into the second command, hit `--version` in `HELP_FLAGS` and
+# suppressed the invocation that DID happen. The count errs low by design, but
+# this was a silent mis-measurement, not a conservative one — a later `--help`
+# in the same body could erase an earlier real invocation anywhere.
+#
+# `&` is in the set and that is deliberate even though `2>&1` is a redirection
+# and not a command end: stopping there can only cost a LONGER leaf path, and no
+# leaf name contains `&`, so the worst case is the same leaf found one word
+# earlier. Erring low here is the same choice the module makes everywhere else.
+ENDERS = ";|&)`"
 
 # Punctuation glued to the LEFT of a word by command substitution. Measured
 # against a real run: the battery's commonest shape is
@@ -187,19 +208,21 @@ def leaves_of(cmd: str, leaves: set[str], table: dict[str, str] | None = None) -
     for i, w in enumerate(words):
         if not is_engine(w):
             continue
-        rest = [unquote(x) for x in words[i + 1 :]]
+        # The RAW words, because only they still carry the punctuation that says
+        # where this command ends — see `ENDERS`.
+        rest = words[i + 1 :]
         # Leading global options sit between the binary and the subcommand.
-        while rest and rest[0].startswith("-"):
-            flag = rest[0]
+        while rest and unquote(rest[0]).startswith("-"):
+            flag = unquote(rest[0])
             rest = rest[1:]
             if flag in GLOBAL_VALUE_FLAGS and rest:
                 rest = rest[1:]
         best = None
         path: list[str] = []
         printed_help = False
-        for x in rest:
-            stripped = x.rstrip(SEPARATORS)
-            ended = stripped != x
+        for raw in rest:
+            stripped = unquote(raw)
+            ended = any(c in raw for c in ENDERS)
             if stripped in HELP_FLAGS:
                 printed_help = True
                 break
@@ -280,13 +303,29 @@ def git_head() -> str:
         return "unknown"
 
 
-def write_trace(path: pathlib.Path, executed: set[str], leaves: set[str], note: str) -> None:
+def write_trace(
+    path: pathlib.Path,
+    executed: set[str],
+    leaves: set[str],
+    note: str,
+    commit: str | None = None,
+) -> None:
+    """Write the trace, stamped with the commit the RUN saw.
+
+    `commit` defaults to HEAD, which is right while recording a fresh run and
+    WRONG while re-recording an older one: a `--update` on a newer HEAD used to
+    move the stamp to a commit the battery never saw. Measured on 2026-10-08 —
+    re-recording the 160-leaf run moved `commit:` from 32efdbb5 to 759d1ea6,
+    three commits later, one of them a 28-line change to `scripts/e2e.sh`. A
+    provenance header that names the wrong commit is worse than none: it is a
+    number nobody can date, wearing a date.
+    """
     lines = [
         "# The CLI leaves a real battery run executed and asserted (F0.2 of the",
         "# maturity plan). Derived, never edited by hand:",
         "#   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update",
         f"# recorded: {note}",
-        f"# commit: {git_head()}",
+        f"# commit: {commit or git_head()}",
         f"# executed: {len(executed)}",
         f"# leaves: {len(leaves)}",
     ]
@@ -342,6 +381,12 @@ def main() -> int:
     ap.add_argument("--from-results", nargs="+", metavar="FILE", help="derive from a battery run")
     ap.add_argument("--update", action="store_true", help="write the trace and the baseline")
     ap.add_argument("--note", default="", help="provenance note for --update (host, date, command)")
+    ap.add_argument(
+        "--commit",
+        default="",
+        metavar="SHA",
+        help="the commit the run saw (default: HEAD; name it when re-recording an older run)",
+    )
     ap.add_argument("--list", action="store_true", help="per-group breakdown")
     ap.add_argument("--list-missing", action="store_true", help="leaves never executed")
     ap.add_argument("--list-unmatched", action="store_true", help="recorded commands that resolved to no leaf")
@@ -378,7 +423,7 @@ def main() -> int:
         if not args.from_results:
             raise SystemExit("--update needs --from-results: a baseline is recorded from a run, not from itself")
         note = args.note or "unnamed run — pass --note with host, date and command"
-        write_trace(TRACE, executed, leaves, note)
+        write_trace(TRACE, executed, leaves, note, args.commit or None)
         BASELINE.write_text(json.dumps({"executed": count, "leaves": total}, indent=2) + "\n")
         print(f"recorded: {count} of {total} leaves invoked under an assertion — {percent(count, total)} %")
         if unmatched:
