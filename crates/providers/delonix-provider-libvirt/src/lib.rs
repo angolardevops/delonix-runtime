@@ -17,7 +17,8 @@ use delonix_compute::capability::{
 };
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, VmBackend, VmConfig,
+    mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem, GuestInfo, VmBackend,
+    VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -481,7 +482,9 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmConsoleVnc => bin(S::Partial {
                 detail: "`vm vnc` reads `vncdisplay` of a `--vnc` domain; no battery",
             }),
-            C::VmGuestAgent => S::NotImplemented,
+            C::VmGuestAgent => bin(S::Partial {
+                detail: "`virsh qemu-agent-command` over a virtio-serial channel added to every domain; works with the golden image's own `qemu-guest-agent` recipe, but no battery check boots a guest and reads it back",
+            }),
             C::VmIpObserved => sys(S::Partial {
                 detail: "DHCP lease with a lease floor, then `domifaddr`; pure test only, the battery does not read the IP",
             }),
@@ -828,6 +831,97 @@ fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
         }
         Err(e) => Err(format!("{prog}: {e}")),
     }
+}
+
+/// Runs one QEMU guest agent command through `virsh qemu-agent-command` and
+/// returns the QMP `"return"` payload — `Ok(None)` when the agent is not
+/// reachable (not configured on this domain, not connected, domain not
+/// running), the SAME distinction [`VmBackend::guest_info`]'s doc-comment
+/// makes: a missing agent is an answer, not a failure. Any other `virsh`
+/// failure (the domain does not exist at all, a malformed reply) propagates.
+///
+/// `--timeout 5` BEFORE the `--`: a flag after it is read as a positional
+/// (the same ordering bug class `net-update`'s `--live --config` already
+/// paid for in this file).
+fn qemu_agent_query(
+    uri: &str,
+    domain: &str,
+    qmp_command: &str,
+) -> delonix_model::Result<Option<serde_json::Value>> {
+    match quiet(
+        "virsh",
+        &[
+            "-c",
+            uri,
+            "qemu-agent-command",
+            "--timeout",
+            "5",
+            "--",
+            domain,
+            qmp_command,
+        ],
+    ) {
+        Ok(out) => {
+            let v: serde_json::Value = serde_json::from_str(&out).map_err(|e| {
+                delonix_model::Error::from(Error::Command {
+                    context: "virsh qemu-agent-command",
+                    message: format!("could not parse the agent's reply: {e} ({out})"),
+                })
+            })?;
+            Ok(v.get("return").cloned())
+        }
+        Err(e) if agent_unreachable(&e) => Ok(None),
+        Err(e) => Err(Error::Command {
+            context: "virsh qemu-agent-command",
+            message: e,
+        }
+        .into()),
+    }
+}
+
+/// `true` when a `virsh qemu-agent-command` failure MEANS "nothing is
+/// listening", not "something else broke". Pure, extracted out of the match
+/// guard above so it is testable without a real `virsh`. `virsh` phrases
+/// this in more than one way depending on version and on WHY the agent is
+/// unreachable ("Guest agent is not responding: QEMU guest agent is not
+/// connected", "domain is not running", "QEMU guest agent is not
+/// configured") — all of them name either the agent or the domain's power
+/// state, never anything else a real `virsh` failure (bad domain name,
+/// `virsh` itself missing) would say.
+fn agent_unreachable(message: &str) -> bool {
+    let l = message.to_lowercase();
+    l.contains("agent") || l.contains("not running")
+}
+
+/// `guest-get-osinfo`'s `(pretty-name, kernel-release)`, the same two fields
+/// [`crate::capability`]'s `vm.guest-agent` entry promises. Pure.
+fn parse_guest_osinfo(v: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    (s("pretty-name").or_else(|| s("name")), s("kernel-release"))
+}
+
+/// `guest-get-fsinfo`'s mounted filesystems, in the guest's own order. An
+/// entry without a mountpoint is skipped — the agent reports internal
+/// devices (e.g. a bind mount's source) that way on some kernels. Pure.
+fn parse_guest_fsinfo(v: &serde_json::Value) -> Vec<GuestFilesystem> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| {
+                    Some(GuestFilesystem {
+                        mountpoint: f.get("mountpoint")?.as_str()?.to_string(),
+                        fstype: f
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        used_bytes: f.get("used-bytes").and_then(|b| b.as_u64()),
+                        total_bytes: f.get("total-bytes").and_then(|b| b.as_u64()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Powers off the domain (`virsh destroy`) only if it is NOT already "shut off" —
@@ -1407,6 +1501,16 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             s.push_str("      </source>\n    </hostdev>\n");
         }
     }
+    // QEMU guest agent channel (`vm.guest-agent`), always present: it is a
+    // no-op unless something listens on `org.qemu.guest_agent.0` inside the
+    // guest (the golden image's build recipe installs and enables it —
+    // `qemu-guest-agent` — but nothing here can see whether a GIVEN guest
+    // did), and `guest_info` already answers `Ok(None)` when it finds
+    // nothing on the other end. No path, no source: libvirt manages the
+    // unix socket under its own run directory.
+    s.push_str("    <channel type='unix'>\n");
+    s.push_str("      <target type='virtio' name='org.qemu.guest_agent.0'/>\n");
+    s.push_str("    </channel>\n");
     // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
     // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
     // manifests only (a fragment can name arbitrary host paths/devices).
@@ -2186,6 +2290,44 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
+    /// What the guest says about itself through `qemu-guest-agent`
+    /// (`vm.guest-agent`), via `virsh qemu-agent-command` — the SAME agent
+    /// the golden image's own build recipe already installs and enables
+    /// (`vmimage.rs`, "`qemu-guest-agent` nas três receitas"). `Ok(None)`
+    /// when the VM is not running, the domain was defined before this
+    /// backend started adding the guest-agent channel (an old record is
+    /// never redefined except by `vm start`/`vm create`), or nothing
+    /// answers on the other end of the channel — the SAME distinction the
+    /// trait's own doc-comment draws: a question the guest does not answer
+    /// is not a failure of this call.
+    fn guest_info(&self, vm: &Vm) -> delonix_model::Result<Option<GuestInfo>> {
+        if !self.is_running(vm) {
+            return Ok(None);
+        }
+        let Some(uri) = libvirt_domain_uri(&vm.name) else {
+            return Ok(None);
+        };
+        let Some(os_raw) = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-osinfo"}"#)?
+        else {
+            return Ok(None);
+        };
+        let (os, kernel) = parse_guest_osinfo(&os_raw);
+        let hostname = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-host-name"}"#)?
+            .and_then(|h| h.get("host-name")?.as_str().map(str::to_string));
+        let filesystems = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-fsinfo"}"#)?
+            .map(|v| parse_guest_fsinfo(&v))
+            .unwrap_or_default();
+        let agent_version = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-info"}"#)?
+            .and_then(|i| i.get("version")?.as_str().map(str::to_string));
+        Ok(Some(GuestInfo {
+            os,
+            kernel,
+            hostname,
+            agent_version,
+            filesystems,
+        }))
+    }
+
     /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
     /// This backend keeps no definition of its own between boots — `vm start`
     /// rebuilds the domain XML from the record (`start` → `create(config_from(..))`),
@@ -2753,6 +2895,64 @@ mod tests {
             allow_mac_spoofing: false,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn every_domain_carries_the_guest_agent_channel() {
+        let cfg = test_vm_cfg("128M");
+        let xml = super::libvirt_domain_xml(&cfg, "/vms/t.qcow2", &super::mac_for(&cfg.name));
+        assert!(
+            xml.contains("org.qemu.guest_agent.0"),
+            "no guest-agent channel in:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn agent_unreachable_recognizes_the_virsh_phrasings() {
+        assert!(super::agent_unreachable(
+            "Guest agent is not responding: QEMU guest agent is not connected"
+        ));
+        assert!(super::agent_unreachable(
+            "Requested operation is not valid: domain is not running"
+        ));
+        assert!(super::agent_unreachable(
+            "internal error: unable to execute QEMU agent command: QEMU guest agent is not configured"
+        ));
+        // A real virsh failure unrelated to the agent must NOT be swallowed.
+        assert!(!super::agent_unreachable("failed to get domain 'ghost'"));
+        assert!(!super::agent_unreachable("virsh: command not found"));
+    }
+
+    #[test]
+    fn parse_guest_osinfo_prefers_pretty_name_and_falls_back_to_name() {
+        let v = serde_json::json!({"pretty-name": "Debian GNU/Linux 12 (bookworm)", "name": "debian", "kernel-release": "6.1.0-amd64"});
+        assert_eq!(
+            super::parse_guest_osinfo(&v),
+            (
+                Some("Debian GNU/Linux 12 (bookworm)".to_string()),
+                Some("6.1.0-amd64".to_string())
+            )
+        );
+        let no_pretty = serde_json::json!({"name": "alpine"});
+        assert_eq!(
+            super::parse_guest_osinfo(&no_pretty),
+            (Some("alpine".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn parse_guest_fsinfo_skips_entries_without_a_mountpoint() {
+        let v = serde_json::json!([
+            {"mountpoint": "/", "type": "ext4", "used-bytes": 1000, "total-bytes": 2000},
+            {"name": "sda1"},
+            {"mountpoint": "/boot", "type": "vfat"},
+        ]);
+        let fs = super::parse_guest_fsinfo(&v);
+        assert_eq!(fs.len(), 2);
+        assert_eq!(fs[0].mountpoint, "/");
+        assert_eq!(fs[0].used_bytes, Some(1000));
+        assert_eq!(fs[1].mountpoint, "/boot");
+        assert_eq!(fs[1].used_bytes, None);
     }
 
     #[test]
