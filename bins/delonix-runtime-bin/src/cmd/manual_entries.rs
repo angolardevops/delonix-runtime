@@ -1254,8 +1254,10 @@ pub static ENTRIES: &[Entry] = &[
             ("host 8080 onto the container's 80", "delonix net ingress publish web 8080:80"),
             ("the same number on both sides", "delonix net ingress publish web 8443"),
             ("a UDP service — rootless cannot bind host ports below 1024, so publish high and let a proxy own :53 if you need it", "delonix net ingress publish dns 5353:53/udp"),
+            ("reachable from OTHER machines: without an address the port binds to 127.0.0.1 alone", "delonix net ingress publish sip 0.0.0.0:5070:5070/udp"),
+            ("reachable from the VMs on a libvirt network, and from nowhere else — see `delonix vm reach`", "delonix net ingress publish api 192.168.122.1:8080:80"),
         ],
-        see_also: &["net ingress unpublish", "net ingress ls", "container update", "net httproute apply"],
+        see_also: &["net ingress unpublish", "net ingress ls", "container update", "net httproute apply", "vm reach"],
     },
     Entry {
         path: "net ingress unpublish",

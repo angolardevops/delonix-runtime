@@ -1777,6 +1777,83 @@ fi
 "$BIN" network rm "$NET2" >/dev/null 2>&1
 
 ########################################
+section "publish: o endereço de bind é REGISTADO e sobrevive a um start"
+########################################
+# O endereço com que uma porta publicada liga era estado USADO na publicação e
+# nunca PERSISTIDO: o registo guardava `51072:80` e o `DELONIX_PUBLISH_ADDR` era
+# relido do ambiente a cada `start`. Medido a 2026-10-07, nos dois sentidos — uma
+# porta exposta à LAN voltava em 127.0.0.1 depois de um `start` (que é o que um
+# unit do `net boot enable` corre, sem ambiente nenhum), e uma porta publicada de
+# propósito só em loopback voltava em 0.0.0.0 quando a shell do operador tinha a
+# variável exportada. Nos dois casos rc=0, sem aviso, com o `ingress ls` a
+# imprimir a linha igual antes e depois.
+#
+# O veredicto é o bind lido do KERNEL (`ss`), nunca o que o comando disse — e tem
+# de ser através de um `stop`+`start`, porque cada passo isolado devolve 0 mesmo
+# com o defeito. Um check pelo rc ficaria verde sobre o bug.
+CPB="cpb-$PFX"
+# Portas altas e pouco prováveis; se alguma estiver ocupada o troço salta com
+# razão audível em vez de chumbar por causa de um vizinho.
+P_LOOP=51081
+P_SPEC=51082
+P_ENVV=51083
+if ss -tulnH 2>/dev/null | grep -qE ":($P_LOOP|$P_SPEC|$P_ENVV) "; then
+  skip "endereço de bind persistido" "uma das portas $P_LOOP/$P_SPEC/$P_ENVV já está ocupada neste host"
+elif ! "$BIN" container run -d --name "$CPB" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
+  skip "endereço de bind persistido" "não foi possível criar o container na rede custom"
+else
+  # 1) Sem endereço: liga só ao loopback, e o REGISTO di-lo (é o que torna o
+  #    `start` seguinte determinístico em vez de dependente do ambiente).
+  check "publish sem endereço liga em 127.0.0.1" ok bash -c \
+    "'$BIN' net ingress publish '$CPB' $P_LOOP:80 >/dev/null && ss -tlnH | grep -q '127.0.0.1:$P_LOOP '"
+  check "publish sem endereço NÃO liga em 0.0.0.0" ok bash -c \
+    "! ss -tlnH | grep -qE '(^|[^.0-9])0\\.0\\.0\\.0:$P_LOOP '"
+  check "o registo guarda o endereço resolvido" ok bash -c \
+    "'$BIN' net ingress ls '$CPB' | grep -q '127.0.0.1:$P_LOOP:80'"
+
+  # 2) Endereço no spec, em UDP — a forma que o `--help` não documentava e que
+  #    era a razão de alguém concluir que só havia loopback.
+  check "publish com endereço no spec liga em 0.0.0.0 (udp)" ok bash -c \
+    "'$BIN' net ingress publish '$CPB' 0.0.0.0:$P_SPEC:80/udp >/dev/null && ss -ulnH | grep -q '0.0.0.0:$P_SPEC '"
+
+  # 3) A via do env var: o endereço tem de ficar REGISTADO, senão desaparece.
+  check "publish via DELONIX_PUBLISH_ADDR liga em 0.0.0.0" ok bash -c \
+    "DELONIX_PUBLISH_ADDR=0.0.0.0 '$BIN' net ingress publish '$CPB' $P_ENVV:80 >/dev/null && ss -tlnH | grep -q '0.0.0.0:$P_ENVV '"
+  check "o endereço do env var fica no registo, não só no dataplane" ok bash -c \
+    "'$BIN' net ingress ls '$CPB' | grep -q '0.0.0.0:$P_ENVV:80'"
+
+  # O CICLO. Sem ambiente nenhum, como um unit de boot.
+  "$BIN" container stop "$CPB" >/dev/null 2>&1
+  sleep 1
+  if "$BIN" container start "$CPB" >/dev/null 2>&1; then
+    sleep 2
+    # O que o bug fazia: 0.0.0.0 → 127.0.0.1, em silêncio.
+    check "start: a porta exposta pelo spec CONTINUA em 0.0.0.0" ok bash -c \
+      "ss -ulnH | grep -q '0.0.0.0:$P_SPEC '"
+    check "start: a porta exposta pelo env var CONTINUA em 0.0.0.0" ok bash -c \
+      "ss -tlnH | grep -q '0.0.0.0:$P_ENVV '"
+    check "start: a porta de loopback CONTINUA em 127.0.0.1" ok bash -c \
+      "ss -tlnH | grep -q '127.0.0.1:$P_LOOP '"
+  else
+    check "start de um container com portas publicadas" ok false
+  fi
+
+  # O sentido INVERSO, que é o que pesa em segurança: um `start` corrido numa
+  # shell com a variável exportada não pode expor à LAN uma porta que foi
+  # publicada de propósito só em loopback.
+  "$BIN" container stop "$CPB" >/dev/null 2>&1
+  sleep 1
+  if DELONIX_PUBLISH_ADDR=0.0.0.0 "$BIN" container start "$CPB" >/dev/null 2>&1; then
+    sleep 2
+    check "start com o env var NÃO expõe uma porta publicada em loopback" ok bash -c \
+      "ss -tlnH | grep -q '127.0.0.1:$P_LOOP ' && ! ss -tlnH | grep -qE '(^|[^.0-9])0\\.0\\.0\\.0:$P_LOOP '"
+  else
+    check "start com o env var exportado" ok false
+  fi
+  "$BIN" container rm -f "$CPB" >/dev/null 2>&1
+fi
+
+########################################
 section "network: IPAM sem leases órfãos (S2, doc 62 §6 P1)"
 ########################################
 # O registo de endereços (`network ipam ls`) ANTES e DEPOIS de cada caminho de
@@ -4382,6 +4459,129 @@ check "serve cri continua vivo (gRPC: não se sonda por HTTP aqui)" ok bash -c \
 for i in $(seq 1 40); do kill -0 "$CRIPID" 2>/dev/null || break; sleep 0.2; done
 check "serve cri morre com SIGTERM" ok bash -c "! kill -0 '$CRIPID' 2>/dev/null"
 rm -f "$CRISOCK"
+
+# --- ADR-0074 D1: um hostPort que o nó não publica é RECUSADO pelo nome -------
+# A nota acima diz que não se finge um pedido gRPC aqui. Com o `crictl` presente
+# — o cliente oficial do projecto Kubernetes — já não é fingir: é o pedido real,
+# pelo mesmo transporte que o kubelet usa.
+#
+# Medido a 2026-10-07: o `slirp4netns` RECUSA SCTP no `add_hostfwd` («bad
+# arguments.proto»), e o `portmap` do CNI fala tcp/udp. Antes desta recusa o
+# sandbox era criado, a spec `5070:5070/sctp` chegava ao container e o pod morria
+# no `StartContainer` a nomear a SPEC e não a causa, em ciclo. O veredicto aqui
+# são as DUAS metades: a recusa chega, e não fica sandbox nenhum para limpar.
+if ! command -v crictl >/dev/null 2>&1; then
+  skip "CRI: hostPort SCTP recusado" "o crictl não está instalado neste host"
+else
+  CRISOCK2="/tmp/dlx-cri-sctp-$PFX.sock"
+  CRIPID2="$(e2e_serve_up cri "$CRISOCK2")"
+  if [ -z "$CRIPID2" ] || [ ! -S "$CRISOCK2" ]; then
+    skip "CRI: hostPort SCTP recusado" "o serve cri não subiu"
+  else
+    CRICFG="$OUT/pod-sctp.json"
+    cat > "$CRICFG" <<'JSON'
+{
+  "metadata": { "name": "sip", "uid": "sctp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 2, "container_port": 5070, "host_port": 5070 } ],
+  "linux": {}
+}
+JSON
+    # A recusa chega pelo transporte, e NOMEIA a porta e o transporte — um
+    # «unsupported» seco deixaria quem lê sem saber o que mudar.
+    check "CRI: um hostPort SCTP é recusado pelo crictl" fail \
+      crictl --runtime-endpoint "unix://$CRISOCK2" runp "$CRICFG"
+    check "CRI: a recusa do SCTP nomeia a porta e o transporte" ok bash -c \
+      "crictl --runtime-endpoint 'unix://$CRISOCK2' runp '$CRICFG' 2>&1 | grep -q 5070 && \
+       crictl --runtime-endpoint 'unix://$CRISOCK2' runp '$CRICFG' 2>&1 | grep -qi sctp"
+    # A metade que diz que a recusa foi ANTES de criar: o nó não tem sandbox.
+    check "CRI: um sandbox recusado não fica para trás" ok bash -c \
+      "[ \"\$(crictl --runtime-endpoint 'unix://$CRISOCK2' pods -q 2>/dev/null | grep -c .)\" = 0 ]"
+    # E o controlo: um hostPort TCP, no mesmo nó e pelo mesmo caminho, passa —
+    # senão este troço ficaria verde com a recusa a ser de tudo.
+    CRICFG_TCP="$OUT/pod-tcp.json"
+    cat > "$CRICFG_TCP" <<'JSON'
+{
+  "metadata": { "name": "web", "uid": "tcp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 0, "container_port": 80, "host_port": 51091 } ],
+  "linux": {}
+}
+JSON
+    CRIPOD="$(crictl --runtime-endpoint "unix://$CRISOCK2" runp "$CRICFG_TCP" 2>/dev/null || true)"
+    check "CRI: um hostPort TCP continua a ser aceite (controlo)" ok bash -c \
+      "[ -n '$CRIPOD' ]"
+    [ -n "$CRIPOD" ] && crictl --runtime-endpoint "unix://$CRISOCK2" rmp -f "$CRIPOD" >/dev/null 2>&1
+  fi
+  [ -n "${CRIPID2:-}" ] && kill "$CRIPID2" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID2:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK2"
+fi
+
+# --- ADR-0074 D3: o hostPort em modo root/CNI é PUBLICADO ----------------------
+# Até esta mudança o caminho CNI não publicava `hostPort` para protocolo NENHUM:
+# os mapeamentos eram guardados e depois descartados (a guarda do `run_opts_of`
+# salta um sandbox CNI), logo o pod subia `Running` com uma porta que não
+# respondia. Silêncio, rc=0, para tcp, udp e sctp.
+#
+# Medido a 2026-10-07 numa VM da golden `delonix-vm-k8s:1.36` (que já traz o
+# `portmap`), com o MESMO guião contra os dois binários: a `origin/main` criou o
+# sandbox com 0 regras DNAT e a porta muda; com a correcção, 3 regras e `LAB-OK`
+# pela porta do host, e 0 regras depois do `rmp`.
+#
+# Este troço precisa de root E de uma cadeia CNI que DECLARE `portMappings` — a
+# bateria corre rootless, por isso salta aqui com a razão em vez de ficar verde
+# por ausência. Para o correr: VM da golden, `/etc/cni/net.d` com uma conflist
+# `bridge` + `portmap`, e `sudo`.
+if [ "$(id -u)" != 0 ]; then
+  skip "CRI root/CNI: o hostPort é publicado" "exige root e uma conflist CNI com \`portmap\` (corre numa VM da golden delonix-vm-k8s)"
+elif ! command -v crictl >/dev/null 2>&1; then
+  skip "CRI root/CNI: o hostPort é publicado" "o crictl não está instalado"
+elif ! ls /etc/cni/net.d/*.conflist >/dev/null 2>&1 || ! grep -ql portMappings /etc/cni/net.d/*.conflist 2>/dev/null; then
+  skip "CRI root/CNI: o hostPort é publicado" "nenhuma conflist em /etc/cni/net.d declara a capacidade portMappings"
+elif [ ! -x /opt/cni/bin/portmap ]; then
+  skip "CRI root/CNI: o hostPort é publicado" "o plugin portmap não está em /opt/cni/bin"
+else
+  CRISOCK3="/run/dlx-cri-hp-$PFX.sock"
+  CRIPID3="$(e2e_serve_up cri "$CRISOCK3")"
+  if [ -z "$CRIPID3" ] || [ ! -S "$CRISOCK3" ]; then
+    skip "CRI root/CNI: o hostPort é publicado" "o serve cri não subiu"
+  else
+    C3="crictl --runtime-endpoint unix://$CRISOCK3"
+    HPCFG="$OUT/pod-hostport.json"
+    cat > "$HPCFG" <<'JSON'
+{
+  "metadata": { "name": "hp", "uid": "hp-uid-1", "namespace": "default", "attempt": 0 },
+  "port_mappings": [ { "protocol": 0, "container_port": 80, "host_port": 31080 } ],
+  "linux": {}
+}
+JSON
+    HPPOD="$($C3 runp "$HPCFG" 2>/dev/null | tail -1)"
+    check "CRI root/CNI: o sandbox com hostPort é criado" ok bash -c "[ -n '$HPPOD' ]"
+    # O veredicto são as REGRAS no kernel, não o rc do runp — a base também
+    # devolvia 0 e criava o sandbox, e era isso que escondia o defeito.
+    check "CRI root/CNI: o portmap escreveu o DNAT da porta" ok bash -c \
+      "[ \"\$(iptables -t nat -S | grep -c 'dport 31080')\" -gt 0 ]"
+    # E a prova que vale: a porta RESPONDE de dentro da netns do sandbox.
+    ip netns exec "cri-$HPPOD" sh -c \
+      'printf "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nLAB-OK\n" | nc -l -p 80 -q 2 >/dev/null 2>&1 &' 2>/dev/null
+    sleep 1
+    check "CRI root/CNI: o hostPort RESPONDE" ok bash -c \
+      "[ \"\$(curl -s --max-time 5 http://127.0.0.1:31080/ 2>/dev/null)\" = LAB-OK ]"
+    $C3 rmp -f "$HPPOD" >/dev/null 2>&1
+    # O DEL tem de desfazer: a conflist guardada leva o runtimeConfig, que é o
+    # que o portmap precisa de receber de volta.
+    check "CRI root/CNI: o rmp limpa as regras" ok bash -c \
+      "[ \"\$(iptables -t nat -S | grep -c 'dport 31080')\" = 0 ]"
+    # A recusa de uma cadeia que NÃO declara a capacidade fica no teste
+    # unitário (`a_cni_chain_that_cannot_publish_is_refused_with_the_fix`): o
+    # directório da conflist é uma constante (`cni::DEFAULT_CONF_DIR`) e não uma
+    # variável, logo não há como apontar o servidor VIVO para outra cadeia sem
+    # reescrever o /etc do nó — e um check que medisse outra coisa seria pior
+    # que a sua ausência.
+  fi
+  [ -n "${CRIPID3:-}" ] && kill "$CRIPID3" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID3:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK3"
+fi
 
 # `delonix serve cri` executa o binário próprio do CRI (ADR-0040 D2.4 emendado): o
 # utilizador só conhece `delonix`, e o servidor não vive dentro dele. O `exec`

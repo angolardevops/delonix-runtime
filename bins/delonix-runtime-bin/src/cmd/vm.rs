@@ -3436,13 +3436,21 @@ fn parse_ip_gateways(out: &str) -> Vec<String> {
     gws
 }
 
-/// Map `host_port -> bind address` for every listening TCP socket (via `ss`).
-/// The LIVE truth of where a published port is bound — the bind address is not
-/// kept in the container record (it came from `DELONIX_PUBLISH_ADDR` at publish
-/// time), so `vm reach` reads it from the actual listeners. Prefers a
-/// non-loopback bind when a port has more than one.
+/// Map `<proto>/<host_port> -> bind address` for every listening socket (via `ss`).
+///
+/// The LIVE truth of where a published port is bound. A publish now records its
+/// resolved address, but reading the wire stays the right answer here: it is the
+/// only one that also covers a record written before that (no address in the
+/// spec), a port a VM could reach that this engine never published, and a
+/// container whose publish was torn down underneath it.
+///
+/// UDP is listed too (`-tuln`, not the `-tln` this used to run): a UDP publish was
+/// invisible to `vm reach` altogether, which is exactly the case someone checks
+/// when a SIP or DNS service does not answer from inside a VM. Keyed per transport
+/// because `tcp/5070` and `udp/5070` are independent bindings. Prefers a
+/// non-loopback bind when one key has more than one listener.
 fn listening_binds() -> std::collections::HashMap<String, String> {
-    match Command::new("ss").args(["-tlnH"]).output() {
+    match Command::new("ss").args(["-tulnH"]).output() {
         Ok(o) if o.status.success() => parse_ss_binds(&String::from_utf8_lossy(&o.stdout)),
         _ => std::collections::HashMap::new(),
     }
@@ -3454,14 +3462,22 @@ fn listening_binds() -> std::collections::HashMap<String, String> {
 fn parse_ss_binds(out: &str) -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     for line in out.lines() {
-        // columns: State Recv-Q Send-Q Local-Address:Port Peer ...
         let cols: Vec<&str> = line.split_whitespace().collect();
-        let Some(local) = cols.get(3) else { continue };
+        // `ss -tuln` prefixes a Netid column (`tcp`/`udp`), `ss -tln` does not:
+        // columns are `[Netid] State Recv-Q Send-Q Local-Address:Port Peer ...`.
+        // Detected rather than assumed — reading the fixed index 3 of a `-tuln`
+        // line picks the Send-Q, and a parser that silently keys ports off a
+        // queue depth is worse than one that skips the line.
+        let (proto, local) = match cols.first().copied() {
+            Some(n @ ("tcp" | "udp")) => (n, cols.get(4)),
+            _ => ("tcp", cols.get(3)),
+        };
+        let Some(local) = local else { continue };
         let Some(idx) = local.rfind(':') else {
             continue;
         };
         let (addr, port) = (local[..idx].to_string(), local[idx + 1..].to_string());
-        m.entry(port)
+        m.entry(format!("{proto}/{port}"))
             .and_modify(|cur: &mut String| {
                 if cur == "127.0.0.1" && addr != "127.0.0.1" {
                     *cur = addr.clone();
@@ -3491,12 +3507,24 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
     let (mut n_reach, mut n_host) = (0usize, 0usize);
     for c in store.list()? {
         for p in &c.ports {
-            let hp = p.split(':').next().unwrap_or(p).to_string();
-            match binds.get(&hp).map(String::as_str) {
+            // The engine's parser, never `split(':').next()`: a spec carries its
+            // host address (`127.0.0.1:8080:80/tcp`), so cutting at the FIRST colon
+            // reads `127.0.0.1` as the host port and matches nothing — the same
+            // trap `fmt_ports` documents having fallen into, in the table read
+            // precisely to decide what a VM can reach. A spec the parser refuses
+            // is skipped rather than guessed at.
+            let Ok((_, hp, _, proto)) = delonix_sdn::parse_publish_addr(p) else {
+                continue;
+            };
+            match binds.get(&format!("{proto}/{hp}")).map(String::as_str) {
                 // loopback only → not reachable from VMs
                 Some("127.0.0.1") | Some("127.0.0.0") => {
                     n_host += 1;
-                    hostonly.row(vec![c.name.clone(), hp, "127.0.0.1 (host only)".into()]);
+                    hostonly.row(vec![
+                        c.name.clone(),
+                        format!("{hp}/{proto}"),
+                        "127.0.0.1 (host only)".into(),
+                    ]);
                 }
                 // bound to a routable address (gateway or 0.0.0.0) → reachable
                 Some(addr) => {
@@ -3539,7 +3567,7 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
         println!(
             "{}",
             super::po::tf(
-                "  fix: re-publish bound to the VM gateway — `delonix net ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix net ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)",
+                "  fix: re-publish bound to the VM gateway — `delonix net ingress unpublish <c> <port>`, then `delonix net ingress publish <c> {gw}:<port>:<port>` (reachable from VMs on that network, not the external LAN). Name the address in the SPEC and not via DELONIX_PUBLISH_ADDR: the spec is recorded and survives a `container start`, the environment variable is not.",
                 &[("gw", &gw)],
             )
         );
@@ -5545,10 +5573,32 @@ LISTEN 0      1      192.168.122.1:18077 0.0.0.0:*
 LISTEN 0      128          0.0.0.0:22    0.0.0.0:*
 LISTEN 0      128             [::]:443   [::]:*";
         let m = parse_ss_binds(out);
-        assert_eq!(m.get("8069").map(String::as_str), Some("127.0.0.1")); // loopback → host-only
-        assert_eq!(m.get("18077").map(String::as_str), Some("192.168.122.1")); // gateway → VM-reachable
-        assert_eq!(m.get("22").map(String::as_str), Some("0.0.0.0")); // all ifaces
-        assert_eq!(m.get("443").map(String::as_str), Some("[::]")); // IPv6, parse não estoura
+        assert_eq!(m.get("tcp/8069").map(String::as_str), Some("127.0.0.1")); // loopback → host-only
+        assert_eq!(
+            m.get("tcp/18077").map(String::as_str),
+            Some("192.168.122.1")
+        ); // gateway → VM-reachable
+        assert_eq!(m.get("tcp/22").map(String::as_str), Some("0.0.0.0")); // all ifaces
+        assert_eq!(m.get("tcp/443").map(String::as_str), Some("[::]")); // IPv6, parse não estoura
+    }
+
+    /// `ss -tuln` (the form `listening_binds` runs, so UDP is listed at all) puts a
+    /// Netid column in FRONT, shifting the local address from index 3 to 4. Reading
+    /// the fixed index would pick the Send-Q and key ports off a queue depth.
+    /// Captured from the real output, with a UDP line whose number also exists on
+    /// TCP — the two must not collapse into one key.
+    #[test]
+    fn parse_ss_binds_reads_the_netid_column_and_keys_per_transport() {
+        let out = "\
+udp   UNCONN 0      0            0.0.0.0:5070  0.0.0.0:*
+tcp   LISTEN 0      1          127.0.0.1:5070  0.0.0.0:*
+tcp   LISTEN 0      128           0.0.0.0:22    0.0.0.0:*";
+        let m = parse_ss_binds(out);
+        assert_eq!(m.get("udp/5070").map(String::as_str), Some("0.0.0.0"));
+        assert_eq!(m.get("tcp/5070").map(String::as_str), Some("127.0.0.1"));
+        assert_eq!(m.get("tcp/22").map(String::as_str), Some("0.0.0.0"));
+        // A UDP publish used to be invisible here: `vm reach` ran `ss -tln`.
+        assert!(m.contains_key("udp/5070"));
     }
 
     #[test]
@@ -5558,7 +5608,7 @@ LISTEN 0      128             [::]:443   [::]:*";
 LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*
 LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(
-            parse_ss_binds(out).get("9000").map(String::as_str),
+            parse_ss_binds(out).get("tcp/9000").map(String::as_str),
             Some("192.168.122.1")
         );
     }
