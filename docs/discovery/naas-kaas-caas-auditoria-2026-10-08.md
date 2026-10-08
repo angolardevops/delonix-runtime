@@ -126,36 +126,44 @@ first), independent of which domain each came from:
 9. **Contracts — no request anywhere carries caller identity.** `ListOperationsRequest`
    is globally unscoped. Not an active exploit today (single trusted local agent per the
    `SO_PEERCRED` model) but a real gap the moment more than one caller shares a node.
-10. **KaaS — no teardown, no backup/restore for a VM/SSH-provisioned cluster.** Destroying
-    one today means manually `vm rm`-ing every VM; there is no `etcdctl snapshot` wiring
-    anywhere. **Confirmed live, the hard way** (§4.6): this audit's own test VM had to be
-    torn down by hand (`vm rm`, `network rm`, three `kubectl config delete-*` calls) for
-    exactly this reason.
+10. **KaaS — no teardown for a VM/SSH-provisioned cluster.** `TEARDOWN FIXED` (§4.8).
+    Destroying one meant manually `vm rm`-ing every VM, by hand editing `~/.kube/config`
+    to drop the stale context — **confirmed live, the hard way** (§4.6): this audit's own
+    test VM had to be torn down exactly that way before the fix existed. `cluster destroy`
+    now detects a VM-provisioned cluster by its node-naming convention and removes the
+    VMs, the cached kubeconfig, and the matching `~/.kube/config` entries in one call,
+    leaving the operator's `--network` alone. Backup/restore (`etcdctl snapshot`) is still
+    not wired anywhere — that half of the gap remains open, see §8.
 11. **Contracts — 39 of 59 RPCs unimplemented**, Container/Pod/VM/Stack/Image with zero
     served verbs — the PaaS cannot delegate to the contract for almost anything yet.
 12. **Contracts — structured errors (`ErrorDetail`) only exist inside `Operation.error`**,
     never on the synchronous error path, which is where most real errors actually surface.
 
-**Gap #13, found live and not in the original ranking** (§4.6): `cluster kubeadm`/
-`cluster apply` upgrade `delonix-cri` on a node but never the `delonix` CLI itself, and the
-CRI's `__apirun` re-exec target resolves whatever `delonix` is on the node's `PATH` — so a
-node provisioned from an old golden image runs brand-new CRI protocol handling on top of
-however old the baked-in CLI is, for every actual container spawn. This is a real,
-security-relevant correctness gap (it silently defeats any fix landed in the CLI/engine
-code after a golden image was built, ADR-0062's own root-fallback ordering fix included —
-measured live, reproducing the exact crash that fix's own commit comment describes as
-closed) that none of the four sandbox-only matrices could have found, because finding it
-required a node old enough to be out of sync with its own CRI.
+**Gap #13, found live and not in the original ranking.** `FIXED` (§4.7, found in §4.6):
+`cluster kubeadm`/`cluster apply` upgraded `delonix-cri` on a node but never the `delonix`
+CLI itself, and the CRI's `__apirun` re-exec target resolves whatever `delonix` is on the
+node's `PATH` — so a node provisioned from an old golden image ran brand-new CRI protocol
+handling on top of however old the baked-in CLI was, for every actual container spawn.
+This was a real, security-relevant correctness gap (it silently defeated any fix landed in
+the CLI/engine code after a golden image was built, ADR-0062's own root-fallback ordering
+fix included — measured live, reproducing the exact crash that fix's own commit comment
+describes as closed) that none of the four sandbox-only matrices could have found, because
+finding it required a node old enough to be out of sync with its own CRI. `prepare_host`
+now installs/replaces the on-node `delonix` CLI the same sha256-check-then-replace way it
+already did for `delonix-cri`, on every `apply_ssh` pass — first provisioning and every
+re-apply after.
 
 ## 4. Corrections implemented, with regression tests
 
-Three fixes landed, in priority order (security/data-loss first, per the brief's own
-§12). Each is its own commit on `auditoria/naas-kaas-caas`, each passed
-`cargo fmt --check`, `cargo clippy -D warnings`, `python3 scripts/lang_ratchet.py`,
-`python3 scripts/arch_fitness.py`, and the pre-commit hook's
-`cargo check --workspace --all-targets` before being committed. A final
-`cargo test --workspace --lib` after all three (see §5) passed with **zero** failures
-across all 25 library crates.
+Seven fixes landed (§4.1–§4.5, §4.7, §4.8), in priority order (security/data-loss first,
+per the brief's own §12), plus one live-validation pass (§4.6) that is not itself a fix
+but is where two of the later ones (§4.7, §4.8) were found. Each fix is its own commit on
+`auditoria/naas-kaas-caas`, each passed `cargo fmt --check`, `cargo clippy -D warnings`,
+`python3 scripts/lang_ratchet.py`, `python3 scripts/arch_fitness.py`, and the pre-commit
+hook's `cargo check --workspace --all-targets` before being committed. A final
+`cargo test --workspace --lib` after the first three (see §5) passed with **zero**
+failures across all 25 library crates; every fix after that was re-verified at the level
+of the one crate (or two) it touched, per each subsection below.
 
 ### 4.1 `fix(container)` 3626ae70 — `--secret-files` fails closed
 
@@ -367,7 +375,91 @@ to remove the context this test's own `--copy-kubeconfig` had merged into the us
 were unchanged throughout — `--copy-kubeconfig` only adds, never switches). The isolated
 `DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` directories were then deleted. A final read-only
 survey confirmed the host's production containers, VMs and networks were exactly as they
-were before this test began.
+were before this test began. (This gap is fixed by §4.8, written after this test — a
+cluster torn down the same way today would need one `cluster destroy` call instead of the
+four commands above, minus the network, which §4.8 deliberately still leaves alone.)
+
+### 4.7 `fix(cluster)` 73eb5f52 — the node's `delonix` CLI now stays in step with `delonix-cri`
+
+Gap #13 (§3), found by §4.6's own live test, not in the original ranking. `prepare_host`
+upgraded `delonix-cri` on every host-prep pass — sha256-check against the resolved binary,
+replace and restart on mismatch — but never touched `/usr/local/bin/delonix` itself. Every
+actual container spawn goes through `delonix-cri`'s own `__apirun` re-exec, and that
+re-exec target is the node's `delonix` CLI, found by name on `PATH` — not the
+freshly-installed CRI sitting next to it. A node provisioned from a golden image therefore
+ran brand-new CRI protocol handling on top of however old the baked-in CLI happened to be,
+invisibly: the two binaries talk to each other fine, so nothing about the mismatch ever
+surfaced as an error.
+
+Measured live in §4.6: `cluster kubeadm` against `delonix-vm-k8s:1.36` (baked-in CLI
+`0.66.0`, built 2026-08-27) crash-looped CoreDNS with `setuid(65532) failed — the image
+USER is not mapped (subuid?)` — the precise symptom a 2026-09-15 fix in this repository's
+own `container_init` documents as closed (moving the user switch to before
+`drop_capabilities`, so `--cap-drop ALL` pods like CoreDNS do not lose `CAP_SETUID`
+first). The fix never reached this node, because nothing had ever installed a newer CLI on
+it. Replacing `/usr/local/bin/delonix` by hand with this session's build confirmed the
+diagnosis before this fix existed.
+
+Adds `install_cli`, called from `prepare_host` right after `install_cri`: same
+sha256-check-then-replace shape as its sibling, deliberately not merged into one function
+(a CLI binary has no systemd unit to restart — new `__apirun` invocations pick up the
+replaced file on their next exec, no service bounce needed). The local binary resolved is
+`std::env::current_exe()` of `apply_ssh`'s own caller, canonicalized — matching the
+existing convention that a node ends up running the SAME version as whatever
+`cluster kubeadm`/`cluster apply` invocation provisioned or re-applied it, the same rule
+`install_cri` already follows for the CRI binary. Covers both first-time provisioning and
+re-running `cluster apply` on an already-bootstrapped cluster (`prepare_host` runs on every
+`apply_ssh` pass, not just the first), which is exactly the case where a stale node most
+needs a refresh.
+
+1161/1161 `delonix-runtime-bin` tests pass; clippy, fmt, lang_ratchet and arch_fitness all
+clean. No new automated test: `install_cli`'s own logic is a single boolean branch (match
+→ skip, mismatch → replace) with no decision table worth extracting as a pure function,
+and the sha256-driven SSH commands it builds carry the exact same safety properties as
+`install_cri`'s own already-accepted, untested-at-this-level pattern (a hex digest and a
+hardcoded path, neither attacker-controlled). **Not re-validated live in this pass**: the
+fix that found the bug already proved the mechanism works by hand (replacing the binary
+and watching the symptom disappear); automating that exact sequence through this new code
+path needs another live VM run, left for a follow-up.
+
+### 4.8 `fix(cluster)` 2ff608f5 — `cluster destroy` now tears down a VM/SSH-provisioned cluster too
+
+Gap #10 (§3), the one this same §4.6 test had to work around by hand. `ClusterCmd::Destroy`
+only recognized the container-based `cluster create` (kind-mode) shape, found by its
+`io.x-k8s.kind.cluster` label. A cluster made of VMs — `<name>-cp<N>`/`-w<N>`/`-etcd<N>`/
+`-lb`, named by `cluster kubeadm` itself — had no destroy verb: the only way to remove one
+was `vm rm` on every node plus hand-editing `~/.kube/config`.
+
+`is_cluster_vm`/`cluster_vm_names` detect a VM cluster by that same naming convention
+(checked against `delonix_vm::list`, since VMs carry no container-style label);
+`ClusterCmd::Destroy` tries this match first and falls through to kind-mode's destroy only
+when it finds none. `destroy_vm_cluster` mirrors `kindmode::destroy`'s own shape —
+confirmation prompt, a progress step per VM removed via `vm::cmd_rm`, then the cached
+kubeconfig and `<root>/clusters/<name>/`. It deliberately leaves the `--network` alone:
+`cluster kubeadm --help` itself says that network is the operator's, not a default this
+command invented.
+
+The new piece is `remove_local_kubeconfig_entries`: removes the `clusters[]`/`contexts[]`
+entries named `<name>` and the `users[]` entry named `<name>-admin` — the exact three names
+`merge_into_local_kubeconfig` writes a VM/SSH cluster's kubeconfig under — and clears
+`current-context` if it was pointing here. Takes `dest: &Path` rather than reading `$HOME`
+itself, the same testable shape `merge_into_local_kubeconfig` already uses. A failure here
+is a warning, never aborts the rest of the teardown.
+
+New tests: `is_cluster_vm_matches_the_naming_convention_exactly` (including the negative
+case this needed most — `lab-cp` without a node number must NOT match cluster `lab`),
+`remove_local_kubeconfig_entries_removes_only_this_clusters_three_names`,
+`remove_local_kubeconfig_entries_tolerates_no_match_and_no_file`. Reverted and
+re-verified: weakening the digit-check in `is_cluster_vm` made the negative case fail
+exactly as expected.
+
+1164/1164 `delonix-runtime-bin` tests pass (1161 before, +3 new); clippy, fmt,
+lang_ratchet and arch_fitness all clean, baselines unchanged. **Not validated live in this
+pass**: §4.6's own manual teardown already exercised the mechanism this fix automates
+(`vm::cmd_rm`, kubeconfig YAML surgery) by hand on a real cluster; repeating that exact
+live setup a second time in the same session, now through this new code path, is left for
+a follow-up rather than redone immediately. The etcd backup/restore half of gap #10 (no
+`etcdctl snapshot` wiring) remains open — see §8.
 
 ## 5. Test results, exact
 
@@ -394,6 +486,12 @@ cargo test -p delonix-cri --lib                                               �
 cargo test -p delonix-sdn --lib                                               → 285 passed; 0 failed
 cargo check --workspace --all-targets (repeated after every fix)              → clean, every time
 cargo test --workspace --lib (full pass, all crates, after fixes 4.1–4.3)      → 25/25 crates "test result: ok"; 0 "test result: FAILED"
+cargo test -p delonix-runtime-bin --bin delonix (full, after 4.7)             → 1161 passed; 0 failed (no new test — see 4.7)
+cargo test -p delonix-runtime-bin --bin delonix (full, after 4.8)             → 1164 passed; 0 failed (+3 new)
+cargo clippy -p delonix-runtime-bin --bin delonix -- -D warnings (after 4.8)  → clean (1 pre-existing needless-borrow warning on an
+                                                                                  unrelated line this fix's code sits next to, fixed
+                                                                                  in the same commit — see 4.8's commit message)
+python3 scripts/arch_fitness.py (after 4.7, 4.8)                              → ok, all baselines unchanged
 ```
 
 Each fix's regression test was individually reverted and re-run to confirm it fails
@@ -406,8 +504,10 @@ this build → `kubectl get nodes` reports `Ready` (confirmed against the live k
 not the CLI's own claim); CoreDNS pods carry real pod-subnet IPs
 (`10.244.0.2`/`10.244.0.3`); `wait_for_cluster_ready` returns `Ok(true)` in 0.3s. This is
 the one "not validated live" caveat from the first version of this report that is now
-resolved — the other four fixes (4.1, 4.3, 4.4, 4.5) remain sandbox-proven only, for the
-reasons each one's subsection states.
+resolved. Gap #13 (§4.7) was itself found and diagnosed live, by hand, on this same test —
+only the automated `install_cli` code path that now does that replacement is unvalidated
+live. The remaining fixes (4.1, 4.3, 4.4, 4.5, 4.8) stay sandbox-proven only, each for the
+reason its own subsection states.
 
 ## 6. Contracts prepared for future PaaS integration — status, not new work
 
@@ -450,29 +550,43 @@ and leaves written down, for whoever does that work next:
   declares a non-root `USER` that this host cannot honour (no subordinate uid/gid range —
   `ls -la /etc/subuid /etc/subgid` for the account running the engine). The container is
   running as root despite the image's intent; this was always true, it is now visible.
+- **`cluster destroy <name>` on a VM-provisioned cluster**: now works in one call — it
+  removes every `<name>-cp<N>`/`-w<N>`/`-etcd<N>`/`-lb` VM, the cached kubeconfig, and the
+  matching `~/.kube/config` entries. It does NOT remove the `--network` the cluster used
+  (`network rm <net>` by hand, once nothing else is using it); a repeated `cluster destroy`
+  on a name with no matching VMs falls through to kind-mode's own destroy, which correctly
+  reports "no such cluster kind" if there is no container-based cluster by that name either.
+- **A node provisioned from an older golden image reporting a kubelet/CRI symptom a
+  commit comment in this repo says is already fixed** (e.g. CoreDNS `setuid` failures): the
+  on-node `delonix` CLI may predate the fix even though `delonix-cri` does not. Re-run
+  `cluster kubeadm`/`cluster apply` against the node — `prepare_host` now replaces a stale
+  CLI the same way it already replaced a stale CRI (§4.7). If the symptom was already
+  present on a node this fix was never run against, replacing `/usr/local/bin/delonix` by
+  hand and re-creating the affected pods is the same diagnostic step this session itself
+  used to confirm the root cause.
 
 ## 8. Limitations, blockers, and remaining risk — stated plainly
 
-- **Fixes 4.1, 4.3, 4.4, 4.5 are sandbox-proven only — fix 4.2's single-node case is now
-  confirmed on real KVM/libvirt** (§4.6), which is the one gap this originally said needed
-  "a host that can run one." The other four's "not validated live" notes in their own
-  subsections above still stand, each for its own stated reason (a mount failure needing
-  `CAP_SYS_ADMIN`; a process-wide procfs write unsafe to exercise in a parallel test
-  runner; `netops` functions with no injectable seam to a live holder).
-- **8 of the 12 originally-ranked gaps, plus the live-only gap #13, are not fixed by this
-  pass.** Landed: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8. Not
-  landed, each for a stated reason: the admission warning event (gap #5) requires adding a
-  new case to `delonix-security-runtime`'s `Outcome`/`Category` taxonomy, which is an
-  architectural decision inside a crate this audit does not own — flagged for its actual
-  owner rather than improvised. Gaps #6, #7, #9–#12 are each real engineering work (a
-  second provider-firewall path, DNS lifecycle tied to VM teardown, a contract-wide
-  identity field, 39 RPCs, a sync-path error model, a destroy verb for VM-provisioned
-  clusters) that did not fit a single session on top of the four-domain inventory, the five
-  landed fixes, and the live validation. Gap #13 (stale CLI on golden images) was found,
-  not fixed — the right fix (does `cluster kubeadm`'s host-prep upgrade the CLI the same
-  way it already upgrades `delonix-cri`? does the CRI's re-exec need to pin an explicit
-  path instead of trusting `PATH`?) deserves its own session, not a reaction under time
-  pressure to something just discovered.
+- **Fixes 4.1, 4.3, 4.4, 4.5, 4.8 are sandbox-proven only — fix 4.2's single-node case is
+  now confirmed on real KVM/libvirt** (§4.6), which is the one gap this originally said
+  needed "a host that can run one," and fix 4.7's underlying mechanism (replacing the
+  on-node CLI) was proven live, by hand, before the automated code path existed. Each
+  remaining "not validated live" note in its own subsection above still stands, each for
+  its own stated reason (a mount failure needing `CAP_SYS_ADMIN`; a process-wide procfs
+  write unsafe to exercise in a parallel test runner; `netops` functions with no injectable
+  seam to a live holder; a teardown already proven by hand, not yet automated through the
+  new code path).
+- **6 of the 12 originally-ranked gaps are not fixed at all by this pass.** Of the twelve,
+  six were touched: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8, and
+  #10 (teardown half — the backup/restore half, `etcdctl snapshot`, is still open). The
+  live-only gap #13 (stale CLI on golden images) is also now fixed (§4.7). Untouched, each
+  for a stated reason: the admission warning event (gap #5) requires adding a new case to
+  `delonix-security-runtime`'s `Outcome`/`Category` taxonomy, which is an architectural
+  decision inside a crate this audit does not own — flagged for its actual owner rather than
+  improvised. Gaps #6, #7, #9, #11, #12 are each real engineering work (a second
+  provider-firewall path, DNS lifecycle tied to VM teardown, a contract-wide identity field,
+  39 RPCs, a sync-path error model) that did not fit a single session on top of the
+  four-domain inventory, the seven landed fixes, and the live validation.
 - **The multi-node KaaS path is unchanged and still silently `NotReady`.** The fix in §4.2
   deliberately does not touch it (no `--cni` escape hatch exists yet on `cluster kubeadm`
   to add a safe refusal without breaking the documented HA example) — this is the single
