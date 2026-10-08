@@ -5780,6 +5780,18 @@ check "pod logs: um pod inexistente é 4, e aponta para o get" 4 bash -c "
   grep -q 'get pods' <<<\"\$out\" || { echo 'não aponta para o get'; exit 99; }
   exit \$rc"
 
+# A bateria limpa atrás de si, e aqui isso não é só arrumação: o root isolado é
+# reutilizado entre corridas, e o `secret rotate-key` desta secção recifra TODOS
+# os segredos do store — um `sec-<pfx>` deixado por corrida fazia a rotação da
+# corrida seguinte pagar o lixo da anterior, e o custo cresceria sem ninguém dar
+# por isso. O volume do snapshot sai pelo `volume prune` da secção das
+# varreduras (está sem referência), mas é removido aqui pelo nome, para não
+# depender da ordem de duas secções.
+"$BIN" secret rm "sec-$PFX" >/dev/null 2>&1
+"$BIN" volume rm "vs-$PFX" >/dev/null 2>&1
+rm -f "$OUT/vsnap-$PFX" "$OUT/sec-$PFX.yaml" "$OUT/bad-manifest.yaml"
+rm -rf "$OUT/ed-$PFX"
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1
