@@ -52,6 +52,7 @@ pub mod netops;
 mod pin_userns;
 pub mod policy_nft;
 pub mod provider_report;
+pub mod route_plan;
 pub mod run_network;
 pub mod vm_network;
 pub mod wg;
