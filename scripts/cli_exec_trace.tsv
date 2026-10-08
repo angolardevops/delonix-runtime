@@ -1,9 +1,9 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: kaeso-sys-01, 2026-10-07, scripts/e2e.sh (release 4.5.0+185) — PASS=1104 FAIL=0 SKIP=12
-# commit: bccc13a0
-# executed: 125
+# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198) — PASS=1118 FAIL=0 SKIP=13
+# commit: e1aacedf
+# executed: 126
 # leaves: 272
 api-resources
 apply
@@ -58,6 +58,7 @@ net egress allow
 net egress ls
 net ingress allow
 net ingress ls
+net ingress publish
 net netns down
 net netns gc
 net netns status
