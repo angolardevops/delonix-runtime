@@ -4580,6 +4580,14 @@ check "e a recusa NOMEIA a capability" ok bash -c \
   "'$BIN' serve cri --addr 'unix://$CAPSOCK' --cap-ceiling NAO_EXISTE_CAP 2>&1 | grep -q NAO_EXISTE_CAP"
 check "serve cri recusa um modo de tecto desconhecido" fail \
   "$BIN" serve cri --addr "unix://$CAPSOCK" --cap-ceiling-mode xyz
+# Como no da capability acima, e pela mesma razão: um `fail` sozinho conta
+# QUALQUER recusa. Desde o ADR-0075 D1 o `serve cri` tem uma segunda razão para
+# falhar — o irmão não estar ao lado do binário — e essa recusa não fala de
+# tectos. Sem esta linha o troço ficava verde a medir o engano, que é a quarta
+# forma de não testar nada descrita no cabeçalho. Medido: a recusa vem do
+# `delonix-cri` e diz `invalid capability ceiling mode "xyz"`.
+check "e a recusa NOMEIA o modo" ok bash -c \
+  "'$BIN' serve cri --addr 'unix://$CAPSOCK' --cap-ceiling-mode xyz 2>&1 | grep -q xyz"
 check "e também aqui não criou socket" ok bash -c "[ ! -S '$CAPSOCK' ]"
 
 # --- o helper: sobe, espera pelo socket, devolve o pid -----------------------
