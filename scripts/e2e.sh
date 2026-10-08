@@ -3809,6 +3809,35 @@ check "secret set continua não-destrutivo por cima de um existente" ok bash -c 
   exit 0"
 "$BIN" secret rm "$SEC" >/dev/null 2>&1
 
+# `secret rotate-key` roda a CHAVE-MESTRA do nó: recifra TODOS os segredos e as
+# credenciais de túnel do root. Num root partilhado isso mexia nos segredos
+# reais do utilizador, por isso só corre isolado — mesma guarda do D5 acima.
+#
+# ACH-034 (2026-10-08): a rotação não muda valor nenhum, mas punha a VERSÃO de
+# cada segredo a 1 — o `save` decidia a versão comparando com o ficheiro em
+# disco, que nessa altura já estava selado com a chave ANTIGA; a decifra falhava
+# e caía no ramo da primeira gravação. Corrigido com um caminho de gravação
+# interno que recebe a versão a manter, deixando a regra do `save` intacta.
+if [[ "$E2E_ISOLATED" != 1 || "$DELONIX_ROOT" == "$REAL_ROOT" ]]; then
+  skip "secret rotate-key" "estado partilhado — a rotação mexia na chave-mestra real do nó"
+else
+  SECR="secr-$PFX"
+  "$BIN" secret create "$SECR" --from-literal k=a >/dev/null 2>&1
+  for v in b c d; do "$BIN" secret set "$SECR" "k=$v" >/dev/null 2>&1; done
+  check "secret: a versão conta as mudanças de valor (4 gravações distintas)" ok bash -c \
+    "'$BIN' secret inspect '$SECR' 2>&1 | grep -qx 'Version: 4'"
+  check "secret rotate-key: roda a chave-mestra" ok bash -c \
+    "'$BIN' secret rotate-key 2>&1 | grep -q 'master key rotated'"
+  check "secret rotate-key: a versão NÃO recua (os valores não mudaram)" ok bash -c \
+    "'$BIN' secret inspect '$SECR' 2>&1 | grep -qx 'Version: 4'"
+  check "secret rotate-key: recifra tudo e os valores em claro continuam os MESMOS" ok bash -c \
+    "'$BIN' secret inspect '$SECR' --reveal 2>&1 | grep -q 'k=d'"
+  check "secret rotate-key: e uma mudança DEPOIS da rotação segue de 4 para 5" ok bash -c \
+    "'$BIN' secret set '$SECR' k=e >/dev/null 2>&1
+     '$BIN' secret inspect '$SECR' 2>&1 | grep -qx 'Version: 5'"
+  "$BIN" secret rm "$SECR" >/dev/null 2>&1
+fi
+
 ########################################
 section "vm (só o que não precisa de hipervisor)"
 ########################################
