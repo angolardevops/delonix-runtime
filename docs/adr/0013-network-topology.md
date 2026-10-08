@@ -298,3 +298,64 @@ próprio ADR, não o alargamento de um campo.
 **O `via:`** (mandar uma subnet por um appliance) continua onde este ADR já o
 deixou: depende de mover o masquerade para o appliance, senão ele vê todos os
 pacotes com um só endereço de origem.
+
+## Addendum (2026-10-08) — a route has to be usable from an ADDITIONAL network
+
+**What the spike did not cover.** The tier B spike put one container on each
+network as its PRIMARY network. Such a workload sends everything to that
+network's gateway, so its packets enter the holder by the bridge the pair names.
+A workload attached with `network connect` does not: `do_attach_extra` gives it
+an address on the network and deliberately leaves its routing table alone, so a
+packet for the routed network leaves by the default route, enters by the PRIMARY
+network's bridge, and never matches `<bridge A> . <bridge B>`.
+
+Measured on v4.5.0, rootless, three throwaway networks, both containers on a
+base network and each connected to one of the routed networks:
+
+| | `a → b` | `b → a` |
+|---|---|---|
+| no route | 100 % loss | 100 % loss |
+| route `A → B` | **100 % loss** | 100 % loss |
+| routes both ways | **100 % loss** | **100 % loss** |
+
+`ip route get <b>` inside `a` answered `via <base gateway> dev eth0`. The route
+was listed, the pair was in `@netpair`, and nothing crossed it.
+
+**Decision.** A declared route must be usable by every workload attached to its
+source network, on whichever interface. The holder keeps, in each multi-homed
+workload, a route to the other network's prefix through THIS network's gateway
+on the interface the workload has here — and the mirror on the far end, because
+a workload attached to B as an additional network would otherwise send its
+replies out of its own default route, with a source address the anti-spoofing of
+that interface refuses.
+
+* What to install is a pure function (`delonix_sdn::route_plan::plan`), tested
+  without a holder. The holder only executes it (`sync_workload_routes`).
+* It runs when a route opens or closes (every workload) and when an additional
+  network is attached or detached (that workload).
+* The routes carry their own routing-protocol id, so the holder removes exactly
+  what it installed and never touches the default route, the connected routes
+  or anything the workload set for itself.
+* Left alone on purpose: the default interface (the default route already
+  covers it), a destination the workload is directly connected to (`ip route
+  replace` would replace the kernel's connected route), and a destination
+  already routed through an earlier interface (one destination, one route,
+  interfaces taken in name order).
+
+**The composition rule is unchanged.** A route in a workload's table says where
+a packet goes OUT. Whether it is forwarded is still the pair's decision, and
+the `fwcont` chains' after it. The mirror route does not open the reverse
+direction — measured, same setup, with the fix:
+
+| | `a → b` | `b → a` |
+|---|---|---|
+| no route | 100 % loss | 100 % loss |
+| route `A → B` | **0 % loss** | 100 % loss (directed, as declared) |
+| routes both ways | 0 % loss | 0 % loss |
+| a workload connected to A AFTER the route existed | 0 % loss | — |
+| both routes closed | 100 % loss, and the routes are gone from both tables | |
+
+**Not covered, and said.** A microVM's routing table is the guest's: the holder
+cannot write it. A VM attached to a routed network as an additional interface
+still needs the route from its own configuration (or from DHCP, option 121,
+which this engine does not serve yet). IPv6 stays where this ADR left it.

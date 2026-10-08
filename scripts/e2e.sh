@@ -1804,6 +1804,47 @@ check "nem directório em containers/" ok bash -c \
   "test \$(ls '$DELONIX_ROOT/containers' 2>/dev/null | wc -l) -eq $dirs_before"
 
 ########################################
+section "network route: uma carga ligada por rede ADICIONAL usa a rota (ADR-0013 tier B)"
+########################################
+# A route is one `iifname A . oifname B` pair, so it only serves a packet that
+# ENTERS by A's bridge. A workload attached to A as an additional network kept
+# sending B's traffic out of its default route, and the route carried nothing
+# while reporting itself open (measured 2026-10-08: 100 % loss both ways with
+# the pair installed). The holder now installs, in each such workload, the route
+# to the other network through this network's gateway — and the mirror on the
+# far end, so replies come back the way they went.
+MH_BASE="mhb-$PFX"; MH_A="mha-$PFX"; MH_B="mhz-$PFX"
+MH_WA="mhwa-$PFX"; MH_WB="mhwb-$PFX"; MH_WC="mhwc-$PFX"
+mh_ip() { "$BIN" container exec "$1" ip -4 -o addr show eth1 2>/dev/null | awk '{print $4}' | cut -d/ -f1; }
+if "$BIN" network create "$MH_BASE" >/dev/null 2>&1 \
+   && "$BIN" network create "$MH_A" >/dev/null 2>&1 \
+   && "$BIN" network create "$MH_B" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$MH_WA" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$MH_WB" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" network connect "$MH_A" "$MH_WA" >/dev/null 2>&1 \
+   && "$BIN" network connect "$MH_B" "$MH_WB" >/dev/null 2>&1; then
+  MH_IPA="$(mh_ip "$MH_WA")"; MH_IPB="$(mh_ip "$MH_WB")"
+  check "multi-homed: as duas cargas têm endereço na rede adicional" ok test -n "$MH_IPA" -a -n "$MH_IPB"
+  check "multi-homed: sem rota, A não alcança B" fail "$BIN" container exec "$MH_WA" ping -c 2 -W 1 "$MH_IPB"
+  "$BIN" network route "$MH_A" "$MH_B" >/dev/null 2>&1
+  check "multi-homed: com a rota A→B, a carga em A alcança a carga em B" ok "$BIN" container exec "$MH_WA" ping -c 2 -W 1 "$MH_IPB"
+  check "multi-homed: a rota é dirigida — B não abre conversa para A" fail "$BIN" container exec "$MH_WB" ping -c 2 -W 1 "$MH_IPA"
+  check "multi-homed: a carga em A tem a rota para a rede B pela eth1" ok bash -c \
+    "'$BIN' container exec '$MH_WA' ip route | grep -q ' via .* dev eth1'"
+  if "$BIN" container run -d --name "$MH_WC" --net "$MH_BASE" "$IMG" sleep 600 >/dev/null 2>&1 \
+     && "$BIN" network connect "$MH_A" "$MH_WC" >/dev/null 2>&1; then
+    check "multi-homed: uma carga ligada DEPOIS de a rota existir também a usa" ok "$BIN" container exec "$MH_WC" ping -c 2 -W 1 "$MH_IPB"
+  fi
+  "$BIN" network route "$MH_A" "$MH_B" --rm >/dev/null 2>&1
+  check "multi-homed: rota fechada, a carga deixa de alcançar B" fail "$BIN" container exec "$MH_WA" ping -c 2 -W 1 "$MH_IPB"
+  check "multi-homed: rota fechada, a rota sai da tabela da carga" ok bash -c \
+    "! '$BIN' container exec '$MH_WA' ip route | grep -q ' via .* dev eth1'"
+fi
+"$BIN" network route "$MH_A" "$MH_B" --rm >/dev/null 2>&1 || true
+for c in "$MH_WA" "$MH_WB" "$MH_WC"; do "$BIN" container rm -f "$c" >/dev/null 2>&1 || true; done
+for n in "$MH_A" "$MH_B" "$MH_BASE"; do "$BIN" network rm "$n" >/dev/null 2>&1 || true; done
+
+########################################
 section "container em rede custom: hot reconfig pelo ingress"
 ########################################
 CN="cn-$PFX"
