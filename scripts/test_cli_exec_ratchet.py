@@ -272,6 +272,31 @@ class Aliases(unittest.TestCase):
         self.assertEqual(self.m.leaves_of("/t/delonix vm snapshot create -h", LEAF_SET), set())
         self.assertEqual(self.m.leaves_of("/t/delonix container run --rm alpine true", LEAF_SET), {"container run"})
 
+    def test_a_later_help_in_the_same_body_does_not_erase_an_earlier_run(self):
+        # Measured 2026-10-08, writing the first check with TWO invocations in
+        # one body: the `version` check compares the command with the flag, and
+        # the leaf counted ZERO. The scan after the first engine word never
+        # stopped at the `)`, walked into the second command and hit `--version`
+        # in HELP_FLAGS, so a real invocation with its exit status judged was
+        # suppressed by the help of the NEXT one. Erring low is this module's
+        # choice; erasing what did run is not — it is a wrong measurement.
+        body = (
+            'bash -c diff <("/t/delonix" version 2>&1) '
+            '<("/t/delonix" --version 2>&1) >/dev/null'
+        )
+        self.assertEqual(self.m.leaves_of(body, LEAF_SET | {"version"}), {"version"})
+
+    def test_the_end_of_a_command_is_read_on_the_raw_word(self):
+        # The companion defect: `unquote` strips `;|&` and `)` BEFORE the scan
+        # sees the word, so an `ended` test built on the unquoted word can never
+        # be true — it was dead code. A separator has to be read on the raw word
+        # or nothing ends a command inside a shell body.
+        self.assertTrue(any(c in ";|&)`" for c in '2>&1)'))
+        self.assertEqual(self.m.unquote('2>&1)'), '2>&1')
+        body = 'bash -c "$BIN" container ps; "$BIN" vm start x --help'
+        # The `--help` belongs to the SECOND command and must not reach the first.
+        self.assertIn("container ps", self.m.leaves_of(body, LEAF_SET))
+
     def test_an_alias_pointing_at_nothing_fails_loudly(self):
         self.m.ALIASES = dict(self.m.ALIASES, **{"container list": "container gone"})
         with self.assertRaises(SystemExit) as cm:

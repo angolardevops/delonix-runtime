@@ -91,6 +91,27 @@ HELP_FLAGS = {"--help", "-h", "--version", "-V"}
 # is a space-joined argv, so a body arrives with its separators glued to words
 # (`container ps;`) and a word-exact match would miss the leaf.
 SEPARATORS = ";|&"
+# What ENDS a command inside a shell body, read on the RAW word.
+#
+# `SEPARATORS` alone could not do it: `unquote` strips them (and `)`) before the
+# scan ever sees the word, so the `ended` test built on the unquoted word was
+# dead code from the first commit — it can never be true. Measured 2026-10-08
+# while writing the first check with TWO invocations in one body:
+#
+#   diff <('$BIN' version …) <('$BIN' --version …)
+#
+# The first invocation really ran `version` and had its exit status judged, and
+# the leaf counted ZERO: the scan after the first engine word never stopped at
+# the `)`, walked into the second command, hit `--version` in `HELP_FLAGS` and
+# suppressed the invocation that DID happen. The count errs low by design, but
+# this was a silent mis-measurement, not a conservative one — a later `--help`
+# in the same body could erase an earlier real invocation anywhere.
+#
+# `&` is in the set and that is deliberate even though `2>&1` is a redirection
+# and not a command end: stopping there can only cost a LONGER leaf path, and no
+# leaf name contains `&`, so the worst case is the same leaf found one word
+# earlier. Erring low here is the same choice the module makes everywhere else.
+ENDERS = ";|&)`"
 
 # Punctuation glued to the LEFT of a word by command substitution. Measured
 # against a real run: the battery's commonest shape is
@@ -187,19 +208,21 @@ def leaves_of(cmd: str, leaves: set[str], table: dict[str, str] | None = None) -
     for i, w in enumerate(words):
         if not is_engine(w):
             continue
-        rest = [unquote(x) for x in words[i + 1 :]]
+        # The RAW words, because only they still carry the punctuation that says
+        # where this command ends — see `ENDERS`.
+        rest = words[i + 1 :]
         # Leading global options sit between the binary and the subcommand.
-        while rest and rest[0].startswith("-"):
-            flag = rest[0]
+        while rest and unquote(rest[0]).startswith("-"):
+            flag = unquote(rest[0])
             rest = rest[1:]
             if flag in GLOBAL_VALUE_FLAGS and rest:
                 rest = rest[1:]
         best = None
         path: list[str] = []
         printed_help = False
-        for x in rest:
-            stripped = x.rstrip(SEPARATORS)
-            ended = stripped != x
+        for raw in rest:
+            stripped = unquote(raw)
+            ended = any(c in raw for c in ENDERS)
             if stripped in HELP_FLAGS:
                 printed_help = True
                 break
