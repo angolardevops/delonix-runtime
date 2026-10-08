@@ -9,6 +9,28 @@
 # Regra: NUNCA usar o `delonix` do PATH — processos/binários antigos são uma
 # armadilha conhecida deste repo (ver AGENTS.md). O default é o build local.
 #
+# ## E são CINCO binários, não um — constrói-os todos no MESMO target
+#
+#   cargo build --release -p delonix-runtime-bin -p delonix-cri \
+#     -p delonix-mgmt-bin -p delonix-mcp-bin -p delonix-node-api-bin
+#
+# O `delonix` não serve o CRI, a API de nó, o MCP nem a API de gestão: faz
+# `exec` do irmão (`delonix_node::dispatch`/`exec_server`), e o `exec_server`
+# prefere o irmão AO LADO do executável e só depois cai para o `PATH`. Logo uma
+# corrida com só o `delonix` construído serve os binários INSTALADOS, de outra
+# versão — e isso não aparece como «falta uma dependência», aparece como FAIL
+# em troços do motor. Medido duas vezes: 6 FAIL no #655 (sem `-mgmt`/`-mcp`/
+# `-node-api`) e FAIL=3 no troço do ADR-0074 D1 a 2026-10-08, este com o
+# `delonix-cri` de 2026-09-07 a ser servido a um `delonix` de hoje.
+#
+# E passa o binário pelo CAMINHO do target, onde os cinco estão juntos:
+#
+#   ./scripts/e2e.sh "$CARGO_TARGET_DIR/release/delonix"
+#
+# **Nunca por um symlink solto em `target/release/delonix`**: aí o irmão não
+# está ao lado do executável e o `exec_server` cai no `PATH` outra vez — o
+# atalho parece equivalente e desfaz exactamente a precaução acima.
+#
 # ## Código de saída — o que este portão chumba, e o que não
 #
 #   FAIL  > 0  -> 1.  Um check chumbou e não há achado escrito por trás.
