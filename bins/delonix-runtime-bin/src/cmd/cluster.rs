@@ -1620,6 +1620,9 @@ fn apply_ssh(
         plano.push(super::po::t("Bootstrapping the etcd cluster").to_string());
     }
     plano.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
+    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
+        plano.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
+    }
     if spec.control_plane.hosts.len() > 1 {
         plano.push(super::po::tf(
             "Joining {n} more control-plane(s)",
@@ -1728,6 +1731,31 @@ fn apply_ssh(
     let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec, &etcd_endpoints)?;
     p.ok();
 
+    // `spec.cni` used to be validated by round-trip and then never read again
+    // anywhere in this function — every cluster bootstrapped through this
+    // path stayed `NotReady` forever, with nothing but a manual
+    // `kubectl apply -f <cni>.yaml` able to fix it (exactly the step a past
+    // investigation session took by hand; see the KaaS capability audit,
+    // docs/discovery/kaas-matrix-2026-10-08.md, gap #1). Only the provably
+    // safe case is wired up here: EXACTLY one node total. A plain bridge CNI
+    // gives that one node working pod networking (it is the same conflist
+    // delonix-cri's own root-CNI path already uses for every pod sandbox —
+    // see ADR-0074 and the AGENTS.md section on the root-CNI bridge fix), but has no
+    // mechanism to route pod traffic BETWEEN nodes (no DaemonSet programs
+    // the routes), so a multi-node cluster is left exactly as before:
+    // `NotReady` until the operator applies their own CNI. `cluster kubeadm`
+    // has no `--cni` flag to opt out of `default` yet, so refusing the
+    // multi-node case outright here would break the HA example with no
+    // escape hatch — a scope decision, not an oversight.
+    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
+        p.step(
+            super::po::t("Installing the default CNI (bridge, single node)"),
+            "🔌",
+        );
+        ensure_single_node_cni(&cp1_target, &spec.pod_subnet)?;
+        p.ok();
+    }
+
     if spec.control_plane.hosts.len() > 1 {
         p.step(
             &super::po::tf(
@@ -1760,21 +1788,48 @@ fn apply_ssh(
         p.ok();
     }
 
-    if wait_ready {
+    // Whether this run actually OBSERVED every node Ready — the one thing
+    // that is allowed to make the final line below say "ready". `None` =
+    // never checked (the historical `cluster apply -f` timing, which passes
+    // `wait_ready: false` on purpose — see `apply()`'s own comment); `Some`
+    // = checked, with the true/false from `wait_for_cluster_ready` itself.
+    let confirmed_ready = if wait_ready {
         let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
         p.step(super::po::t("Waiting for all nodes to be Ready"), "⏳");
-        wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
+        let ready = wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
         p.ok();
-    }
+        Some(ready)
+    } else {
+        None
+    };
 
     p.step(super::po::t("Fetching kubeconfig"), "📇");
     let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
     p.ok();
 
-    output::info(&super::po::tf(
-        "cluster \"{name}\" ready",
-        &[("name", name)],
-    ));
+    // The line this replaces said "ready" unconditionally — even on the
+    // historical `wait_ready: false` path, where readiness is never even
+    // looked at, and even when `wait_for_cluster_ready` itself had just
+    // warned that 0 of N nodes converged. `kubeadm join` returning success
+    // means bootstrapped, not Ready; conflating the two is the exact
+    // "relato desonesto" this repo's own doctrine rejects elsewhere — see
+    // the KaaS capability audit's gap #1.
+    match confirmed_ready {
+        Some(true) => output::info(&super::po::tf(
+            "cluster \"{name}\" ready",
+            &[("name", name)],
+        )),
+        Some(false) => output::info(&super::po::tf(
+            "cluster \"{name}\" bootstrapped — not all nodes reported Ready (see the warning \
+             above); check with `delonix cluster {name} kubectl get nodes`",
+            &[("name", name)],
+        )),
+        None => output::info(&super::po::tf(
+            "cluster \"{name}\" bootstrapped — readiness was not checked (pass --wait, or run \
+             `delonix cluster {name} kubectl get nodes` yourself)",
+            &[("name", name)],
+        )),
+    }
     println!("kubeconfig: {}", kubeconfig_path.display());
     println!("export KUBECONFIG={}", kubeconfig_path.display());
     Ok(())
@@ -1782,16 +1837,21 @@ fn apply_ssh(
 
 /// Polls `kubectl get nodes` on the control-plane until all `expected` nodes
 /// report `Ready` (CNI installed and functional) or `timeout` elapses.
-/// Best-effort: a timeout is a WARNING, not a hard failure — the cluster is
-/// already bootstrapped (`kubeadm join` succeeded on every node); the CNI
-/// may just be slow to converge (image pulls, etc.), and the kubeconfig this
-/// gates is still valid either way, just possibly ahead of full readiness.
+/// Returns `Ok(true)` when every node converged, `Ok(false)` when SOME did
+/// (a legitimate "still converging" case — slow image pulls, a CNI
+/// DaemonSet not yet scheduled — not a reason to fail a bootstrap that
+/// otherwise succeeded). `Err` only when NOT EVEN ONE node reached `Ready`
+/// by the deadline: `kubeadm join` succeeding on every host and zero of
+/// them ever going `Ready` is the exact signature of a CNI that was never
+/// applied at all (see the KaaS capability audit's gap #1) — a structurally
+/// different, worse case than "slow", and the caller used to report BOTH as
+/// success.
 fn wait_for_cluster_ready(
     cp1: &SshTarget,
     cluster_name: &str,
     expected: usize,
     timeout: Duration,
-) -> Result<()> {
+) -> Result<bool> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let out = remote::ssh_run(
@@ -1804,7 +1864,7 @@ fn wait_for_cluster_ready(
             .filter(|l| l.split_whitespace().nth(1) == Some("Ready"))
             .count();
         if ready >= expected && expected > 0 {
-            return Ok(());
+            return Ok(true);
         }
         if std::time::Instant::now() >= deadline {
             output::warn(&super::po::tf(
@@ -1816,10 +1876,75 @@ fn wait_for_cluster_ready(
                     ("n", &expected.to_string()),
                 ],
             ));
-            return Ok(());
+            if ready == 0 {
+                return Err(Error::Invalid(super::po::tf(
+                    "cluster \"{name}\": 0/{n} node(s) ever reached Ready — the cluster is \
+                     bootstrapped (kubeadm join succeeded everywhere) but has no working pod \
+                     network; apply a CNI by hand (`KUBECONFIG=... kubectl apply -f <cni>.yaml` \
+                     on the control-plane) and re-run with --wait, or check \
+                     `kubectl get nodes`/`kubectl describe node` yourself",
+                    &[("name", cluster_name), ("n", &expected.to_string())],
+                )));
+            }
+            return Ok(false);
         }
         std::thread::sleep(Duration::from_secs(5));
     }
+}
+
+/// The "default" CNI for a cluster with EXACTLY one node total: a plain
+/// bridge + host-local IPAM conflist at `/etc/cni/net.d/10-bridge.conflist`.
+/// This is not new networking mechanism — it is the identical conflist
+/// `delonix-cri`'s own root-mode pod-sandbox path already requires and reads
+/// (ADR-0074; the AGENTS.md section on fixing the root-CNI bridge has this
+/// exact shape live-validated against a real kubelet) — wiring it into the
+/// bootstrap, not inventing it. Also removes the default
+/// `node-role.kubernetes.io/control-plane` taint (mirrors kind-mode's own
+/// `cfg.workers == 0` branch in `kindmode.rs`): without it nothing
+/// user-facing — not even CoreDNS — ever schedules onto a control-plane-only
+/// node.
+///
+/// Idempotent: writing the same file twice and re-applying `kubectl taint
+/// ... -` on an already-untainted node are both no-ops.
+///
+/// Scope, deliberately: multi-node clusters do not call this (see the call
+/// site) — a plain bridge CNI has no mechanism to route pod traffic between
+/// nodes, and shipping that silently would trade one broken promise for
+/// another, just quieter.
+///
+/// `pod_subnet` is `single_node_bridge_conflist`'s only moving part, kept
+/// pure and separate so the JSON shape is unit-tested without SSH.
+fn single_node_bridge_conflist(pod_subnet: &str) -> String {
+    format!(
+        "{{\"cniVersion\":\"1.0.0\",\"name\":\"bridge\",\"plugins\":[\
+         {{\"type\":\"bridge\",\"bridge\":\"cni0\",\"isGateway\":true,\"ipMasq\":true,\
+         \"hairpinMode\":true,\"ipam\":{{\"type\":\"host-local\",\
+         \"ranges\":[[{{\"subnet\":\"{pod_subnet}\"}}]],\"routes\":[{{\"dst\":\"0.0.0.0/0\"}}]}}}},\
+         {{\"type\":\"portmap\",\"capabilities\":{{\"portMappings\":true}}}}]}}"
+    )
+}
+
+fn ensure_single_node_cni(cp1: &SshTarget, pod_subnet: &str) -> Result<()> {
+    let conflist = single_node_bridge_conflist(pod_subnet);
+    let tmp = delonix_state::write_private_temp("delonix-10-bridge.conflist", conflist.as_bytes())
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::t("writing the default CNI conflist")
+            ))
+        })?;
+    let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-10-bridge.conflist");
+    let _ = std::fs::remove_file(&tmp);
+    scp_result.map_err(|e| Error::Invalid(format!("CNI conflist: {e}")))?;
+    remote::ssh_run(
+        cp1,
+        "mkdir -p /etc/cni/net.d && \
+         mv /tmp/delonix-10-bridge.conflist /etc/cni/net.d/10-bridge.conflist && \
+         KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+         node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true",
+    )
+    .map_err(|e| Error::Invalid(format!("applying the default CNI conflist: {e}")))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -3019,6 +3144,53 @@ mod tests {
     }
 
     use super::*;
+
+    /// Regression (KaaS capability audit, gap #1): the conflist this engine
+    /// writes for a single-node `cni: default` cluster has to parse with the
+    /// SAME parser `delonix-cri`'s own root-mode pod-sandbox path reads it
+    /// with (`delonix_sdn::cni::parse_config`/`readiness`) — a conflist that
+    /// is merely "valid JSON" but shaped wrong would compile this fix,
+    /// commit it, and still leave the node `NotReady`, undetectably.
+    #[test]
+    fn single_node_bridge_conflist_parses_with_the_engines_own_cni_reader() {
+        let json = single_node_bridge_conflist("10.244.0.0/24");
+        let parsed = delonix_sdn::cni::parse_config(&json)
+            .expect("the engine's own CNI parser must accept this conflist");
+        assert_eq!(parsed.name, "bridge");
+        let types: Vec<&str> = parsed
+            .plugins
+            .iter()
+            .map(|p| p["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(types, ["bridge", "portmap"]);
+        assert_eq!(parsed.plugins[0]["ipam"]["type"], "host-local");
+        assert_eq!(
+            parsed.plugins[0]["ipam"]["ranges"][0][0]["subnet"],
+            "10.244.0.0/24"
+        );
+        // `readiness()` is what actually gates a kubelet's `NetworkReady` —
+        // confirms the file is not just parseable but USABLE: missing only
+        // the plugin binaries (expected — none are on disk in a unit test).
+        let tmp = tempfile::tempdir().unwrap();
+        let conf_dir = tmp.path().join("net.d");
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("10-bridge.conflist"), &json).unwrap();
+        match delonix_sdn::cni::readiness(&conf_dir, &[tmp.path().join("bin")]) {
+            delonix_sdn::cni::Readiness::PluginMissing(m) => {
+                assert_eq!(m, ["bridge", "host-local", "portmap"]);
+            }
+            other => panic!("expected PluginMissing (no binaries in this test), got {other:?}"),
+        }
+    }
+
+    /// Whatever subnet the manifest declares has to land in the conflist
+    /// unmangled — a typo'd interpolation here would silently hand every
+    /// pod on the node an address outside `spec.podSubnet`.
+    #[test]
+    fn single_node_bridge_conflist_carries_the_exact_pod_subnet() {
+        let json = single_node_bridge_conflist("192.168.77.0/24");
+        assert!(json.contains("\"subnet\":\"192.168.77.0/24\""), "{json}");
+    }
 
     /// A state root and a `$HOME` in one temp dir, each with its own files —
     /// the shape of the defect: an isolated `DELONIX_ROOT` on a host whose
