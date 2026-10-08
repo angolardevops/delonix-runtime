@@ -2022,7 +2022,7 @@ fn handle_control(line: &str) -> String {
         // the exemption map — the spike proved the forwarding already exists and
         // an explicit pair drop is what closes it, so opening a path is not a
         // dataplane, it is an exemption.
-        ["netroute", op, a, b] => do_netroute(op, a, b),
+        ["netroute", op, a, b] => do_netroute(op, a, b).map(|()| sync_all_workload_routes()),
         // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
         ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
@@ -2061,11 +2061,15 @@ fn handle_control(line: &str) -> String {
         // `attach` above); 7 = namespaced.
         ["attach-extra", netns, ifname, ip, bridge, gateway] => {
             do_attach_extra(netns, ifname, ip, bridge, gateway, "default")
+                .map(|()| sync_workload_routes_of(netns))
         }
         ["attach-extra", netns, ifname, ip, bridge, gateway, ns] => {
             do_attach_extra(netns, ifname, ip, bridge, gateway, ns)
+                .map(|()| sync_workload_routes_of(netns))
         }
-        ["detach-extra", netns, ifname] => do_detach_extra(netns, ifname),
+        ["detach-extra", netns, ifname] => {
+            do_detach_extra(netns, ifname).map(|()| sync_workload_routes_of(netns))
+        }
         // live bandwidth limit (rootless): shaping on the infra-side veth
         // (download via tbf at the root, upload via ingress police).
         ["netrate", vh, rate, burst] => do_netrate(vh, rate, burst),
@@ -3854,6 +3858,135 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
                 String::from_utf8_lossy(&out.stderr).trim()
             ),
         })
+    }
+}
+
+/// What the route plan needs to know about the node, read ONCE per pass: the
+/// live route pairs and the networks with their bridge and gateway.
+fn workload_route_inputs() -> (Vec<(String, String)>, Vec<crate::route_plan::Net>) {
+    let listing = crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, NETPAIR_MAP])
+        .unwrap_or_default();
+    let nets = network_list()
+        .into_iter()
+        .filter_map(|d| {
+            let cidr = crate::Cidr::parse(&d.prefix)?;
+            // The address the BRIDGE answers on — what `ensure_net_bridge` gave
+            // it — and not a declared gateway: the holder is the router between
+            // two networks, an appliance behind a declared gateway is not.
+            let gateway = cidr.gateway()?;
+            Some(crate::route_plan::Net {
+                bridge: d.bridge,
+                cidr,
+                gateway,
+            })
+        })
+        .collect();
+    (parse_netpair_elements(&listing), nets)
+}
+
+/// Makes ONE workload's routing table agree with the declared network routes
+/// (`route_plan`): installs what a multi-homed workload needs to use them, and
+/// removes what this engine installed for a route that has since closed.
+///
+/// Only the routes carrying [`crate::route_plan::WORKLOAD_ROUTE_PROTO`] are
+/// touched, so the default route, the connected ones and anything the workload
+/// set for itself are never this function's to change.
+///
+/// Best-effort and SAID: a workload whose table cannot be updated does not fail
+/// the route (the pair is installed, and every other workload uses it), but it
+/// is logged with the workload and the destination, because «the route is
+/// there and this one container cannot use it» is otherwise invisible.
+fn sync_workload_routes(netns: &str, pairs: &[(String, String)], nets: &[crate::route_plan::Net]) {
+    use crate::route_plan::{self, WORKLOAD_ROUTE_PROTO};
+    let in_ns = |args: &[&str]| {
+        let mut argv = vec!["netns", "exec", netns];
+        argv.extend_from_slice(args);
+        crate::capture("ip", &argv).unwrap_or_default()
+    };
+    let ifaces = route_plan::parse_ifaces(&in_ns(&["ip", "-o", "-4", "addr", "show"]));
+    let current = route_plan::parse_route_dests(&in_ns(&[
+        "ip",
+        "route",
+        "show",
+        "proto",
+        WORKLOAD_ROUTE_PROTO,
+    ]));
+    // One interface and nothing of ours in the table: the common case, and
+    // nothing to compute.
+    if ifaces.len() < 2 && current.is_empty() {
+        return;
+    }
+    let default_dev = route_plan::parse_default_dev(&in_ns(&["ip", "route", "show", "default"]));
+    let wanted = route_plan::plan(&ifaces, default_dev.as_deref(), pairs, nets);
+    for gone in current
+        .iter()
+        .filter(|c| !wanted.iter().any(|w| w.dest == **c))
+    {
+        let dest = gone.to_string_cidr();
+        if run(
+            "ip",
+            &[
+                "netns",
+                "exec",
+                netns,
+                "ip",
+                "route",
+                "del",
+                &dest,
+                "proto",
+                WORKLOAD_ROUTE_PROTO,
+            ],
+        )
+        .is_err()
+        {
+            tracing::warn!(netns, dest, "could not remove a workload route");
+        }
+    }
+    for r in &wanted {
+        let dest = r.dest.to_string_cidr();
+        if let Err(e) = run(
+            "ip",
+            &[
+                "netns",
+                "exec",
+                netns,
+                "ip",
+                "route",
+                "replace",
+                &dest,
+                "via",
+                &r.via,
+                "dev",
+                &r.dev,
+                "proto",
+                WORKLOAD_ROUTE_PROTO,
+            ],
+        ) {
+            tracing::warn!(netns, dest, dev = r.dev, error = %e, "could not install a workload route: this workload cannot use the network route");
+        }
+    }
+}
+
+/// [`sync_workload_routes`] for the workload whose netns is `netns` — after an
+/// additional network is attached to it or detached from it.
+fn sync_workload_routes_of(netns: &str) {
+    let netns = sanitize(netns);
+    let (pairs, nets) = workload_route_inputs();
+    sync_workload_routes(&netns, &pairs, &nets);
+}
+
+/// [`sync_workload_routes`] for every workload of the node — after a network
+/// route is opened or closed. The inputs are read once; a node with no
+/// multi-homed workload pays one `ip addr` per workload and nothing else.
+fn sync_all_workload_routes() {
+    let (pairs, nets) = workload_route_inputs();
+    let listed = crate::capture("ip", &["netns", "list"]).unwrap_or_default();
+    for line in listed.lines() {
+        // `ip netns list` prints `<name>` or `<name> (id: N)`.
+        let Some(ns) = line.split_whitespace().next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        sync_workload_routes(&sanitize(ns), &pairs, &nets);
     }
 }
 

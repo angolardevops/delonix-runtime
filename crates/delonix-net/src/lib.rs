@@ -42,6 +42,7 @@ pub mod discover;
 mod flock;
 pub mod infra;
 pub mod ipam;
+pub mod route_plan;
 pub mod wg;
 
 /// ONE process-wide lock for the environment variables the tests rewrite.
