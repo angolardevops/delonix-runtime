@@ -63,11 +63,23 @@
 #   scripts/cli_exec_ratchet.py --list-missing  # as que nunca correm
 #
 # Esta linha dizia «EXECUTA 91 — 37%», medido à mão a 2026-09-09 sobre a v3.0.0
-# (244 folhas). A medição de 2026-10-07 dá **125 de 272 — 46,0%**, e os dois
-# números NÃO são comparáveis: o primeiro foi contado à mão com uma regra que
-# nunca ficou escrita. É precisamente por isso que a regra passou a estar no
-# script e o número passou a ser derivado — um número guardado num comentário
-# envelhece sem ninguém dar por isso, e este envelheceu um mês.
+# (244 folhas). A medição de 2026-10-07 deu 125 de 272 — 46,0%, e a de
+# 2026-10-08, com as secções de cobertura deste commit, dá **160 de 272 —
+# 58,8%**. Nenhum destes é comparável com o «91 — 37%»: esse foi contado à mão
+# com uma regra que nunca ficou escrita. É precisamente por isso que a regra
+# passou a estar no script e o número passou a ser derivado — um número guardado
+# num comentário envelhece sem ninguém dar por isso, e este envelheceu um mês.
+#
+# Do salto de 126 para 160: 33 folhas que ninguém exercitava, e 1 que a
+# bateria JÁ exercitava e o parser do ratchet não via (o `build`, invocado por
+# dentro de uma função de shell). A correcção do parser — um `--help` numa segunda
+# invocação do mesmo corpo suprimia a primeira — recupera 0 retroactivamente,
+# medido contra a corrida completa anterior; existe para o `version` contar.
+#
+# E numa corrida ROOTLESS há folhas que o host não pode medir: um SKIP por
+# pré-condição não conta folha nenhuma (o troço do `hostPort` em modo root/CNI
+# quer root). O que o host não mede não é o que a bateria não exercita, e a
+# diferença lê-se no bloco de SKIP do resumo.
 #
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
 # faz a cobertura parecer melhor sem uma única folha nova exercitada — e é
@@ -5668,6 +5680,12 @@ check "config: set/get/unset fecham o ciclo, e o get volta ao default" ok bash -
 # prova que recusou, e um corpo que acaba num `grep` bem-sucedido devolve 0 —
 # foi exactamente assim que a primeira versão destes dois checks se enganou a
 # si própria (esperava `fail` num corpo que passa a 0 quando está tudo certo).
+# Por fora do check, de propósito: se o ciclo acima chumbar a meio deixa
+# `output = json` escrito, e esse valor é GLOBAL — todos os checks seguintes
+# passariam a receber JSON onde esperam tabela, e a bateria daria uma cascata de
+# FAIL cuja causa está centenas de linhas atrás.
+"$BIN" config unset output >/dev/null 2>&1
+
 check "config set: uma chave desconhecida é recusada PELO NOME, classe 1" ok bash -c "
   out=\$('$BIN' config set nao.existe 1 2>&1); rc=\$?
   [ \$rc -eq 1 ] || { echo \"devia recusar com 1, deu \$rc\"; exit 1; }

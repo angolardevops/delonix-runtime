@@ -8277,11 +8277,64 @@ asseridos resolviam para folha nenhuma; e `container ls` nunca casava, porque a 
 é `container ps` e o inventário sai do `--help`, que só imprime o nome canónico — o comando
 mais exercitado da CLI contava como nunca executado.
 
-**E um zero pode ser a resposta certa.** `build` conta 0 e a bateria constrói imagens: a
-secção dele invoca o motor por uma função de shell e por linhas de setup com `|| true`, e
-assere a CONSEQUÊNCIA (os donos dentro da imagem), nunca o código de saída do build. Pela
-regra é 0, correctamente — ninguém julgou aquela invocação. Transformar uma dessas linhas num
-`check` é o ponto de cobertura mais barato de toda a bateria.
+**E um zero podia ser a resposta certa — o do `build` não era.** Esta secção dizia que
+`build` conta 0 «correctamente, porque ninguém julgou aquela invocação». Medido a 2026-10-08:
+a bateria constrói QUATRO vezes dentro de um `check`, e a invocação ERA julgada — o que o
+parser não atravessava era a função de shell que a envolve (`build_env_path`), porque o `cmd`
+que o `check` grava é o NOME da função. Não era cobertura em falta, era medição em falta. Em
+vez de reescrever o check subtil do `ENV PATH` por uma folha, entrou um check próprio e mínimo
+(um `-t` dá um nome que o `image ls` mostra, e o `CMD` declarado é o que corre), com o
+`Delonixfile` escrito fora dele para o corpo ficar sem aspas aninhadas.
+
+**O parser apagava invocações que tinham corrido, e isso era pior que errar por baixo
+(2026-10-08).** O primeiro check com DUAS invocações no mesmo corpo de shell —
+`diff <('$BIN' version …) <('$BIN' --version …)`, a verificar a promessa escrita de que o
+comando imprime o texto da flag verbatim — contou a folha `version` a ZERO. A varredura a
+seguir à primeira palavra-motor nunca parava no `)`, entrava no segundo comando, encontrava
+`--version` nos `HELP_FLAGS` e suprimia a invocação que ACONTECEU. E o irmão do defeito
+explica-o: o teste de fim-de-comando era **código morto desde o primeiro commit** — o
+`unquote` tira `;|&` e `)` antes de a varredura ver a palavra, logo `stripped != x` nunca
+podia ser verdade, e a correcção que esta secção descrevia («trailing separators … fixed with
+SEPARATORS stripping that also ends the command») não terminava comando nenhum. Lê-se agora
+na palavra CRUA (`ENDERS = ";|&)`"`), com dois testes verificados a chumbar com a correcção
+revertida. O `&` entra de propósito: parar num `2>&1` só pode custar um caminho de folha mais
+longo, e nenhum nome de folha tem `&`.
+
+**Medido a 2026-10-08: 160 de 272 — 58,8 %** (PASS=1148 FAIL=0 SKIP=14 XFAIL=1). Do salto, **33 folhas que
+ninguém exercitava** e **1 que a bateria já exercitava e o parser não via** (o `build`) — e os
+dois dizem-se separados de propósito: somá-los faria passar por cobertura nova o que era
+medição em falta. A correcção do `ENDERS`, medida contra a corrida completa anterior, recupera
+**0** retroactivamente: existe para o `version` contar e para o próximo check composto não ser
+apagado, não para inflar o numerador. As folhas novas são leituras puras e ciclos locais (sem hipervisor, sem
+rede, sem privilégio), em 37 checks, e **nenhum é um «invoca e devolve 0»**: um check que
+não julga nada sobe o numerador e não testa nada, que é a desonestidade que o portão existe
+para impedir — seria pior que a folha continuar a zero. As oito varreduras (`prune`) correm
+DEPOIS da limpeza, de propósito: um `image prune` a meio tirava a imagem base debaixo das
+secções seguintes.
+
+**O que o HOST não mede não é o que a bateria não exercita**, e a diferença tem de se ler no
+cabeçalho do trace. Numa corrida rootless há checks que SALTAM por pré-condição (o troço do
+`hostPort` em modo root/CNI do #720 quer root e uma conflist com `portMappings`), e um SKIP
+não conta folha nenhuma. Quem lê a fracção sem isto lê a diferença como esquecimento.
+
+**O ponto cego que fica, com o número que o decidiu.** A medição do parser corrigido contra
+a corrida COMPLETA da bateria (sem os checks novos) dá o MESMO que a do antigo — 126 de 272 —,
+logo a correcção não recupera nada retroactivamente: existe para o `version` contar e para o
+próximo check composto não ser apagado. O que continua invisível são os **wrappers de shell**:
+25 dos 1130 comandos asseridos definem uma função (`sp () { … "$BIN" "$@" }`) e chamam-na, e
+o parser não atravessa isso. Escreveu-se a regra que resolveria um wrapper definido no MESMO
+corpo e mediu-se antes de a adoptar: revela **11 folhas, das quais 1 nova** (`vm
+default-backend`) — as outras dez já contam por outro caminho. Código novo num portão
+partilhado, com regex sobre texto de shell, por UMA folha, não se paga: fica a não-decisão
+escrita, com o número. O contador erra por baixo em 1 por este caminho, e isso é dizível.
+
+**ACH-034, achado a medir esta cobertura:** `secret rotate-key` põe a VERSÃO de cada segredo
+a 1 (medido 4 → 1, com o valor intacto). A regra da versão tem um dono só, escrita no
+`SecretStore::save` (ADR-0069 item 6): valores iguais, mesma versão — e uma rotação de chave
+não muda valor nenhum. A causa é a ORDEM dentro do `rotate_key`: roda a chave-mestra ANTES de
+regravar, e o `save` compara contra um ficheiro ainda selado com a chave antiga; a leitura
+falha e cai no ramo «primeira gravação». Fica na bateria como `xfail ACH-034` — não chumba o
+portão, não desaparece, e CHUMBA por XPASS no dia em que for corrigido.
 
 > **O número de checks NÃO é a cobertura, e esta secção quase o disse.** A primeira versão media
 > 51/23% e citava «198/198»; ao preparar a release, os checks eram já 143 e as execuções 55 (25%),
