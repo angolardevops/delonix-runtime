@@ -106,8 +106,38 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install protoc (pinned, verified)
+        # NOT `apt-get install protobuf-compiler`: it resolves to whatever the
+        # runner image ships, and the two jobs here run on DIFFERENT images
+        # (ubuntu-22.04 and ubuntu-22.04-arm, pinned on purpose for glibc 2.35).
+        # Measured on 2026-10-08, publishing v5.0.0: the arm64 job died on
+        # `delonix/node/v1/compute.proto: This file contains proto3 optional
+        # fields, but --experimental_allow_proto3_optional was not set` — 22.04
+        # ships protoc 3.12, which predates proto3 optional being stable (3.15).
+        # CI could not have caught it: CI runs on ubuntu-latest, whose protoc is
+        # new enough, so the gate validated in a different environment than the
+        # one that builds the artefact. The `optional` is load-bearing (ADR-0042
+        # E3: an unmeasured `used_bytes` is absent, never zero), so the fix is
+        # the toolchain and not the contract.
+        run: |
+          set -euo pipefail
+          V=36.2
+          case "$(uname -m)" in
+            x86_64)  A=linux-x86_64;   SUM=121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278 ;;
+            aarch64) A=linux-aarch_64; SUM=8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a ;;
+            *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v$V/protoc-$V-$A.zip"
+          echo "$SUM  /tmp/protoc.zip" | sha256sum -c -
+          sudo unzip -q -o /tmp/protoc.zip -d /usr/local 'bin/protoc' 'include/*'
+          sudo chmod 0755 /usr/local/bin/protoc
+          protoc --version
+          # Fail closed: a protoc that cannot compile the contract must not build a release.
+          protoc -I proto -I third_party/googleapis --descriptor_set_out=/dev/null \
+            proto/delonix/node/v1/common.proto proto/delonix/node/v1/node.proto \
+            proto/delonix/node/v1/compute.proto proto/delonix/node/v1/infra.proto \
+            proto/delonix/node/v1/operations.proto
       - name: Install the pinned toolchain
         run: rustup show
       - name: Runner architecture
@@ -142,8 +172,38 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-      - name: Instala protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install protoc (pinned, verified)
+        # NOT `apt-get install protobuf-compiler`: it resolves to whatever the
+        # runner image ships, and the two jobs here run on DIFFERENT images
+        # (ubuntu-22.04 and ubuntu-22.04-arm, pinned on purpose for glibc 2.35).
+        # Measured on 2026-10-08, publishing v5.0.0: the arm64 job died on
+        # `delonix/node/v1/compute.proto: This file contains proto3 optional
+        # fields, but --experimental_allow_proto3_optional was not set` — 22.04
+        # ships protoc 3.12, which predates proto3 optional being stable (3.15).
+        # CI could not have caught it: CI runs on ubuntu-latest, whose protoc is
+        # new enough, so the gate validated in a different environment than the
+        # one that builds the artefact. The `optional` is load-bearing (ADR-0042
+        # E3: an unmeasured `used_bytes` is absent, never zero), so the fix is
+        # the toolchain and not the contract.
+        run: |
+          set -euo pipefail
+          V=36.2
+          case "$(uname -m)" in
+            x86_64)  A=linux-x86_64;   SUM=121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278 ;;
+            aarch64) A=linux-aarch_64; SUM=8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a ;;
+            *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v$V/protoc-$V-$A.zip"
+          echo "$SUM  /tmp/protoc.zip" | sha256sum -c -
+          sudo unzip -q -o /tmp/protoc.zip -d /usr/local 'bin/protoc' 'include/*'
+          sudo chmod 0755 /usr/local/bin/protoc
+          protoc --version
+          # Fail closed: a protoc that cannot compile the contract must not build a release.
+          protoc -I proto -I third_party/googleapis --descriptor_set_out=/dev/null \
+            proto/delonix/node/v1/common.proto proto/delonix/node/v1/node.proto \
+            proto/delonix/node/v1/compute.proto proto/delonix/node/v1/infra.proto \
+            proto/delonix/node/v1/operations.proto
       - name: Instala toolchain fixada
         run: rustup show
       - uses: Swatinem/rust-cache@v2
