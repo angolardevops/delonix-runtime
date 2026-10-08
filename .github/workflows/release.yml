@@ -114,9 +114,11 @@ jobs:
         # `delonix/node/v1/compute.proto: This file contains proto3 optional
         # fields, but --experimental_allow_proto3_optional was not set` — 22.04
         # ships protoc 3.12, which predates proto3 optional being stable (3.15).
-        # CI could not have caught it: CI runs on ubuntu-latest, whose protoc is
-        # new enough, so the gate validated in a different environment than the
-        # one that builds the artefact. The `optional` is load-bearing (ADR-0042
+        # CI could not have caught it, and the comparison that matters is between
+        # the two arm64 jobs: ci.yml pins ubuntu-24.04-arm (protoc 3.21, accepts)
+        # and this file pinned ubuntu-22.04-arm (protoc 3.12, demands the flag).
+        # The install command was identical in both — the IMAGE differed, so a
+        # green CI did not prove the release builds. The `optional` is load-bearing (ADR-0042
         # E3: an unmeasured `used_bytes` is absent, never zero), so the fix is
         # the toolchain and not the contract.
         run: |
@@ -180,9 +182,11 @@ jobs:
         # `delonix/node/v1/compute.proto: This file contains proto3 optional
         # fields, but --experimental_allow_proto3_optional was not set` — 22.04
         # ships protoc 3.12, which predates proto3 optional being stable (3.15).
-        # CI could not have caught it: CI runs on ubuntu-latest, whose protoc is
-        # new enough, so the gate validated in a different environment than the
-        # one that builds the artefact. The `optional` is load-bearing (ADR-0042
+        # CI could not have caught it, and the comparison that matters is between
+        # the two arm64 jobs: ci.yml pins ubuntu-24.04-arm (protoc 3.21, accepts)
+        # and this file pinned ubuntu-22.04-arm (protoc 3.12, demands the flag).
+        # The install command was identical in both — the IMAGE differed, so a
+        # green CI did not prove the release builds. The `optional` is load-bearing (ADR-0042
         # E3: an unmeasured `used_bytes` is absent, never zero), so the fix is
         # the toolchain and not the contract.
         run: |

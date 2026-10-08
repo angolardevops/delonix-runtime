@@ -145,9 +145,13 @@ set`: o 22.04 traz **protoc 3.12**, anterior ao `optional` de proto3 ter ficado
 estável (3.15). O `build & publish` nem chegou a correr (`skipped`), logo teria
 falhado igual em x86_64 — o arm64 só chegou lá primeiro.
 
-**E o CI não podia apanhar isto**, que é a parte a reter: o CI corre em
-`ubuntu-latest`, cujo `protoc` é novo o suficiente, por isso o portão validava num
-ambiente diferente daquele que constrói o artefacto. É a mesma classe do «medir a
+**E o CI não podia apanhar isto**, que é a parte a reter. A comparação que importa
+é entre os dois jobs arm64, e os runners são PINADOS em sítios diferentes:
+`ci.yml` em **`ubuntu-24.04-arm`** (protoc 3.21, aceita) e `release.yml` em
+**`ubuntu-22.04-arm`** (protoc 3.12, exige a flag). Não é o comando de instalação
+que difere — é idêntico nos dois — é a imagem. Logo o portão validava num ambiente
+diferente daquele que constrói o artefacto, e um CI verde **não prova que a release
+constrói**. É a mesma classe do «medir a
 coisa, não um proxy», aplicada ao ambiente em vez ao valor. Os dois jobs passam a
 descarregar um `protoc` de versão fixa, verificado por sha256 (os digests vêm da
 API do GitHub, por asset), com o arquivo escolhido por `uname -m` num ÚNICO
