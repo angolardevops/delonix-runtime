@@ -3979,6 +3979,53 @@ fn looks_like_address(s: &str) -> bool {
 ///
 /// `exec`s: this is a shortcut for a shell, so `ssh` inherits the terminal
 /// whole. Nothing to do after it returns.
+///
+/// The full argv `cmd_ssh` execs — pure and testable on its own, because the
+/// thing `exec()` swallows (a wrong flag order, a missing `--`) only shows up
+/// as "No route to host" or a shell that eats the wrong token, never as a
+/// compile error. `holder_netns_wrap`, when given, is prefixed whole in
+/// front of `ssh` ([`delonix_sdn::infra::infra_join_argv`]'s own shape,
+/// already ending in its OWN `--`): nothing below it changes depending on
+/// whether the wrap is there.
+fn ssh_argv(
+    holder_netns_wrap: Option<&[String]>,
+    identity: Option<&std::path::Path>,
+    user: &str,
+    host: &str,
+    command: &[String],
+) -> Vec<String> {
+    let mut argv: Vec<String> = holder_netns_wrap
+        .map(<[String]>::to_vec)
+        .unwrap_or_default();
+    argv.push("ssh".to_string());
+    if let Some(key) = identity {
+        argv.push("-i".to_string());
+        argv.push(key.to_string_lossy().into_owned());
+    }
+    // A VM is recreated at the same address all the time; a changed host key is
+    // the NORM here, not an attack, and refusing to connect over it would make
+    // this shortcut useless. Said out loud rather than hidden: this is a lab
+    // convenience, and `delonix vm ssh` is not the tool for a host you do not
+    // own.
+    argv.extend([
+        "-o".to_string(),
+        "StrictHostKeyChecking=no".to_string(),
+        "-o".to_string(),
+        "UserKnownHostsFile=/dev/null".to_string(),
+        "-o".to_string(),
+        "LogLevel=ERROR".to_string(),
+    ]);
+    // `--` before the destination: a name starting with `-` would otherwise be
+    // read as an option (the same defence the `ssh`/`scp` of `cluster apply`
+    // got in the first security audit). This is `ssh`'s OWN `--`, not the
+    // wrap's — `nsenter` already closed its own option parsing before `ssh`
+    // ever appears in the argv.
+    argv.push("--".to_string());
+    argv.push(format!("{user}@{host}"));
+    argv.extend(command.iter().cloned());
+    argv
+}
+
 fn cmd_ssh(
     base: &std::path::Path,
     target: &str,
@@ -4024,38 +4071,50 @@ fn cmd_ssh(
         );
     }
 
-    let mut cmd = std::process::Command::new("ssh");
-    if let Some(key) = identity {
-        cmd.arg("-i").arg(key);
-    }
-    // A VM is recreated at the same address all the time; a changed host key is
-    // the NORM here, not an attack, and refusing to connect over it would make
-    // this shortcut useless. Said out loud rather than hidden: this is a lab
-    // convenience, and `delonix vm ssh` is not the tool for a host you do not
-    // own.
-    cmd.args([
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "LogLevel=ERROR",
-    ]);
-    // `--` before the destination: a name starting with `-` would otherwise be
-    // read as an option (the same defence the `ssh`/`scp` of `cluster apply`
-    // got in the first security audit).
-    cmd.arg("--").arg(format!("{user}@{host}"));
-    if !command.is_empty() {
-        cmd.args(command);
-    }
+    // A Cloud Hypervisor VM's tap lives INSIDE the ingress holder's own
+    // network namespace (`delonix-vm`'s own doc-comment: "runs rootless
+    // INSIDE the ingress infra netns") — never in this process's. libvirt's
+    // `nat`/`bridge` modes put the VM on `virbr0`/a host bridge, which IS in
+    // the caller's netns, so only this backend needs the wrapper.
+    //
+    // FOUND auditing VMaaS readiness, reproduced live: `vm create --backend
+    // cloud-hypervisor ... --wait` confirms "is up" (the engine's own ARP
+    // probe runs FROM INSIDE the holder, via `infra::sdn_reachable`) and the
+    // very next `vm ssh`/a bare `ssh <ip>` got "No route to host" — this
+    // process has no route to the SDN's `10.x` range at all. The VM was
+    // never unreachable; only this command's own process was.
+    let holder_netns_wrap = if vm.as_ref().is_some_and(|v| v.backend == "cloud-hypervisor") {
+        Some(delonix_sdn::infra::infra_join_argv().ok_or_else(|| {
+            Error::Invalid(
+                super::po::t(
+                    "this VM's network lives inside the ingress holder's own namespace, and the \
+                     holder is not up — run `delonix net netns up` first",
+                )
+                .to_string(),
+            )
+        })?)
+    } else {
+        None
+    };
+    let argv = ssh_argv(
+        holder_netns_wrap.as_deref(),
+        identity,
+        &user,
+        &host,
+        command,
+    );
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
     use std::os::unix::process::CommandExt;
     // `exec` and not `spawn`+`wait`: this hands the terminal to ssh whole
     // (interactive shell, pty, escape handling) and there is nothing to do
-    // afterwards. `exec` only RETURNS on failure — most often ssh not installed.
+    // afterwards. `exec` only RETURNS on failure — most often ssh (or, wrapped,
+    // `nsenter`) not installed.
+    let program = holder_netns_wrap.as_ref().map_or("ssh", |_| "nsenter+ssh");
     let err = cmd.exec();
     Err(Error::Runtime {
         context: "ssh",
-        message: format!("could not run ssh: {err}"),
+        message: format!("could not run {program}: {err}"),
     })
 }
 
@@ -5058,6 +5117,70 @@ mod tests {
         assert!(
             msg.contains("already exists in namespace 'teamA'") && msg.contains("'teamB'"),
             "{msg}"
+        );
+    }
+
+    #[test]
+    fn ssh_argv_without_a_wrap_is_plain_ssh() {
+        let argv = super::ssh_argv(None, None, "delonix", "10.0.2.5", &[]);
+        assert_eq!(argv[0], "ssh");
+        let dd = argv.iter().position(|a| a == "--").expect("no --");
+        assert_eq!(argv[dd + 1], "delonix@10.0.2.5");
+    }
+
+    /// The bug found auditing VMaaS readiness: a Cloud Hypervisor VM's tap
+    /// lives inside the holder's OWN netns, and a plain `ssh` run from this
+    /// process never had a route there — it reported "No route to host"
+    /// even though the engine's own ARP probe (run FROM INSIDE the holder)
+    /// had just confirmed the VM was up. The wrap has to land IN FRONT of
+    /// `ssh`, whole, with nothing of `ssh`'s own argv disturbed.
+    #[test]
+    fn ssh_argv_puts_the_holder_netns_wrap_in_front_of_ssh_unchanged() {
+        let wrap = [
+            "nsenter".to_string(),
+            "-t".to_string(),
+            "4242".to_string(),
+            "-U".to_string(),
+            "-m".to_string(),
+            "-n".to_string(),
+            "--preserve-credentials".to_string(),
+            "--".to_string(),
+        ];
+        let plain = super::ssh_argv(None, None, "delonix", "10.200.1.9", &[]);
+        let wrapped = super::ssh_argv(Some(&wrap), None, "delonix", "10.200.1.9", &[]);
+        assert_eq!(wrapped[0], "nsenter");
+        assert_eq!(&wrapped[..wrap.len()], &wrap[..]);
+        // Everything AFTER the wrap's own `--` is exactly `ssh`'s own argv —
+        // the unwrapped case, byte for byte.
+        assert_eq!(&wrapped[wrap.len()..], &plain[..]);
+    }
+
+    #[test]
+    fn ssh_argv_carries_the_identity_and_the_trailing_command() {
+        let argv = super::ssh_argv(
+            None,
+            Some(std::path::Path::new("/home/x/key")),
+            "root",
+            "10.0.2.5",
+            &["hostname".to_string()],
+        );
+        let i = argv.iter().position(|a| a == "-i").expect("no -i");
+        assert_eq!(argv[i + 1], "/home/x/key");
+        assert_eq!(argv.last().unwrap(), "hostname");
+    }
+
+    /// A destination that LOOKS like a flag (an address or hostname starting
+    /// with `-`) must land after `ssh`'s own `--`, never be read as an
+    /// option — the same defence `cluster apply`'s `ssh`/`scp` already has.
+    #[test]
+    fn ssh_argv_guards_the_destination_with_a_dash_dash() {
+        let argv = super::ssh_argv(None, None, "delonix", "-oProxyCommand=evil", &[]);
+        let dd = argv.iter().position(|a| a == "--").expect("no --");
+        assert_eq!(argv[dd + 1], "delonix@-oProxyCommand=evil");
+        assert_eq!(
+            dd,
+            argv.len() - 2,
+            "the destination must follow -- directly"
         );
     }
 

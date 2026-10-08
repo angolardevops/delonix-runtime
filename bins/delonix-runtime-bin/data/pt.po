@@ -2270,6 +2270,9 @@ msgstr "escape de consola inválido '{raw}' — indica UMA tecla de controlo, co
 msgid "appliance image: logging in as root with the password set when the image was built (`root-password` in scripts/appliances/answer-*.toml; the published images use `delonix-admin`)"
 msgstr "imagem appliance: entra como root com a password definida quando a imagem foi construída (`root-password` em scripts/appliances/answer-*.toml; as imagens publicadas usam `delonix-admin`)"
 
+msgid "this VM's network lives inside the ingress holder's own namespace, and the holder is not up — run `delonix net netns up` first"
+msgstr "a rede desta VM vive dentro da própria namespace do holder de ingress, e o holder não está de pé — corre `delonix net netns up` primeiro"
+
 msgid "log in (appliance: root + the password from the image build)"
 msgstr "entrar (appliance: root + a password da construção da imagem)"
 
