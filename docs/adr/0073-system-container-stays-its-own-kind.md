@@ -1,6 +1,6 @@
 # ADR-0073: `SystemContainer` stays its own Kind, and the ADR-0070 row closes with the reason
 
-- **Status:** Proposed (2026-10-06)
+- **Status:** Accepted (2026-10-08, by the owner)
 - **Date:** 2026-10-06
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0070's table (the `SystemContainer` row), ADR-0058 (a
