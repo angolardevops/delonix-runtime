@@ -76,7 +76,7 @@ never rewritten — supersede them with a new one.
 - **0002** — Generic compute driver trait: 2a-now / 2b-on-trigger split. *Phase 2a implemented* —
   `ComputeDriver` trait + container/vm adapters in `cmd/workload.rs`, consumed by the
   `delonix workload {ls,describe,stop,rm}` command group. Phase 2b (promote to `core` / a `delonix-compute`
-  crate) stays deferred until a second consumer (cri/mgmt) needs it.
+  crate) stays deferred until a second consumer (cri/mgmt) needs it. *Accepted* (2026-07-30) for Phase 2a; Phase 2b deferred on-trigger.
 - **0003** — Tenancy-free capability model (`ContainerRun`/`NetworkAttach`/…) gated at the
   control-socket dispatch, **without** identity/tenant/audit context (that half is out of bounds).
   *Proposed* — recommends staying Proposed until a lower-trust local socket consumer exists (same
@@ -88,17 +88,17 @@ never rewritten — supersede them with a new one.
 - **0061** — What a `delonix init` template promises: one capability end to end, webhooks both
   ways, OpenTelemetry, contract and architecture gates as tests; locks shipped only when they are a
   function of the manifest (Go); the generator checks the name and `-v` it substitutes; detection
-  reads manifests and says «unknown». *Proposed*.
+  reads manifests and says «unknown». *Accepted* (2026-10-06); the template contract, the lock policy and the generator checks are in `main` (#642 and the edge/tunnel work that followed).
 - **0063** — IPAM beyond Proxmox's own: an external controller is named by the zone and registered
   on the cluster (phpIPAM refused while PVE cannot map a MAC to an address; NetBox after a live
   spike, observed through its own API), gateways and ranges changed in place with a repair of the
   IPAM's gateway entry after a failed transaction, and a reservation that owns its MAC so a VM
-  created after it gets the reserved address. *Proposed*; the reservation fixes are in #654.
+  created after it gets the reserved address. *Accepted* (2026-10-06); D3's defect fix is in #654, and **D1 and D2 are not implemented** — Sprint 2 of `docs/discovery/66_CONTINUITY_PLAN.md`.
 - **0064** — The DNS role sets a zone's DNS settings (`spec.dns` on a NetworkZone: a controller
   the cluster's administrator registered, a domain, a reverse controller) and the node writes the
   records — a guest's A and PTR, a subnet gateway's `<vnet>-gw`. `dns` without a DHCP range is
   refused, the field is hot and read from the node, the controller's credential is never held, and
-  the gateway records the node leaves on a teardown are named. *Proposed*; D1–D5 in the F5c PR.
+  the gateway records the node leaves on a teardown are named. *Accepted* (2026-10-06); D1–D5 are in the ADR-0059 F5c PR and **D6 is decided and not implemented** — it needs a live case against a real DNS server.
 - **0065** — IPv6 in the SDN dataplane: one `table inet` instead of `ip` + an `ip6` refusal,
   v6 addresses derived from the v4 lease (no second IPAM), static assignment and AAAA in the
   holder's DNS, NAT66 egress through slirp. Opt-in per network (`--ipv6`); the default is
@@ -121,7 +121,7 @@ never rewritten — supersede them with a new one.
   administrator allowlist (no device, path or command in a manifest); the engine stays rootless and
   privileged operations go through a per-request, socket-activated helper (or an explicitly
   configured rootful node service); a probe without privilege answers «could not determine», never
-  «no pools»; pools are created and destroyed only by the administrator. *Proposed*; a Portuguese
+  «no pools»; pools are created and destroyed only by the administrator. *Accepted* (2026-10-06), **P0 implemented** (#689); P1–P6 need root and spare disks in a lab VM and are not built. A Portuguese
   review copy is `0067-storage-pools.pt-AO.md`.
 - **0068** — VM hotplug: a new `vm update` verb (like `container update`; `vm resize` stays cold)
   adds vCPUs, memory, disks and NICs on a running VM within a maximum declared at create (default
