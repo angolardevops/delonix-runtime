@@ -35,11 +35,17 @@ plan did it with a lost branch, and these did it with a status line.
    it exists for is the shape this repo keeps paying for; it was found because an
    edit to a bullet FAILED and the gate stayed green over the disagreement.
 
-   A bullet's status is the last ITALIC span that names a state, not any status
-   word in its prose: `0072`'s entry says «rejected for the Kind move» before its
-   `*Accepted*`, so reading the whole text would have filed it as rejected. And
-   the span must not swallow `**bold**` — `**0074**` sits at the start of every
-   bullet, and naive pairing of asterisks hid that entry's own `*Accepted*`.
+   Since 2026-10-08 the index has ONE shape: a table row per ADR. The bullet list
+   was migrated into it and a bullet-shaped entry is now refused, because two
+   shapes meant two places to update and four ADRs (`0001`-`0004`) were in both.
+   A status cell BEGINS with the state, which is what makes reading the first
+   match correct: the prose that follows says «rejected for the Kind move»
+   (`0072`) and «rejected on measurement» (`0075`) long before it is done.
+
+3. **Every ADR has a status, and an index row.** Both are absences the earlier
+   gate could not see, because it only judged what it found. Measured 2026-10-08:
+   `0011`, `0045` and `0051` had no index entry at all, so nothing compared them
+   to anything.
 
 What it deliberately does NOT check: a status line that names a branch. ADR-0061
 did exactly that and it was a real defect — but `0049`'s status names the API
@@ -94,20 +100,54 @@ def word_of(text: str) -> str | None:
         return None
     w = m.group(1).lower()
     return SAME.get(w, w)
-STATUS = re.compile(r"^-\s+\*\*(status|estado):?\*\*:?\s*(.*)$", re.I)
+# The status line, in every shape the ADRs actually use. Measured 2026-10-08:
+# requiring a LIST ITEM (`- **Status:**`) read 60 of 76 documents and skipped
+# SIXTEEN — and `main()` skips a document with no status silently, so for those
+# sixteen the gate checked neither self-contradiction nor the index. A gate that
+# reads nothing is a green by absence, which this file's own docstring calls the
+# failure this repo has paid for twice; it was doing it to a fifth of the ADRs.
+#
+# The three shapes it was missing, all of them carrying a real status:
+#   `**Status: Accepted (2026-08-12).**`  — bold with the colon INSIDE (0013, 0022)
+#   `**Status:** Accepted 2026-09-15 — …` — a paragraph, not a list item (0038)
+#   `## Status` + the prose below it       — a heading (0048)
+STATUS = re.compile(r"^-?\s*\*\*(status|estado):?\*\*:?\s*(.*)$", re.I)
+STATUS_INNER = re.compile(r"^\*\*(status|estado):\s*(.*)$", re.I)
+STATUS_HEAD = re.compile(r"^#{2,3}\s+(status|estado)\s*$", re.I)
 
 
 def status_of(lines: list[str]) -> tuple[int, str]:
     """The status line's index and its text, continuation lines included."""
     for i, line in enumerate(lines):
+        text = None
         m = STATUS.match(line)
-        if not m:
+        if m:
+            text = m.group(2)
+        else:
+            m = STATUS_INNER.match(line)
+            if m:
+                # `**Status: Accepted (…).** the rest` — the closing `**` sits
+                # mid-line, so the status text is the whole remainder.
+                text = m.group(2)
+            elif STATUS_HEAD.match(line):
+                # A heading: the status is the paragraph under it.
+                body = []
+                for cont in lines[i + 1 :]:
+                    if not cont.strip():
+                        if body:
+                            break
+                        continue
+                    if cont.startswith("#"):
+                        break
+                    body.append(cont.strip())
+                text = " ".join(body)
+        if text is None:
             continue
-        text = m.group(2)
-        for cont in lines[i + 1 :]:
-            if cont.startswith("- ") or not cont.strip():
-                break
-            text += " " + cont.strip()
+        if not STATUS_HEAD.match(line):
+            for cont in lines[i + 1 :]:
+                if cont.startswith("- ") or cont.startswith("#") or not cont.strip():
+                    break
+                text += " " + cont.strip()
         return i, text
     return -1, ""
 
@@ -135,12 +175,6 @@ def bullet_entries(lines: list[str]) -> dict[str, str]:
         out[m.group(1)] = text
         i = j
     return out
-
-
-def bullet_status(text: str) -> str | None:
-    """The state a bullet declares: the LAST italic span that names one."""
-    named = [s for s in ITALIC.findall(text) if word_of(s)]
-    return word_of(named[-1]) if named else None
 
 
 def main() -> int:
@@ -190,24 +224,36 @@ def main() -> int:
                     f"README.md: {m.group(2)} says «{w}» and the ADR says "
                     f"«{own[m.group(2)]}» — the index is lying to whoever stops there"
                 )
-        by_number = {name[:4]: name for name in own}
-        for num, text in bullet_entries(readme.read_text(encoding="utf-8").splitlines()).items():
-            name = by_number.get(num)
-            if name is None:
-                continue
-            w = bullet_status(text)
-            if w is None:
+        # One shape for the index (2026-10-08). The reader stays as the
+        # REFUSAL, not as dead code: a bullet added tomorrow is caught here
+        # instead of silently escaping the table check.
+        for num in bullet_entries(readme.read_text(encoding="utf-8").splitlines()):
+            problems.append(
+                f"README.md: {num} is indexed as a bullet — the index is a table, "
+                "one row per ADR (migrated 2026-10-08; two shapes meant two places to update)"
+            )
+        # An ADR with no row is compared to nothing, which reads as agreement.
+        indexed = {
+            m.group(2)
+            for m in (ROW.match(l) for l in readme.read_text(encoding="utf-8").splitlines())
+            if m
+        }
+        for name in sorted(own):
+            if name not in indexed:
                 problems.append(
-                    f"README.md: the bullet for {num} names no state — the ADR says "
-                    f"«{own[name]}» and a reader who stops at the index learns nothing"
+                    f"README.md: {name} has no index row — a reader who stops at the "
+                    f"index never learns it says «{own[name]}»"
                 )
-                continue
-            rows += 1
-            if w != own[name]:
-                problems.append(
-                    f"README.md: the bullet for {num} says «{w}» and the ADR says "
-                    f"«{own[name]}» — the index is lying to whoever stops there"
-                )
+
+    # A status nobody can read is the same absence, one file further in.
+    for path in sorted(ADR.glob("0*.md")):
+        _, status = status_of(path.read_text(encoding="utf-8").splitlines())
+        if not word_of(status):
+            problems.append(
+                f"{path.name}: no status line names a state — a reader cannot tell "
+                "whether the decision is taken (see STATUS for the shapes accepted)"
+            )
+
     if problems:
         print(f"FAIL  adr status: {len(problems)} contradiction(s) in {checked} ADR(s)")
         for p in problems:

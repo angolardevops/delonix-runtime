@@ -103,64 +103,99 @@ class AdrStatusGate(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("1 index row(s)", r.stdout)
 
-    # --- the index's OTHER shape: the bullet list (measured 2026-10-08) --------
-    # The table check covered none of the thirteen most recent ADRs, because the
-    # table stops at 0062 and a bullet list carries 0061 and 0063 onwards. Four
-    # of them were lying. Each test below fails with the bullet reader removed.
+    # --- the status cell is read at its HEAD (migration of 2026-10-08) --------
+    # The bullet list became table rows, so the prose that used to follow an
+    # italic state now sits in the status cell. The convention that makes the
+    # first match correct is that the cell BEGINS with the state.
 
-    def test_a_bullet_index_disagreeing_with_the_document_fails(self):
-        readme = "- **0001** — a decision, explained at length. *Proposed*.\n"
+    def test_prose_after_the_state_does_not_change_it(self):
+        """0072's cell says «rejected for the Kind move» after its **Accepted**."""
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Accepted** (2026-01-01) — the Kind move "
+            "was rejected for its own reasons, and a second option was superseded |\n"
+        )
+        r = run({"0001-a.md": CLEAN}, readme=readme)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("1 index row(s)", r.stdout)
+
+    def test_a_bullet_entry_is_refused_now_that_the_index_is_a_table(self):
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Accepted 2026-01-01** |\n"
+            "- **0001** — the same decision, a second time. *Accepted*.\n"
+        )
         r = run({"0001-a.md": CLEAN}, readme=readme)
         self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("the bullet for 0001", r.stdout)
+        self.assertIn("indexed as a bullet", r.stdout)
+
+    def test_an_adr_with_no_index_row_fails(self):
+        """0011, 0045, 0051 had none, and 0027 had a row pointing elsewhere."""
+        readme = "| ADR | What | State |\n|---|---|---|\n"
+        r = run({"0001-a.md": CLEAN}, readme=readme)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("has no index row", r.stdout)
+
+    def test_a_row_for_another_file_is_not_a_row_for_this_one(self):
+        # Two ADRs shared the number 0027; the index linked one and the other
+        # was invisible. The comparison is by FILE, not by number.
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-other.md) | another file | **Accepted 2026-01-01** |\n"
+        )
+        r = run({"0001-a.md": CLEAN}, readme=readme)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("0001-a.md has no index row", r.stdout)
+
+    def test_a_status_no_shape_can_read_fails(self):
+        body = "# ADR-0002: a decision\n\nIt was decided, somehow.\n\n## Context\n"
+        # A second ADR WITH a status, so this does not fall into the older
+        # «the gate read nothing» guard, which covers the all-empty case.
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Accepted 2026-01-01** |\n"
+        )
+        r = run({"0001-a.md": CLEAN, "0002-b.md": body}, readme=readme)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("no status line names a state", r.stdout)
+
+    # --- the three status shapes the reader was missing ------------------------
+    # Measured 2026-10-08: requiring a list item read 60 of 76 documents and
+    # skipped SIXTEEN, silently. Each of these fails with the widened reader
+    # reverted, because the document then has no readable status at all.
+
+    def test_a_status_bold_with_the_colon_inside_is_read(self):
+        """`**Status: Accepted (2026-08-12).**` — ADR-0013 and ADR-0022."""
+        body = "# ADR-0001: a decision\n\n**Status: Accepted (2026-01-01).** And a sentence.\n"
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Proposed** |\n"
+        )
+        r = run({"0001-a.md": body}, readme=readme)
+        self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("index is lying", r.stdout)
 
-    def test_a_bullet_index_agreeing_passes_and_is_counted(self):
-        readme = "- **0001** — a decision, explained at length. *Accepted* (2026-01-01).\n"
-        r = run({"0001-a.md": CLEAN}, readme=readme)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("1 index row(s)", r.stdout)
-
-    def test_a_bullet_that_names_no_state_fails(self):
-        """ADR-0002's entry carried `*Phase 2a implemented*` and no state at all."""
-        readme = "- **0001** — a decision. *Phase 2a implemented*, the rest deferred.\n"
-        r = run({"0001-a.md": CLEAN}, readme=readme)
+    def test_a_status_paragraph_without_a_bullet_is_read(self):
+        """`**Status:** Accepted 2026-09-15 — …` — ADR-0038."""
+        body = "# ADR-0001: a decision\n\n**Status:** Accepted 2026-01-01 — gated on a spike\n"
+        readme = (
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Proposed** |\n"
+        )
+        r = run({"0001-a.md": body}, readme=readme)
         self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("names no state", r.stdout)
+        self.assertIn("index is lying", r.stdout)
 
-    def test_a_status_word_in_the_prose_does_not_win_over_the_italic(self):
-        """ADR-0072's entry says «rejected for the Kind move» before its *Accepted*."""
+    def test_a_status_under_a_heading_is_read(self):
+        """`## Status` with the state in the paragraph below — ADR-0048."""
+        body = "# ADR-0001: a decision\n\n## Status\n\nProposed 2026-01-01. Scope decided.\n\n## Context\n"
         readme = (
-            "- **0001** — a decision; the Kind move was rejected for its own reasons. "
-            "*Accepted* (2026-01-01).\n"
+            "| ADR | What | State |\n|---|---|---|\n"
+            "| [0001](0001-a.md) | a decision | **Accepted** |\n"
         )
-        r = run({"0001-a.md": CLEAN}, readme=readme)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        # The row count, not just the exit code: a gate that ignores bullets
-        # ALSO exits 0 here, so without this line the test passes on the broken
-        # reader and proves nothing. Measured — it did.
-        self.assertIn("1 index row(s)", r.stdout)
-
-    def test_the_bold_number_does_not_swallow_the_italic_state(self):
-        """Naive asterisk pairing read `**0001**` as an italic and hid the state."""
-        readme = (
-            "- **0001** — a decision with **bold** in the middle of it. "
-            "*Accepted* (2026-01-01).\n"
-        )
-        r = run({"0001-a.md": CLEAN}, readme=readme)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("1 index row(s)", r.stdout)
-
-    def test_a_state_on_a_continuation_line_is_read(self):
-        """Ten of the eighteen entries carried their state on a wrapped line."""
-        readme = (
-            "- **0001** — a decision long enough that its entry wraps over\n"
-            "  more than one line before it ever gets to the state.\n"
-            "  *Proposed*.\n"
-        )
-        r = run({"0001-a.md": CLEAN}, readme=readme)
+        r = run({"0001-a.md": body}, readme=readme)
         self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("the bullet for 0001", r.stdout)
+        self.assertIn("index is lying", r.stdout)
 
     def test_a_gate_that_read_nothing_fails(self):
         """A green by absence is the failure mode this repo has paid for twice."""
