@@ -1,6 +1,6 @@
 # ADR-0072: the perimeter filter stays on `NetworkGateway`, and the ADR-0070 row closes with the reason
 
-- **Status:** Proposed (2026-10-06)
+- **Status:** Accepted (2026-10-08, by the owner)
 - **Date:** 2026-10-06
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0070's table (the `NetworkGateway` row), ADR-0059 D1.5
