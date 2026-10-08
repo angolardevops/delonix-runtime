@@ -5393,6 +5393,19 @@ de re-exec, para um terceiro não nascer com metade).
 - **Plan**: um store ilegível (VM, volumes com âmbito, presença de containers) é erro, não «vazio».
 - **Pod**: o mesmo nome noutra namespace é `Conflict`, não «already exists».
 - **CNI**: prazo de 60 s (`DELONIX_CNI_TIMEOUT_SECS`) e 1 MiB por stream.
+- **`secret rotate-key` roda a CHAVE, não os valores — e por isso NÃO toca na versão** (ACH-034,
+  corrigido a 2026-10-08). A rotação recifrava cada segredo por `SecretStore::save`, que decide a
+  versão comparando com o ficheiro em disco — ficheiro que nessa altura já estava selado com a
+  chave ANTIGA. A decifra falhava, caía no ramo da primeira gravação e escrevia `1` por cima de
+  todos: `Version: 4` → `Version: 1` sem um único valor mudado. Os valores sobreviviam (é só
+  recifrar), por isso nada parecia roto; o que rompia era o campo que o consumidor lê para saber
+  «isto mudou?» — a anotação `delonix.io/secret-versions` e o «rotated since» do `container
+  describe` passavam a dizer o CONTRÁRIO do que aconteceu, e uma versão que ANDA PARA TRÁS parte
+  qualquer comparação monótona. A regra do `save` está certa e tem teste: a correcção é um caminho
+  de gravação interno (`SecretStore::write`) que recebe a versão a manter, e só o `rotate_key` o
+  usa — o passo 1 da rotação já carregou cada segredo com sucesso, logo a versão anterior é
+  conhecida e não se deita fora. Gates: o unitário `rotate_key_does_not_walk_the_version_backwards` (chumba com
+  a correcção revertida, verificado) e os cinco checks «secret rotate-key» da bateria.
 - O que ficou por fazer e porquê está no ADR-0069 (política antes da activação, `ResourceKey`
   com scope, refresh operacional do plan de VM, OpenStack).
 

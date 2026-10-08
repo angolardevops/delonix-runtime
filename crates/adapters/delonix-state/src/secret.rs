@@ -139,6 +139,29 @@ impl SecretStore {
     /// undecryptable — data loss, not just staleness). Fixed with the same
     /// per-writer-unique temp name (pid + atomic seq) `Store::save` uses.
     pub fn save(&self, s: &Secret) -> Result<()> {
+        self.write(s, None)
+    }
+
+    /// [`SecretStore::save`], but with the version the caller ALREADY knows
+    /// instead of one derived from the file on disk.
+    ///
+    /// BUG FOUND (ACH-034): only `rotate_key` needs this, and it is exactly
+    /// why. `save` decides the version by comparing against `self.load(&name)`
+    /// — and `rotate_key` re-seals AFTER rotating the master key, so that
+    /// `load` is reading a file still sealed with the OLD key. The decryption
+    /// fails, the comparison falls into the `Err(_) => 1` arm (the
+    /// first-save case) and the version of EVERY secret is rewritten as 1: a
+    /// key rotation changes no value, so by the store's own rule the version
+    /// had to stay PUT. A consumer that reads the version to answer "did
+    /// this change?" read 4 → 1 and concluded the opposite of what happened,
+    /// and a version that goes BACKWARDS breaks every monotonic comparison
+    /// built on it (caches, reconcilers). The rule in `save` is right and has
+    /// a test (`the_store_assigns_the_version_from_the_values`); what was
+    /// wrong is a path that cannot apply it and answers with another case's
+    /// answer anyway. `rotate_key` loaded each secret successfully in step 1,
+    /// so the previous version is known — it is passed in here rather than
+    /// thrown away and guessed at.
+    fn write(&self, s: &Secret, keep_version: Option<u32>) -> Result<()> {
         if !valid_name(&s.name) {
             return Err(Error::InvalidSecretName(s.name.clone()));
         }
@@ -151,10 +174,15 @@ impl SecretStore {
         // cannot forget to bump it, or bump it without a change. Same values →
         // same version; different values → the previous + 1; first save → 1.
         let mut stored = s.clone();
-        stored.version = match self.load(&s.name) {
-            Ok(prev) if prev.data == s.data => prev.version.max(1),
-            Ok(prev) => prev.version.max(1) + 1,
-            Err(_) => 1,
+        stored.version = match keep_version {
+            // re-seal of an unchanged value: keep the version it already had
+            // (`0` = record written before versions existed → reads as 1).
+            Some(v) => v.max(1),
+            None => match self.load(&s.name) {
+                Ok(prev) if prev.data == s.data => prev.version.max(1),
+                Ok(prev) => prev.version.max(1) + 1,
+                Err(_) => 1,
+            },
         };
         // value encrypted at-rest: header || nonce || ciphertext.
         let mut blob = Vec::from(SEALED_MAGIC);
@@ -321,9 +349,10 @@ impl SecretStore {
         }
         // 2) rotate the shared master key (also re-encrypts the tunnel creds).
         self.vault.rotate_key()?;
-        // 3) re-seal all secrets with the new key.
+        // 3) re-seal all secrets with the new key, KEEPING each version: the
+        //    rotation changed the key, not a single value (see `write`).
         for s in &loaded {
-            self.save(s)?;
+            self.write(s, Some(s.version))?;
         }
         Ok(())
     }
@@ -615,5 +644,79 @@ mod tests {
         assert_eq!(store.load("s2").unwrap().data.get("B").unwrap(), "2");
         let store2 = SecretStore::open(dir).unwrap();
         assert_eq!(store2.load("s1").unwrap().data.get("A").unwrap(), "1");
+    }
+
+    #[test]
+    fn rotate_key_does_not_walk_the_version_backwards() {
+        // BUG regression guard (ACH-034): `rotate_key` re-sealed each secret
+        // through `save`, which decides the version by comparing against the
+        // file on disk — a file ALREADY sealed with the key that had just been
+        // rotated away. The decryption failed, `save` fell into its
+        // first-save arm and wrote version 1 over every secret: version 4 → 1
+        // with no value changed. The values survived (the rotation only
+        // re-encrypts them), so nothing looked broken; what broke was the one
+        // field a consumer reads to answer "did this change?", which answered
+        // the opposite, and backwards at that.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut store = SecretStore::open(dir).unwrap();
+        let mk = |v: &str| Secret {
+            name: "sv".into(),
+            data: [("K".to_string(), v.to_string())].into(),
+            updated_unix: 1,
+            version: 0,
+        };
+        // four distinct values → version 4 (the store counts the changes).
+        for v in ["a", "b", "c", "d"] {
+            store.save(&mk(v)).unwrap();
+        }
+        assert_eq!(store.load("sv").unwrap().version, 4);
+
+        store.rotate_key().unwrap();
+
+        let after = store.load("sv").unwrap();
+        assert_eq!(
+            after.version, 4,
+            "a key rotation changes no value: the version had to stay PUT"
+        );
+        assert_eq!(
+            after.data.get("K").map(String::as_str),
+            Some("d"),
+            "the value is still readable with the new key"
+        );
+        // and from disk, reopened with the rotated key.
+        let reopened = SecretStore::open(dir).unwrap().load("sv").unwrap();
+        assert_eq!(reopened.version, 4);
+        assert_eq!(reopened.data.get("K").map(String::as_str), Some("d"));
+        // a value changed AFTER the rotation still advances from 4, not from 1.
+        store.save(&mk("e")).unwrap();
+        assert_eq!(store.load("sv").unwrap().version, 5);
+    }
+
+    #[test]
+    fn rotate_key_promotes_a_legacy_record_without_a_version_to_1() {
+        // A plaintext record from before versions existed carries `0`, which
+        // reads as 1 — a rotation must land on 1, not on 0 nor on 2.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut store = SecretStore::open(dir).unwrap();
+        let legacy = serde_json::to_vec(&Secret {
+            name: "old".into(),
+            data: [("K".to_string(), "v".to_string())].into(),
+            updated_unix: 0,
+            version: 0,
+        })
+        .unwrap();
+        std::fs::write(dir.join("secrets/old.json"), &legacy).unwrap();
+        store.rotate_key().unwrap();
+        let after = store.load("old").unwrap();
+        assert_eq!(after.version, 1);
+        assert_eq!(after.data.get("K").map(String::as_str), Some("v"));
+        assert!(
+            std::fs::read(dir.join("secrets/old.json"))
+                .unwrap()
+                .starts_with(SEALED_MAGIC),
+            "the plaintext legacy record came out encrypted"
+        );
     }
 }
