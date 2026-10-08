@@ -1,7 +1,7 @@
 # ADR-0074: A `hostPort` the node cannot publish is refused by name, and the CNI path has to publish them
 
-- **Status:** Proposed (2026-10-07). **D1, D2 and D3 are all implemented** on
-  `cri/hostport-proto`: the refusal is per path, and the CNI chain publishes `hostPort` through
+- **Status:** Accepted (2026-10-08, by the owner). **D1, D2 and D3 are all implemented** and
+  merged in `#720`: the refusal is per path, and the CNI chain publishes `hostPort` through
   `portmap`'s `runtimeConfig`. Measured in a lab VM from this repo's own
   `delonix-vm-k8s:1.36` golden, against both binaries: `origin/main` created the sandbox with
   **0** DNAT rules and a port that answered nothing; with the change, **3** rules, `LAB-OK` over
