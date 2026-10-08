@@ -1,11 +1,10 @@
 # ADR-0075: `exec_server` refuses a sibling it did not find beside itself, instead of trusting the `PATH`
 
-- **Status:** Accepted (2026-10-08, by the owner). **Nothing is implemented yet**: `exec_server`
-  still takes the `PATH` fallback in silence, and D1/D2 are separate work with their own PR.
-  Accepting a decision is not the same as having it, and the measurement that motivated this ADR
-  still reproduces against a `delonix` run from a build tree. Until D1 lands, the battery guard
-  merged in `#725` measures the same hole from the outside — which protects this repo's own runs,
-  not a user's node.
+- **Status:** Accepted (2026-10-08, by the owner). **D1 and D2 are implemented**: `exec_server`
+  refuses a sibling that is not beside the executable, and `DELONIX_SERVER_FROM_PATH=1` takes the
+  `PATH` copy with a line on stderr naming it. The decision was extracted to a pure `choose` so it
+  could be tested — the `exec` replaces the process, so nothing past it is reachable from a test.
+  D3 was already true and is unchanged. Measured live, see the addendum.
 - **Date:** 2026-10-08
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0040 D2.4 as amended (each server is its own binary and `delonix serve <x>` /
@@ -128,11 +127,30 @@ ADR rejects on measurement.
 
 ## What was not measured
 
-- The refusal is **not implemented**; this ADR is `Proposed` and records the decision, not a landed
-  change. No code in `exec_server` has moved.
+- ~~The refusal is **not implemented**~~ — implemented 2026-10-08, see the addendum below.
 - Whether any real user depends on the `PATH` fallback. The claim here is only that
   `scripts/install.sh` does not create that layout, which was read in the script, not surveyed
   across installs.
 - `delonix-mgmt` and `delonix-node-api` were not probed for the «`--version` starts the server»
   behaviour on an obsolete copy. The measurement above is on `delonix-cri` only; the absence of a
   `version_flag.rs` for those two is a fact about the tests, not a measurement of old binaries.
+
+## Addendum 2026-10-08 — D1 and D2 built, and measured on the binary that caused this
+
+`exec_server` now asks `choose(name, beside_dir, opted_in, on_path)`, a pure function, and only then
+`exec`s. Measured against the real binary, with the four siblings and then with `delonix` alone:
+
+| what was beside `delonix` | `DELONIX_SERVER_FROM_PATH` | outcome |
+|---|---|---|
+| the four siblings | unset | serves, silently, as before |
+| nothing | unset | **refused**, naming the directory it looked in |
+| nothing | `1` | serves, with one stderr line naming the `PATH` copy |
+
+The refusal is `Error::Unavailable`, so it carries the same class as «not installed» did; the
+message names the server, the directory, the install hint and the opt-in variable, and is translated
+in `data/pt.po`.
+
+Nine tests cover the decision, including the three the fix exists for: a sibling found only on the
+`PATH` is refused; `beside` wins even when the opt-in is set, so the opt-in can never downgrade a
+good install; and all four dispatched names go through the same decision, because a fix that covered
+only `delonix-cri` would have left three open.

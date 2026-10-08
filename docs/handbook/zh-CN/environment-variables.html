@@ -420,6 +420,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>默认关闭，好让装在集群上的 runtime 永远不依赖命令是从哪个目录跑的。没有它的话，顺序是 <code>--cri-bin</code>、<code>delonix</code> 旁边的那个 <code>delonix-cri</code>，然后是正在运行版本的 release 资产，并对照它的 <code>SHA256SUMS</code> 校验。来源、路径和 sha256 总会被打印出来。</td>
 </tr>
 <tr>
+<td><code>DELONIX_SERVER_FROM_PATH</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:exec_server</code></a>（<code>FROM_PATH_ENV</code>，由 <code>choose</code> 决定）</td>
+<td>当运行中的 <code>delonix</code> 旁边没有兄弟服务二进制时，选择性允许使用 <code>PATH</code> 上找到的那一个（ADR-0075 D2）。</td>
+<td>仅 <code>1</code> 开启；未设置、空、<code>0</code> 或其他值均为关闭。</td>
+<td>默认关闭：不在可执行文件旁边的兄弟二进制来自另一次安装，因为 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 把所有二进制放在同一个 <code>BIN_DIR</code>。2026-10-08 实测——<code>PATH</code> 上 2026-09-07 的 <code>delonix-cri</code> 为 2026-10-08 的 <code>delonix</code> 提供服务，三项电池检查失败，看起来像是引擎的错；本应拦住它的版本拒绝运行在被调用方（<code>delonix_node::<wbr>dispatch::<wbr>check_version</code>），而如此老旧的服务器并不包含它。开启该选项时，解析出的路径会写到 stderr。<code>beside</code> 始终优先，因此这绝不会降级一个正确的安装。</td>
+</tr>
+<tr>
 <td><code>DELONIX_API_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>；由 <code>cmd/serve.rs:run</code> 转发</td>
 <td>本地管理 API（<code>delonix serve api</code>）的 socket。</td>
