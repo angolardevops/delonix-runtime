@@ -5219,8 +5219,8 @@ msgstr "Emite JSON em vez de um resumo para humanos"
 msgid "Free-form note kept with the rule"
 msgstr "Nota livre guardada com a regra"
 
-msgid "`hostPort:containerPort[/tcp|udp]` or just `port`"
-msgstr "`portaHost:portaContainer[/tcp|udp]` ou só `porta`"
+msgid "`[hostIp:]hostPort:containerPort[/tcp|udp]` or just `port`. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from another machine. Name the address to widen it: `0.0.0.0:5070:5070/udp` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). The resolved address is RECORDED, so it survives a `container start`"
+msgstr "`[ipHost:]portaHost:portaContainer[/tcp|udp]` ou só `porta`. SEGURO POR OMISSÃO: sem `ipHost` a porta liga só a `127.0.0.1` — alcançável do próprio host, NÃO de outra máquina. Nomeia o endereço para alargar: `0.0.0.0:5070:5070/udp` (todas as interfaces), `192.168.1.10:8080:80` (uma), ou o gateway do libvirt para a alcançar de VMs (ver `delonix vm reach`). O endereço resolvido fica REGISTADO, por isso sobrevive a um `container start`"
 
 msgid "IP in the infra subnet. Defaults to a deterministic one derived from `name`"
 msgstr "IP na subnet de infra. Por omissão, um determinístico derivado do `name`"
@@ -6433,6 +6433,12 @@ msgstr "Pára ao fim destes segundos (um `SIGINT` a sério, como Ctrl-C — igno
 
 msgid "what is open on a container, and from where"
 msgstr "o que está aberto num container, e de onde"
+
+msgid "reachable from OTHER machines: without an address the port binds to 127.0.0.1 alone"
+msgstr "alcançável de OUTRAS máquinas: sem endereço a porta liga só a 127.0.0.1"
+
+msgid "reachable from the VMs on a libvirt network, and from nowhere else — see `delonix vm reach`"
+msgstr "alcançável das VMs de uma rede libvirt, e de mais nenhum lado — ver `delonix vm reach`"
 
 msgid "shut the door by default, so only the rules you write let anything in"
 msgstr "fechar a porta por omissão, para só as regras que escreveres deixarem entrar alguma coisa"

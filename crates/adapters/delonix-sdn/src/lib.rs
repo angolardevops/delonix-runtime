@@ -186,6 +186,92 @@ pub(crate) mod testenv {
             }
         }
     }
+
+    /// A temp state root pinned into `DELONIX_ROOT` for ONE test, and removed
+    /// when the test ends — also on panic.
+    ///
+    /// # Why this is a type and not three lines per test
+    ///
+    /// The ORDER matters, and every fixture in this crate had it wrong:
+    ///
+    /// ```ignore
+    /// let mut env = crate::testenv::lock();        // dropped SECOND
+    /// let dir = tempfile::tempdir().unwrap();      // dropped FIRST
+    /// env.set("DELONIX_ROOT", dir.path());
+    /// ```
+    ///
+    /// Locals drop in reverse, so the directory went first and `DELONIX_ROOT`
+    /// kept naming a path that no longer existed until the guard dropped. The
+    /// lock serialises WRITERS of the variable; production code READS it with no
+    /// lock at all, so a concurrent test could resolve that dead root and
+    /// `create_dir_all` it back into existence — one stray `.tmpXXXXXX` in
+    /// `TMPDIR` per lost race (measured 2026-10-07: `cargo test -p delonix-sdn`
+    /// left 3, 0 and 1 entries over three runs, which is the
+    /// `scripts/tmp_roots_gate.py` flake). `TempDir`'s own `Drop` reported
+    /// nothing, because the removal had SUCCEEDED; the directory came back
+    /// afterwards.
+    ///
+    /// So this unpins the environment FIRST and removes the directory SECOND, on
+    /// both paths, and [`TempRoot::close`] makes a removal that fails fail the
+    /// test instead of leaving a leftover nobody looks at.
+    pub(crate) struct TempRoot {
+        env: Option<EnvGuard>,
+        dir: Option<tempfile::TempDir>,
+    }
+
+    impl TempRoot {
+        /// Pins `DELONIX_ROOT` at a fresh directory.
+        pub(crate) fn new() -> Self {
+            let dir = tempfile::tempdir().expect("temp root");
+            let mut env = lock();
+            env.set("DELONIX_ROOT", dir.path());
+            Self {
+                env: Some(env),
+                dir: Some(dir),
+            }
+        }
+
+        /// Pins `DELONIX_ROOT` **and** `DELONIX_NET_RUNTIME_DIR` (`<root>/run`).
+        ///
+        /// Both or neither: a test that isolates only the state root still sends
+        /// its `control_send` to this host's real holder.
+        pub(crate) fn with_runtime_dir() -> Self {
+            let mut this = Self::new();
+            let run = this.path().join("run");
+            std::fs::create_dir_all(&run).expect("runtime dir");
+            this.env().set("DELONIX_NET_RUNTIME_DIR", &run);
+            this
+        }
+
+        pub(crate) fn path(&self) -> &std::path::Path {
+            self.dir.as_ref().expect("live temp root").path()
+        }
+
+        /// The guard, for a test that pins further variables of its own.
+        pub(crate) fn env(&mut self) -> &mut EnvGuard {
+            self.env.as_mut().expect("live temp root")
+        }
+
+        /// Unpins the environment and removes the directory, FAILING the test if
+        /// it cannot be removed. Called on the way out of a passing test; the
+        /// panic path falls back to `Drop`, which cannot fail a test.
+        pub(crate) fn close(mut self) {
+            self.env.take();
+            if let Some(dir) = self.dir.take() {
+                let path = dir.path().to_path_buf();
+                dir.close()
+                    .unwrap_or_else(|e| panic!("temp root {} not removed: {e}", path.display()));
+            }
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            // Environment first, directory second — see the type's doc.
+            self.env.take();
+            self.dir.take();
+        }
+    }
 }
 
 pub use discover::{discover_ports, DiscoveredPort};
@@ -199,10 +285,27 @@ const BRIDGE: &str = "delonix0";
 /// `DELONIX_SUBNET_BASE` forces a value; otherwise it reads the persisted file; otherwise
 /// it scans the host and picks a free one.
 fn default_base() -> u8 {
+    default_base_in(&ambient_root())
+}
+
+/// [`default_base`] for an EXPLICIT root, so a caller that already knows which
+/// root it is working on never persists into another one.
+///
+/// **The bug this closes** (measured 2026-10-07): `NetworkStore::get("bridge")`
+/// resolved this cache from the process environment while the store itself lived
+/// at the root it was opened with. The two are the same path on a node, which is
+/// why nothing showed — but a `NetworkStore::open(A)` whose caller had
+/// `DELONIX_ROOT=B` read B's octet and wrote B's file, i.e. a store silently
+/// writing outside its own root. In the test suite, where `DELONIX_ROOT` points
+/// at another test's temp dir, that `create_dir_all` RE-CREATED a directory the
+/// other test had already removed, leaving a stray `.tmpXXXXXX` in `TMPDIR` on
+/// every run that lost the race (`scripts/tmp_roots_gate.py`, 3/0/1 entries over
+/// three runs). The cleanup had not failed: the directory came BACK after it.
+fn default_base_in(root: &std::path::Path) -> u8 {
     if let Ok(Ok(b)) = std::env::var("DELONIX_SUBNET_BASE").map(|s| s.trim().parse::<u8>()) {
         return b;
     }
-    let path = net_state_path();
+    let path = net_state_path_in(root);
     if let Ok(Ok(b)) = std::fs::read_to_string(&path).map(|s| s.trim().parse::<u8>()) {
         return b;
     }
@@ -214,9 +317,19 @@ fn default_base() -> u8 {
     base
 }
 
-fn net_state_path() -> std::path::PathBuf {
-    let root = std::env::var("DELONIX_ROOT").unwrap_or_else(|_| "/var/lib/delonix".into());
-    std::path::Path::new(&root).join("net").join("default-base")
+/// The root when the caller names none. Deliberately NOT `infra::base_root`:
+/// that one resolves a rootless engine to `$XDG_DATA_HOME/delonix`, and moving
+/// this cache there would re-pick the default network's `/16` on a node that
+/// already has one. Kept byte for byte as it was so this fix changes where a
+/// store with its OWN root writes, and nothing else.
+fn ambient_root() -> std::path::PathBuf {
+    std::env::var_os("DELONIX_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/var/lib/delonix"))
+}
+
+fn net_state_path_in(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("net").join("default-base")
 }
 
 /// `10.X` octets already in use in the host's routes/addresses (avoids collision with the
@@ -250,15 +363,11 @@ fn pick_free_base() -> u8 {
         .unwrap_or(201)
 }
 
-/// The `prefix`/`gateway`/`subnet` of the default network (derived from the base octet).
+/// The `prefix` of the default network (derived from the base octet). The
+/// gateway and subnet are derived in [`Network::default_bridge_in`], which has a
+/// root to resolve the octet against and reads it once for all three.
 fn default_prefix() -> String {
     format!("10.{}", default_base())
-}
-fn default_gateway() -> String {
-    format!("10.{}.0.1", default_base())
-}
-fn default_subnet() -> String {
-    format!("10.{}.0.0/16", default_base())
 }
 
 // ---- process helpers -----------------------------------------------------
@@ -476,6 +585,63 @@ pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
         .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 
+/// The transport a published port speaks. The two host-side probes need it:
+/// `tcp/5070` and `udp/5070` are independent bindings, and asking about one tells
+/// you nothing about the other — a UDP publish onto a host port whose UDP side is
+/// already taken sailed through a TCP-only busy check and only failed later, in the
+/// slirp, with its opaque `add_hostfwd` JSON.
+///
+/// An enum and not the `&str` the specs carry, on purpose: `"sctp"` (which the CRI
+/// can emit) and a typo must be REFUSED at this boundary, not silently probed as
+/// TCP. Everything upstream already validated the string, so the conversion is a
+/// `?` and the fail-closed edge stays visible at each call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proto {
+    Tcp,
+    Udp,
+}
+
+impl Proto {
+    /// The `tcp`/`udp` of a publish spec. Anything else is an error — see the
+    /// type's doc comment for why there is no default.
+    pub fn parse(proto: &str) -> Result<Self> {
+        match proto {
+            "tcp" => Ok(Proto::Tcp),
+            "udp" => Ok(Proto::Udp),
+            other => Err(Error::InvalidPublishSpec(format!(
+                "unknown protocol '{other}' (tcp|udp)"
+            ))),
+        }
+    }
+}
+
+/// A publish spec with its host bind address made EXPLICIT: resolves it through
+/// [`publish_bind_addr`] and writes it into the spec, so the canonical
+/// `addr:hostPort:contPort/proto` is what gets stored and compared.
+///
+/// This exists because the record used to keep the spec exactly as typed, which
+/// left the bind address as state that was USED at publish time and never
+/// PERSISTED — the trap this codebase has paid for four times already (`-v`, `-p`
+/// on a custom network, extra networks, `Container.pod`). Measured 2026-10-07 on
+/// an isolated root: `DELONIX_PUBLISH_ADDR=0.0.0.0 … publish web 51072:80` bound
+/// `0.0.0.0`, stored the string `51072:80`, and the next `container start` — which
+/// is what a `net boot enable` unit runs, with no environment of its own — brought
+/// it back on `127.0.0.1`. Silently, rc 0, with `net ingress ls` printing the same
+/// row before and after. The inverse measured too, and it is the one that matters:
+/// a port published deliberately WITHOUT an address (loopback only) came back on
+/// `0.0.0.0`, exposed to the whole LAN, because the operator's shell happened to
+/// export the variable — and the engine's own `vm reach` hint is what teaches them
+/// to export it.
+///
+/// Idempotent: a spec that already names an address keeps it (the spec always wins
+/// over the environment), so re-normalizing on the `--net <network>` re-exec's
+/// second pass, or on a record written by an earlier call, changes nothing.
+pub fn normalize_publish_spec(spec: &str) -> Result<String> {
+    let (addr, host_port, cont_port, proto) = parse_publish_addr(spec)?;
+    let bind = publish_bind_addr(addr.as_deref());
+    Ok(format!("{bind}:{host_port}:{cont_port}/{proto}"))
+}
+
 /// Can this process bind `port` on `addr`, as far as PERMISSION goes? Ports below
 /// `net.ipv4.ip_unprivileged_port_start` (1024 by default) need `CAP_NET_BIND_SERVICE`,
 /// which a rootless engine does not have — and the bind that publishes a port happens
@@ -487,12 +653,20 @@ pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
 /// untouched), and only the kernel knows for sure. `EADDRINUSE` is deliberately NOT a
 /// failure here — a busy port is a different diagnosis, with its own error that names
 /// the owner, and this check must not steal it.
-pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
-    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+pub fn can_bind_host_port(addr: &str, port: u16, proto: Proto) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
     let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
-    match TcpListener::bind(SocketAddrV4::new(ip, port)) {
-        Ok(_) => true,
-        Err(e) => !matches!(e.kind(), std::io::ErrorKind::PermissionDenied),
+    let sa = SocketAddrV4::new(ip, port);
+    // The privilege threshold is the same for both transports, but the probe has to
+    // speak the one being published: a TCP probe for a UDP publish answers about a
+    // binding nobody asked for.
+    let err = match proto {
+        Proto::Tcp => TcpListener::bind(sa).err(),
+        Proto::Udp => UdpSocket::bind(sa).err(),
+    };
+    match err {
+        None => true,
+        Some(e) => !matches!(e.kind(), std::io::ErrorKind::PermissionDenied),
     }
 }
 
@@ -511,13 +685,18 @@ pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
 /// A REAL bind, not a `/proc/net/tcp` scan: only the kernel knows for sure, and a
 /// scan would miss a listener bound to a DIFFERENT address on the same port (e.g.
 /// `0.0.0.0` vs `127.0.0.1`) that would still collide with this exact bind.
-pub fn host_port_busy(addr: &str, port: u16) -> bool {
-    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+pub fn host_port_busy(addr: &str, port: u16, proto: Proto) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
     let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
-    matches!(
-        TcpListener::bind(SocketAddrV4::new(ip, port)),
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse
-    )
+    let sa = SocketAddrV4::new(ip, port);
+    // Per-transport, for the reason in [`Proto`]: a free TCP port says nothing
+    // about the UDP side of the same number, and a UDP publish used to be checked
+    // against TCP — blind by construction.
+    let err = match proto {
+        Proto::Tcp => TcpListener::bind(sa).err(),
+        Proto::Udp => UdpSocket::bind(sa).err(),
+    };
+    matches!(err, Some(e) if e.kind() == std::io::ErrorKind::AddrInUse)
 }
 
 /// Best-effort name of whatever holds `port` on the host right now (any protocol,
@@ -759,14 +938,26 @@ impl Network {
 }
 
 impl Network {
-    /// The default network (`delonix0`).
+    /// The default network (`delonix0`), with its `/16` taken from the root the
+    /// process environment names.
     pub fn default_bridge() -> Self {
+        Self::default_bridge_in(&ambient_root())
+    }
+
+    /// [`Network::default_bridge`] for an EXPLICIT root — what a
+    /// [`NetworkStore`] uses, because it knows the root it was opened with and
+    /// must not read another one's octet (see [`default_base_in`]).
+    ///
+    /// Also the only place the octet is resolved ONCE instead of three times:
+    /// the three `default_*` helpers each went to disk on their own.
+    pub(crate) fn default_bridge_in(root: &std::path::Path) -> Self {
+        let base = default_base_in(root);
         Network {
             name: DEFAULT_NET.to_string(),
             bridge: BRIDGE.to_string(),
-            gateway: default_gateway(),
-            prefix: default_prefix(),
-            subnet: default_subnet(),
+            gateway: format!("10.{base}.0.1"),
+            prefix: format!("10.{base}"),
+            subnet: format!("10.{base}.0.0/16"),
             driver: DRIVER_BRIDGE.to_string(),
             parent: None,
             vni: None,
@@ -1001,7 +1192,7 @@ impl NetworkStore {
     /// (`driver`/`parent`/`subnet`/`gateway`/`base`) for the new drivers.
     pub fn get(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Ok(Network::default_bridge());
+            return Ok(Network::default_bridge_in(&self.root()));
         }
         let body = std::fs::read_to_string(self.path(name)).map_err(|e| {
             Error::from(delonix_model::Error::not_found_or_io(e, || {
@@ -2337,24 +2528,40 @@ pub fn slirp_add_hostfwd(
                     // 1024, so name it here instead of leaving raw JSON as the only
                     // clue — the callers that don't preflight (ingress, compose,
                     // `container update --publish-add`, the docker API) all land here.
+                    // An unparseable proto cannot reach here (the specs are validated
+                    // upstream), and if it ever did the probes are skipped rather than
+                    // guessed at — the hint would just be absent, never wrong.
+                    let probe = Proto::parse(proto).ok();
                     let hint = match host_port.parse::<u16>() {
-                        Ok(p) if !can_bind_host_port(&host_addr, p) => format!(
-                            " — binding port {p} on the host needs privilege \
+                        Ok(p)
+                            if probe
+                                .map(|pr| !can_bind_host_port(&host_addr, p, pr))
+                                .unwrap_or(false) =>
+                        {
+                            format!(
+                                " — binding port {p} on the host needs privilege \
                              (rootless cannot publish below \
                              net.ipv4.ip_unprivileged_port_start); publish on a higher \
                              port instead, e.g. -p 8080:{guest_port}"
-                        ),
+                            )
+                        }
                         // The callers that land here WITHOUT the `container run`
                         // preflight (ingress hot-publish, `container update
                         // --publish-add`) never ruled out a host process delonix
                         // doesn't track holding the port — name it if we can,
                         // same as the preflight does.
-                        Ok(p) if host_port_busy(&host_addr, p) => format!(
-                            " — port {p} is already in use on the host by {} \
-                             (not a delonix container); publish on another port instead",
-                            host_port_owner_process(p)
-                                .unwrap_or_else(|| "another process".to_string())
-                        ),
+                        Ok(p)
+                            if probe
+                                .map(|pr| host_port_busy(&host_addr, p, pr))
+                                .unwrap_or(false) =>
+                        {
+                            format!(
+                                " — port {p}/{proto} is already in use on the host by {} \
+                                 (not a delonix container); publish on another port instead",
+                                host_port_owner_process(p)
+                                    .unwrap_or_else(|| "another process".to_string())
+                            )
+                        }
                         _ => String::new(),
                     };
                     return Err(Error::Command {
@@ -3080,14 +3287,14 @@ mod tests {
     /// shadow it with a "needs privilege" that would be plain wrong.
     #[test]
     fn can_bind_host_port_separa_privilegio_de_porta_ocupada() {
-        use super::can_bind_host_port;
+        use super::{can_bind_host_port, Proto};
         use std::net::TcpListener;
         let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
         let busy = held.local_addr().unwrap().port();
-        assert!(can_bind_host_port("127.0.0.1", busy));
+        assert!(can_bind_host_port("127.0.0.1", busy, Proto::Tcp));
         // Unprivileged and free.
         drop(held);
-        assert!(can_bind_host_port("127.0.0.1", busy));
+        assert!(can_bind_host_port("127.0.0.1", busy, Proto::Tcp));
         // A privileged port is only refused when we really lack the privilege — as
         // root (or with the sysctl lowered) the answer legitimately flips, so the
         // assertion is conditioned on what the kernel actually allows here.
@@ -3098,7 +3305,8 @@ mod tests {
             .and_then(|s| s.trim().parse::<u16>().ok())
             .unwrap_or(1024);
         if !root && low > 80 {
-            assert!(!can_bind_host_port("127.0.0.1", 80));
+            assert!(!can_bind_host_port("127.0.0.1", 80, Proto::Tcp));
+            assert!(!can_bind_host_port("127.0.0.1", 80, Proto::Udp));
         }
     }
 
@@ -3110,11 +3318,11 @@ mod tests {
     /// blew up deep inside the slirp handshake.
     #[test]
     fn host_port_busy_flags_eaddrinuse_only() {
-        use super::host_port_busy;
+        use super::{host_port_busy, Proto};
         use std::net::TcpListener;
         let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
         let busy = held.local_addr().unwrap().port();
-        assert!(host_port_busy("127.0.0.1", busy));
+        assert!(host_port_busy("127.0.0.1", busy, Proto::Tcp));
         drop(held);
         // Once released, an EPHEMERAL port can be taken by any other test running in
         // parallel before this line reads it — measured, 1 run in 12 of the
@@ -3125,9 +3333,87 @@ mod tests {
             let l = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
             let port = l.local_addr().unwrap().port();
             drop(l);
-            !host_port_busy("127.0.0.1", port)
+            !host_port_busy("127.0.0.1", port, Proto::Tcp)
         });
         assert!(freed_reads_free, "a released port kept reading busy");
+    }
+
+    /// A UDP publish has to be probed against UDP. Both checks used to open a
+    /// `TcpListener` whatever the spec said, so a host port whose UDP side was
+    /// taken read as FREE and the conflict only surfaced inside the slirp, as
+    /// opaque `add_hostfwd` JSON. The two transports are independent bindings:
+    /// the same number is busy on one and free on the other at the same time,
+    /// and that is what this asserts.
+    #[test]
+    fn the_busy_probe_answers_per_transport() {
+        use super::{host_port_busy, Proto};
+        use std::net::UdpSocket;
+        let held = UdpSocket::bind("127.0.0.1:0").expect("bind an ephemeral udp port");
+        let busy = held.local_addr().unwrap().port();
+        // The UDP side is held by us, so UDP is busy...
+        assert!(
+            host_port_busy("127.0.0.1", busy, Proto::Udp),
+            "a held udp port must read busy"
+        );
+        // ...and asking about TCP on the SAME number answers about TCP. It is
+        // free unless a neighbour happens to hold it, so a busy answer here is
+        // not the function's fault — asked of a few numbers, as the sibling
+        // test does, so the assertion is about the function and not a race.
+        let tcp_side_is_independent = (0..5).any(|_| {
+            let u = UdpSocket::bind("127.0.0.1:0").expect("bind an ephemeral udp port");
+            let port = u.local_addr().unwrap().port();
+            host_port_busy("127.0.0.1", port, Proto::Udp)
+                && !host_port_busy("127.0.0.1", port, Proto::Tcp)
+        });
+        assert!(
+            tcp_side_is_independent,
+            "udp busy never coincided with tcp free"
+        );
+    }
+
+    /// `sctp` (which the CRI can emit) and a typo are REFUSED here, never probed
+    /// as TCP — the whole point of the enum. See [`super::Proto`].
+    #[test]
+    fn an_unknown_transport_is_refused_not_assumed_tcp() {
+        use super::Proto;
+        assert_eq!(Proto::parse("tcp").unwrap(), Proto::Tcp);
+        assert_eq!(Proto::parse("udp").unwrap(), Proto::Udp);
+        for bad in ["sctp", "TCP", "", "tcp6"] {
+            assert!(Proto::parse(bad).is_err(), "{bad} should be refused");
+        }
+    }
+
+    /// The bind address becomes part of the stored spec, so it survives a
+    /// `start`. Before this the record kept the spec as typed and the address was
+    /// re-resolved from the environment on every publish — see
+    /// [`super::normalize_publish_spec`] for the two measured directions.
+    #[test]
+    fn the_normalized_spec_carries_the_resolved_bind_address() {
+        use super::normalize_publish_spec as norm;
+        // An address in the spec always wins, and is kept verbatim.
+        assert_eq!(norm("0.0.0.0:8080:80").unwrap(), "0.0.0.0:8080:80/tcp");
+        assert_eq!(
+            norm("192.168.1.10:5070:5070/udp").unwrap(),
+            "192.168.1.10:5070:5070/udp"
+        );
+        // Idempotent: the `--net <network>` re-exec normalizes a second time, and
+        // so does any record written by an earlier call.
+        let once = norm("0.0.0.0:8080:80/tcp").unwrap();
+        assert_eq!(norm(&once).unwrap(), once);
+        // Without an address, and without the env var, the safe default is what
+        // gets WRITTEN DOWN — which is the whole fix: `8080:80` no longer means
+        // "whatever the environment says at start time".
+        if std::env::var_os("DELONIX_PUBLISH_ADDR").is_none() {
+            assert_eq!(norm("8080:80").unwrap(), "127.0.0.1:8080:80/tcp");
+            // A bare port is host and container alike (the `publish web 8443`
+            // form the help documents), and it, too, gets its address written.
+            assert_eq!(norm("8443").unwrap(), "127.0.0.1:8443:8443/tcp");
+        }
+        // A spec the parser refuses is still refused — normalizing is not a
+        // place to become lenient.
+        assert!(norm("localhost:8080:80").is_err());
+        assert!(norm("0:80").is_err());
+        assert!(norm("8000-8010:80").is_err());
     }
 
     /// Best-effort resolution: while WE hold the port ourselves (this test
@@ -3353,7 +3639,14 @@ mod tests {
 
         // The default network is not hashed — the two stores name it with their
         // own constant, and those must not drift apart either.
+        //
+        // Under a root of its own: `default_bridge` resolves the octet from
+        // `DELONIX_ROOT`, and reading another test's root is how this suite came
+        // to re-create a temp dir its owner had already removed
+        // (`crate::testenv::TempRoot`).
+        let root = crate::testenv::TempRoot::new();
         assert_eq!(Network::default_bridge().bridge, infra::INFRA_BRIDGE);
+        root.close();
     }
 
     #[test]
@@ -3447,6 +3740,42 @@ mod tests {
         assert!(s.create("bridge").is_err(), "nome reservado deve falhar");
         s.remove("alpha").unwrap();
         assert_eq!(s.list().unwrap().len(), 1);
+    }
+
+    /// REGRESSION: a store opened at a root persists the default network's
+    /// octet INSIDE that root — never in the one the environment names.
+    ///
+    /// `get("bridge")` used to resolve that cache from `DELONIX_ROOT` while the
+    /// store itself lived at the root it was opened with. The two are the same
+    /// path on a node, which is why nothing showed. In this suite they are not:
+    /// the store wrote into ANOTHER test's temp dir and its `create_dir_all`
+    /// RE-CREATED that directory after its owner had removed it, leaving a stray
+    /// `.tmpXXXXXX` in `TMPDIR` (`scripts/tmp_roots_gate.py`; measured
+    /// 2026-10-07 as 3, 0 and 1 entries over three runs of
+    /// `cargo test -p delonix-sdn`).
+    #[test]
+    fn the_store_persists_its_octet_inside_its_own_root() {
+        let mut ambient = crate::testenv::TempRoot::new();
+        // Otherwise the octet comes from the variable and nothing is written.
+        ambient.env().unset("DELONIX_SUBNET_BASE");
+        let own = tempfile::tempdir().unwrap();
+
+        let def = NetworkStore::open(own.path())
+            .unwrap()
+            .get("bridge")
+            .unwrap();
+
+        let cache = own.path().join("net").join("default-base");
+        let octet = std::fs::read_to_string(&cache)
+            .unwrap_or_else(|e| panic!("{} not written: {e}", cache.display()));
+        assert_eq!(def.prefix, format!("10.{}", octet.trim()));
+        assert!(
+            !ambient.path().join("net").exists(),
+            "the store wrote into the root the environment names, not its own"
+        );
+
+        own.close().expect("own root removed");
+        ambient.close();
     }
 
     #[test]
@@ -3975,13 +4304,10 @@ mod tests_single_allocator {
     use super::*;
 
     fn with_root<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-        let mut env = crate::testenv::lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", d);
-        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
-        f(d)
+        let root = crate::testenv::TempRoot::with_runtime_dir();
+        let out = f(root.path());
+        root.close();
+        out
     }
 
     #[test]

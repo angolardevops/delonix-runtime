@@ -30,7 +30,14 @@ porta, nunca como um `if provider == …` espalhado pelo código.
    (o supervisor de um container, o holder de rede). Um daemon novo exige um ADR com a
    evidência do que a alternativa não resolveu.
 3. **Rootless-first** — o caminho normal corre sem root. Privilégio é opt-in explícito,
-   dito ao operador, nunca um default silencioso.
+   dito ao operador, nunca um default silencioso. **E rootless-first não é rootless-only**
+   (decisão do dono, 2026-10-07): «precisa de root» NÃO é razão para deixar cair uma
+   capacidade. Quando é preciso, constrói-se atrás de **modo root** ou de **delegação de
+   cgroup**, como o `vm bridge` e os limites `--device-*` já fazem — e a recusa de hoje
+   diz-se «não implementado», nunca «impossível». A diferença não é de estilo: uma
+   mensagem que se lê como limite permanente ensina o próximo leitor a parar de procurar,
+   e já aconteceu — a recusa de SCTP no CRI nasceu a dizer «este nó não tem caminho»
+   quando o kernel aceita a regra de DNAT que o modo root escreveria (ADR-0074 D3).
 
 **O que o motor não conhece: nenhum consumidor.** O motor não sabe quem o usa. Não conhece
 plataformas, control planes, consolas nem agentes — nem os seus repositórios e crates —,
@@ -3644,6 +3651,91 @@ static pod que nunca passou pelo API server.
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
   anterior a este trabalho).
 
+## Um `hostPort` que o nó não publica é RECUSADO pelo nome (ADR-0074, 2026-10-07)
+
+Encontrado a validar a resposta a «o `net ingress publish` liga em 0.0.0.0 ou só em loopback?».
+O `cri_port_specs` mapeava `Protocol::Sctp` para a string `"sctp"` e um número de protocolo
+desconhecido para `"tcp"` — ou seja **tinha opinião própria sobre o que o motor consegue
+publicar**, e estava errado nas duas.
+
+**Três medições, cada uma contra a coisa e não contra o que se lê:**
+
+1. **O dataplane ROOTLESS não sabe SCTP — e só ele.** O `slirp4netns` 1.2.1 (libslirp 4.7.0),
+   sondado pelo api-socket contra um netns descartável: `tcp` e `udp` devolvem um id, `sctp`
+   devolve `bad request: add_hostfwd: bad arguments.proto`. É o DATAPLANE, não o parser.
+   **Corrigido no mesmo dia, por medição**: esta secção começou por dizer que «o `portmap` do CNI
+   também só fala tcp/udp, logo nenhum caminho publica SCTP» — afirmação tirada da especificação
+   upstream e marcada como não medida. É FALSA. O `portmap` do `kubernetes-cni` escreve
+   `-p sctp -m sctp --dport 31070 -j DNAT`, e com o módulo `sctp` carregado um cliente SCTP real
+   no nó alcançou um servidor dentro da netns do pod. Logo o caminho root/CNI publica SCTP ponta a
+   ponta, e só o slirp rootless não consegue.
+2. **A spec chegava mesmo ao container** (`o.ports = sb.port_mappings`), onde o
+   `parse_publish_addr` a recusava — logo o pod morria no `StartContainer`, **depois** de o
+   sandbox existir, com um erro que nomeia a SPEC (`invalid protocol in '8080:80/sctp'`) e não a
+   causa, num manifesto que é Kubernetes legal, e retentado pelo kubelet para sempre numa
+   condição que nunca pode limpar.
+3. **`hostNetwork` é mesmo a rede do host** — um container `--net host` reporta o MESMO inode
+   `net:[...]` do host e vê as interfaces do nó. Liga as portas do nó ele próprio, qualquer que
+   seja o transporte, e é por isso que recusar ali partiria um caso que FUNCIONA. É também a
+   razão de os mapeamentos não lhe serem entregues (a guarda do `run_opts_of`).
+
+A recusa vive no `RunPodSandbox`, ao lado da do `cgroup_parent` e pela razão idêntica: um
+`failed_precondition` põe o pod em `Pending` com a razão como evento, que é onde o operador
+olha. **Não um drop em silêncio** — um `hostPort` declarado e não publicado deixa o pod
+`Running` com um serviço que não responde, a família que este motor já teve de remover três
+vezes (`--network-alias`, `--security-opt seccomp=`, `-v …:z`); e um aviso iria para o journal
+do `delonix-cri`, enquanto quem pode agir lê `kubectl get pod`.
+
+**O transporte pergunta-se ao `delonix_sdn::Proto`**, a autoridade única do que o motor publica.
+Um número fora do enum do CRI é recusado PELO NÚMERO em vez de adivinhado — era um palpite sobre
+o único campo cujo trabalho é dizer o que o tráfego é.
+
+**O raio é estreito, e é isso que torna a recusa barata**: um `containerPort` sem `hostPort`
+continua a ser DESCARTADO (`m.host_port > 0`), que é a semântica correcta do k8s (é informativo)
+e é a forma que um **Service** SCTP usa — vai por kube-proxy, nunca por `hostPort`. Logo os
+serviços SCTP ficam intocados, e nenhum pod que funcione hoje passa a falhar: essa combinação
+já falhava, mais tarde e pior.
+
+**«Não implementado», nunca «impossível»** — e a primeira versão desta recusa errou nisso. Dizia
+«este nó não tem caminho para SCTP», o que se lê como limite permanente. Medido no mesmo dia, numa
+netns descartável: **o kernel aceita** `sctp dport 5070 counter … dnat to 10.0.0.5:5070`. Ou seja
+em modo root o motor publicava SCTP com as nftables que já escreve para o seu ingress, sem slirp
+nem portmap. A recusa fica — nada disso está construído —, mas a palavra mudou. É a doutrina do
+dono (2026-10-07): rootless-FIRST não é rootless-only, e «precisa de root» não deixa cair uma
+capacidade (ver os princípios no topo deste ficheiro).
+
+**E a recusa é POR CAMINHO, porque os caminhos diferem.** Uma resposta cega recusaria SCTP também
+em root/CNI, onde funciona. Só o ingress nativo rootless recusa um transporte, e só o que o seu
+slirp não carrega; o `hostNetwork` não julga nada.
+
+**A metade maior ficou FEITA, e era um trabalho em vez de dois**: em modo root/CNI o `hostPort`
+não era publicado para protocolo NENHUM — a guarda `if !sb.host_network && sb.cni_netns.is_empty()`
+descarta os mapeamentos — e nada o dizia. Os `portMappings` passam agora como `runtimeConfig` do
+plugin, como o containerd faz, e isso entrega tcp, udp **e** sctp de uma vez. O argumento de
+capacidade é injectado na CONFLIST, e é isso que dispensa plumbing novo nos dois caminhos: o root
+entrega a lista ao `attach_named_netns`, o rootless hex-codifica o MESMO JSON na linha de controlo
+do holder (cuja forma não muda), e guardar o resultado como a conflist do sandbox devolve ao `DEL`
+a configuração idêntica — que é o que a especificação pede a um runtime. Uma cadeia que não declare
+`portMappings` é recusada pelo nome, com a correcção: atacar e ficar calado era o silêncio que isto
+remove.
+
+**Medido no lab** (VM da golden `delonix-vm-k8s:1.36` deste repo, com o mesmo guião contra os dois
+binários): a `origin/main` criou o sandbox com **0** regras DNAT e a porta muda; com a correcção,
+**3** regras, `LAB-OK` pela porta do host, e **0** regras depois do `rmp` — que é a prova de que o
+`DEL` também recebe o `runtimeConfig`.
+
+**Prova**: 4 testes unitários, um round-trip gRPC real pelo socket unix que também afirma que
+**não fica sandbox nenhum** (a metade que diz que a recusa foi antes de criar), e um gate na
+bateria com o `crictl` — o cliente oficial do k8s — com controlo TCP ao lado. Os três testes que
+importam chumbam com a correcção revertida (os outros dois são controlos e mantêm-se verdes, de
+propósito). Ao vivo, raiz isolada: `crictl runp` com `hostPort` SCTP → `rc=1`,
+`code = FailedPrecondition`, a mensagem a nomear porta, transporte e as duas saídas; `crictl
+pods` vazio; e um `hostPort` TCP no mesmo nó criado `Ready`.
+
+**Nota do próprio auditor**: o comentário da bateria dizia que ali não se finge um pedido gRPC
+«que não sabemos fazer aqui» — e o `crictl` estava instalado. O gate novo fecha esse gap de
+passagem.
+
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
 Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM
@@ -4391,6 +4483,73 @@ respostas à mesma pergunta começam a divergir.
 (sem comando de CLI) e só é global; regras sem ordenação/prioridade explícita; sem `log prefix` por
 regra. (Pods e VMs entraram no isolamento na v0.40.0 e a recuperação pós-respawn cobre pods
 desde a v0.41.0 — ver a secção «Isolamento de namespace».)
+
+### O endereço de bind de uma porta publicada passou a ser REGISTADO (2026-10-07)
+
+O endereço com que uma porta publicada liga era estado **usado** na publicação e nunca
+**persistido**: o registo guardava a spec como foi escrita (`51072:80`) e o
+`publish_bind_addr` voltava a resolver o `DELONIX_PUBLISH_ADDR` a cada `start`. Quinta
+ocorrência da armadilha já catalogada — *estado necessário para RECONSTRUIR o recurso tem
+de ser persistido, não só usado na criação* (`-v`, `-p` em rede custom, redes extra,
+`Container.pod`).
+
+**Medido nos dois sentidos**, com raiz isolada, contra o bind lido do kernel e não contra
+o que o comando disse:
+
+- `DELONIX_PUBLISH_ADDR=0.0.0.0 … publish 51072:80` ligou em `0.0.0.0`, gravou `51072:80`,
+  e o `container start` seguinte — o que um unit do `net boot enable` corre, sem ambiente
+  nenhum — trouxe-a de volta em `127.0.0.1`. Serviço em baixo, listagem a dizer publicado.
+- O INVERSO, que é o que pesa em segurança: uma porta publicada de propósito **sem**
+  endereço (só loopback) voltou em `0.0.0.0`, exposta à LAN inteira, porque a shell que
+  correu o `start` tinha a variável exportada. E é a dica do próprio motor (`vm reach`) que
+  ensinava a exportá-la.
+
+Nos dois casos **rc=0, sem aviso**, e o `net ingress ls` a imprimir a linha igual antes e
+depois: `51070:80` e `51072:80` eram bytes idênticos em disco com alcance oposto.
+
+**A correcção é uma só função**, `delonix_sdn::normalize_publish_spec`, aplicada na
+fronteira: a spec guardada é sempre `addr:hostPort:contPort/proto`. Idempotente, por causa
+da 2.ª passagem do re-exec de `--net <rede>`. Efeito de lado bem-vindo: o `fmt_ports` já
+dizia que **com endereço explícito o endereço é FACTO** e imprimia-o, logo o `container ls`
+passou a mostrar `0.0.0.0:55070->5070/udp` sem uma linha de código nova — na coluna que se
+lê precisamente para decidir o que está exposto. Uma spec **sem** endereço passou a querer
+dizer «registo anterior a esta versão», e só aí a omissão do `0.0.0.0` se mantém.
+
+**O reconciliador tinha de andar no mesmo passo, ou trocava-se um bug por outro pior.**
+`ports` é campo comparado e quente, e o seu diff planeia `Replace` — que num container é
+destruir e recriar. Um manifesto `8080:80` contra um registo `127.0.0.1:8080:80/tcp` era
+deriva eterna. Daí `comparable_ports`, UMA função para o `desired` e o `actual`: duas
+cópias desta normalização são como os dois lados começam a discordar. Normaliza também na
+LEITURA, para um registo legado não ler como deriva depois do upgrade; e um manifesto que
+NOMEIA outro endereço continua a ser deriva genuína, que é o caso que não podia ser
+engolido.
+
+**As sondas de porta eram TCP-only** (`can_bind_host_port`, `host_port_busy`): uma
+publicação UDP era verificada contra TCP, cega por construção, e o conflito só aparecia
+dentro do slirp como JSON opaco. Passam a receber um `delonix_sdn::Proto` — enum e não
+`&str`, para o `sctp` que o CRI consegue emitir e um typo serem **recusados** nesta
+fronteira em vez de sondados como TCP. Provou-se ao vivo e por acidente: a porta 5070/UDP
+deste host está mesmo ocupada por um `python3`, e a sonda nova nomeou-o **com o
+transporte** (`port 5070/udp is already in use … by python3`).
+
+**Três defeitos do `vm reach` apanhados pela mesma passagem** — o primeiro teria sido
+causado pela normalização se não se tivesse olhado: lia a porta de host com
+`p.split(':').next()`, que numa spec com endereço devolve `127.0.0.1` e não casa com nada
+(a MESMA armadilha que o `fmt_ports` documenta ter pago); corria `ss -tln`, logo uma
+publicação UDP era-lhe invisível, que é exactamente o caso de quem vai ver porque é que um
+SIP não responde de dentro de uma VM; e a dica de correcção ensinava o env var, a via que
+não sobrevive a um `start`.
+
+**O `--help` do `net ingress publish` não documentava a forma `hostIp:`** — aceitava-a e
+calava-se, com três exemplos e nenhum com endereço, enquanto o `container run -p`
+documenta as duas. Foi esse silêncio que quase levou alguém a concluir que só havia
+loopback e a mudar de caminho (um proxy UDP, MetalLB) por uma capacidade que já existia.
+
+**Gate**: secção «publish: o endereço de bind é REGISTADO e sobrevive a um start» do
+`scripts/e2e.sh`, verificada pela regra da casa — **10/10 com a correcção, 6/10 sem ela**,
+com as quatro falhas a serem exactamente as quatro facetas do bug. Tinha de ser o CICLO
+(`publish` → `stop` → `start`): cada passo isolado devolve 0 mesmo com o defeito, e um
+check pelo rc ficaria verde por cima dele.
 
 ### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
 

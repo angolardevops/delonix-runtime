@@ -216,7 +216,7 @@ delegação de cgroup v2 dedicada que um systemd aninhado (kindest/node) exige.<
 <div class="arch">
 <div class="row">
 <div class="box mut" style="flex:1"><b>host</b>portas publicadas (127.0.0.1 por omissão;
-<code>DELONIX_PUBLISH_ADDR</code> para expor)</div>
+nomeia o endereço no spec para expor — <code>0.0.0.0:8080:80</code>)</div>
 <div class="box" style="flex:1"><b>holder netns (1 por utilizador)</b>bridge delonix0 ·
 slirp4netns único · nft (DNAT «pre», firewall) · DNS interno com os nomes dos containers</div>
 <div class="box mut" style="flex:1"><b>containers</b>veth por container, ligados à bridge;
@@ -319,7 +319,7 @@ sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs
 <div class="arch">
 <div class="row">
 <div class="box mut" style="flex:1"><b>host</b>published ports (127.0.0.1 by default;
-<code>DELONIX_PUBLISH_ADDR</code> to expose)</div>
+name the address in the spec to expose — <code>0.0.0.0:8080:80</code>)</div>
 <div class="box" style="flex:1"><b>holder netns (1 per user)</b>delonix0 bridge ·
 single slirp4netns · nft (DNAT "pre", firewall) · internal DNS with container names</div>
 <div class="box mut" style="flex:1"><b>containers</b>one veth per container, attached to the
