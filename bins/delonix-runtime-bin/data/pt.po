@@ -11156,6 +11156,16 @@ msgstr "Interno: o cgroup do kubelet para este pod (`cgroup_parent` do CRI, ADR 
 msgid "'{name}' is not installed next to delonix nor on the PATH — install it with `{hint}`"
 msgstr "'{name}' não está instalado ao lado do delonix nem no PATH — instala-o com `{hint}`"
 
+msgid ""
+"'{name}' is not next to delonix in {dir}, and a copy found on the PATH would be from "
+"another install — install it with `{hint}`, or set {var}=1 to serve with it anyway"
+msgstr ""
+"'{name}' não está ao lado do delonix em {dir}, e uma cópia encontrada no PATH seria de "
+"outra instalação — instala-o com `{hint}`, ou define {var}=1 para servir com ela mesmo assim"
+
+msgid "warning: serving with '{path}', which is not next to this delonix ({var}=1)"
+msgstr "aviso: a servir com '{path}', que não está ao lado deste delonix ({var}=1)"
+
 # dicionário de códigos DX-CDNN (ADR-0043)
 msgid "Code"
 msgstr "Código"

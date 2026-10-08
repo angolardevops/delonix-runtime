@@ -446,6 +446,13 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <td>Desligado por omissão para o runtime instalado num cluster nunca depender do directório de onde o comando correu. Sem ele a ordem é <code>--cri-bin</code>, o <code>delonix-cri</code> ao lado do <code>delonix</code>, e depois o asset de release da versão em execução, verificado contra o seu <code>SHA256SUMS</code>. A origem, o caminho e o sha256 são sempre impressos.</td>
 </tr>
 <tr>
+<td><code>DELONIX_SERVER_FROM_PATH</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:exec_server</code></a> (<code>FROM_PATH_ENV</code>, decidido pelo <code>choose</code>)</td>
+<td>Opt-in para servir com um binário irmão encontrado no <code>PATH</code> quando nenhum está ao lado do <code>delonix</code> em execução (ADR-0075 D2).</td>
+<td>Só <code>1</code> liga; não definida, vazia, <code>0</code> ou outra coisa fica desligada.</td>
+<td>Desligada por omissão: um irmão que não está ao lado do executável é de outra instalação, porque o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> põe todos os binários num único <code>BIN_DIR</code>. Medido a 2026-10-08 — um <code>delonix-cri</code> de 2026-09-07 no <code>PATH</code> serviu um <code>delonix</code> de 2026-10-08 e três verificações da bateria chumbaram como se o motor estivesse errado; a recusa de versão que devia tê-lo apanhado corre no CHAMADO (<code>delonix_node::<wbr>dispatch::<wbr>check_version</code>), que um servidor tão antigo não carrega. Com o opt-in ligado, o caminho resolvido é nomeado no stderr. O <code>beside</code> ganha sempre, logo isto nunca pode degradar uma instalação boa.</td>
+</tr>
+<tr>
 <td><code>DELONIX_API_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; passada adiante por <code>cmd/serve.rs:run</code></td>
 <td>Socket da API de gestão local (<code>delonix serve api</code>).</td>

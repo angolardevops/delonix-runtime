@@ -444,6 +444,13 @@ and how to tear the isolated infra down, is in
 <td>Off by default so the runtime installed on a cluster never depends on the directory the command ran from. Without it the order is <code>--cri-bin</code>, the <code>delonix-cri</code> next to <code>delonix</code>, then the release asset of the running version, verified against its <code>SHA256SUMS</code>. The origin, path and sha256 are always printed.</td>
 </tr>
 <tr>
+<td><code>DELONIX_SERVER_FROM_PATH</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>serve.<wbr>rs:exec_server</code></a> (<code>FROM_PATH_ENV</code>, decided by <code>choose</code>)</td>
+<td>Opt-in to serve with a sibling server found on the <code>PATH</code> when none sits beside the running <code>delonix</code> (ADR-0075 D2).</td>
+<td>Only <code>1</code> turns it on; unset, empty, <code>0</code> or anything else is off.</td>
+<td>Off by default: a sibling that is not beside the executable is from another installation, because <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> puts every binary in one <code>BIN_DIR</code>. Measured 2026-10-08 — a <code>delonix-cri</code> of 2026-09-07 on the <code>PATH</code> served a <code>delonix</code> of 2026-10-08 and three battery checks failed as if the engine were wrong; the version refusal that should have caught it runs in the callee (<code>delonix_node::<wbr>dispatch::<wbr>check_version</code>), which a server that old cannot carry. When the opt-in is on, the resolved path is named on stderr. <code>beside</code> always wins, so this can never downgrade a good install.</td>
+</tr>
+<tr>
 <td><code>DELONIX_API_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; forwarded by <code>cmd/serve.rs:run</code></td>
 <td>Socket of the local management API (<code>delonix serve api</code>).</td>
