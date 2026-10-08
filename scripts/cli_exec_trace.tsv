@@ -1,0 +1,132 @@
+# The CLI leaves a real battery run executed and asserted (F0.2 of the
+# maturity plan). Derived, never edited by hand:
+#   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
+# recorded: kaeso-sys-01, 2026-10-07, scripts/e2e.sh (release 4.5.0+185) — PASS=1104 FAIL=0 SKIP=12
+# commit: bccc13a0
+# executed: 125
+# leaves: 272
+api-resources
+apply
+backup create
+backup inspect
+backup ls
+backup remove
+backup restore
+backup schedule
+cluster kubeconfig
+compatibility compose
+completion shell
+compose config
+compose down
+compose logs
+compose ps
+compose up
+container describe
+container exec
+container healthcheck
+container inspect
+container logs
+container port
+container ps
+container rm
+container run
+container start
+container stats
+container stop
+container top
+container update
+container wait
+delete
+describe
+drift
+explain
+get
+image describe
+image load
+image ls
+image pull
+image save
+image tag
+image vm ls
+init
+man
+manifest schema
+mcp capabilities
+mcp doctor
+migrate assess
+net egress allow
+net egress ls
+net ingress allow
+net ingress ls
+net netns down
+net netns gc
+net netns status
+net netns up
+network apply
+network connect
+network create
+network describe
+network diagnose
+network disconnect
+network inspect
+network ipam ls
+network ls
+network rm
+network route
+pod attach
+pod cp
+pod create
+pod exec
+provider config schema
+provider config validate
+provider describe
+provider ls
+provider matrix
+secret create
+secret inspect
+secret ls
+secret rm
+secret set
+serve api
+serve cri
+serve docker-api
+stack apply
+stack describe
+stack destroy
+stack history
+stack init
+stack ls
+stack plan
+stack rollback
+stack validate
+stack wait
+system boot status
+system df
+system doctor
+system events
+system features
+system info
+system snapshot restore
+vm cloud-init
+vm create
+vm ls
+vm move
+vm pause
+vm resize
+vm snapshot create
+vm snapshot ls
+vm snapshot restore
+vm snapshot rm
+vm start
+vm stop
+vm unpause
+volume apply
+volume create
+volume describe
+volume inspect
+volume ls
+volume rm
+volume snapshot create
+volume snapshot rm
+workload describe
+workload ls

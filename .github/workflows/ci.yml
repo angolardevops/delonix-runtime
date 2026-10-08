@@ -58,6 +58,28 @@ jobs:
       - name: Proved cells against the recorded baseline
         run: python3 scripts/capability_ratchet.py
 
+  # ---- How much of the CLI the battery actually RUNS (F0.2 of the plan 65) ----
+  #
+  # `cli surface` keeps the inventory of invocable leaves honest, and the battery
+  # checks the `--help` of all of them. That is not the same as running them: the
+  # header of `scripts/e2e.sh` carried the fraction by hand from 2026-09-09
+  # ("executes 91 — 37%") and a number kept in a comment goes stale with nobody
+  # noticing. This holds it with the `lang_ratchet.py` semantics, and fails as
+  # well when a leaf is ADDED without a decision — a leaf nobody exercises lowers
+  # the fraction, and that is the point.
+  #
+  # It reads a trace COMMITTED from a named run, not a run of its own: the hosted
+  # runner blocks unprivileged user namespaces, so the battery cannot execute
+  # here (see the `chaos` and `perf` jobs). The provenance header of the trace is
+  # what makes the number datable, the same shape as `docs/proxmox/trace-*.routes`.
+  cli-exec:
+    name: cli execution ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Executed CLI leaves against the recorded baseline
+        run: python3 scripts/cli_exec_ratchet.py
+
   # ---- The dependency direction of ADR-0040, enforced while the move happens ----
   # Phase P0: the rails go in BEFORE any crate moves, so the restructuring cannot
   # regress while it is under way. The rules (layer direction, purity of the
