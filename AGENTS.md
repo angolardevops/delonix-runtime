@@ -135,6 +135,53 @@ tenha a forma `vX.Y.Z`, uma que não exista no remoto, e uma que já tenha relea
 Sem essa guarda, um `tag: main` teria feito checkout de um ramo e publicado uma
 release chamada «main».
 
+**O `protoc` do release é PINADO, e a razão foi medida a publicar a v5.0.0.** Os
+dois jobs de build instalavam-no com `apt-get install protobuf-compiler`, que
+resolve para o que a imagem do runner traz — e os dois correm em imagens
+DIFERENTES (`ubuntu-22.04` e `ubuntu-22.04-arm`, pinadas de propósito por causa do
+glibc 2.35). O `build (arm64)` morreu em `delonix/node/v1/compute.proto: This file
+contains proto3 optional fields, but --experimental_allow_proto3_optional was not
+set`: o 22.04 traz **protoc 3.12**, anterior ao `optional` de proto3 ter ficado
+estável (3.15). O `build & publish` nem chegou a correr (`skipped`), logo teria
+falhado igual em x86_64 — o arm64 só chegou lá primeiro.
+
+**E o CI não podia apanhar isto**, que é a parte a reter. A comparação que importa
+é entre os dois jobs arm64, e os runners são PINADOS em sítios diferentes:
+`ci.yml` em **`ubuntu-24.04-arm`** (protoc 3.21, aceita) e `release.yml` em
+**`ubuntu-22.04-arm`** (protoc 3.12, exige a flag). Não é o comando de instalação
+que difere — é idêntico nos dois — é a imagem. Logo o portão validava num ambiente
+diferente daquele que constrói o artefacto, e um CI verde **não prova que a release
+constrói**. É a mesma classe do «medir a
+coisa, não um proxy», aplicada ao ambiente em vez ao valor. Os dois jobs passam a
+descarregar um `protoc` de versão fixa, verificado por sha256 (os digests vêm da
+API do GitHub, por asset), com o arquivo escolhido por `uname -m` num ÚNICO
+snippet partilhado — dois snippets voltariam a poder divergir, que é o defeito. E
+**falha fechado**: o passo compila o contrato logo a seguir a instalar, por isso um
+`protoc` que não o consiga compilar nunca chega a construir uma release.
+
+**O `optional` fica, e não é acidental**: são três campos, e o `used_bytes` do
+`infra.proto` existe para distinguir «medido» de «desconhecido» (ADR-0042 E3 —
+desconhecido nunca é zero). Tirá-lo mudava o contrato e perdia a distinção; a
+correcção é a toolchain. **Continua em aberto**: o `ci.yml` instala `protoc` por
+`apt` em oito sítios, logo a exposição ao ambiente continua lá — pinar também o CI
+mexe no que o `contract_gate` gera e é PR próprio.
+
+**Um número de checks não diz nada sem o SHA a que pertence**, e isso mordeu duas
+vezes no mesmo dia (2026-10-08). Uma vez ruidosa: `mergeStateStatus: UNKNOWN` com o
+`headRefOid` preso no commit de antes de um rebase — o merge foi RECUSADO. A outra
+**silenciosa, e é a perigosa**: o PR de release reportava `head=138d96ee` com **18
+checks verdes** e `CLEAN` enquanto a ref já estava no commit seguinte; os 18
+pertenciam ao commit ANTERIOR, e ler «18 pass + CLEAN» como pronto teria fundido a
+release com notas novas sem um único check sobre elas. A `updated_at` do PR estava
+parada e a lista de commits acabava no commit velho; um `close` + `reopen` forçou a
+re-sincronização. O comando que torna a regra verificável em vez de um aviso:
+
+```bash
+gh api repos/<owner>/<repo>/commits/<sha>/check-runs \
+  --jq '{total, por_sha: [.check_runs[].head_sha] | unique}'
+# → {"total": 20, "por_sha": ["<sha>"]}   um só SHA, e é o que se quer
+```
+
 **O custo, dito porque é o custo**: uma tag sem release passa a ser um estado
 intermédio normal, e o `version_gate` acima continua a olhar para a TAG e não
 para a release — portanto a `version` do `Cargo.toml` alinha-se no momento em que
