@@ -154,10 +154,29 @@ diferente daquele que constrói o artefacto, e um CI verde **não prova que a re
 constrói**. É a mesma classe do «medir a
 coisa, não um proxy», aplicada ao ambiente em vez ao valor. Os dois jobs passam a
 descarregar um `protoc` de versão fixa, verificado por sha256 (os digests vêm da
-API do GitHub, por asset), com o arquivo escolhido por `uname -m` num ÚNICO
-snippet partilhado — dois snippets voltariam a poder divergir, que é o defeito. E
-**falha fechado**: o passo compila o contrato logo a seguir a instalar, por isso um
+API do GitHub, por asset), com o arquivo escolhido por `uname -m`. E **falha
+fechado**: o `release.yml` compila o contrato logo a seguir a instalar, por isso um
 `protoc` que não o consiga compilar nunca chega a construir uma release.
+
+**E a primeira versão disto dizia «num ÚNICO snippet partilhado — dois snippets
+voltariam a poder divergir, que é o defeito», o que era FALSO.** Medido no próprio
+diff: `grep -c '^+          V=36.2'` dava **2**. O `uname -m` escolhe a arquitectura
+dentro de cada cópia, mas o bloco de 33 linhas estava colado nos dois jobs, com a
+versão e os dois digests escritos duas vezes — exactamente o defeito que a frase
+nomeava. Apanhado por outra sessão a medir o diff em vez de ler a afirmação. A
+resposta é `.github/actions/protoc`, uma acção local: os dois jobs do `release.yml`
+e os oito sítios do `ci.yml` passam a `- uses: ./.github/actions/protoc`, e a
+versão com os digests vive num ficheiro só. Dez cópias do mesmo shell seriam dez
+sítios para a versão voltar a divergir.
+
+**A acção instala e mais nada, de propósito**, e a porta do contrato fica no
+`release.yml`: no CI seria redundante oito vezes (o job `contract` corre o gate
+completo, que é mais forte, e qualquer outro job falharia no build do Rust — que é
+precisamente como isto foi encontrado); numa release é o que impede um `protoc`
+incapaz de produzir um artefacto. E o layout `/usr/local` não é incidental: o
+`scripts/contract_gate.py` deriva o `-I` dos well-known types de
+`$(dirname $(which protoc))/../include`, por isso o `include/*` do zip é
+obrigatório.
 
 **O `optional` fica, e não é acidental**: são três campos, e o `used_bytes` do
 `infra.proto` existe para distinguir «medido» de «desconhecido» (ADR-0042 E3 —
