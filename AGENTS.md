@@ -8255,6 +8255,34 @@ corridos, concentrados em `net` (45), `image` (31) e `vm` (24).
 ajuda.** Foi em `net` que os dois achados abaixo apareceram, ao primeiro contacto, os dois em
 comandos que a bateria nunca executava.
 
+**Desde 2026-10-07 este número é um PORTÃO e não um comentário** (F0.2 do plano 65).
+`scripts/cli_exec_ratchet.py` deriva-o do `results.jsonl` de uma corrida real — uma folha
+conta quando um `check`/`xfail` a invocou **e julgou o resultado** — e chumba nos três
+sentidos: quando desce, quando sobe sem a linha de base subir no mesmo commit, e quando uma
+folha NOVA entra na CLI sem ninguém a exercitar (uma folha que ninguém corre baixa a fracção,
+e é esse o ponto). O numerador sai de um trace COMMITADO com proveniência
+(`scripts/cli_exec_trace.tsv`, a forma do `docs/proxmox/trace-*.routes`), porque o runner
+alojado não corre a bateria — bloqueia userns.
+
+**Medido a 2026-10-07 (4.5.0+185, PASS=1104 FAIL=0 SKIP=12): 125 de 272 — 46,0 %.** Os
+números desta secção e o «91 — 37%» que o cabeçalho da bateria carregava desde 2026-09-09
+**não são comparáveis com este**: foram contados à mão, sobre árvores diferentes, com uma
+regra que nunca ficou escrita. É por isso que a regra está agora no script.
+
+**Três armadilhas que só a medição contra dados REAIS apanhou**, e cada uma dava um número
+confiante e errado: contar as invocações de `--help` dava **100 % em todos os grupos** (a
+bateria verifica o `--help` de todas as folhas, por construção — é o OUTRO número); o caminho
+do binário chega colado à pontuação de shell (`"$('…/delonix'`) e por isso 190 comandos
+asseridos resolviam para folha nenhuma; e `container ls` nunca casava, porque a folha canónica
+é `container ps` e o inventário sai do `--help`, que só imprime o nome canónico — o comando
+mais exercitado da CLI contava como nunca executado.
+
+**E um zero pode ser a resposta certa.** `build` conta 0 e a bateria constrói imagens: a
+secção dele invoca o motor por uma função de shell e por linhas de setup com `|| true`, e
+assere a CONSEQUÊNCIA (os donos dentro da imagem), nunca o código de saída do build. Pela
+regra é 0, correctamente — ninguém julgou aquela invocação. Transformar uma dessas linhas num
+`check` é o ponto de cobertura mais barato de toda a bateria.
+
 > **O número de checks NÃO é a cobertura, e esta secção quase o disse.** A primeira versão media
 > 51/23% e citava «198/198»; ao preparar a release, os checks eram já 143 e as execuções 55 (25%),
 > porque outra sessão acrescentou casos entretanto. **Cita-se a fracção medida e a data, nunca o
