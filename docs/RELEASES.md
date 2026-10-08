@@ -6,8 +6,14 @@
 
 ## v5.0.0 — o `USER` da imagem é quem corre, o bloco `provider` tipado, e o contrato de nó servido
 
-Cento e oitenta commits desde a `v4.5.0` (152 sem contar os merges), de
-`#572` a `#713`.
+Duzentos e dois commits desde a `v4.5.0` (162 sem contar os merges), de `#572` a
+`#720` — medidos em `831b9601`, a ponta depois do segundo merge da `main` de
+2026-10-08 (`git rev-list --count v4.5.0..831b9601`).
+
+O número vai agora com o commit em que foi medido, porque sem isso envelhece em
+silêncio: os «180 (152)» desta nota estavam certos em `ea38d89b`, onde foram
+contados, e deixaram de bater com a branch assim que ela cresceu. Fixá-lo a um
+sha torna-o verificável em vez de uma afirmação sobre «a ponta».
 
 **Numerada como MAJOR por uma razão só, e está na secção seguinte**: um container
 passa a correr como o utilizador que a imagem declara. Todo o resto desta release
@@ -58,6 +64,16 @@ O que muda, e o que fazer:
   passo (antes corria sempre como root, mesmo depois de um `USER app`), e a cache
   de layers preserva os donos — um rebuild com cache perdia-os.
 
+**Duas assinaturas públicas do `delonix-sdn` mudaram** (`#718`):
+`can_bind_host_port` e `host_port_busy` passaram a receber um `Proto`. Quem
+consome o crate por `git` + tag não parte hoje, mas subir esse pin exige uma
+passagem. A assinatura antiga não podia ficar porque **era** a armadilha: as duas
+sondas abriam sempre um `TcpListener`, qualquer que fosse o spec, logo uma
+publicação UDP era verificada contra TCP — cega por construção, com o conflito a
+aparecer só dentro do slirp como JSON opaco. O enum obriga cada sítio de chamada
+a dizer o transporte, e recusa nessa fronteira o `sctp` que o CRI consegue emitir
+em vez de o sondar como TCP.
+
 Efeito lateral da mesma passagem: a extracção passou a preservar **setuid, setgid
 e sticky**. O `/tmp` de todos os containers era `777` em vez de `1777`, e um `su`
 setuid perdia o bit. Uma layer extraída por um motor anterior é corrigida a partir
@@ -67,7 +83,39 @@ dos cabeçalhos do blob na primeira vez que uma imagem a usa.
 
 ### Mudanças de comportamento
 
+**O endereço de bind de uma porta publicada passa a ser REGISTADO** (`#718`). Era
+estado USADO na publicação e nunca persistido: o registo guardava a spec como foi
+escrita (`51072:80`) e o `DELONIX_PUBLISH_ADDR` era relido do ambiente a cada
+`start`. Quinta ocorrência da armadilha «estado necessário para RECONSTRUIR o
+recurso tem de ser persistido». Medido nos dois sentidos, contra o bind lido do
+kernel:
+
+- publicada com `DELONIX_PUBLISH_ADDR=0.0.0.0`, voltava em **`127.0.0.1`** depois
+  de um `start` — que é o que um unit do `net boot enable` corre, sem ambiente
+  nenhum. Serviço em baixo, listagem a dizer publicado;
+- e o INVERSO, que é o que pesa em segurança: uma porta publicada de propósito
+  **sem** endereço (só loopback) voltava em **`0.0.0.0`**, exposta à LAN inteira,
+  porque a shell que correu o `start` tinha a variável exportada.
+
+Nos dois casos rc=0, sem aviso, com o `net ingress ls` a imprimir a linha igual
+antes e depois — `51070:80` e `51072:80` eram bytes idênticos em disco com
+alcance oposto. Agora a spec guardada é sempre `addr:hostPort:contPort/proto`, e
+o `container ls` mostra o endereço (`0.0.0.0:55070->5070/udp`) na coluna que se
+lê precisamente para decidir o que está exposto. Uma spec **sem** endereço passou
+a querer dizer «registo anterior a esta versão».
+
 Recusas novas. Em todos estes casos o motor **aceitava e não cumpria**.
+
+**Um `hostPort` que o nó não publica (ADR-0074, `#720`)** — e a recusa é **por
+caminho**, porque os caminhos diferem e medi-los foi o que o mostrou: o
+`slirp4netns` recusa SCTP no `add_hostfwd` (`bad arguments.proto`), o `portmap`
+do CNI publica-o ponta a ponta, e o `hostNetwork` não publica nada (o container
+está na netns REAL do host e liga as portas ele próprio). Uma resposta cega teria
+fechado uma porta que está aberta em modo root. A recusa chega do
+`RunPodSandbox`, antes de o sandbox existir, como `failed_precondition` — que o
+kubelet mostra como evento no pod em vez de um `StartContainer` retentado para
+sempre. Um `containerPort` sem `hostPort` continua descartado, que é a forma que
+um **Service** SCTP usa: nenhum serviço SCTP é afectado.
 
 **Manifestos (ADR-0069, `#682`, `#687`)**
 
@@ -153,6 +201,26 @@ Recusas novas. Em todos estes casos o motor **aceitava e não cumpria**.
 ---
 
 ### Novidades
+
+**O `hostPort` é publicado em modo root/CNI** (ADR-0074 D3, `#720`). Não era, para
+protocolo NENHUM: os mapeamentos eram guardados e depois descartados, e o pod
+subia `Running` com uma porta que não respondia — silêncio, rc=0. Os
+`portMappings` passam agora como `runtimeConfig` do plugin, como o containerd
+faz, e isso entrega tcp, udp **e** sctp de uma vez. O argumento de capacidade é
+injectado na conflist, e é isso que dispensa plumbing novo nos dois caminhos CNI:
+o root entrega a lista ao `attach_named_netns`, o rootless hex-codifica o MESMO
+JSON na linha de controlo do holder (cuja forma não muda, por isso um holder
+antigo continua a servir), e guardar o resultado como a conflist do sandbox
+devolve ao `DEL` a configuração idêntica. A declaração é lida do
+`capabilities.portMappings` do próprio plugin, nunca de uma lista de nomes; uma
+cadeia que não a declare é recusada a nomear o `portmap`. Medido numa VM da
+golden deste repo com o `crictl`, contra os dois binários: antes **0** regras
+DNAT e porta muda, depois **3** regras, resposta pela porta do host, e **0**
+regras depois do `rmp`.
+
+E o `hostIP` passa a viajar nesse caminho: descartá-lo publicaria em todas as
+interfaces uma porta que o pod pediu numa só — exposição alargada em silêncio, o
+mesmo defeito que o `#718` corrigiu pela outra ponta.
 
 **Containers de sistema no Proxmox — `kind: SystemContainer`** (ADR-0058, plano
 63, `#579`, `#582`, `#583`, `#588`, `#590`–`#594`)
@@ -308,6 +376,19 @@ obtido com `image login`, nunca num push.
 
 ### Build e desenvolvimento
 
+- **A métrica de maturidade do catálogo passou a ser CALCULADA, com ratchet**
+  (plano 65 F0.1, `#715`). Era contada à mão sobre o markdown publicado, e as
+  duas contagens em circulação estavam **ambas erradas**: a do plano 66 vinha de
+  um `grep -c` que contou os sumários por provider, a prosa da introdução e a
+  palavra `supported` dentro de `unsupported-by-provider`; a do plano 65 dizia 99
+  de 265. A contagem a sério é **100 de 252 (39,7 %)**, e o `provider ls` concorda.
+  Um número medido por grep a um documento não é uma métrica — é o documento a
+  falar de si próprio.
+- **As credenciais de um laboratório deixaram de estar a um `git add -A` de serem
+  publicadas** (`#716`). Medido na raiz deste repo, que é PÚBLICO:
+  `opnsense-lab.env`, com chave e segredo em claro, não estava ignorado por nada —
+  a única coisa entre ele e um push era a regra da casa de nunca usar `git add -A`.
+  Uma regra é uma intenção; isto é um ferrolho. Nada foi apagado.
 - **Um `Makefile` para o ciclo do desenvolvedor**: `bootstrap`, `doctor`, `build`,
   `install`, `ci`.
 - **O binário de release deixou de depender do caminho do checkout** — duas
@@ -335,6 +416,15 @@ obtido com `image login`, nunca num push.
 A última passagem antes desta release consolidou o trabalho de cinco sessões
 paralelas num plano único (`docs/discovery/66_CONTINUITY_PLAN.md`) e correu as
 medições que ele exige. O que isso produziu, além dos números da secção seguinte:
+
+**Uma store aberta numa raiz deixou de escrever noutra** (`#719`), e a hipótese
+óbvia estava errada. O `tmp_roots_gate.py` chumbava na `main` ao acaso — `cargo
+test -p delonix-sdn` deixava 3, 0 e 1 restos em três corridas iguais. A leitura
+natural era «o `Drop` do `TempDir` engole o erro de remoção», e um
+`TempDir::close()` com o erro à vista teria **passado sem apanhar nada**: seguido
+com `strace` sobre os seis binários de teste em paralelo, a remoção funcionava e
+o directório **voltava** depois dela, posto lá por OUTRO teste. Não era uma
+limpeza que falhava; era uma store a escrever numa raiz que não era a sua.
 
 - **Um convidado governado por política nasce fechado, ou não nasce** (ADR-0069
   D6, `#705`). O D6 fechava containers e Pods; uma VM e um system container
@@ -385,8 +475,9 @@ medições que ele exige. O que isso produziu, além dos números da secção se
 
 ### A evidência desta release, medida
 
-Contra a ponta desta release — o código de `0640a9c7` mais o bump desta nota —
-a 2026-10-06, neste host, com raiz de estado isolada:
+Contra o código de `0640a9c7` mais o bump desta nota, a 2026-10-06, neste host,
+com raiz de estado isolada. **A ponta da release mudou depois disso** — ver o
+adendo no fim desta secção, que diz o que foi re-medido e o que não foi:
 
 | Medição | Resultado |
 |---|---|
@@ -413,6 +504,140 @@ setup da secção de backup puxava uma SEGUNDA imagem com a saída descartada, e
 num host de ligação lenta isso fazia treze checks chumbarem a dizer «no such
 container». Está corrigido na mesma série.
 
+#### Adendo (2026-10-08): a ponta moveu-se, e o que isso vale
+
+A `main` foi fundida nesta branch **três** vezes a 2026-10-08, trazendo
+`#714`–`#722`. A ponta passou de `0640a9c7` para `831b9601` e desta para
+`7f5b5125`, logo os números da tabela acima descrevem **a árvore de 2026-10-06 e não
+esta**. Dito aqui porque o `#714` existe exactamente por isto ter acontecido antes,
+e porque o `version_gate` não o apanha: ele confere que as notas EXISTEM, não que
+descrevem o conteúdo.
+
+O segundo merge trouxe o `#717` — **quanto da CLI a bateria EXECUTA passa a ser
+medido, não escrito à mão** (plano 65 F0.2). O `Cargo.toml` conflitava por
+construção (a `main` em `4.5.0`, esta branch em `5.0.0`) e ficou em **5.0.0**,
+com o `Cargo.lock` a concordar; o `AGENTS.md` e o `scripts/e2e.sh` ficaram com os
+DOIS lados, que é a regra da casa — escolher um apagaria o achado de outra pessoa.
+
+**E a ponta moveu-se outra vez antes da tag**, com o `#721` e o `#722`, que são as
+duas metades do mesmo item: o `#717` entregou o INSTRUMENTO e o número que ele
+media; estes dois entregaram a COBERTURA que o número conta. Por isso a tabela
+abaixo substitui a anterior em vez de a acompanhar.
+
+Re-medido na ponta final, nesta máquina:
+
+| Medição | Resultado |
+|---|---|
+| Bateria de testes (`cargo test --workspace`) | **2836 passados / 0 falhas** |
+| `cargo fmt --check` e `clippy -D warnings` | limpos |
+| `version_gate` | ok — `release commit: 5.0.0 (notes present), previous tag v4.5.0` |
+| `lang_ratchet`, `arch_fitness`, `adr_status_gate`, `contract_gate`, `capability_ratchet`, `dev_docs --check` | ok |
+| `tmp_roots_gate` | ok — 0 restos |
+| `cli_exec_ratchet` | ok — **160 de 272 folhas da CLI invocadas sob asserção = 58,8 %** |
+| Bateria da CLI (`scripts/e2e.sh`), corrida completa | **PASS=1148 FAIL=0 SKIP=14 XFAIL=1 XPASS=0** |
+
+**A cobertura passou de 125 para 160**, e as componentes separam-se de propósito,
+porque só uma delas é trabalho novo: **33 folhas** que ninguém exercitava ganharam
+`check`; **1** (`build`) a bateria já exercitava e o parser não conseguia ver; e
+**0** foram recuperadas retroactivamente pela correcção do parser. Os 272 do
+denominador não mexeram — nenhum destes PRs tocou o `scripts/cli_baseline.tsv`.
+
+**O parágrafo anterior desta secção dizia que os 46,0 % SUBESTIMAVAM, e deixou de
+valer pelas duas razões que nomeava**: o `#721` regravou o trace contra a ponta
+fundida (125 → 126), e o `#722` correu a bateria inteira na ponta final. O que
+sobra desse parágrafo é um defeito do instrumento que eu próprio tinha publicado
+no `#717` e que o `#722` corrigiu: **um `--help` mais à frente no MESMO corpo de
+shell apagava uma invocação real anterior**, e o teste do fim-de-comando era código
+morto. Medido nos dois sentidos — a correcção recupera **zero** folhas
+retroactivamente (o parser antigo e o novo dão ambos 126 sobre a corrida anterior),
+logo o ganho é de hoje para a frente, não uma reescrita do passado.
+
+**Os 14 SKIP, classificados até ao último** — o cabeçalho do trace commitado diz
+«5 + 7», que não soma 14, e a conta certa é esta: **7** pedem um appliance OPNsense
+(3) ou um cluster Proxmox (4); **3** este host não os pode medir (o `hostPort` em
+root/CNI, que exige root e uma conflist com `portmap`; o NFS, que exige
+CAP_SYS_ADMIN; o `system boot enable`, que escreve units fora do root isolado);
+**2** são caminhos de FALHA cujo disparo é a ferramenta estar AUSENTE, e este host
+tem-na (`virt-customize`, `wg`) — saltam por ele ser capaz, não por não ser; **1**
+porque não há imagens VM neste host; e **1** — o `stack init --template httpd --up`
+— porque o build não completou em 180 s. Só este último é uma lacuna de medição em
+vez de uma propriedade do host. **O 1 XFAIL é o ACH-034**, um
+defeito do motor com achado escrito (um `secret rotate-key` põe a versão a 1 em vez
+de a preservar) — não chumba o portão, e chumba por XPASS no dia em que for
+corrigido, que é o que força o marcador a sair.
+
+**O arnês de caos e o portão de performance CORRERAM na ponta, e a versão anterior
+desta secção dizia o contrário.** Dizia «NÃO re-medido», e para o portão arriscava
+uma previsão — «recusaria julgá-lo» — que a medição contradiz. Correram noutra
+sessão, e aqui ficam com a proveniência e com a parte que eu próprio verifiquei,
+porque um número de outra pessoa não é uma medição minha:
+
+| Arnês de caos | **54 PASS · 0 FAIL · 1 SKIP** — duas corridas independentes, o mesmo resultado |
+|---|---|
+| Onde | VM descartável, Ubuntu 24.04.4, 4 vCPU, 5 GiB, kernel 6.8.0-136 |
+| Como | `systemd-run --user --scope -p Delegate=yes -- bash scripts/chaos.sh --bin /usr/local/bin/delonix` |
+| Binários | os cinco irmãos `delonix 5.0.0`, construídos em `831b9601` |
+| 1ª corrida | outra sessão, `load(1m) 0.11`; log em `/tmp/delonix-chaos-v5.0.0/` com sidecar de proveniência |
+| 2ª corrida | **conduzida nesta sessão**, 14:51Z, `load 0.27 → 0.22`, `rc=0` |
+| O único SKIP | `truenas-destroy`, sem `DELONIX_CHAOS_TRUENAS_URL/USER/PASS` |
+
+Os quatro cenários de limites (`oom`, `scale`, `aggregate-ceiling`,
+`delegated-scope`) **passaram** — é o scope delegado que os torna exercitáveis, e
+numa sessão SSH saltariam com `DX-6000`, que é o motor a recusar com razão.
+
+**Porque é que um binário de `831b9601` vale para esta ponta, verificado por mim e
+não aceite por palavra**: o `#717` não toca uma linha de Rust (`git diff --stat
+e1aacedf^1 e1aacedf -- '*.rs' Cargo.toml Cargo.lock` vem vazio); o `831b9601` já
+CONTÉM as únicas mudanças de motor em jogo (`#718` e `#720` — confirmado com
+`merge-base --is-ancestor` nos três commits); de `831b9601` até à ponta do `#722` o
+diff de `*.rs`/`Cargo.toml`/`Cargo.lock` é **vazio** (só `AGENTS.md`,
+`docs/discovery/`, `scripts/`); e o `scripts/chaos.sh` é byte-a-byte o mesmo nas
+duas pontas (sha256 `1a405cf940819eaf`, igual em `main` e em `release/v5.0.0`).
+
+**E a corrida foi repetida nesta sessão, para a nota não depender de uma medição
+alheia**: mesmo comando, mesma VM, **54 PASS · 0 FAIL · 1 SKIP** e `rc=0`, com os
+cenários contados do MEU log e não do sumário dele — **zero** linhas de FAIL, e os
+quatro de limites (`oom`, `scale`, `aggregate-ceiling`, `delegated-scope`) a passar
+nas duas. O log da primeira foi verificado contra o hash publicado
+(`f85d2c4f…ba4`, confirmado por mim) e tem 54 linhas `^  PASS  `; a única menção a
+FAIL é o próprio sumário a dizer `0 FAIL`.
+
+**O arnês NÃO escreve `results.jsonl`** — ao contrário do `scripts/e2e.sh`, não tem
+`OUT=` nenhum (`grep -nE 'results\.jsonl|OUT=|jsonl' scripts/chaos.sh` vem vazio),
+por isso o log é a única saída e esta nota não promete um ficheiro estruturado que
+não existe.
+
+| Portão de performance | **julgou, e passou: `delonix` ×1.08** |
+|---|---|
+| `delonix` | 94 ms · baseline 87 ms · ×1.08 · dispersão 1,2× |
+| `docker` | 299 ms · baseline 224 ms · ×1.33 · dispersão 1,3× |
+| `podman` | 336 ms · baseline 279 ms · ×1.20 · dispersão 1,3× |
+| Bancada | `load(1m) 6.41` de um limiar de 16 · `publishable: true` · 10 amostras por motor |
+| Baseline | 2026-09-23, `ceec7f8c`, delonix 4.3.0, a MESMA máquina |
+
+**Reproduzi o veredicto a partir do JSON cru** (`python3 scripts/bench_gate.py --run
+/tmp/bench.json` → `rc=0`, `ok: delonix ×1.08, dentro da tolerância de 25%`), em vez
+de confiar no número relatado. **E a minha previsão estava errada pela razão que
+torna o portão útil**: as âncoras degradaram MAIS do que o motor na mesma corrida
+(×1.33 e ×1.20 contra ×1.08), logo o que mexeu foi a bancada e não o motor — se o
+motor tivesse degradado tanto como elas, ele teria recusado julgar. A terceira saída
+existe exactamente para separar esses dois casos, e aqui separou.
+
+**Duas pré-condições que o arnês não tem sonda para detectar**, e que deram corridas
+INVÁLIDAS sem se anunciarem como tal: correr o binário de `target/release/` em vez do
+caminho instalado dá `DX-9301 making / private … Permission denied`, porque o perfil
+AppArmor `userns` está pinado ao CAMINHO — o sintoma foram 25 SKIP e 2 FAIL a apontar
+para o motor quando a causa era o caminho do ficheiro; e uma sessão SSH não tem
+delegação de cgroup, logo os quatro cenários de limites saltam. Nenhuma das duas é
+defeito do motor, e nenhuma das duas se vê no relatório.
+
+**Por fim, porque duas corridas da bateria dão totais diferentes e as duas estão
+certas**: `1110 + 7 + 1 = 1118` e `14 − 1 = 13` — os sete são checks `--up:` atrás do
+SKIP de 180 s, e o `+1` é o check `provider matrix é a matriz publicada`, que FALHA se
+a bateria correr na árvore `main` com binários 5.0.0 (a matriz embebe a versão do
+motor, e a única linha diferente é `engine 4.5.0` contra `engine 5.0.0`). Contra a
+matriz da ponta é idêntica byte a byte: é montagem, não defeito.
+
 ### O que NÃO foi validado
 
 Dito aqui porque o implícito lê-se como provado:
@@ -432,6 +657,19 @@ Dito aqui porque o implícito lê-se como provado:
   markdown, e as duas contagens que circulavam — «111 de 281» e «99 de 265» —
   estavam ambas erradas: a primeira vinha de um `grep -c` que contava os
   sumários do próprio ficheiro como se fossem células.
+- **O `hostPort` em root/CNI não foi validado com um kubelet** (`#720`): tudo foi
+  conduzido pelo `crictl` — o cliente oficial do projecto Kubernetes, pelo mesmo
+  transporte que um kubelet usa — e por testes, não por um kubelet a agendar os
+  pods com as suas retentativas e a sua noção de prontidão. E foi **um nó, uma
+  cadeia** `bridge`+`portmap`: uma CNI real de cluster (Calico, Cilium) a declarar
+  a capacidade de outra forma, e mais de um nó, ficaram por medir.
+- **O SCTP está provado no caminho do `portmap`, não nas nftables próprias do
+  motor** (ADR-0074 D3.1): a rota em que o motor escreveria o seu próprio
+  `sctp … dnat` em modo root só foi carregada num kernel como ruleset — nenhum
+  pacote a atravessou. Quem a construir começa por fechar essa lacuna.
+- **O endereço de bind registado não foi medido através de um reboot** (`#718`): o
+  ciclo provado é `publish` → `stop` → `start`, que é o que um unit do `net boot
+  enable` corre, mas o arranque da máquina em si não foi exercitado.
 - **Nenhuma conformidade é reclamada**: as suites OCI, CRI, CNI e CSI não
   correram. O número do CRI publicado (79/103) é do `critest` v1.36 contra o
   motor **v0.63.1** e não foi remedido.
