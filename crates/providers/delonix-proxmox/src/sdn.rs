@@ -1741,6 +1741,60 @@ impl Client {
         )
     }
 
+    /// Stages a subnet's addressing as EXACTLY `gateway` and `dhcp_ranges`
+    /// (`PUT /cluster/sdn/vnets/{vnet}/subnets/{subnet}`) — ADR-0063 D2, a
+    /// subnet changed in place. Unlike [`Self::update_sdn_subnet_with`],
+    /// where an omitted field keeps its value, `None` and an empty list CLEAR
+    /// the field (`delete=gateway`, `delete=dhcp-range`), so the subnet ends
+    /// as declared. The probe that settles a lost answer compares both.
+    ///
+    /// Measured on PVE 9.2.2 (ADR-0063): a staged gateway change moves the
+    /// IPAM's gateway entry AT ONCE, before any apply, and a rollback does
+    /// not move it back — a caller that may roll back owns the repair
+    /// ([`crate::ipam`]). Clearing a field with `delete` is the node's
+    /// section-config convention (the zone's `delete=dhcp` is measured); on a
+    /// subnet it is not measured.
+    pub fn set_sdn_subnet_addressing(
+        &self,
+        ledger: &Ledger,
+        vnet: &str,
+        zone: &str,
+        cidr: &str,
+        gateway: Option<&str>,
+        dhcp_ranges: &[DhcpRange],
+    ) -> Result<()> {
+        validate_sdn_id(vnet)?;
+        validate_sdn_id(zone)?;
+        validate_cidr(cidr)?;
+        let subnet = sdn_subnet_id(zone, cidr);
+        let encoded = subnet_option_fields(&SubnetOptions {
+            gateway,
+            dhcp_ranges,
+            ..Default::default()
+        })?;
+        let cleared = subnet_cleared_fields(gateway, dhcp_ranges);
+        let mut form: Vec<(&str, &str)> = encoded.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        if !cleared.is_empty() {
+            form.push(("delete", cleared.as_str()));
+        }
+        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{subnet}");
+        self.task_or_done(
+            ledger,
+            SDN_VMID,
+            TaskKind::UpdateSdnSubnet,
+            || self.put_form(&path, &form),
+            Some(&|| {
+                let obj = self.sdn_vnet_subnet(vnet, zone, cidr)?;
+                Ok(obj
+                    .get("gateway")
+                    .and_then(|v| v.as_str())
+                    .filter(|g| !g.is_empty())
+                    == gateway
+                    && dhcp_ranges_of(&obj) == dhcp_ranges)
+            }),
+        )
+    }
+
     // ----- IPAM allocations on a vnet ---------------------------------------
 
     /// Reserves `ip` in the vnet's subnet for `mac`
@@ -1898,6 +1952,20 @@ fn subnet_option_fields(opts: &SubnetOptions<'_>) -> Result<Vec<(&'static str, S
     Ok(out)
 }
 
+/// The `delete` value of a subnet write that converges to `gateway` and
+/// `dhcp_ranges`: the fields that are declared absent, comma-separated (the
+/// node's `pve-configid-list`). Empty when nothing is cleared. Pure.
+fn subnet_cleared_fields(gateway: Option<&str>, dhcp_ranges: &[DhcpRange]) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    if gateway.is_none() {
+        out.push("gateway");
+    }
+    if dhcp_ranges.is_empty() {
+        out.push("dhcp-range");
+    }
+    out.join(",")
+}
+
 /// The `srvreload` tasks of a node's task list whose id is `networking`, as
 /// `(upid, starttime)`. Other reloads (`srvreload` of another service) are
 /// not the network's and are left out.
@@ -1931,9 +1999,9 @@ fn validate_dns_controller_id(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        network_reload_entries, sdn_subnet_id, subnet_option_fields, validate_cidr,
-        validate_dns_controller_id, validate_fabric_id, validate_ip, validate_mac, validate_sdn_id,
-        DhcpRange, SubnetOptions,
+        network_reload_entries, sdn_subnet_id, subnet_cleared_fields, subnet_option_fields,
+        validate_cidr, validate_dns_controller_id, validate_fabric_id, validate_ip, validate_mac,
+        validate_sdn_id, DhcpRange, SubnetOptions,
     };
 
     /// A DNS controller id follows PVE's `pve-sdn-dns-id`, not the zone/vnet
@@ -2001,6 +2069,20 @@ mod tests {
         ] {
             assert!(validate_mac(bad).is_err(), "{bad:?} should be refused");
         }
+    }
+
+    /// ADR-0063 D2: a subnet converged in place ends exactly as declared, so
+    /// a field declared absent is cleared rather than left as it was.
+    #[test]
+    fn a_subnet_converged_in_place_clears_what_is_declared_absent() {
+        let r = [DhcpRange {
+            start: "10.0.0.100".into(),
+            end: "10.0.0.150".into(),
+        }];
+        assert_eq!(subnet_cleared_fields(Some("10.0.0.1"), &r), "");
+        assert_eq!(subnet_cleared_fields(None, &r), "gateway");
+        assert_eq!(subnet_cleared_fields(Some("10.0.0.1"), &[]), "dhcp-range");
+        assert_eq!(subnet_cleared_fields(None, &[]), "gateway,dhcp-range");
     }
 
     #[test]

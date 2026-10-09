@@ -1666,6 +1666,13 @@
           ],
           "description": "The DNS server the provider registers the zone's guests in (ADR-0059\nF5c). Hot: a change converges live; the records the provider already\nwrote stay as they are."
         },
+        "ipam": {
+          "description": "The IPAM controller (its id on the provider) the zone's subnets\nallocate from (ADR-0063 D1); `pve`, the provider's built-in one, when\nomitted. The controller is the provider administrator's — the engine\nnever creates one — and one the provider does not have, or cannot\nserve a zone from, is refused before any write. Cold: the provider\nrefuses to change it once the zone holds a subnet.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "vnets": {
           "default": [],
           "items": {
@@ -3671,7 +3678,7 @@
           "type": "string"
         },
         "subnets": {
-          "description": "The vnet's subnets, allocated from the provider's IPAM (ADR-0059\nF5b). Cold: a change replaces the document.",
+          "description": "The vnet's subnets, allocated from the provider's IPAM (ADR-0059\nF5b). A subnet's `gateway` and `dhcpRange` are hot: a change is made\nin place (ADR-0063 D2). Its `cidr` is its identity: a changed,\nadded or removed subnet replaces the document.",
           "items": {
             "$ref": "#/$defs/SubnetInput"
           },

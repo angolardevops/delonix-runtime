@@ -28,6 +28,23 @@
 //! when the caller's record declared it. An entry at the same address with
 //! ANOTHER MAC — a guest's allocation, someone's reservation — is refused,
 //! never overwritten.
+//!
+//! # The controller a zone allocates from (ADR-0063 D1)
+//!
+//! A zone names the IPAM controller its subnets allocate from
+//! ([`DEFAULT_CONTROLLER`] when it names none). The controller is the
+//! provider administrator's: it carries a credential to a third-party
+//! system, so the engine never creates one, and a zone naming one the
+//! provider does not have is refused before any write
+//! ([`missing_controllers`]). A provider also refuses, by name, a controller
+//! it cannot serve a zone from ([`IpamProvider::refuse_unsupported`]).
+//!
+//! # Subnets changed in place (ADR-0063 D2)
+//!
+//! A subnet's CIDR is its identity; its gateway and its DHCP ranges are not.
+//! [`subnet_change`] is the one rule that says which of the two a difference
+//! is: the provider uses it to update a subnet in place, the plan to decide
+//! what is hot.
 
 use crate::error::{Error, Result};
 use crate::ownership::{OwnerMark, RemoveOutcome};
@@ -85,6 +102,127 @@ pub struct IpamObserved {
     pub zone_ipam: bool,
     /// The zone serves DHCP.
     pub zone_dhcp: bool,
+    /// The IPAM controller the running zone allocates from, when it names
+    /// one.
+    pub controller: Option<String>,
+}
+
+/// The controller a zone allocates from when its document names none: the
+/// provider's built-in one (Proxmox's `pve`), which needs no external server.
+pub const DEFAULT_CONTROLLER: &str = "pve";
+
+/// One IPAM controller registered on the provider: its id and plugin type.
+/// Never its credential.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IpamController {
+    pub id: String,
+    pub kind: String,
+}
+
+/// `true` for an IPAM controller id the provider's client sends: a lowercase
+/// letter, then up to 7 lowercase letters or digits (the `pve-sdn-id` form
+/// the Proxmox client checks before an id goes into a URL path). Never looser
+/// than what the client accepts, so an id that passes here is not refused
+/// later, inside a transaction.
+pub fn valid_controller_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+        && id.len() <= 8
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+}
+
+/// `id` when `registered` does not hold it (empty otherwise) — the shape
+/// [`crate::dns::missing_controllers`] answers in.
+pub fn missing_controllers(id: &str, registered: &[IpamController]) -> Vec<String> {
+    if registered.iter().any(|c| c.id == id) {
+        Vec::new()
+    } else {
+        vec![id.to_string()]
+    }
+}
+
+/// How a declared subnet differs from the one a provider holds (ADR-0063 D2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubnetChange {
+    /// Nothing to do.
+    Same,
+    /// The gateway and/or the DHCP ranges differ: updated in place. One line
+    /// per difference.
+    InPlace(Vec<String>),
+    /// The CIDR (or the vnet) differs: that is the subnet's identity, so it
+    /// is another subnet and never an update.
+    Replace(Vec<String>),
+}
+
+fn ranges_text(r: &[DhcpRange]) -> String {
+    let mut v: Vec<String> = r.iter().map(|r| format!("{}-{}", r.start, r.end)).collect();
+    v.sort();
+    v.join(",")
+}
+
+/// The gateway and DHCP range differences of `have` from `want`, one line
+/// each. The identity is not compared. Pure.
+pub fn subnet_settings_drift(have: &IpamSubnet, want: &IpamSubnet) -> Vec<String> {
+    let mut out = Vec::new();
+    if have.gateway != want.gateway {
+        out.push(format!(
+            "subnet {} gateway is '{}', declared '{}'",
+            want.cidr,
+            have.gateway.as_deref().unwrap_or(""),
+            want.gateway.as_deref().unwrap_or("")
+        ));
+    }
+    if ranges_text(&have.dhcp_ranges) != ranges_text(&want.dhcp_ranges) {
+        out.push(format!(
+            "subnet {} dhcp ranges are '{}', declared '{}'",
+            want.cidr,
+            ranges_text(&have.dhcp_ranges),
+            ranges_text(&want.dhcp_ranges)
+        ));
+    }
+    out
+}
+
+/// Classifies the difference between a subnet a provider holds and the one
+/// declared (ADR-0063 D2.1): the CIDR and the vnet are the identity
+/// ([`SubnetChange::Replace`]); the gateway and the DHCP ranges change in
+/// place ([`SubnetChange::InPlace`]). Pure.
+pub fn subnet_change(have: &IpamSubnet, want: &IpamSubnet) -> SubnetChange {
+    if have.vnet != want.vnet || have.cidr.trim() != want.cidr.trim() {
+        return SubnetChange::Replace(vec![format!(
+            "subnet {} in vnet '{}' is declared as {} in vnet '{}' — the CIDR is the subnet's \
+             identity",
+            have.cidr, have.vnet, want.cidr, want.vnet
+        )]);
+    }
+    let lines = subnet_settings_drift(have, want);
+    if lines.is_empty() {
+        SubnetChange::Same
+    } else {
+        SubnetChange::InPlace(lines)
+    }
+}
+
+/// The IPAM entry that holds `gateway` in `vnet`, if any — a reservation or a
+/// guest's allocation. ADR-0063 D2.4: a gateway is never moved onto an
+/// address an entry holds. Pure.
+pub fn gateway_held_by<'a>(
+    vnet: &str,
+    gateway: &str,
+    entries: &'a [IpamEntry],
+) -> Option<&'a IpamEntry> {
+    entries.iter().find(|e| e.vnet == vnet && e.ip == gateway)
+}
+
+/// The line that says the running zone allocates from another controller
+/// than `declared`, or none. Pure.
+pub fn controller_drift(declared: &str, observed: &IpamObserved) -> Option<String> {
+    match observed.controller.as_deref() {
+        Some(c) if c != declared => Some(format!(
+            "the zone allocates from IPAM controller '{c}', declared '{declared}'"
+        )),
+        _ => None,
+    }
 }
 
 fn cidr_of(text: &str) -> Option<Cidr> {
@@ -240,16 +378,15 @@ pub fn zone_serves_dhcp(subnets: &[IpamSubnet], has_reservations: bool) -> bool 
     has_reservations || subnets.iter().any(|s| !s.dhcp_ranges.is_empty())
 }
 
-/// How what a provider holds differs from what a record declared, one line
-/// per difference, sorted. Empty = in sync. `dhcp` is
-/// [`zone_serves_dhcp`] of the record. Pure.
-///
-/// Entries nobody declared (a guest's allocation) are not differences, and a
-/// subnet in an owned vnet that is not declared is one: nobody else removes
-/// it.
-pub fn ipam_drift(
+/// How the zone's options and the SET of subnets a provider holds differ from
+/// what a record declared, one line per difference, sorted: the zone does not
+/// allocate or does not serve DHCP, a declared subnet is missing, an owned
+/// vnet holds a subnet nobody declared. The gateway and the DHCP ranges of a
+/// subnet that is there are NOT compared — they change in place
+/// ([`subnet_settings_drift`]). `dhcp` is [`zone_serves_dhcp`] of the record.
+/// Pure.
+pub fn ipam_layout_drift(
     subnets: &[IpamSubnet],
-    reservations: &[IpamReservation],
     dhcp: bool,
     observed: &IpamObserved,
 ) -> Vec<String> {
@@ -261,39 +398,15 @@ pub fn ipam_drift(
         out.push("the zone does not serve DHCP".into());
     }
     for want in subnets {
-        match observed
+        if !observed
             .subnets
             .iter()
-            .find(|s| s.vnet == want.vnet && s.cidr == want.cidr)
+            .any(|s| s.vnet == want.vnet && s.cidr == want.cidr)
         {
-            None => out.push(format!(
+            out.push(format!(
                 "subnet {} in vnet '{}' is missing",
                 want.cidr, want.vnet
-            )),
-            Some(have) => {
-                if have.gateway != want.gateway {
-                    out.push(format!(
-                        "subnet {} gateway is '{}', declared '{}'",
-                        want.cidr,
-                        have.gateway.as_deref().unwrap_or(""),
-                        want.gateway.as_deref().unwrap_or("")
-                    ));
-                }
-                let ranges = |r: &[DhcpRange]| {
-                    let mut v: Vec<String> =
-                        r.iter().map(|r| format!("{}-{}", r.start, r.end)).collect();
-                    v.sort();
-                    v.join(",")
-                };
-                if ranges(&have.dhcp_ranges) != ranges(&want.dhcp_ranges) {
-                    out.push(format!(
-                        "subnet {} dhcp ranges are '{}', declared '{}'",
-                        want.cidr,
-                        ranges(&have.dhcp_ranges),
-                        ranges(&want.dhcp_ranges)
-                    ));
-                }
-            }
+            ));
         }
     }
     for have in &observed.subnets {
@@ -305,6 +418,34 @@ pub fn ipam_drift(
                 "subnet {} in vnet '{}' is in this engine's vnet and is not declared",
                 have.cidr, have.vnet
             ));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// How what a provider holds differs from what a record declared, one line
+/// per difference, sorted. Empty = in sync. `dhcp` is
+/// [`zone_serves_dhcp`] of the record. Pure.
+///
+/// [`ipam_layout_drift`], plus each subnet's gateway and DHCP ranges, plus the
+/// reservations. Entries nobody declared (a guest's allocation) are not
+/// differences, and a subnet in an owned vnet that is not declared is one:
+/// nobody else removes it.
+pub fn ipam_drift(
+    subnets: &[IpamSubnet],
+    reservations: &[IpamReservation],
+    dhcp: bool,
+    observed: &IpamObserved,
+) -> Vec<String> {
+    let mut out = ipam_layout_drift(subnets, dhcp, observed);
+    for want in subnets {
+        if let Some(have) = observed
+            .subnets
+            .iter()
+            .find(|s| s.vnet == want.vnet && s.cidr == want.cidr)
+        {
+            out.extend(subnet_settings_drift(have, want));
         }
     }
     for want in reservations {
@@ -343,15 +484,26 @@ pub trait IpamProvider: delonix_compute::vm_provider::Provider {
     /// `true` if this backend can be used right now. Never a round trip.
     fn available(&self) -> bool;
 
-    /// Sets the zone's IPAM and DHCP options so its subnets allocate and
-    /// serve addresses (staged; inside the segment transaction). Only a zone
-    /// the caller owns is passed here. `dhcp` says whether any subnet
-    /// declares a range.
-    fn prepare_zone(&self, zone: &str, dhcp: bool) -> delonix_model::Result<()>;
+    /// The IPAM controllers registered on the provider. Read-only; never
+    /// returns a credential.
+    fn controllers(&self) -> delonix_model::Result<Vec<IpamController>>;
+
+    /// Refuses, by name, a registered controller this provider cannot serve
+    /// a zone from (ADR-0063 D1.2, D1.3). Called before any write.
+    fn refuse_unsupported(&self, controller: &IpamController) -> delonix_model::Result<()>;
+
+    /// Sets the zone's IPAM and DHCP options so its subnets allocate from
+    /// `controller` and serve addresses (staged; inside the segment
+    /// transaction). Only a zone the caller owns is passed here. `dhcp` says
+    /// whether any subnet declares a range.
+    fn prepare_zone(&self, zone: &str, controller: &str, dhcp: bool) -> delonix_model::Result<()>;
 
     /// Ensures a subnet exists in a vnet `owner` owns (staged; inside the
-    /// segment transaction). One in a vnet without the mark is refused; one
-    /// that exists with another gateway or other ranges is drift.
+    /// segment transaction). One in a vnet without the mark is refused. One
+    /// that exists with another gateway or other DHCP ranges is updated in
+    /// place ([`subnet_change`], ADR-0063 D2) and answers `Created`, except
+    /// that a gateway is never moved onto an address an IPAM entry holds
+    /// ([`gateway_held_by`]).
     fn ensure_subnet(
         &self,
         zone: &str,
@@ -389,6 +541,25 @@ pub trait IpamProvider: delonix_compute::vm_provider::Provider {
     /// Reads what [`IpamObserved`] describes for `zone`, restricted to
     /// `vnets` (the ones the caller owns). Read-only.
     fn observe(&self, zone: &str, vnets: &[String]) -> delonix_model::Result<IpamObserved>;
+
+    /// After a segment transaction that failed — or one a dead process left
+    /// for the next to discard — puts the IPAM's gateway entry of each
+    /// running subnet of `vnets` back on the running gateway where the
+    /// provider left it elsewhere (ADR-0063 D2.3: a staged gateway change
+    /// moves the IPAM entry at once, and the rollback does not move it back).
+    /// The subnet ends with ONE gateway entry, on its running gateway (put
+    /// back when a rolled-back removal left none), or with NONE when it runs
+    /// without a gateway (a rolled-back addition leaves one): any other the
+    /// provider left is released. Only vnets carrying `owner`'s
+    /// mark are touched. Called only after such a failure. Returns one line
+    /// per subnet repaired; empty when every entry was already where it
+    /// belongs.
+    fn repair_gateways(
+        &self,
+        zone: &str,
+        vnets: &[String],
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<Vec<String>>;
 }
 
 /// Builds an [`IpamProvider`], or reports why it could not.
@@ -568,6 +739,7 @@ mod tests {
             ],
             zone_ipam: true,
             zone_dhcp: true,
+            controller: Some(DEFAULT_CONTROLLER.into()),
         }
     }
 
@@ -640,6 +812,115 @@ mod tests {
     #[test]
     fn a_zone_without_subnets_asks_nothing_of_the_zone() {
         assert!(ipam_drift(&[], &[], false, &IpamObserved::default()).is_empty());
+    }
+
+    #[test]
+    fn a_controller_id_and_a_missing_controller_are_named() {
+        for good in ["pve", "netbox1", "a1"] {
+            assert!(valid_controller_id(good), "{good}");
+        }
+        for bad in ["", "1pve", "Pve", "net-box", "toolongid", "pve/x"] {
+            assert!(!valid_controller_id(bad), "{bad}");
+        }
+        let registered = [IpamController {
+            id: "pve".into(),
+            kind: "pve".into(),
+        }];
+        assert!(missing_controllers("pve", &registered).is_empty());
+        assert_eq!(
+            missing_controllers("netbox1", &registered),
+            vec!["netbox1".to_string()]
+        );
+        assert!(missing_controllers(DEFAULT_CONTROLLER, &[]).len() == 1);
+    }
+
+    /// ADR-0063 D2.1: the gateway and the ranges change in place; the CIDR is
+    /// the identity.
+    #[test]
+    fn a_gateway_or_range_change_is_in_place_and_a_cidr_change_is_a_replace() {
+        assert_eq!(subnet_change(&subnet(), &subnet()), SubnetChange::Same);
+
+        let mut gw = subnet();
+        gw.gateway = Some("10.78.0.254".into());
+        match subnet_change(&subnet(), &gw) {
+            SubnetChange::InPlace(lines) => {
+                assert_eq!(lines.len(), 1, "{lines:?}");
+                assert!(lines[0].contains("gateway"), "{lines:?}");
+            }
+            other => panic!("expected in place, got {other:?}"),
+        }
+
+        let mut both = gw.clone();
+        both.dhcp_ranges = vec![DhcpRange {
+            start: "10.78.0.10".into(),
+            end: "10.78.0.30".into(),
+        }];
+        assert!(matches!(
+            subnet_change(&subnet(), &both),
+            SubnetChange::InPlace(l) if l.len() == 2
+        ));
+        let mut no_range = subnet();
+        no_range.dhcp_ranges.clear();
+        assert!(matches!(
+            subnet_change(&subnet(), &no_range),
+            SubnetChange::InPlace(_)
+        ));
+
+        let mut moved = both.clone();
+        moved.cidr = "10.79.0.0/24".into();
+        assert!(matches!(
+            subnet_change(&subnet(), &moved),
+            SubnetChange::Replace(_)
+        ));
+        let mut other_vnet = subnet();
+        other_vnet.vnet = "v2".into();
+        assert!(matches!(
+            subnet_change(&subnet(), &other_vnet),
+            SubnetChange::Replace(_)
+        ));
+    }
+
+    /// The layout drift is what stays cold: a gateway or a range changed on
+    /// the provider is not in it, a missing or undeclared subnet is.
+    #[test]
+    fn the_layout_drift_leaves_the_settings_to_the_in_place_path() {
+        let mut o = in_sync();
+        o.subnets[0].gateway = Some("10.78.0.254".into());
+        o.subnets[0].dhcp_ranges.clear();
+        assert!(ipam_layout_drift(&[subnet()], true, &o).is_empty());
+        assert_eq!(
+            ipam_drift(&[subnet()], &[reservation()], true, &o).len(),
+            2,
+            "the full drift still names both"
+        );
+        o.subnets.clear();
+        assert_eq!(
+            ipam_layout_drift(&[subnet()], true, &o),
+            vec!["subnet 10.78.0.0/24 in vnet 'v1' is missing".to_string()]
+        );
+    }
+
+    /// ADR-0063 D2.4: an address an entry holds is never a new gateway.
+    #[test]
+    fn a_gateway_held_by_an_entry_is_named() {
+        let o = in_sync();
+        let held = gateway_held_by("v1", "10.78.0.20", &o.entries).unwrap();
+        assert_eq!(held.mac.as_deref(), Some("BC:24:11:00:00:20"));
+        assert!(gateway_held_by("v1", "10.78.0.254", &o.entries).is_none());
+        assert!(gateway_held_by("v2", "10.78.0.20", &o.entries).is_none());
+    }
+
+    #[test]
+    fn a_zone_on_another_controller_is_one_line() {
+        let mut o = in_sync();
+        assert_eq!(controller_drift(DEFAULT_CONTROLLER, &o), None);
+        o.controller = Some("netbox1".into());
+        assert_eq!(
+            controller_drift(DEFAULT_CONTROLLER, &o).as_deref(),
+            Some("the zone allocates from IPAM controller 'netbox1', declared 'pve'")
+        );
+        o.controller = None;
+        assert_eq!(controller_drift(DEFAULT_CONTROLLER, &o), None);
     }
 
     #[test]

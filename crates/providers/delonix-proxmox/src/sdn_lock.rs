@@ -486,6 +486,48 @@ impl Client {
             },
         }
     }
+
+    /// Runs `change` under the cluster's SDN lock and then DISCARDS whatever
+    /// it staged — a rollback with the token, the lock released by the same
+    /// call — whether `change` succeeded or not. Nothing is ever applied.
+    ///
+    /// For a change whose effect is OUTSIDE the staged configuration and
+    /// whose staged half must not survive: the IPAM gateway repair
+    /// (ADR-0063 D2.3), where two staged gateway writes move the IPAM's
+    /// gateway entry at once and the rollback leaves the subnet as it runs.
+    ///
+    /// Same lock discipline as [`Self::sdn_transaction`]: a dead holder's
+    /// staged changes are discarded first, someone else's pending changes or
+    /// a held lock refuse before anything is sent. `change`'s error wins; a
+    /// failed rollback after a successful `change` is the error returned.
+    pub fn sdn_discarded_change<T>(
+        &self,
+        ledger: &Ledger,
+        change: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.recover_dead_sdn_lock(ledger)?;
+        let token = self.acquire_sdn_lock(false)?;
+        save_held_lock(ledger, &token);
+        let _held = HeldLockFile { ledger };
+        let outcome = {
+            if let Ok(mut g) = self.sdn_lock.lock() {
+                *g = Some((std::thread::current().id(), token.0.clone()));
+            }
+            let _scope = TokenScope { client: self };
+            change()
+        };
+        let rollback = self.rollback_sdn(ledger, Some(&token));
+        match (outcome, rollback) {
+            (Ok(v), Ok(())) => Ok(v),
+            (Err(e), Ok(())) => Err(e),
+            (Ok(_), Err(rb)) => Err(rb),
+            (Err(e), Err(rb)) => Err(Error::SdnRollbackFailed(format!(
+                "proxmox: a discarded SDN change failed ({e}) and discarding it failed too \
+                 ({rb}); pending changes and the SDN lock (token {}) may be left on the cluster",
+                token.0
+            ))),
+        }
+    }
 }
 
 /// The file a held SDN lock is recorded in, next to the task ledger.

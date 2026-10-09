@@ -21,10 +21,16 @@
 //! configuration, which carries none of this engine's `delonix.io/stack`
 //! labels to stamp.
 //!
-//! **No update-in-place**: `sdn.rs` (the Proxmox client) has no
-//! `set_sdn_zone`/`set_sdn_vnet` route — only create/delete. `apply()` only
-//! ENSURES every vnet CURRENTLY declared is present; it never retracts one
-//! dropped from the list while others stay. The full document's teardown
+//! **What changes in place, and what does not**: a zone and its vnets are
+//! created and deleted, never updated — `apply()` only ENSURES every vnet
+//! CURRENTLY declared is present, and never retracts one dropped from the
+//! list while others stay. A subnet's gateway and DHCP ranges are the
+//! exception (ADR-0063 D2): changed in place, inside the transaction; its
+//! CIDR is its identity and stays cold. A gateway change moves the
+//! provider's IPAM gateway entry the moment it is staged, so every apply
+//! repairs any entry a prior run left stranded — a failed/interrupted run's
+//! discarded change, or one made by hand on the node — recorded as a ledger
+//! step ([`repair_gateways_step`]). The full document's teardown
 //! (`--replace NetworkZone/<name>`, or dropping it under `stack apply
 //! --prune`) removes every vnet the registry last recorded, then the zone.
 //!
@@ -75,6 +81,14 @@ pub struct NetworkZoneSpecDoc {
     /// wrote stay as they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<DnsInput>,
+    /// The IPAM controller (its id on the provider) the zone's subnets
+    /// allocate from (ADR-0063 D1); `pve`, the provider's built-in one, when
+    /// omitted. The controller is the provider administrator's — the engine
+    /// never creates one — and one the provider does not have, or cannot
+    /// serve a zone from, is refused before any write. Cold: the provider
+    /// refuses to change it once the zone holds a subnet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipam: Option<String>,
 }
 
 /// `spec.dns` of a zone: a DNS controller the provider's administrator
@@ -112,7 +126,9 @@ pub struct VNetSpecInput {
     #[serde(default)]
     pub alias: Option<String>,
     /// The vnet's subnets, allocated from the provider's IPAM (ADR-0059
-    /// F5b). Cold: a change replaces the document.
+    /// F5b). A subnet's `gateway` and `dhcpRange` are hot: a change is made
+    /// in place (ADR-0063 D2). Its `cidr` is its identity: a changed,
+    /// added or removed subnet replaces the document.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subnets: Vec<SubnetInput>,
 }
@@ -148,7 +164,7 @@ pub struct ReservationInput {
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
 /// spec uses).
-pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets", "dns"];
+pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets", "dns", "ipam"];
 
 /// Fields the reconciler compares.
 ///
@@ -156,13 +172,19 @@ pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets", "dns"];
 /// mark, observed on every plan (ADR-0059 D4): `in sync`, or each difference
 /// from what the record declared. The manifest always wants `in sync`.
 ///
-/// `subnets` is cold (a change replaces the document); `reservations` and
-/// `dns` are hot: an apply removes the reservations no longer declared and
-/// makes the new ones, and writes the zone's DNS settings. Both are read from
-/// the provider, not the record, so a change made by hand converges too.
+/// `subnets` (each subnet's vnet and CIDR, its identity) and `ipam` (the
+/// controller, which the provider will not change under a subnet) are cold:
+/// a change replaces the document. `subnetSettings` (each subnet's gateway
+/// and DHCP ranges, ADR-0063 D2), `reservations` and `dns` are hot: an apply
+/// writes the subnets in place, removes the reservations no longer declared
+/// and makes the new ones, and writes the zone's DNS settings. All three are
+/// read from the provider, not the record, so a change made by hand
+/// converges too.
 pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &[
     "vnets",
     "subnets",
+    "subnetSettings",
+    "ipam",
     "dns",
     "reservations",
     "remote",
@@ -214,6 +236,10 @@ struct NetworkZoneRecord {
     /// The DNS settings this engine gave the zone (ADR-0059 F5c).
     #[serde(default)]
     dns: Option<DnsInput>,
+    /// The IPAM controller the zone's subnets allocate from (ADR-0063 D1).
+    /// `None` — and every record from before the field — is the default.
+    #[serde(default)]
+    ipam: Option<String>,
 }
 
 /// One reservation this engine holds.
@@ -371,8 +397,21 @@ fn validate_addressing(vnets: &[VNetSpecInput]) -> Result<()> {
     Ok(())
 }
 
+/// The `subnets` field: each subnet's identity, `vnet|cidr` (ADR-0063 D2.1 —
+/// the CIDR is what the subnet is; a change of it is another subnet).
 fn subnets_field(vnets: &[VNetSpecInput]) -> String {
     let mut items: Vec<String> = declared_subnets(vnets)
+        .iter()
+        .map(|s| format!("{}|{}", s.vnet, s.cidr))
+        .collect();
+    items.sort();
+    items.join(";")
+}
+
+/// The `subnetSettings` field: each subnet's gateway and DHCP ranges,
+/// `vnet|cidr|gateway|ranges` — what changes in place (ADR-0063 D2.1).
+fn subnet_settings_field(subnets: &[IpamSubnet]) -> String {
+    let mut items: Vec<String> = subnets
         .iter()
         .map(|s| {
             let mut ranges: Vec<String> = s
@@ -392,6 +431,49 @@ fn subnets_field(vnets: &[VNetSpecInput]) -> String {
         .collect();
     items.sort();
     items.join(";")
+}
+
+/// The controller a spec or record names, or the default — the one the
+/// provider is asked to allocate from.
+fn controller_of(ipam: Option<&String>) -> &str {
+    ipam.map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(delonix_networking::ipam::DEFAULT_CONTROLLER)
+}
+
+/// The `ipam` field: the controller, when the zone has subnets that allocate
+/// from it; empty otherwise (a zone without subnets allocates nothing).
+fn ipam_field(ipam: Option<&String>, vnets: &[VNetSpecInput]) -> String {
+    if declared_subnets(vnets).is_empty() {
+        String::new()
+    } else {
+        controller_of(ipam).to_string()
+    }
+}
+
+/// Refuses an `ipam:` the provider would refuse or that would allocate
+/// nothing (ADR-0063 D1): a controller id the provider cannot be sent, or a
+/// zone that declares no subnet. Whether the provider HAS the controller is
+/// asked in the apply, before any write.
+fn validate_ipam(name: &str, spec: &NetworkZoneSpecDoc) -> Result<()> {
+    let Some(id) = spec.ipam.as_deref().map(str::trim) else {
+        return Ok(());
+    };
+    if !delonix_networking::ipam::valid_controller_id(id) {
+        return Err(Error::Invalid(super::po::tf(
+            "NetworkZone/{name}: ipam '{id}' is not an IPAM controller id (a lowercase letter, \
+             then up to 7 lowercase letters or digits)",
+            &[("name", name), ("id", id)],
+        )));
+    }
+    if declared_subnets(&spec.vnets).is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "NetworkZone/{name}: ipam: no subnet is declared, so the zone allocates nothing from \
+             '{id}' — declare a subnet, or drop `ipam:`",
+            &[("name", name), ("id", id)],
+        )));
+    }
+    Ok(())
 }
 
 fn reservations_field(rs: &[ReservationRec]) -> String {
@@ -475,6 +557,11 @@ fn record_fields(rec: &NetworkZoneRecord) -> BTreeMap<String, String> {
     let mut f = BTreeMap::new();
     f.insert("vnets".into(), vnets_field(&rec.vnets));
     f.insert("subnets".into(), subnets_field(&rec.vnets));
+    f.insert(
+        "subnetSettings".into(),
+        subnet_settings_field(&declared_subnets(&rec.vnets)),
+    );
+    f.insert("ipam".into(), ipam_field(rec.ipam.as_ref(), &rec.vnets));
     f.insert("reservations".into(), reservations_field(&rec.reservations));
     f.insert("dns".into(), dns_field(rec.dns.as_ref()));
     f
@@ -488,6 +575,11 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let mut fields = BTreeMap::new();
     fields.insert("vnets".into(), vnets_field(&spec.vnets));
     fields.insert("subnets".into(), subnets_field(&spec.vnets));
+    fields.insert(
+        "subnetSettings".into(),
+        subnet_settings_field(&declared_subnets(&spec.vnets)),
+    );
+    fields.insert("ipam".into(), ipam_field(spec.ipam.as_ref(), &spec.vnets));
     fields.insert("dns".into(), dns_field(spec.dns.as_ref()));
     fields.insert(
         "reservations".into(),
@@ -512,6 +604,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .into_iter()
         .map(|rec| {
             let mut fields = record_fields(&rec);
+            fields.insert("subnetSettings".into(), subnet_settings_held(&rec)?);
             fields.insert("reservations".into(), reservations_held(&rec)?);
             fields.insert("dns".into(), dns_held(&rec)?);
             fields.insert("remote".into(), remote_field(&rec)?);
@@ -613,25 +706,54 @@ fn remote_field(rec: &NetworkZoneRecord) -> Result<String> {
         .map_err(at(provider_id, "observe"))?;
     let mut drift = delonix_sdn::segment::segment_drift(&rec.name, &declared_vnets(rec), &observed);
     if uses_ipam(&[], rec) {
-        // Reservations are compared in their own (hot) field; here only the
-        // zone's options and the subnets, which are cold.
+        // Reservations and each subnet's gateway and ranges are compared in
+        // their own (hot) fields; here only what is cold: the zone's options,
+        // its controller, and which subnets exist.
         let subnets = declared_subnets(&rec.vnets);
         let dhcp = delonix_networking::ipam::zone_serves_dhcp(
             &subnets,
             !declared_reservations(&rec.vnets).is_empty(),
         );
-        drift.extend(delonix_networking::ipam::ipam_drift(
-            &subnets,
-            &[],
-            dhcp,
-            &observe_ipam(provider_id, rec)?,
+        let observed = observe_ipam(provider_id, rec)?;
+        drift.extend(delonix_networking::ipam::ipam_layout_drift(
+            &subnets, dhcp, &observed,
         ));
+        if !subnets.is_empty() {
+            drift.extend(delonix_networking::ipam::controller_drift(
+                controller_of(rec.ipam.as_ref()),
+                &observed,
+            ));
+        }
     }
     Ok(if drift.is_empty() {
         IN_SYNC.to_string()
     } else {
         drift.join("; ")
     })
+}
+
+/// The `subnetSettings` field as the provider runs it: the gateway and DHCP
+/// ranges of each of the record's subnets on the cluster. A gateway or a range
+/// changed by hand reads as a hot change the next apply converges in place
+/// (ADR-0063 D2), not as drift that would replace the zone. A declared subnet
+/// that is not running is missing from this field and named by `remote`. A
+/// record that cannot be observed keeps what it recorded.
+fn subnet_settings_held(rec: &NetworkZoneRecord) -> Result<String> {
+    let declared = declared_subnets(&rec.vnets);
+    if rec.ledger.is_interrupted() || rec.owner.is_empty() || declared.is_empty() {
+        return Ok(subnet_settings_field(&declared));
+    }
+    let (provider_id, _) = resolve_provider(&rec.provider)?;
+    let running: Vec<IpamSubnet> = observe_ipam(provider_id, rec)?
+        .subnets
+        .into_iter()
+        .filter(|s| {
+            declared
+                .iter()
+                .any(|d| d.vnet == s.vnet && d.cidr == s.cidr)
+        })
+        .collect();
+    Ok(subnet_settings_field(&running))
 }
 
 /// The `reservations` field as the provider holds it: the record's
@@ -721,6 +843,40 @@ fn owner_mark(rec: &mut NetworkZoneRecord) -> Result<OwnerMark> {
     Ok(OwnerMark::new(&rec.owner)?)
 }
 
+/// ADR-0063 D2.3 as one ledger step: puts the IPAM gateway entry of each of
+/// the record's owned subnets back on its running gateway, where a discarded
+/// gateway change left it. Opened and saved before it runs, settled and saved
+/// after — a process that dies during it leaves the step open, and the next
+/// apply repairs again. Each subnet repaired is said.
+fn repair_gateways_step(
+    s: &JsonStore<NetworkZoneRecord>,
+    rec: &mut NetworkZoneRecord,
+    provider_id: &str,
+    ipam: &dyn IpamProvider,
+    owner: &OwnerMark,
+) -> Result<()> {
+    let name = rec.name.clone();
+    let vnets: Vec<String> = rec.vnets.iter().map(|v| v.name.clone()).collect();
+    let step = rec.ledger.open("repair_gateways", &name);
+    s.save(&name, rec)?;
+    let done = ipam
+        .repair_gateways(&name, &vnets, owner)
+        .map_err(at(provider_id, "repair_gateways"));
+    rec.ledger
+        .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+    s.save(&name, rec)?;
+    for line in done.as_deref().unwrap_or_default() {
+        println!(
+            "{}",
+            super::po::tf(
+                "networkzone/{name}: IPAM gateway entry repaired — {line}",
+                &[("name", &name), ("line", line)],
+            )
+        );
+    }
+    done.map(|_| ())
+}
+
 /// Applies one document, in ONE transaction on the cluster: ensures the
 /// zone, then every declared vnet inside it (zone first — a vnet
 /// referencing one that does not exist is refused by the provider), and
@@ -734,6 +890,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let name = doc.metadata.name.clone();
     validate_addressing(&spec.vnets)?;
     validate_dns(&name, &spec)?;
+    validate_ipam(&name, &spec)?;
 
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
@@ -779,6 +936,32 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             .into());
         }
     }
+    // The IPAM controller is the cluster administrator's too (ADR-0063 D1):
+    // one the cluster does not have, or one the provider cannot serve a zone
+    // from, is refused before any write.
+    let controller = controller_of(spec.ipam.as_ref()).to_string();
+    if let (Some(ipam), false) = (&ipam, subnets.is_empty()) {
+        let registered = ipam
+            .controllers()
+            .map_err(at(provider_id, "ipam_controllers"))?;
+        if !delonix_networking::ipam::missing_controllers(&controller, &registered).is_empty() {
+            return Err(
+                delonix_networking::Error::RemotePrerequisiteMissing(super::po::tf(
+                    "IPAM controller '{id}' on provider '{provider}' — the engine does not create \
+                 IPAM controllers: register it on the cluster (it holds the IPAM's credential)",
+                    &[("id", &controller), ("provider", provider_id)],
+                ))
+                .into(),
+            );
+        }
+        if let Some(c) = registered.iter().find(|c| c.id == controller) {
+            ipam.refuse_unsupported(c)
+                .map_err(at(provider_id, "ipam_controllers"))?;
+        }
+    }
+    // The gateways the zone ran with before this apply, to say which ones a
+    // DNS server keeps the old record of (ADR-0064).
+    let prior_subnets = declared_subnets(&rec.vnets);
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
@@ -801,16 +984,32 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     {
         rec.zone_owned = true;
     }
-    if let Some(why) = rec.ledger.interruption() {
+    let interrupted = rec.ledger.interruption();
+    if let Some(why) = &interrupted {
         println!(
             "{}",
             super::po::tf(
                 "networkzone/{name}: the last run was {why} — applying again; the provider discards what it left staged",
-                &[("name", &name), ("why", &why)],
+                &[("name", &name), ("why", why)],
             )
         );
     }
     rec.ledger = Default::default();
+    // A run that stopped may have staged a gateway change: discarding it does
+    // not move the IPAM's gateway entry back (ADR-0063 D2.3). Repaired before
+    // this run stages anything — and if the repair fails, nothing is staged.
+    //
+    // Run on EVERY apply, not only after an interrupted one (widened from the
+    // ADR's original "called only after a failure" — found measuring D2.3
+    // live: a stale entry left by a hand edit on the node, or by an older
+    // binary that never had this repair, would otherwise sit there until the
+    // next failure happens to trip it. `repair_gateways` is idempotent — a
+    // subnet already matching its running gateway is a no-op — so widening
+    // the call site costs one extra read per apply and closes that gap for
+    // every apply, not just the one right after a crash).
+    if let Some(ipam) = &ipam {
+        repair_gateways_step(&s, &mut rec, provider_id, ipam.as_ref(), &owner)?;
+    }
     let step = rec.ledger.open("transaction", &name);
     s.save(&name, &rec)?;
 
@@ -852,7 +1051,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         // subnet exists — then each subnet.
         if let (Some(ipam), false) = (&ipam, subnets.is_empty()) {
             let dhcp = delonix_networking::ipam::zone_serves_dhcp(&subnets, !declared.is_empty());
-            ipam.prepare_zone(&name, dhcp)
+            ipam.prepare_zone(&name, &controller, dhcp)
                 .map_err(at(provider_id, "prepare_zone"))?;
         }
         // DNS before the subnets: the node registers a subnet's gateway when
@@ -887,6 +1086,22 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 .unwrap_or(true);
         rec.zone_owned = had_zone || committed;
         s.save(&name, &rec)?;
+        // ADR-0063 D2.3: a gateway change this transaction staged moved the
+        // IPAM's gateway entry, and the rollback left it there. Repaired now;
+        // a repair that fails is a failed step, and the next apply repairs
+        // again before it stages anything. The transaction's error is the
+        // one returned.
+        if let Some(ipam) = &ipam {
+            if let Err(e) = repair_gateways_step(&s, &mut rec, provider_id, ipam.as_ref(), &owner) {
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "networkzone/{name}: the IPAM gateway repair after the failed transaction failed too: {error}",
+                        &[("name", &name), ("error", &e.to_string())],
+                    )
+                );
+            }
+        }
     }
     outcome?;
 
@@ -895,7 +1110,36 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     }
     rec.vnets = spec.vnets.clone();
     rec.dns = spec.dns.clone();
+    rec.ipam = spec.ipam.clone();
     s.save(&name, &rec)?;
+    if spec.dns.is_some() {
+        // ADR-0064: the node writes `<vnet>-gw` when a subnet is created and
+        // never rewrites it, so a gateway changed in place keeps its old
+        // address on the DNS server.
+        for now in &subnets {
+            if let Some(before) = prior_subnets.iter().find(|p| {
+                p.vnet == now.vnet
+                    && p.cidr == now.cidr
+                    && p.gateway.is_some()
+                    && p.gateway != now.gateway
+            }) {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "networkzone/{name}: subnet {cidr} changed its gateway in place — the DNS \
+                         record '{vnet}-gw' keeps the old address {old}; the provider never \
+                         rewrites it",
+                        &[
+                            ("name", &name),
+                            ("cidr", &now.cidr),
+                            ("vnet", &now.vnet),
+                            ("old", before.gateway.as_deref().unwrap_or_default()),
+                        ],
+                    )
+                );
+            }
+        }
+    }
     if dns_changed {
         // Measured on PVE 9.2.2: the node writes records when it hands out an
         // address or creates a subnet, and never rewrites them.
@@ -1291,8 +1535,9 @@ mod tests {
         assert_eq!(s[0].dhcp_ranges.len(), 1);
         let r = declared_reservations(&v);
         assert_eq!(r[0].mac, "BC:24:11:00:00:20", "the MAC in the node's form");
+        assert_eq!(subnets_field(&v), "v1|10.78.0.0/24");
         assert_eq!(
-            subnets_field(&v),
+            subnet_settings_field(&s),
             "v1|10.78.0.0/24|10.78.0.1|10.78.0.100-10.78.0.150"
         );
         let mut reversed = r.clone();
@@ -1302,6 +1547,7 @@ mod tests {
         let spec = |vnets: &[VNetSpecInput]| NetworkZoneSpecDoc {
             vnets: vnets.to_vec(),
             dns: None,
+            ipam: None,
         };
         let caps = required_capabilities(&spec(&v));
         for c in [C::NetIpamProvider, C::NetIpamReservation, C::NetIpamDhcp] {
@@ -1319,7 +1565,68 @@ mod tests {
                 zone: "f5c.lab".into(),
                 reverse_server: Some("pdnslab".into()),
             }),
+            ipam: None,
         }
+    }
+
+    /// ADR-0063 D2.1, at plan time: a gateway or a range changed moves only
+    /// the hot `subnetSettings` field; a changed CIDR moves the cold
+    /// `subnets` field, so the plan replaces the document.
+    #[test]
+    fn a_gateway_change_is_hot_and_a_cidr_change_is_cold() {
+        use super::super::reconcile::is_hot_change;
+        let before = addressed();
+        let mut gw = addressed();
+        gw[0].subnets[0].gateway = Some("10.78.0.254".into());
+        gw[0].subnets[0].dhcp_range[0].start = "10.78.0.10".into();
+        assert_eq!(subnets_field(&before), subnets_field(&gw));
+        assert_ne!(
+            subnet_settings_field(&declared_subnets(&before)),
+            subnet_settings_field(&declared_subnets(&gw))
+        );
+        let mut moved = addressed();
+        moved[0].subnets[0].cidr = "10.79.0.0/24".into();
+        assert_ne!(subnets_field(&before), subnets_field(&moved));
+
+        let k = super::super::kinds::NETWORK_ZONE;
+        assert!(is_hot_change(k, "subnetSettings", Some("a"), Some("b")));
+        assert!(!is_hot_change(k, "subnets", Some("a"), Some("b")));
+        assert!(!is_hot_change(k, "ipam", Some("pve"), Some("other")));
+        for f in ["subnetSettings", "ipam"] {
+            assert!(RECONCILED_NETWORK_ZONE_FIELDS.contains(&f), "{f}");
+        }
+    }
+
+    /// ADR-0063 D1.1: the controller defaults to the built-in one, is
+    /// compared only for a zone that allocates, and is refused when it cannot
+    /// be sent or would allocate nothing.
+    #[test]
+    fn the_ipam_controller_defaults_and_is_refused_when_it_cannot_apply() {
+        let v = addressed();
+        assert_eq!(ipam_field(None, &v), "pve");
+        assert_eq!(ipam_field(Some(&"pve".to_string()), &v), "pve");
+        assert_eq!(ipam_field(Some(&"netbox1".to_string()), &v), "netbox1");
+        assert_eq!(ipam_field(Some(&"netbox1".to_string()), &v[1..]), "");
+
+        let spec = |ipam: &str, vnets: Vec<VNetSpecInput>| NetworkZoneSpecDoc {
+            vnets,
+            dns: None,
+            ipam: Some(ipam.into()),
+        };
+        assert!(validate_ipam("z", &spec("pve", addressed())).is_ok());
+        let e = validate_ipam("z", &spec("Net-Box", addressed()))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("not an IPAM controller id"), "{e}");
+        let e = validate_ipam("z", &spec("pve", addressed()[1..].to_vec()))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("no subnet is declared"), "{e}");
+
+        let parsed: NetworkZoneSpecDoc =
+            serde_yaml::from_str("vnets: []\nipam: netbox1\n").unwrap();
+        assert_eq!(parsed.ipam.as_deref(), Some("netbox1"));
+        assert!(NETWORK_ZONE_SPEC_FIELDS.contains(&"ipam"));
     }
 
     #[test]
