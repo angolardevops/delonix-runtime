@@ -14003,18 +14003,21 @@ msgstr "o contrato de nó no socket unix por omissão — gRPC e HTTP/JSON do de
 
 msgid "a socket of your own, then read the providers as JSON"
 msgstr "um socket teu, e depois lê os providers em JSON"
-# vm resize (vm.resize.cold, ADR-0049 slice 2)
-msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot"
-msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque"
+# vm resize (vm.resize.cold, ADR-0049 slice 2; --disk-size added for vm.disk.resize)
+msgid "Change a STOPPED VM's vCPUs, memory and/or boot disk size for its next boot"
+msgstr "Muda os vCPUs, a memória e/ou o tamanho do disco de arranque de uma VM PARADA para o próximo arranque"
 
-msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot.\n\nA cold resize: refused while the VM is running or paused, because a guest that only sees the change after its next reboot has not been resized yet. On libvirt and Cloud Hypervisor the record is the whole definition and `vm start` rebuilds the VM from it; on Proxmox the node's config is changed and read back, and the node is asked too — a VM started from its own UI is refused even if the record says stopped. A value that does not parse (`2GB`) is refused, never read as a default."
-msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque.\n\nUm redimensionamento a frio: recusado enquanto a VM está a correr ou em pausa, porque um convidado que só vê a mudança no reinício seguinte ainda não foi redimensionado. No libvirt e no Cloud Hypervisor o registo é a definição inteira e o `vm start` reconstrói a VM a partir dele; no Proxmox a config do nó é alterada e relida, e o nó também é consultado — uma VM arrancada pela interface dele é recusada mesmo que o registo diga parada. Um valor que não se lê (`2GB`) é recusado, nunca tomado por um valor por omissão."
+msgid "Change a STOPPED VM's vCPUs, memory and/or boot disk size for its next boot.\n\nA cold resize: refused while the VM is running or paused, because a guest that only sees the change after its next reboot has not been resized yet. On libvirt and Cloud Hypervisor the record is the whole definition and `vm start` rebuilds the VM from it; on Proxmox the node's config is changed and read back, and the node is asked too — a VM started from its own UI is refused even if the record says stopped. A value that does not parse (`2GB`) is refused, never read as a default.\n\n`--disk-size` only GROWS the boot disk, never shrinks it — there is no flag for that. Most guests pick up the new space on their own next boot (the golden images' own cloud-init already runs `growpart`); a guest without that needs its own `growpart`/`resize2fs` by hand."
+msgstr "Muda os vCPUs, a memória e/ou o tamanho do disco de arranque de uma VM PARADA para o próximo arranque.\n\nUm redimensionamento a frio: recusado enquanto a VM está a correr ou em pausa, porque um convidado que só vê a mudança no reinício seguinte ainda não foi redimensionado. No libvirt e no Cloud Hypervisor o registo é a definição inteira e o `vm start` reconstrói a VM a partir dele; no Proxmox a config do nó é alterada e relida, e o nó também é consultado — uma VM arrancada pela interface dele é recusada mesmo que o registo diga parada. Um valor que não se lê (`2GB`) é recusado, nunca tomado por um valor por omissão.\n\nO `--disk-size` só FAZ CRESCER o disco de arranque, nunca o encolhe — não há flag para isso. A maioria dos convidados apanha o espaço novo sozinha no arranque seguinte (o cloud-init das imagens doradas já corre `growpart`); um convidado sem isso precisa do seu próprio `growpart`/`resize2fs`, à mão."
 
 msgid "New number of vCPUs (at least 1)"
 msgstr "Novo número de vCPUs (pelo menos 1)"
 
 msgid "New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`)"
 msgstr "Nova memória: um número com sufixo M/G opcional (`768M`, `4G`, `4Gi`)"
+
+msgid "New boot disk size, in whole GiB — grows only, never shrinks"
+msgstr "Novo tamanho do disco de arranque, em GiB inteiros — só cresce, nunca encolhe"
 
 msgid "give a stopped VM 4 vCPUs and 8 GiB for its next boot"
 msgstr "dar a uma VM parada 4 vCPUs e 8 GiB para o próximo arranque"
