@@ -105,9 +105,12 @@ first), independent of which domain each came from:
    checked. Single-node is now genuinely fixed and proven on real libvirt/KVM; multi-node
    is unchanged (no `--cni` escape hatch exists on `cluster kubeadm` yet to refuse it
    safely).
-3. **CaaS — the ADR-0062 root-fallback is invisible to any external consumer.** `FIXED,
-   CLI half` (§4.3). A Pod that declares `runAsNonRoot` can be running as root, with
-   nothing in `ContainerStatus`/`inspect`/logs to show it.
+3. **CaaS — the ADR-0062 root-fallback is invisible to any external consumer.** `FIXED`
+   (§4.3, §4.11). A Pod that declares `runAsNonRoot` can be running as root, with
+   nothing in `ContainerStatus`/`inspect`/logs to show it. The CLI/`inspect` half closed
+   first (`1e5562e6`); the CRI half — `ContainerStatusResponse.info`, the kubelet's own
+   path to the fact — closed afterward (`46e3222a`, §4.11), gated on `verbose` exactly
+   like `StatusResponse.info`'s `capabilityCeiling` already was.
 4. **KaaS — `oom_score_adj`/`cpuset_mems`/`unified`/hugepages silently dropped on the CRI
    path.** `oom_score_adj` `FIXED` (§4.5); `cpuset_mems`/`unified`/hugepages still not —
    contradicts ADR-0038's own decision text. See §8.
@@ -143,14 +146,17 @@ first), independent of which domain each came from:
    server's own — by construction there is exactly one possible caller identity today,
    so recording it would record a constant, not information. Nothing small to add ahead
    of the real multi-caller design this gap is actually about.
-10. **KaaS — no teardown for a VM/SSH-provisioned cluster.** `TEARDOWN FIXED` (§4.8).
+10. **KaaS — no teardown for a VM/SSH-provisioned cluster.** `FIXED` (§4.8, §4.11).
     Destroying one meant manually `vm rm`-ing every VM, by hand editing `~/.kube/config`
     to drop the stale context — **confirmed live, the hard way** (§4.6): this audit's own
     test VM had to be torn down exactly that way before the fix existed. `cluster destroy`
     now detects a VM-provisioned cluster by its node-naming convention and removes the
     VMs, the cached kubeconfig, and the matching `~/.kube/config` entries in one call,
-    leaving the operator's `--network` alone. Backup/restore (`etcdctl snapshot`) is still
-    not wired anywhere — that half of the gap remains open, see §8.
+    leaving the operator's `--network` alone. The other half, `etcdctl snapshot`
+    backup/restore, closed afterward (`7d529876`/`c7fe951d`, §4.11) — `cluster backup
+    <name> [--to <path>]` and `cluster restore <name> --from <path>`, scoped to a single
+    `etcd.mode: stacked` control-plane and stated as not validated against a real
+    cluster in the session that wrote it (see §4.11 for the exact boundary).
 11. **Contracts — 39 of 59 RPCs unimplemented**, Container/Pod/VM/Stack/Image with zero
     served verbs — the PaaS cannot delegate to the contract for almost anything yet.
     `REVIEWED, still not attempted` (§4.10): confirmed against the current tree (8 explicit
@@ -284,15 +290,15 @@ output. Reverted the fix locally and confirmed the test fails without it
 (`assertion failed: r.record.user_fallback_to_root`), then restored it. 84/84
 `delonix-compute` tests, 92/92 `cmd::container::` tests pass.
 
-**Deliberately not done**: the CRI's own `ContainerStatus` still cannot show this. CRI
-containers are tracked in a separate `ContainerRec`/store
-(`crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs`), distinct from
-`delonix-compute::Container`, and `ContainerStatusResponse.info` (the CRI spec's
-sanctioned free-form debug extension, requested via `verbose: true`) is currently always
-empty. Wiring the flag through needs understanding exactly how `StartContainer`
-cross-references the two stores for a given id — real work, not something to guess at
-without a kubelet in this sandbox to validate the result against. Named as a scoped
-follow-up rather than attempted half-blind.
+**Deliberately not done at the time, closed as its own follow-up (`46e3222a`, §4.11)**:
+the CRI's own `ContainerStatus` could not show this. CRI containers are tracked in a
+separate `ContainerRec`/store, distinct from `delonix-compute::Container`, and
+`ContainerStatusResponse.info` was always empty, with `container_status` not even
+accepting a `verbose` parameter to gate it on. The cross-reference turned out not to be
+at `StartContainer` (the fallback decision happens inside the engine process it shells
+out to, after that function has already returned) — it is read back at `ContainerStatus`
+time, from the engine's own persisted record, through the SAME `load_reconciled` helper
+`state`/`exit_code`/OOM-killed already use. See §4.11 for the full fix.
 
 ### 4.4 `fix(net)` 347cd598 — a network's record now outlives a failed dataplane removal
 
@@ -487,7 +493,7 @@ pass**: §4.6's own manual teardown already exercised the mechanism this fix aut
 (`vm::cmd_rm`, kubeconfig YAML surgery) by hand on a real cluster; repeating that exact
 live setup a second time in the same session, now through this new code path, is left for
 a follow-up rather than redone immediately. The etcd backup/restore half of gap #10 (no
-`etcdctl snapshot` wiring) remains open — see §8.
+`etcdctl snapshot` wiring) closed afterward — see §4.11.
 
 ### 4.9 `docs(proxmox)` 3f9def7f — gap #6 investigated; the obvious guard is itself blocked
 
@@ -570,6 +576,65 @@ specific evidence that confirms it, not just the earlier one-line guess:
   the same class of contract-wide decision §6 already declines to improvise — growing the
   served surface or the error shape by a few RPCs under an unrelated audit would not close
   either gap, only make the next, real completion pass harder to reason about.
+
+### 4.11 Two gaps named "still open" in §3/§8 closed in a later session — `7d529876`/`c7fe951d`, `46e3222a`
+
+Both of this section's own earlier "still open" notes (§4.3's deliberately-not-done CRI
+half of gap #3; §4.8's "the etcd backup/restore half of gap #10 remains open") were
+closed in a later session on this same tree, each as its own scoped PR rather than
+revisiting this audit's original commits.
+
+**Gap #10, second half — `cluster backup`/`cluster restore` (`7d529876`, docs fix
+`c7fe951d`, PR #747).** `delonix cluster backup <name> [--to <path>]` runs `etcdctl
+snapshot save` on `<name>-cp1` and streams the result back over SSH, base64-encoded,
+inside ONE privileged command (save → encode → delete the remote temp file) — the
+cluster's entire keyspace, Secrets included, never sits on the node's disk outside that
+one command's lifetime, and is never read back by a second, separate connection, the
+same class of bug `fetch_kubeconfig`'s own doc comment documents having once had for
+`admin.conf`. `delonix cluster restore <name> --from <path>` is the destructive half:
+mirrors Kubernetes' own documented etcd disaster-recovery procedure (stop the static
+pod, preserve the old data directory, `etcdctl snapshot restore` under the EXISTING
+member's own identity — name/initial-cluster/peer-urls/data-dir, read back from its own
+manifest and parsed with a pure, unit-tested function rather than a remote `grep -oP`
+round trip depending on PCRE support no node is guaranteed to have), and refuses by name
+above a single `-cpN` control-plane (a correct multi-member restore needs a working
+`--initial-cluster` for every OTHER member too, not attempted). Scoped to `etcd.mode:
+stacked` only — `external` has its own PKI layout and is refused by name, never silently
+attempted. **Neither verb was validated against a real cluster**: no live
+VM-provisioned cluster was available in that session without reusing another session's
+stopped VMs, which it declined to touch — stated explicitly in both commands' own doc
+comments, not folded into a caveat. 1169/1169 `delonix-runtime-bin` tests pass (1164
+before this fix, +5 new unit tests on the pure manifest-flag parser backing both verbs);
+clippy, fmt, lang_ratchet, arch_fitness, `cargo deny`, the CLI leaf-baseline gate and
+the exec-coverage ratchet all clean, with the latter's denominator honestly bumped
+272 → 274 (two new leaves neither the battery nor that session could exercise live, so
+the fraction reads 58.4% rather than falsely flat) rather than silently ignored.
+
+**Gap #3, second half — `ContainerStatusResponse.info` (`46e3222a`, PR #750).**
+`container_status` now accepts a `verbose` parameter, threaded through from
+`ContainerStatusRequest.verbose` at the gRPC boundary exactly the way `status()` already
+threads it for `StatusResponse.info`'s `capabilityCeiling` (the only existing precedent
+in this crate for the `info`-map convention: a flat key, a plain string value, never a
+JSON blob). When `true`, it reads the engine's own persisted record for `cri-<id>` via
+the EXISTING `load_reconciled` helper — the same one `state`/`exit_code`/OOM-killed
+already go through — and reports `info["userFallbackToRoot"]` as `"true"`/`"false"`,
+never omitted (an absent key and an explicit `"false"` read very differently to a
+kubelet logging `.info` on an unexpected restart). The cross-reference this section's
+own §4.3 flagged as needing investigation turned out not to be at `StartContainer`: the
+fallback decision happens inside the engine process that RPC shells out to
+(`delonix __apirun`), after the handler has already returned, so the fact has to be read
+back at `ContainerStatus` time, never captured at creation time — no change needed to
+`StartContainer` or `ContainerRec`. Two new unit tests (fallback reported under
+`verbose: true`, a container whose `USER` was honoured reports `"false"`, a non-verbose
+request gets an empty `info` map either way, per the CRI contract), reverted locally and
+confirmed to fail without the fix. 63/63 `delonix-cri` lib tests plus the crate's full
+test suite (lib + both existing `grpc_status.rs` integration tests + `version_flag.rs`)
+pass. **No new gRPC-transport integration test added**, stated rather than silently
+skipped: the only surface this adds at that boundary is a 3-line pass-through
+(`container_id`/`verbose` extraction) identical in shape to `status()`'s own, which
+already has gRPC-transport proof; the substantive logic is covered, revert-verified, at
+the lib level — the same bar the CLI half of this exact gap (`1e5562e6`) was closed
+against.
 
 ## 5. Test results, exact
 
@@ -688,9 +753,12 @@ and leaves written down, for whoever does that work next:
   new code path).
 - **5 of the 12 originally-ranked gaps are not fixed by this pass — but all five were
   reviewed with evidence, not left on the earlier one-line guess (§4.10).** Of the twelve,
-  six have a behavior fix: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half),
-  #8, and #10 (teardown half — the backup/restore half, `etcdctl snapshot`, is still open).
-  Gap #6 (§4.9) got real work — a precise diagnosis of exactly why the obvious fix cannot
+  six have a behavior fix: #1, #2 (single-node), #3, #4 (`oom_score_adj` half), #8, and
+  #10 — **#3 and #10 closed in full** in a later session on this same tree (§4.11: #3's
+  CRI/`ContainerStatus` half, `46e3222a`; #10's `etcdctl snapshot` backup/restore half,
+  `7d529876`), both stated as not validated against a real cluster/kubelet, same as this
+  section's own earlier fixes. Gap #6 (§4.9) got real work — a precise diagnosis of
+  exactly why the obvious fix cannot
   land without an owner decision, and doc-comment hardening in the meantime — but no
   behavior changed, so it stays counted as open. The live-only gap #13 (stale CLI on
   golden images) is also now fixed (§4.7). The five that remain untouched each have a
