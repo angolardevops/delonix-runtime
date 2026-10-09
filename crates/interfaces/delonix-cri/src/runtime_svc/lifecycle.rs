@@ -159,6 +159,51 @@ impl CriResources {
         })
         .unwrap_or_default()
     }
+
+    /// PURE. ADR 0038 item 4: `UpdateContainerResources` is a PARTIAL
+    /// request — a field `update` leaves unspecified (0/empty) means "not
+    /// touched by this call", never "clear it" (see [`ResourceUpdate`]'s own
+    /// doc for why this differs from `CreateContainer`'s reading of the same
+    /// zero). Overwriting `self` with `update` wholesale would silently
+    /// erase every OTHER field the container was created with the moment any
+    /// one field is updated — this merges field by field instead, so the
+    /// persisted record keeps meaning the container's FULL current desired
+    /// state, the shape `start_run_opts` already expects.
+    ///
+    /// `cpu_quota`/`cpu_period` are kept as a PAIR, deliberately: a caller
+    /// that updates one without the other is not a shape any real kubelet or
+    /// `crictl update` produces (the two are always sent together), and
+    /// merging them independently could leave a quota paired with the OLD
+    /// period, silently changing the core count nobody asked to change.
+    fn merge_update(&self, update: &CriResources) -> CriResources {
+        let mut merged = self.clone();
+        if update.memory_limit_in_bytes != 0 {
+            merged.memory_limit_in_bytes = update.memory_limit_in_bytes;
+        }
+        if update.cpu_quota != 0 || update.cpu_period != 0 {
+            merged.cpu_quota = update.cpu_quota;
+            merged.cpu_period = update.cpu_period;
+        }
+        if update.cpu_shares != 0 {
+            merged.cpu_shares = update.cpu_shares;
+        }
+        if !update.cpuset_cpus.is_empty() {
+            merged.cpuset_cpus = update.cpuset_cpus.clone();
+        }
+        if update.oom_score_adj != 0 {
+            merged.oom_score_adj = update.oom_score_adj;
+        }
+        if !update.cpuset_mems.is_empty() {
+            merged.cpuset_mems = update.cpuset_mems.clone();
+        }
+        if !update.hugepage_limits.is_empty() {
+            merged.hugepage_limits = update.hugepage_limits.clone();
+        }
+        if !update.unified.is_empty() {
+            merged.unified = update.unified.clone();
+        }
+        merged
+    }
 }
 
 /// `cpu.shares` (cgroup v1, what the kubelet sends: 2..262144) → `cpu.weight`
@@ -283,6 +328,14 @@ fn validate_resource_paths(r: &CriResources) -> Result<(), Status> {
 /// `.` (cgroup v2's own naming: `memory.high`, `io.weight`, `cpuset.cpus`, …).
 fn wanted_resource_controllers(r: &CriResources) -> Vec<(String, String)> {
     let mut wanted: Vec<(String, String)> = Vec::new();
+    // `cpuset_cpus` was wired into `apply_resources` long before this preflight
+    // existed (ADR 0038 item 3's other half, the one the context note already
+    // named: "measured in a rootless session: nproc 32 inside a container that
+    // asked for 0-1"). It never got a refusal of its own — closed here, in the
+    // same place its sibling `cpuset_mems` was closed.
+    if !r.cpuset_cpus.is_empty() {
+        wanted.push(("cpuset".to_string(), "cpuset_cpus".to_string()));
+    }
     if !r.cpuset_mems.is_empty() {
         wanted.push(("cpuset".to_string(), "cpuset_mems".to_string()));
     }
@@ -1737,6 +1790,125 @@ pub fn start_container(
     Ok(Response::new(StartContainerResponse {}))
 }
 
+/// CRI `UpdateContainerResources` (ADR 0038 item 4) — the live counterpart of
+/// `StartContainer`'s own resource path, on a container already created (and
+/// usually running; a stopped one is a normal case too, see below).
+///
+/// Honour-or-refuse FIRST, reusing [`refuse_unenforceable_resources`] — the
+/// identical check `StartContainer` already runs, against the SAME question
+/// (does the leaf this container is actually in have the controller?), before
+/// any write. Then merges the request into the container's recorded resources
+/// ([`CriResources::merge_update`] — this call is partial, never a full
+/// replace) and applies it: [`delonix_linux::update_kube_resources`] dispatches
+/// to `SetUnitProperties` under a kubelet systemd scope or a direct cgroup
+/// write otherwise (ADR 0038 item 1's placement decides which).
+///
+/// The record is updated whether or not the container is CURRENTLY live — a
+/// stopped container has nothing to write to right now, and the merge is
+/// exactly what the next `start` is supposed to pick up (the same `Deferred`
+/// case `update_limits` already names for the CLI's `container update`). A
+/// container that LOOKS alive but whose cgroup vanished out from under it
+/// (`NotEnforced`) is not an error either — by the time anyone could act on
+/// one, the race that caused it is already over — but it is logged, because
+/// `UpdateContainerResourcesResponse` has no field to carry the distinction
+/// back to the kubelet.
+pub fn update_container_resources(
+    base: &Path,
+    req: UpdateContainerResourcesRequest,
+) -> Result<Response<UpdateContainerResourcesResponse>, Status> {
+    let mut rec: ContainerRec = read_rec(&ct_dir(base), &req.container_id)?;
+    let sandbox = read_rec::<SandboxRec>(&sb_dir(base), &rec.sandbox_id).ok();
+    let kube_cgroup_parent = sandbox
+        .as_ref()
+        .map(|sb| sb.cgroup_parent.as_str())
+        .filter(|s| !s.is_empty());
+    let asked = CriResources::from_cri(req.linux.as_ref());
+    refuse_unenforceable_resources(&asked, kube_cgroup_parent)?;
+    let merged = rec.resources.merge_update(&asked);
+
+    let store = delonix_state::Store::open(base.join("containers")).map_err(st)?;
+    let id = format!("cri-{}", req.container_id);
+    let container = store.load(&id).map_err(st)?;
+
+    // What THIS request actually asked to change — recomputed from the full
+    // MERGED pair for cpus (never just `asked`'s own cpu_quota/cpu_period),
+    // so touching only one of the two still reads a consistent core count.
+    let memory =
+        (asked.memory_limit_in_bytes != 0).then(|| merged.memory_limit_in_bytes.to_string());
+    let cpus = (asked.cpu_quota != 0 || asked.cpu_period != 0).then(|| {
+        format!(
+            "{:.3}",
+            merged.cpu_quota as f64 / merged.cpu_period.max(1) as f64
+        )
+    });
+    let cpu_weight =
+        (asked.cpu_shares != 0).then(|| shares_to_weight(merged.cpu_shares).to_string());
+    let cpuset = (!asked.cpuset_cpus.is_empty()).then(|| merged.cpuset_cpus.clone());
+    let cpuset_mems = (!asked.cpuset_mems.is_empty()).then(|| merged.cpuset_mems.clone());
+    let oom_score_adj = (asked.oom_score_adj != 0)
+        .then(|| merged.oom_score_adj.clamp(i32::MIN as i64, i32::MAX as i64) as i32);
+
+    let update = delonix_linux::ResourceUpdate {
+        memory: memory.as_deref(),
+        cpus: cpus.as_deref(),
+        cpu_weight: cpu_weight.as_deref(),
+        cpuset: cpuset.as_deref(),
+        cpuset_mems: cpuset_mems.as_deref(),
+        hugepage_limits: &asked.hugepage_limits,
+        unified: &asked.unified,
+        oom_score_adj,
+    };
+    match delonix_linux::update_kube_resources(&container, &update) {
+        Ok(delonix_linux::LimitUpdate::NotEnforced) => tracing::warn!(
+            container = %req.container_id,
+            "cri: UpdateContainerResources did not reach a live cgroup — the \
+             container looked alive and its cgroup is gone"
+        ),
+        Ok(_) => {}
+        Err(e) => return Err(Status::internal(e.to_string())),
+    }
+
+    // Persisted regardless of liveness — see the function doc for why a
+    // stopped container is a normal case here, not an error.
+    store
+        .update(&id, |c| {
+            if let Some(m) = &memory {
+                c.memory_max = m.clone();
+            }
+            if let Some(cp) = &cpus {
+                c.cpus = cp.clone();
+            }
+            if cpu_weight.is_some() {
+                c.cpu_weight = cpu_weight.clone();
+            }
+            if cpuset.is_some() {
+                c.cpuset = cpuset.clone();
+            }
+            if cpuset_mems.is_some() {
+                c.cpuset_mems = cpuset_mems.clone();
+            }
+            if !asked.hugepage_limits.is_empty() {
+                c.hugepage_limits = merged.hugepage_limits.clone();
+            }
+            if !asked.unified.is_empty() {
+                c.unified = merged.unified.clone();
+            }
+            if oom_score_adj.is_some() {
+                c.oom_score_adj = oom_score_adj;
+            }
+            true
+        })
+        .map_err(st)?;
+
+    // The CRI's own record must agree, or a later `start` — which rebuilds
+    // the run spec from `rec.resources`, not from the engine's own record —
+    // would silently discard this update the moment the container restarts.
+    rec.resources = merged;
+    write_rec(&ct_dir(base), &req.container_id, &rec)?;
+
+    Ok(Response::new(UpdateContainerResourcesResponse {}))
+}
+
 pub fn stop_container(
     base: &Path,
     id: String,
@@ -2906,6 +3078,56 @@ mod tests {
         assert!(o.cpus.is_none());
     }
 
+    /// ADR 0038 item 4: an `UpdateContainerResources` is PARTIAL — touching
+    /// one field must leave every other one exactly as the container was
+    /// created with. A wholesale replace would erase them the moment any
+    /// single field is updated.
+    #[test]
+    fn merge_update_only_overwrites_the_fields_the_request_gave() {
+        let created = CriResources {
+            memory_limit_in_bytes: 536_870_912,
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            cpuset_cpus: "0-1".into(),
+            ..Default::default()
+        };
+        let only_memory = CriResources {
+            memory_limit_in_bytes: 268_435_456,
+            ..Default::default()
+        };
+        let merged = created.merge_update(&only_memory);
+        assert_eq!(
+            merged.memory_limit_in_bytes, 268_435_456,
+            "the field asked for"
+        );
+        assert_eq!(merged.cpu_quota, 50_000, "untouched");
+        assert_eq!(merged.cpu_period, 100_000, "untouched");
+        assert_eq!(merged.cpuset_cpus, "0-1", "untouched");
+    }
+
+    /// `cpu_quota`/`cpu_period` merge as a PAIR: an update that only touches
+    /// one of the two replaces BOTH with the update's own values, never a
+    /// mix of the new one and the old one — that mix would silently change
+    /// the core count nobody asked to change.
+    #[test]
+    fn merge_update_keeps_cpu_quota_and_period_paired() {
+        let created = CriResources {
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            ..Default::default()
+        };
+        let only_period = CriResources {
+            cpu_period: 50_000,
+            ..Default::default()
+        };
+        let merged = created.merge_update(&only_period);
+        assert_eq!(
+            merged.cpu_quota, 0,
+            "the pair moves together, not independently"
+        );
+        assert_eq!(merged.cpu_period, 50_000);
+    }
+
     /// The runc/crun map: the kubelet's floor (2) and ceiling (262144) land on
     /// cpu.weight's own bounds, and the default 1024 shares lands on 39.
     #[test]
@@ -2950,6 +3172,7 @@ mod tests {
     fn wanted_controllers_match_the_field_and_the_unified_prefix() {
         assert_eq!(wanted_resource_controllers(&CriResources::default()), []);
         let r = CriResources {
+            cpuset_cpus: "0-1".into(),
             cpuset_mems: "0-1".into(),
             hugepage_limits: vec![("2MB".into(), 1)],
             unified: vec![
@@ -2961,6 +3184,7 @@ mod tests {
         assert_eq!(
             wanted_resource_controllers(&r),
             vec![
+                ("cpuset".to_string(), "cpuset_cpus".to_string()),
                 ("cpuset".to_string(), "cpuset_mems".to_string()),
                 ("hugetlb".to_string(), "hugepage_limits".to_string()),
                 ("memory".to_string(), "unified[\"memory.high\"]".to_string()),
