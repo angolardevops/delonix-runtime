@@ -149,7 +149,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (29 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (30 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -301,7 +301,7 @@ leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/s
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 29 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 30 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-model</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -324,6 +324,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
     NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
     OPN[&quot;delonix-opnsense&lt;br&gt;GatewayProvider REMOTO contra a API REST de UMA appliance OPNsense&lt;br&gt;(ADR-0051) — fora do delonix-sdn por trazer cliente HTTP&quot;]
+    PDNS[&quot;delonix-powerdns&lt;br&gt;cliente minimo da API de UM servidor PowerDNS, com a credencial&lt;br&gt;do PROPRIO motor (ADR-0064 D6) — remove os registos de gateway que o no deixa&quot;]
     MODEL[&quot;delonix-model&lt;br&gt;modelo partilhado PURO (foundation, ADR-0040) —&lt;br&gt;o Error e o dicionario DX-CDNN, Status, ContainerFw,&lt;br&gt;typestate, o modelo do segredo e os nomes gerados&quot;]
     STACK[&quot;delonix-stack&lt;br&gt;contexto Stack (ADR-0040): tabela de Kinds,&lt;br&gt;reconciliador de 3 vias, Condition, revisões&quot;]
     COMPUTE[&quot;delonix-compute&lt;br&gt;contexto Compute (ADR-0040): a especificacao&lt;br&gt;de execucao unica (RunOpts) que as entradas traduzem&quot;]
@@ -347,6 +348,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; PVE
     BIN --&gt; NAS
     BIN --&gt; OPN
+    BIN --&gt; PDNS
     MCPBIN --&gt; MCP
     MGMTBIN --&gt; MGMT
     NODEAPIBIN --&gt; NODEAPI
@@ -433,6 +435,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     STATECRATE --&gt; COMPUTE
     NAS --&gt; MODEL
     OPN --&gt; MODEL
+    PDNS --&gt; MODEL
     VM2 --&gt; NODECTX
     VM2 --&gt; MODEL
     VOL --&gt; STORCTX
@@ -493,6 +496,11 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   <code>GatewayProvider</code> do OPNsense (ADR-0051) implementa a porta do contexto <code>delonix-networking</code>
   (ADR-0059 F2a; até lá vivia no <code>delonix-sdn</code>), os dois a partir de fora, e <strong>registam-se</strong> (<code>register_backend</code>/<code>register_gateway_provider</code>), com
   o alvo conhecido só pelo <code>-bin</code>, não pelo motor.</li>
+<li><strong><code>delonix-powerdns</code> está fora pela mesma razão</strong> (ADR-0064 D6): fala com UM servidor
+  PowerDNS, com a credencial que o operador dá ao MOTOR no <code>providers.yaml</code>, para remover
+  os registos de gateway que o nó Proxmox escreve e nunca remove. Depende só do
+  <code>delonix-model</code>; quem sabe QUE registos são é o contexto <code>delonix-networking</code>
+  (<code>gateway_records</code>) e o provider (<code>DnsProvider::reverse_zone</code>), e quem os liga é o <code>-bin</code>.</li>
 <li><strong>Nada depende de <code>delonix-proxmox</code>, <code>delonix-truenas</code> nem <code>delonix-opnsense</code> a não ser
   o <code>-bin</code> e, no caso do <code>delonix-proxmox</code>, o <code>delonix-node-api</code></strong> (que o lista entre os
   providers do nó, como o <code>delonix provider ls</code> faz) — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
