@@ -11233,6 +11233,15 @@ msgstr "Interno: o cgroup do kubelet para este pod (`cgroup_parent` do CRI, ADR 
 msgid "Internal: CRI `LinuxContainerResources.oom_score_adj` (ADR 0038 item 3), written to `/proc/<pid>/oom_score_adj` at spawn."
 msgstr "Interno: `LinuxContainerResources.oom_score_adj` do CRI (ADR 0038, item 3), escrito em `/proc/<pid>/oom_score_adj` no arranque."
 
+msgid "Internal: CRI `LinuxContainerResources.cpuset_mems` (ADR 0038 item 3), mirrors `--kube-cgroup-parent`/`--oom-score-adj` so this field is reachable without a kubelet. NOT spelled `--cpuset-mems` — that is a Docker-ism this engine deliberately does not have on the stable CLI (see `the_docker_spellings_are_not_ours`), and this flag only exists for debugging the CRI path."
+msgstr "Interno: `LinuxContainerResources.cpuset_mems` do CRI (ADR 0038, item 3), espelha `--kube-cgroup-parent`/`--oom-score-adj` para este campo ser alcançável sem kubelet. NÃO se chama `--cpuset-mems` — isso é um docker-ismo que este motor deliberadamente não tem na CLI estável (ver `the_docker_spellings_are_not_ours`), e esta flag existe só para depurar o caminho do CRI."
+
+msgid "Internal: CRI `LinuxContainerResources.hugepage_limits` (ADR 0038 item 3), repeatable `<page_size>=<limit_bytes>` (e.g. `2MB=1048576`)."
+msgstr "Interno: `LinuxContainerResources.hugepage_limits` do CRI (ADR 0038, item 3), repetível `<page_size>=<limit_bytes>` (ex.: `2MB=1048576`)."
+
+msgid "Internal: CRI `LinuxContainerResources.unified` (ADR 0038 item 3), repeatable `<cgroup file>=<value>` (e.g. `memory.high=100000000`)."
+msgstr "Interno: `LinuxContainerResources.unified` do CRI (ADR 0038, item 3), repetível `<ficheiro cgroup>=<valor>` (ex.: `memory.high=100000000`)."
+
 msgid "'{name}' is not installed next to delonix nor on the PATH — install it with `{hint}`"
 msgstr "'{name}' não está instalado ao lado do delonix nem no PATH — instala-o com `{hint}`"
 

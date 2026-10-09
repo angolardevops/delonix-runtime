@@ -132,3 +132,17 @@ Design that follows:
 Not measured by the spike: the cgroupfs driver end to end, `oom_score_adj`, `unified`,
 hugepages, and anything under a live kubelet (the control-plane crash-loop on this image is
 investigated separately).
+
+## Item 3 implemented: `cpuset_mems`/`unified`/`hugepage_limits` honour-or-refuse
+
+`CriResources` gained the three proto fields; `refuse_unenforceable_resources` runs in
+`start_container`, before `StartContainer` reports success, and checks the controller the
+container is actually about to land in — the engine's own `leaf_controllers()` without a
+`cgroup_parent`, the parent's own `cgroup.controllers` with one (item 1's placement decides
+which). The write side mirrors `cpuset.cpus` across all three write paths (delegated rootless
+leaf, non-delegated root slice, the kubelet-parent leaf/scope), with `AllowedMemoryNodes` added
+as a systemd unit property for `cpuset_mems` and raw writes for `hugepage_limits`/`unified`
+(neither has a systemd property). `oom_score_adj` needed no change: it never touches a
+controller. See AGENTS.md, "`cpuset_mems`/`unified`/`hugepage_limits`: honour-or-refuse no
+caminho CRI (ADR 0038 item 3)" for the full account. Not validated against a live kubelet (the
+crash-loop above); unit/pure tests only.

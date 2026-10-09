@@ -8309,10 +8309,61 @@ scope sob o slice do pod com `memory.max 67108864`, `cpu.max 50000 100000`, `cpu
 → `exit 137`, `reason OOMKilled`; cgroupfs → leaf em `/kubepods/burstable/pod…/delonix-<id>`; pai
 com `..` → `InvalidArgument`; sandbox sem pai → `delonix.slice` e tecto da casa inalterados.
 
-**Por fazer (ADR 0038, fases seguintes)**: estatísticas para o eviction manager,
-`oom_score_adj`, `unified`/hugepages, `UpdateContainerResources` (via `SetUnitProperties`, já
-provado no spike), e a validação com um kubelet estável — bloqueada pelo crash-loop do
-control-plane, investigado à parte.
+**Por fazer (ADR 0038, fases seguintes)**: `UpdateContainerResources` (via `SetUnitProperties`,
+já provado no spike), e a validação com um kubelet estável — bloqueada pelo crash-loop do
+control-plane, investigado à parte. As estatísticas do eviction manager e `oom_score_adj`
+ficaram fechados a seguir (#316, e a secção `CriResources`/`apply_resources` abaixo);
+`cpuset_mems`/`unified`/hugepages estão na secção seguinte.
+
+## `cpuset_mems`/`unified`/hugepage_limits: honour-or-refuse no caminho CRI (ADR 0038 item 3)
+
+A fase 1 pôs o container no sítio certo; o que faltava era o resto do item 3 — e, ao medir antes
+de escrever código, descobriu-se que o CRI **não tinha preflight nenhum**, nem para o que já
+estava implementado (`cpuset_cpus`). O `oom_score_adj` já escrevia direito (não passa por
+controlador nenhum, é um `/proc/<pid>/oom_score_adj` puro); `cpuset_mems`, `hugepage_limits` e
+`unified` nem chegavam a `RunOpts` — o `CriResources` do `lifecycle.rs` não os tinha.
+
+- **`CriResources` ganhou os três campos do proto** (`cpuset_mems: String`, `hugepage_limits:
+  Vec<(String, u64)>`, `unified: Vec<(String, String)>` — o `unified` ordenado no `from_cri`,
+  para um `HashMap` iterado em ordens diferentes nunca comparar como requisições distintas).
+  `apply_resources` traduz-os para os três campos novos de `RunOpts`/`Container`
+  (`cpuset_mems`/`hugepage_limits`/`unified`), marcados "set only by the CRI" como
+  `kube_cgroup_parent`/`oom_score_adj` já estavam — não há flag `container run` para nenhum.
+- **A recusa vive em `refuse_unenforceable_resources`, chamada em `start_container` antes de
+  `start_run_opts`** — antes de `StartContainer` responder sucesso, a mesma disciplina do #307
+  para `-m`/`--cpus`/`--cpuset` na CLI. Three-way split testável: `validate_resource_paths`
+  (recusa um `page_size`/chave `unified` com `/`/`..` — os dois tornam-se parte de um CAMINHO de
+  ficheiro, `hugetlb.<page_size>.limit_in_bytes` ou a própria chave), `wanted_resource_controllers`
+  (que controlador cada campo pedido precisa — `cpuset_mems`→cpuset, `hugepage_limits`→hugetlb,
+  cada chave `unified` pelo PREFIXO antes do primeiro ponto, a própria convenção de nomes do
+  cgroup v2) e `resources_decision` (PURA, testada sem árvore cgroup2 nenhuma — o mesmo corte do
+  `controller_limits_decision` da CLI).
+- **O "ANDE" do probe depende de ONDE o container vai realmente ficar**: sem `cgroup_parent` do
+  sandbox, pergunta-se ao `delonix_linux::leaf_controllers()` (o mesmo slice/leaf que um `container
+  run` usa); com ele, lê-se o `cgroup.controllers` do PRÓPRIO parent (`parent_cgroup_controllers`)
+  — o slice do motor não é onde esse container vai viver (ADR 0038 item 1). Perguntar ao sítio
+  errado teria recusado pedidos legítimos debaixo de um `cgroup_parent` bem delegado, ou aceitado
+  pedidos que o parent do kubelet não consegue de todo.
+  `DELONIX_ALLOW_UNENFORCED_LIMITS` é a mesma válvula da CLI, com `tracing::warn!` em vez de
+  `eprintln!` (é um servidor, não um comando).
+- **O lado do HONRAR**: `cpuset.mems` ganhou o mesmo tratamento que `cpuset.cpus` já tinha nos
+  TRÊS caminhos de escrita (leaf delegado rootless, slice root sem parent, leaf cgroupfs do
+  parent do kubelet — este último HARD-FAIL via `write_limit`, como `cpuset.cpus` já era ali).
+  `hugepage_limits`/`unified` ganharam o mesmo nos três, **best-effort** nos dois primeiros e no
+  braço systemd (sem propriedade D-Bus para nenhum dos dois — escrevem-se directamente no
+  `scope_dir`, depois de confirmado que o pid já está dentro), **hard-fail** no braço cgroupfs.
+  O braço systemd ganhou `AllowedMemoryNodes` como propriedade da unit (o mesmo `cpuset_to_mask`
+  que já servia `AllowedCPUs` — é uma lista-de-números→bitmask genérica, não específica de CPU).
+  `"hugetlb"` entrou nas quatro listas de controladores a activar no `subtree_control`
+  (`try_delegated_base` × 2, `enable_slice_controllers`, o braço cgroupfs do `setup_kube_cgroup`)
+  — sem isso, mesmo um host com hugetlb disponível no kernel nunca o veria delegado à leaf.
+- **Nenhuma validação de `page_size`/valor de `unified` além do traçado de caminho**: o kubelet
+  já normaliza `"2MB"`/`"1GB"` antes de os mandar, e o próprio `unified` é, por definição do
+  proto, um par `(ficheiro cgroup v2, valor)` cru — reescrever a validação do kubelet seria uma
+  segunda opinião não documentada sobre um contrato que já é dele.
+- **Não validado ao vivo** (precisa de um kubelet estável contra um nó com hugetlb configurado,
+  bloqueado pelo mesmo crash-loop do control-plane citado acima): só testes unitários/puros das
+  três funções de decisão e dos argv/escritas de cgroup.
 
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 

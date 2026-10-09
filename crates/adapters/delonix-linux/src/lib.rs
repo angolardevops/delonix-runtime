@@ -4617,7 +4617,7 @@ fn enable_slice_controllers(slice: &str) {
     // silently a no-op as root, and `leaf_controllers` now makes `container run`
     // refuse the flag instead — so the slice has to hand it down for root to
     // honour a flag it always claimed to.
-    for ctrl in ["memory", "cpu", "pids", "io", "cpuset"] {
+    for ctrl in ["memory", "cpu", "pids", "io", "cpuset", "hugetlb"] {
         if enable(slice, ctrl) {
             continue;
         }
@@ -5153,7 +5153,7 @@ fn try_delegated_base(
     //    uncounted (metrics at 0 despite the right leaf). One by one; fails if
     //    the base has direct processes (shared scope) → fallback.
     let mut any = false;
-    for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
+    for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids", "+hugetlb"] {
         if std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl).is_ok() {
             any = true;
         }
@@ -5167,7 +5167,7 @@ fn try_delegated_base(
     //     allocation is a limit that was not there when it mattered.
     if let (Some(_), Some(gp)) = (&group, c.cgroup_parent.as_ref()) {
         apply_group_ceiling(&parent, gp);
-        for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
+        for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids", "+hugetlb"] {
             let _ = std::fs::write(format!("{parent}/cgroup.subtree_control"), ctrl);
         }
     }
@@ -5230,6 +5230,7 @@ fn try_delegated_base(
     if let Some(set) = &c.cpuset {
         let _ = std::fs::write(format!("{leaf}/cpuset.cpus"), set);
     }
+    write_cri_only_resources(&leaf, c);
     if let Some(w) = &c.io_weight {
         let _ = std::fs::write(format!("{leaf}/io.weight"), w);
     }
@@ -5252,6 +5253,28 @@ fn try_delegated_base(
         return false;
     }
     true
+}
+
+/// Best-effort writes for the CRI-only resource fields of ADR 0038 item 3
+/// (`cpuset_mems`, `hugepage_limits`, `unified`) — no `container run` flag sets
+/// any of these, so there is nobody for a CLI-side preflight to warn. The CRI
+/// itself refuses the request before `StartContainer` reports success when the
+/// leaf's cgroup is missing the controller
+/// (`delonix_cri::refuse_unenforceable_resources`); a write failing here means
+/// that probe and the kernel disagreed, not that nobody checked.
+fn write_cri_only_resources(leaf: &str, c: &Container) {
+    if let Some(mems) = &c.cpuset_mems {
+        let _ = std::fs::write(format!("{leaf}/cpuset.mems"), mems);
+    }
+    for (size, limit) in &c.hugepage_limits {
+        let _ = std::fs::write(
+            format!("{leaf}/hugetlb.{size}.limit_in_bytes"),
+            limit.to_string(),
+        );
+    }
+    for (key, value) in &c.unified {
+        let _ = std::fs::write(format!("{leaf}/{key}"), value);
+    }
 }
 
 /// The four flags that set `io.max`, as the warnings name them.
@@ -5692,6 +5715,7 @@ fn setup_cgroup(c: &Container, pid: i32, io_dev: Option<&str>) -> Result<()> {
     if let Some(set) = &c.cpuset {
         let _ = std::fs::write(format!("{cg}/cpuset.cpus"), set); // core pinning
     }
+    write_cri_only_resources(cg, c);
     if let Some(w) = &c.io_weight {
         let _ = std::fs::write(format!("{cg}/io.weight"), w); // I/O priority
     }
@@ -8583,6 +8607,12 @@ struct KubeLimits {
     cpu_weight: Option<u64>,
     cpuset: Option<String>,
     io_weight: Option<u64>,
+    /// ADR 0038 item 3, CRI `cpuset_mems` — no CLI flag sets this.
+    cpuset_mems: Option<String>,
+    /// ADR 0038 item 3, CRI `hugepage_limits` — `(page_size, limit_bytes)`.
+    hugepage_limits: Vec<(String, u64)>,
+    /// ADR 0038 item 3, CRI `unified` — raw `(cgroup file, value)` pairs.
+    unified: Vec<(String, String)>,
 }
 
 /// PURE. `memory_max`/`cpus` of `"max"` or empty mean unlimited here.
@@ -8631,6 +8661,9 @@ fn kube_limits(c: &Container) -> Result<KubeLimits> {
         cpu_weight: weight(&c.cpu_weight, "cpu-weight")?,
         cpuset: c.cpuset.clone().filter(|s| !s.trim().is_empty()),
         io_weight: weight(&c.io_weight, "io-weight")?,
+        cpuset_mems: c.cpuset_mems.clone().filter(|s| !s.trim().is_empty()),
+        hugepage_limits: c.hugepage_limits.clone(),
+        unified: c.unified.clone(),
     })
 }
 
@@ -8702,6 +8735,21 @@ fn transient_scope_argv(
             .ok_or_else(|| Error::InvalidCpuset(format!("--cpuset {set}: not a CPU list")))?;
         let mut p = vec![
             "AllowedCPUs".to_string(),
+            "ay".to_string(),
+            mask.len().to_string(),
+        ];
+        p.extend(mask.iter().map(u8::to_string));
+        props.push(p);
+    }
+    // ADR 0038 item 3, CRI `cpuset_mems`: the same bitmask property systemd
+    // offers for `cpuset.mems` as `AllowedCPUs` offers for `cpuset.cpus` —
+    // `cpuset_to_mask` is a list-of-numbers → bitmask, not a CPU-specific one.
+    if let Some(set) = &l.cpuset_mems {
+        let mask = cpuset_to_mask(set).ok_or_else(|| {
+            Error::InvalidCpuset(format!("cpuset_mems {set}: not a memory-node list"))
+        })?;
+        let mut p = vec![
+            "AllowedMemoryNodes".to_string(),
             "ay".to_string(),
             mask.len().to_string(),
         ];
@@ -8808,6 +8856,24 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
                     c.name
                 );
             }
+            // ADR 0038 item 3, `hugepage_limits`/`unified`: systemd has no unit
+            // property for either (unlike `cpuset.mems`'s `AllowedMemoryNodes`,
+            // set above as a scope property), so they land on the scope's own
+            // cgroup directory directly, best-effort for the same reason the
+            // Cgroupfs branch's writes are hard-fail: `delonix-cri`'s
+            // `refuse_unenforceable_resources` has already refused the request
+            // before `StartContainer` can answer success when the controller
+            // is missing, so a write failing here means that probe and the
+            // kernel disagreed, not that nobody checked.
+            for (size, limit) in &limits.hugepage_limits {
+                let _ = std::fs::write(
+                    format!("{scope_dir}/hugetlb.{size}.limit_in_bytes"),
+                    limit.to_string(),
+                );
+            }
+            for (key, value) in &limits.unified {
+                let _ = std::fs::write(format!("{scope_dir}/{key}"), value);
+            }
             Ok(())
         }
         KubeCgroupDriver::Cgroupfs => {
@@ -8831,8 +8897,10 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
             // cgroup with `cpu memory pids` enabling nothing at all.
             let available =
                 std::fs::read_to_string(format!("{parent}/cgroup.controllers")).unwrap_or_default();
-            for ctl in controllers_to_enable(&available, &["cpu", "memory", "pids", "cpuset", "io"])
-            {
+            for ctl in controllers_to_enable(
+                &available,
+                &["cpu", "memory", "pids", "cpuset", "io", "hugetlb"],
+            ) {
                 let _ = std::fs::write(
                     format!("{parent}/cgroup.subtree_control"),
                     format!("+{ctl}"),
@@ -8861,6 +8929,27 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
             }
             if let Some(set) = &limits.cpuset {
                 write_limit(&leaf, "cpuset.cpus", set)?;
+            }
+            // ADR 0038 item 3, `cpuset_mems`/`hugepage_limits`/`unified`: the
+            // same hard-fail discipline as `cpuset.cpus` above — these only
+            // ever come from the CRI (no `container run` flag sets them), and
+            // the refusal that prevents a request the leaf cannot enforce from
+            // ever reaching here lives in `delonix-cri`
+            // (`refuse_unenforceable_resources`), before `StartContainer`
+            // answers success. A write failing here means that probe and the
+            // kernel disagreed, not that nobody checked.
+            if let Some(mems) = &limits.cpuset_mems {
+                write_limit(&leaf, "cpuset.mems", mems)?;
+            }
+            for (size, limit) in &limits.hugepage_limits {
+                write_limit(
+                    &leaf,
+                    &format!("hugetlb.{size}.limit_in_bytes"),
+                    &limit.to_string(),
+                )?;
+            }
+            for (key, value) in &limits.unified {
+                write_limit(&leaf, key, value)?;
             }
             if let Some(w) = limits.io_weight {
                 write_limit(&leaf, "io.weight", &w.to_string())?;

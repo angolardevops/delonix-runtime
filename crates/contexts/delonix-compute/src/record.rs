@@ -600,6 +600,20 @@ pub struct Container {
     /// this field existed.
     #[serde(default)]
     pub oom_score_adj: Option<i32>,
+    /// CRI `LinuxContainerResources.cpuset_mems` (ADR 0038 item 3) — written to
+    /// `cpuset.mems` at spawn. `None` on every container not created through
+    /// the CRI with the field set.
+    #[serde(default)]
+    pub cpuset_mems: Option<String>,
+    /// CRI `LinuxContainerResources.hugepage_limits` (ADR 0038 item 3), each
+    /// entry `(page_size, limit_bytes)` written to
+    /// `hugetlb.<page_size>.limit_in_bytes` at spawn.
+    #[serde(default)]
+    pub hugepage_limits: Vec<(String, u64)>,
+    /// CRI `LinuxContainerResources.unified` (ADR 0038 item 3), each entry a
+    /// raw `(cgroup file, value)` pair written verbatim at spawn.
+    #[serde(default)]
+    pub unified: Vec<(String, String)>,
     /// A custom OCI seccomp profile, stored as its JSON CONTENT.
     ///
     /// The content and not the path, deliberately: the file lives on the host,
@@ -838,6 +852,9 @@ impl Container {
             ulimits: Vec::new(),
             sysctls: Vec::new(),
             oom_score_adj: None,
+            cpuset_mems: None,
+            hugepage_limits: Vec::new(),
+            unified: Vec::new(),
             seccomp_profile: None,
             dns_servers: Vec::new(),
             dns_searches: Vec::new(),
