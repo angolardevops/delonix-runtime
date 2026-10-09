@@ -600,6 +600,19 @@ fn delonix_oom_killed(base: &Path, cri_id: &str) -> bool {
         .is_some_and(|c| c.crash_reason.as_deref() == Some(delonix_linux::OOM_KILLED))
 }
 
+/// Whether this CRI container's image declared a non-root `USER` the host
+/// could not honour, so it is actually running as root (ADR-0062's documented
+/// fallback). Before this, the fact lived only in `Container.
+/// user_fallback_to_root` — readable from `delonix container inspect`, but
+/// invisible to anything going through the CRI: a Pod declaring
+/// `runAsNonRoot` could be running as root with nothing in `ContainerStatus`
+/// to show it. `None` (container unknown) reads the same as `false` here —
+/// there is no fallback fact to report about a container that cannot be
+/// found, which is the state `container_status` reports on it either way.
+fn delonix_user_fallback_to_root(base: &Path, cri_id: &str) -> bool {
+    load_reconciled(base, cri_id).is_some_and(|c| c.user_fallback_to_root)
+}
+
 /// The CRI `reason` for an exited container. `OOMKilled` is the string the
 /// kubelet and `kubectl describe` already know; before it existed an OOM came
 /// back as `Error` with exit 137, indistinguishable from an external SIGKILL.
@@ -1685,6 +1698,7 @@ pub fn list_containers(
 pub fn container_status(
     base: &Path,
     id: String,
+    verbose: bool,
 ) -> Result<Response<ContainerStatusResponse>, Status> {
     let mut r: ContainerRec = read_rec(&ct_dir(base), &id)?;
     // Real exit code (from the Store), so the kubelet sees the exit cause instead
@@ -1734,9 +1748,22 @@ pub fn container_status(
         mounts: r.mounts.iter().map(CriMount::to_cri).collect(),
         ..Default::default()
     };
+    // `info` is only populated for a verbose request (CRI contract) — same
+    // gating `status()` already uses for `capabilityCeiling`. The ADR-0062
+    // fallback goes here so `crictl inspect --output json <id>` (or a kubelet
+    // that logs `.info` on an unexpected restart) can show it, instead of a
+    // `runAsNonRoot` Pod running as root with nothing in `ContainerStatus` to
+    // say so.
+    let mut info = std::collections::HashMap::new();
+    if verbose {
+        info.insert(
+            "userFallbackToRoot".to_string(),
+            delonix_user_fallback_to_root(base, &r.id).to_string(),
+        );
+    }
     Ok(Response::new(ContainerStatusResponse {
         status: Some(status),
-        info: Default::default(),
+        info,
     }))
 }
 
@@ -3483,7 +3510,7 @@ mod tests {
         };
         write_rec(&ct_dir(tmp), "abc", &rec).unwrap();
 
-        let s1 = container_status(tmp, "abc".into())
+        let s1 = container_status(tmp, "abc".into(), false)
             .unwrap()
             .into_inner()
             .status
@@ -3498,7 +3525,7 @@ mod tests {
         );
 
         std::thread::sleep(std::time::Duration::from_millis(5));
-        let s2 = container_status(tmp, "abc".into())
+        let s2 = container_status(tmp, "abc".into(), false)
             .unwrap()
             .into_inner()
             .status
@@ -3508,6 +3535,89 @@ mod tests {
             "finished_at não pode mudar entre polls sucessivos"
         );
         assert_eq!(s1.started_at, s2.started_at);
+    }
+
+    /// The other half of the ADR-0062 fix (the CLI/`inspect` half landed
+    /// first): a Pod declaring `runAsNonRoot` running as root had nothing in
+    /// `ContainerStatus` to show it. `info` is CRI's own sanctioned
+    /// free-form debug extension, gated on `verbose` exactly like
+    /// `StatusResponse.info`'s `capabilityCeiling` already is.
+    #[test]
+    fn container_status_reports_the_adr_0062_fallback_only_when_verbose() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
+        let mut c = delonix_compute::Container::new(
+            "cri-abc".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        c.user_fallback_to_root = true;
+        store.save(&c).unwrap();
+
+        let rec = ContainerRec {
+            id: "abc".into(),
+            created_at: 1,
+            ..Default::default()
+        };
+        write_rec(&ct_dir(tmp), "abc", &rec).unwrap();
+
+        let quiet = container_status(tmp, "abc".into(), false)
+            .unwrap()
+            .into_inner();
+        assert!(
+            quiet.info.is_empty(),
+            "a non-verbose request must get an empty info map, per the CRI contract"
+        );
+
+        let loud = container_status(tmp, "abc".into(), true)
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            loud.info.get("userFallbackToRoot").map(String::as_str),
+            Some("true"),
+            "a verbose request on a container that fell back to root must say so"
+        );
+    }
+
+    /// The symmetric case: a container that DID get its declared `USER` has
+    /// nothing to report — `info` says `"false"`, never omits the key (an
+    /// absent key and an explicit `"false"` read very differently to a
+    /// kubelet logging `.info` on an unexpected restart).
+    #[test]
+    fn container_status_reports_false_when_the_user_was_honoured() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
+        let mut c = delonix_compute::Container::new(
+            "cri-abc".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        c.status = delonix_model::records::Status::Running;
+        store.save(&c).unwrap();
+
+        let rec = ContainerRec {
+            id: "abc".into(),
+            created_at: 1,
+            ..Default::default()
+        };
+        write_rec(&ct_dir(tmp), "abc", &rec).unwrap();
+
+        let loud = container_status(tmp, "abc".into(), true)
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            loud.info.get("userFallbackToRoot").map(String::as_str),
+            Some("false")
+        );
     }
 
     /// A base with two sandboxes and three containers: two in `sbaaaa`, one in `sbbbbb`.

@@ -325,8 +325,9 @@ impl RuntimeService for DelonixRuntime {
         &self,
         r: Request<ContainerStatusRequest>,
     ) -> Result<Response<ContainerStatusResponse>, Status> {
-        let (base, id) = (self.base.clone(), r.into_inner().container_id);
-        blocking(move || lifecycle::container_status(&base, id)).await
+        let req = r.into_inner();
+        let (base, id, verbose) = (self.base.clone(), req.container_id, req.verbose);
+        blocking(move || lifecycle::container_status(&base, id, verbose)).await
     }
 
     // --- not exercised by the base crictl/kubelet flow → UNIMPLEMENTED ---
