@@ -4800,6 +4800,117 @@ JSON
   rm -f "$CRISOCK2"
 fi
 
+# --- ADR-0038 item 3: cpuset_mems/unified/hugepage_limits, honour-or-refuse ---
+# Até esta mudança o CRI não tinha preflight NENHUM para um campo de recurso —
+# nem para o `cpuset_cpus` já ligado desde sempre: um kubelet a pedir um
+# controlador que a leaf do container não tem recebia um container `Running`
+# com o limite simplesmente ausente, a mesma falha que o #307 já fechou para
+# `-m`/`--cpus`/`--cpuset` na CLI. A recusa corre em `StartContainer`, não em
+# `CreateContainer` — por isso o `create` abaixo tem de ter SUCESSO, e é o
+# `start` a seguir que recusa.
+#
+# O controlador "nonexistentctrl" nunca existe em kernel nenhum, por isso a
+# recusa é determinística em QUALQUER host — nem precisa de root nem de saber
+# o que este host delega. A válvula `DELONIX_ALLOW_UNENFORCED_LIMITS` é o
+# controlo: o MESMO pedido, com ela no ambiente do servidor, tem de arrancar.
+# E o traçado de caminho (`hugepage_limits[].page_size`/chave `unified` com
+# `..`) é recusado SEMPRE, incluindo com a válvula aberta — ela só dispensa a
+# pergunta ao controlador, nunca a segurança do caminho do ficheiro.
+if ! command -v crictl >/dev/null 2>&1; then
+  skip "CRI: cpuset_mems/unified/hugepage_limits honour-or-refuse" "o crictl não está instalado neste host"
+else
+  CRIRES_POD="$OUT/pod-res.json"
+  cat > "$CRIRES_POD" <<'JSON'
+{ "metadata": { "name": "respod", "uid": "resc-uid-1", "namespace": "default", "attempt": 0 }, "linux": {} }
+JSON
+  CRIRES_BOGUS="$OUT/ctr-res-bogus.json"
+  cat > "$CRIRES_BOGUS" <<'JSON'
+{
+  "metadata": { "name": "resc", "attempt": 0 },
+  "image": { "image": "alpine:3.19" },
+  "command": ["sleep", "300"],
+  "linux": { "resources": { "unified": { "nonexistentctrl.limit": "1" } } }
+}
+JSON
+  CRIRES_ESCAPE="$OUT/ctr-res-escape.json"
+  cat > "$CRIRES_ESCAPE" <<'JSON'
+{
+  "metadata": { "name": "resc2", "attempt": 0 },
+  "image": { "image": "alpine:3.19" },
+  "command": ["sleep", "300"],
+  "linux": { "resources": { "hugepage_limits": [ { "page_size": "../etc/passwd", "limit": 1 } ] } }
+}
+JSON
+
+  CRISOCK3="/tmp/dlx-cri-res-$PFX.sock"
+  CRIPID3="$(e2e_serve_up cri "$CRISOCK3")"
+  if [ -z "$CRIPID3" ] || [ ! -S "$CRISOCK3" ]; then
+    skip "CRI: cpuset_mems/unified/hugepage_limits honour-or-refuse" "o serve cri não subiu"
+  else
+    C3="crictl --runtime-endpoint unix://$CRISOCK3 --image-endpoint unix://$CRISOCK3"
+    POD3="$($C3 runp "$CRIRES_POD" 2>/dev/null)"
+    CID3="$($C3 create "$POD3" "$CRIRES_BOGUS" "$CRIRES_POD" 2>/dev/null)"
+    check "CRI: create com um recurso que o leaf não delega tem sucesso" ok bash -c \
+      "[ -n '$CID3' ]"
+    # UM SÓ `start`, capturado — chamá-lo duas vezes (uma por grep) testaria o
+    # SEGUNDO pedido num container já falhado a arrancar, que não é o mesmo
+    # caso: a 1.ª versão deste check fazia isso e o 2.º `start` respondia outra
+    # coisa, FAIL por um bug do próprio check, não do motor.
+    CRIRES_OUT3="$(crictl --runtime-endpoint "unix://$CRISOCK3" start "$CID3" 2>&1)"
+    CRIRES_RC3=$?
+    check "CRI: start recusa um controlador inexistente" fail bash -c "exit $CRIRES_RC3"
+    # Sem o traçado exacto de `[`/`\"` — o klog do crictl escreve o campo com
+    # barras invertidas antes das aspas (`unified[\"...\"]`), e um regex que
+    # tentasse casar essa forma à letra discutia escape em vez de medir o que
+    # importa: que a mensagem nomeia os DOIS, o campo e o controlador.
+    check "CRI: a recusa nomeia o campo e o controlador" ok bash -c \
+      "printf '%s' '$CRIRES_OUT3' | grep -q unified && \
+       printf '%s' '$CRIRES_OUT3' | grep -q nonexistentctrl"
+    [ -n "$CID3" ] && crictl --runtime-endpoint "unix://$CRISOCK3" rm -f "$CID3" >/dev/null 2>&1
+    [ -n "$POD3" ] && crictl --runtime-endpoint "unix://$CRISOCK3" rmp -f "$POD3" >/dev/null 2>&1
+
+    # Um `hugepage_limits[].page_size`/chave `unified` com `..` é recusado no
+    # `start`, ANTES de perguntar a controlador nenhum — e continua a ser
+    # mesmo depois de reportado o controlador (ver abaixo).
+    POD3b="$($C3 runp "$CRIRES_POD" 2>/dev/null)"
+    CID3b="$($C3 create "$POD3b" "$CRIRES_ESCAPE" "$CRIRES_POD" 2>/dev/null)"
+    CRIRES_OUT3B="$(crictl --runtime-endpoint "unix://$CRISOCK3" start "$CID3b" 2>&1)"
+    CRIRES_RC3B=$?
+    check "CRI: um page_size com .. é recusado por nome, nunca escrito" fail bash -c "exit $CRIRES_RC3B"
+    check "CRI: a recusa do page_size é por traçado de caminho, não por controlador" ok bash -c \
+      "printf '%s' '$CRIRES_OUT3B' | grep -q 'invalid page size'"
+    [ -n "$CID3b" ] && crictl --runtime-endpoint "unix://$CRISOCK3" rm -f "$CID3b" >/dev/null 2>&1
+    [ -n "$POD3b" ] && crictl --runtime-endpoint "unix://$CRISOCK3" rmp -f "$POD3b" >/dev/null 2>&1
+  fi
+  [ -n "${CRIPID3:-}" ] && kill "$CRIPID3" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID3:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK3"
+
+  # O controlo: a MESMA recusa, com a válvula no ambiente do SERVIDOR (não do
+  # crictl) — tem de arrancar. Prova que `DELONIX_ALLOW_UNENFORCED_LIMITS`
+  # chega a sério ao caminho novo, não só ao da CLI que já a tinha.
+  CRISOCK4="/tmp/dlx-cri-res-hatch-$PFX.sock"
+  rm -f "$CRISOCK4"
+  setsid env DELONIX_ALLOW_UNENFORCED_LIMITS=1 "$BIN" serve cri --addr "unix://$CRISOCK4" >>"$SRVLOG" 2>&1 &
+  for i in $(seq 1 60); do [ -S "$CRISOCK4" ] && break; sleep 0.2; done
+  CRIPID4="$(ss -xlpnH 2>/dev/null | grep -F "$CRISOCK4" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
+  if [ -z "$CRIPID4" ] || [ ! -S "$CRISOCK4" ]; then
+    skip "CRI: DELONIX_ALLOW_UNENFORCED_LIMITS deixa arrancar sem o controlador" "o serve cri não subiu"
+  else
+    C4="crictl --runtime-endpoint unix://$CRISOCK4 --image-endpoint unix://$CRISOCK4"
+    POD4="$($C4 runp "$CRIRES_POD" 2>/dev/null)"
+    CID4="$($C4 create "$POD4" "$CRIRES_BOGUS" "$CRIRES_POD" 2>/dev/null)"
+    check "CRI: a válvula deixa arrancar o MESMO pedido que foi recusado sem ela" ok \
+      crictl --runtime-endpoint "unix://$CRISOCK4" start "$CID4"
+    [ -n "$CID4" ] && crictl --runtime-endpoint "unix://$CRISOCK4" stop "$CID4" >/dev/null 2>&1
+    [ -n "$CID4" ] && crictl --runtime-endpoint "unix://$CRISOCK4" rm -f "$CID4" >/dev/null 2>&1
+    [ -n "$POD4" ] && crictl --runtime-endpoint "unix://$CRISOCK4" rmp -f "$POD4" >/dev/null 2>&1
+  fi
+  [ -n "${CRIPID4:-}" ] && kill "$CRIPID4" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "${CRIPID4:-0}" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$CRISOCK4"
+fi
+
 # --- ADR-0074 D3: o hostPort em modo root/CNI é PUBLICADO ----------------------
 # Até esta mudança o caminho CNI não publicava `hostPort` para protocolo NENHUM:
 # os mapeamentos eram guardados e depois descartados (a guarda do `run_opts_of`
