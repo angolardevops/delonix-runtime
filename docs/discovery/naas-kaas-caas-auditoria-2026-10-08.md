@@ -127,11 +127,22 @@ first), independent of which domain each came from:
    caller" pattern this repo has already catalogued five times.
 7. **NaaS — stale DNS on Proxmox VM teardown/rename** can point to an address later
    reassigned to a different workload (ADR-0064 D6, decided, not implemented).
+   `REVIEWED, still not attempted` (§4.10): confirmed there is zero existing scaffolding
+   for it (`ProviderEntry`'s `type` enum has exactly `libvirt`/`proxmox`/`opnsense` — no
+   `dns`/`powerdns` credential entry anywhere), the ADR's own text names a live DNS server
+   as a precondition this session does not have, and it is already its own scheduled
+   slice of work (Sprint 2, `docs/discovery/66_CONTINUITY_PLAN.md`) — not a bounded fix
+   the way gap #6 turned out to be.
 8. **NaaS — asymmetric rollback in `netops::remove`** can leave an orphaned `NetDef` that
    blocks future creates with a false `NetworkPrefixConflict`. `FIXED` (§4.4).
 9. **Contracts — no request anywhere carries caller identity.** `ListOperationsRequest`
    is globally unscoped. Not an active exploit today (single trusted local agent per the
    `SO_PEERCRED` model) but a real gap the moment more than one caller shares a node.
+   `REVIEWED, still not attempted` (§4.10): confirmed the socket's own accept path
+   (`delonix-node-api/src/lib.rs:134`) refuses any peer whose uid differs from the
+   server's own — by construction there is exactly one possible caller identity today,
+   so recording it would record a constant, not information. Nothing small to add ahead
+   of the real multi-caller design this gap is actually about.
 10. **KaaS — no teardown for a VM/SSH-provisioned cluster.** `TEARDOWN FIXED` (§4.8).
     Destroying one meant manually `vm rm`-ing every VM, by hand editing `~/.kube/config`
     to drop the stale context — **confirmed live, the hard way** (§4.6): this audit's own
@@ -142,8 +153,17 @@ first), independent of which domain each came from:
     not wired anywhere — that half of the gap remains open, see §8.
 11. **Contracts — 39 of 59 RPCs unimplemented**, Container/Pod/VM/Stack/Image with zero
     served verbs — the PaaS cannot delegate to the contract for almost anything yet.
+    `REVIEWED, still not attempted` (§4.10): confirmed against the current tree (8 explicit
+    `UNIMPLEMENTED` handlers; the rest never reach a handler at all, unserved by the
+    router). Contract completion at this scale is squarely the P5-phase owner's call per
+    §6's own stated reasoning, not something to grow by a few RPCs under an unrelated
+    task.
 12. **Contracts — structured errors (`ErrorDetail`) only exist inside `Operation.error`**,
     never on the synchronous error path, which is where most real errors actually surface.
+    `REVIEWED, still not attempted` (§4.10): confirmed `ErrorDetail` appears in exactly
+    `operations.rs`/`operations.proto`/`common.proto` and nowhere else — the claim holds
+    precisely as stated. Threading it onto every synchronous RPC response is the same
+    class of contract-wide decision as #11, same owner.
 
 **Gap #13, found live and not in the original ranking.** `FIXED` (§4.7, found in §4.6):
 `cluster kubeadm`/`cluster apply` upgraded `delonix-cri` on a node but never the `delonix`
@@ -518,6 +538,39 @@ prescribed acceptance test (a live case toggling the node's `nftables` option an
 packets with it on and off) needs exactly the probe this pass found is blocked — writing
 that test is itself gated on the ADR addendum this subsection asks for.
 
+### 4.10 The remaining candidates, reviewed — none attempted, each with a specific reason
+
+After gap #6 turned out to need real investigation before its verdict was clear, the other
+four gaps this report had provisionally deferred (§8's first draft) got the same scrutiny
+rather than a second blanket "out of scope." None changed verdict; each now has the
+specific evidence that confirms it, not just the earlier one-line guess:
+
+- **Gap #7 (stale DNS on Proxmox teardown, ADR-0064 D6).** Confirmed zero existing
+  scaffolding: `ProviderEntry`'s `type` enum in `providers_config.rs` has exactly
+  `libvirt`/`proxmox`/`opnsense` — no `dns`/`powerdns` credential entry anywhere in the
+  tree, and `delonix-proxmox`/`delonix-networking`'s existing `dns.rs` modules implement
+  only D1-D5 (reading a zone's DNS settings THROUGH Proxmox), never a direct engine→DNS-
+  server client. D6 needs that client built from nothing, a new `providers.yaml` entry
+  type, and — the ADR's own words — "its own live case against a real DNS server," which
+  this session does not have access to (unlike the Proxmox lab, confirmed unreachable
+  from this sandbox in §4.6's own isolation notes). It is also already named as its own
+  scheduled slice (Sprint 2, `docs/discovery/66_CONTINUITY_PLAN.md`), not a gap sized for
+  an audit-session fix.
+- **Gap #9 (contracts carry no caller identity).** Confirmed the actual mechanism that
+  makes this "not an active exploit today" is stronger than the one-liner suggested:
+  `delonix-node-api/src/lib.rs:134` refuses any peer whose uid differs from the server's
+  own, so there is, by construction, exactly one possible caller on any socket this engine
+  serves. Recording that uid in an operation's metadata today would record a value that
+  never varies — not the audit trail the gap is actually worried about, which only exists
+  once a second legitimate caller identity is designed in. Nothing to add ahead of that.
+- **Gaps #11/#12 (RPC and error-contract completeness).** Re-measured rather than assumed:
+  8 explicit `UNIMPLEMENTED` handlers exist today, the rest of the 59 never reach a handler
+  at all (unmatched by the router); `ErrorDetail` appears in exactly `operations.rs`/
+  `operations.proto`/`common.proto`, nowhere else. Both claims hold precisely. Both are
+  the same class of contract-wide decision §6 already declines to improvise — growing the
+  served surface or the error shape by a few RPCs under an unrelated audit would not close
+  either gap, only make the next, real completion pass harder to reason about.
+
 ## 5. Test results, exact
 
 Two environments ended up involved, and the results below say which is which.
@@ -633,23 +686,27 @@ and leaves written down, for whoever does that work next:
   write unsafe to exercise in a parallel test runner; `netops` functions with no injectable
   seam to a live holder; a teardown already proven by hand, not yet automated through the
   new code path).
-- **5 of the 12 originally-ranked gaps are not touched at all by this pass; gap #6 was
-  investigated and found blocked, not fixed.** Of the twelve, six have a behavior fix: #1,
-  #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8, and #10 (teardown half —
-  the backup/restore half, `etcdctl snapshot`, is still open). Gap #6 (§4.9) got real work
-  — a precise diagnosis of exactly why the obvious fix cannot land without an owner
-  decision, and doc-comment hardening in the meantime — but no behavior changed, so it
-  stays counted as open. The live-only gap #13 (stale CLI on golden images) is also now
-  fixed (§4.7). Untouched entirely, each for a stated reason: the admission warning event
-  (gap #5) requires adding a new case to `delonix-security-runtime`'s `Outcome`/`Category`
-  taxonomy, which is an architectural decision inside a crate this audit does not own —
-  flagged for its actual owner rather than improvised. Gap #7 (DNS cleanup, ADR-0064 D6)
-  needs a live DNS server to validate against, which this pass did not have and the ADR
-  itself says is a precondition — the same shape of blocker gap #6 turned out to have, by a
-  different cause. Gaps #9, #11, #12 are each real engineering work (a contract-wide
-  identity field, 39 RPCs, a sync-path error model) that did not fit a single session on
-  top of the four-domain inventory, the seven landed fixes, the live validation, and gap
-  #6's investigation.
+- **5 of the 12 originally-ranked gaps are not fixed by this pass — but all five were
+  reviewed with evidence, not left on the earlier one-line guess (§4.10).** Of the twelve,
+  six have a behavior fix: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half),
+  #8, and #10 (teardown half — the backup/restore half, `etcdctl snapshot`, is still open).
+  Gap #6 (§4.9) got real work — a precise diagnosis of exactly why the obvious fix cannot
+  land without an owner decision, and doc-comment hardening in the meantime — but no
+  behavior changed, so it stays counted as open. The live-only gap #13 (stale CLI on
+  golden images) is also now fixed (§4.7). The five that remain untouched each have a
+  specific, measured reason, not a restated assumption: the admission warning event (gap
+  #5) requires adding a new case to `delonix-security-runtime`'s `Outcome`/`Category`
+  taxonomy, an architectural decision inside a crate this audit does not own; gap #7 (DNS
+  cleanup, ADR-0064 D6) has zero existing credential/client scaffolding and needs a live
+  DNS server this session cannot reach, a precondition the ADR itself states; gap #9
+  (caller identity) is structurally a non-issue today — the socket's own accept path
+  refuses any peer whose uid differs from the server's own, confirmed at
+  `delonix-node-api/src/lib.rs:134` — so there is nothing to record that would carry
+  information yet; gaps #11/#12 (RPC and error-contract completeness) were re-measured
+  (8 of 59 RPCs have an explicit `UNIMPLEMENTED` handler, the rest unmatched by the
+  router; `ErrorDetail` appears in exactly three files, all on the async path) and both
+  numbers hold precisely — both are still the P5-phase owner's call, per §6's own
+  reasoning, not a gap sized for a few RPCs grown under an unrelated audit.
 - **The multi-node KaaS path is unchanged and still silently `NotReady`.** The fix in §4.2
   deliberately does not touch it (no `--cni` escape hatch exists yet on `cluster kubeadm`
   to add a safe refusal without breaking the documented HA example) — this is the single
