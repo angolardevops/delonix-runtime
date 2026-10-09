@@ -568,7 +568,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             | C::FirewallStateless
             | C::FirewallLogging
             | C::FirewallIcmpType
-            | C::FirewallWorkloadPeer => S::UnsupportedByProvider {
+            | C::FirewallWorkloadPeer
+            | C::FirewallIntraSegment => S::UnsupportedByProvider {
                 reason: "not a compute capability: answered by the network/storage provider",
             },
         }

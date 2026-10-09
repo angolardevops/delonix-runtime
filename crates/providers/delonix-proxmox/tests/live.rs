@@ -3873,8 +3873,11 @@ impl Drop for SdnLabCleanup<'_> {
 ///    controller, a zone and a vnet) staged under the lock, the dry-run's FRR
 ///    diff carrying the chain, applied; then the RUNNING configuration holds
 ///    it, nothing is pending, the dry-run is empty, and the vnet is available.
-/// 4. The vnet firewall: options, forward rules inserted at the top, a move,
-///    deletes — read back; an `in` rule refused before the wire.
+/// 4. The vnet firewall: the three writes (options, add, update) refused
+///    by the client with DX-1552 whatever their fields (`sdn_routing.rs`,
+///    module doc), and the node read back unchanged — no rule, no forward
+///    policy. The writes' own round trip was measured live on 2026-09-27
+///    (`docs/proxmox/trace-9.2.2.routes`) before the refusal was decided.
 /// 5. The teardown, under the lock again, and the node back as it was found.
 #[test]
 fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
@@ -4271,23 +4274,20 @@ fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
     client.release_sdn_lock(&ledger, &tok).expect("release");
 
     // --- 4. the vnet firewall ----------------------------------------------------
-    // `sdn_vnet_firewall_index` is deliberately NOT called here: measured live
-    // 2026-10-09, that one route is restricted to a real `root@pam` session and
-    // refuses an API token (403), while every call below accepts one. Asking it
-    // first would make this test need the password this crate's own `Auth` doc
-    // calls the form NOT to prefer. `rules`/`options` existing is proven by the
-    // two calls below succeeding, which is the same fact the index would have
-    // named — see `sdn_vnet_firewall_index`'s own doc comment for the measurement.
-    let inbound = FirewallRuleOpts {
-        rule_type: Some("in"),
+    // Every write is refused by the client before it is sent (DX-1552): whether
+    // a vnet rule filters anything is the per-node `nftables` option, under the
+    // `/nodes/{node}/firewall` tree this engine does not read (ADR-0049 D3).
+    // `sdn_vnet_firewall_index` is deliberately NOT called: measured live
+    // 2026-10-09, that one route refuses an API token (403, `user != root@pam`)
+    // — see its own doc comment.
+    let ssh = FirewallRuleOpts {
+        comment: Some("dlxsdn-ssh"),
+        proto: Some("tcp"),
+        dport: Some("22"),
         ..Default::default()
     };
-    let e = client
-        .add_sdn_vnet_firewall_rule(&ledger, &vnet, "ACCEPT", &inbound)
-        .unwrap_err();
-    assert_eq!(e.number(), 1551, "{e}");
-    client
-        .set_sdn_vnet_firewall_options(
+    let refused = [
+        client.set_sdn_vnet_firewall_options(
             &ledger,
             &vnet,
             &VnetFirewallOptions {
@@ -4295,104 +4295,19 @@ fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
                 policy_forward: Some("DROP"),
                 ..Default::default()
             },
-        )
-        .expect("options");
-    let opts = client.sdn_vnet_firewall_options(&vnet).expect("options");
-    assert_eq!(
-        opts.get("policy_forward").and_then(|v| v.as_str()),
-        Some("DROP"),
-        "{opts}"
+        ),
+        client.add_sdn_vnet_firewall_rule(&ledger, &vnet, "ACCEPT", &ssh),
+        client.update_sdn_vnet_firewall_rule(&ledger, &vnet, 0, &ssh, None),
+    ];
+    for r in refused {
+        let e = r.unwrap_err();
+        assert_eq!(e.number(), 1552, "{e}");
+    }
+    let rules = client.sdn_vnet_firewall_rules(&vnet).expect("rules");
+    assert!(
+        rules.is_empty(),
+        "a refused write reached the node: {rules:?}"
     );
-    assert_eq!(
-        opts.get("enable").and_then(|v| v.as_u64()),
-        Some(1),
-        "{opts}"
-    );
-    client
-        .add_sdn_vnet_firewall_rule(
-            &ledger,
-            &vnet,
-            "DROP",
-            &FirewallRuleOpts {
-                comment: Some("dlxsdn-drop"),
-                ..Default::default()
-            },
-        )
-        .expect("drop rule");
-    client
-        .add_sdn_vnet_firewall_rule(
-            &ledger,
-            &vnet,
-            "ACCEPT",
-            &FirewallRuleOpts {
-                comment: Some("dlxsdn-ssh"),
-                proto: Some("tcp"),
-                dport: Some("22"),
-                ..Default::default()
-            },
-        )
-        .expect("ssh rule");
-    let comments = |c: &delonix_proxmox::Client| -> Vec<String> {
-        c.sdn_vnet_firewall_rules(&vnet)
-            .expect("rules")
-            .iter()
-            .map(|r| {
-                assert_eq!(
-                    r.get("type").and_then(|v| v.as_str()),
-                    Some("forward"),
-                    "{r}"
-                );
-                r.get("comment")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .collect()
-    };
-    assert_eq!(
-        comments(client),
-        ["dlxsdn-ssh", "dlxsdn-drop"],
-        "the node inserts a rule at the top"
-    );
-    let r0 = client.sdn_vnet_firewall_rule(&vnet, 0).expect("rule 0");
-    assert_eq!(r0.get("dport").and_then(|v| v.as_str()), Some("22"), "{r0}");
-    client
-        .update_sdn_vnet_firewall_rule(
-            &ledger,
-            &vnet,
-            1,
-            &FirewallRuleOpts {
-                comment: Some("dlxsdn-drop-all"),
-                ..Default::default()
-            },
-            None,
-        )
-        .expect("update");
-    client
-        .update_sdn_vnet_firewall_rule(&ledger, &vnet, 0, &FirewallRuleOpts::default(), Some(2))
-        .expect("move");
-    assert_eq!(
-        comments(client),
-        ["dlxsdn-drop-all", "dlxsdn-ssh"],
-        "the first rule moved below the second"
-    );
-    client
-        .delete_sdn_vnet_firewall_rule(&ledger, &vnet, 0)
-        .expect("delete");
-    client
-        .delete_sdn_vnet_firewall_rule(&ledger, &vnet, 0)
-        .expect("delete");
-    assert!(comments(client).is_empty(), "no rule left");
-    client
-        .set_sdn_vnet_firewall_options(
-            &ledger,
-            &vnet,
-            &VnetFirewallOptions {
-                delete: &["enable", "policy_forward"],
-                ..Default::default()
-            },
-        )
-        .expect("clear options");
     let opts = client.sdn_vnet_firewall_options(&vnet).expect("options");
     assert!(opts.get("policy_forward").is_none(), "{opts}");
 

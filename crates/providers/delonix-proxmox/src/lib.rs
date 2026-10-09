@@ -648,12 +648,11 @@ enum TaskKind {
     CreateSdnRouteMapEntry,
     UpdateSdnRouteMapEntry,
     DeleteSdnRouteMapEntry,
-    /// `PUT …/vnets/{vnet}/firewall/options` and the `…/firewall/rules`
-    /// writes — the node's own firewall for traffic FORWARDED through a
-    /// vnet. NOT staged: written to `/etc/pve/sdn/firewall/<vnet>.fw` at once.
-    SdnVnetFirewallOptions,
-    AddSdnVnetFirewallRule,
-    UpdateSdnVnetFirewallRule,
+    /// `DELETE …/vnets/{vnet}/firewall/rules/{pos}` — removes a rule of the
+    /// node's own firewall for traffic FORWARDED through a vnet. NOT staged:
+    /// written to `/etc/pve/sdn/firewall/<vnet>.fw` at once. The writes that
+    /// would ADD to it are refused (`sdn_routing.rs`, module doc), so they
+    /// have no kind.
     DeleteSdnVnetFirewallRule,
     /// `DELETE /cluster/sdn/lock` — releases the cluster's global SDN lock.
     ReleaseSdnLock,
@@ -753,9 +752,6 @@ impl TaskKind {
             TaskKind::CreateSdnRouteMapEntry => "create-sdn-route-map-entry",
             TaskKind::UpdateSdnRouteMapEntry => "update-sdn-route-map-entry",
             TaskKind::DeleteSdnRouteMapEntry => "delete-sdn-route-map-entry",
-            TaskKind::SdnVnetFirewallOptions => "sdn-vnet-firewall-options",
-            TaskKind::AddSdnVnetFirewallRule => "sdn-vnet-firewall-add-rule",
-            TaskKind::UpdateSdnVnetFirewallRule => "sdn-vnet-firewall-update-rule",
             TaskKind::DeleteSdnVnetFirewallRule => "sdn-vnet-firewall-delete-rule",
             TaskKind::ReleaseSdnLock => "release-sdn-lock",
             TaskKind::RollbackSdn => "rollback-sdn",
@@ -948,9 +944,6 @@ impl TaskKind {
             TaskKind::CreateSdnRouteMapEntry => "sdnroutemapcreate",
             TaskKind::UpdateSdnRouteMapEntry => "sdnroutemapupdate",
             TaskKind::DeleteSdnRouteMapEntry => "sdnroutemapdelete",
-            TaskKind::SdnVnetFirewallOptions => "pvefw",
-            TaskKind::AddSdnVnetFirewallRule => "pvefw",
-            TaskKind::UpdateSdnVnetFirewallRule => "pvefw",
             TaskKind::DeleteSdnVnetFirewallRule => "pvefw",
             TaskKind::ReleaseSdnLock => "sdnunlock",
             TaskKind::RollbackSdn => "sdnrollback",
@@ -6944,6 +6937,15 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             C::FirewallWorkloadPeer => S::UnsupportedByProvider {
                 reason: "`fromWorkload` is refused: a workload address is on the engine's SDN, which the VM is not on",
             },
+            // Catalog 1.4.0: the vnet's own firewall. The client refuses every
+            // write to it (`sdn_routing.rs`, module doc): whether a vnet rule
+            // filters anything is the per-node `nftables` option, under
+            // `/nodes/{node}/firewall` — host administration this engine does
+            // not read (ADR-0049 D3) — so a write would be "accepted, filters
+            // nothing" on every node that runs the iptables firewall.
+            C::FirewallIntraSegment => S::UnsupportedByProvider {
+                reason: "the vnet firewall's writes are refused by the client: whether a vnet rule filters anything is the per-node `nftables` option under /nodes/{node}/firewall, host administration the engine does not read (ADR-0049 D3) — decided 2026-10, readiness audit gap #6",
+            },
             C::ProviderAvailability
             | C::ResourceReadback
             | C::Events
@@ -7350,7 +7352,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             | C::FirewallStateless
             | C::FirewallLogging
             | C::FirewallIcmpType
-            | C::FirewallWorkloadPeer => S::UnsupportedByProvider {
+            | C::FirewallWorkloadPeer
+            | C::FirewallIntraSegment => S::UnsupportedByProvider {
                 reason: "not a compute capability: answered by the network/storage provider",
             },
         }

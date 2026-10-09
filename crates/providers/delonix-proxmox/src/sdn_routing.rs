@@ -42,44 +42,42 @@
 //! traffic carries. So a vnet firewall isolates guests of one vnet from each
 //! other; it is not a boundary between vnets.
 //!
-//! # No caller may expose this without reading this first
+//! # The vnet firewall's writes are refused, by decision
 //!
-//! [`Client::set_sdn_vnet_firewall_options`] and
-//! [`Client::add_sdn_vnet_firewall_rule`]/[`Client::update_sdn_vnet_firewall_rule`]
-//! are correct, tested clients for a real Proxmox route — and, measured on
-//! 2026-09-27 (`docs/proxmox/trace-9.2.2.routes`), **zero callers exist
-//! outside this crate** (confirmed by grep across `bins/delonix-runtime-bin`
-//! and `delonix-networking`): no `kind:`/CLI reaches them today. That is the
-//! only reason a write through this client is not, right now, a silent
-//! "accepted and filters nothing" in front of a real operator — the same
-//! "public, dead, bug waiting for its first caller" shape this repository's
-//! own `AGENTS.md` already catalogues five times over (`mount_live`,
-//! `set_net_rate`, `update_limits`, `publish_port_allow`, `Net`).
+//! [`Client::set_sdn_vnet_firewall_options`],
+//! [`Client::add_sdn_vnet_firewall_rule`] and
+//! [`Client::update_sdn_vnet_firewall_rule`] refuse every call, at their
+//! first line, before any validation and before any request
+//! ([`Error::VnetFirewallWriteRefused`], DX-1552). Decided in 2026-10 by the
+//! session closing gap #6 of the NaaS/KaaS/CaaS readiness audit
+//! (`docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md`); the catalog
+//! row is `firewall.intra-segment`, `unsupported-by-provider` for Proxmox.
+//! There is no ADR number for it: the decision is to NOT cross a line
+//! ADR-0049 D3 already draws, and nothing needs one for that.
 //!
-//! **A node-side probe to close that gap the way
-//! [`Error::DatacenterFirewallDisabled`] closes it for a VM's own firewall
-//! (`vm_firewall.rs`, reading `GET /cluster/firewall/options`) does not
-//! exist for this one, and is not a missing line to add**: the field that
-//! decides enforcement, the per-node `nftables` option, lives under
-//! `/nodes/{node}/firewall/options` — and this engine's own measured API
-//! coverage (`docs/proxmox/matrix-9.2.2.md`) classifies the WHOLE
-//! `/nodes/{node}/firewall/*` tree `unsupported-by-design`, reason "node
-//! firewall — host administration", the same boundary ADR-0049 D3 draws for
-//! cluster administration generally. A client that read it anyway to decide
-//! whether to refuse a write would be reaching past a line this engine
-//! already drew on purpose, for a reason that has nothing to do with this
-//! one capability — the exact "widened its own reach without anyone
-//! deciding so" ADR-0064 D6 refuses for a DNS controller's credential, for
-//! the same underlying reason.
+//! The reason, measured above: a vnet rule is enforced only by the nftables
+//! `proxmox-firewall`, turned on per node by the host firewall option
+//! `nftables: 1`. Under the default iptables `pve-firewall` the node stores
+//! the rule, reads it back, and filters nothing. The field that decides that
+//! lives under `/nodes/{node}/firewall/options`, and this engine classifies
+//! the whole `/nodes/{node}/firewall/*` tree `unsupported-by-design`
+//! (`docs/proxmox/matrix-9.2.2.md`, «node firewall — host administration»),
+//! the boundary ADR-0049 D3 draws. A
+//! [`Error::DatacenterFirewallDisabled`]-style probe (`vm_firewall.rs` reads
+//! `GET /cluster/firewall/options` before a VM's own firewall) would have to
+//! read past that line. So the two options were a probe behind an ADR-0049
+//! addendum, or an unconditional refusal; the refusal was taken, because it
+//! crosses nothing, and nothing called these three anyway (no `kind:`, no
+//! CLI — grep across `bins/delonix-runtime-bin` and `delonix-networking`).
 //!
-//! So: before adding a `kind:`/CLI path to either function above, its author
-//! needs ONE of — the owner's explicit decision to cross that boundary for
-//! this one read-only probe (a new ADR addendum, not a quiet `GET`); or
-//! wiring the capability catalog to report this row permanently
-//! `unavailable-on-host`/`not-implemented` and refusing any write attempt
-//! client-side, unconditionally, never "accept and hope." Either way, this
-//! paragraph is the reason neither has happened yet — not an oversight to
-//! silently work around.
+//! What was removed with it: the request each one sent, and the per-field
+//! checks (`forward`-only rule type, ACCEPT/DROP/REJECT, the log levels) that
+//! answered DX-1551, now retired in favour of DX-1552. The tested
+//! implementation is in this file's history, before the commit that added
+//! this section, for whoever revisits it with a named need and the addendum.
+//! The reads (`sdn_vnet_firewall_*`) and
+//! [`Client::delete_sdn_vnet_firewall_rule`] stay: reading or removing a rule
+//! never reports protection that does not exist.
 //!
 //! # What is offered, and what is not
 //!
@@ -640,31 +638,19 @@ pub struct VnetFirewallOptions<'a> {
     pub delete: &'a [&'a str],
 }
 
-const LOG_LEVELS: &[&str] = &[
-    "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug", "nolog",
-];
-
-fn vnet_rule_invalid(msg: String) -> Error {
-    Error::InvalidVnetFirewallRule(msg)
-}
-
-fn validate_vnet_rule(rule_type: Option<&str>, action: Option<&str>) -> Result<()> {
-    if let Some(t) = rule_type {
-        if t != "forward" {
-            return Err(vnet_rule_invalid(format!(
-                "invalid Proxmox vnet firewall rule type '{t}': a vnet's firewall only takes \
-                 'forward' rules (the node refuses 'in' and 'out' there)"
-            )));
-        }
-    }
-    if let Some(a) = action {
-        if !matches!(a, "ACCEPT" | "DROP" | "REJECT") {
-            return Err(vnet_rule_invalid(format!(
-                "invalid Proxmox vnet firewall rule action '{a}': expected ACCEPT, DROP or REJECT"
-            )));
-        }
-    }
-    Ok(())
+/// The answer of every write to a vnet's own firewall — see the module doc's
+/// «The vnet firewall's writes are refused, by decision». Built before any
+/// argument is looked at: no field of the request changes it.
+fn vnet_firewall_write_refused(what: &str) -> Error {
+    Error::VnetFirewallWriteRefused(format!(
+        "proxmox: {what} is refused: this provider does not write a vnet's firewall. Whether a \
+         vnet rule filters anything is the per-node `nftables` option under \
+         /nodes/{{node}}/firewall, which this engine does not read (ADR-0049 D3, host \
+         administration); under the iptables firewall the node stores the rule and filters \
+         nothing, so the write is refused rather than reported as protection that may not \
+         exist (decided 2026-10, readiness audit gap #6). For traffic to or from one guest, use \
+         its own firewall (`NetworkPolicy` with `scope: vm` or `scope: systemcontainer`)"
+    ))
 }
 
 fn has_id(items: &[serde_json::Value], key: &str, id: &str) -> bool {
@@ -1220,70 +1206,19 @@ impl Client {
         Ok(w.data)
     }
 
-    /// Sets the vnet firewall's options (`PUT …/vnets/{vnet}/firewall/options`).
-    /// Written at once, not staged.
-    ///
-    /// Read the module doc's "No caller may expose this without reading
-    /// this first" before adding a `kind:`/CLI path to this function — a
-    /// successful write here does not mean the rule it enables filters
-    /// anything.
+    /// Would set the vnet firewall's options
+    /// (`PUT …/vnets/{vnet}/firewall/options`); refused unconditionally,
+    /// before any validation or request — see the module doc's «The vnet
+    /// firewall's writes are refused, by decision».
     pub fn set_sdn_vnet_firewall_options(
         &self,
-        ledger: &Ledger,
-        vnet: &str,
-        opts: &VnetFirewallOptions<'_>,
+        _ledger: &Ledger,
+        _vnet: &str,
+        _opts: &VnetFirewallOptions<'_>,
     ) -> Result<()> {
-        validate_sdn_id(vnet)?;
-        if let Some(p) = opts.policy_forward {
-            if !matches!(p, "ACCEPT" | "DROP") {
-                return Err(vnet_rule_invalid(format!(
-                    "invalid Proxmox vnet firewall forward policy '{p}': expected ACCEPT or DROP"
-                )));
-            }
-        }
-        if let Some(l) = opts.log_level_forward {
-            if !LOG_LEVELS.contains(&l) {
-                return Err(vnet_rule_invalid(format!(
-                    "invalid Proxmox vnet firewall log level '{l}': expected one of {}",
-                    LOG_LEVELS.join(", ")
-                )));
-            }
-        }
-        for d in opts.delete {
-            if !matches!(*d, "enable" | "policy_forward" | "log_level_forward") {
-                return Err(vnet_rule_invalid(format!(
-                    "cannot clear '{d}' on a Proxmox vnet firewall: expected enable, \
-                     policy_forward or log_level_forward"
-                )));
-            }
-        }
-        let mut fields: Vec<(&'static str, String)> = Vec::new();
-        if let Some(e) = opts.enable {
-            fields.push(("enable", if e { "1" } else { "0" }.to_string()));
-        }
-        if let Some(p) = opts.policy_forward {
-            fields.push(("policy_forward", p.to_string()));
-        }
-        if let Some(l) = opts.log_level_forward {
-            fields.push(("log_level_forward", l.to_string()));
-        }
-        if !opts.delete.is_empty() {
-            fields.push(("delete", opts.delete.join(",")));
-        }
-        let form: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let path = format!("/cluster/sdn/vnets/{vnet}/firewall/options");
-        self.task_or_done(
-            ledger,
-            SDN_VMID,
-            TaskKind::SdnVnetFirewallOptions,
-            || self.put_form(&path, &form),
-            Some(&|| {
-                let o = self.sdn_vnet_firewall_options(vnet)?;
-                Ok(opts
-                    .policy_forward
-                    .is_none_or(|p| o.get("policy_forward").and_then(|v| v.as_str()) == Some(p)))
-            }),
-        )
+        Err(vnet_firewall_write_refused(
+            "setting a vnet firewall's options",
+        ))
     }
 
     /// The vnet firewall's rules, in the node's order
@@ -1308,95 +1243,31 @@ impl Client {
         Ok(w.data)
     }
 
-    /// Adds a `forward` rule (`POST …/vnets/{vnet}/firewall/rules`) — at the
-    /// TOP of the list, where the node inserts it. `opts.rule_type`, if given,
-    /// has to be `forward`; `enable` is sent explicitly, defaulting to on, for
-    /// the reason [`Client::add_firewall_rule`] gives. No probe, for the same
-    /// reason that one has none.
-    ///
-    /// Read the module doc's "No caller may expose this without reading
-    /// this first" before adding a `kind:`/CLI path to this function — this
-    /// POST succeeding never means the rule it writes filters anything.
+    /// Would add a `forward` rule (`POST …/vnets/{vnet}/firewall/rules`);
+    /// refused unconditionally, before any validation or request — see the
+    /// module doc's «The vnet firewall's writes are refused, by decision».
     pub fn add_sdn_vnet_firewall_rule(
         &self,
-        ledger: &Ledger,
-        vnet: &str,
-        action: &str,
-        opts: &FirewallRuleOpts<'_>,
+        _ledger: &Ledger,
+        _vnet: &str,
+        _action: &str,
+        _opts: &FirewallRuleOpts<'_>,
     ) -> Result<()> {
-        validate_sdn_id(vnet)?;
-        validate_vnet_rule(opts.rule_type, Some(action))?;
-        let mut fields: Vec<(&str, String)> = vec![
-            ("type", "forward".to_string()),
-            ("action", action.to_string()),
-            (
-                "enable",
-                if opts.enable.unwrap_or(true) {
-                    "1"
-                } else {
-                    "0"
-                }
-                .to_string(),
-            ),
-        ];
-        fields.extend(crate::firewall_rule_common_fields(opts));
-        let form: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let path = format!("/cluster/sdn/vnets/{vnet}/firewall/rules");
-        self.task_or_done(
-            ledger,
-            SDN_VMID,
-            TaskKind::AddSdnVnetFirewallRule,
-            || self.post_form(&path, &form, true),
-            None,
-        )
+        Err(vnet_firewall_write_refused("adding a vnet firewall rule"))
     }
 
-    /// Changes a rule at `pos` (`PUT …/firewall/rules/{pos}`); only the fields
-    /// given are sent. `moveto` moves the rule to another position instead —
-    /// the node ignores every other field when it is set (its own schema
-    /// says so), so the two are refused together.
-    ///
-    /// Same enforcement caveat as [`Client::add_sdn_vnet_firewall_rule`] —
-    /// see the module doc before exposing this past this crate.
+    /// Would change the rule at `pos` (`PUT …/firewall/rules/{pos}`);
+    /// refused unconditionally, before any validation or request — see the
+    /// module doc's «The vnet firewall's writes are refused, by decision».
     pub fn update_sdn_vnet_firewall_rule(
         &self,
-        ledger: &Ledger,
-        vnet: &str,
-        pos: u32,
-        opts: &FirewallRuleOpts<'_>,
-        moveto: Option<u32>,
+        _ledger: &Ledger,
+        _vnet: &str,
+        _pos: u32,
+        _opts: &FirewallRuleOpts<'_>,
+        _moveto: Option<u32>,
     ) -> Result<()> {
-        validate_sdn_id(vnet)?;
-        validate_vnet_rule(opts.rule_type, opts.action)?;
-        let mut fields = crate::firewall_rule_common_fields(opts);
-        if let Some(t) = opts.rule_type {
-            fields.push(("type", t.to_string()));
-        }
-        if let Some(a) = opts.action {
-            fields.push(("action", a.to_string()));
-        }
-        if let Some(e) = opts.enable {
-            fields.push(("enable", if e { "1" } else { "0" }.to_string()));
-        }
-        if let Some(m) = moveto {
-            if !fields.is_empty() {
-                return Err(vnet_rule_invalid(
-                    "a Proxmox vnet firewall rule update cannot both move the rule and change \
-                     it: the node ignores every other field when `moveto` is set"
-                        .into(),
-                ));
-            }
-            fields.push(("moveto", m.to_string()));
-        }
-        let form: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let path = format!("/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}");
-        self.task_or_done(
-            ledger,
-            SDN_VMID,
-            TaskKind::UpdateSdnVnetFirewallRule,
-            || self.put_form(&path, &form),
-            None,
-        )
+        Err(vnet_firewall_write_refused("changing a vnet firewall rule"))
     }
 
     /// Removes the rule at `pos` (`DELETE …/firewall/rules/{pos}`).
@@ -1562,12 +1433,12 @@ mod tests {
     }
 
     #[test]
-    fn a_vnet_rule_is_a_forward_rule() {
-        assert!(validate_vnet_rule(Some("forward"), Some("DROP")).is_ok());
-        for t in ["in", "out", "group"] {
-            let e = validate_vnet_rule(Some(t), None).unwrap_err();
-            assert_eq!(e.number(), 1551, "{e}");
-        }
-        assert!(validate_vnet_rule(None, Some("+group")).is_err());
+    fn the_vnet_firewall_refusal_is_its_own_dictionary_entry() {
+        let e = vnet_firewall_write_refused("adding a vnet firewall rule");
+        assert_eq!(e.number(), 1552, "{e}");
+        assert!(e.is_invalid_argument(), "{e}");
+        let shown = e.to_string();
+        assert!(shown.contains("/nodes/{node}/firewall"), "{shown}");
+        assert!(shown.contains("ADR-0049 D3"), "{shown}");
     }
 }

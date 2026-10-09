@@ -36,7 +36,7 @@ use serde::Serialize;
 
 /// Version of the catalog itself (not of the engine). See the module docs for
 /// what bumps which part.
-pub const CATALOG_VERSION: &str = "1.3.0";
+pub const CATALOG_VERSION: &str = "1.4.0";
 
 /// Which port a capability belongs to — the words the node contract's
 /// `ProviderInfo.kind` uses. `Gateway` (catalog 1.1.0, ADR-0059 D2) is a
@@ -364,6 +364,12 @@ pub enum Capability {
     FirewallIcmpType,
     /// A rule's peer is named by namespace or selector, not by a CIDR.
     FirewallWorkloadPeer,
+    /// A rule set attached to a network SEGMENT itself, filtering traffic
+    /// bridged between workloads of that one segment — not a boundary between
+    /// segments (catalog 1.4.0). Proxmox's vnet firewall is the shape measured:
+    /// `forward` rules only, and routed traffic into or out of the vnet is
+    /// not filtered.
+    FirewallIntraSegment,
 
     // --- console --------------------------------------------------------
     VmConsoleSerial,
@@ -526,6 +532,7 @@ impl Capability {
         Self::FirewallLogging,
         Self::FirewallIcmpType,
         Self::FirewallWorkloadPeer,
+        Self::FirewallIntraSegment,
         Self::VmConsoleSerial,
         Self::VmConsoleVnc,
         Self::VmGuestAgent,
@@ -679,6 +686,7 @@ impl Capability {
             Self::FirewallLogging => "firewall.logging",
             Self::FirewallIcmpType => "firewall.icmp-type",
             Self::FirewallWorkloadPeer => "firewall.workload-peer",
+            Self::FirewallIntraSegment => "firewall.intra-segment",
             Self::VmConsoleSerial => "vm.console.serial",
             Self::VmConsoleVnc => "vm.console.vnc",
             Self::VmGuestAgent => "vm.guest-agent",
@@ -820,7 +828,8 @@ impl Capability {
             | FirewallStateless
             | FirewallLogging
             | FirewallIcmpType
-            | FirewallWorkloadPeer => ProviderKind::Network,
+            | FirewallWorkloadPeer
+            | FirewallIntraSegment => ProviderKind::Network,
             VmConsoleSerial | VmConsoleVnc | VmGuestAgent | VmIpObserved => ProviderKind::Compute,
             MetricsPrometheus | MetricsPerWorkloadNetwork | HostHealth | HostCapacity => {
                 ProviderKind::Compute
@@ -957,7 +966,8 @@ impl Capability {
             | FirewallStateless
             | FirewallLogging
             | FirewallIcmpType
-            | FirewallWorkloadPeer => Domain::Firewall,
+            | FirewallWorkloadPeer
+            | FirewallIntraSegment => Domain::Firewall,
             VmConsoleSerial | VmConsoleVnc | VmGuestAgent | VmIpObserved => Domain::Console,
             MetricsPrometheus | MetricsPerWorkloadNetwork | HostHealth | HostCapacity => {
                 Domain::Metrics

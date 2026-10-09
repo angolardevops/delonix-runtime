@@ -14246,6 +14246,16 @@ msgstr "A firewall de uma vnet filtra o tráfego ENCAMINHADO através da vnet e 
 msgid "Use the rule type 'forward' (the default) and ACCEPT, DROP or REJECT; for traffic to or from one VM, use the VM's own firewall."
 msgstr "Usa o tipo de regra 'forward' (o de omissão) e ACCEPT, DROP ou REJECT; para o tráfego de ou para uma VM, usa a firewall da própria VM."
 
+# DX-1552 — the vnet firewall's writes, refused by decision (replaces DX-1551)
+msgid "the Proxmox vnet firewall is not written by this engine"
+msgstr "a firewall de vnet do Proxmox não é escrita por este motor"
+
+msgid "A write to a Proxmox vnet's own firewall — its options, a new rule or a changed rule — is refused before any request, whatever its fields. Whether a vnet rule filters anything is decided per node by the host firewall's `nftables` option, under `/nodes/{node}/firewall`, which this engine does not read (ADR-0049 D3: host administration); under the default iptables firewall the node stores the rule and filters nothing. A write that could be reported as protection that does not exist is refused instead. Even where it is enforced, a vnet rule filters traffic bridged between guests of that one vnet, not traffic routed between vnets."
+msgstr "Uma escrita na firewall própria de uma vnet do Proxmox — as opções, uma regra nova ou uma regra alterada — é recusada antes de qualquer pedido, sejam quais forem os campos. Se uma regra de vnet filtra alguma coisa é decidido nó a nó pela opção `nftables` da firewall do host, em `/nodes/{node}/firewall`, que este motor não lê (ADR-0049 D3: administração do host); com a firewall iptables por omissão, o nó guarda a regra e não filtra nada. Uma escrita que poderia ser reportada como uma protecção que não existe é recusada em vez disso. Mesmo onde é aplicada, uma regra de vnet filtra o tráfego em bridge entre convidados dessa vnet, não o tráfego encaminhado entre vnets."
+
+msgid "For traffic to or from one guest, use its own firewall (`NetworkPolicy` with `scope: vm` or `scope: systemcontainer`). Writing a vnet's firewall needs an owner decision to read the node's firewall options first (an ADR-0049 addendum)."
+msgstr "Para o tráfego de ou para um convidado, usa a firewall dele (`NetworkPolicy` com `scope: vm` ou `scope: systemcontainer`). Escrever a firewall de uma vnet exige uma decisão do dono para ler primeiro as opções de firewall do nó (um adendo ao ADR-0049)."
+
 msgid "the cluster's SDN configuration is locked"
 msgstr "a configuração SDN do cluster está trancada"
 

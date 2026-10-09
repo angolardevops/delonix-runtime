@@ -2674,61 +2674,69 @@ fn a_failed_rollback_names_both_failures_and_the_token() {
     );
 }
 
-/// A vnet's firewall takes `forward` rules only: an `in` rule is refused
-/// before the wire; a staged vnet ("invalid vnet specified") is a not-found
-/// that says to apply first; a rule goes out with `type=forward` and no lock
-/// token even inside a transaction (the Perl route refuses an unknown one).
+/// The three writes to a vnet's own firewall — options, a new rule, a
+/// changed rule — are refused unconditionally (DX-1552, `sdn_routing.rs`
+/// module doc): a well-formed request and a malformed one get the same
+/// answer, and NOTHING reaches the node, not even a login or a lock. Reads
+/// stay: a staged vnet ("invalid vnet specified") is a not-found that says
+/// to apply first.
 #[test]
-fn a_vnet_firewall_rule_is_forward_only_and_never_carries_the_lock() {
-    let rules = "/cluster/sdn/vnets/v1/firewall/rules";
-    let node = MockNode::start(script(&[
-        ("POST", SDN_LOCK, ok_data(r#""tok-4""#)),
-        ("POST", rules, ok_data("null")),
-        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
-        (
-            "GET",
-            "/cluster/sdn/vnets/v2/firewall/rules",
-            Reply::Json(
-                500,
-                r#"{"data":null,"message":"invalid vnet specified at /usr/share/perl5/PVE/API2/Firewall/Helpers.pm line 54.\n"}"#
-                    .into(),
-            ),
+fn a_vnet_firewall_write_is_refused_before_anything_reaches_the_node() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        "/cluster/sdn/vnets/v2/firewall/rules",
+        Reply::Json(
+            500,
+            r#"{"data":null,"message":"invalid vnet specified at /usr/share/perl5/PVE/API2/Firewall/Helpers.pm line 54.\n"}"#
+                .into(),
         ),
-    ]));
+    )]));
     let cli = sdn_client(&node);
+    // Connecting proves the node (`GET /nodes`); everything after it counts.
+    let connected = node.log().len();
     let dir = tempfile::tempdir().unwrap();
     let ledger = Ledger::at(dir.path());
-    let inbound = delonix_proxmox::FirewallRuleOpts {
-        rule_type: Some("in"),
-        ..Default::default()
-    };
-    let e = cli
-        .add_sdn_vnet_firewall_rule(&ledger, "v1", "ACCEPT", &inbound)
-        .unwrap_err();
-    assert_eq!(e.number(), 1551, "{e}");
-    assert_eq!(node.count("POST", rules), 0, "refused before the wire");
 
     let ssh = delonix_proxmox::FirewallRuleOpts {
+        rule_type: Some("forward"),
         proto: Some("tcp"),
         dport: Some("22"),
         ..Default::default()
     };
-    cli.sdn_transaction(&ledger, || {
-        cli.add_sdn_vnet_firewall_rule(&ledger, "v1", "ACCEPT", &ssh)
-    })
-    .expect("transaction");
-    let sent = node
-        .log()
-        .into_iter()
-        .find(|s| s.method == "POST" && s.path == rules)
-        .expect("the rule was sent");
+    // Malformed on purpose: an `in` rule, a vnet id the node could not hold.
+    // The refusal comes first, so it is the same answer as the valid one.
+    let inbound = delonix_proxmox::FirewallRuleOpts {
+        rule_type: Some("in"),
+        ..Default::default()
+    };
+    let opts = delonix_proxmox::VnetFirewallOptions {
+        enable: Some(true),
+        policy_forward: Some("DROP"),
+        ..Default::default()
+    };
+    let refused = [
+        cli.set_sdn_vnet_firewall_options(&ledger, "v1", &opts),
+        cli.add_sdn_vnet_firewall_rule(&ledger, "v1", "ACCEPT", &ssh),
+        cli.add_sdn_vnet_firewall_rule(&ledger, "Not A Vnet", "+group", &inbound),
+        cli.update_sdn_vnet_firewall_rule(&ledger, "v1", 0, &ssh, None),
+        cli.update_sdn_vnet_firewall_rule(&ledger, "v1", 0, &ssh, Some(2)),
+    ];
+    for r in refused {
+        let e = r.unwrap_err();
+        assert_eq!(e.number(), 1552, "{e}");
+        assert!(e.to_string().contains("ADR-0049 D3"), "{e}");
+    }
+    let sent: Vec<String> = node.log()[connected..]
+        .iter()
+        .map(|s| format!("{} {}", s.method, s.path))
+        .collect();
     assert!(
-        sent.body.contains("type=forward")
-            && sent.body.contains("enable=1")
-            && sent.body.contains("dport=22")
-            && !sent.body.contains("lock-token"),
-        "{}",
-        sent.body
+        sent.is_empty(),
+        "a refused vnet firewall write sent {sent:?}"
+    );
+    assert!(
+        std::fs::read_dir(dir.path()).unwrap().next().is_none(),
+        "a refused write left a ledger entry"
     );
 
     let staged = cli.sdn_vnet_firewall_rules("v2").unwrap_err();
