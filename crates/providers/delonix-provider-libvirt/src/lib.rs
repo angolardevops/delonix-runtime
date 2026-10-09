@@ -484,8 +484,8 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmConsoleVnc => bin(S::Partial {
                 detail: "`vm vnc` reads `vncdisplay` of a `--vnc` domain; no battery",
             }),
-            C::VmGuestAgent => bin(S::Partial {
-                detail: "`virsh qemu-agent-command` over a virtio-serial channel added to every domain; works with the golden image's own `qemu-guest-agent` recipe, but no battery check boots a guest and reads it back",
+            C::VmGuestAgent => bin(S::Supported {
+                evidence: "live:crates/providers/delonix-provider-libvirt/tests/live.rs::libvirt_guest_agent_answers_on_a_real_cloud_init_boot",
             }),
             C::VmIpObserved => sys(S::Partial {
                 detail: "DHCP lease with a lease floor, then `domifaddr`; pure test only, the battery does not read the IP",

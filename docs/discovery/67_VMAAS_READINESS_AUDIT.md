@@ -120,14 +120,25 @@ exactly the combinations that support it.
     Filesystem:   /boot/efi (vfat) 11.8 MiB / 123.7 MiB
     Filesystem:   / (ext4) 945.1 MiB / 2.60 GiB
   ```
-  **Still `partial` in the published matrix, deliberately**: this proves the
-  mechanism works against a real agent, but it was a manual session, not an
-  automated, re-runnable check the evidence-gate test can point to — unlike
-  `vm.disk.resize` (§7), nothing here could be reduced to an empty-disk
-  battery check, because there is no agent without a real guest OS. Promoting
-  it needs either a real image pull inside `scripts/e2e.sh` (a cost this pass
-  chose not to add to the standard battery) or a dedicated opt-in `live.rs`
-  test, neither built here.
+  **Promoted to `supported`, as a follow-up to this same session**: an
+  opt-in `crates/providers/delonix-provider-libvirt/tests/live.rs`
+  (`libvirt_guest_agent_answers_on_a_real_cloud_init_boot`, `#[ignore]`, run
+  with `DELONIX_LIBVIRT_LIVE_DISK=<a real cloud-init qcow2>`) builds its own
+  NoCloud seed with `packages: [qemu-guest-agent]` + a `runcmd` to enable it —
+  no SSH key, no login, because the thing under test is the virtio-serial
+  channel itself, not reachability — boots a throwaway domain on this host's
+  `qemu:///system`, and polls `LibvirtBackend::guest_info` for up to 300s.
+  Run for real against the Debian 12 genericcloud image this repo's own
+  appliance scripts already cache: **54s** end to end, real data back
+  (`Debian GNU/Linux 12 (bookworm)`, kernel `6.1.0-53-cloud-amd64`, agent
+  `7.2.22`, two filesystems with real used/total bytes), and the domain
+  destroyed/undefined on a `Drop` guard that runs even if an assertion
+  panics — confirmed empty in `virsh -c qemu:///system list --all` straight
+  after. The evidence-gate only checks that the file and function exist
+  (`live:crates/providers/delonix-provider-libvirt/tests/live.rs::
+  libvirt_guest_agent_answers_on_a_real_cloud_init_boot`), so CI never needs
+  a KVM host to stay green; a human with one re-runs it to keep the claim
+  honest, the same contract `delonix-proxmox/tests/live.rs` already has.
 
 - **Found and FIXED a real, reachable bug**: `delonix vm ssh` against a
   Cloud Hypervisor VM failed with "No route to host"/"Connection timed out"
@@ -269,11 +280,11 @@ confirmed by the repository's own architecture notes; not re-verified here).
 
 ## 7. What is fixed, what is open
 
-### Fixed in this pass (three commits to `vmaas/auditoria`, pushed)
+### Fixed in this pass (four commits to `vmaas/auditoria`, pushed)
 
 | # | Finding | Severity | Fix | Evidence |
 |---|---|---|---|---|
-| 1 | `vm.guest-agent` not asked on libvirt despite the golden image shipping the agent | Medium (observability/day-2 gap, not a correctness bug) | virtio-serial channel on every domain + `guest_info()` via `virsh qemu-agent-command` | 4 new unit tests, clippy clean, matrix regenerated and gate-verified. **Live-validated manually against a real agent** (§3) — real OS/kernel/hostname/version/filesystems read back. Still `partial` in the matrix: the live pass was manual, not an automated check the evidence-gate can cite (see §3's note). |
+| 1 | `vm.guest-agent` not asked on libvirt despite the golden image shipping the agent | Medium (observability/day-2 gap, not a correctness bug) | virtio-serial channel on every domain + `guest_info()` via `virsh qemu-agent-command` | 4 new unit tests, clippy clean, matrix regenerated and gate-verified. **Live-validated twice**: first manually (§3), then with an opt-in `crates/providers/delonix-provider-libvirt/tests/live.rs` this same session built and ran for real (54s, real OS/kernel/hostname/agent-version/filesystems back, domain torn down on a panic-safe `Drop` guard). Promoted to `supported` in the matrix — `live:crates/providers/delonix-provider-libvirt/tests/live.rs::libvirt_guest_agent_answers_on_a_real_cloud_init_boot`, verified by the evidence-gate. |
 | 2 | `vm ssh` unreachable on Cloud Hypervisor VMs (wrong netns) | **High** — breaks the engine's own documented "next step" for ~half its VM backends | wrap the `ssh` exec with the existing holder-netns `nsenter` prefix | 4 new unit tests + **live end-to-end reproduction and fix verification** (§3): "Connection timed out" → "Connection refused" (routing fixed) → `rc=0` real guest answer once cloud-init/sshd finished starting. Baseline re-confirmed broken (`Connection timed out`) immediately after, on a plain `ssh` from the same process, as a control. |
 | 3 | `vm.disk.resize` not implemented on any backend | **High** — a VMaaS day-1 requirement (bigger disk) had no path at all | `VmBackend::resize_disk` (grow-only, refused against the backend's own current size) on all three backends; `vm resize --disk-size <GiB>` | Unit tests (argv/size parsing) in all three provider crates + **a new, automated `scripts/e2e.sh` section** (empty-disk convention, like the existing snapshot sections) covering grow/refuse-shrink/refuse-while-running on BOTH local backends, 14/14 PASS — AND a full live boot-and-reboot on both backends confirming a real guest's filesystem grows automatically (§2/§3). Promoted to `supported` for libvirt and cloud-hypervisor in the published matrix, with `check:` evidence the gate verified; `partial` for Proxmox (its `PUT …/resize` for an existing VM is new code, not live-tested — no reachable node). |
 
@@ -284,8 +295,12 @@ regenerated and matches `the_published_matrix_is_the_generated_one` /
 `every_supported_capability_cites_evidence_that_exists`. No crate boundary,
 dependency direction or privilege model changed — `serde_json` is an
 existing workspace dependency extended to the two crates that now need to
-parse `qemu-img`/QGA JSON, nothing new pulled in. Cell metric moved from
-100/252 (39.7%) to 102/252 (40.5%).
+parse `qemu-img`/QGA JSON, nothing new pulled in. The fourth commit's
+`library_prints` increase (6 `eprintln!` in the new opt-in live test, the
+same pattern the other three provider `tests/live.rs` already have) is a
+baseline bump in the same commit, not a silent ratchet violation. Cell
+metric moved from 100/252 (39.7%) through 102/252 (40.5%) to **103/252
+(40.9%)**.
 
 ### Open, in priority order (none attempted in this pass — scope and ADR sequencing)
 
@@ -299,18 +314,14 @@ parse `qemu-img`/QGA JSON, nothing new pulled in. Cell metric moved from
    node). Re-run `delonix-proxmox/tests/live.rs` against the lab before
    trusting those rows for a VMaaS launch decision, and add live evidence
    for the new `resize_disk` path on an existing VM specifically.
-3. **`vm.guest-agent` on libvirt, promoted from `partial` to `supported`** —
-   the mechanism is proven (§3); what is missing is an automated, re-runnable
-   check the evidence-gate can cite (a real image pull inside `scripts/e2e.sh`,
-   or a dedicated opt-in `live.rs` test).
-4. **The `delonix-vm-base:debian-bookworm` tag does not ship
+3. **The `delonix-vm-base:debian-bookworm` tag does not ship
    `qemu-guest-agent`**, even though the current build recipe installs and
    enables it (found live in §3, worked around by hand for this audit, never
    reported before because nothing had asked the agent anything until this
    pass). The published image needs rebuilding from the current recipe —
    out of scope here (image publishing is a deliberate, separate action, not
    something to do unilaterally from an audit).
-5. **CH live-disk snapshot** stays correctly `unsupported-by-provider`
+4. **CH live-disk snapshot** stays correctly `unsupported-by-provider`
    (ADR already explains why: CH's own `vm.snapshot` API saves memory
    without the disk, which cannot be restored consistently) — not a gap,
    a documented limit worth repeating here so it is not re-discovered as
@@ -378,9 +389,6 @@ rm -rf /tmp/dlxvmaas-live
 - `vm reach`/`vm bridge` (VM↔container by IP, needs root), physical/VLAN
   networking: out of scope for this pass or needing a privileged, shared-host
   action this audit chose not to take alone.
-- `vm.guest-agent` on libvirt: proven live against a real agent (§3), but by
-  hand — not yet backed by an automated check the evidence-gate can cite, so
-  the matrix still says `partial`.
 - A kubelet-driven workload on a VM-backed node: not attempted — this audit
   is about the VM base itself, not the Kubernetes layer above it.
 - An **online**, no-reboot disk grow (the fix in this pass is cold: VM
