@@ -61,8 +61,20 @@ jobs:
       - name: Ferramentas de build da golden
         run: |
           sudo apt-get update
+          # isc-dhcp-client (dhclient): the supermin appliance virt-customize boots
+          # to run --network tries `dhclient` then falls back to `dhcpcd` for the
+          # appliance's own eth0 — and on a stock ubuntu-24.04 runner NEITHER is
+          # installed (supermin only COPIES binaries the HOST already has).
+          # Measured: /init prints "dhcpcd: command not found", eth0 never gets an
+          # address, /etc/resolv.conf never exists, and the guest's apt-get fails
+          # DNS resolution within ~10s — not the ~300s dhclient-lease timeout this
+          # engine's own hint text describes (that number is about a REAL guest's
+          # dhclient, not the throwaway supermin appliance virt-customize boots to
+          # do the customizing). Same already-documented class of bug as the
+          # k8s/online recipe's host prerequisites — see AGENTS.md "Bloqueio de
+          # execução conhecido".
           sudo apt-get install -y protobuf-compiler libguestfs-tools qemu-utils cloud-image-utils \
-            qemu-system-x86 ovmf
+            qemu-system-x86 ovmf isc-dhcp-client
           # KVM for the boot probe below; without it the probe falls back to TCG (slower, same verdict).
           if [ -e /dev/kvm ]; then
             echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
