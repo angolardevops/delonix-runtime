@@ -109,6 +109,13 @@ struct CriResources {
     cpu_shares: i64,
     #[serde(default)]
     cpuset_cpus: String,
+    /// ADR 0038 item 3. `0` is indistinguishable, at the wire, from "not
+    /// set" (the CRI proto field is a bare `int64`, no `Option`) — treated
+    /// the same way `memory_limit_in_bytes`/`cpu_shares`/`cpuset_cpus` above
+    /// already treat their own zero/empty: "nothing to apply", which is
+    /// also the correct behavior for a kubelet that genuinely does not care.
+    #[serde(default)]
+    oom_score_adj: i64,
 }
 
 impl CriResources {
@@ -119,6 +126,7 @@ impl CriResources {
             cpu_period: r.cpu_period,
             cpu_shares: r.cpu_shares,
             cpuset_cpus: r.cpuset_cpus.clone(),
+            oom_score_adj: r.oom_score_adj,
         })
         .unwrap_or_default()
     }
@@ -154,6 +162,12 @@ fn apply_resources(r: &CriResources, o: &mut delonix_compute::RunOpts) {
     }
     if !r.cpuset_cpus.is_empty() {
         o.cpuset = Some(r.cpuset_cpus.clone());
+    }
+    if r.oom_score_adj != 0 {
+        // The kernel's own range (/proc/<pid>/oom_score_adj); a value
+        // outside i32 from a malformed request is clamped at the write
+        // site (`apply_oom_score_adj`) rather than refused here.
+        o.oom_score_adj = Some(r.oom_score_adj.clamp(i32::MIN as i64, i32::MAX as i64) as i32);
     }
 }
 
@@ -2640,6 +2654,12 @@ mod tests {
             cpu_period: 100_000,
             cpu_shares: 512,
             cpuset_cpus: "0-1".into(),
+            // A Guaranteed-QoS pod's real value (kubelet's own formula),
+            // and the field this test originally shipped without — ADR
+            // 0038 item 3, fixed in the CaaS capability audit's gap #4:
+            // this used to be read off the wire into `CriResources` and
+            // never referenced again anywhere.
+            oom_score_adj: -998,
         };
         let mut o = delonix_compute::RunOpts::default();
         apply_resources(&r, &mut o);
@@ -2647,6 +2667,7 @@ mod tests {
         assert_eq!(o.cpus.as_deref(), Some("0.500"));
         assert_eq!(o.cpu_weight.as_deref(), Some("20"));
         assert_eq!(o.cpuset.as_deref(), Some("0-1"));
+        assert_eq!(o.oom_score_adj, Some(-998));
         let rec = ContainerRec {
             resources: r,
             ..Default::default()

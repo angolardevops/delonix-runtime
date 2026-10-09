@@ -44,6 +44,12 @@ pub struct ResolvedRun {
     pub mounts: Vec<Mount>,
     /// `--user` resolved against the image: uid and optional gid.
     pub run_user: Option<(u32, Option<u32>)>,
+    /// `true` when the image declared a non-root `USER` that this host
+    /// could not honour (no subordinate uid/gid range) and the container
+    /// fell back to root instead — see [`Container::user_fallback_to_root`]
+    /// for why this is persisted and not just the transient [`Notice`]
+    /// below.
+    pub user_fallback_to_root: bool,
     /// This node's memory ceiling for a container started without `-m`.
     pub default_memory: String,
     /// This node's CPU ceiling for a container started without `--cpus`.
@@ -127,10 +133,16 @@ where
     // caller asked, and the spawn reports what is missing.
     let image_user = image_user_is_non_root(&config.user).then_some(config.user.as_str());
     let mut notices = edits.notices;
+    // Set only by the fallback arm below, and persisted on the `Container`
+    // (`user_fallback_to_root`) — see that field's doc comment for why a
+    // `Notice` alone (printed once, nowhere a CRI consumer can read it
+    // after the fact) was not enough.
+    let mut user_fallback_to_root = false;
     let run_user = match (&o.user, image_user) {
         (Some(u), _) => Some(images.resolve_user(&rootfs, u)?),
         (None, Some(u)) if host.can_map_id_range() => Some(images.resolve_user(&rootfs, u)?),
         (None, Some(u)) => {
+            user_fallback_to_root = true;
             // Only on the first pass: the re-exec into a custom network resolves again.
             if !second_pass {
                 notices.push(Notice::new(
@@ -191,6 +203,7 @@ where
             devices: edits.devices,
             mounts: mounts.clone(),
             run_user,
+            user_fallback_to_root,
             default_memory: host.default_memory(),
             default_cpus: host.default_cpus(),
             default_masked_paths: host.default_masked_paths(),
@@ -376,6 +389,7 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
         c.run_uid = Some(uid);
         c.run_gid = gid;
     }
+    c.user_fallback_to_root = r.user_fallback_to_root;
 
     // ---- resources (cgroup v2) ----
     // Always resolved, never left to `Container::new`'s `"1.0"`: that literal is the
@@ -385,6 +399,7 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
     c.cpuset = o.cpuset.clone();
     c.cgroup_parent = o.cgroup_parent.clone();
     c.kube_cgroup = kube_cgroup;
+    c.oom_score_adj = o.oom_score_adj;
     c.io_weight = o.io_weight.clone();
     c.io_max = o.io_max.clone();
 
@@ -772,6 +787,10 @@ mod tests {
         assert_eq!(r.record.run_user, Some((101, Some(101))));
         assert_eq!(asked(&f).as_deref(), Some("user odoo in /roots/id1"));
         assert!(!said(&r), "an applied USER needs no warning");
+        assert!(
+            !r.record.user_fallback_to_root,
+            "a successfully applied USER is not a fallback"
+        );
         // The re-exec pass resolves the same user.
         let f = Fake::with_image_user("odoo");
         assert_eq!(
@@ -791,17 +810,40 @@ mod tests {
             let r = run(&o, &f, false).unwrap();
             assert_eq!(r.record.run_user, None, "{root:?} is root");
             assert_eq!(asked(&f), None);
+            assert!(
+                !r.record.user_fallback_to_root,
+                "an image that itself declares root is not a FALLBACK to root"
+            );
         }
 
-        // No subordinate range: uid 0, said on the first pass only.
+        // No subordinate range: uid 0, said on the first pass only. REGRESSION
+        // (CaaS capability audit, gap #2): before `user_fallback_to_root`
+        // existed, this exact scenario — a non-root `USER` silently downgraded
+        // to root — left no trace anywhere a `ContainerStatus`/`inspect` call
+        // could read; only the one-shot `Notice` below, printed to a stderr a
+        // CRI caller never reads on the success path. Asserting it on the
+        // PERSISTED `Container` (via `build_record`), not just on the
+        // transient `ResolvedRun`, is the point: that is what `inspect` sees.
         let single = || Fake {
             single_uid: true,
             ..Fake::with_image_user("odoo")
         };
         let r = run(&o, &single(), false).unwrap();
         assert_eq!(r.record.run_user, None);
+        assert!(r.record.user_fallback_to_root);
         assert!(said(&r));
-        assert!(!said(&run(&o, &single(), true).unwrap()));
+        let second = run(&o, &single(), true).unwrap();
+        assert!(!said(&second), "the notice is only printed once");
+        assert!(
+            second.record.user_fallback_to_root,
+            "the FACT survives the re-exec pass even though the notice does not"
+        );
+        let persisted = build_record(&o, r.record).unwrap();
+        assert!(
+            persisted.user_fallback_to_root,
+            "must reach the Container record `container inspect`/CRI `ContainerStatus` read, \
+             not just the transient Notice"
+        );
 
         assert!(image_user_is_non_root("101:101"));
         assert!(image_user_is_non_root("haproxy"));

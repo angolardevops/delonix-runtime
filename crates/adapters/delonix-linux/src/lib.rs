@@ -2751,37 +2751,67 @@ fn apply_tmpfs(specs: &[String]) {
 /// for `--secret-files`. Runs INSIDE the container's namespace (post-`pivot_root`,
 /// still with caps): the values stay only in RAM (tmpfs) — they never touch the host fs
 /// nor the container's, nor the environment. The mount is left read-only for the container.
-fn write_secret_files(pairs: &[(String, String)]) {
-    use std::os::unix::fs::PermissionsExt;
+///
+/// Fails closed. Every step used to be `let _ = ...`: if the tmpfs mount failed
+/// (a rejected flag on a given kernel, `/run/secrets` already occupied by
+/// something else, a more restrictive cgroup/userns than expected), the loop
+/// below kept writing anyway — straight onto the container's own persistent
+/// overlay, which `container commit` can carry into a published image and a
+/// filesystem backup/snapshot can carry off the host. That is the exact
+/// outcome `--secret-files` exists to avoid relative to `--secret` (env vars).
+/// A container that never starts because its secrets could not be confined
+/// to RAM leaks nothing; one that silently wrote them to disk already has.
+fn write_secret_files(pairs: &[(String, String)]) -> std::result::Result<(), String> {
     let dir = "/run/secrets";
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let _ = mount(
+    mount_secrets_tmpfs(dir)?;
+    write_secret_values(dir, pairs)?;
+    // Makes the tmpfs read-only for the container (the values are already
+    // there) — also fail-closed: a tmpfs that stayed writable is still RAM,
+    // not a disk leak, but silently keeping it mutable contradicts what the
+    // caller was promised, and the remount is cheap enough that there is no
+    // reason to let it fail quietly either.
+    mount(
+        None::<&str>,
+        dir,
+        None::<&str>,
+        MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    )
+    .map_err(|e| format!("remount {dir} read-only: {e}"))
+}
+
+/// The two mount(2) calls of `write_secret_files`, isolated so the pure
+/// value-writing half (`write_secret_values`) is testable without
+/// `CAP_SYS_ADMIN` or a mount namespace.
+fn mount_secrets_tmpfs(dir: &str) -> std::result::Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {dir}: {e}"))?;
+    mount(
         Some("tmpfs"),
         dir,
         Some("tmpfs"),
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
         Some("mode=0700"),
-    );
+    )
+    .map_err(|e| format!("mount tmpfs on {dir}: {e}"))
+}
+
+/// Writes each pair as `{dir}/{key}` (0600). Pure I/O, no mount(2) — the half
+/// a unit test exercises directly, on a plain temp directory. It has no way
+/// to tell whether `dir` is actually a tmpfs and does not try to; that
+/// guarantee is `mount_secrets_tmpfs`'s contract, enforced before this runs.
+fn write_secret_values(dir: &str, pairs: &[(String, String)]) -> std::result::Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
     for (k, v) in pairs {
         // only safe file names (they are valid env keys, but defensive).
         if k.is_empty() || k.contains('/') {
             continue;
         }
         let p = format!("{dir}/{k}");
-        if std::fs::write(&p, v).is_ok() {
-            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
-        }
+        std::fs::write(&p, v).map_err(|e| format!("write secret file {k}: {e}"))?;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("chmod secret file {k}: {e}"))?;
     }
-    // makes the tmpfs read-only for the container (the values are already there).
-    let _ = mount(
-        None::<&str>,
-        dir,
-        None::<&str>,
-        MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-        None::<&str>,
-    );
+    Ok(())
 }
 
 /// Writes the namespaced `sysctl`s (`--sysctl net.x=y`) into the container's
@@ -2890,6 +2920,26 @@ fn apply_ulimits(specs: &[String]) {
             unsafe { libc::setrlimit(res, &rl) };
         }
     }
+}
+
+/// Writes `/proc/self/oom_score_adj` for the init process — the CRI
+/// `LinuxContainerResources.oom_score_adj` the kubelet sets per QoS class
+/// (Guaranteed: -998, Burstable: a formula, BestEffort: 1000). ADR 0038's
+/// own decision text is "honour or refuse, never ignore"; this field had
+/// neither — it was read off the wire into `CriResources` and then never
+/// referenced again, so a Guaranteed-QoS pod's OOM-kill priority never
+/// matched what the kubelet (and `kubectl describe node`) believed was
+/// true. Clamped to the kernel's accepted range; a value outside it from a
+/// malformed manifest is corrected rather than handed to the `write` to
+/// fail on. Best-effort, same style as `apply_ulimits` right above it:
+/// lowering the value needs `CAP_SYS_RESOURCE`, still held here, before
+/// `drop_capabilities` takes it away.
+fn apply_oom_score_adj(adj: Option<i32>) {
+    let Some(adj) = adj else { return };
+    let _ = std::fs::write(
+        "/proc/self/oom_score_adj",
+        adj.clamp(-1000, 1000).to_string(),
+    );
 }
 
 /// (privileged / Kind node) Gives the container a DEDICATED, EMPTY CGROUP ROOT.
@@ -3124,6 +3174,10 @@ struct ProcessSpec<'a> {
     group_add: &'a [u32],
     ulimits: &'a [String],
     sysctls: &'a [String],
+    /// CRI `LinuxContainerResources.oom_score_adj`. `None` = leave whatever
+    /// the kernel/cgroup already gave this process (today's behavior for
+    /// everything that is not a CRI container with the field set).
+    oom_score_adj: Option<i32>,
 }
 
 /// What the container sees on disk.
@@ -3209,6 +3263,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
                 group_add,
                 ulimits,
                 sysctls,
+                oom_score_adj,
             },
         filesystem:
             FilesystemSpec {
@@ -3375,7 +3430,13 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
     }
     apply_tmpfs(tmpfs); // --tmpfs (after the pivot, still with caps)
     if !secret_files.is_empty() {
-        write_secret_files(secret_files); // --secret-files: in-namespace tmpfs (still with caps)
+        // --secret-files: in-namespace tmpfs (still with caps). Fails closed —
+        // see `write_secret_files`'s doc comment for why a secret must never
+        // fall through to the container's persistent rootfs.
+        if let Err(e) = write_secret_files(secret_files) {
+            eprintln!("delonix: failed to confine secret files to tmpfs: {e}");
+            return 126;
+        }
     }
     // `--read-only`: remounts the rootfs (`/`) read-only. Volumes/dev/proc are
     // separate mounts and stay writable; the rest becomes immutable.
@@ -3389,10 +3450,11 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         );
     }
     apply_ulimits(ulimits); // --ulimit (before dropping CAP_SYS_RESOURCE)
-                            // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
-                            // container's own) and before `drop_capabilities` (they are mounts, and need
-                            // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
-                            // masks the host's path or silently fails with EPERM.
+    apply_oom_score_adj(oom_score_adj); // CRI oom_score_adj, same reason/timing as --ulimit
+                                        // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
+                                        // container's own) and before `drop_capabilities` (they are mounts, and need
+                                        // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
+                                        // masks the host's path or silently fails with EPERM.
     apply_masked_paths(masked_paths);
     apply_readonly_paths(readonly_paths);
     // READY: the last mount is in. Everything that shapes this mount namespace —
@@ -6276,6 +6338,7 @@ fn spawn(
     let devices = container.devices.clone();
     let tmpfs = container.tmpfs.clone();
     let ulimits = container.ulimits.clone();
+    let oom_score_adj = container.oom_score_adj;
     let group_add = container.group_add.clone();
     let masked_paths = container.masked_paths.clone();
     let readonly_paths = container.readonly_paths.clone();
@@ -6500,6 +6563,7 @@ fn spawn(
                 group_add: &group_add,
                 ulimits: &ulimits,
                 sysctls: &sysctls,
+                oom_score_adj,
             },
             filesystem: FilesystemSpec {
                 mounts: &mounts,
@@ -9760,6 +9824,85 @@ mod tests {
         assert!(
             !root.exists(),
             "a árvore inteira tem de desaparecer, não só o nível de topo"
+        );
+    }
+
+    /// `write_secret_values` is the pure half of `write_secret_files` — no
+    /// `mount(2)`, so it is directly testable on a plain temp directory
+    /// (the tmpfs half needs `CAP_SYS_ADMIN` and mounts the real
+    /// `/run/secrets`, so it is exercised live, not here — see the doc
+    /// comment on `write_secret_files`).
+    #[test]
+    fn write_secret_values_writes_0600_files_with_the_exact_content() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_string_lossy().to_string();
+        let pairs = vec![
+            ("DB_PASSWORD".to_string(), "s3nha-secreta".to_string()),
+            ("API_KEY".to_string(), "k-abc123".to_string()),
+        ];
+        super::write_secret_values(&dir, &pairs).expect("should write both values");
+        for (k, v) in &pairs {
+            let p = tmp.path().join(k);
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), *v);
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "secret file {k} must be 0600, got {mode:o}");
+        }
+    }
+
+    /// An empty key or one containing `/` is skipped, not written — the
+    /// defensive check against a key that could escape `dir` via a path
+    /// component.
+    #[test]
+    fn write_secret_values_skips_unsafe_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_string_lossy().to_string();
+        let pairs = vec![
+            (String::new(), "ignored".to_string()),
+            ("../escape".to_string(), "ignored".to_string()),
+            ("OK".to_string(), "kept".to_string()),
+        ];
+        super::write_secret_values(&dir, &pairs).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("OK")).unwrap(),
+            "kept"
+        );
+        assert!(!tmp.path().parent().unwrap().join("escape").exists());
+        let mut entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        entries.sort();
+        assert_eq!(entries, vec![std::ffi::OsString::from("OK")]);
+    }
+
+    /// REGRESSION (CaaS security audit, 2026-10-08): the bug being fixed was
+    /// that every failure in this path (`create_dir_all`, the `mount`, each
+    /// `write`/`set_permissions`) was `let _ = ...`'d away, so a secret value
+    /// silently fell through onto whatever `/run/secrets` already was —
+    /// the container's own persistent overlay — instead of aborting. This
+    /// proves the surviving half of that contract: a write failure (here, a
+    /// directory that does not exist, so every `std::fs::write` fails with
+    /// `NotFound`) is now a hard `Err`, not a silently-partial success. The
+    /// `mount_secrets_tmpfs`/`write_secret_files` wiring above it propagates
+    /// this with `?`, so the same failure aborts container start (`126`)
+    /// instead of leaving secrets on disk — that half needs `CAP_SYS_ADMIN`
+    /// and a mount namespace to exercise live, which this unit test cannot
+    /// do; it is covered by reading the `?` chain, not by a mock mount.
+    #[test]
+    fn write_secret_values_fails_closed_instead_of_silently_dropping_values() {
+        let missing = std::env::temp_dir().join(format!(
+            "delonix-secretvalues-missing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+        let pairs = vec![("WOULD_LEAK".to_string(), "top-secret".to_string())];
+        let err = super::write_secret_values(&missing.to_string_lossy(), &pairs)
+            .expect_err("a write into a nonexistent directory must fail, not partially succeed");
+        assert!(err.contains("WOULD_LEAK"), "{err}");
+        assert!(
+            !missing.exists(),
+            "must not have created anything on the way"
         );
     }
 
