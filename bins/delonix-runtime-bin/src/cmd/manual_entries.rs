@@ -81,7 +81,7 @@ pub static ENTRIES: &[Entry] = &[
             ("nodes, network, cached kubeconfig and the ~/.kube/config entry — volumes untouched", "delonix cluster destroy lab"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster destroy lab -f"),
         ],
-        see_also: &["delete", "cluster prune", "cluster create"],
+        see_also: &["delete", "cluster prune", "cluster create", "cluster backup"],
     },
     Entry {
         path: "cluster prune",
@@ -167,7 +167,37 @@ pub static ENTRIES: &[Entry] = &[
             ("then every other control-plane/worker, one at a time — `kubeadm upgrade node`", "delonix cluster upgrade -f cloud.yaml --to 1.32.1 lab-w1"),
             ("a control-plane that schedules nothing anyway: skip the automatic drain/uncordon", "delonix cluster upgrade -f cloud.yaml --to 1.32.1 --no-drain"),
         ],
-        see_also: &["cluster drain", "cluster uncordon", "cluster apply", "cluster health"],
+        see_also: &[
+            "cluster drain",
+            "cluster uncordon",
+            "cluster apply",
+            "cluster health",
+            "cluster backup",
+        ],
+    },
+    Entry {
+        path: "cluster backup",
+        group: "Lifecycle",
+        examples: &[
+            (
+                "etcd's keyspace, to the default path under the cluster's own state directory",
+                "delonix cluster backup lab",
+            ),
+            (
+                "to an explicit file — before an upgrade, say",
+                "delonix cluster backup lab --to /srv/backups/lab-etcd.db",
+            ),
+        ],
+        see_also: &["cluster restore", "cluster upgrade", "cluster destroy"],
+    },
+    Entry {
+        path: "cluster restore",
+        group: "Lifecycle",
+        examples: &[(
+            "bring etcd back from a snapshot taken with `cluster backup` — DESTRUCTIVE",
+            "delonix cluster restore lab --from /srv/backups/lab-etcd.db",
+        )],
+        see_also: &["cluster backup", "cluster upgrade"],
     },
     Entry {
         path: "cluster apply",
