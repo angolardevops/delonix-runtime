@@ -116,17 +116,46 @@ struct CriResources {
     /// also the correct behavior for a kubelet that genuinely does not care.
     #[serde(default)]
     oom_score_adj: i64,
+    /// ADR 0038 item 3, `LinuxContainerResources.cpuset_mems`. "" = not set.
+    #[serde(default)]
+    cpuset_mems: String,
+    /// ADR 0038 item 3, `LinuxContainerResources.hugepage_limits`, kept as
+    /// `(page_size, limit)` pairs — the exact shape `hugetlb.<page_size>.limit_in_bytes`
+    /// needs, with no intermediate type.
+    #[serde(default)]
+    hugepage_limits: Vec<(String, u64)>,
+    /// ADR 0038 item 3, `LinuxContainerResources.unified` — raw cgroup v2
+    /// `(file, value)` pairs (e.g. `("memory.high", "100000000")`), sorted by
+    /// key so two requests with the same map never compare unequal because a
+    /// `HashMap` iterated them in a different order.
+    #[serde(default)]
+    unified: Vec<(String, String)>,
 }
 
 impl CriResources {
     fn from_cri(r: Option<&LinuxContainerResources>) -> Self {
-        r.map(|r| CriResources {
-            memory_limit_in_bytes: r.memory_limit_in_bytes,
-            cpu_quota: r.cpu_quota,
-            cpu_period: r.cpu_period,
-            cpu_shares: r.cpu_shares,
-            cpuset_cpus: r.cpuset_cpus.clone(),
-            oom_score_adj: r.oom_score_adj,
+        r.map(|r| {
+            let mut unified: Vec<(String, String)> = r
+                .unified
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            unified.sort();
+            CriResources {
+                memory_limit_in_bytes: r.memory_limit_in_bytes,
+                cpu_quota: r.cpu_quota,
+                cpu_period: r.cpu_period,
+                cpu_shares: r.cpu_shares,
+                cpuset_cpus: r.cpuset_cpus.clone(),
+                oom_score_adj: r.oom_score_adj,
+                cpuset_mems: r.cpuset_mems.clone(),
+                hugepage_limits: r
+                    .hugepage_limits
+                    .iter()
+                    .map(|h| (h.page_size.clone(), h.limit))
+                    .collect(),
+                unified,
+            }
         })
         .unwrap_or_default()
     }
@@ -169,6 +198,144 @@ fn apply_resources(r: &CriResources, o: &mut delonix_compute::RunOpts) {
         // site (`apply_oom_score_adj`) rather than refused here.
         o.oom_score_adj = Some(r.oom_score_adj.clamp(i32::MIN as i64, i32::MAX as i64) as i32);
     }
+    if !r.cpuset_mems.is_empty() {
+        o.cpuset_mems = Some(r.cpuset_mems.clone());
+    }
+    if !r.hugepage_limits.is_empty() {
+        o.hugepage_limits = r.hugepage_limits.clone();
+    }
+    if !r.unified.is_empty() {
+        o.unified = r.unified.clone();
+    }
+}
+
+/// ADR 0038 item 3: `cpuset_mems`/`hugepage_limits`/`unified` are honoured or
+/// refused, never silently ignored — the same guardrail #307 already gives the
+/// CLI for `-m`/`--cpus`/`--cpuset`. The CRI had none at all for ANY resource
+/// field: a kubelet asking for one of these on a leaf whose cgroup does not
+/// delegate the controller got a container that reports `Running` with the
+/// limit simply absent, discovered only by reading the cgroup by hand.
+///
+/// Checked here, at `StartContainer` — before it answers success, not guessed
+/// at write time — against the controllers the container is ACTUALLY about to
+/// land in: [`delonix_linux::leaf_controllers`] when the sandbox has no
+/// kubelet `cgroup_parent` (the engine's own slice/leaf, the same destination
+/// `container run` uses), or that parent's own `cgroup.controllers`
+/// ([`parent_cgroup_controllers`]) when it does — the engine's slice is not
+/// where that container will live (ADR 0038 item 1).
+///
+/// Also refuses a `hugepage_limits[].page_size` or `unified` key that would
+/// escape the leaf directory it is written into (`/`, `..`): both become part
+/// of a cgroup FILE PATH (`hugetlb.<page_size>.limit_in_bytes`, or the `unified`
+/// key verbatim), and the kubelet is not sandboxed input the engine should
+/// trust with a path component.
+///
+/// PURE validation and decision live in [`validate_resource_paths`],
+/// [`wanted_resource_controllers`] and [`resources_decision`] — this is the
+/// glue that reads the host (or, with `DELONIX_ALLOW_UNENFORCED_LIMITS`, skips
+/// reading it at all).
+fn refuse_unenforceable_resources(
+    r: &CriResources,
+    kube_cgroup_parent: Option<&str>,
+) -> Result<(), Status> {
+    validate_resource_paths(r)?;
+    let wanted = wanted_resource_controllers(r);
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    if std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some() {
+        tracing::warn!(
+            fields = %wanted.iter().map(|(_, f)| f.as_str()).collect::<Vec<_>>().join(", "),
+            "cri: resource field(s) requested without checking cgroup delegation — \
+             DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+        );
+        return Ok(());
+    }
+    let have: Vec<String> = match kube_cgroup_parent {
+        Some(parent) => parent_cgroup_controllers(parent),
+        None => delonix_linux::leaf_controllers(),
+    };
+    resources_decision(&wanted, &have)
+}
+
+/// PURE. Rejects a `hugepage_limits[].page_size`/`unified` key that would
+/// escape the leaf directory it becomes part of the path of.
+fn validate_resource_paths(r: &CriResources) -> Result<(), Status> {
+    for (size, _) in &r.hugepage_limits {
+        if size.is_empty() || size.contains('/') || size.contains("..") {
+            return Err(Status::invalid_argument(format!(
+                "hugepage_limits: invalid page size {size:?}"
+            )));
+        }
+    }
+    for (key, _) in &r.unified {
+        if key.is_empty() || key.contains('/') || key.contains("..") || !key.contains('.') {
+            return Err(Status::invalid_argument(format!(
+                "unified: invalid cgroup key {key:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// PURE. The `(controller, field)` pairs `r` needs honoured, in the order
+/// asked — `unified`'s controller is the prefix of the key before its first
+/// `.` (cgroup v2's own naming: `memory.high`, `io.weight`, `cpuset.cpus`, …).
+fn wanted_resource_controllers(r: &CriResources) -> Vec<(String, String)> {
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    if !r.cpuset_mems.is_empty() {
+        wanted.push(("cpuset".to_string(), "cpuset_mems".to_string()));
+    }
+    if !r.hugepage_limits.is_empty() {
+        wanted.push(("hugetlb".to_string(), "hugepage_limits".to_string()));
+    }
+    for (key, _) in &r.unified {
+        let ctrl = key.split('.').next().unwrap_or(key.as_str()).to_string();
+        wanted.push((ctrl, format!("unified[\"{key}\"]")));
+    }
+    wanted
+}
+
+/// PURE. The decision [`refuse_unenforceable_resources`] acts on, tested
+/// without a cgroup2 tree — the same split the CLI's
+/// `controller_limits_decision` already uses for `--cpuset`/`--io-weight`.
+fn resources_decision(wanted: &[(String, String)], have: &[String]) -> Result<(), Status> {
+    let missing: Vec<&(String, String)> = wanted
+        .iter()
+        .filter(|(c, _)| !have.iter().any(|h| h == c))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let fields = missing
+        .iter()
+        .map(|(_, f)| f.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut controllers: Vec<&str> = missing.iter().map(|(c, _)| c.as_str()).collect();
+    controllers.sort();
+    controllers.dedup();
+    Err(Status::failed_precondition(format!(
+        "cannot enforce {fields}: the cgroup this container would run in does not have the \
+         controller(s) `{}` — the limit would not exist while StartContainer reports success. \
+         Set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to start without it",
+        controllers.join(" ")
+    )))
+}
+
+/// The controllers a kubelet-shaped `cgroup_parent` offers, read from its OWN
+/// `cgroup.controllers` — never [`delonix_linux::leaf_controllers`], which
+/// answers about the engine's own slice/leaf, a different cgroup than the one
+/// a container with a `cgroup_parent` actually lands in (ADR 0038 item 1). An
+/// unparsable or unreadable parent answers "nothing available", which is the
+/// fail-closed side for a refusal check.
+fn parent_cgroup_controllers(raw_parent: &str) -> Vec<String> {
+    let Ok(parent) = delonix_compute::KubeCgroupParent::parse(raw_parent) else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(format!("{}/cgroup.controllers", parent.path()))
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -1537,6 +1704,12 @@ pub fn start_container(
         let bytes = std::fs::read(&rec.env_file0).map_err(st)?;
         delonix_compute::run::parse_env0(&bytes, &rec.env_file0).map_err(st)?
     };
+    // ADR 0038 item 3: before anything starts, not guessed at write time.
+    let kube_cgroup_parent = sandbox
+        .as_ref()
+        .map(|sb| sb.cgroup_parent.as_str())
+        .filter(|s| !s.is_empty());
+    refuse_unenforceable_resources(&rec.resources, kube_cgroup_parent)?;
     let opts = start_run_opts(&rec, sandbox.as_ref(), ceiling, &id, env);
     // The run specification goes to the engine as data, not argv — one translation
     // (above) instead of two — in a fresh single-threaded process, where the
@@ -2687,6 +2860,9 @@ mod tests {
             // this used to be read off the wire into `CriResources` and
             // never referenced again anywhere.
             oom_score_adj: -998,
+            cpuset_mems: "0-1".into(),
+            hugepage_limits: vec![("2MB".into(), 1_048_576)],
+            unified: vec![("memory.high".into(), "100000000".into())],
         };
         let mut o = delonix_compute::RunOpts::default();
         apply_resources(&r, &mut o);
@@ -2695,6 +2871,12 @@ mod tests {
         assert_eq!(o.cpu_weight.as_deref(), Some("20"));
         assert_eq!(o.cpuset.as_deref(), Some("0-1"));
         assert_eq!(o.oom_score_adj, Some(-998));
+        assert_eq!(o.cpuset_mems.as_deref(), Some("0-1"));
+        assert_eq!(o.hugepage_limits, vec![("2MB".to_string(), 1_048_576)]);
+        assert_eq!(
+            o.unified,
+            vec![("memory.high".to_string(), "100000000".to_string())]
+        );
         let rec = ContainerRec {
             resources: r,
             ..Default::default()
@@ -2732,6 +2914,122 @@ mod tests {
         assert_eq!(shares_to_weight(1024), 39);
         assert_eq!(shares_to_weight(262_144), 10_000);
         assert_eq!(shares_to_weight(1), 1);
+    }
+
+    /// ADR 0038 item 3: a `page_size`/`unified` key that would escape the
+    /// leaf directory it becomes a path component of is refused, not written.
+    #[test]
+    fn resource_paths_refuse_what_would_escape_the_leaf() {
+        for bad in ["../x", "a/b", "/abs", "..", ""] {
+            let r = CriResources {
+                hugepage_limits: vec![(bad.to_string(), 1)],
+                ..Default::default()
+            };
+            let err = validate_resource_paths(&r).expect_err(&format!("{bad:?} must be refused"));
+            assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        }
+        for bad in ["../memory.high", "a/b", "/abs", "no_dot_at_all", ""] {
+            let r = CriResources {
+                unified: vec![(bad.to_string(), "1".to_string())],
+                ..Default::default()
+            };
+            validate_resource_paths(&r).expect_err(&format!("{bad:?} must be refused"));
+        }
+        // The legitimate shapes pass through untouched.
+        let ok = CriResources {
+            hugepage_limits: vec![("2MB".to_string(), 1)],
+            unified: vec![("memory.high".to_string(), "1".to_string())],
+            ..Default::default()
+        };
+        assert!(validate_resource_paths(&ok).is_ok());
+    }
+
+    /// ADR 0038 item 3: which controller each field needs, and `unified`'s is
+    /// the key's own prefix (cgroup v2's naming, not a lookup table).
+    #[test]
+    fn wanted_controllers_match_the_field_and_the_unified_prefix() {
+        assert_eq!(wanted_resource_controllers(&CriResources::default()), []);
+        let r = CriResources {
+            cpuset_mems: "0-1".into(),
+            hugepage_limits: vec![("2MB".into(), 1)],
+            unified: vec![
+                ("memory.high".into(), "1".into()),
+                ("io.weight".into(), "default 100".into()),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            wanted_resource_controllers(&r),
+            vec![
+                ("cpuset".to_string(), "cpuset_mems".to_string()),
+                ("hugetlb".to_string(), "hugepage_limits".to_string()),
+                ("memory".to_string(), "unified[\"memory.high\"]".to_string()),
+                ("io".to_string(), "unified[\"io.weight\"]".to_string()),
+            ]
+        );
+    }
+
+    /// ADR 0038 item 3, the decision itself: refuses what is missing, names
+    /// the controller and the field, and is silent when every controller the
+    /// request needs is present — tested without a cgroup2 tree, the same
+    /// split the CLI's `controller_limits_decision` uses.
+    #[test]
+    fn resources_decision_refuses_only_the_missing_controllers() {
+        let wanted = vec![
+            ("cpuset".to_string(), "cpuset_mems".to_string()),
+            ("hugetlb".to_string(), "hugepage_limits".to_string()),
+        ];
+        assert!(
+            resources_decision(&wanted, &["cpuset".to_string(), "hugetlb".to_string()]).is_ok()
+        );
+
+        let err = resources_decision(&wanted, &["cpuset".to_string()])
+            .expect_err("hugetlb is missing, this must refuse");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("hugetlb"), "{}", err.message());
+        assert!(
+            err.message().contains("hugepage_limits"),
+            "{}",
+            err.message()
+        );
+        assert!(
+            !err.message().contains("cpuset_mems"),
+            "cpuset_mems was satisfied, it must not be named: {}",
+            err.message()
+        );
+
+        assert!(
+            resources_decision(&[], &[]).is_ok(),
+            "nothing wanted, nothing to refuse"
+        );
+    }
+
+    /// `refuse_unenforceable_resources` end to end: nothing requested is a
+    /// no-op without touching the host at all (no `cgroup_parent`, and the
+    /// probe would be `leaf_controllers()` — a real host read this test must
+    /// not depend on), and the escape hatch skips the probe outright.
+    #[test]
+    fn refuse_unenforceable_resources_is_a_noop_with_nothing_requested() {
+        assert!(refuse_unenforceable_resources(&CriResources::default(), None).is_ok());
+    }
+
+    /// `parent_cgroup_controllers` resolves against the KUBELET PARENT's own
+    /// path (`KubeCgroupParent::path()`, always under `/sys/fs/cgroup`) —
+    /// never the engine's own slice/leaf, a different cgroup than the one this
+    /// container actually lands in (ADR 0038 item 1). Reading the real file at
+    /// that path on a live host is what the battery/chaos scripts cover; this
+    /// tests only the two things provable without one: the path it builds,
+    /// and the fail-closed answer for a parent that was never valid (refused
+    /// long before this is reached, at `RunPodSandbox`).
+    #[test]
+    fn parent_cgroup_controllers_resolves_under_the_cgroup2_mount() {
+        let parsed = delonix_compute::KubeCgroupParent::parse("/kubepods/burstable/podabc")
+            .expect("a valid cgroupfs parent");
+        assert_eq!(parsed.path(), "/sys/fs/cgroup/kubepods/burstable/podabc");
+        assert_eq!(
+            parent_cgroup_controllers("not/a/valid/parent"),
+            Vec::<String>::new()
+        );
     }
 
     /// The kubelet's parent reaches `container run`, and only when there is one.

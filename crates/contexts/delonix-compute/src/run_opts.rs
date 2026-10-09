@@ -75,6 +75,22 @@ pub struct RunOpts {
     /// process; this is never guessed at for a plain `container run`.
     #[serde(default)]
     pub oom_score_adj: Option<i32>,
+    /// CRI `LinuxContainerResources.cpuset_mems` — set only by the CRI (ADR 0038
+    /// item 3). No `container run` flag exists for this; a request the node's
+    /// cgroup leaf cannot enforce is refused before `StartContainer` reports
+    /// success, never silently ignored.
+    #[serde(default)]
+    pub cpuset_mems: Option<String>,
+    /// CRI `LinuxContainerResources.hugepage_limits` — set only by the CRI (ADR
+    /// 0038 item 3). Each entry is `(page_size, limit_bytes)`, written verbatim
+    /// to `hugetlb.<page_size>.limit_in_bytes` on the leaf.
+    #[serde(default)]
+    pub hugepage_limits: Vec<(String, u64)>,
+    /// CRI `LinuxContainerResources.unified` — set only by the CRI (ADR 0038
+    /// item 3). Each entry is a raw cgroup v2 `(file, value)` pair
+    /// (`"memory.high"`, `"io.weight"`, …), written verbatim to the leaf.
+    #[serde(default)]
+    pub unified: Vec<(String, String)>,
     #[serde(default)]
     pub io_weight: Option<String>,
     /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded

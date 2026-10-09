@@ -400,6 +400,9 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
     c.cgroup_parent = o.cgroup_parent.clone();
     c.kube_cgroup = kube_cgroup;
     c.oom_score_adj = o.oom_score_adj;
+    c.cpuset_mems = o.cpuset_mems.clone();
+    c.hugepage_limits = o.hugepage_limits.clone();
+    c.unified = o.unified.clone();
     c.io_weight = o.io_weight.clone();
     c.io_max = o.io_max.clone();
 

@@ -1224,6 +1224,22 @@ pub enum ContainerCmd {
         /// written to `/proc/<pid>/oom_score_adj` at spawn.
         #[arg(long = "oom-score-adj", hide = true)]
         oom_score_adj: Option<i32>,
+        /// Internal: CRI `LinuxContainerResources.cpuset_mems` (ADR 0038 item 3),
+        /// mirrors `--kube-cgroup-parent`/`--oom-score-adj` so this field is
+        /// reachable without a kubelet. NOT spelled `--cpuset-mems` — that is a
+        /// Docker-ism this engine deliberately does not have on the stable CLI
+        /// (see `the_docker_spellings_are_not_ours`), and this flag only exists
+        /// for debugging the CRI path.
+        #[arg(long = "kube-cpuset-mems", hide = true)]
+        cpuset_mems: Option<String>,
+        /// Internal: CRI `LinuxContainerResources.hugepage_limits` (ADR 0038 item 3),
+        /// repeatable `<page_size>=<limit_bytes>` (e.g. `2MB=1048576`).
+        #[arg(long = "hugepage-limit", hide = true, value_parser = parse_hugepage_limit)]
+        hugepage_limits: Vec<(String, u64)>,
+        /// Internal: CRI `LinuxContainerResources.unified` (ADR 0038 item 3),
+        /// repeatable `<cgroup file>=<value>` (e.g. `memory.high=100000000`).
+        #[arg(long = "unified", hide = true, value_parser = parse_unified_entry)]
+        unified: Vec<(String, String)>,
         /// Relative I/O weight (`io.weight`, 1–10000).
         #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
         io_weight: Option<String>,
@@ -1754,6 +1770,9 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             cpuset,
             kube_cgroup_parent,
             oom_score_adj,
+            cpuset_mems,
+            hugepage_limits,
+            unified,
             io_weight,
             device_read_bps,
             device_write_bps,
@@ -1843,6 +1862,9 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 cgroup_parent: None,
                 kube_cgroup_parent,
                 oom_score_adj,
+                cpuset_mems,
+                hugepage_limits,
+                unified,
                 io_weight,
                 no_supervisor: false,
                 io_max: compose_io_max(
@@ -3865,6 +3887,27 @@ pub(crate) fn parse_cgroup_weight(s: &str) -> std::result::Result<String, String
         Ok(n) if (1..=10_000).contains(&n) => Ok(s.to_string()),
         _ => Err(format!("'{s}': weight must be a number from 1 to 10000")),
     }
+}
+
+/// Parses `--hugepage-limit`'s `<page_size>=<limit_bytes>` (ADR 0038 item 3).
+/// Internal-only flag: a malformed value refuses at parse, never reaching the
+/// CRI-side path validation that exists for the kubelet's own wire format.
+fn parse_hugepage_limit(s: &str) -> std::result::Result<(String, u64), String> {
+    let (size, limit) = s
+        .split_once('=')
+        .ok_or_else(|| format!("'{s}': expected <page_size>=<limit_bytes>"))?;
+    let limit = limit
+        .parse::<u64>()
+        .map_err(|_| format!("'{s}': limit is not a number of bytes"))?;
+    Ok((size.to_string(), limit))
+}
+
+/// Parses `--unified`'s `<cgroup file>=<value>` (ADR 0038 item 3).
+fn parse_unified_entry(s: &str) -> std::result::Result<(String, String), String> {
+    let (key, value) = s
+        .split_once('=')
+        .ok_or_else(|| format!("'{s}': expected <cgroup file>=<value>"))?;
+    Ok((key.to_string(), value.to_string()))
 }
 
 /// Validates `--restart` at the CLI boundary, so a typo is refused instead of
