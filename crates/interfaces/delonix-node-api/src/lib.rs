@@ -10,8 +10,9 @@
 //! the same functions `delonix system info` reads. `GET /openapi.json` serves
 //! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
 //! render it from UI files embedded in the binary ([`docs`]). `WatchEvents`
-//! answers `UNIMPLEMENTED` with the step that brings it; every other service of
-//! the contract is not registered on this socket at all.
+//! answers `UNIMPLEMENTED` with the step that brings it; every service of the
+//! contract this socket does not implement at all (`ContainerService`,
+//! `PodService`) is not registered either.
 //!
 //! Errors: gRPC carries `google.rpc.Status`; the REST encoding answers every
 //! error with an RFC 9457 `application/problem+json` document built by the
@@ -29,6 +30,12 @@
 //! `OperationService.GetOperation` and `ListOperations`. `request_id` (REST:
 //! `Idempotency-Key`) makes a retry the first answer; `etag` (REST:
 //! `If-Match`) makes a stale delete 412.
+//!
+//! `VirtualMachineService` ([`vms`] reads, [`vm_ops`] writes), full: create/
+//! get/list/delete, start/stop (the same `Operation` ledger as networks),
+//! the synchronous pause/resume, and the snapshot lifecycle. `Console` (a
+//! live byte pipe into the guest) is `UNIMPLEMENTED`, the same family as
+//! `ContainerService.Exec`, which this socket does not serve at all yet.
 //!
 //! The REST routes are not written by hand: `build.rs` generates the route
 //! table and the dispatchers from the `google.api.http` annotations
@@ -72,6 +79,8 @@ pub mod providers;
 pub mod selector;
 mod service;
 pub mod transcode;
+pub mod vm_ops;
+pub mod vms;
 pub mod volumes;
 
 pub use service::{

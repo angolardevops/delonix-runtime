@@ -8,6 +8,9 @@ use tonic::{Request, Response, Status};
 use crate::proto::v1::network_service_server::{NetworkService, NetworkServiceServer};
 use crate::proto::v1::node_service_server::{NodeService, NodeServiceServer};
 use crate::proto::v1::operation_service_server::{OperationService, OperationServiceServer};
+use crate::proto::v1::virtual_machine_service_server::{
+    VirtualMachineService, VirtualMachineServiceServer,
+};
 use crate::proto::v1::volume_service_server::{VolumeService, VolumeServiceServer};
 use crate::proto::v1::{
     ApiRoot, Capacity, Event, GetApiRootRequest, GetCapacityRequest, GetHealthRequest,
@@ -22,6 +25,14 @@ use crate::proto::v1::{
     ConnectContainerRequest, Container, CreateNetworkRequest, DeleteNetworkRequest,
     DisconnectContainerRequest, GetNetworkRequest, ListNetworksRequest, ListNetworksResponse,
     Network, Operation,
+};
+use crate::proto::v1::{
+    ConsoleRequest, ConsoleResponse, CreateSnapshotRequest, CreateVirtualMachineRequest,
+    DeleteSnapshotRequest, DeleteVirtualMachineRequest, GetVirtualMachineRequest,
+    ListSnapshotsRequest, ListSnapshotsResponse, ListVirtualMachinesRequest,
+    ListVirtualMachinesResponse, PauseVirtualMachineRequest, RestoreSnapshotRequest,
+    ResumeVirtualMachineRequest, StartVirtualMachineRequest, StopVirtualMachineRequest,
+    VirtualMachine,
 };
 use crate::proto::v1::{
     CreateVolumeRequest, DeleteVolumeRequest, GetVolumeRequest, ListVolumesRequest,
@@ -264,6 +275,168 @@ impl VolumeService for NodeApi {
 }
 
 #[tonic::async_trait]
+impl VirtualMachineService for NodeApi {
+    async fn get_virtual_machine(
+        &self,
+        req: Request<GetVirtualMachineRequest>,
+    ) -> Result<Response<VirtualMachine>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine", move || {
+            crate::vms::get_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_virtual_machines(
+        &self,
+        req: Request<ListVirtualMachinesRequest>,
+    ) -> Result<Response<ListVirtualMachinesResponse>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machines", move || {
+            crate::vms::list_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn create_virtual_machine(
+        &self,
+        req: Request<CreateVirtualMachineRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine create", move || {
+            crate::vm_ops::create_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn delete_virtual_machine(
+        &self,
+        req: Request<DeleteVirtualMachineRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine delete", move || {
+            crate::vm_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn start_virtual_machine(
+        &self,
+        req: Request<StartVirtualMachineRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine start", move || {
+            crate::vm_ops::start_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn stop_virtual_machine(
+        &self,
+        req: Request<StopVirtualMachineRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine stop", move || {
+            crate::vm_ops::stop_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn pause_virtual_machine(
+        &self,
+        req: Request<PauseVirtualMachineRequest>,
+    ) -> Result<Response<VirtualMachine>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine pause", move || {
+            crate::vm_ops::pause_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn resume_virtual_machine(
+        &self,
+        req: Request<ResumeVirtualMachineRequest>,
+    ) -> Result<Response<VirtualMachine>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine resume", move || {
+            crate::vm_ops::resume_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn create_snapshot(
+        &self,
+        req: Request<CreateSnapshotRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine snapshot create", move || {
+            crate::vm_ops::create_snapshot_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn list_snapshots(
+        &self,
+        req: Request<ListSnapshotsRequest>,
+    ) -> Result<Response<ListSnapshotsResponse>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine snapshots", move || {
+            crate::vm_ops::list_snapshots_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn restore_snapshot(
+        &self,
+        req: Request<RestoreSnapshotRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine snapshot restore", move || {
+            crate::vm_ops::restore_snapshot_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    async fn delete_snapshot(
+        &self,
+        req: Request<DeleteSnapshotRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let req = req.into_inner();
+        blocking("virtual machine snapshot delete", move || {
+            crate::vm_ops::delete_snapshot_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
+    }
+
+    type ConsoleStream =
+        Pin<Box<dyn tokio_stream::Stream<Item = Result<ConsoleResponse, Status>> + Send + 'static>>;
+
+    async fn console(
+        &self,
+        _req: Request<tonic::Streaming<ConsoleRequest>>,
+    ) -> Result<Response<Self::ConsoleStream>, Status> {
+        // A serial console is a live byte pipe into a running guest — the
+        // same family as `ContainerService.Exec`, which this socket does not
+        // serve at all yet. Named so a caller does not read a generic
+        // "service not found": the method exists in the contract, this build
+        // has nowhere to plumb it to.
+        Err(unserved("VirtualMachineService", "Console"))
+    }
+}
+
+#[tonic::async_trait]
 impl OperationService for NodeApi {
     async fn get_operation(
         &self,
@@ -343,6 +516,10 @@ pub fn router() -> axum::Router {
             &format!("/{}/*rest", OperationServiceServer::<NodeApi>::NAME),
             OperationServiceServer::new(NodeApi),
         )
+        .route_service(
+            &format!("/{}/*rest", VirtualMachineServiceServer::<NodeApi>::NAME),
+            VirtualMachineServiceServer::new(NodeApi),
+        )
         .fallback(fallback)
         .method_not_allowed_fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
@@ -411,6 +588,9 @@ async fn rest(
             "OperationService" => {
                 transcode::dispatch_operation_service(&NodeApi, route.rpc, input).await
             }
+            "VirtualMachineService" => {
+                transcode::dispatch_virtual_machine_service(&NodeApi, route.rpc, input).await
+            }
             _ => Err(transcode::not_served(route)),
         }
     };
@@ -425,7 +605,17 @@ async fn rest(
 /// ADR-0042 D2: `Idempotency-Key` (the request's `request_id`) and `If-Match`
 /// (its `etag`). A header on any other route is not read, and `If-Match` on a
 /// request with no `etag` field is refused.
-const MUTATIONS: &[&str] = &["CreateNetwork", "DeleteNetwork"];
+const MUTATIONS: &[&str] = &[
+    "CreateNetwork",
+    "DeleteNetwork",
+    "CreateVirtualMachine",
+    "DeleteVirtualMachine",
+    "StartVirtualMachine",
+    "StopVirtualMachine",
+    "CreateSnapshot",
+    "RestoreSnapshot",
+    "DeleteSnapshot",
+];
 
 /// Puts a header's value in the request field it stands for. The same value
 /// in both places is fine; two different ones are refused — which of them the
