@@ -230,16 +230,31 @@ and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless 
   with one gateway entry on the running gateway and no lock, for all three changes (moved to
   `.254`, removed, added). With the PR's binary as the control, the removed case ended `rc=0` with
   **no** gateway entry and a plan of `=`, and the added case was refused by D2.4 on every apply.
-- **Not fixed, measured:** the plan does not read the IPAM's gateway entries. A subnet whose
-  entry is missing plans `=` (exit 0); the repair runs only after a failed or interrupted run, so
-  an inconsistency made by hand, or left by an older binary, stays until the next failure.
-- **Not fixed, measured by hand on the node:** a subnet **deleted** inside a transaction that is
-  then rolled back comes back in the configuration and not in the IPAM's database
-  (`pve-ipam-state.json`). The node then refuses every update and every delete of that subnet
-  (`subnet '<cidr>' doesn't exist in IPAM DB`), so neither the engine nor `pvesh` can remove the
-  vnet or the zone. The only way out measured was to add the subnet back to that file by hand.
-  It applies to a teardown (`remove_subnet` then `remove_vnet`/`remove_zone`) or a CIDR replace
-  that fails after the subnet's delete was staged.
+- **Widened (2026-10-09), owner decision:** the repair ran only after a failed or interrupted
+  run, so an inconsistency made by hand on the node, or left by an older binary that never had
+  this repair, stayed until the next failure happened to trip it. `repair_gateways` is idempotent
+  — a subnet whose entry already matches its running gateway is a no-op — so the call site in
+  `network_zone.rs::apply_one` now runs it on **every** apply, not only an interrupted one. This
+  widens D2.3 from "called only after a failure" to "called every time", at the cost of one extra
+  read per apply. The plan still does not read the IPAM's gateway entries on its own (a subnet
+  whose entry is missing still plans `=`, exit 0) — that is a separate, larger change (the plan
+  would need to fingerprint the IPAM side the way `uses_ipam`/`ipam_fingerprint` already do for
+  drift detection, not just for the repair step), and is left open.
+- **Not fixed, by owner decision — a known limitation, not an engine bug to patch around.** A
+  subnet **deleted** inside a transaction that is then rolled back comes back in the
+  configuration and not in the IPAM's database (`pve-ipam-state.json`). The node then refuses
+  every update and every delete of that subnet (`subnet '<cidr>' doesn't exist in IPAM DB`), so
+  neither the engine nor `pvesh` can remove the vnet or the zone. The only way out measured was to
+  edit that file on the node by hand — it is an undocumented, internal Proxmox state file, not
+  something exposed through any API route this engine talks to. Having the engine reach around
+  its own provider boundary to patch a vendor's internal file is a fragile, unsupported workaround
+  (the file's format and location are not a contract Proxmox publishes, and could change under a
+  future PVE release without notice) — the risk of building that is judged higher than the risk of
+  leaving this documented. It applies to a teardown (`remove_subnet` then `remove_vnet`/
+  `remove_zone`) or a CIDR replace that fails after the subnet's delete was staged. Operational
+  mitigation until a real fix exists: avoid interrupting (`kill -9`, a crashed host) a
+  `NetworkZone` apply or destroy while a subnet delete is in flight; if it happens, recovery is a
+  manual Proxmox-side operation, not an automated `delonix` path.
 - **D2.5 — measured** (follow-up run, by hand and through
   `live.rs::a_gateway_is_removed_and_added_in_place_and_a_range_narrows_under_a_guest`). A VM
   created on the vnet got an allocation in the range (`.100`); the range narrowed to `.10–.30` is

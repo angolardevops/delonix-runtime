@@ -27,8 +27,9 @@
 //! list while others stay. A subnet's gateway and DHCP ranges are the
 //! exception (ADR-0063 D2): changed in place, inside the transaction; its
 //! CIDR is its identity and stays cold. A gateway change moves the
-//! provider's IPAM gateway entry the moment it is staged, so a transaction
-//! that fails is followed by a repair of that entry, recorded as a ledger
+//! provider's IPAM gateway entry the moment it is staged, so every apply
+//! repairs any entry a prior run left stranded — a failed/interrupted run's
+//! discarded change, or one made by hand on the node — recorded as a ledger
 //! step ([`repair_gateways_step`]). The full document's teardown
 //! (`--replace NetworkZone/<name>`, or dropping it under `stack apply
 //! --prune`) removes every vnet the registry last recorded, then the zone.
@@ -997,7 +998,16 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     // A run that stopped may have staged a gateway change: discarding it does
     // not move the IPAM's gateway entry back (ADR-0063 D2.3). Repaired before
     // this run stages anything — and if the repair fails, nothing is staged.
-    if let (Some(ipam), true) = (&ipam, interrupted.is_some()) {
+    //
+    // Run on EVERY apply, not only after an interrupted one (widened from the
+    // ADR's original "called only after a failure" — found measuring D2.3
+    // live: a stale entry left by a hand edit on the node, or by an older
+    // binary that never had this repair, would otherwise sit there until the
+    // next failure happens to trip it. `repair_gateways` is idempotent — a
+    // subnet already matching its running gateway is a no-op — so widening
+    // the call site costs one extra read per apply and closes that gap for
+    // every apply, not just the one right after a crash).
+    if let Some(ipam) = &ipam {
         repair_gateways_step(&s, &mut rec, provider_id, ipam.as_ref(), &owner)?;
     }
     let step = rec.ledger.open("transaction", &name);
