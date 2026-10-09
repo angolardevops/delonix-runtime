@@ -70,6 +70,11 @@ pub struct RunOpts {
     /// The kubelet's cgroup for the pod (ADR 0038) — set only by the CRI.
     #[serde(default)]
     pub kube_cgroup_parent: Option<String>,
+    /// CRI `LinuxContainerResources.oom_score_adj` — set only by the CRI
+    /// (ADR 0038 item 3). `None` leaves whatever the kernel/cgroup gives the
+    /// process; this is never guessed at for a plain `container run`.
+    #[serde(default)]
+    pub oom_score_adj: Option<i32>,
     #[serde(default)]
     pub io_weight: Option<String>,
     /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded

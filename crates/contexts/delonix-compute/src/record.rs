@@ -592,6 +592,14 @@ pub struct Container {
     /// namespaced `sysctl`s (`--sysctl key=value`), written to `/proc/sys`.
     #[serde(default)]
     pub sysctls: Vec<String>,
+    /// CRI `LinuxContainerResources.oom_score_adj` — written to
+    /// `/proc/<pid>/oom_score_adj` at spawn (ADR 0038 item 3: "honour or
+    /// refuse, never ignore" — this field used to be read off the wire and
+    /// then dropped without either). `None` on every container not created
+    /// through the CRI with the field set, and on a record written before
+    /// this field existed.
+    #[serde(default)]
+    pub oom_score_adj: Option<i32>,
     /// A custom OCI seccomp profile, stored as its JSON CONTENT.
     ///
     /// The content and not the path, deliberately: the file lives on the host,
@@ -707,6 +715,21 @@ pub struct Container {
     /// `run_as_group`). `None` = uses the UID's primary group. Persisted.
     #[serde(default)]
     pub run_gid: Option<u32>,
+    /// `true` when the image declares a non-root `USER` but this host could
+    /// not honour it (ADR-0062's documented fallback: rootless with no
+    /// subordinate uid/gid range maps a single uid, so there is no second
+    /// user to become) and the process is running as root (uid 0) instead
+    /// of the uid the image asked for — not because anyone requested root,
+    /// but because this host cannot give it anything else. Before this
+    /// field existed the only trace of that decision was a `Notice` printed
+    /// once to the CLI's stderr: a container created via CRI (the normal
+    /// path for a kubelet) left no record anywhere that `ContainerStatus`/
+    /// `inspect` could read — an orchestrator had no way to discover, after
+    /// the fact, that a Pod which declared non-root is in fact running as
+    /// root. `#[serde(default)]` so an older record (which never ran as
+    /// root for this reason, by construction) reads `false`.
+    #[serde(default)]
+    pub user_fallback_to_root: bool,
     /// Short, stable reason code set when `status` flips to `Crashed`/`Failed`:
     /// `"oom_killed"` (the kernel's OOM killer — read off the cgroup's
     /// `memory.events` by whoever waited on the init, before the cgroup is
@@ -814,6 +837,7 @@ impl Container {
             tmpfs: Vec::new(),
             ulimits: Vec::new(),
             sysctls: Vec::new(),
+            oom_score_adj: None,
             seccomp_profile: None,
             dns_servers: Vec::new(),
             dns_searches: Vec::new(),
@@ -835,6 +859,7 @@ impl Container {
             hostname: None,
             run_uid: None,
             run_gid: None,
+            user_fallback_to_root: false,
             crash_reason: None,
             crashed_at: None,
         }

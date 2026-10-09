@@ -25,7 +25,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{etcd, k8s_recipes, kubeadm_config, lb, vmimage};
+use super::{etcd, k8s_recipes, kubeadm_config, lb, vm, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -836,6 +836,20 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             return super::kindmode::start(&images, &store, name.as_deref());
         }
         ClusterCmd::Destroy { ref name, force } => {
+            // VM/SSH-provisioned clusters have no destroy of their own today
+            // (KaaS capability audit, gap #10 — lived through directly while
+            // tearing down this same audit's own test cluster by hand).
+            // Checked only when a NAME is given: a VM-cluster match on an
+            // omitted name would have to disambiguate against a kind-mode
+            // cluster that might ALSO be "the only one", which is a second
+            // decision this fix does not need to make to close the gap —
+            // the omitted-name path keeps its exact previous behavior.
+            if let Some(n) = name {
+                let vms = cluster_vm_names(n)?;
+                if !vms.is_empty() {
+                    return destroy_vm_cluster(n, &vms, force);
+                }
+            }
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::destroy(&images, &store, name.as_deref(), force);
         }
@@ -1589,6 +1603,13 @@ fn apply_ssh(
 ) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(cri_bin.map(|p| p.to_path_buf()))?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
+    // The CLI running THIS command — installed on every node alongside
+    // delonix-cri, for the reason `install_cli`'s doc comment states: a node
+    // provisioned from a golden image otherwise keeps running whatever
+    // `delonix` was baked into it, no matter how new the CRI next to it is.
+    let cli_bin = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| Error::Invalid(format!("resolving this CLI's own binary path: {e}")))?;
 
     let all_hosts: Vec<&HostSpec> = spec
         .control_plane
@@ -1620,6 +1641,9 @@ fn apply_ssh(
         plano.push(super::po::t("Bootstrapping the etcd cluster").to_string());
     }
     plano.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
+    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
+        plano.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
+    }
     if spec.control_plane.hosts.len() > 1 {
         plano.push(super::po::tf(
             "Joining {n} more control-plane(s)",
@@ -1662,6 +1686,7 @@ fn apply_ssh(
                 let label = h.label();
                 let cri_bin = &cri_bin;
                 let cri_service = &cri_service;
+                let cli_bin = &cli_bin;
                 scope.spawn(move || {
                     prepare_host(
                         &target,
@@ -1669,6 +1694,7 @@ fn apply_ssh(
                         spec.k8s_version.as_deref(),
                         cri_bin,
                         cri_service,
+                        cli_bin,
                     )
                 })
             })
@@ -1728,6 +1754,31 @@ fn apply_ssh(
     let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec, &etcd_endpoints)?;
     p.ok();
 
+    // `spec.cni` used to be validated by round-trip and then never read again
+    // anywhere in this function — every cluster bootstrapped through this
+    // path stayed `NotReady` forever, with nothing but a manual
+    // `kubectl apply -f <cni>.yaml` able to fix it (exactly the step a past
+    // investigation session took by hand; see the KaaS capability audit,
+    // docs/discovery/kaas-matrix-2026-10-08.md, gap #1). Only the provably
+    // safe case is wired up here: EXACTLY one node total. A plain bridge CNI
+    // gives that one node working pod networking (it is the same conflist
+    // delonix-cri's own root-CNI path already uses for every pod sandbox —
+    // see ADR-0074 and the AGENTS.md section on the root-CNI bridge fix), but has no
+    // mechanism to route pod traffic BETWEEN nodes (no DaemonSet programs
+    // the routes), so a multi-node cluster is left exactly as before:
+    // `NotReady` until the operator applies their own CNI. `cluster kubeadm`
+    // has no `--cni` flag to opt out of `default` yet, so refusing the
+    // multi-node case outright here would break the HA example with no
+    // escape hatch — a scope decision, not an oversight.
+    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
+        p.step(
+            super::po::t("Installing the default CNI (bridge, single node)"),
+            "🔌",
+        );
+        ensure_single_node_cni(&cp1_target, &spec.pod_subnet)?;
+        p.ok();
+    }
+
     if spec.control_plane.hosts.len() > 1 {
         p.step(
             &super::po::tf(
@@ -1760,21 +1811,48 @@ fn apply_ssh(
         p.ok();
     }
 
-    if wait_ready {
+    // Whether this run actually OBSERVED every node Ready — the one thing
+    // that is allowed to make the final line below say "ready". `None` =
+    // never checked (the historical `cluster apply -f` timing, which passes
+    // `wait_ready: false` on purpose — see `apply()`'s own comment); `Some`
+    // = checked, with the true/false from `wait_for_cluster_ready` itself.
+    let confirmed_ready = if wait_ready {
         let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
         p.step(super::po::t("Waiting for all nodes to be Ready"), "⏳");
-        wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
+        let ready = wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
         p.ok();
-    }
+        Some(ready)
+    } else {
+        None
+    };
 
     p.step(super::po::t("Fetching kubeconfig"), "📇");
     let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
     p.ok();
 
-    output::info(&super::po::tf(
-        "cluster \"{name}\" ready",
-        &[("name", name)],
-    ));
+    // The line this replaces said "ready" unconditionally — even on the
+    // historical `wait_ready: false` path, where readiness is never even
+    // looked at, and even when `wait_for_cluster_ready` itself had just
+    // warned that 0 of N nodes converged. `kubeadm join` returning success
+    // means bootstrapped, not Ready; conflating the two is the exact
+    // "relato desonesto" this repo's own doctrine rejects elsewhere — see
+    // the KaaS capability audit's gap #1.
+    match confirmed_ready {
+        Some(true) => output::info(&super::po::tf(
+            "cluster \"{name}\" ready",
+            &[("name", name)],
+        )),
+        Some(false) => output::info(&super::po::tf(
+            "cluster \"{name}\" bootstrapped — not all nodes reported Ready (see the warning \
+             above); check with `delonix cluster {name} kubectl get nodes`",
+            &[("name", name)],
+        )),
+        None => output::info(&super::po::tf(
+            "cluster \"{name}\" bootstrapped — readiness was not checked (pass --wait, or run \
+             `delonix cluster {name} kubectl get nodes` yourself)",
+            &[("name", name)],
+        )),
+    }
     println!("kubeconfig: {}", kubeconfig_path.display());
     println!("export KUBECONFIG={}", kubeconfig_path.display());
     Ok(())
@@ -1782,16 +1860,21 @@ fn apply_ssh(
 
 /// Polls `kubectl get nodes` on the control-plane until all `expected` nodes
 /// report `Ready` (CNI installed and functional) or `timeout` elapses.
-/// Best-effort: a timeout is a WARNING, not a hard failure — the cluster is
-/// already bootstrapped (`kubeadm join` succeeded on every node); the CNI
-/// may just be slow to converge (image pulls, etc.), and the kubeconfig this
-/// gates is still valid either way, just possibly ahead of full readiness.
+/// Returns `Ok(true)` when every node converged, `Ok(false)` when SOME did
+/// (a legitimate "still converging" case — slow image pulls, a CNI
+/// DaemonSet not yet scheduled — not a reason to fail a bootstrap that
+/// otherwise succeeded). `Err` only when NOT EVEN ONE node reached `Ready`
+/// by the deadline: `kubeadm join` succeeding on every host and zero of
+/// them ever going `Ready` is the exact signature of a CNI that was never
+/// applied at all (see the KaaS capability audit's gap #1) — a structurally
+/// different, worse case than "slow", and the caller used to report BOTH as
+/// success.
 fn wait_for_cluster_ready(
     cp1: &SshTarget,
     cluster_name: &str,
     expected: usize,
     timeout: Duration,
-) -> Result<()> {
+) -> Result<bool> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let out = remote::ssh_run(
@@ -1804,7 +1887,7 @@ fn wait_for_cluster_ready(
             .filter(|l| l.split_whitespace().nth(1) == Some("Ready"))
             .count();
         if ready >= expected && expected > 0 {
-            return Ok(());
+            return Ok(true);
         }
         if std::time::Instant::now() >= deadline {
             output::warn(&super::po::tf(
@@ -1816,10 +1899,75 @@ fn wait_for_cluster_ready(
                     ("n", &expected.to_string()),
                 ],
             ));
-            return Ok(());
+            if ready == 0 {
+                return Err(Error::Invalid(super::po::tf(
+                    "cluster \"{name}\": 0/{n} node(s) ever reached Ready — the cluster is \
+                     bootstrapped (kubeadm join succeeded everywhere) but has no working pod \
+                     network; apply a CNI by hand (`KUBECONFIG=... kubectl apply -f <cni>.yaml` \
+                     on the control-plane) and re-run with --wait, or check \
+                     `kubectl get nodes`/`kubectl describe node` yourself",
+                    &[("name", cluster_name), ("n", &expected.to_string())],
+                )));
+            }
+            return Ok(false);
         }
         std::thread::sleep(Duration::from_secs(5));
     }
+}
+
+/// The "default" CNI for a cluster with EXACTLY one node total: a plain
+/// bridge + host-local IPAM conflist at `/etc/cni/net.d/10-bridge.conflist`.
+/// This is not new networking mechanism — it is the identical conflist
+/// `delonix-cri`'s own root-mode pod-sandbox path already requires and reads
+/// (ADR-0074; the AGENTS.md section on fixing the root-CNI bridge has this
+/// exact shape live-validated against a real kubelet) — wiring it into the
+/// bootstrap, not inventing it. Also removes the default
+/// `node-role.kubernetes.io/control-plane` taint (mirrors kind-mode's own
+/// `cfg.workers == 0` branch in `kindmode.rs`): without it nothing
+/// user-facing — not even CoreDNS — ever schedules onto a control-plane-only
+/// node.
+///
+/// Idempotent: writing the same file twice and re-applying `kubectl taint
+/// ... -` on an already-untainted node are both no-ops.
+///
+/// Scope, deliberately: multi-node clusters do not call this (see the call
+/// site) — a plain bridge CNI has no mechanism to route pod traffic between
+/// nodes, and shipping that silently would trade one broken promise for
+/// another, just quieter.
+///
+/// `pod_subnet` is `single_node_bridge_conflist`'s only moving part, kept
+/// pure and separate so the JSON shape is unit-tested without SSH.
+fn single_node_bridge_conflist(pod_subnet: &str) -> String {
+    format!(
+        "{{\"cniVersion\":\"1.0.0\",\"name\":\"bridge\",\"plugins\":[\
+         {{\"type\":\"bridge\",\"bridge\":\"cni0\",\"isGateway\":true,\"ipMasq\":true,\
+         \"hairpinMode\":true,\"ipam\":{{\"type\":\"host-local\",\
+         \"ranges\":[[{{\"subnet\":\"{pod_subnet}\"}}]],\"routes\":[{{\"dst\":\"0.0.0.0/0\"}}]}}}},\
+         {{\"type\":\"portmap\",\"capabilities\":{{\"portMappings\":true}}}}]}}"
+    )
+}
+
+fn ensure_single_node_cni(cp1: &SshTarget, pod_subnet: &str) -> Result<()> {
+    let conflist = single_node_bridge_conflist(pod_subnet);
+    let tmp = delonix_state::write_private_temp("delonix-10-bridge.conflist", conflist.as_bytes())
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::t("writing the default CNI conflist")
+            ))
+        })?;
+    let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-10-bridge.conflist");
+    let _ = std::fs::remove_file(&tmp);
+    scp_result.map_err(|e| Error::Invalid(format!("CNI conflist: {e}")))?;
+    remote::ssh_run(
+        cp1,
+        "mkdir -p /etc/cni/net.d && \
+         mv /tmp/delonix-10-bridge.conflist /etc/cni/net.d/10-bridge.conflist && \
+         KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+         node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true",
+    )
+    .map_err(|e| Error::Invalid(format!("applying the default CNI conflist: {e}")))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1853,6 +2001,168 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
     (1..=count)
         .map(|i| format!("{cluster_name}-{role}{i}"))
         .collect()
+}
+
+/// The inverse of `vm_names`/the `<name>-lb` literal `provision_and_apply`
+/// writes: does `vm_name` belong to the cluster `cluster_name` provisioned?
+/// PURE, so the naming convention this file has in TWO places (the names it
+/// writes, and now the names a destroy has to find) cannot quietly drift
+/// apart from a single string literal changing in only one of them.
+fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
+    let Some(rest) = vm_name.strip_prefix(cluster_name) else {
+        return false;
+    };
+    let Some(suffix) = rest.strip_prefix('-') else {
+        return false;
+    };
+    suffix == "lb"
+        || ["cp", "w", "etcd"].iter().any(|role| {
+            suffix
+                .strip_prefix(role)
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
+/// Every VM this engine's own store knows about that belongs to cluster
+/// `cluster_name` — empty when the cluster was not VM/SSH-provisioned at
+/// all (the caller falls back to kind-mode's own resolution in that case).
+fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
+    Ok(delonix_vm::list(&state_root())?
+        .into_iter()
+        .filter(|vm| is_cluster_vm(&vm.name, cluster_name))
+        .map(|vm| vm.name)
+        .collect())
+}
+
+/// `cluster destroy <name>` for a VM/SSH-provisioned cluster — the half that
+/// never existed (KaaS capability audit, gap #10): `ClusterCmd::Destroy`
+/// went straight to kind-mode's own `destroy`, which only ever looks at
+/// containers carrying the `io.x-k8s.kind.cluster` label, so a cluster made
+/// of VMs had no destroy verb at all. An operator's only way to tear one
+/// down was `vm rm` on every node by hand, plus editing `~/.kube/config`
+/// themselves — exactly what this same audit's own live-validation test
+/// (`docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md` §4.6) had to do,
+/// which is how this gap went from "known" to "fixed".
+///
+/// Deliberately leaves the network alone: `--network` names a network the
+/// OPERATOR created (`cluster kubeadm`'s own `--help` says so — "no magic
+/// default"), so it is never this command's to remove, the same way
+/// kind-mode's own `delete` only removes the network IT created
+/// (`cluster_net(name)`) and never a user's.
+fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
+    if !super::prune::confirm(
+        force,
+        &super::po::tf(
+            "`cluster destroy` removes VM-provisioned cluster '{name}' — pass --force to \
+             confirm when not on a terminal",
+            &[("name", name)],
+        ),
+        Some(super::po::tf(
+            "This will remove {n} VM(s) of cluster '{name}', its cached kubeconfig, and the \
+             matching ~/.kube/config entries. The network it used is left alone — you created \
+             it, this command did not.",
+            &[("n", &vms.len().to_string()), ("name", name)],
+        )),
+        super::po::t("Continue? [y/N]"),
+    )? {
+        return Ok(());
+    }
+    super::output::info(&format!(
+        "{} \"{name}\"",
+        super::po::t("Destroying cluster")
+    ));
+    let base = state_root();
+    let mut p = super::output::Progress::new();
+    for vm_name in vms {
+        p.step(
+            &format!("{} '{vm_name}'", super::po::t("Removing VM")),
+            "🗑️",
+        );
+        vm::cmd_rm(&base, vm_name, true)?;
+        p.ok();
+    }
+    p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
+    let _ = std::fs::remove_file(
+        base.join("clusters")
+            .join(format!("{name}-kubeconfig.yaml")),
+    );
+    let _ = std::fs::remove_dir_all(base.join("clusters").join(name));
+    let local_kubeconfig =
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".kube").join("config"));
+    match local_kubeconfig.map(|dest| remove_local_kubeconfig_entries(&dest, name)) {
+        None | Some(Ok(())) => p.ok(),
+        Some(Err(e)) => {
+            p.step("", ""); // closes the cleanup step with ✗ before the warning
+            super::output::warn(&super::po::tf(
+                "could not remove kubeconfig entries for '{name}': {e}",
+                &[("name", name), ("e", &e.to_string())],
+            ));
+        }
+    }
+    drop(p);
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}' removed ({n} VM(s))",
+            &[("name", name), ("n", &vms.len().to_string())],
+        )
+    );
+    Ok(())
+}
+
+/// Removes the `clusters[]`/`contexts[]` entries named `cluster_name` and
+/// the `users[]` entry named `<cluster_name>-admin` from the kubeconfig at
+/// `dest` — the exact three names `merge_into_local_kubeconfig` writes a
+/// VM/SSH cluster's kubeconfig under (same `dest` parameter shape as that
+/// function, for the same reason: testable without mutating `$HOME`).
+/// Clears `current-context` too, if it was pointing here: left dangling, it
+/// would make a bare `kubectl` fail at EVERYTHING instead of just this one
+/// cluster. Mirrors kind-mode's own `remove_kubecontext` shape exactly; not
+/// the same function, because the two naming conventions differ (kind-mode
+/// uses ONE name for all three kinds of entry; a VM/SSH cluster's user
+/// entry is `<name>-admin`).
+fn remove_local_kubeconfig_entries(dest: &Path, cluster_name: &str) -> Result<()> {
+    use serde_yaml::Value;
+    let Ok(txt) = std::fs::read_to_string(dest) else {
+        return Ok(());
+    };
+    if txt.trim().is_empty() {
+        return Ok(());
+    }
+    let mut cfg: Value = serde_yaml::from_str(&txt).map_err(|e| {
+        Error::Invalid(format!(
+            "{} {}: {e}",
+            dest.display(),
+            super::po::t("is not valid YAML")
+        ))
+    })?;
+    let user_name = format!("{cluster_name}-admin");
+    let mut changed = false;
+    for (key, target) in [
+        ("clusters", cluster_name),
+        ("contexts", cluster_name),
+        ("users", user_name.as_str()),
+    ] {
+        if let Some(seq) = cfg.get_mut(key).and_then(|v| v.as_sequence_mut()) {
+            let before = seq.len();
+            seq.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(target));
+            changed |= seq.len() != before;
+        }
+    }
+    if cfg.get("current-context").and_then(|v| v.as_str()) == Some(cluster_name) {
+        if let Some(m) = cfg.as_mapping_mut() {
+            m.remove(Value::from("current-context"));
+        }
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    let out = serde_yaml::to_string(&cfg).map_err(|e| Error::Invalid(e.to_string()))?;
+    let tmp = dest.with_extension("delonix.tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(&tmp, dest)?;
+    Ok(())
 }
 
 /// The OCI reference to `vm pull` for a resolved `image_tag` that has no
@@ -2400,6 +2710,7 @@ fn prepare_host(
     k8s_version: Option<&str>,
     cri_bin: &std::path::Path,
     cri_service: &std::path::Path,
+    cli_bin: &std::path::Path,
 ) -> Result<()> {
     for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
@@ -2410,6 +2721,56 @@ fn prepare_host(
     }
 
     install_cri(target, label, cri_bin, cri_service)?;
+    install_cli(target, label, cli_bin)?;
+    Ok(())
+}
+
+/// Remote path the `delonix` CLI lives at (the golden image's own convention —
+/// see `install.sh`).
+const REMOTE_CLI_BIN: &str = "/usr/local/bin/delonix";
+
+/// Keeps the node's `delonix` CLI in step with `install_cri`'s own `delonix-cri` —
+/// same idea, same sha256-check-then-replace shape, deliberately NOT merged
+/// into one function: a CLI binary has no systemd unit to restart.
+///
+/// Why this exists at all: a golden image bakes in a `delonix` built on
+/// whatever day the image was built, and `prepare_host` upgraded `delonix-cri`
+/// (the gRPC server) from the day it was written — but every actual container
+/// spawn goes through `delonix-cri`'s own `__apirun` re-exec, and THAT target
+/// is the node's own `delonix`, found by name, not the freshly-installed CRI.
+/// A node provisioned today from a two-month-old image was therefore running
+/// brand-new CRI protocol handling on top of two-month-old container-spawn
+/// logic — invisibly, because nothing checked, and no symptom points at a CLI
+/// mismatch (the two binaries do not fail to talk to each other; the stale
+/// one just quietly keeps whatever bugs it shipped with, user-switch-ordering
+/// bugs included). Measured live on this exact golden image
+/// (`delonix-vm-k8s:1.36`, baked-in CLI `0.66.0` from 2026-08-27): CoreDNS
+/// crash-looped with the precise symptom a 2026-09-15 fix elsewhere in this
+/// file documents as closed, because the fix never reached this node's CLI.
+fn install_cli(target: &SshTarget, label: &str, cli_bin: &std::path::Path) -> Result<()> {
+    let err = |e: Error| Error::Invalid(format!("[{label}] delonix CLI: {e}"));
+    let local = vmimage::hex_sha256_file(cli_bin)?;
+    let matches = remote::ssh_check(
+        target,
+        &format!("[ \"$(sha256sum {REMOTE_CLI_BIN} 2>/dev/null | cut -d' ' -f1)\" = \"{local}\" ]"),
+    );
+    if matches {
+        return Ok(());
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "[{label}] the node's delonix CLI differs from this one's (sha256 {sha}) — \
+             replacing it (delonix-cri re-execs it to spawn every container)",
+            &[("label", label), ("sha", &local[..12])],
+        )
+    );
+    remote::scp_to(target, cli_bin, "/tmp/delonix-cli").map_err(err)?;
+    remote::ssh_run(
+        target,
+        &format!("mv /tmp/delonix-cli {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}"),
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -3020,6 +3381,53 @@ mod tests {
 
     use super::*;
 
+    /// Regression (KaaS capability audit, gap #1): the conflist this engine
+    /// writes for a single-node `cni: default` cluster has to parse with the
+    /// SAME parser `delonix-cri`'s own root-mode pod-sandbox path reads it
+    /// with (`delonix_sdn::cni::parse_config`/`readiness`) — a conflist that
+    /// is merely "valid JSON" but shaped wrong would compile this fix,
+    /// commit it, and still leave the node `NotReady`, undetectably.
+    #[test]
+    fn single_node_bridge_conflist_parses_with_the_engines_own_cni_reader() {
+        let json = single_node_bridge_conflist("10.244.0.0/24");
+        let parsed = delonix_sdn::cni::parse_config(&json)
+            .expect("the engine's own CNI parser must accept this conflist");
+        assert_eq!(parsed.name, "bridge");
+        let types: Vec<&str> = parsed
+            .plugins
+            .iter()
+            .map(|p| p["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(types, ["bridge", "portmap"]);
+        assert_eq!(parsed.plugins[0]["ipam"]["type"], "host-local");
+        assert_eq!(
+            parsed.plugins[0]["ipam"]["ranges"][0][0]["subnet"],
+            "10.244.0.0/24"
+        );
+        // `readiness()` is what actually gates a kubelet's `NetworkReady` —
+        // confirms the file is not just parseable but USABLE: missing only
+        // the plugin binaries (expected — none are on disk in a unit test).
+        let tmp = tempfile::tempdir().unwrap();
+        let conf_dir = tmp.path().join("net.d");
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("10-bridge.conflist"), &json).unwrap();
+        match delonix_sdn::cni::readiness(&conf_dir, &[tmp.path().join("bin")]) {
+            delonix_sdn::cni::Readiness::PluginMissing(m) => {
+                assert_eq!(m, ["bridge", "host-local", "portmap"]);
+            }
+            other => panic!("expected PluginMissing (no binaries in this test), got {other:?}"),
+        }
+    }
+
+    /// Whatever subnet the manifest declares has to land in the conflist
+    /// unmangled — a typo'd interpolation here would silently hand every
+    /// pod on the node an address outside `spec.podSubnet`.
+    #[test]
+    fn single_node_bridge_conflist_carries_the_exact_pod_subnet() {
+        let json = single_node_bridge_conflist("192.168.77.0/24");
+        assert!(json.contains("\"subnet\":\"192.168.77.0/24\""), "{json}");
+    }
+
     /// A state root and a `$HOME` in one temp dir, each with its own files —
     /// the shape of the defect: an isolated `DELONIX_ROOT` on a host whose
     /// `~/.kube` holds real clusters.
@@ -3323,6 +3731,99 @@ users:
         assert_eq!(
             merged["current-context"], "outro",
             "an absent current-context must be filled by the cluster just created"
+        );
+    }
+
+    /// Regression (KaaS capability audit, gap #10): the naming convention a
+    /// `cluster kubeadm` VM/SSH cluster uses has to be recognized precisely —
+    /// `is_cluster_vm` is the ONE place that decides it, shared by whatever
+    /// finds the VMs to destroy and (conceptually) by `vm_names`/the `-lb`
+    /// literal that create them. A loose match here would make `cluster
+    /// destroy foo` also remove an unrelated `foobar-cp1`.
+    #[test]
+    fn is_cluster_vm_matches_the_naming_convention_exactly() {
+        for ok in [
+            "lab-cp1",
+            "lab-cp12",
+            "lab-w1",
+            "lab-w3",
+            "lab-etcd1",
+            "lab-lb",
+        ] {
+            assert!(is_cluster_vm(ok, "lab"), "{ok} should match cluster 'lab'");
+        }
+        for not_ok in [
+            "labextra-cp1", // different cluster, same prefix characters
+            "lab",          // the cluster name itself is not a node
+            "lab-",         // no role at all
+            "lab-cp",       // no index
+            "lab-cpx",      // non-numeric index
+            "lab-master1",  // not one of the roles this engine writes
+            "other-cp1",    // a different cluster entirely
+        ] {
+            assert!(
+                !is_cluster_vm(not_ok, "lab"),
+                "{not_ok} must NOT match cluster 'lab'"
+            );
+        }
+    }
+
+    /// Regression (same gap): removing a VM/SSH cluster's kubeconfig entries
+    /// has to find exactly the three names `merge_into_local_kubeconfig`
+    /// wrote (`<name>` for cluster+context, `<name>-admin` for the user),
+    /// leave every OTHER cluster's entries untouched, and clear
+    /// `current-context` only when it was actually pointing here.
+    #[test]
+    fn remove_local_kubeconfig_entries_removes_only_this_clusters_three_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
+        let dest = tmp.path().join("config");
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "doomed", &dest).unwrap();
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "survivor", &dest).unwrap();
+
+        remove_local_kubeconfig_entries(&dest, "doomed").unwrap();
+
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        let names = |key: &str| -> Vec<String> {
+            merged[key]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|e| e["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(names("clusters"), vec!["survivor"]);
+        assert_eq!(names("contexts"), vec!["survivor"]);
+        assert_eq!(names("users"), vec!["survivor-admin"]);
+        // `doomed` was the current-context (the first cluster merged always
+        // is) — clearing it, rather than leaving it dangling, is the point.
+        assert!(merged.get("current-context").is_none());
+    }
+
+    /// A removal that finds nothing to remove (a name that was never
+    /// merged, or no kubeconfig at all) is a no-op, not an error — the
+    /// caller in `destroy_vm_cluster` treats a missing kubeconfig as nothing
+    /// to clean up, the same way `fetch_kubeconfig`'s own `~/.kube/config`
+    /// handling already does.
+    #[test]
+    fn remove_local_kubeconfig_entries_tolerates_no_match_and_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("config");
+        assert!(remove_local_kubeconfig_entries(&dest, "never-existed").is_ok());
+
+        let source = tmp.path().join("admin.conf");
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        remove_local_kubeconfig_entries(&dest, "not-lab").unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(
+            merged["clusters"].as_sequence().unwrap().len(),
+            1,
+            "a non-matching name must not touch an unrelated cluster's entries"
         );
     }
 
