@@ -71,8 +71,9 @@ jobs:
           # engine's own hint text describes (that number is about a REAL guest's
           # dhclient, not the throwaway supermin appliance virt-customize boots to
           # do the customizing). Same already-documented class of bug as the
-          # k8s/online recipe's host prerequisites — see AGENTS.md "Bloqueio de
-          # execução conhecido".
+          # k8s/online recipe's host prerequisites — see the engine's own
+          # AGENTS.md, the section about known host prerequisites for the
+          # virt-customize build.
           sudo apt-get install -y protobuf-compiler libguestfs-tools qemu-utils cloud-image-utils \
             qemu-system-x86 ovmf isc-dhcp-client
           # KVM for the boot probe below; without it the probe falls back to TCG (slower, same verdict).
