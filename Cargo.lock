@@ -1207,6 +1207,8 @@ dependencies = [
  "delonix-provider-libvirt",
  "delonix-state",
  "libc",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.19",
  "tracing",

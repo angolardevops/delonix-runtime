@@ -17,6 +17,11 @@ delonix-provider-cloud-hypervisor = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
+# For VmImageJsonDefaults (ADR-0076 D3): reads the 3 fields of an image's own
+# recorded defaults straight off its JSON sidecar, without depending on
+# bins/delonix-runtime-bin's VmImageStore.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # A per-test temp dir that is removed when the test ends, also on panic
