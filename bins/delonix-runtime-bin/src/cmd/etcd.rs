@@ -151,7 +151,11 @@ fn etcd_cache_dir(version: &str) -> PathBuf {
 /// other download in this codebase (never installs an unverified binary),
 /// mirroring `vmimage::download_cri_bin`'s exact pattern. Cached under
 /// `<root>/bin/etcd-<version>/`, so this only downloads once per version.
-fn download_and_cache_etcd(version: &str) -> Result<(PathBuf, PathBuf)> {
+///
+/// `pub(crate)`: also the way `cmd::etcd_backup` gets a version-matched
+/// `etcdctl` for a STACKED control-plane node, which never installs its own
+/// (unlike the external-etcd systemd unit this function was written for).
+pub(crate) fn download_and_cache_etcd(version: &str) -> Result<(PathBuf, PathBuf)> {
     let cache_dir = etcd_cache_dir(version);
     let etcd_bin = cache_dir.join("etcd");
     let etcdctl_bin = cache_dir.join("etcdctl");

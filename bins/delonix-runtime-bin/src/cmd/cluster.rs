@@ -738,6 +738,34 @@ pub enum ClusterCmd {
         #[arg(long)]
         no_drain: bool,
     },
+    /// Back up etcd's keyspace to a local file (VM-provisioned clusters only).
+    ///
+    /// `etcd.mode: stacked` (the kubeadm default) only — `etcd.mode:
+    /// external` is not supported yet, and is refused by name rather than
+    /// attempted. Reads the control-plane's own `apiserver-etcd-client`
+    /// certificate over SSH; nothing on the cluster is changed.
+    Backup {
+        /// Cluster name.
+        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        name: String,
+        /// Destination file. Omit = `<root>/clusters/<name>/etcd-snapshot-<unix-time>.db`.
+        #[arg(long, value_hint = clap::ValueHint::FilePath)]
+        to: Option<PathBuf>,
+    },
+    /// Restore etcd's keyspace from a snapshot taken with `cluster backup`.
+    ///
+    /// **DESTRUCTIVE.** Stops the control-plane's etcd, moves its data
+    /// directory aside (never deletes it), restores into a fresh one under
+    /// the existing member's own identity, and brings etcd back up.
+    /// Single stacked control-plane only — refuses above one.
+    Restore {
+        /// Cluster name.
+        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        name: String,
+        /// Snapshot file written by `cluster backup`.
+        #[arg(long, value_hint = clap::ValueHint::FilePath)]
+        from: PathBuf,
+    },
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
@@ -943,6 +971,8 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             node,
             no_drain,
         } => cmd_upgrade(file, &to, node.as_deref(), no_drain),
+        ClusterCmd::Backup { name, to } => super::etcd_backup::backup(&name, to),
+        ClusterCmd::Restore { name, from } => super::etcd_backup::restore(&name, &from),
     }
 }
 
@@ -2026,7 +2056,7 @@ fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
 /// Every VM this engine's own store knows about that belongs to cluster
 /// `cluster_name` — empty when the cluster was not VM/SSH-provisioned at
 /// all (the caller falls back to kind-mode's own resolution in that case).
-fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
+pub(crate) fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
     Ok(delonix_vm::list(&state_root())?
         .into_iter()
         .filter(|vm| is_cluster_vm(&vm.name, cluster_name))
@@ -2351,7 +2381,10 @@ fn pull_official(store: &VmImageStore, tag: &str) -> Result<()> {
 /// `<root>/clusters/<name>/id_ed25519` (non-interactive `ssh-keygen`, no
 /// passphrase — automation, same spirit as the `BatchMode=yes` already used in
 /// `remote.rs`). Returns `(private_path, public_text)`.
-fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(PathBuf, String)> {
+pub(crate) fn generate_or_load_ssh_key(
+    name: &str,
+    explicit: Option<PathBuf>,
+) -> Result<(PathBuf, String)> {
     if let Some(key) = explicit {
         let pub_path = key.with_extension("pub");
         let public = std::fs::read_to_string(&pub_path).map_err(|e| {

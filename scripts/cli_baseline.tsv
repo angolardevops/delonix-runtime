@@ -8,6 +8,7 @@
 ~	backup schedule
 !	build
 ~	cluster apply
+~	cluster backup
 ~	cluster create
 =	cluster destroy
 ~	cluster drain
@@ -19,6 +20,7 @@
 =	cluster load
 ~	cluster ls
 ~	cluster prune
+~	cluster restore
 =	cluster start
 =	cluster stop
 ~	cluster uncordon
@@ -103,10 +105,10 @@
 ~	manifest render
 ~	manifest schema
 ~	manifest validate
-~	migrate assess
 =	mcp capabilities
 =	mcp doctor
 =	mcp serve
+~	migrate assess
 ~	net capture
 ~	net egress allow
 ~	net egress clear

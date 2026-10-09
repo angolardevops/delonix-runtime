@@ -8312,6 +8312,9 @@ msgstr "O control-plane está a responder, e todos os nós estão `Ready`?\n\nS�
 msgid "Cluster name. Omit when there is only one"
 msgstr "Nome do cluster. Omite-o se só houver um"
 
+msgid "Cluster name."
+msgstr "Nome do cluster."
+
 msgid "Generate a Kubernetes manifest from a container/pod already running locally."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente."
 
@@ -10847,6 +10850,50 @@ msgstr ""
 msgid "Mark a drained node schedulable again"
 msgstr "Marca um nó drenado como voltando a ser escalonável"
 
+msgid "Back up etcd's keyspace to a local file (VM-provisioned clusters only)."
+msgstr "Faz uma cópia de segurança do espaço de chaves do etcd para um ficheiro local (só clusters provisionados por VM)."
+
+msgid ""
+"Back up etcd's keyspace to a local file (VM-provisioned clusters only).\n"
+"\n"
+"`etcd.mode: stacked` (the kubeadm default) only — `etcd.mode: external` is "
+"not supported yet, and is refused by name rather than attempted. Reads the "
+"control-plane's own `apiserver-etcd-client` certificate over SSH; nothing "
+"on the cluster is changed."
+msgstr ""
+"Faz uma cópia de segurança do espaço de chaves do etcd para um ficheiro "
+"local (só clusters provisionados por VM).\n"
+"\n"
+"Só `etcd.mode: stacked` (o default do kubeadm) — `etcd.mode: external` "
+"ainda não é suportado, e é recusado pelo nome em vez de tentado. Lê o "
+"certificado `apiserver-etcd-client` do próprio control-plane por SSH; nada "
+"no cluster é alterado."
+
+msgid "Restore etcd's keyspace from a snapshot taken with `cluster backup`."
+msgstr "Restaura o espaço de chaves do etcd a partir de um snapshot tirado com `cluster backup`."
+
+msgid ""
+"Restore etcd's keyspace from a snapshot taken with `cluster backup`.\n"
+"\n"
+"**DESTRUCTIVE.** Stops the control-plane's etcd, moves its data directory "
+"aside (never deletes it), restores into a fresh one under the existing "
+"member's own identity, and brings etcd back up. Single stacked "
+"control-plane only — refuses above one."
+msgstr ""
+"Restaura o espaço de chaves do etcd a partir de um snapshot tirado com "
+"`cluster backup`.\n"
+"\n"
+"**DESTRUTIVO.** Pára o etcd do control-plane, afasta o seu directório de "
+"dados (nunca o apaga), restaura para um novo sob a identidade já existente "
+"do membro, e volta a pôr o etcd de pé. Só um único control-plane stacked — "
+"recusa acima de um."
+
+msgid "Destination file. Omit = `<root>/clusters/<name>/etcd-snapshot-<unix-time>.db`."
+msgstr "Ficheiro de destino. Omitir = `<root>/clusters/<name>/etcd-snapshot-<unix-time>.db`."
+
+msgid "Snapshot file written by `cluster backup`."
+msgstr "Ficheiro de snapshot escrito pelo `cluster backup`."
+
 msgid "mark a drained node schedulable again"
 msgstr "marca um nó drenado como voltando a ser escalonável"
 
@@ -10916,6 +10963,15 @@ msgstr "depois cada outro control-plane/worker, um de cada vez — `kubeadm upgr
 
 msgid "a control-plane that schedules nothing anyway: skip the automatic drain/uncordon"
 msgstr "um control-plane que de qualquer forma não escalona nada: salta a drenagem/reintegração automática"
+
+msgid "etcd's keyspace, to the default path under the cluster's own state directory"
+msgstr "o espaço de chaves do etcd, para o caminho por omissão sob o próprio directório de estado do cluster"
+
+msgid "to an explicit file — before an upgrade, say"
+msgstr "para um ficheiro explícito — antes de uma actualização, por exemplo"
+
+msgid "bring etcd back from a snapshot taken with `cluster backup` — DESTRUCTIVE"
+msgstr "traz o etcd de volta a partir de um snapshot tirado com `cluster backup` — DESTRUTIVO"
 
 msgid "VM '{name}' captures its serial console to a file, so there is no interactive console to attach to — read {path} instead, or recreate the VM without capture"
 msgstr "a VM '{name}' captura a consola série para ficheiro, por isso não há consola interactiva a que ligar — lê antes {path}, ou recria a VM sem captura"
