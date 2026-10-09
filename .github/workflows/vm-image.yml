@@ -105,7 +105,7 @@ jobs:
             echo "dest_repo=${{ inputs.image }}" >> "$GITHUB_OUTPUT"
           fi
       - name: Constrói a imagem VM dourada (offline)
-        if: ${{ inputs.no_k8s != 'true' }}
+        if: ${{ !inputs.no_k8s }}
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
@@ -127,14 +127,14 @@ jobs:
       # actual PRIMEIRO no PATH (o libguestfs procura-o com `passt --help`, logo
       # compilá-lo sem o pôr no PATH não muda nada).
       - name: passt actual (a build --no-k8s precisa de rede no appliance)
-        if: ${{ inputs.no_k8s == 'true' }}
+        if: ${{ inputs.no_k8s }}
         run: |
           git clone --depth 1 https://passt.top/passt /tmp/passt-src
           make -C /tmp/passt-src -j"$(nproc)"
           mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
           echo "/tmp/passt-src" >> "$GITHUB_PATH"
       - name: Constrói a imagem VM dourada (sem Kubernetes)
-        if: ${{ inputs.no_k8s == 'true' }}
+        if: ${{ inputs.no_k8s }}
         env:
           LIBGUESTFS_BACKEND: direct
           XDG_RUNTIME_DIR: /tmp/delonix-run
