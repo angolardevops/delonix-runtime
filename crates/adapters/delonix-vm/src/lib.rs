@@ -637,20 +637,27 @@ pub fn set_cloud_init(
 /// resize leaves it saying what the VM actually has.
 ///
 /// Returns the updated record.
-/// Changes a STOPPED VM's vCPUs and/or memory for its next boot — the cold
-/// resize (`vm.resize.cold`, see [`VmBackend::resize_cold`]).
+/// Changes a STOPPED VM's vCPUs, memory and/or boot disk size for its next
+/// boot — the cold resize (`vm.resize.cold`/`vm.disk.resize`, see
+/// [`VmBackend::resize_cold`]/[`VmBackend::resize_disk`]).
 ///
 /// Everything that can be refused is refused before the backend is asked:
-/// nothing to change, zero vCPUs, a memory value that does not parse (the
-/// lenient [`mem_mib`] would read `2GB` as 1 GiB and this would report it
-/// done), and a VM that is running or paused — a guest that only sees the
-/// change after its next reboot has not been resized yet. The record is
-/// rewritten only after the backend returns `Ok`, so a refused or failed
-/// resize leaves it saying what the VM actually has.
+/// nothing to change, zero vCPUs, zero GiB of disk, a memory value that does
+/// not parse (the lenient [`mem_mib`] would read `2GB` as 1 GiB and this
+/// would report it done), and a VM that is running or paused — a guest that
+/// only sees the change after its next reboot has not been resized yet. The
+/// record is rewritten only after the backend returns `Ok`, so a refused or
+/// failed resize leaves it saying what the VM actually has.
 ///
 /// Returns the updated record.
-pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<Vm> {
-    engine(base)?.resize(name, vcpus, memory)
+pub fn resize(
+    base: &Path,
+    name: &str,
+    vcpus: Option<u32>,
+    memory: Option<&str>,
+    disk_size_gib: Option<u32>,
+) -> Result<Vm> {
+    engine(base)?.resize(name, vcpus, memory, disk_size_gib)
 }
 
 /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
@@ -2921,25 +2928,31 @@ mod tests {
         };
 
         let code_of = |e: Error| e.number();
-        assert_eq!(code_of(resize(base, "r", None, None).unwrap_err()), 1536);
-        assert_eq!(code_of(resize(base, "r", Some(0), None).unwrap_err()), 1536);
         assert_eq!(
-            code_of(resize(base, "r", None, Some("2GB")).unwrap_err()),
+            code_of(resize(base, "r", None, None, None).unwrap_err()),
             1536
         );
         assert_eq!(
-            code_of(resize(base, "r", None, Some("0")).unwrap_err()),
+            code_of(resize(base, "r", Some(0), None, None).unwrap_err()),
             1536
         );
         assert_eq!(
-            code_of(resize(base, "a-correr", Some(2), None).unwrap_err()),
+            code_of(resize(base, "r", None, Some("2GB"), None).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(base, "r", None, Some("0"), None).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(base, "a-correr", Some(2), None, None).unwrap_err()),
             5505
         );
         assert_eq!(
-            code_of(resize(base, "pausada", Some(2), None).unwrap_err()),
+            code_of(resize(base, "pausada", Some(2), None, None).unwrap_err()),
             5505
         );
-        assert!(resize(base, "nao-existe", Some(2), None)
+        assert!(resize(base, "nao-existe", Some(2), None, None)
             .unwrap_err()
             .is_not_found());
         assert!(
@@ -2950,14 +2963,14 @@ mod tests {
         unchanged("a-correr");
 
         FAIL.store(true, Ordering::SeqCst);
-        assert!(resize(base, "r", Some(4), None).is_err());
+        assert!(resize(base, "r", Some(4), None, None).is_err());
         unchanged("r");
         FAIL.store(false, Ordering::SeqCst);
 
         // Only memory: vCPUs keep the record's value, and the backend is told both.
-        let vm = resize(base, "r", None, Some("4Gi")).unwrap();
+        let vm = resize(base, "r", None, Some("4Gi"), None).unwrap();
         assert_eq!((vm.vcpus, vm.memory.as_str()), (1, "4Gi"));
-        let vm = resize(base, "r", Some(3), None).unwrap();
+        let vm = resize(base, "r", Some(3), None, None).unwrap();
         assert_eq!((vm.vcpus, vm.memory.as_str()), (3, "4Gi"));
         assert_eq!(st.load("r").unwrap().vcpus, 3);
         assert_eq!(
@@ -2965,7 +2978,9 @@ mod tests {
             vec![(4, 1024), (1, 4096), (3, 4096)]
         );
 
-        let e = resize(base, "n", Some(2), None).unwrap_err().to_string();
+        let e = resize(base, "n", Some(2), None, None)
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("resize") && e.contains("sem-resize"), "{e}");
         unchanged("n");
 

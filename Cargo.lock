@@ -1014,6 +1014,7 @@ dependencies = [
  "delonix-model",
  "delonix-node",
  "libc",
+ "serde_json",
  "tempfile",
  "tracing",
 ]

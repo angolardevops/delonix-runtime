@@ -1379,6 +1379,13 @@ variable when the program runs.</p>
 <td>TLS verification is disabled in these tests.</td>
 </tr>
 <tr>
+<td><code>DELONIX_LIBVIRT_LIVE_DISK</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-provider-libvirt/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-provider-libvirt/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Real cloud-init base qcow2 to run the <code>vm.guest-agent</code> live test against.</td>
+<td>A filesystem path.</td>
+<td>Enables the test. It boots a throwaway <code>qemu:///system</code> domain, has cloud-init install and enable <code>qemu-guest-agent</code> itself (no SSH key needed), and destroys/undefines the domain on exit even if an assertion panics.</td>
+</tr>
+<tr>
 <td><code>DELONIX_UPDATE_FIXTURES</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/tests/advisor_fixtures.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>advisor_fixtures.<wbr>rs:goldens_match_the_rules_as_they_are_today</code></a></td>
 <td>Rewrites the advisor golden fixtures in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux/tests/fixtures/advisor" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>fixtures/<wbr>advisor/<wbr></code></a> instead of comparing against them.</td>
@@ -1399,6 +1406,9 @@ DELONIX_TRUENAS_TEST_USER=&lt;user&gt; \
 DELONIX_TRUENAS_TEST_PASS=&#x27;&lt;password&gt;&#x27; \
 DELONIX_TRUENAS_TEST_POOL=tank \
   cargo test -p delonix-truenas --test live -- --nocapture
+
+DELONIX_LIBVIRT_LIVE_DISK=/path/to/debian-genericcloud.qcow2 \
+  cargo test -p delonix-provider-libvirt --test live -- --ignored --nocapture
 
 DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 </code></pre></div>

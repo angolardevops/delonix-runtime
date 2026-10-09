@@ -21,6 +21,9 @@ use delonix_node::proc_starttime;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// `--disk-size`'s unit, everywhere in this crate: whole GiB.
+const GIB_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// The VM use cases over the ports one call needs.
 pub struct VmEngine<'a, R, B, D, S> {
     /// The state root; the VMs live under `<root>/vms`.
@@ -645,27 +648,50 @@ where
         st.set(name, &vm).map_err(Error::from)?;
         Ok(vm)
     }
-    /// Changes a STOPPED VM's vCPUs and/or memory for its next boot — the cold
-    /// resize (`vm.resize.cold`, see [`VmBackend::resize_cold`]).
+    /// Changes a STOPPED VM's vCPUs, memory and/or boot disk size for its
+    /// next boot — the cold resize (`vm.resize.cold`/`vm.disk.resize`, see
+    /// [`VmBackend::resize_cold`]/[`VmBackend::resize_disk`]).
     ///
-    /// Everything that can be refused is refused before the backend is asked:
-    /// nothing to change, zero vCPUs, a memory value that does not parse (the
-    /// lenient [`mem_mib`] would read `2GB` as 1 GiB and this would report it
-    /// done), and a VM that is running or paused — a guest that only sees the
-    /// change after its next reboot has not been resized yet. The record is
-    /// rewritten only after the backend returns `Ok`, so a refused or failed
-    /// resize leaves it saying what the VM actually has.
+    /// Everything that can be refused is refused before the backend is
+    /// asked: nothing to change, zero vCPUs, a memory value that does not
+    /// parse (the lenient [`mem_mib`] would read `2GB` as 1 GiB and this
+    /// would report it done), zero GiB of disk, and a VM that is running or
+    /// paused — a guest that only sees the change after its next reboot has
+    /// not been resized yet. The disk is grown FIRST, before vcpus/memory:
+    /// growing a disk is the one part of this that touches a file on disk
+    /// and can fail for reasons nothing else here can (space, a backend's
+    /// own grow-only guard), and a half-applied resize should at least never
+    /// have claimed a vcpu/memory change that then didn't happen.
     ///
-    /// Returns the updated record.
-    pub fn resize(&self, name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<Vm> {
-        if vcpus.is_none() && memory.is_none() {
+    /// Shrinking the disk is never offered here — not refused silently, not
+    /// offered at all: there is no flag for it. A filesystem does not
+    /// retreat with its block device, and every backend that implements
+    /// `resize_disk` refuses a shrink before touching anything.
+    ///
+    /// Returns the updated record. The record carries no field for the
+    /// disk's size — it lives in the backend's own disk, queried live
+    /// (`vm describe`/the backend's `resize_disk`), the same way the engine
+    /// never duplicates a container's rootfs size either.
+    pub fn resize(
+        &self,
+        name: &str,
+        vcpus: Option<u32>,
+        memory: Option<&str>,
+        disk_size_gib: Option<u32>,
+    ) -> Result<Vm> {
+        if vcpus.is_none() && memory.is_none() && disk_size_gib.is_none() {
             return Err(Error::InvalidResize(format!(
-                "nothing to resize on VM '{name}': give --vcpus and/or --memory"
+                "nothing to resize on VM '{name}': give --vcpus, --memory and/or --disk-size"
             )));
         }
         if vcpus == Some(0) {
             return Err(Error::InvalidResize(format!(
                 "VM '{name}' cannot have 0 vCPUs"
+            )));
+        }
+        if disk_size_gib == Some(0) {
+            return Err(Error::InvalidResize(format!(
+                "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
             )));
         }
         let new_mib = match memory {
@@ -685,11 +711,13 @@ where
                 vm.status
             )));
         }
+        let backend = self.backends.for_vm(&vm)?;
+        if let Some(gib) = disk_size_gib {
+            backend.resize_disk(&vmdir, &vm, u64::from(gib) * GIB_BYTES)?;
+        }
         let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
         let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
-        self.backends
-            .for_vm(&vm)?
-            .resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
+        backend.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
         vm.vcpus = target_vcpus;
         if let Some(m) = memory {
             vm.memory = m.trim().to_string();

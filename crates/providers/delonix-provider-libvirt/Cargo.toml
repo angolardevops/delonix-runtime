@@ -11,6 +11,7 @@ delonix-model = { workspace = true }
 delonix-node = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

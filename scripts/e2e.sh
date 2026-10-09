@@ -4359,6 +4359,76 @@ else
 fi
 
 ########################################
+section "vm: --disk-size cresce o disco de arranque, só a crescer (vm.disk.resize)"
+########################################
+# Achado e corrigido a auditar a prontidão VMaaS (docs/discovery/67): esta
+# capacidade estava not-implemented nos três backends. O que se prova AQUI é o
+# MECANISMO do motor (cresce o qcow2, recusa um encolher, recusa com a VM a
+# correr) contra um disco VAZIO — a mesma convenção das secções de snapshot
+# acima: nada disto precisa de um SO convidado a sério. Que um convidado com
+# `growpart`/cloud-init apanha o espaço novo sozinho no arranque seguinte foi
+# validado ao vivo, à mão, com a golden debian-bookworm — registado no
+# discovery doc, não repetido aqui (pedir um pull de imagem a cada corrida da
+# bateria custaria minutos por nada que este mecanismo já não prove).
+if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+  RVM="resize-$PFX"; RDISK="$OUT/$RVM.qcow2"
+  qemu-img create -f qcow2 "$RDISK" 64M >/dev/null 2>&1
+  if "$BIN" vm create "$RVM" --disk "$RDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
+    check "vm resize --disk-size com a VM a correr recusa (5)" 5 "$BIN" vm resize "$RVM" --disk-size 1
+    check "vm stop (disk resize)" ok "$BIN" vm stop "$RVM"
+    check "vm resize --disk-size 0 recusa (1)" 1 "$BIN" vm resize "$RVM" --disk-size 0
+    # O disco vazio tem 64 MiB — bem abaixo de 1 GiB, por isso é sempre um grow.
+    check "vm resize --disk-size de uma VM parada" ok "$BIN" vm resize "$RVM" --disk-size 1
+    check "o overlay cresceu para exactamente 1 GiB" ok bash -c \
+      "qemu-img info --output=json '$SROOT/vms/$RVM.qcow2' | python3 -c \"import json,sys; sys.exit(0 if json.load(sys.stdin)['virtual-size']==1073741824 else 1)\""
+    check "um --disk-size que não cresce recusa (1)" 1 "$BIN" vm resize "$RVM" --disk-size 1
+    check "vm start depois do resize do disco" ok "$BIN" vm start "$RVM"
+    check "o domínio continua a correr com o disco maior" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system domstate '$RVM')\" = running ]"
+    "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
+  else
+    skip "vm: --disk-size (libvirt)" "o vm create falhou neste host"
+    "$BIN" delete vm "$RVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$RDISK"
+else
+  skip "vm: --disk-size (libvirt)" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+fi
+
+# Mesma ressalva de isolamento da secção CH acima: meia-isolação é pior que
+# nenhuma.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: --disk-size (cloud-hypervisor)" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif command -v cloud-hypervisor >/dev/null; then
+  RCVM="chresize-$PFX"; RCDISK="$OUT/$RCVM.qcow2"
+  qemu-img create -f qcow2 "$RCDISK" 64M >/dev/null 2>&1
+  if "$BIN" vm create "$RCVM" --disk "$RCDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
+    # A pré-condição «o vmm está mesmo vivo», verificada e não presumida —
+    # a mesma lição da secção CH de snapshots, acima.
+    for _ in $(seq 50); do
+      pgrep -f -- "^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$RCVM.sock( |\$)" >/dev/null && break
+      sleep 0.2
+    done
+    check "CH: --disk-size com a VM a correr recusa (5)" 5 "$BIN" vm resize "$RCVM" --disk-size 1
+    check "CH: vm stop (disk resize)" ok "$BIN" vm stop "$RCVM"
+    check "CH: --disk-size 0 recusa (1)" 1 "$BIN" vm resize "$RCVM" --disk-size 0
+    check "CH: --disk-size de uma VM parada" ok "$BIN" vm resize "$RCVM" --disk-size 1
+    check "CH: o overlay cresceu para exactamente 1 GiB" ok bash -c \
+      "qemu-img info -U --output=json '$SROOT/vms/$RCVM.qcow2' | python3 -c \"import json,sys; sys.exit(0 if json.load(sys.stdin)['virtual-size']==1073741824 else 1)\""
+    check "CH: um --disk-size que não cresce recusa (1)" 1 "$BIN" vm resize "$RCVM" --disk-size 1
+    "$BIN" delete vm "$RCVM" -f >/dev/null 2>&1
+  else
+    skip "vm: --disk-size (cloud-hypervisor)" "o vm create CH falhou neste host (infra de rede?)"
+    "$BIN" delete vm "$RCVM" -f >/dev/null 2>&1
+  fi
+  rm -f "$RCDISK"
+else
+  skip "vm: --disk-size (cloud-hypervisor)" "sem cloud-hypervisor instalado"
+fi
+
+########################################
 section "vm: o mesmo nome noutra namespace é um conflito, não «ensured»"
 ########################################
 # ADR-0069 item 2, medido a 2026-10-06: o registo de uma VM é `vms/<nome>.json`,
