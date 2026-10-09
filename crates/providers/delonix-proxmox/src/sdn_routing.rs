@@ -1188,6 +1188,19 @@ impl Client {
     /// The vnet firewall's index (`GET /cluster/sdn/vnets/{vnet}/firewall`:
     /// `rules`, `options`). Like every route below, answers only for a vnet in
     /// the RUNNING configuration.
+    ///
+    /// **Restricted to the real `root@pam` session, unlike every other route
+    /// in this section** — measured live 2026-10-09: an API token refused
+    /// with `403 Permission check failed (user != root@pam)`, repeatedly and
+    /// consistently, while the exact same token reads and writes
+    /// [`Client::sdn_vnet_firewall_options`]/[`Client::set_sdn_vnet_firewall_options`]/
+    /// [`Client::sdn_vnet_firewall_rules`]/[`Client::add_sdn_vnet_firewall_rule`]
+    /// on the SAME vnet without complaint. This index tells a caller nothing
+    /// those two do not already — `rules`/`options` always exist for a vnet
+    /// with firewall support — so prefer them directly and treat this one as
+    /// a `root@pam`-only diagnostic, not something a token-authenticated
+    /// caller (the form this crate's own `Auth` doc-comment names "the form
+    /// to prefer") can rely on.
     pub fn sdn_vnet_firewall_index(&self, vnet: &str) -> Result<Vec<serde_json::Value>> {
         validate_sdn_id(vnet)?;
         let path = format!("/cluster/sdn/vnets/{vnet}/firewall");
