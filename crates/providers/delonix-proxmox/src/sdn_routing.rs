@@ -42,6 +42,45 @@
 //! traffic carries. So a vnet firewall isolates guests of one vnet from each
 //! other; it is not a boundary between vnets.
 //!
+//! # No caller may expose this without reading this first
+//!
+//! [`Client::set_sdn_vnet_firewall_options`] and
+//! [`Client::add_sdn_vnet_firewall_rule`]/[`Client::update_sdn_vnet_firewall_rule`]
+//! are correct, tested clients for a real Proxmox route — and, measured on
+//! 2026-09-27 (`docs/proxmox/trace-9.2.2.routes`), **zero callers exist
+//! outside this crate** (confirmed by grep across `bins/delonix-runtime-bin`
+//! and `delonix-networking`): no `kind:`/CLI reaches them today. That is the
+//! only reason a write through this client is not, right now, a silent
+//! "accepted and filters nothing" in front of a real operator — the same
+//! "public, dead, bug waiting for its first caller" shape this repository's
+//! own `AGENTS.md` already catalogues five times over (`mount_live`,
+//! `set_net_rate`, `update_limits`, `publish_port_allow`, `Net`).
+//!
+//! **A node-side probe to close that gap the way
+//! [`Error::DatacenterFirewallDisabled`] closes it for a VM's own firewall
+//! (`vm_firewall.rs`, reading `GET /cluster/firewall/options`) does not
+//! exist for this one, and is not a missing line to add**: the field that
+//! decides enforcement, the per-node `nftables` option, lives under
+//! `/nodes/{node}/firewall/options` — and this engine's own measured API
+//! coverage (`docs/proxmox/matrix-9.2.2.md`) classifies the WHOLE
+//! `/nodes/{node}/firewall/*` tree `unsupported-by-design`, reason "node
+//! firewall — host administration", the same boundary ADR-0049 D3 draws for
+//! cluster administration generally. A client that read it anyway to decide
+//! whether to refuse a write would be reaching past a line this engine
+//! already drew on purpose, for a reason that has nothing to do with this
+//! one capability — the exact "widened its own reach without anyone
+//! deciding so" ADR-0064 D6 refuses for a DNS controller's credential, for
+//! the same underlying reason.
+//!
+//! So: before adding a `kind:`/CLI path to either function above, its author
+//! needs ONE of — the owner's explicit decision to cross that boundary for
+//! this one read-only probe (a new ADR addendum, not a quiet `GET`); or
+//! wiring the capability catalog to report this row permanently
+//! `unavailable-on-host`/`not-implemented` and refusing any write attempt
+//! client-side, unconditionally, never "accept and hope." Either way, this
+//! paragraph is the reason neither has happened yet — not an oversight to
+//! silently work around.
+//!
 //! # What is offered, and what is not
 //!
 //! Two controller types: `evpn` (the one an EVPN zone needs) and `bgp` (one
@@ -1170,6 +1209,11 @@ impl Client {
 
     /// Sets the vnet firewall's options (`PUT …/vnets/{vnet}/firewall/options`).
     /// Written at once, not staged.
+    ///
+    /// Read the module doc's "No caller may expose this without reading
+    /// this first" before adding a `kind:`/CLI path to this function — a
+    /// successful write here does not mean the rule it enables filters
+    /// anything.
     pub fn set_sdn_vnet_firewall_options(
         &self,
         ledger: &Ledger,
@@ -1256,6 +1300,10 @@ impl Client {
     /// has to be `forward`; `enable` is sent explicitly, defaulting to on, for
     /// the reason [`Client::add_firewall_rule`] gives. No probe, for the same
     /// reason that one has none.
+    ///
+    /// Read the module doc's "No caller may expose this without reading
+    /// this first" before adding a `kind:`/CLI path to this function — this
+    /// POST succeeding never means the rule it writes filters anything.
     pub fn add_sdn_vnet_firewall_rule(
         &self,
         ledger: &Ledger,
@@ -1294,6 +1342,9 @@ impl Client {
     /// given are sent. `moveto` moves the rule to another position instead —
     /// the node ignores every other field when it is set (its own schema
     /// says so), so the two are refused together.
+    ///
+    /// Same enforcement caveat as [`Client::add_sdn_vnet_firewall_rule`] —
+    /// see the module doc before exposing this past this crate.
     pub fn update_sdn_vnet_firewall_rule(
         &self,
         ledger: &Ledger,
