@@ -217,12 +217,15 @@ pub enum Error {
     #[error("{0}")]
     InvalidSdnRouting(String),
 
-    /// A rule of a vnet's firewall that is not a `forward` rule, or whose
-    /// action is not ACCEPT/DROP/REJECT. A vnet's firewall filters traffic
-    /// forwarded through the vnet and nothing else — the node refuses `in`
-    /// and `out` there (measured).
+    /// A write to a vnet's own firewall (options, a new rule, a changed
+    /// rule), refused unconditionally before any validation or request.
+    /// Whether a vnet rule filters anything is decided by the per-node
+    /// `nftables` option under `/nodes/{node}/firewall`, which this engine
+    /// does not read (ADR-0049 D3, host administration); under the iptables
+    /// firewall the node stores the rule and filters nothing. Replaces
+    /// DX-1551, the per-field check those writes used to run.
     #[error("{0}")]
-    InvalidVnetFirewallRule(String),
+    VnetFirewallWriteRefused(String),
 
     /// A guest-driven shutdown/reboot timeout this client could not wait out:
     /// the node would still be inside the task when the client's own task
@@ -267,7 +270,7 @@ impl Error {
             Error::InvalidSdnAddress(_) => 1534,
             Error::InvalidPowerTimeout(_) => 1535,
             Error::InvalidSdnRouting(_) => 1550,
-            Error::InvalidVnetFirewallRule(_) => 1551,
+            Error::VnetFirewallWriteRefused(_) => 1552,
             Error::SdnLocked(_) => 5515,
             Error::SdnPendingChanges(_) => 5516,
             Error::SdnRollbackFailed(_) => 9525,
@@ -407,7 +410,7 @@ mod tests {
             Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
             Error::InvalidSdnAddress("invalid Proxmox SDN MAC address 'x': expected XX:XX:XX:XX:XX:XX".into()),
             Error::InvalidSdnRouting("invalid Proxmox SDN route map id 'pve_x': the prefix 'pve_' is reserved by the node".into()),
-            Error::InvalidVnetFirewallRule("invalid Proxmox vnet firewall rule type 'in': a vnet's firewall only takes 'forward' rules".into()),
+            Error::VnetFirewallWriteRefused("proxmox: adding a vnet firewall rule is refused: this provider does not write a vnet's firewall".into()),
             Error::SdnLocked("proxmox: u returned HTTP 500: invalid lock token provided! — the cluster's SDN configuration is locked by another holder".into()),
             Error::SdnPendingChanges("proxmox: u returned HTTP 500: configuration has pending changes".into()),
             Error::SdnRollbackFailed("proxmox: the SDN change failed (x) and discarding it failed too (y)".into()),

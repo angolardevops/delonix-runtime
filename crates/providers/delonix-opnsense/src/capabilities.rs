@@ -93,6 +93,9 @@ pub fn capability_report(configured: bool) -> ProviderReport {
             C::FirewallWorkloadPeer => S::UnsupportedByProvider {
                 reason: "the appliance does not know the engine's namespaces; a peer is refused, never expanded into a CIDR snapshot (ADR-0059 D6)",
             },
+            C::FirewallIntraSegment => S::UnsupportedByProvider {
+                reason: "traffic bridged inside one segment never crosses a perimeter appliance; it filters at the boundary (net.gateway.*)",
+            },
             C::ProviderAvailability
             | C::ResourceReadback
             | C::Events

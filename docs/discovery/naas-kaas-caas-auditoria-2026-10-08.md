@@ -143,7 +143,10 @@ first), independent of which domain each came from:
    doc-comment hardening landed instead, naming the mismatch and requiring an owner
    decision before any future caller can reach it uninformed. Not yet reachable by any
    `kind:`/CLI, so still dormant — the same "public, dead, bug waiting for its first
-   caller" pattern this repo has already catalogued five times.
+   caller" pattern this repo has already catalogued five times. **`CLOSED` later
+   (§4.13)**: the decision was made — the three writes refuse unconditionally (DX-1552),
+   the catalog row `firewall.intra-segment` reads `unsupported-by-provider`, no ADR
+   addendum, no boundary crossed.
 7. **NaaS — stale DNS on Proxmox VM teardown/rename** can point to an address later
    reassigned to a different workload (ADR-0064 D6, decided, not implemented).
    `REVIEWED, still not attempted` (§4.10): confirmed there is zero existing scaffolding
@@ -709,6 +712,43 @@ still blocks that. With item 4 closed, ADR-0038's four decision items are now al
 implemented; what remains for the ADR as a whole is exactly that end-to-end kubelet
 validation, not new behavior.
 
+### 4.13 Gap #6 closed by decision — the vnet firewall's writes refuse unconditionally
+
+§4.9 left gap #6 waiting on one of two owner decisions. The one taken (2026-10, the
+session driving this audit's follow-up): **the unconditional refusal, not the probe** —
+no ADR-0049 addendum, no read of `/nodes/{node}/firewall/*`. The probe would have crossed
+a line drawn on purpose; the refusal crosses nothing, and its only cost is a capability
+nothing called.
+
+- `Client::set_sdn_vnet_firewall_options`, `add_sdn_vnet_firewall_rule` and
+  `update_sdn_vnet_firewall_rule` (`crates/providers/delonix-proxmox/src/sdn_routing.rs`)
+  now answer `Error::VnetFirewallWriteRefused` (new **DX-1552**,
+  `vm.proxmox_vnet_firewall_write_refused`, class invalid-argument) at their first line,
+  before any validation or request. Their bodies, the per-field checks and the three
+  `TaskKind`s they used are gone (a function with no reachable body and a variant with no
+  constructor are what this repository deletes, not keeps); **DX-1551**, the old
+  per-field error, is retired in favour of DX-1552. The reads and
+  `delete_sdn_vnet_firewall_rule` stay — neither can report protection that does not
+  exist.
+- The catalog gains `firewall.intra-segment` (catalog 1.4.0): a rule set attached to a
+  segment, filtering traffic bridged inside it — not a boundary between segments, which
+  is what the vnet firewall measured to be. Proxmox answers `unsupported-by-provider` with
+  the reason; the node's own SDN (`linux`) and OPNsense answer `unsupported-by-provider`
+  for their own reasons; the compute and storage reports list it with their other
+  non-compute/non-storage rows. The cell metric does not move (103/273): an
+  `unsupported-by-provider` cell is outside the denominator.
+- `docs/proxmox/matrix-9.2.2.md`: the three write routes move from `supported+tested` to
+  `unsupported-by-design` with the reason (an `EXCLUDED` entry in
+  `scripts/proxmox_api_inventory.py`); called routes 183 → 180.
+
+**Verified**: the failure-injection case
+`a_vnet_firewall_write_is_refused_before_anything_reaches_the_node` sends a well-formed
+and a malformed write through each of the three and asserts DX-1552, zero requests after
+connecting and no ledger entry; run against `origin/main`'s implementation it fails (the
+mock receives the `PUT` it has no script for). The live case's step 4 now asserts the
+refusal and reads the vnet back unchanged — **not re-run against the lab node** (the
+change is client-side; nothing reaches the node to measure).
+
 ## 5. Test results, exact
 
 Two environments ended up involved, and the results below say which is which.
@@ -835,7 +875,8 @@ and leaves written down, for whoever does that work next:
   real cluster/kubelet, same as this section's own earlier fixes. Gap #6 (§4.9) got real work — a precise diagnosis of
   exactly why the obvious fix cannot
   land without an owner decision, and doc-comment hardening in the meantime — but no
-  behavior changed, so it stays counted as open. The live-only gap #13 (stale CLI on
+  behavior changed, so it stays counted as open. **That decision was made later and the
+  gap closed (§4.13)**: the writes refuse unconditionally, no probe, no boundary crossed. The live-only gap #13 (stale CLI on
   golden images) is also now fixed (§4.7). The five that remain untouched each have a
   specific, measured reason, not a restated assumption: the admission warning event (gap
   #5) requires adding a new case to `delonix-security-runtime`'s `Outcome`/`Category`

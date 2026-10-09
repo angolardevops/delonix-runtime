@@ -260,6 +260,7 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
             | C::FirewallLogging
             | C::FirewallIcmpType
             | C::FirewallWorkloadPeer
+            | C::FirewallIntraSegment
             | C::VolumeLocal
             | C::VolumeBind
             | C::VolumeNfs

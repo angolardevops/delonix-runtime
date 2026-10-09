@@ -81,6 +81,9 @@ EXCLUDED: list[tuple[str, str]] = [
     ("/cluster/replication", "replication jobs — cluster-dependent, slice 3"),
     ("/cluster/backup", "backup schedules — provider administration (slice 2 covers per-VM backup only)"),
     ("/cluster/firewall", "cluster firewall — provider administration"),
+    # Only the vnet firewall's WRITES land here (options, add, update): the reads and the
+    # rule delete are called, and a called route never reaches this table.
+    ("/cluster/sdn/vnets/{vnet}/firewall", "vnet firewall writes — refused by the client (DX-1552): whether a vnet rule filters anything is the per-node `nftables` option under /nodes/{node}/firewall, host administration (ADR-0049 D3); readiness audit gap #6, 2026-10"),
     ("/cluster/acme", "ACME accounts/plugins — host certificate administration"),
     ("/cluster/ceph", "Ceph administration — storage provider, not a VM operation"),
     ("/cluster/metrics", "metric servers — host observability administration"),

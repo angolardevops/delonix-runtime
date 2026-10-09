@@ -29,8 +29,8 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 183 (27.1 % of the schema) — 182 seen in a live trace, 1 not
-- **unsupported by design**: 356 (each with a written reason)
+- **called**: 180 (26.7 % of the schema) — 179 seen in a live trace, 1 not
+- **unsupported by design**: 359 (each with a written reason)
 - **not yet implemented**: 136
 - **not available in this version**: 0
 
@@ -38,7 +38,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 |---|---:|---:|---:|---:|---:|
 | qemu | 59 | 0 | 18 | 32 | 109 |
 | lxc | 22 | 0 | 40 | 0 | 62 |
-| sdn | 85 | 0 | 0 | 5 | 90 |
+| sdn | 82 | 0 | 3 | 5 | 90 |
 | storage | 5 | 0 | 0 | 20 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
@@ -117,12 +117,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | PUT | `/cluster/sdn/vnets/{vnet}` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall` | supported+tested | array | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/options` | supported+tested | object | yes |  |
-| PUT | `/cluster/sdn/vnets/{vnet}/firewall/options` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/rules` | supported+tested | array | yes |  |
-| POST | `/cluster/sdn/vnets/{vnet}/firewall/rules` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | supported+tested | object | yes |  |
-| PUT | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
 | POST | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
@@ -436,6 +433,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/replication/{id}` | unsupported-by-design | null | yes | replication jobs — cluster-dependent, slice 3 |
 | GET | `/cluster/replication/{id}` | unsupported-by-design | object | yes | replication jobs — cluster-dependent, slice 3 |
 | PUT | `/cluster/replication/{id}` | unsupported-by-design | null | yes | replication jobs — cluster-dependent, slice 3 |
+| PUT | `/cluster/sdn/vnets/{vnet}/firewall/options` | unsupported-by-design | null | yes | vnet firewall writes — refused by the client (DX-1552): whether a vnet rule filters anything is the per-node `nftables` option under /nodes/{node}/firewall, host administration (ADR-0049 D3); readiness audit gap #6, 2026-10 |
+| POST | `/cluster/sdn/vnets/{vnet}/firewall/rules` | unsupported-by-design | null | yes | vnet firewall writes — refused by the client (DX-1552): whether a vnet rule filters anything is the per-node `nftables` option under /nodes/{node}/firewall, host administration (ADR-0049 D3); readiness audit gap #6, 2026-10 |
+| PUT | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | unsupported-by-design | null | yes | vnet firewall writes — refused by the client (DX-1552): whether a vnet rule filters anything is the per-node `nftables` option under /nodes/{node}/firewall, host administration (ADR-0049 D3); readiness audit gap #6, 2026-10 |
 | GET | `/nodes/{node}/apt` | unsupported-by-design | array | yes | package management — host administration |
 | GET | `/nodes/{node}/apt/changelog` | unsupported-by-design | string | yes | package management — host administration |
 | GET | `/nodes/{node}/apt/repositories` | unsupported-by-design | object | yes | package management — host administration |

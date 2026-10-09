@@ -230,6 +230,7 @@ pub fn report(host: &StorageHost) -> ProviderReport {
             | C::FirewallLogging
             | C::FirewallIcmpType
             | C::FirewallWorkloadPeer
+            | C::FirewallIntraSegment
             | C::VmConsoleSerial
             | C::VmConsoleVnc
             | C::VmGuestAgent

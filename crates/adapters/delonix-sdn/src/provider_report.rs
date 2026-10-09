@@ -216,6 +216,9 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::FirewallWorkloadPeer => filt(S::Partial {
                     detail: "namespace peers (`@dlxns_<ns>`) are enforced; label selectors (ADR-0024) are not implemented",
                 }),
+                C::FirewallIntraSegment => S::UnsupportedByProvider {
+                    reason: "a local provider: a rule attaches to a workload (firewall.per-workload), never to a network as such",
+                },
                 C::ProviderAvailability
                 | C::ResourceReadback
                 | C::Events
