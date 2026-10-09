@@ -164,9 +164,11 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 <div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  backup      Back up etcd&#x27;s keyspace to a local file (VM-provisioned clusters only)
   create      Create a local Kubernetes cluster **without a manifest and without Docker**
   destroy     Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry
   kubeadm     Provision VMs (golden VM image) + `kubeadm` bootstrap
+  restore     Restore etcd&#x27;s keyspace from a snapshot taken with `cluster backup`
   start       Start every node of a stopped kind-mode cluster back up
   stop        Stop every node of a kind-mode cluster at once — no rebuild, no state lost
   upgrade     Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style
@@ -190,7 +192,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    stop · start · destroy · create · kubeadm · upgrade
+  Lifecycle    stop · start · destroy · create · kubeadm · upgrade · backup · restore
   Create       init
   Interact     ls · load · kubeconfig · health · drain · uncordon
   Declarative  kube · apply
