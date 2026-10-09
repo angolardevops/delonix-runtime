@@ -1564,14 +1564,14 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     # do uid 1000 do container como 100999 (o subuid) — uma imagem que dá o rootfs
     # inteiro ao uid 1000 em qualquer motor que respeite a posse do tar.
     _uc="e2e-usercommit-$PFX"; _uci="e2e-usercommit-$PFX:1"
-    if "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120 >/dev/null 2>&1 \
-       && "$BIN" container commit "$_uc" "$_uci" >/dev/null 2>&1; then
+    if "$BIN" container run -d --name "$_uc" --net none -u 1000 "$_ui" sleep 120 >/dev/null 2>&1; then
+      check "container commit" ok "$BIN" container commit "$_uc" "$_uci"
       check "commit: a layer guarda os donos que o CONTAINER vê" ok bash -c \
         "[ \"\$('$BIN' container run --rm --net none -u 1000 '$_uci' stat -c %u /etc/passwd /srv/own 2>/dev/null | tr '\n' ' ')\" = '0 1000 ' ]"
       check "commit: o USER da imagem base sobrevive" ok bash -c \
         "[ \"\$('$BIN' container run --rm --net none '$_uci' id -u 2>/dev/null)\" = 1000 ]"
     else
-      skip "commit: donos na layer" "o commit do container de teste falhou neste host"
+      skip "commit: donos na layer" "o run do container de teste falhou neste host"
     fi
     "$BIN" container rm -f "$_uc" >/dev/null 2>&1 || true
     "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
@@ -1780,7 +1780,7 @@ check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(
 "$BIN" container run -d --net none --restart always --name "rn-$PFX" "$IMG" sh -c 'sleep 1; exit 1' >/dev/null 2>&1
 if e2e_in_backoff "rn-$PFX" 0; then
   RN0=$(e2e_restarts "rn-$PFX")
-  "$BIN" container rename "rn-$PFX" "rn2-$PFX" >/dev/null 2>&1
+  check "container rename" ok "$BIN" container rename "rn-$PFX" "rn2-$PFX"
   check "um rename na espera entre reinícios sobrevive ao reinício" ok bash -c \
     "for _ in \$(seq 1 40); do n=\$('$BIN' container ls -a -o json | python3 -c \"import json,sys; print(next((c.get('restarts') for c in json.load(sys.stdin) if c.get('name')=='rn2-$PFX'),-1))\"); [ \"\$n\" -gt '$RN0' ] 2>/dev/null && exit 0; sleep 0.5; done; exit 1"
 else
@@ -5023,8 +5023,24 @@ check "serve api sem o delonix-mgmt instalado sai com 69" 69 \
   env PATH=/usr/bin:/bin "$LONE/delonix" serve api --addr "unix:///tmp/dlx-lone-api-$PFX.sock"
 rm -rf "$LONE"
 
+# `delonix serve node-api` executa o `delonix-node-api` (ADR-0040 P5), o
+# mesmo contrato das três acima — foreground, exit real, nunca só
+# backgrounded (os dois usos de `serve node-api` noutras secções nunca
+# julgam o comando em si, só a sonda ao socket que ele acaba por abrir).
+NODEAPISOCK2="/tmp/dlx-srv-nodeapi2-$PFX.sock"
+NODEAPIPID2="$(e2e_serve_up node-api "$NODEAPISOCK2")"
+check "serve node-api corre o executável delonix-node-api" ok bash -c \
+  "[ -n '$NODEAPIPID2' ] && [ \"\$(basename \"\$(readlink /proc/$NODEAPIPID2/exe)\")\" = delonix-node-api ]"
+[ -n "$NODEAPIPID2" ] && kill "$NODEAPIPID2" 2>/dev/null
+for i in $(seq 1 40); do kill -0 "$NODEAPIPID2" 2>/dev/null || break; sleep 0.2; done
+rm -f "$NODEAPISOCK2"
+LONE="$OUT/lone-nodeapi-$PFX"; mkdir -p "$LONE"; cp "$BIN" "$LONE/delonix"
+check "serve node-api sem o delonix-node-api instalado sai com 69" 69 \
+  env PATH=/usr/bin:/bin "$LONE/delonix" serve node-api --addr "unix:///tmp/dlx-lone-nodeapi-$PFX.sock"
+rm -rf "$LONE"
+
 check "nenhum servidor desta corrida ficou para trás" ok bash -c \
-  "! pgrep -f '(serve (cri|api|docker-api)|delonix-cri|delonix-mgmt) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
+  "! pgrep -f '(serve (cri|api|node-api|docker-api)|delonix-cri|delonix-mgmt|delonix-node-api) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
 
 section "compose — o que é recusado, e se a recusa dispara"
 
@@ -5194,6 +5210,31 @@ check "ingress ls json separa governado de aberto" ok bash -c \
     "$BIN" net ingress allow naoexiste-$PFX 80
   check "net egress de um container inexistente diz 4" 4 \
     "$BIN" net egress allow naoexiste-$PFX 80
+
+  # --- deny/rm/unpublish: os irmãos de allow/ls/clear que nunca corriam -------
+  NGNET="ngnet-$PFX"; NGC="ngc-$PFX"; NGP=$(( 29300 + RANDOM % 150 ))
+  if "$BIN" network create "$NGNET" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$NGC" --net "$NGNET" -p "$NGP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
+    check "net ingress deny" ok "$BIN" net ingress deny "$NGC" 80
+    check "net ingress deny: a regra aparece na firewall do container" ok bash -c \
+      "'$BIN' net ingress ls '$NGC' | grep -qE '^any +80 .*deny'"
+    check "net ingress rm" ok "$BIN" net ingress rm "$NGC" 80
+    check "net ingress rm: a regra saiu" ok bash -c \
+      "! '$BIN' net ingress ls '$NGC' | grep -qE '^any +80 .*deny'"
+    check "net ingress unpublish" ok "$BIN" net ingress unpublish "$NGC" "$NGP"
+    check "net ingress unpublish: a porta saiu da listagem" ok bash -c \
+      "'$BIN' net ingress ls -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(1 if any('$NGP' in t for r in d for t in r.get('targets',[])) else 0)\""
+    check "net egress deny" ok "$BIN" net egress deny "$NGC" 80
+    check "net egress deny: a regra aparece na firewall do container" ok bash -c \
+      "'$BIN' net egress ls '$NGC' | grep -qE '^any +80 .*deny'"
+    check "net egress rm" ok "$BIN" net egress rm "$NGC" 80
+    check "net egress rm: a regra saiu" ok bash -c \
+      "! '$BIN' net egress ls '$NGC' | grep -qE '^any +80 .*deny'"
+  else
+    skip "net ingress/egress deny/rm/unpublish" "não foi possível preparar rede+container"
+  fi
+  "$BIN" container rm -f "$NGC" >/dev/null 2>&1
+  "$BIN" network rm "$NGNET" >/dev/null 2>&1
 
   # --- os outros verbos respondem, e a classe de erro é a certa ---------------
   # As LISTAGENS de HTTPRoute e Gateway não vivem no `net`: o `net httproute`
@@ -5882,7 +5923,7 @@ if "$BIN" network create "$DP" >/dev/null 2>&1 \
   DPIP=$(ip_of "$DPS")
   e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
   check "delete policy: a linha de base alcança" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 3
-  "$BIN" net ingress policy "$DPS" deny >/dev/null 2>&1
+  check "net ingress policy deny" ok "$BIN" net ingress policy "$DPS" deny
   e0=$(echos_of "$DPS"); "$BIN" container exec "$DPC" ping -c3 -W1 "$DPIP" >/dev/null 2>&1
   check "delete policy: com deny não alcança" ok test "$(( $(echos_of "$DPS") - e0 ))" -eq 0
   check "delete networkpolicies <c>/ingress" ok "$BIN" delete networkpolicies "$DPS/ingress"
@@ -6165,6 +6206,116 @@ check "pod logs: um pod inexistente é 4, e aponta para o get" 4 bash -c "
 "$BIN" volume rm "vs-$PFX" >/dev/null 2>&1
 rm -f "$OUT/vsnap-$PFX" "$OUT/sec-$PFX.yaml" "$OUT/bad-manifest.yaml"
 rm -rf "$OUT/ed-$PFX"
+
+########################################
+section "mais leituras e ciclos locais (F0.2, lote 2: container/image/vm/cluster)"
+########################################
+# Continuação da secção acima — a mesma disciplina (invariante real, nunca só
+# o rc), sobre o grupo com mais folhas por folha-coberta: `container`.
+
+# --- `container kill`: NÃO força Stopped, o próximo observe é que decide ----
+check "container run para kill" ok "$BIN" container run -d --name "kc-$PFX" --net none "$IMG" sleep 600
+check "container kill" ok "$BIN" container kill "kc-$PFX"
+check "kill: o estado real acaba Crashed, nunca Stopped" ok bash -c "
+  for _ in \$(seq 1 40); do
+    s=\$('$BIN' container inspect 'kc-$PFX' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"status\"])')
+    [ \"\$s\" = Crashed ] && exit 0
+    [ \"\$s\" = Stopped ] && { echo 'kill forçou Stopped'; exit 1; }
+    sleep 0.5
+  done
+  echo \"nunca saiu de '\$s'\"; exit 1"
+"$BIN" container rm -f "kc-$PFX" >/dev/null 2>&1
+
+# --- `container pause`/`unpause`: o freezer do cgroup v2, não um proxy -------
+check "container run para pause" ok "$BIN" container run -d --name "pc-$PFX" --net none "$IMG" sleep 600
+PCPID=$("$BIN" container inspect "pc-$PFX" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["pid"])' 2>/dev/null)
+PCCG=$(sed -n 's#^0::##p' "/proc/$PCPID/cgroup" 2>/dev/null)
+check "container pause" ok "$BIN" container pause "pc-$PFX"
+check "pause: cgroup.freeze diz 1" ok bash -c "[ \"\$(cat '/sys/fs/cgroup$PCCG/cgroup.freeze' 2>/dev/null)\" = 1 ]"
+check "container unpause" ok "$BIN" container unpause "pc-$PFX"
+check "unpause: cgroup.freeze volta a 0" ok bash -c "[ \"\$(cat '/sys/fs/cgroup$PCCG/cgroup.freeze' 2>/dev/null)\" = 0 ]"
+"$BIN" container rm -f "pc-$PFX" >/dev/null 2>&1
+
+# --- `container restart`: reaproveita o rootfs, ganha um pid NOVO -----------
+check "container run para restart" ok "$BIN" container run -d --name "rsc-$PFX" --net none "$IMG" sleep 600
+RSCPID1=$("$BIN" container inspect "rsc-$PFX" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["pid"])' 2>/dev/null)
+check "container restart" ok "$BIN" container restart "rsc-$PFX"
+check "restart: pid novo, status Running" ok bash -c "
+  for _ in \$(seq 1 40); do
+    out=\$('$BIN' container inspect 'rsc-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; print(d[\"pid\"],d[\"status\"])')
+    set -- \$out
+    [ \"\$2\" = Running ] && [ \"\$1\" != '$RSCPID1' ] && exit 0
+    sleep 0.5
+  done
+  echo \"ficou em '\$out', pid antigo era $RSCPID1\"; exit 1"
+"$BIN" container rm -f "rsc-$PFX" >/dev/null 2>&1
+
+# --- `container diff`: A/D relativo à imagem ---------------------------------
+check "container run para diff" ok "$BIN" container run -d --name "dc-$PFX" --net none "$IMG" sleep 600
+check "um exec que cria e apaga um ficheiro" ok "$BIN" container exec "dc-$PFX" sh -c "echo hi > /novo-$PFX.txt; rm -f /etc/motd"
+check "container diff: mostra o A e o D" ok bash -c "
+  out=\$('$BIN' container diff 'dc-$PFX') || exit 1
+  grep -q \"A /novo-$PFX.txt\" <<<\"\$out\" || { echo 'não mostrou o A do ficheiro criado'; exit 1; }
+  grep -q 'D /etc/motd' <<<\"\$out\" || { echo 'não mostrou o D do ficheiro apagado'; exit 1; }"
+
+# --- `container cp`: os dois sentidos, byte a byte ---------------------------
+check "container cp: host -> container" ok bash -c "
+  echo 'conteudo-$PFX' >'$OUT/cpin-$PFX.txt'
+  '$BIN' container cp '$OUT/cpin-$PFX.txt' 'dc-$PFX:/cpin-$PFX.txt'"
+check "container cp: container -> host, byte a byte" ok bash -c "
+  '$BIN' container cp 'dc-$PFX:/cpin-$PFX.txt' '$OUT/cpout-$PFX.txt' || exit 1
+  diff '$OUT/cpin-$PFX.txt' '$OUT/cpout-$PFX.txt'"
+"$BIN" container rm -f "dc-$PFX" >/dev/null 2>&1
+rm -f "$OUT/cpin-$PFX.txt" "$OUT/cpout-$PFX.txt"
+
+# --- `container apply`: `kind: Container` directo, idempotente por nome -----
+check "container apply: cria do manifesto" ok bash -c "
+  printf 'apiVersion: compute.delonix.io/v1alpha1\nkind: Container\nmetadata:\n  name: ca-$PFX\nspec:\n  image: $IMG\n  network: none\n  command: [\"sleep\", \"600\"]\n' >'$OUT/ca-$PFX.yaml'
+  '$BIN' container apply -f '$OUT/ca-$PFX.yaml'"
+check "container apply: o container do manifesto está Running" ok bash -c "
+  '$BIN' container inspect 'ca-$PFX' | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[0][\"status\"]==\"Running\" else 1)'"
+"$BIN" container rm -f "ca-$PFX" >/dev/null 2>&1
+rm -f "$OUT/ca-$PFX.yaml"
+
+# --- `container init`: as duas peças, já preenchidas -------------------------
+check "container init: escreve Delonixfile + manifesto numa pasta vazia" ok bash -c "
+  d='$OUT/cinit-$PFX'; mkdir -p \"\$d\"
+  '$BIN' container init \"\$d\" || exit 1
+  [ -s \"\$d/Delonixfile\" ] || { echo 'Delonixfile vazio ou em falta'; exit 1; }
+  [ -s \"\$d/delonix-manifest.yaml\" ] || { echo 'manifesto vazio ou em falta'; exit 1; }"
+rm -rf "$OUT/cinit-$PFX"
+
+# --- `image apply`: `kind: Image` com pull, idempotente ---------------------
+check "image apply: puxa a imagem do manifesto" ok bash -c "
+  printf 'apiVersion: artifact.delonix.io/v1alpha1\nkind: Image\nmetadata:\n  name: ia-$PFX\nspec:\n  pull: $IMG\n' >'$OUT/ia-$PFX.yaml'
+  '$BIN' image apply -f '$OUT/ia-$PFX.yaml'"
+check "image apply: a imagem fica listada" ok bash -c "
+  '$BIN' image ls | grep -qF '$IMG'"
+rm -f "$OUT/ia-$PFX.yaml"
+
+# --- `image history`: camadas base-a-topo, digest + tamanho -----------------
+check "image history: pelo menos uma camada com digest e tamanho" ok bash -c "
+  out=\$('$BIN' image history '$IMG') || exit 1
+  grep -qE 'sha256:[0-9a-f]+' <<<\"\$out\" || { echo 'sem digest'; exit 1; }"
+
+# --- `dashboard --once --json`: um snapshot, sem TUI -------------------------
+check "dashboard --once --json: JSON com scope e tiles" ok bash -c "
+  '$BIN' dashboard --once --json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get(\"scope\")==\"global\" and isinstance(d.get(\"tiles\"),list) and len(d[\"tiles\"])>0 else 1)'"
+
+# --- `vm default-backend`: lê/escreve um ÚNICO valor no ficheiro de providers
+check "vm default-backend: sem --set devolve o estado actual" ok bash -c "
+  '$BIN' vm default-backend | grep -qE 'none \(auto|libvirt|cloud-hypervisor'"
+check "vm default-backend --set libvirt" ok "$BIN" vm default-backend --set libvirt
+check "vm default-backend: o get devolve o que o set escreveu" ok bash -c "
+  [ \"\$('$BIN' vm default-backend)\" = libvirt ]"
+check "vm default-backend --set <desconhecido>: recusa pelo nome, nomeia os aceites" fail bash -c "
+  out=\$('$BIN' vm default-backend --set bogus-$PFX 2>&1); rc=\$?
+  grep -q \"unknown VM backend: 'bogus-$PFX'\" <<<\"\$out\" || { echo 'recusou sem nomear o valor'; exit 99; }
+  grep -q 'cloud-hypervisor' <<<\"\$out\" || { echo 'não diz os aceites'; exit 99; }
+  exit \$rc"
+
+# --- `cluster ls`: sem privilégio, sem cluster nenhum, rc 0 ------------------
+check "cluster ls: sem clusters, ainda assim rc 0" ok "$BIN" cluster ls
 
 section "limpeza"
 ########################################

@@ -1,10 +1,10 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: kaeso-sys-01, 2026-10-08, scripts/e2e.sh (release 4.5.0+198, e1aacedf + esta serie) — PASS=1148 FAIL=0 SKIP=14 XFAIL=1 XPASS=0. Corrida ROOTLESS, e os 14 SKIP classificados ate ao ultimo: 7 pedem um appliance OPNsense (3) ou um cluster Proxmox (4); 3 este host nao os pode medir (hostPort em root/CNI, NFS com CAP_SYS_ADMIN, system boot enable escreve units fora do root isolado); 2 sao caminhos de FALHA cujo disparo e a ferramenta estar AUSENTE e este host tem-na (virt-customize, wg), logo saltam por ele ser capaz; 1 por nao haver imagens VM; 1 porque o stack init --up nao completou em 180s — e so este ultimo e lacuna de medicao, nao propriedade do host. Um SKIP nao conta folha nenhuma: o que o host nao mede nao e o que a bateria nao exercita.
-# commit: 32efdbb5
-# executed: 160
-# leaves: 272
+# recorded: kaeso-sys-01, 2026-10-10, binário delonix 5.0.0+92 (2b9087b0), corrida real PASS=1215 FAIL=8 SKIP=16 XPASS=1 (os FAIL são flakiness de carga do host, não relacionados com as folhas novas)
+# commit: 2b9087b0
+# executed: 181
+# leaves: 275
 api-resources
 apply
 backup create
@@ -15,6 +15,7 @@ backup restore
 backup schedule
 build
 cluster kubeconfig
+cluster ls
 cluster prune
 compatibility compose
 compatibility docker
@@ -28,28 +29,41 @@ compose up
 config get
 config set
 config unset
+container apply
+container commit
+container cp
 container describe
+container diff
 container exec
 container healthcheck
+container init
 container inspect
+container kill
 container logs
+container pause
 container port
 container prune
 container ps
+container rename
+container restart
 container rm
 container run
 container start
 container stats
 container stop
 container top
+container unpause
 container update
 container wait
+dashboard
 delete
 describe
 drift
 explain
 get
+image apply
 image describe
+image history
 image load
 image ls
 image prune
@@ -66,10 +80,16 @@ mcp capabilities
 mcp doctor
 migrate assess
 net egress allow
+net egress deny
 net egress ls
+net egress rm
 net ingress allow
+net ingress deny
 net ingress ls
+net ingress policy
 net ingress publish
+net ingress rm
+net ingress unpublish
 net netns down
 net netns gc
 net netns status
@@ -81,7 +101,6 @@ network describe
 network diagnose
 network disconnect
 network inspect
-network ipam ls
 network ipam prune
 network ls
 network rm
@@ -110,6 +129,7 @@ secret unset
 serve api
 serve cri
 serve docker-api
+serve node-api
 stack apply
 stack describe
 stack destroy
@@ -138,6 +158,7 @@ system virt
 version
 vm cloud-init
 vm create
+vm default-backend
 vm ls
 vm move
 vm pause
