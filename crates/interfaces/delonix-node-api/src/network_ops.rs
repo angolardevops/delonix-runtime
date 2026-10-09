@@ -93,6 +93,31 @@ fn declared(root: &Path, name: &str) -> bool {
     root.join("networks").join(name).is_file()
 }
 
+/// [`operations::fingerprint_of`] of a `CreateNetwork` request's content —
+/// everything that distinguishes what gets created, not just the name
+/// `target` already carries.
+///
+/// `topology` is NOT a part here, on purpose: by the time this is called,
+/// `create_with` has already refused `Overlay` and any unknown value, so
+/// only `Bridge` and `Unspecified` (0 and 1, both meaning "bridge" per the
+/// enum's own comment) can reach this function — and those two carry no
+/// distinguishing information between two requests, so fingerprinting the
+/// raw wire value would wrongly flag `topology: 0` and `topology:
+/// NETWORK_TOPOLOGY_BRIDGE` (1) as different requests. If `Overlay` is ever
+/// served here, its own fields belong in this fingerprint at that time —
+/// not folded in blind today.
+fn create_fingerprint(
+    spec: &crate::proto::v1::NetworkSpec,
+    labels: &std::collections::HashMap<String, String>,
+    annotations: &std::collections::HashMap<String, String>,
+) -> String {
+    operations::fingerprint_of(&[
+        ("ipv4_cidr", &spec.ipv4_cidr),
+        ("labels", &operations::canonical_map(labels)),
+        ("annotations", &operations::canonical_map(annotations)),
+    ])
+}
+
 /// `(label, Some(value))` pairs, the shape `NetworkStore::set_metadata` takes.
 fn pairs(map: &std::collections::HashMap<String, String>) -> Vec<(String, Option<String>)> {
     let mut v: Vec<_> = map
@@ -207,9 +232,10 @@ pub fn create_with(
         delonix_sdn::NetworkStore::validate_subnet(&spec.ipv4_cidr).map_err(invalid)?;
     }
     let target = format!("Network/{}", req.name);
+    let fp = create_fingerprint(&spec, &req.labels, &req.annotations);
     // The same request sent again is answered with the first answer — before
     // the "already exists" check, which the first request itself made true.
-    if let Some(found) = operations::replay(root, "create", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "create", &target, &req.request_id, &fp)? {
         return Ok(operations::message(&found));
     }
     if declared(root, &req.name) {
@@ -218,7 +244,7 @@ pub fn create_with(
             req.name
         )));
     }
-    let rec = match operations::begin(root, "create", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "create", &target, &req.request_id, &fp)? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -250,7 +276,7 @@ pub fn delete_with(
     }
     let target = format!("Network/{}", req.name);
     // Before "not found", which the first request itself made true.
-    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id, "")? {
         return Ok(operations::message(&found));
     }
     let missing =
@@ -285,7 +311,7 @@ pub fn delete_with(
             )),
         )));
     }
-    let rec = match operations::begin(root, "delete", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "delete", &target, &req.request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };

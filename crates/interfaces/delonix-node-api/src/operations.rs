@@ -7,7 +7,12 @@
 //!
 //! - **Idempotency.** A request that names a `request_id` gets the id
 //!   `r-<request_id>`, created exclusively: the same request sent twice finds
-//!   the first one's record and is answered with it, whatever its state.
+//!   the first one's record and is answered with it, whatever its state. The
+//!   identity check is `(verb, target, fingerprint)`: two requests that name
+//!   the same resource under the same `request_id` but whose content
+//!   disagrees (a different image, size, namespace, …) are refused
+//!   (DX-5001), never silently answered with one another's result — see
+//!   [`fingerprint_of`].
 //! - **Interrupted.** A record that is not finished names the process that
 //!   owns it (pid and start time). When that process is gone, the next read
 //!   ends the operation `FAILED` with reason `Interrupted` — never `RUNNING`
@@ -67,9 +72,61 @@ pub struct Record {
     pub failure: Option<Failure>,
     #[serde(default)]
     pub request_id: String,
+    /// [`fingerprint_of`] of the request this record answers. Empty for a
+    /// record written before this field existed, or by a mutation that does
+    /// not compute one (its target name is its whole content, e.g.
+    /// start/stop) — `replay` does not compare an empty stored fingerprint,
+    /// so neither case is retroactively invalidated.
+    #[serde(default)]
+    pub fingerprint: String,
     /// The process doing the work, while it is not finished.
     pub owner_pid: i32,
     pub owner_starttime: u64,
+}
+
+/// A canonical, versioned fingerprint of the fields that distinguish one
+/// request's EFFECT from another's, for [`Record::fingerprint`]/[`replay`].
+///
+/// `parts` is `(name, value)`; a part whose value is empty is treated as
+/// "not sent", which is also how a proto3 scalar at its own zero value
+/// reads on the wire — a caller that wants "0 means default" to fingerprint
+/// the same as "omitted" passes `""` for that part at 0, never `"0"`. Parts
+/// are sorted by name before hashing, so the CALLER's field order never
+/// matters; a map-valued part should already be canonicalized (sorted,
+/// joined) by the caller before it is passed in as one string.
+///
+/// The `fp1:` prefix is a format version: a later change to what gets
+/// fingerprinted, or how, produces a value that can never collide with one
+/// this version computed — it simply never matches, the same as an empty
+/// stored fingerprint, never a false equality.
+pub fn fingerprint_of(parts: &[(&str, &str)]) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut sorted: Vec<&(&str, &str)> = parts.iter().filter(|(_, v)| !v.is_empty()).collect();
+    sorted.sort();
+    let mut body = String::from("fp1");
+    for (k, v) in sorted {
+        body.push('\u{1f}'); // unit separator: not a character a field value plausibly contains
+        body.push_str(k);
+        body.push('=');
+        body.push_str(v);
+    }
+    let mut h = DefaultHasher::new();
+    body.hash(&mut h);
+    format!("fp1:{:016x}", h.finish())
+}
+
+/// Canonicalizes a label/annotation map into one [`fingerprint_of`] part
+/// value: sorted `k=v` pairs joined by `\x1f`, so insertion order into the
+/// `HashMap` never changes the fingerprint.
+pub fn canonical_map(map: &std::collections::HashMap<String, String>) -> String {
+    let mut pairs: Vec<(&str, &str)> = map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    pairs.sort();
+    pairs
+        .into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
 }
 
 /// What [`begin`] found.
@@ -201,16 +258,25 @@ fn all(root: &Path) -> Result<Vec<Record>, Status> {
 ///
 /// With a `request_id`, the id is derived from it and the record is created
 /// exclusively. If it already exists and is the same `verb` on the same
-/// `target`, the caller gets [`Begun::Replay`] and must not do the work again;
-/// a `request_id` that answered something else is refused.
-pub fn begin(root: &Path, verb: &str, target: &str, request_id: &str) -> Result<Begun, Status> {
+/// `target` with a matching `fingerprint`, the caller gets [`Begun::Replay`]
+/// and must not do the work again; a `request_id` that already answered a
+/// different request (verb, target, or a disagreeing fingerprint) is
+/// refused. Pass `""` for `fingerprint` from a mutation whose target name IS
+/// its whole content (nothing else to diverge on) — see [`fingerprint_of`].
+pub fn begin(
+    root: &Path,
+    verb: &str,
+    target: &str,
+    request_id: &str,
+    fingerprint: &str,
+) -> Result<Begun, Status> {
     let id = if request_id.is_empty() {
         format!("op-{}", delonix_node::generate_id())
     } else {
         check_request_id(request_id)?;
         format!("r-{request_id}")
     };
-    if let Some(found) = replay(root, verb, target, request_id)? {
+    if let Some(found) = replay(root, verb, target, request_id, fingerprint)? {
         return Ok(Begun::Replay(found));
     }
     std::fs::create_dir_all(dir(root)).map_err(|e| io("creating the directory", e))?;
@@ -226,21 +292,29 @@ pub fn begin(root: &Path, verb: &str, target: &str, request_id: &str) -> Result<
         ended_ms: None,
         failure: None,
         request_id: request_id.to_string(),
+        fingerprint: fingerprint.to_string(),
         owner_pid: pid,
         owner_starttime: delonix_node::proc_starttime(pid).unwrap_or_default(),
     };
     // Exclusive creation: the whole record is written to a private file and
     // linked under its name. `link` fails if the name exists, so of two
-    // requests with one `request_id` exactly one begins.
+    // requests with one `request_id` exactly one begins. The staged name is
+    // unique per ATTEMPT (`delonix_node::unique_tmp_suffix`, pid + a
+    // process-wide sequence) — not just per `(request_id, pid)` — so two
+    // threads racing the same `request_id` never share a staged inode: a
+    // shared, non-unique name let one thread's later write silently mutate
+    // the other's already-linked file, or let a `remove_file` race turn a
+    // legitimate replay into an ENOENT `Err` (measured: 33-40% of racing
+    // retries, before this fix).
     let bytes = serde_json::to_vec_pretty(&rec).map_err(|e| io("encoding", e))?;
-    let staged = dir(root).join(format!(".{id}.{pid}.new"));
+    let staged = dir(root).join(format!(".{id}.{}.new", delonix_node::unique_tmp_suffix()));
     std::fs::write(&staged, bytes).map_err(|e| io("writing", e))?;
     let linked = std::fs::hard_link(&staged, path(root, &id));
     let _ = std::fs::remove_file(&staged);
     match linked {
         Ok(()) => Ok(Begun::New(rec)),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            match replay(root, verb, target, request_id)? {
+            match replay(root, verb, target, request_id, fingerprint)? {
                 Some(found) => Ok(Begun::Replay(found)),
                 None => Err(io("creating", e)),
             }
@@ -256,6 +330,7 @@ pub fn replay(
     verb: &str,
     target: &str,
     request_id: &str,
+    fingerprint: &str,
 ) -> Result<Option<Record>, Status> {
     if request_id.is_empty() {
         return Ok(None);
@@ -269,6 +344,21 @@ pub fn replay(
             "request_id '{request_id}' already answered '{} {}': a request_id names one request",
             found.verb, found.target
         )));
+    }
+    // An empty STORED fingerprint is never compared — a record written
+    // before this field existed, or by a mutation that does not compute
+    // one, is not retroactively invalidated (see Record::fingerprint).
+    if !found.fingerprint.is_empty() && found.fingerprint != fingerprint {
+        let mut status = Status::already_exists(format!(
+            "request_id '{request_id}' was already used for a '{verb} {target}' request whose \
+             content does not match this one — a request_id must name one exact request, not \
+             just one resource; generate a new request_id for this request"
+        ));
+        status.metadata_mut().insert(
+            crate::network_ops::DX_METADATA,
+            tonic::metadata::MetadataValue::from_static("5001"),
+        );
+        return Err(status);
     }
     settled(root, found).map(Some)
 }
@@ -444,7 +534,17 @@ mod tests {
     use crate::proto::v1::PageRequest;
 
     fn new(root: &Path, verb: &str, target: &str, request_id: &str) -> Record {
-        match begin(root, verb, target, request_id).unwrap() {
+        new_fp(root, verb, target, request_id, "")
+    }
+
+    fn new_fp(
+        root: &Path,
+        verb: &str,
+        target: &str,
+        request_id: &str,
+        fingerprint: &str,
+    ) -> Record {
+        match begin(root, verb, target, request_id, fingerprint).unwrap() {
             Begun::New(r) => r,
             Begun::Replay(r) => panic!("expected a new operation, got a replay of {}", r.id),
         }
@@ -500,12 +600,12 @@ mod tests {
         let first = new(dir.path(), "create", "Network/lab", "3f2a-01");
         assert_eq!(first.id, "r-3f2a-01");
         // Sent again while it runs, and again after it ended: the same record.
-        match begin(dir.path(), "create", "Network/lab", "3f2a-01").unwrap() {
+        match begin(dir.path(), "create", "Network/lab", "3f2a-01", "").unwrap() {
             Begun::Replay(r) => assert_eq!(r.id, first.id),
             Begun::New(_) => panic!("the same request_id began twice"),
         }
         finish(dir.path(), first, Ok(String::new())).unwrap();
-        match begin(dir.path(), "create", "Network/lab", "3f2a-01").unwrap() {
+        match begin(dir.path(), "create", "Network/lab", "3f2a-01", "").unwrap() {
             Begun::Replay(r) => assert_eq!(r.state, State::Succeeded),
             Begun::New(_) => panic!("the same request_id began twice"),
         }
@@ -517,7 +617,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         new(dir.path(), "create", "Network/lab", "k1");
         for (verb, target) in [("delete", "Network/lab"), ("create", "Network/other")] {
-            let err = begin(dir.path(), verb, target, "k1").unwrap_err();
+            let err = begin(dir.path(), verb, target, "k1", "").unwrap_err();
             assert_eq!(err.code(), tonic::Code::InvalidArgument);
             assert!(err
                 .message()
@@ -526,10 +626,43 @@ mod tests {
     }
 
     #[test]
+    fn a_request_id_that_answered_the_same_verb_and_target_with_different_content_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = new_fp(dir.path(), "create", "Network/lab", "k2", "fp1:aaaa");
+        finish(dir.path(), first, Ok(String::new())).unwrap();
+        let err = begin(dir.path(), "create", "Network/lab", "k2", "fp1:bbbb").unwrap_err();
+        assert_eq!(err.code(), tonic::Code::AlreadyExists);
+        assert!(err.message().contains("content does not match"));
+        assert_eq!(
+            err.metadata().get(crate::network_ops::DX_METADATA).unwrap(),
+            "5001"
+        );
+        // The SAME fingerprint, by contrast, is a genuine replay.
+        match begin(dir.path(), "create", "Network/lab", "k2", "fp1:aaaa").unwrap() {
+            Begun::Replay(r) => assert_eq!(r.fingerprint, "fp1:aaaa"),
+            Begun::New(_) => panic!("a matching fingerprint must replay, not re-run"),
+        }
+    }
+
+    #[test]
+    fn an_empty_stored_fingerprint_is_never_compared() {
+        let dir = tempfile::tempdir().unwrap();
+        // A record as a mutation that does not fingerprint (or one written
+        // before this field existed) leaves it: fingerprint = "".
+        new(dir.path(), "create", "Network/lab", "k3");
+        // A caller that DOES compute a fingerprint for this verb/target must
+        // still get a clean replay against that legacy record.
+        match begin(dir.path(), "create", "Network/lab", "k3", "fp1:anything").unwrap() {
+            Begun::Replay(_) => {}
+            Begun::New(_) => panic!("an empty stored fingerprint must not force a re-run"),
+        }
+    }
+
+    #[test]
     fn a_request_id_that_is_not_a_file_name_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         for bad in ["../x", "a/b", ".hidden", "a b", &"x".repeat(65)] {
-            let err = begin(dir.path(), "create", "Network/lab", bad).unwrap_err();
+            let err = begin(dir.path(), "create", "Network/lab", bad, "").unwrap_err();
             assert_eq!(err.code(), tonic::Code::InvalidArgument, "{bad}");
         }
         assert!(!dir.path().join("operations").exists());
@@ -644,5 +777,70 @@ mod tests {
         new(dir.path(), "create", "Network/new", "");
         assert!(read(dir.path(), &old.id).unwrap().is_none());
         assert!(read(dir.path(), &kept.id).unwrap().is_some());
+    }
+
+    /// D1's regression test (review 2026-10-09, ADR-0076): two threads
+    /// racing `begin()` for the identical `request_id` must settle to
+    /// exactly one `New` and the other a clean `Replay` — never a hard
+    /// `Err`. Before the per-attempt-unique staging name, this failed
+    /// 33-40% of the time (the staged file `.{id}.{pid}.new` was shared by
+    /// both threads, so the loser's `hard_link` sometimes raced the
+    /// winner's `remove_file` into ENOENT instead of AlreadyExists).
+    /// A `Barrier` forces near-simultaneous entry; repetition (not sleep)
+    /// gives the race the chance to occur. Real OS threads, not tokio tasks
+    /// — this is the same primitive `tokio::spawn_blocking` hands every
+    /// mutation to in the real server (`service.rs::blocking`).
+    #[test]
+    fn concurrent_begins_of_the_same_request_id_never_produce_a_hard_error() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        const ITERATIONS: usize = 500;
+        let mut total_new = 0usize;
+        let mut total_replay = 0usize;
+        let mut hard_errors: Vec<String> = Vec::new();
+
+        for i in 0..ITERATIONS {
+            let request_id = format!("race-{i}");
+            let barrier = Arc::new(Barrier::new(2));
+            let root1 = dir.path().to_path_buf();
+            let root2 = dir.path().to_path_buf();
+            let rid1 = request_id.clone();
+            let rid2 = request_id;
+            let b1 = barrier.clone();
+            let b2 = barrier;
+            let t1 = std::thread::spawn(move || {
+                b1.wait();
+                begin(&root1, "create", "Network/lab", &rid1, "")
+            });
+            let t2 = std::thread::spawn(move || {
+                b2.wait();
+                begin(&root2, "create", "Network/lab", &rid2, "")
+            });
+            for r in [t1.join().unwrap(), t2.join().unwrap()] {
+                match r {
+                    Ok(Begun::New(_)) => total_new += 1,
+                    Ok(Begun::Replay(_)) => total_replay += 1,
+                    Err(e) => hard_errors.push(format!("iteration {i}: {e}")),
+                }
+            }
+        }
+
+        assert_eq!(
+            total_new, ITERATIONS,
+            "every pair must have exactly one executor"
+        );
+        assert_eq!(
+            total_replay,
+            ITERATIONS - hard_errors.len(),
+            "the non-executing thread must get a Replay, not an error"
+        );
+        assert!(
+            hard_errors.is_empty(),
+            "{} of {ITERATIONS} racing begin() calls surfaced a hard error instead of a clean \
+             Replay — the staging file is not unique per attempt:\n{}",
+            hard_errors.len(),
+            hard_errors.join("\n")
+        );
     }
 }
