@@ -8615,44 +8615,56 @@ struct KubeLimits {
     unified: Vec<(String, String)>,
 }
 
+/// PURE. `memory_max` of `"max"`/empty means unlimited (`None`) here — shared
+/// by [`kube_limits`] (create) and [`unit_properties_for_update`] (ADR 0038
+/// item 4), the two places that turn a size string into what systemd's own
+/// `MemoryMax` property (a bare `t`, no `"max"` sentinel) can take.
+fn memory_bytes_or_unlimited(memory_max: &str) -> Result<Option<u64>> {
+    match mem_limit_write_value(memory_max).as_deref() {
+        None => Err(Error::InvalidMemoryLimit(format!(
+            "--memory {memory_max}: not a size"
+        ))),
+        Some("max") => Ok(None),
+        Some(bytes) => Ok(Some(bytes.parse::<u64>().map_err(|_| {
+            Error::InvalidMemoryLimit(format!("--memory {memory_max}: not a size"))
+        })?)),
+    }
+}
+
+/// PURE. `cpus` (a core count, e.g. `0.5`) of `"max"`/empty means unlimited
+/// (`None`) here — the `CPUQuotaPerSecUSec` sibling of
+/// [`memory_bytes_or_unlimited`], shared the same way.
+fn cpu_quota_usec_or_unlimited(cpus: &str) -> Result<Option<u64>> {
+    let cpus = cpus.trim();
+    if cpus.is_empty() || cpus.eq_ignore_ascii_case("max") {
+        return Ok(None);
+    }
+    let cores: f64 = cpus
+        .parse()
+        .ok()
+        .filter(|v: &f64| v.is_finite() && *v > 0.0)
+        .ok_or_else(|| Error::InvalidCpuLimit(format!("--cpus {cpus}: not a number of cores")))?;
+    Ok(Some(((cores * 1_000_000.0).round() as u64).max(10_000)))
+}
+
+/// PURE. A cgroup weight string (`cpu.weight`/`io.weight`, 1–10000) — the same
+/// range `parse_cgroup_weight` enforces on the CLI side, shared here with
+/// [`unit_properties_for_update`] (ADR 0038 item 4).
+fn cgroup_weight_value(w: &str, what: &str) -> Result<u64> {
+    w.trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|n| (1..=10_000).contains(n))
+        .ok_or_else(|| Error::InvalidCgroupWeight(format!("--{what} {w}: weight must be 1–10000")))
+}
+
 /// PURE. `memory_max`/`cpus` of `"max"` or empty mean unlimited here.
 fn kube_limits(c: &Container) -> Result<KubeLimits> {
-    let memory_bytes = match mem_limit_write_value(&c.memory_max).as_deref() {
-        None => {
-            return Err(Error::InvalidMemoryLimit(format!(
-                "--memory {}: not a size",
-                c.memory_max
-            )));
-        }
-        Some("max") => None,
-        Some(bytes) => Some(bytes.parse::<u64>().map_err(|_| {
-            Error::InvalidMemoryLimit(format!("--memory {}: not a size", c.memory_max))
-        })?),
-    };
-    let cpus = c.cpus.trim();
-    let cpu_quota_usec = if cpus.is_empty() || cpus.eq_ignore_ascii_case("max") {
-        None
-    } else {
-        let cores: f64 = cpus
-            .parse()
-            .ok()
-            .filter(|v: &f64| v.is_finite() && *v > 0.0)
-            .ok_or_else(|| {
-                Error::InvalidCpuLimit(format!("--cpus {cpus}: not a number of cores"))
-            })?;
-        Some(((cores * 1_000_000.0).round() as u64).max(10_000))
-    };
+    let memory_bytes = memory_bytes_or_unlimited(&c.memory_max)?;
+    let cpu_quota_usec = cpu_quota_usec_or_unlimited(&c.cpus)?;
     let weight = |v: &Option<String>, what: &str| -> Result<Option<u64>> {
         v.as_deref()
-            .map(|w| {
-                w.trim()
-                    .parse::<u64>()
-                    .ok()
-                    .filter(|n| (1..=10_000).contains(n))
-                    .ok_or_else(|| {
-                        Error::InvalidCgroupWeight(format!("--{what} {w}: weight must be 1–10000"))
-                    })
-            })
+            .map(|w| cgroup_weight_value(w, what))
             .transpose()
     };
     Ok(KubeLimits {
@@ -9362,6 +9374,214 @@ pub fn update_limits(
     Ok(LimitUpdate::Applied)
 }
 
+/// A partial resource update — ADR 0038 item 4's
+/// [`update_kube_resources`] input, built from a CRI `UpdateContainerResources`.
+///
+/// Each field follows [`update_limits`]'s own convention: `None`/an empty
+/// slice means "leave this one as it is", never "clear it". The CRI wire
+/// format has no way to ask for the second thing on this RPC — an update is a
+/// PARTIAL request (a kubelet in-place resize, or `crictl update`, only ever
+/// sets what changed) — unlike `CreateContainer`'s OWN "not specified" for
+/// the identical proto fields, which means "no limit": the same zero, two
+/// different RPCs, two different questions, because one establishes a NEW
+/// state with nothing to inherit and the other mutates one that already
+/// exists.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ResourceUpdate<'a> {
+    pub memory: Option<&'a str>,
+    pub cpus: Option<&'a str>,
+    pub cpu_weight: Option<&'a str>,
+    pub cpuset: Option<&'a str>,
+    pub cpuset_mems: Option<&'a str>,
+    pub hugepage_limits: &'a [(String, u64)],
+    pub unified: &'a [(String, String)],
+    pub oom_score_adj: Option<i32>,
+}
+
+/// PURE. The `(sv)` properties [`set_unit_properties`] sends for a LIVE
+/// update — only what `u` actually gives becomes a property; everything
+/// systemd was not told about keeps whatever it already had, which is what
+/// `SetUnitProperties(runtime=false, …)` means by design. Same shapes as
+/// `transient_scope_argv`'s own properties (same types, same
+/// `cpuset_to_mask`) — the two write the SAME properties of the SAME kind of
+/// unit; only the call around them differs (`StartTransientUnit` creates one,
+/// this mutates one already running).
+fn unit_properties_for_update(u: &ResourceUpdate) -> Result<Vec<Vec<String>>> {
+    let mut props: Vec<Vec<String>> = Vec::new();
+    if let Some(m) = u.memory {
+        match memory_bytes_or_unlimited(m)? {
+            Some(b) => {
+                props.push(vec!["MemoryMax".into(), "t".into(), b.to_string()]);
+                props.push(vec!["MemorySwapMax".into(), "t".into(), "0".into()]);
+            }
+            None => {
+                props.push(vec!["MemoryMax".into(), "t".into(), u64::MAX.to_string()]);
+                props.push(vec![
+                    "MemorySwapMax".into(),
+                    "t".into(),
+                    u64::MAX.to_string(),
+                ]);
+            }
+        }
+    }
+    if let Some(c) = u.cpus {
+        let q = cpu_quota_usec_or_unlimited(c)?.unwrap_or(u64::MAX);
+        props.push(vec!["CPUQuotaPerSecUSec".into(), "t".into(), q.to_string()]);
+    }
+    if let Some(w) = u.cpu_weight {
+        let w = cgroup_weight_value(w, "cpu-weight")?;
+        props.push(vec!["CPUWeight".into(), "t".into(), w.to_string()]);
+    }
+    if let Some(set) = u.cpuset {
+        let mask = cpuset_to_mask(set)
+            .ok_or_else(|| Error::InvalidCpuset(format!("--cpuset {set}: not a CPU list")))?;
+        let mut p = vec![
+            "AllowedCPUs".to_string(),
+            "ay".to_string(),
+            mask.len().to_string(),
+        ];
+        p.extend(mask.iter().map(u8::to_string));
+        props.push(p);
+    }
+    if let Some(mems) = u.cpuset_mems {
+        let mask = cpuset_to_mask(mems).ok_or_else(|| {
+            Error::InvalidCpuset(format!("cpuset_mems {mems}: not a memory-node list"))
+        })?;
+        let mut p = vec![
+            "AllowedMemoryNodes".to_string(),
+            "ay".to_string(),
+            mask.len().to_string(),
+        ];
+        p.extend(mask.iter().map(u8::to_string));
+        props.push(p);
+    }
+    Ok(props)
+}
+
+/// Calls `busctl … SetUnitProperties` against an already-running scope —
+/// ADR 0038 item 4's live-update mechanism, proved in the item 1 spike
+/// ("SetUnitProperties live → … with the SAME PID"). `runtime=false`: the
+/// change is meant to survive past this boot, same as the properties
+/// `transient_scope_argv` sets at creation.
+fn set_unit_properties(unit: &str, u: &ResourceUpdate) -> Result<()> {
+    let props = unit_properties_for_update(u)?;
+    if props.is_empty() {
+        return Ok(());
+    }
+    let mut argv: Vec<String> = [
+        "call",
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+        "SetUnitProperties",
+        "sba(sv)",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    argv.push(unit.to_string());
+    argv.push("false".to_string());
+    argv.push(props.len().to_string());
+    for p in props {
+        argv.extend(p);
+    }
+    let out = std::process::Command::new("busctl")
+        .args(&argv)
+        .output()
+        .map_err(|e| Error::Syscall {
+            context: "cgroup",
+            message: format!("busctl (needed for the systemd cgroup driver): {e}"),
+        })?;
+    if !out.status.success() {
+        return Err(Error::Syscall {
+            context: "cgroup",
+            message: format!(
+                "systemd refused to update {unit}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// [`apply_oom_score_adj`]'s sibling for a LIVE update from OUTSIDE the
+/// container (the CRI server, not the container's own init writing to
+/// `/proc/self/`) — targets the recorded pid's own file. Best-effort, same
+/// reason as `update_limits`'s own writes: a pid that just exited is a race,
+/// not a bug, and `update_kube_resources` has already judged liveness before
+/// calling this.
+fn apply_oom_score_adj_external(pid: i32, adj: i32) {
+    let _ = std::fs::write(
+        format!("/proc/{pid}/oom_score_adj"),
+        adj.clamp(-1000, 1000).to_string(),
+    );
+}
+
+/// `update_limits` widened to every field ADR 0038 item 3 added, and
+/// PLACEMENT-AWARE (ADR 0038 item 4): a container the kubelet placed in a
+/// SYSTEMD scope (item 1) updates through [`set_unit_properties`], so
+/// `systemctl show`/`status` keep telling the truth about it instead of a
+/// raw write the unit's own bookkeeping never hears about.
+/// `hugepage_limits`/`unified` have no systemd property either way and are
+/// written straight to the scope's own cgroup, exactly as creation does.
+/// Everything else (no kubelet parent, or the cgroupfs driver) writes
+/// directly to the live leaf — [`update_limits`]'s own path, widened in place.
+pub fn update_kube_resources(container: &Container, u: &ResourceUpdate) -> Result<LimitUpdate> {
+    let cg = live_cgroup(container);
+    if !std::path::Path::new(&cg).exists() {
+        let alive = container
+            .pid
+            .is_some_and(|p| safe_to_signal(p, container.pid_starttime));
+        return Ok(if alive {
+            LimitUpdate::NotEnforced
+        } else {
+            LimitUpdate::Deferred
+        });
+    }
+    match container.kube_cgroup.as_ref() {
+        Some(k) if k.driver == KubeCgroupDriver::Systemd => {
+            let unit = format!(
+                "delonix-{}-{}.scope",
+                container.id,
+                container.pid.unwrap_or(0)
+            );
+            set_unit_properties(&unit, u)?;
+        }
+        _ => {
+            if let Some(m) = u.memory {
+                write_limit(&cg, "memory.max", m)?;
+            }
+            if let Some(c) = u.cpus {
+                write_limit(&cg, "cpu.max", &cpu_max_value(c))?;
+            }
+            if let Some(w) = u.cpu_weight {
+                let _ = std::fs::write(format!("{cg}/cpu.weight"), w);
+            }
+            if let Some(set) = u.cpuset {
+                let _ = std::fs::write(format!("{cg}/cpuset.cpus"), set);
+            }
+            if let Some(mems) = u.cpuset_mems {
+                let _ = std::fs::write(format!("{cg}/cpuset.mems"), mems);
+            }
+        }
+    }
+    // Neither systemd property above covers hugetlb/unified; both write
+    // straight to the scope/leaf's own cgroup regardless of placement.
+    for (size, limit) in u.hugepage_limits {
+        let _ = std::fs::write(
+            format!("{cg}/hugetlb.{size}.limit_in_bytes"),
+            limit.to_string(),
+        );
+    }
+    for (key, value) in u.unified {
+        let _ = std::fs::write(format!("{cg}/{key}"), value);
+    }
+    if let (Some(adj), Some(pid)) = (u.oom_score_adj, container.pid) {
+        apply_oom_score_adj_external(pid, adj);
+    }
+    Ok(LimitUpdate::Applied)
+}
+
 /// Removes a container. If it is running, requires `force` (and kills it).
 ///
 /// **With `force`, it returns only once the process has EXITED, not once it was
@@ -9879,6 +10099,102 @@ mod limit_update_tests {
             update_limits(&c, Some("128M"), None).unwrap(),
             LimitUpdate::Deferred
         );
+    }
+
+    /// ADR 0038 item 4: `update_kube_resources` has the exact same two cases
+    /// as `update_limits` for a dead/stopped container — it widens the FIELDS,
+    /// not the liveness decision, which stays shared via `live_cgroup`.
+    #[test]
+    fn update_kube_resources_defers_on_a_stopped_container() {
+        let c = parado();
+        let u = ResourceUpdate {
+            memory: Some("128M"),
+            ..Default::default()
+        };
+        assert_eq!(
+            update_kube_resources(&c, &u).unwrap(),
+            LimitUpdate::Deferred
+        );
+    }
+
+    #[test]
+    fn update_kube_resources_does_not_mistake_a_stale_pid_for_alive() {
+        let mut c = parado();
+        c.pid = Some(0x7FFF_FFFE);
+        c.pid_starttime = Some(1);
+        let u = ResourceUpdate {
+            memory: Some("128M"),
+            ..Default::default()
+        };
+        assert_eq!(
+            update_kube_resources(&c, &u).unwrap(),
+            LimitUpdate::Deferred
+        );
+    }
+
+    /// PURE. Only the properties `u` actually gives become `(sv)` entries —
+    /// the whole point of a PARTIAL update (`SetUnitProperties` leaves
+    /// anything not listed untouched).
+    #[test]
+    fn unit_properties_for_update_sends_only_what_was_asked() {
+        let empty = unit_properties_for_update(&ResourceUpdate::default()).unwrap();
+        assert!(
+            empty.is_empty(),
+            "nothing asked, nothing to send: {empty:?}"
+        );
+
+        let mem_only = unit_properties_for_update(&ResourceUpdate {
+            memory: Some("128M"),
+            ..Default::default()
+        })
+        .unwrap();
+        let names: Vec<&str> = mem_only.iter().map(|p| p[0].as_str()).collect();
+        assert_eq!(names, ["MemoryMax", "MemorySwapMax"], "{mem_only:?}");
+        assert_eq!(mem_only[0][2], (128 * 1024 * 1024).to_string());
+    }
+
+    /// `memory: Some("max")` is a REQUEST to go unlimited, not "nothing
+    /// asked" — it pushes systemd's own infinity sentinel (`UINT64_MAX`)
+    /// explicitly, because omitting the property would leave the OLD
+    /// ceiling in force, the opposite of what the caller said.
+    #[test]
+    fn unit_properties_for_update_can_ask_for_unlimited_explicitly() {
+        let props = unit_properties_for_update(&ResourceUpdate {
+            memory: Some("max"),
+            cpus: Some("max"),
+            ..Default::default()
+        })
+        .unwrap();
+        let by_name = |n: &str| props.iter().find(|p| p[0] == n).map(|p| p[2].clone());
+        assert_eq!(by_name("MemoryMax"), Some(u64::MAX.to_string()));
+        assert_eq!(by_name("CPUQuotaPerSecUSec"), Some(u64::MAX.to_string()));
+    }
+
+    #[test]
+    fn unit_properties_for_update_covers_cpuset_and_weight() {
+        let props = unit_properties_for_update(&ResourceUpdate {
+            cpu_weight: Some("500"),
+            cpuset: Some("0-1"),
+            cpuset_mems: Some("0"),
+            ..Default::default()
+        })
+        .unwrap();
+        let names: Vec<&str> = props.iter().map(|p| p[0].as_str()).collect();
+        assert_eq!(names, ["CPUWeight", "AllowedCPUs", "AllowedMemoryNodes"]);
+    }
+
+    #[test]
+    fn unit_properties_for_update_refuses_what_update_limits_also_refuses() {
+        assert!(unit_properties_for_update(&ResourceUpdate {
+            cpu_weight: Some("0"),
+            ..Default::default()
+        })
+        .is_err());
+        assert!(unit_properties_for_update(&ResourceUpdate {
+            cpuset: Some("not a cpu list"),
+            ..Default::default()
+        })
+        .is_err());
     }
 }
 

@@ -330,13 +330,14 @@ impl RuntimeService for DelonixRuntime {
         blocking(move || lifecycle::container_status(&base, id, verbose)).await
     }
 
-    // --- not exercised by the base crictl/kubelet flow → UNIMPLEMENTED ---
     async fn update_container_resources(
         &self,
-        _r: Request<UpdateContainerResourcesRequest>,
+        r: Request<UpdateContainerResourcesRequest>,
     ) -> Result<Response<UpdateContainerResourcesResponse>, Status> {
-        todo("update_container_resources")
+        let base = self.base.clone();
+        blocking(move || lifecycle::update_container_resources(&base, r.into_inner())).await
     }
+
     async fn reopen_container_log(
         &self,
         r: Request<ReopenContainerLogRequest>,

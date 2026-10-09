@@ -8309,11 +8309,11 @@ scope sob o slice do pod com `memory.max 67108864`, `cpu.max 50000 100000`, `cpu
 → `exit 137`, `reason OOMKilled`; cgroupfs → leaf em `/kubepods/burstable/pod…/delonix-<id>`; pai
 com `..` → `InvalidArgument`; sandbox sem pai → `delonix.slice` e tecto da casa inalterados.
 
-**Por fazer (ADR 0038, fases seguintes)**: `UpdateContainerResources` (via `SetUnitProperties`,
-já provado no spike), e a validação com um kubelet estável — bloqueada pelo crash-loop do
-control-plane, investigado à parte. As estatísticas do eviction manager e `oom_score_adj`
-ficaram fechados a seguir (#316, e a secção `CriResources`/`apply_resources` abaixo);
-`cpuset_mems`/`unified`/hugepages estão na secção seguinte.
+**Por fazer (ADR 0038, fases seguintes)**: a validação com um kubelet estável — bloqueada pelo
+crash-loop do control-plane, investigado à parte. As estatísticas do eviction manager e
+`oom_score_adj` ficaram fechados a seguir (#316, e a secção `CriResources`/`apply_resources`
+abaixo); `cpuset_mems`/`unified`/hugepages e `UpdateContainerResources` estão nas duas secções
+seguintes — o ADR fica assim com os quatro itens implementados.
 
 ## `cpuset_mems`/`unified`/hugepage_limits: honour-or-refuse no caminho CRI (ADR 0038 item 3)
 
@@ -8364,6 +8364,50 @@ controlador nenhum, é um `/proc/<pid>/oom_score_adj` puro); `cpuset_mems`, `hug
 - **Não validado ao vivo** (precisa de um kubelet estável contra um nó com hugetlb configurado,
   bloqueado pelo mesmo crash-loop do control-plane citado acima): só testes unitários/puros das
   três funções de decisão e dos argv/escritas de cgroup.
+- **Fechada a lacuna gémea deste item, que esta secção tinha deixado por fazer**: `cpuset_cpus`
+  entrou em `wanted_resource_controllers` ao lado de `cpuset_mems` — estava wired em
+  `apply_resources` desde sempre e nunca tinha preflight nenhum (a nota de contexto do próprio
+  ADR já media isto: "nproc 32 dentro de um container que pediu 0-1").
+
+## `UpdateContainerResources`: a actualização ao vivo, placement-aware (ADR 0038 item 4)
+
+O item 1 pôs o container no cgroup certo; o item 4 era a peça que faltava para o mexer DEPOIS de
+criado — `UpdateContainerResources` respondia sempre `todo`, e é o RPC que o resize em-lugar do
+kubelet (KEP-1287) e o `crictl update` chamam.
+
+- **`CriResources::merge_update`** — a chave do desenho: o CRI não distingue, no FIO, «não
+  especificado» de «não tocar» — os dois são zero/vazio no proto. Em `CreateContainer` isso
+  significa "sem limite" (nada a herdar, estado novo); em `UpdateContainerResources` significa
+  "deixa como está" (um resize do kubelet, ou um `crictl update --memory X`, só mandam o que
+  mudou). Substituir o registo por inteiro apagaria todos os OUTROS campos no instante em que
+  um só é actualizado — `merge_update` faz a fusão campo a campo, PURA e testada. `cpu_quota`/
+  `cpu_period` fundem-se como PAR (tocar só num substitui os DOIS pelo que o pedido trouxe, nunca
+  mistura um novo com o outro antigo — um pedido assim não é forma que nenhum kubelet ou
+  `crictl` produza, e está documentado em vez de escondido).
+- **A recusa é a MESMA de `StartContainer`**: `refuse_unenforceable_resources` corre antes de
+  qualquer escrita, contra a mesma pergunta (o leaf onde este container ESTÁ REALMENTE tem o
+  controlador?) — zero código novo de validação.
+- **`delonix_linux::update_kube_resources`** — `update_limits` alargado aos campos do item 3 e
+  sensível ao LUGAR (item 1): sob um scope systemd do kubelet, `SetUnitProperties` (apenas as
+  propriedades que o pedido trouxe — o resto fica como estava, que é o que `SetUnitProperties`
+  já significa); fora disso, escrita directa na leaf, como `update_limits` sempre fez.
+  `hugepage_limits`/`unified` não têm propriedade systemd nenhuma e escrevem-se directamente no
+  cgroup do scope/leaf nos dois casos. `oom_score_adj` escreve em `/proc/<pid>/oom_score_adj`
+  de fora (`apply_oom_score_adj_external`, irmã da que o próprio init já escrevia a si mesmo).
+- **`memory_bytes_or_unlimited`/`cpu_quota_usec_or_unlimited`/`cgroup_weight_value`** saíram de
+  dentro de `kube_limits` para serem partilhadas com `unit_properties_for_update` — a mesma
+  conversão size-ou-"max"→bytes que a criação já fazia, sem copiar a lógica.
+- **`unit_properties_for_update` sabe pedir "sem limite" explicitamente** (`memory`/`cpus` com o
+  valor literal `"max"`): omitir a propriedade deixaria o `SetUnitProperties` em paz e o tecto
+  ANTIGO ficava em vigor — o oposto do que "max" pede.
+- **Validado ao vivo** (root isolado, `alpine:3.19`, os cinco binários irmãos, sem `cgroup_parent`
+  — o caminho de leaf delegado rootless, não o systemd, que precisa de um kubelet root para se
+  medir): `memory_limit_in_bytes`/`cpu_quota`+`cpu_period` num `UpdateContainerResources` real
+  pelo `crictl update`, com o MESMO pid — `memory.max` 134217728→268435456, `cpu.max` "50000
+  100000"→"100000 100000"; um segundo update SÓ com memória confirmou a fusão parcial —
+  `cpu.max` ficou exactamente como estava. **Não validado ao vivo**: o braço systemd
+  (`SetUnitProperties`), bloqueado pelo mesmo motivo do item 3 — precisa de um kubelet root
+  estável; só testes unitários/puros dos argv e da decisão de propriedades.
 
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 
