@@ -109,14 +109,14 @@ jobs:
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
-          ./target/release/delonix image --vm build \
+          ./target/release/delonix image vm build \
             --tag "${{ steps.vars.outputs.tag }}" \
             --ubuntu-release "${{ inputs.ubuntu_release }}" \
             --k8s-version "${{ inputs.k8s_version }}" \
             --cri-bin ./target/release/delonix-cri \
             --delonix-bin ./target/release/delonix \
             --offline
-          ./target/release/delonix image --vm ls
+          ./target/release/delonix image vm ls
       # Ao contrário da golden (`--offline`, sem rede no appliance), uma build
       # `--no-k8s` INSTALA pacotes lá dentro e precisa mesmo de rede. Quem a dá é
       # o passt, e o do Ubuntu 24.04 — o runner — é o mesmo que falha nos dois
@@ -140,34 +140,34 @@ jobs:
           XDG_RUNTIME_DIR: /tmp/delonix-run
         run: |
           if [ "${{ inputs.distro }}" = "debian" ]; then
-            ./target/release/delonix image --vm build \
+            ./target/release/delonix image vm build \
               --tag "${{ steps.vars.outputs.tag }}" \
               --distro debian \
               --debian-release "${{ inputs.debian_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           elif [ "${{ inputs.distro }}" = "rocky" ]; then
-            ./target/release/delonix image --vm build \
+            ./target/release/delonix image vm build \
               --tag "${{ steps.vars.outputs.tag }}" \
               --distro rocky \
               --rocky-release "${{ inputs.rocky_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           elif [ "${{ inputs.distro }}" = "fedora" ]; then
-            ./target/release/delonix image --vm build \
+            ./target/release/delonix image vm build \
               --tag "${{ steps.vars.outputs.tag }}" \
               --distro fedora \
               --fedora-release "${{ inputs.fedora_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           else
-            ./target/release/delonix image --vm build \
+            ./target/release/delonix image vm build \
               --tag "${{ steps.vars.outputs.tag }}" \
               --ubuntu-release "${{ inputs.ubuntu_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           fi
-          ./target/release/delonix image --vm ls
+          ./target/release/delonix image vm ls
       # A build that exits 0 is not a disk that boots: the 1.36 tag published on
       # 2026-08-24 stopped at `grub rescue>` under SeaBIOS and nothing here noticed.
       # Boot the artefact under both firmwares, on the bus a Proxmox template uses,
@@ -186,7 +186,7 @@ jobs:
         run: |
           echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | ./target/release/delonix image login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
-          ./target/release/delonix image --vm push \
+          ./target/release/delonix image vm push \
             "${{ steps.vars.outputs.tag }}" \
             "${{ steps.vars.outputs.dest_repo }}:${{ steps.vars.outputs.dest_tag }}"
       - name: Sumário
