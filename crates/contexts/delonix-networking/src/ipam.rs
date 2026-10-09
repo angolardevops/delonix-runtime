@@ -547,8 +547,10 @@ pub trait IpamProvider: delonix_compute::vm_provider::Provider {
     /// running subnet of `vnets` back on the running gateway where the
     /// provider left it elsewhere (ADR-0063 D2.3: a staged gateway change
     /// moves the IPAM entry at once, and the rollback does not move it back).
-    /// The subnet ends with ONE gateway entry, on its running gateway: any
-    /// other the provider left is released. Only vnets carrying `owner`'s
+    /// The subnet ends with ONE gateway entry, on its running gateway (put
+    /// back when a rolled-back removal left none), or with NONE when it runs
+    /// without a gateway (a rolled-back addition leaves one): any other the
+    /// provider left is released. Only vnets carrying `owner`'s
     /// mark are touched. Called only after such a failure. Returns one line
     /// per subnet repaired; empty when every entry was already where it
     /// belongs.

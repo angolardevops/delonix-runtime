@@ -174,13 +174,22 @@ and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless 
   zone was not created. `ipam` is a cold field: the node refuses to change it once a subnet exists.
 - **D1.2, D1.3.** The provider serves only a controller of plugin `pve`. `phpipam` is refused by
   name with the node's `die`; `netbox` is refused by name until the D1.3 spike; any other plugin
-  as never measured. Proved by unit test only: the lab has no external controller, and the node
-  verifies a controller's URL before it registers one.
+  as never measured. Measured (2026-10-09, follow-up run): a NetBox and a phpIPAM controller
+  registered on the cluster against a stub (the node verifies the URL: `GET <url>/ipam/aggregates/`
+  for NetBox, `GET <url>/sections/<section>` with a `token:` header for phpIPAM) are listed by the
+  port with their plugin type and refused by name, DX-6381 (exit 69), through `stack apply` and
+  `live.rs::an_external_ipam_controller_is_listed_and_refused_by_name`. The refusal comes before
+  any write: no zone, vnet or record was created, and the stub saw only the node's own
+  verification. `stack plan` does not refuse (it plans `+`, exit 2): the controller is read at
+  apply.
 - **D2.1, D2.2.** `subnets` (vnet and CIDR) stays cold; a new hot field, `subnetSettings`
   (gateway and ranges), is read from the provider, so a gateway changed by hand on the node
   converges back too (measured). The write is `PUT …/subnets/<id>` with the exact target:
-  **`delete=dhcp-range` clears every range** (measured here for the first time). `delete=gateway`
-  is sent when a gateway is declared absent, and was not measured.
+  **`delete=dhcp-range` clears every range** (measured here for the first time). **`delete=gateway`
+  clears the gateway and its IPAM entry** (measured in the follow-up run, through the provider
+  and through `stack apply`): the staged `PUT` releases the entry at once, like a moved gateway,
+  and after the apply the running subnet has no gateway, the IPAM no gateway entry, and the plan
+  is `=`.
 - **D2.4.** A new gateway that an IPAM entry holds is refused before the `PUT` (measured: the
   entry did not move).
 - **D2.3 — the measured sequence was incomplete.** Injected exactly as the Context describes
@@ -196,5 +205,51 @@ and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless 
   Measured through the CLI with a natural failure: two subnets, the first moved its gateway, the
   second was refused by D2.4 inside the same transaction; the repair put the first one's entry
   back, and the ledger reads `transaction: failed`, `repair_gateways: done`.
-- **D2.5** is a warning naming each guest allocation outside the new ranges; the node's
-  behaviour in that case is still not measured.
+- **D2.3 — two more states the first repair missed** (follow-up run, 2026-10-09, measured on the
+  node by hand and then through the engine). The rollback restores the staged configuration and
+  never the IPAM, whichever way the gateway changed:
+  - a gateway **removed** (`delete=gateway`) and rolled back: the subnet runs with its gateway and
+    the IPAM holds **no** gateway entry. The router's address is free: the node then accepted a
+    reservation of it for a guest's MAC (`POST …/ips`, rc 0). The first repair skipped a subnet
+    with no gateway entry ("never measured"). Moving through a free address and back restores the
+    entry (measured: the node warns `IP '<gw>' does not exist in IPAM DB` on the first `PUT` and
+    goes on), so the repair now does that too.
+  - a gateway **added** to a subnet without one and rolled back: the subnet runs without a
+    gateway and the IPAM keeps the new gateway's entry. **It wedges the next apply**: D2.4 refuses
+    that very gateway because the stale entry holds the address (DX-5389, measured with the PR's
+    binary after a `kill -9`, and repeated on every apply). The repair now releases every gateway
+    entry of a subnet that runs without a gateway.
+  - A right entry next to a stale one (a repair cut short between its move and its release) only
+    releases the stale one. The releases run inside the discarded change, under the SDN lock.
+- **D2.3 after a real `kill -9`** (follow-up run, through `stack apply`). The CLI's route trace was
+  pointed at a FIFO, so each request waits for the reader; the process was SIGKILLed right after
+  the subnet's `PUT` was answered, blocked before its next request. The node then held: the SDN
+  lock with the dead process's token, the staged gateway change, the IPAM gateway entry moved (or
+  released, or added), and the record's ledger read `transaction: submitted`. The next apply said
+  the run was interrupted, discarded the dead lock (`died holding the lock`), repaired, and ended
+  with one gateway entry on the running gateway and no lock, for all three changes (moved to
+  `.254`, removed, added). With the PR's binary as the control, the removed case ended `rc=0` with
+  **no** gateway entry and a plan of `=`, and the added case was refused by D2.4 on every apply.
+- **Not fixed, measured:** the plan does not read the IPAM's gateway entries. A subnet whose
+  entry is missing plans `=` (exit 0); the repair runs only after a failed or interrupted run, so
+  an inconsistency made by hand, or left by an older binary, stays until the next failure.
+- **Not fixed, measured by hand on the node:** a subnet **deleted** inside a transaction that is
+  then rolled back comes back in the configuration and not in the IPAM's database
+  (`pve-ipam-state.json`). The node then refuses every update and every delete of that subnet
+  (`subnet '<cidr>' doesn't exist in IPAM DB`), so neither the engine nor `pvesh` can remove the
+  vnet or the zone. The only way out measured was to add the subnet back to that file by hand.
+  It applies to a teardown (`remove_subnet` then `remove_vnet`/`remove_zone`) or a CIDR replace
+  that fails after the subnet's delete was staged.
+- **D2.5 — measured** (follow-up run, by hand and through
+  `live.rs::a_gateway_is_removed_and_added_in_place_and_a_range_narrows_under_a_guest`). A VM
+  created on the vnet got an allocation in the range (`.100`); the range narrowed to `.10–.30` is
+  accepted and applied, and the allocation stays where it is, with its vmid. The zone's `dnsmasq`
+  serves the whole subnet as `static` (`dhcp-range=…,<network>,static,<mask>,infinite`), so the
+  range only steers the IPAM's allocator: a VM created after the change got `.10`, and the first
+  VM, started after the change, was handed `.100` (`ethers` written at `qmstart`, `DHCPACK
+  10.86.2.100`). The engine's warning ("the node leaves it where it is") is therefore what the node
+  does; the guest keeps an address outside the declared range until it is destroyed.
+- The F5b and F5c live cases (`the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp`,
+  `the_dns_provider_registers_a_guest_in_the_zones_dns_server`), whose `prepare_zone` calls now
+  name the controller, pass again against the lab (an `alpine:3.20` OCI archive, the lab's
+  PowerDNS on the second node), and leave no zone, guest or DNS record behind.

@@ -6239,6 +6239,406 @@ fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
     );
 }
 
+/// ADR-0063 D1.2/D1.3 against a real node: a NetBox and a phpIPAM controller
+/// registered on the cluster — real entries of `GET /cluster/sdn/ipams`, the
+/// node having verified each URL against a stub — are listed by the IPAM port
+/// with their plugin type and refused BY NAME by the provider (DX-6381),
+/// while the built-in `pve` one stays served. The stub sees only the node's
+/// own verification: the engine never talks to an external IPAM. Needs
+/// `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`, like the controller half above.
+#[test]
+fn an_external_ipam_controller_is_listed_and_refused_by_name() {
+    use delonix_networking::ipam::IpamProvider;
+    use delonix_proxmox::IpamKind;
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(callback) = std::env::var("DELONIX_PROXMOX_TEST_CALLBACK_ADDR") else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let stub = ControllerStub::start();
+    let base = format!("http://{callback}:{}", stub.port);
+    let suffix = std::process::id() % 1_000_000;
+    let netbox = format!("nb{suffix}");
+    let phpipam = format!("ph{suffix}");
+
+    /// Deletes the controllers this test registered, on every exit.
+    struct Registered<'a> {
+        client: &'a delonix_proxmox::Client,
+        ledger: &'a delonix_proxmox::Ledger,
+        ids: Vec<String>,
+    }
+    impl Drop for Registered<'_> {
+        fn drop(&mut self) {
+            for id in &self.ids {
+                let _ = self.client.delete_sdn_ipam(self.ledger, id);
+            }
+        }
+    }
+    let registered = Registered {
+        client: &client,
+        ledger: &ledger,
+        ids: vec![netbox.clone(), phpipam.clone()],
+    };
+    client
+        .create_sdn_ipam(
+            &ledger,
+            &netbox,
+            IpamKind::Netbox,
+            &format!("{base}/api"),
+            "tok-nb",
+            None,
+        )
+        .expect("register a NetBox controller");
+    client
+        .create_sdn_ipam(
+            &ledger,
+            &phpipam,
+            IpamKind::PhpIpam,
+            &format!("{base}/api/app"),
+            "tok-ph",
+            Some(1),
+        )
+        .expect("register a phpIPAM controller");
+
+    let listed = ipam.controllers().expect("controllers");
+    for (id, kind, why) in [
+        (&netbox, "netbox", "ADR-0063 D1.3"),
+        (&phpipam, "phpipam", "parsing of result not yet implemented"),
+    ] {
+        let c = listed
+            .iter()
+            .find(|c| c.id == *id)
+            .unwrap_or_else(|| panic!("controller '{id}' is not listed: {listed:?}"));
+        assert_eq!(c.kind, kind, "{c:?}");
+        let e = ipam
+            .refuse_unsupported(c)
+            .expect_err("an external controller is refused by name");
+        assert_eq!(e.number(), 6381, "{e}");
+        let text = e.to_string();
+        assert!(
+            text.contains(id.as_str()) && text.contains(kind) && text.contains(why),
+            "{text}"
+        );
+    }
+    let pve = listed
+        .iter()
+        .find(|c| c.id == "pve")
+        .expect("the built-in controller");
+    ipam.refuse_unsupported(pve)
+        .expect("the built-in controller is still served");
+
+    // phpIPAM's token rides a `token:` header the stub does not record.
+    let seen = stub.requests();
+    assert!(
+        seen.iter().all(|l| {
+            (l.contains("/api/ipam/aggregates/") && l.contains("tok-nb"))
+                || l.contains("/api/app/sections/1")
+        }),
+        "something other than the node's own verification reached the controller: {seen:?}"
+    );
+
+    drop(registered);
+    let after = ipam.controllers().expect("controllers after the teardown");
+    assert!(
+        !after.iter().any(|c| c.id == netbox || c.id == phpipam),
+        "a controller of this test was left on the cluster: {after:?}"
+    );
+}
+
+/// ADR-0063 D2 against a real node, the cases the first live case left out:
+///
+/// * D2.3 for a gateway REMOVED: `delete=gateway` staged and rolled back
+///   leaves the subnet running with its gateway and the IPAM with NO gateway
+///   entry — the router's address free for a guest (measured: the node then
+///   accepts a reservation of it). The repair puts the entry back.
+/// * D2.2 `delete=gateway` for real: the node clears the gateway and its
+///   IPAM entry.
+/// * D2.3 for a gateway ADDED: staged and rolled back, the subnet runs
+///   without a gateway and the IPAM holds the new one's entry, which then
+///   makes D2.4 refuse that very gateway. The repair releases it, and the
+///   gateway is then added.
+/// * D2.5: a guest's allocation (made by the node at the VM's create), then
+///   the subnet's range narrowed so the allocation falls outside it — the
+///   node accepts the change and leaves the allocation where it is.
+#[test]
+fn a_gateway_is_removed_and_added_in_place_and_a_range_narrows_under_a_guest() {
+    use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamSubnet};
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let owner = OwnerMark::from_random(
+        &(std::process::id() ^ 0x0063_d225)
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("g{suffix}");
+    let vnet = format!("h{suffix}");
+    let octet = suffix % 200 + 20;
+    let at = |last: u8| format!("10.85.{octet}.{last}");
+    let subnet = |gateway: Option<u8>, ranges: &[(u8, u8)]| IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.85.{octet}.0/24"),
+        gateway: gateway.map(at),
+        dhcp_ranges: ranges
+            .iter()
+            .map(|(s, e)| DhcpRange {
+                start: at(*s),
+                end: at(*e),
+            })
+            .collect(),
+    };
+    let gateway_entries = || -> Vec<String> {
+        client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .filter(|e| e["zone"] == zone.as_str() && e["vnet"] == vnet.as_str())
+            .filter(|e| match &e["gateway"] {
+                serde_json::Value::Number(n) => n.as_u64() == Some(1),
+                serde_json::Value::Bool(b) => *b,
+                serde_json::Value::String(s) => s == "1",
+                _ => false,
+            })
+            .map(|e| e["ip"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+    let running = || {
+        ipam.observe(&zone, std::slice::from_ref(&vnet))
+            .expect("observe")
+            .subnets
+    };
+    let repair = || {
+        ipam.repair_gateways(&zone, std::slice::from_ref(&vnet), &owner)
+            .expect("repair")
+    };
+    let failed = |s: &IpamSubnet| {
+        let e = segment
+            .transaction(&mut || {
+                ipam.ensure_subnet(&zone, s, &owner)?;
+                Err(delonix_model::Error::Invalid(
+                    "injected failure after the subnet was staged".into(),
+                ))
+            })
+            .expect_err("the injected failure");
+        assert!(e.to_string().contains("injected failure"), "{e}");
+    };
+    let converge = |s: &IpamSubnet| {
+        segment
+            .transaction(&mut || ipam.ensure_subnet(&zone, s, &owner).map(|_| ()))
+            .expect("the subnet in place");
+    };
+
+    let with_gateway = subnet(Some(1), &[(100, 150)]);
+    let without_gateway = subnet(None, &[(100, 150)]);
+    segment
+        .transaction(&mut || {
+            segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?;
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("d25".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, "pve", true)?;
+            ipam.ensure_subnet(&zone, &with_gateway, &owner)?;
+            Ok(())
+        })
+        .expect("zone, vnet and subnet");
+    assert_eq!(running(), vec![with_gateway.clone()]);
+    assert_eq!(gateway_entries(), vec![at(1)]);
+
+    // D2.3, a gateway REMOVED and rolled back.
+    failed(&without_gateway);
+    assert_eq!(
+        running(),
+        vec![with_gateway.clone()],
+        "the rollback kept the gateway"
+    );
+    assert_eq!(
+        gateway_entries(),
+        Vec::<String>::new(),
+        "measured: the staged delete=gateway released the entry and the rollback did not \
+         bring it back"
+    );
+    let repaired = repair();
+    tracing::info!(?repaired, "after a rolled-back gateway removal");
+    assert_eq!(repaired.len(), 1, "{repaired:?}");
+    assert!(
+        repaired[0].contains("held no gateway entry"),
+        "{repaired:?}"
+    );
+    assert_eq!(gateway_entries(), vec![at(1)], "the entry is back");
+    assert_eq!(running(), vec![with_gateway.clone()]);
+    assert!(client.sdn_pending_changes().expect("pending").is_empty());
+    assert!(repair().is_empty(), "a second repair found something to do");
+
+    // D2.2, `delete=gateway` for real.
+    converge(&without_gateway);
+    assert_eq!(running(), vec![without_gateway.clone()]);
+    assert_eq!(
+        gateway_entries(),
+        Vec::<String>::new(),
+        "the node cleared the gateway's IPAM entry with the gateway"
+    );
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                ipam.ensure_subnet(&zone, &without_gateway, &owner)?,
+                EnsureOutcome::AlreadyPresent
+            );
+            Ok(())
+        })
+        .expect("unchanged");
+
+    // D2.3, a gateway ADDED and rolled back.
+    failed(&with_gateway);
+    assert_eq!(
+        running(),
+        vec![without_gateway.clone()],
+        "the rollback kept the subnet without a gateway"
+    );
+    assert_eq!(
+        gateway_entries(),
+        vec![at(1)],
+        "measured: the staged gateway's entry survived the rollback"
+    );
+    let e = segment
+        .transaction(&mut || ipam.ensure_subnet(&zone, &with_gateway, &owner).map(|_| ()))
+        .expect_err("D2.4 refuses the gateway the stale entry holds");
+    assert!(e.to_string().contains("already held"), "{e}");
+    let repaired = repair();
+    tracing::info!(?repaired, "after a rolled-back gateway addition");
+    assert_eq!(repaired.len(), 1, "{repaired:?}");
+    assert!(
+        repaired[0].contains("runs without a gateway"),
+        "{repaired:?}"
+    );
+    assert_eq!(gateway_entries(), Vec::<String>::new());
+    assert!(client.sdn_pending_changes().expect("pending").is_empty());
+    converge(&with_gateway);
+    assert_eq!(running(), vec![with_gateway.clone()]);
+    assert_eq!(gateway_entries(), vec![at(1)]);
+
+    // D2.5: a guest's allocation, then the range narrowed under it.
+    /// Destroys the guest this test created, on every exit.
+    struct Guest<'a> {
+        client: &'a delonix_proxmox::Client,
+        ledger: &'a delonix_proxmox::Ledger,
+        vmid: u32,
+    }
+    impl Drop for Guest<'_> {
+        fn drop(&mut self) {
+            if self.client.vm_exists(self.vmid).unwrap_or(false) {
+                let _ = self.client.destroy(self.ledger, self.vmid);
+            }
+        }
+    }
+    let vmid = client.next_vmid().expect("next vmid");
+    let cfg = delonix_compute::vm_backend::VmConfig {
+        name: format!("dlxd25{}", suffix % 10000),
+        vcpus: 1,
+        memory: "128M".into(),
+        bridge: Some(vnet.clone()),
+        ..Default::default()
+    };
+    client
+        .create_vm(&ledger, vmid, &cfg.name, &cfg, &storage, 1)
+        .expect("a guest on the vnet");
+    let guest = Guest {
+        client: &client,
+        ledger: &ledger,
+        vmid,
+    };
+    let allocation = |vmid: u32| -> Vec<String> {
+        ipam.observe(&zone, std::slice::from_ref(&vnet))
+            .expect("observe")
+            .entries
+            .iter()
+            .filter(|e| e.vmid == Some(vmid))
+            .map(|e| e.ip.clone())
+            .collect()
+    };
+    let held = allocation(vmid);
+    let in_old_range = |ip: &str| {
+        ip.rsplit('.')
+            .next()
+            .and_then(|o| o.parse::<u8>().ok())
+            .is_some_and(|o| (100..=150).contains(&o))
+    };
+    assert!(
+        held.len() == 1 && in_old_range(&held[0]),
+        "the node allocated the guest a range address at create: {held:?}"
+    );
+    let narrowed = subnet(Some(1), &[(10, 30)]);
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                ipam.ensure_subnet(&zone, &narrowed, &owner)?,
+                EnsureOutcome::Created
+            );
+            Ok(())
+        })
+        .expect("the node accepts a range narrowed under a guest's allocation");
+    assert_eq!(running(), vec![narrowed.clone()]);
+    assert_eq!(
+        allocation(vmid),
+        held,
+        "the node leaves the guest's allocation where it is, outside the new range"
+    );
+    tracing::info!(?held, "a guest allocation outside the narrowed range");
+    drop(guest);
+    assert!(
+        allocation(vmid).is_empty(),
+        "destroying the guest released its allocation"
+    );
+
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &narrowed, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
+    assert!(
+        !client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .any(|e| e["zone"] == zone.as_str()),
+        "an IPAM entry of the zone was left behind"
+    );
+}
+
 /// Reads a PowerDNS zone's records through the server's own API (the TEST's
 /// read: the engine never talks to the DNS server). Returns `(name, type,
 /// contents)` without the SOA and NS sets.

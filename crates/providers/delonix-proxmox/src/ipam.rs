@@ -105,18 +105,20 @@ pub(crate) fn gateway_entries_from(
         .collect()
 }
 
-/// One subnet whose IPAM gateway entry is not on the running gateway
-/// (ADR-0063 D2.3), and the address the repair moves the gateway through.
+/// One subnet whose IPAM gateway entries do not match its running gateway
+/// (ADR-0063 D2.3), and what the repair does about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GatewayRepair {
     pub vnet: String,
     pub cidr: String,
-    /// The running subnet's gateway: where the entry belongs.
-    pub gateway: String,
-    /// Where the IPAM holds the gateway entry instead.
-    pub stale: String,
-    /// A free address of the subnet the gateway is moved through.
-    pub through: String,
+    /// The running subnet's gateway: where the ONE gateway entry belongs.
+    /// `None` when the subnet runs without a gateway, so no entry belongs.
+    pub gateway: Option<String>,
+    /// The gateway entries the IPAM holds on any OTHER address — released.
+    pub stale: Vec<String>,
+    /// A free address of the subnet the gateway is moved through, when no
+    /// entry is on the running gateway; `None` when nothing is moved.
+    pub through: Option<String>,
 }
 
 /// Whether `ip` is an address of the subnet a repair is about.
@@ -160,12 +162,24 @@ pub(crate) fn free_address(subnet: &IpamSubnet, entries: &[IpamEntry]) -> Option
     })
 }
 
-/// The repairs ADR-0063 D2.3 calls for: each running subnet with a gateway
-/// whose vnet holds a gateway entry inside the subnet on ANOTHER address, and
-/// none on the running gateway. A subnet with no gateway entry at all is left
-/// alone — that state was never measured, and the sequence is only known to
-/// restore an entry the node moved. `Err` names a subnet with no free
-/// address to move through. Pure.
+/// The repairs ADR-0063 D2.3 calls for: a running subnet ends with exactly
+/// one gateway entry, on its running gateway, or none when it runs without
+/// a gateway. Three states, each measured on PVE 9.2.2 after a gateway
+/// change was staged and rolled back:
+///
+/// * a gateway MOVED: the entry stays on the staged address, none on the
+///   running gateway — moved through a free address and back, the stale
+///   one released;
+/// * a gateway REMOVED (`delete=gateway`): the entry is gone and the
+///   running gateway's address is free (the node then accepts a
+///   reservation of the router's address for a guest) — moved through a
+///   free address and back, which puts the entry back;
+/// * a gateway ADDED to a subnet that had none: the subnet runs without one
+///   and the IPAM holds a gateway entry — released.
+///
+/// A right entry next to stale ones (a repair cut short before its release)
+/// only releases the stale ones. `Err` names a subnet with no free address
+/// to move through. Pure.
 pub(crate) fn gateway_repairs(
     running: &[IpamSubnet],
     gateway_entries: &[(String, String)],
@@ -173,35 +187,60 @@ pub(crate) fn gateway_repairs(
 ) -> Result<Vec<GatewayRepair>, String> {
     let mut out = Vec::new();
     for s in running {
-        let Some(g) = s.gateway.as_deref() else {
-            continue;
-        };
         let mine: Vec<&str> = gateway_entries
             .iter()
             .filter(|(vnet, ip)| *vnet == s.vnet && s.holds(ip))
             .map(|(_, ip)| ip.as_str())
             .collect();
-        if mine.contains(&g) {
+        let gateway = s.gateway.as_deref();
+        let stale: Vec<String> = mine
+            .iter()
+            .filter(|ip| Some(**ip) != gateway)
+            .map(|ip| (*ip).to_string())
+            .collect();
+        let through = match gateway {
+            Some(g) if !mine.contains(&g) => Some(free_address(s, entries).ok_or_else(|| {
+                format!(
+                    "subnet {} in vnet '{}': no free address to move the gateway through",
+                    s.cidr, s.vnet
+                )
+            })?),
+            _ => None,
+        };
+        if stale.is_empty() && through.is_none() {
             continue;
         }
-        let Some(stale) = mine.first() else {
-            continue;
-        };
-        let through = free_address(s, entries).ok_or_else(|| {
-            format!(
-                "subnet {} in vnet '{}': no free address to move the gateway through",
-                s.cidr, s.vnet
-            )
-        })?;
         out.push(GatewayRepair {
             vnet: s.vnet.clone(),
             cidr: s.cidr.clone(),
-            gateway: g.to_string(),
-            stale: (*stale).to_string(),
+            gateway: gateway.map(str::to_string),
+            stale,
             through,
         });
     }
     Ok(out)
+}
+
+/// What a repair says it did, one line per subnet.
+fn repair_line(r: &GatewayRepair) -> String {
+    let at = format!("subnet {} in vnet '{}'", r.cidr, r.vnet);
+    match (&r.gateway, r.stale.as_slice(), &r.through) {
+        (Some(g), [], Some(_)) => {
+            format!("{at}: the IPAM held no gateway entry, put back on {g}")
+        }
+        (Some(g), stale, Some(_)) => format!(
+            "{at}: the IPAM gateway entry was on {}, put back on {g}",
+            stale.join(", ")
+        ),
+        (Some(g), stale, None) => format!(
+            "{at}: released the extra IPAM gateway entries on {} (the entry on {g} stays)",
+            stale.join(", ")
+        ),
+        (None, stale, _) => format!(
+            "{at}: the subnet runs without a gateway; released the IPAM gateway entries on {}",
+            stale.join(", ")
+        ),
+    }
 }
 
 /// The [`IpamProvider`] for the cluster's SDN.
@@ -735,11 +774,14 @@ impl IpamProvider for ProxmoxIpamProvider {
         })
     }
 
-    /// ADR-0063 D2.3, the sequence measured on PVE 9.2.2 to put a moved IPAM
-    /// gateway entry back: with the SDN lock held, stage the gateway on a
-    /// free address and back on the running one (two writes), then roll back
-    /// — nothing staged survives, and the IPAM ends with the gateway entry on
-    /// the running gateway. Read back after: an entry still elsewhere is an
+    /// ADR-0063 D2.3, the sequences measured on PVE 9.2.2 (see
+    /// [`gateway_repairs`]): with the SDN lock held, stage the gateway on a
+    /// free address and back on the running one (two writes) where no entry
+    /// is on the running gateway; once that entry is confirmed, release
+    /// every other gateway entry of the subnet (`DELETE …/ips`, which acts on
+    /// the IPAM, not on the staged configuration); then roll back — nothing
+    /// staged survives. Read back after: a subnet that does not end with
+    /// exactly its running gateway's entry (or none, without a gateway) is an
     /// error, never a success. Nothing is written when every entry is right.
     fn repair_gateways(
         &self,
@@ -778,10 +820,19 @@ impl IpamProvider for ProxmoxIpamProvider {
         if repairs.is_empty() {
             return Ok(Vec::new());
         }
+        let gateways = || -> crate::Result<Vec<(String, String)>> {
+            Ok(gateway_entries_from(
+                &self.client.sdn_ipam_status(IPAM)?,
+                zone,
+            ))
+        };
         self.client
             .sdn_discarded_change(&self.ledger, || {
                 for r in &repairs {
-                    for g in [r.through.as_str(), r.gateway.as_str()] {
+                    let (Some(through), Some(gateway)) = (&r.through, &r.gateway) else {
+                        continue;
+                    };
+                    for g in [through.as_str(), gateway.as_str()] {
                         self.client.update_sdn_subnet_with(
                             &self.ledger,
                             &r.vnet,
@@ -794,67 +845,60 @@ impl IpamProvider for ProxmoxIpamProvider {
                         )?;
                     }
                 }
+                // Measured on PVE 9.2.2 (2026-10-09): the move-and-back puts
+                // a gateway entry on the running gateway and LEAVES the one
+                // on the staged address, still flagged gateway — which holds
+                // that address and makes the node refuse the subnet's delete
+                // ("not empty"). A subnet has one gateway, so every other
+                // gateway entry is released — but only once the right one is
+                // confirmed: without it the read-back below names the subnet.
+                let held = gateways()?;
+                for r in &repairs {
+                    let mine = |vnet: &str, ip: &str| vnet == r.vnet && r_holds(r, ip);
+                    let right = match &r.gateway {
+                        Some(g) => held.iter().any(|(vnet, ip)| mine(vnet, ip) && ip == g),
+                        None => true,
+                    };
+                    if !right {
+                        continue;
+                    }
+                    for (_, ip) in held
+                        .iter()
+                        .filter(|(vnet, ip)| mine(vnet, ip) && Some(ip) != r.gateway.as_ref())
+                    {
+                        self.client
+                            .sdn_vnet_ip_delete(&self.ledger, &r.vnet, zone, ip, None)?;
+                    }
+                }
                 Ok(())
             })
             .map_err(delonix_model::Error::from)?;
-        let gateways = || -> delonix_model::Result<Vec<(String, String)>> {
-            Ok(gateway_entries_from(
-                &self
-                    .client
-                    .sdn_ipam_status(IPAM)
-                    .map_err(delonix_model::Error::from)?,
-                zone,
-            ))
-        };
-        // Measured on PVE 9.2.2 (2026-10-09): the move-and-back puts a gateway
-        // entry on the running gateway and LEAVES the one on the staged
-        // address, still flagged gateway — which then holds that address and
-        // makes the node refuse the subnet's delete ("not empty"). A subnet
-        // has one gateway, so once the right entry is confirmed every other
-        // gateway entry of the subnet is released (`DELETE …/ips`, measured
-        // to work on a gateway entry, ADR-0063).
-        let held = gateways()?;
+        let after = gateways().map_err(delonix_model::Error::from)?;
         let mut out = Vec::new();
-        for r in &repairs {
-            let mine = |vnet: &str, ip: &str| vnet == r.vnet && r_holds(r, ip);
-            if !held
-                .iter()
-                .any(|(vnet, ip)| mine(vnet, ip) && *ip == r.gateway)
-            {
-                return Err(delonix_model::Error::Invalid(format!(
-                    "subnet {} in vnet '{}': the IPAM gateway entry is still not on {} after the \
-                     repair (it was on {}) — release {} on the cluster before a guest is given \
-                     it, and put the gateway entry back by hand",
-                    r.cidr, r.vnet, r.gateway, r.stale, r.gateway
-                )));
-            }
-            for (_, ip) in held
-                .iter()
-                .filter(|(vnet, ip)| mine(vnet, ip) && *ip != r.gateway)
-            {
-                self.client
-                    .sdn_vnet_ip_delete(&self.ledger, &r.vnet, zone, ip, None)
-                    .map_err(delonix_model::Error::from)?;
-            }
-        }
-        let after = gateways()?;
         for r in &repairs {
             let entries: Vec<&str> = after
                 .iter()
                 .filter(|(vnet, ip)| *vnet == r.vnet && r_holds(r, ip))
                 .map(|(_, ip)| ip.as_str())
                 .collect();
-            if entries != [r.gateway.as_str()] {
-                return Err(delonix_model::Error::Invalid(format!(
-                    "subnet {} in vnet '{}': after the repair the IPAM holds gateway entries on \
-                     {entries:?}, expected only {}",
-                    r.cidr, r.vnet, r.gateway
-                )));
+            let want: Vec<&str> = r.gateway.as_deref().into_iter().collect();
+            if entries != want {
+                return Err(delonix_model::Error::Invalid(match &r.gateway {
+                    Some(g) => format!(
+                        "subnet {} in vnet '{}': after the repair the IPAM holds gateway entries \
+                         on {entries:?}, expected only {g} — release any other on the cluster \
+                         and put the gateway entry back by hand before a guest is given {g}",
+                        r.cidr, r.vnet
+                    ),
+                    None => format!(
+                        "subnet {} in vnet '{}' runs without a gateway, and after the repair the \
+                         IPAM still holds gateway entries on {entries:?} — release them on the \
+                         cluster",
+                        r.cidr, r.vnet
+                    ),
+                }));
             }
-            out.push(format!(
-                "subnet {} in vnet '{}': the IPAM gateway entry was on {}, put back on {}",
-                r.cidr, r.vnet, r.stale, r.gateway
-            ));
+            out.push(repair_line(r));
         }
         Ok(out)
     }
@@ -975,30 +1019,89 @@ mod tests {
             vec![GatewayRepair {
                 vnet: "v".into(),
                 cidr: "10.82.0.0/24".into(),
-                gateway: "10.82.0.1".into(),
-                stale: "10.82.0.254".into(),
+                gateway: Some("10.82.0.1".into()),
+                stale: vec!["10.82.0.254".into()],
                 // .254 is held (the stale entry), .255 is the broadcast.
-                through: "10.82.0.253".into(),
+                through: Some("10.82.0.253".into()),
             }]
         );
+        assert!(repair_line(&r[0]).contains("was on 10.82.0.254, put back on 10.82.0.1"));
 
-        // In sync, or no gateway entry at all (never measured): nothing.
+        // In sync: nothing.
         let right = [("v".to_string(), "10.82.0.1".to_string())];
         assert!(gateway_repairs(&running, &right, &entries)
             .unwrap()
             .is_empty());
-        assert!(gateway_repairs(&running, &[], &entries).unwrap().is_empty());
-        // A gateway entry of ANOTHER vnet does not count.
+        // A gateway entry of ANOTHER vnet does not count — and this subnet
+        // has none of its own, which is the next case.
         let elsewhere = [("w".to_string(), "10.82.0.254".to_string())];
-        assert!(gateway_repairs(&running, &elsewhere, &entries)
-            .unwrap()
-            .is_empty());
-        // A subnet without a gateway has nothing to repair.
+        assert_eq!(
+            gateway_repairs(&running, &elsewhere, &entries).unwrap(),
+            gateway_repairs(&running, &[], &entries).unwrap()
+        );
+    }
+
+    /// A `delete=gateway` staged and rolled back (measured on PVE 9.2.2,
+    /// 2026-10-09): the subnet runs with its gateway and the IPAM holds no
+    /// gateway entry — the router's address is free for a guest. Moved
+    /// through a free address and back, nothing to release.
+    #[test]
+    fn a_running_gateway_with_no_entry_is_put_back() {
+        let running = [sub("10.82.0.1")];
+        let entries = [entry("10.82.0.20", Some("BC:24:11:00:00:20"))];
+        let r = gateway_repairs(&running, &[], &entries).unwrap();
+        assert_eq!(
+            r,
+            vec![GatewayRepair {
+                vnet: "v".into(),
+                cidr: "10.82.0.0/24".into(),
+                gateway: Some("10.82.0.1".into()),
+                stale: Vec::new(),
+                through: Some("10.82.0.254".into()),
+            }]
+        );
+        assert!(repair_line(&r[0]).contains("held no gateway entry, put back on 10.82.0.1"));
+    }
+
+    /// A gateway added to a subnet without one, staged and rolled back
+    /// (measured on PVE 9.2.2): the subnet runs without a gateway and the
+    /// IPAM holds the new one's entry. Released, nothing moved — and it would
+    /// otherwise make D2.4 refuse that gateway on the next apply.
+    #[test]
+    fn a_gateway_entry_of_a_subnet_without_a_gateway_is_released() {
         let mut no_gw = sub("10.82.0.1");
         no_gw.gateway = None;
-        assert!(gateway_repairs(&[no_gw], &stale, &entries)
-            .unwrap()
-            .is_empty());
+        let held = [("v".to_string(), "10.82.0.1".to_string())];
+        let r = gateway_repairs(&[no_gw.clone()], &held, &[entry("10.82.0.1", None)]).unwrap();
+        assert_eq!(
+            r,
+            vec![GatewayRepair {
+                vnet: "v".into(),
+                cidr: "10.82.0.0/24".into(),
+                gateway: None,
+                stale: vec!["10.82.0.1".into()],
+                through: None,
+            }]
+        );
+        assert!(repair_line(&r[0]).contains("runs without a gateway; released"));
+        // No gateway and no entry: nothing.
+        assert!(gateway_repairs(&[no_gw], &[], &[]).unwrap().is_empty());
+    }
+
+    /// A repair cut short after its move and before its release: the right
+    /// entry is there, the stale one is still flagged — only released.
+    #[test]
+    fn an_extra_gateway_entry_next_to_the_right_one_is_released() {
+        let running = [sub("10.82.0.1")];
+        let held = [
+            ("v".to_string(), "10.82.0.200".to_string()),
+            ("v".to_string(), "10.82.0.1".to_string()),
+        ];
+        let r = gateway_repairs(&running, &held, &[]).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].stale, vec!["10.82.0.200".to_string()]);
+        assert_eq!(r[0].through, None);
+        assert!(repair_line(&r[0]).contains("the entry on 10.82.0.1 stays"));
     }
 
     #[test]
