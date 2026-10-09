@@ -40,8 +40,8 @@ pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 /// it without depending on this adapter. Re-exported: no caller changes.
 pub use delonix_compute::vm_backend::{
     mem_mib, parse_mem_mib, BackendFactory, BackendRegistration, Boot, CloudInitIntent,
-    CreateStage, DestroyStage, GuestFilesystem, GuestInfo, MoveOptions, ReportFactory, VmBackend,
-    VmConfig,
+    CreateStage, DestroyStage, GuestFilesystem, GuestInfo, HotplugOutcome, MoveOptions,
+    ReportFactory, VmBackend, VmConfig,
 };
 
 pub mod capabilities;
@@ -658,6 +658,24 @@ pub fn resize(
     disk_size_gib: Option<u32>,
 ) -> Result<Vm> {
     engine(base)?.resize(name, vcpus, memory, disk_size_gib)
+}
+
+/// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1): adds vCPUs
+/// and/or memory to a RUNNING VM, live, up to its declared ceiling (D3); on
+/// a STOPPED VM it is [`resize`]'s cold path. See [`delonix_compute::vm::VmEngine::update`].
+///
+/// Returns the updated record and, for a running VM, the
+/// [`HotplugOutcome`] of each field asked for — `Partial` when the
+/// hypervisor assigned the resource but the guest did not confirm it within
+/// `wait` (ADR-0068 D4), never silently rounded up to success.
+pub fn update(
+    base: &Path,
+    name: &str,
+    vcpus: Option<u32>,
+    memory: Option<&str>,
+    wait: std::time::Duration,
+) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
+    engine(base)?.update(name, vcpus, memory, wait)
 }
 
 /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,

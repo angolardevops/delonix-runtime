@@ -6959,7 +6959,14 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
             | C::VmClone
             | C::VmTemplate
             | C::VmResizeCold
-            | C::VmHotplug
+            | C::VmHotplugCpuAdd
+            | C::VmHotplugCpuRemove
+            | C::VmHotplugMemoryAdd
+            | C::VmHotplugMemoryRemove
+            | C::VmHotplugDiskAdd
+            | C::VmHotplugDiskRemove
+            | C::VmHotplugNicAdd
+            | C::VmHotplugNicRemove
             | C::VmExtraDisks
             | C::VmExtraNics
             | C::VmDiskResize
@@ -7115,7 +7122,14 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmResizeCold => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size",
             },
-            C::VmHotplug => S::NotImplemented,
+            C::VmHotplugCpuAdd => S::NotImplemented,
+            C::VmHotplugCpuRemove => S::NotImplemented,
+            C::VmHotplugMemoryAdd => S::NotImplemented,
+            C::VmHotplugMemoryRemove => S::NotImplemented,
+            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskRemove => S::NotImplemented,
+            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it",
             },

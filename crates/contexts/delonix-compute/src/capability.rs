@@ -161,8 +161,20 @@ pub enum Capability {
     VmTemplate,
     /// Change CPU/memory of a stopped VM from the record.
     VmResizeCold,
-    /// Change CPU/memory/devices of a RUNNING VM.
-    VmHotplug,
+    /// Adding a vCPU to a RUNNING VM (ADR-0068 D11). Split from `.remove`:
+    /// the hypervisor accepting a removal has been measured to not mean the
+    /// guest actually released it (ADR-0068 finding 3).
+    VmHotplugCpuAdd,
+    VmHotplugCpuRemove,
+    /// Adding memory to a RUNNING VM (ADR-0068 D11).
+    VmHotplugMemoryAdd,
+    VmHotplugMemoryRemove,
+    /// Attaching a disk to a RUNNING VM (ADR-0068 D11).
+    VmHotplugDiskAdd,
+    VmHotplugDiskRemove,
+    /// Attaching a NIC to a RUNNING VM (ADR-0068 D11).
+    VmHotplugNicAdd,
+    VmHotplugNicRemove,
     VmExtraDisks,
     VmExtraNics,
     VmDiskResize,
@@ -391,7 +403,14 @@ impl Capability {
         Self::VmClone,
         Self::VmTemplate,
         Self::VmResizeCold,
-        Self::VmHotplug,
+        Self::VmHotplugCpuAdd,
+        Self::VmHotplugCpuRemove,
+        Self::VmHotplugMemoryAdd,
+        Self::VmHotplugMemoryRemove,
+        Self::VmHotplugDiskAdd,
+        Self::VmHotplugDiskRemove,
+        Self::VmHotplugNicAdd,
+        Self::VmHotplugNicRemove,
         Self::VmExtraDisks,
         Self::VmExtraNics,
         Self::VmDiskResize,
@@ -537,7 +556,14 @@ impl Capability {
             Self::VmClone => "vm.clone",
             Self::VmTemplate => "vm.template",
             Self::VmResizeCold => "vm.resize.cold",
-            Self::VmHotplug => "vm.hotplug",
+            Self::VmHotplugCpuAdd => "vm.hotplug.cpu.add",
+            Self::VmHotplugCpuRemove => "vm.hotplug.cpu.remove",
+            Self::VmHotplugMemoryAdd => "vm.hotplug.memory.add",
+            Self::VmHotplugMemoryRemove => "vm.hotplug.memory.remove",
+            Self::VmHotplugDiskAdd => "vm.hotplug.disk.add",
+            Self::VmHotplugDiskRemove => "vm.hotplug.disk.remove",
+            Self::VmHotplugNicAdd => "vm.hotplug.nic.add",
+            Self::VmHotplugNicRemove => "vm.hotplug.nic.remove",
             Self::VmExtraDisks => "vm.disks.extra",
             Self::VmExtraNics => "vm.nics.extra",
             Self::VmDiskResize => "vm.disk.resize",
@@ -684,7 +710,14 @@ impl Capability {
             | VmClone
             | VmTemplate
             | VmResizeCold
-            | VmHotplug
+            | VmHotplugCpuAdd
+            | VmHotplugCpuRemove
+            | VmHotplugMemoryAdd
+            | VmHotplugMemoryRemove
+            | VmHotplugDiskAdd
+            | VmHotplugDiskRemove
+            | VmHotplugNicAdd
+            | VmHotplugNicRemove
             | VmExtraDisks
             | VmExtraNics
             | VmDiskResize
@@ -812,7 +845,14 @@ impl Capability {
             | VmClone
             | VmTemplate
             | VmResizeCold
-            | VmHotplug
+            | VmHotplugCpuAdd
+            | VmHotplugCpuRemove
+            | VmHotplugMemoryAdd
+            | VmHotplugMemoryRemove
+            | VmHotplugDiskAdd
+            | VmHotplugDiskRemove
+            | VmHotplugNicAdd
+            | VmHotplugNicRemove
             | VmExtraDisks
             | VmExtraNics
             | VmDiskResize
