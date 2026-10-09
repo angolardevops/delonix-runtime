@@ -291,6 +291,7 @@ These are read only by tests. Without them the live tests **skip** and print `SK
 | `DELONIX_OPNSENSE_TEST_URL` | `crates/providers/delonix-opnsense/tests/live.rs:target` | OPNsense appliance to run the live client tests against. | `https://<host>`. | Enables the tests. They create and remove one alias and one rule, then confirm the appliance is left clean. |
 | `DELONIX_OPNSENSE_TEST_KEY` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API key. | Required. | |
 | `DELONIX_OPNSENSE_TEST_SECRET` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API secret. | Required. | TLS verification is disabled in these tests. |
+| `DELONIX_LIBVIRT_LIVE_DISK` | `crates/providers/delonix-provider-libvirt/tests/live.rs` | Real cloud-init base qcow2 to run the `vm.guest-agent` live test against. | A filesystem path. | Enables the test. It boots a throwaway `qemu:///system` domain, has cloud-init install and enable `qemu-guest-agent` itself (no SSH key needed), and destroys/undefines the domain on exit even if an assertion panics. |
 | `DELONIX_UPDATE_FIXTURES` | `crates/adapters/delonix-linux/tests/advisor_fixtures.rs:goldens_match_the_rules_as_they_are_today` | Rewrites the advisor golden fixtures in `crates/adapters/delonix-linux/tests/fixtures/advisor/` instead of comparing against them. | Set (any value) → rewrite. | Regenerate in the **same commit** as the rule change. |
 
 Run the live tests (replace the placeholders; never commit real credentials):
@@ -307,6 +308,9 @@ DELONIX_TRUENAS_TEST_USER=<user> \
 DELONIX_TRUENAS_TEST_PASS='<password>' \
 DELONIX_TRUENAS_TEST_POOL=tank \
   cargo test -p delonix-truenas --test live -- --nocapture
+
+DELONIX_LIBVIRT_LIVE_DISK=/path/to/debian-genericcloud.qcow2 \
+  cargo test -p delonix-provider-libvirt --test live -- --ignored --nocapture
 
 DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 ```

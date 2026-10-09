@@ -166,7 +166,7 @@ Commands:
   migrate          Move a VM to another `delonix` host — real downtime, no shared storage
   move             Move a VM to another node of its cluster — same VM, same record
   pause            Suspend a running VM&#x27;s vCPUs — guest memory stays intact, unlike `stop`
-  resize           Change a STOPPED VM&#x27;s vCPUs and/or memory for its next boot
+  resize           Change a STOPPED VM&#x27;s vCPUs, memory and/or boot disk size for its next boot
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk, record and snapshots)
