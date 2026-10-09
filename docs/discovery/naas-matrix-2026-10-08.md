@@ -257,6 +257,30 @@ do aceite silencioso; (b) com `nftables: 1`, repete a medição por pacotes já 
 (DROP na porta 23, ACCEPT na 22) como check automatizado — nunca `rc==0` sem olhar para o
 tráfego real.
 
+**Seguimento (2026-10-09): a guarda sugerida acima está BLOQUEADA por outra decisão já tomada
+neste mesmo repositório — não é uma linha a acrescentar.** O campo que decidiria a guarda, a
+opção `nftables` por-NÓ, vive em `/nodes/{node}/firewall/options` — e o `docs/proxmox/
+matrix-9.2.2.md` deste repositório (ADR-0049, gerado por uma sessão anterior) já classifica a
+árvore INTEIRA `/nodes/{node}/firewall/*` como `unsupported-by-design`, razão "node firewall —
+host administration" — a mesma fronteira que a ADR-0049 D3 traça para a administração do
+cluster em geral. Ler esse campo, mesmo só para DECIDIR recusar uma escrita, seria alargar o
+alcance do motor para fora de uma linha já desenhada de propósito por outra razão — a mesma
+lógica que a ADR-0064 D6 usa para recusar reaproveitar a credencial de um controlador de DNS
+noutra chamada.
+
+**O que ficou feito nesta sessão, sem cruzar essa fronteira**: endurecimento de documentação em
+`sdn_routing.rs` — uma secção nova no doc-comment do módulo ("No caller may expose this without
+reading this first") que nomeia o impasse com precisão e exige uma decisão explícita do dono
+(um addendum de ADR) OU o catálogo de capacidades a reportar esta linha `unavailable-on-host`/
+`not-implemented` permanentemente, antes de qualquer `kind:`/CLI ligar isto — mais um ponteiro
+de uma linha em cada uma das três funções (`set_sdn_vnet_firewall_options`,
+`add_sdn_vnet_firewall_rule`, `update_sdn_vnet_firewall_rule`). **Sem mudança de
+comportamento.** O teste de aceitação (a)/(b) acima continua por fazer — precisa da decisão do
+dono primeiro, não só do lab.
+
+Rastreado também em `docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md` §4.9 e no item 6 da
+lista de gaps dessa mesma secção §3.
+
 ### Gap 2 — Registos DNS deixados pelo nó Proxmox em teardown/rename, sem limpeza (risco: **isolamento entre tenants / apontador obsoleto**)
 
 **O que está medido**: ADR-0064, D4 ("What the node leaves behind is said out loud") — destruir

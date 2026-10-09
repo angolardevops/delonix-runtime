@@ -116,9 +116,15 @@ first), independent of which domain each came from:
    forgets to configure both `RuntimePolicy` and `DELONIX_CRI_CAP_CEILING` gets node
    compromise with no structural signal. See §8.
 6. **NaaS — Proxmox-native vnet firewall is accepted and read back but does not actually
-   filter** under the Proxmox default (datacenter firewall off). Not yet reachable by any
-   `kind:`/CLI, so dormant — the same "public, dead, bug waiting for its first caller"
-   pattern this repo has already catalogued five times.
+   filter** under the Proxmox default firewall backend (`iptables`/`pve-firewall` — not
+   the datacenter enable/disable toggle; it is enforced only under `nftables`/
+   `proxmox-firewall`). `INVESTIGATED, not closeable the way first proposed` (§4.9): the
+   obvious write-time guard needs a node-side probe this engine's own prior decision
+   (`docs/proxmox/matrix-9.2.2.md`, ADR-0049) already walls off as "host administration" —
+   doc-comment hardening landed instead, naming the mismatch and requiring an owner
+   decision before any future caller can reach it uninformed. Not yet reachable by any
+   `kind:`/CLI, so still dormant — the same "public, dead, bug waiting for its first
+   caller" pattern this repo has already catalogued five times.
 7. **NaaS — stale DNS on Proxmox VM teardown/rename** can point to an address later
    reassigned to a different workload (ADR-0064 D6, decided, not implemented).
 8. **NaaS — asymmetric rollback in `netops::remove`** can leave an orphaned `NetDef` that
@@ -155,9 +161,11 @@ re-apply after.
 
 ## 4. Corrections implemented, with regression tests
 
-Seven fixes landed (§4.1–§4.5, §4.7, §4.8), in priority order (security/data-loss first,
-per the brief's own §12), plus one live-validation pass (§4.6) that is not itself a fix
-but is where two of the later ones (§4.7, §4.8) were found. Each fix is its own commit on
+Seven behavior fixes landed (§4.1–§4.5, §4.7, §4.8), in priority order (security/data-loss
+first, per the brief's own §12), plus one live-validation pass (§4.6, not itself a fix but
+where two of the later ones were found) and one documentation-hardening pass (§4.9, gap
+#6 — the behavior fix it first proposed turned out to be blocked, see its own subsection).
+Each fix is its own commit on
 `auditoria/naas-kaas-caas`, each passed `cargo fmt --check`, `cargo clippy -D warnings`,
 `python3 scripts/lang_ratchet.py`, `python3 scripts/arch_fitness.py`, and the pre-commit
 hook's `cargo check --workspace --all-targets` before being committed. A final
@@ -461,6 +469,55 @@ live setup a second time in the same session, now through this new code path, is
 a follow-up rather than redone immediately. The etcd backup/restore half of gap #10 (no
 `etcdctl snapshot` wiring) remains open — see §8.
 
+### 4.9 `docs(proxmox)` 3f9def7f — gap #6 investigated; the obvious guard is itself blocked
+
+Gap #6 (§3): a Proxmox vnet firewall rule, written through
+`set_sdn_vnet_firewall_options`/`add_sdn_vnet_firewall_rule`/
+`update_sdn_vnet_firewall_rule` (`crates/providers/delonix-proxmox/src/sdn_routing.rs`), is
+accepted and read back whether or not it filters a single packet — it is enforced only
+under the node's `nftables` (`proxmox-firewall`) backend, never under the Proxmox default
+(`iptables`, `pve-firewall`). The module's own top-of-file doc comment already measured and
+stated this in full (lines 16-44, from an earlier PR); what was missing was anything at the
+three call sites pointing back to it, or anything standing between a future caller and
+treating a successful write as a working rule — the "public, dead, bug waiting for its
+first caller" shape this repo's own `AGENTS.md` already catalogues five times
+(`mount_live`, `set_net_rate`, `update_limits`, `publish_port_allow`, `Net`). Zero callers
+exist today (confirmed by grep across `bins/delonix-runtime-bin` and
+`delonix-networking`), which is the only reason this is dormant rather than active.
+
+This session's own capability-matrix write-up (`naas-matrix-2026-10-08.md`, "Gap 1")
+proposed the obvious-looking fix first: probe the node's firewall backend before writing,
+mirroring `vm_firewall.rs`'s already-shipped `Error::DatacenterFirewallDisabled` guard
+(reads `GET /cluster/firewall/options` before letting a VM's own firewall rules through).
+**That fix turned out to be blocked by a decision this same repository already made
+elsewhere**: the field that would answer the probe, the per-node `nftables` option, lives
+under `/nodes/{node}/firewall/options` — and this engine's own measured API coverage
+(`docs/proxmox/matrix-9.2.2.md`, from ADR-0049) classifies the WHOLE
+`/nodes/{node}/firewall/*` tree `unsupported-by-design`, reason "node firewall — host
+administration", the same boundary ADR-0049 D3 already draws for cluster administration in
+general. Reading it anyway — even read-only, even only to decide whether to refuse a write
+— would reach past a line this engine drew on purpose for an unrelated reason, the same
+"widened its own reach without anyone deciding so" ADR-0064 D6 refuses for a DNS
+controller's credential.
+
+What landed instead is the fix available without crossing that line: a new module-doc
+section in `sdn_routing.rs` ("No caller may expose this without reading this first") naming
+the mismatch precisely and requiring an explicit owner decision (a new ADR addendum to
+cross that boundary for this one read-only probe, or the capability catalog reporting this
+row permanently `unavailable-on-host`/`not-implemented` and refusing any write
+unconditionally) before any `kind:`/CLI path reaches either function — plus a one-line
+pointer on each of the three functions themselves. Zero behavior change. This closes the
+gap the only way available today: not by making the first caller impossible (that needs a
+decision this audit does not own, the same reasoning §6 already applies to adding RPCs to
+`delonix-node-api`), but by making it impossible for that caller to arrive uninformed.
+
+121/121 `delonix-proxmox` unit tests pass (unchanged — nothing here is behavior a test
+could observe); clippy, fmt, lang_ratchet and arch_fitness all clean, no baseline change.
+**Not validated live, and cannot be without the owner's decision above**: the matrix's own
+prescribed acceptance test (a live case toggling the node's `nftables` option and measuring
+packets with it on and off) needs exactly the probe this pass found is blocked — writing
+that test is itself gated on the ADR addendum this subsection asks for.
+
 ## 5. Test results, exact
 
 Two environments ended up involved, and the results below say which is which.
@@ -576,17 +633,23 @@ and leaves written down, for whoever does that work next:
   write unsafe to exercise in a parallel test runner; `netops` functions with no injectable
   seam to a live holder; a teardown already proven by hand, not yet automated through the
   new code path).
-- **6 of the 12 originally-ranked gaps are not fixed at all by this pass.** Of the twelve,
-  six were touched: #1, #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8, and
-  #10 (teardown half — the backup/restore half, `etcdctl snapshot`, is still open). The
-  live-only gap #13 (stale CLI on golden images) is also now fixed (§4.7). Untouched, each
-  for a stated reason: the admission warning event (gap #5) requires adding a new case to
-  `delonix-security-runtime`'s `Outcome`/`Category` taxonomy, which is an architectural
-  decision inside a crate this audit does not own — flagged for its actual owner rather than
-  improvised. Gaps #6, #7, #9, #11, #12 are each real engineering work (a second
-  provider-firewall path, DNS lifecycle tied to VM teardown, a contract-wide identity field,
-  39 RPCs, a sync-path error model) that did not fit a single session on top of the
-  four-domain inventory, the seven landed fixes, and the live validation.
+- **5 of the 12 originally-ranked gaps are not touched at all by this pass; gap #6 was
+  investigated and found blocked, not fixed.** Of the twelve, six have a behavior fix: #1,
+  #2 (single-node), #3 (CLI half), #4 (`oom_score_adj` half), #8, and #10 (teardown half —
+  the backup/restore half, `etcdctl snapshot`, is still open). Gap #6 (§4.9) got real work
+  — a precise diagnosis of exactly why the obvious fix cannot land without an owner
+  decision, and doc-comment hardening in the meantime — but no behavior changed, so it
+  stays counted as open. The live-only gap #13 (stale CLI on golden images) is also now
+  fixed (§4.7). Untouched entirely, each for a stated reason: the admission warning event
+  (gap #5) requires adding a new case to `delonix-security-runtime`'s `Outcome`/`Category`
+  taxonomy, which is an architectural decision inside a crate this audit does not own —
+  flagged for its actual owner rather than improvised. Gap #7 (DNS cleanup, ADR-0064 D6)
+  needs a live DNS server to validate against, which this pass did not have and the ADR
+  itself says is a precondition — the same shape of blocker gap #6 turned out to have, by a
+  different cause. Gaps #9, #11, #12 are each real engineering work (a contract-wide
+  identity field, 39 RPCs, a sync-path error model) that did not fit a single session on
+  top of the four-domain inventory, the seven landed fixes, the live validation, and gap
+  #6's investigation.
 - **The multi-node KaaS path is unchanged and still silently `NotReady`.** The fix in §4.2
   deliberately does not touch it (no `--cni` escape hatch exists yet on `cluster kubeadm`
   to add a safe refusal without breaking the documented HA example) — this is the single
