@@ -2523,6 +2523,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm stop", "vm start", "provider ls"],
     },
     Entry {
+        path: "vm update",
+        group: "Lifecycle",
+        examples: &[
+            ("add a vCPU to a running VM, live, up to its declared ceiling", "delonix vm update dev --vcpus 4"),
+            ("add memory live, waiting up to 10s for the guest to confirm it", "delonix vm update dev --memory 1G --wait-secs 10"),
+        ],
+        see_also: &["vm resize", "vm create", "provider ls"],
+    },
+    Entry {
         path: "vm prune",
         group: "Maintenance",
         examples: &[

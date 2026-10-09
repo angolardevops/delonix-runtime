@@ -933,6 +933,16 @@ pub enum VmCmd {
         /// use). Cannot be smaller than the base image.
         #[arg(long = "disk-size")]
         disk_size_gib: Option<u32>,
+        /// Hotplug ceiling for vCPUs (ADR-0068 D3) — omit for no headroom
+        /// (every VM without this flag stays exactly as it is today).
+        /// Required, together with `--memory-max`, before `vm update` can add
+        /// CPU/memory to this VM while it runs.
+        #[arg(long = "vcpus-max")]
+        vcpus_max: Option<u32>,
+        /// Hotplug ceiling for memory (ADR-0068 D3), same syntax as
+        /// `--memory` — omit for no headroom.
+        #[arg(long = "memory-max")]
+        memory_max: Option<String>,
         /// Hostname to apply on first boot (generates the NoCloud ISO if no
         /// explicit `--seed` is given).
         #[arg(long)]
@@ -1326,6 +1336,38 @@ pub enum VmCmd {
         /// New boot disk size, in whole GiB — grows only, never shrinks.
         #[arg(long = "disk-size")]
         disk_size_gib: Option<u32>,
+    },
+    /// Add vCPUs and/or memory to a RUNNING VM, live; on a STOPPED VM it is `vm resize`.
+    ///
+    /// Adds up to the ceiling declared at create (`--vcpus-max`/`--memory-max`,
+    /// ADR-0068 D1).
+    ///
+    /// **Add only** — a target at or below what the VM already has is
+    /// refused; use `vm resize` on a stopped VM to decrease. Without a
+    /// declared ceiling above the boot size there is no headroom to add
+    /// into, and the refusal names `vm resize --vcpus-max/--memory-max`.
+    ///
+    /// The hypervisor accepting the request is not the guest using it
+    /// (ADR-0068 D4): this waits up to `--wait` for the guest side to
+    /// confirm, and on a backend or resource with no channel to see that at
+    /// all (Cloud Hypervisor's CPU add, today) settles for `partial`
+    /// immediately — the record still takes the hypervisor-assigned value
+    /// either way, so a restart never drops it. A `partial` outcome exits
+    /// 124 (`DX-8504`), printed after the record is already updated.
+    Update {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// Target vCPU count (must exceed the VM's current count).
+        #[arg(long)]
+        vcpus: Option<u32>,
+        /// Target memory, a number with an optional M/G suffix (`768M`,
+        /// `4G`, `4Gi`); must exceed the VM's current amount.
+        #[arg(long)]
+        memory: Option<String>,
+        /// How long to wait for the guest to confirm it is using the
+        /// hot-added resource before reporting `partial` (ADR-0068 D4).
+        #[arg(long, default_value = "60")]
+        wait_secs: u64,
     },
     /// Move a VM to another node of its cluster — same VM, same record.
     ///
@@ -2500,6 +2542,12 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // `kind: VM` herda o tamanho da imagem. Acrescentá-lo é o passo
             // seguinte, e é o que liga a quota do inquilino ao manifesto.
             disk_size_gib: None,
+            // Same gap as `disk_size_gib` just above, same reason: `VmSpec`
+            // (the manifest's typed spec) has no `vcpusMax`/`memoryMax` yet
+            // (ADR-0068 D3). `vm create --vcpus-max/--memory-max` has them;
+            // extending the manifest is a named follow-up, not a silent one.
+            vcpus_max: None,
+            memory_max_mib: None,
             // A VM someone creates from the CLI is one they mean to WATCH, so it
             // keeps the interactive console. Capture-to-file serves an unattended
             // reader (the DKS) that builds the `VmConfig` as a library; leaving it
@@ -2672,6 +2720,8 @@ pub fn run(action: VmCmd) -> Result<()> {
             disk,
             vcpus,
             memory,
+            vcpus_max,
+            memory_max,
             network,
             namespace,
             kernel,
@@ -2761,6 +2811,38 @@ pub fn run(action: VmCmd) -> Result<()> {
             };
             let (vcpus, memory, backend) =
                 resolve_vm_defaults(vcpus, memory, backend, image_meta.as_ref());
+            // ADR-0068 D3: the ceiling is declared at create, cold, and never
+            // below the boot size — a hotplug region narrower than the VM
+            // already is would be nonsensical, not a fixed-up number.
+            let memory_max_mib = match memory_max.as_deref() {
+                Some(s) => Some(delonix_vm::parse_mem_mib(s).ok_or_else(|| {
+                    Error::Invalid(super::po::tf(
+                        "--memory-max: '{value}' is not a size this engine understands (e.g. \
+                         2G, 1024M, 2Gi)",
+                        &[("value", s)],
+                    ))
+                })?),
+                None => None,
+            };
+            if let Some(max) = vcpus_max {
+                if max < vcpus {
+                    return Err(Error::Invalid(super::po::tf(
+                        "--vcpus-max ({max}) cannot be smaller than --vcpus ({vcpus}): the \
+                         ceiling is the most this VM can ever hotplug up to, not a target",
+                        &[("max", &max.to_string()), ("vcpus", &vcpus.to_string())],
+                    )));
+                }
+            }
+            if let Some(max) = memory_max_mib {
+                let boot_mib = delonix_vm::mem_mib(&memory);
+                if max < boot_mib {
+                    return Err(Error::Invalid(super::po::tf(
+                        "--memory-max ({max} MiB) cannot be smaller than the boot memory \
+                         ({boot} MiB)",
+                        &[("max", &max.to_string()), ("boot", &boot_mib.to_string())],
+                    )));
+                }
+            }
             // ALWAYS a cloud-init seed (unless an explicit `--seed`). Without a
             // datasource, the cloud image's cloud-init doesn't run the network
             // phase and the VM ends up with no IP nor route ("Network is
@@ -2861,6 +2943,8 @@ pub fn run(action: VmCmd) -> Result<()> {
                 disk,
                 vcpus,
                 memory,
+                vcpus_max,
+                memory_max_mib,
                 network,
                 namespace,
                 kernel,
@@ -3367,6 +3451,41 @@ pub fn run(action: VmCmd) -> Result<()> {
                 print!(", disk >= {gib}G");
             }
             println!();
+            Ok(())
+        }
+        VmCmd::Update {
+            name,
+            vcpus,
+            memory,
+            wait_secs,
+        } => {
+            let wait = std::time::Duration::from_secs(wait_secs);
+            let (vm, outcomes) = delonix_vm::update(&base, &name, vcpus, memory.as_deref(), wait)?;
+            if outcomes.is_empty() {
+                // Cold path: the VM was stopped, so `vm update` IS `vm resize` there.
+                println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
+                return Ok(());
+            }
+            let mut partial_reason: Option<String> = None;
+            for (field, outcome) in outcomes {
+                let value = match field {
+                    "vcpus" => vm.vcpus.to_string(),
+                    "memory" => vm.memory.clone(),
+                    _ => String::new(),
+                };
+                match outcome {
+                    delonix_vm::HotplugOutcome::Complete => {
+                        println!("{name}: {field} -> {value} (complete)");
+                    }
+                    delonix_vm::HotplugOutcome::Partial { reason } => {
+                        println!("{name}: {field} -> {value} (partial)");
+                        partial_reason.get_or_insert(reason);
+                    }
+                }
+            }
+            if let Some(reason) = partial_reason {
+                return Err(Error::coded(8504, Error::Timeout(reason)));
+            }
             Ok(())
         }
         VmCmd::Move {

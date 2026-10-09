@@ -358,7 +358,14 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:o domínio arranca com 2 vCPU",
             }),
-            C::VmHotplug => S::NotImplemented,
+            C::VmHotplugCpuAdd => S::NotImplemented,
+            C::VmHotplugCpuRemove => S::NotImplemented,
+            C::VmHotplugMemoryAdd => S::NotImplemented,
+            C::VmHotplugMemoryRemove => S::NotImplemented,
+            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskRemove => S::NotImplemented,
+            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => bin(S::Partial {
                 detail: "`extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery",
             }),

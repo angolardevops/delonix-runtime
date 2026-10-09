@@ -17,7 +17,7 @@ use delonix_compute::capability::{
 };
 use delonix_compute::vm::{console_socket, serial_log_path, vm_namespace_of};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, VmBackend, VmConfig,
+    mem_mib, BackendRegistration, Boot, CreateStage, HotplugOutcome, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -328,7 +328,18 @@ pub fn cloud_hypervisor_report(host: &CloudHypervisorHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Partial {
                 detail: "`vm resize` rewrites vcpus/memory in the record and `vm start` rebuilds the vmm command line from it; no battery check yet",
             }),
-            C::VmHotplug => S::NotImplemented,
+            C::VmHotplugCpuAdd => bin(S::Partial {
+                detail: "`vm update --vcpus` via `vm.resize`, add only; always reports `partial` — no channel to confirm the guest onlined the vCPU (ADR-0068 D4/Q5), no battery check yet",
+            }),
+            C::VmHotplugCpuRemove => S::NotImplemented,
+            C::VmHotplugMemoryAdd => bin(S::Partial {
+                detail: "`vm update --memory` via `vm.resize` over a virtio-mem region declared at create (ADR-0068 D3); `memory_actual_size` confirms the guest only with a driver and the onlining policy (D8), no battery check yet",
+            }),
+            C::VmHotplugMemoryRemove => S::NotImplemented,
+            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskRemove => S::NotImplemented,
+            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => S::UnsupportedByProvider {
                 reason: "the CH command line carries one root disk and the seed; `extraDisks` are refused for this backend",
             },
@@ -556,21 +567,42 @@ fn health(available: bool, reason: &'static str, message: String) -> ProviderHea
 // ===========================================================================
 
 /// Builds the Cloud Hypervisor `--memory` argument (with `hugepages=on` if
-/// requested). Pure function — tested without hardware.
+/// requested, and `hotplug_method=virtio-mem,hotplug_size=…` when
+/// `cfg.memory_max_mib` declares headroom above the boot size — ADR-0068 D3;
+/// `acpi` was measured and rejected, Alternatives, "it does not remove, and
+/// answered 204 to a removal"). Pure function — tested without hardware.
 fn memory_arg(cfg: &VmConfig) -> String {
-    let mut a = format!("size={}M", mem_mib(&cfg.memory));
+    let boot_mib = mem_mib(&cfg.memory);
+    let mut a = format!("size={boot_mib}M");
     if cfg.hugepages {
         a.push_str(",hugepages=on");
+    }
+    if let Some(max_mib) = cfg.memory_max_mib {
+        if max_mib > boot_mib {
+            a.push_str(&format!(
+                ",hotplug_method=virtio-mem,hotplug_size={}M",
+                max_mib - boot_mib
+            ));
+        }
     }
     a
 }
 
-/// Builds the Cloud Hypervisor `--cpus` argument. With `cpu_affinity`, pins
-/// each vCPU to the same list of host CPUs (`affinity=0@[list],1@[list],…`).
-/// Pure function — tested without hardware.
+/// Builds the Cloud Hypervisor `--cpus` argument. `max=` is the hotplug
+/// ceiling declared by `cfg.vcpus_max` (ADR-0068 D3) — without it Cloud
+/// Hypervisor refuses any `vm.resize` above the boot count, measured
+/// (Annex A) as `Requested vCPUs exceed maximum`. With `cpu_affinity`, pins
+/// each boot vCPU to the same list of host CPUs (`affinity=0@[list],1@[list],…`
+/// — unaffected by `max`, which only reserves slots for vCPUs that do not
+/// exist yet). Pure function — tested without hardware.
 fn cpus_arg(cfg: &VmConfig) -> String {
     let n = cfg.vcpus.max(1);
     let mut a = format!("boot={n}");
+    if let Some(max) = cfg.vcpus_max {
+        if max > n {
+            a.push_str(&format!(",max={max}"));
+        }
+    }
     if let Some(list) = &cfg.cpu_affinity {
         let aff: Vec<String> = (0..n).map(|v| format!("{v}@[{list}]")).collect();
         a.push_str(&format!(",affinity={}", aff.join(":")));
@@ -817,6 +849,163 @@ impl VmBackend for CloudHypervisorBackend {
 
     fn unpause(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         Ok(ch_api_put(&vm.api_socket, "/api/v1/vm.resume")?)
+    }
+
+    // ---- hotplug add (ADR-0068, Phase 1) ----------------------------------
+    //
+    // Both go through `vm.resize`, over the same api-socket `pause`/`resume`
+    // already use. Removal is a separate capability (D10) and is not here.
+
+    /// `vm.resize {"desired_vcpus":N}`. Always `Partial` (D4/Q5): Cloud
+    /// Hypervisor has no channel today to confirm the GUEST onlined a
+    /// hot-added vCPU, only that the VMM spawned its thread — so `wait` is
+    /// accepted (trait contract) and intentionally unused rather than spent
+    /// polling for a signal that does not exist.
+    fn hotplug_add_cpu(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        target_vcpus: u32,
+        _wait: Duration,
+    ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+        let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+        if target_vcpus > ceiling {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_vcpus} vCPUs — the declared maximum is \
+                 {ceiling} (see `vm resize --vcpus-max`, ADR-0068 D3)",
+                vm.name
+            ))));
+        }
+        let pid = vm.pid.ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "vm",
+                message: format!("VM '{}' has no recorded VMM pid to hotplug", vm.name),
+            })
+        })?;
+        let (status, _) = ch_api_call_with_body(
+            &vm.api_socket,
+            "PUT",
+            "/api/v1/vm.resize",
+            Some(&format!("{{\"desired_vcpus\":{target_vcpus}}}")),
+            Duration::from_secs(10),
+        )?;
+        if !http_status_is_2xx(&status) {
+            return Err(delonix_model::Error::from(Error::CloudHypervisorApi(
+                format!(
+                    "cloud-hypervisor vm.resize (vcpus) for VM '{}': {}",
+                    vm.name,
+                    if status.is_empty() {
+                        "no response"
+                    } else {
+                        &status
+                    }
+                ),
+            )));
+        }
+        // ADR-0068 D5: the truth is what is read back from the live VM, never
+        // the request's own answer — `vcpuN` thread count, not `boot_vcpus`.
+        let assigned = ch_live_vcpu_count(pid).ok_or_else(|| {
+            delonix_model::Error::from(Error::CloudHypervisorApi(format!(
+                "cloud-hypervisor accepted vm.resize for VM '{}' but its VMM threads (pid {pid}) \
+                 could not be read back — the live vCPU count is unknown",
+                vm.name
+            )))
+        })?;
+        Ok((
+            assigned,
+            HotplugOutcome::Partial {
+                reason: "cloud-hypervisor has no channel to confirm the guest onlined the \
+                         hot-added vCPU (ADR-0068 D4/Q5)"
+                    .into(),
+            },
+        ))
+    }
+
+    /// `vm.resize {"desired_ram":<bytes>}` over the virtio-mem region `boot`
+    /// opens when `vcfg.memory_max_mib` declares headroom (`memory_arg`).
+    /// Unlike CPU, memory HAS a channel (D4): `vm.info`'s
+    /// `memory_actual_size` only moves once the guest's virtio-mem driver
+    /// claims the new blocks, so this polls it for `wait` before settling.
+    fn hotplug_add_memory(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        target_mib: u64,
+        wait: Duration,
+    ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+        let ceiling = vm.memory_max_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib > ceiling {
+            return Err(delonix_model::Error::from(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_mib} MiB — the declared maximum is {ceiling} \
+                 MiB (see `vm resize --memory-max`, ADR-0068 D3)",
+                vm.name
+            ))));
+        }
+        let target_bytes = target_mib.saturating_mul(1024 * 1024);
+        let (status, _) = ch_api_call_with_body(
+            &vm.api_socket,
+            "PUT",
+            "/api/v1/vm.resize",
+            Some(&format!("{{\"desired_ram\":{target_bytes}}}")),
+            Duration::from_secs(10),
+        )?;
+        if !http_status_is_2xx(&status) {
+            return Err(delonix_model::Error::from(Error::CloudHypervisorApi(
+                format!(
+                    "cloud-hypervisor vm.resize (memory) for VM '{}': {}",
+                    vm.name,
+                    if status.is_empty() {
+                        "no response"
+                    } else {
+                        &status
+                    }
+                ),
+            )));
+        }
+        // ADR-0068 D5: read back `memory_actual_size`, never the request's
+        // own `desired_ram` — it is the guest's virtio-mem driver, not the
+        // hypervisor's acceptance, that moves this number (D4, finding 4).
+        let deadline = Instant::now() + wait;
+        loop {
+            let actual = ch_api_call(
+                &vm.api_socket,
+                "GET",
+                "/api/v1/vm.info",
+                Duration::from_secs(2),
+            )
+            .ok()
+            .and_then(|(status, body)| http_status_is_2xx(&status).then_some(body))
+            .and_then(|body| vm_info_memory_actual_bytes(&body));
+            if let Some(actual) = actual {
+                let actual_mib = actual / (1024 * 1024);
+                if actual_mib >= target_mib {
+                    return Ok((actual_mib, HotplugOutcome::Complete));
+                }
+                if Instant::now() >= deadline {
+                    return Ok((
+                        actual_mib,
+                        HotplugOutcome::Partial {
+                            reason: format!(
+                                "cloud-hypervisor accepted the resize, but the guest's \
+                                 virtio-mem driver has not plugged the memory within {}s — \
+                                 actual {actual_mib} MiB of {target_mib} MiB requested \
+                                 (no driver, or not onlined — ADR-0068 D8)",
+                                wait.as_secs()
+                            ),
+                        },
+                    ));
+                }
+            } else if Instant::now() >= deadline {
+                return Err(delonix_model::Error::from(Error::CloudHypervisorApi(
+                    format!(
+                    "cloud-hypervisor accepted vm.resize for VM '{}' but `vm.info` could not be \
+                     read back — the live memory size is unknown",
+                    vm.name
+                ),
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     // ---- snapshots -------------------------------------------------------
@@ -1072,13 +1261,32 @@ fn ch_api_call(
     path: &str,
     timeout: Duration,
 ) -> Result<(String, Vec<u8>)> {
+    ch_api_call_with_body(sock, method, path, None, timeout)
+}
+
+/// Same framing as [`ch_api_call`], with an optional JSON request body — the
+/// only verb that needs one is `vm.resize` (`{"desired_vcpus":N}` /
+/// `{"desired_ram":<bytes>}`, ADR-0068 D1), so every other caller keeps
+/// sending the exact `Content-Length: 0` request it always did.
+fn ch_api_call_with_body(
+    sock: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    timeout: Duration,
+) -> Result<(String, Vec<u8>)> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     let mut s = UnixStream::connect(sock)
         .map_err(|e| Error::CloudHypervisorApi(format!("cloud-hypervisor api socket: {e}")))?;
     let _ = s.set_read_timeout(Some(timeout));
     let _ = s.set_write_timeout(Some(timeout));
-    let req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
+    let body = body.unwrap_or("");
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n");
+    if !body.is_empty() {
+        req.push_str("Content-Type: application/json\r\n");
+    }
+    req.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
     s.write_all(req.as_bytes())
         .map_err(|e| Error::CloudHypervisorApi(format!("cloud-hypervisor api write: {e}")))?;
     let mut buf = Vec::new();
@@ -1376,6 +1584,54 @@ fn vm_info_says_running(body: &[u8]) -> bool {
         .filter(|c| !c.is_whitespace())
         .collect();
     compact.contains("\"state\":\"Running\"")
+}
+
+/// Pure: the `memory_actual_size` of a `vm.info` body, in bytes — ADR-0068
+/// D5's read-back for memory, never `config.memory.*` (measured, Annex A
+/// finding 4, to answer "plugged" even when nothing plugged: ACPI reported a
+/// removal that did not happen, and virtio-mem's `hotplugged_size` moves
+/// before the guest driver claims anything — `memory_actual_size` is what
+/// the VMM says the guest is actually using). No JSON parser needed for one
+/// integer field; a `None` means the key was not found, never 0.
+fn vm_info_memory_actual_bytes(body: &[u8]) -> Option<u64> {
+    let compact: String = String::from_utf8_lossy(body)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let key = "\"memory_actual_size\":";
+    let start = compact.find(key)? + key.len();
+    let digits: String = compact[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+/// Pure: how many of Cloud Hypervisor's own `vcpuN` thread names are present
+/// — ADR-0068 D5's vCPU truth, never `config.boot_vcpus` (measured, Annex A
+/// finding 3: a `vm.resize` that answers 204 can leave the OLD thread count
+/// one request away from matching what was asked for).
+fn count_vcpu_threads<'a>(thread_names: impl Iterator<Item = &'a str>) -> u32 {
+    thread_names
+        .filter(|n| {
+            n.strip_prefix("vcpu")
+                .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .count() as u32
+}
+
+/// Reads [`count_vcpu_threads`] off the real VMM process's threads
+/// (`/proc/<pid>/task/<tid>/comm`). `None` when the pid cannot be read at
+/// all (gone, or `/proc` denied) — never a silent 0, which would read as
+/// "every vCPU disappeared" instead of "could not look".
+fn ch_live_vcpu_count(pid: i32) -> Option<u32> {
+    let dir = std::fs::read_dir(format!("/proc/{pid}/task")).ok()?;
+    let names: Vec<String> = dir
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path().join("comm")).ok())
+        .map(|s| s.trim().to_string())
+        .collect();
+    Some(count_vcpu_threads(names.iter().map(String::as_str)))
 }
 
 /// `" — VM log: <last lines>"`, or `""` when the log is empty/unreadable, so
@@ -1680,6 +1936,40 @@ Format specific information:
         assert_eq!(
             cpus_arg(&c),
             "boot=4,affinity=0@[8-15]:1@[8-15]:2@[8-15]:3@[8-15]"
+        );
+    }
+
+    #[test]
+    fn cpus_arg_declares_max_only_above_boot() {
+        let mut c = hpc_cfg();
+        // ADR-0068 D3's default: no headroom declared, no `max=` — byte for
+        // byte what every VM without a ceiling already boots with.
+        c.vcpus_max = None;
+        assert_eq!(cpus_arg(&c), "boot=4");
+        // A ceiling equal to (or below) the boot count is not headroom.
+        c.vcpus_max = Some(4);
+        assert_eq!(cpus_arg(&c), "boot=4");
+        c.vcpus_max = Some(8);
+        assert_eq!(cpus_arg(&c), "boot=4,max=8");
+    }
+
+    #[test]
+    fn memory_arg_declares_virtio_mem_only_above_boot() {
+        let mut c = hpc_cfg();
+        c.memory_max_mib = None;
+        assert_eq!(memory_arg(&c), "size=2048M");
+        c.memory_max_mib = Some(2048);
+        assert_eq!(memory_arg(&c), "size=2048M");
+        c.memory_max_mib = Some(4096);
+        assert_eq!(
+            memory_arg(&c),
+            "size=2048M,hotplug_method=virtio-mem,hotplug_size=2048M"
+        );
+        // hugepages and the hotplug region are independent CH knobs.
+        c.hugepages = true;
+        assert_eq!(
+            memory_arg(&c),
+            "size=2048M,hugepages=on,hotplug_method=virtio-mem,hotplug_size=2048M"
         );
     }
 }
@@ -2107,5 +2397,40 @@ mod tests_boot_confirms_the_vmm {
             Some(42)
         );
         assert_eq!(http_content_length("HTTP/1.1 204 No Content"), None);
+    }
+
+    #[test]
+    fn vm_info_memory_actual_bytes_reads_the_real_shapes() {
+        assert_eq!(
+            vm_info_memory_actual_bytes(
+                br#"{"config":{},"state":"Running","memory_actual_size":536870912}"#
+            ),
+            Some(536_870_912)
+        );
+        // pretty-printed, and the field appearing before other numeric keys
+        // that could be mistaken for it.
+        assert_eq!(
+            vm_info_memory_actual_bytes(
+                b"{\n  \"memory_actual_size\": 268435456,\n  \"boot_vcpus\": 1\n}"
+            ),
+            Some(268_435_456)
+        );
+        assert_eq!(vm_info_memory_actual_bytes(br#"{"state":"Running"}"#), None);
+        assert_eq!(vm_info_memory_actual_bytes(b""), None);
+    }
+
+    #[test]
+    fn count_vcpu_threads_matches_only_the_vcpu_shape() {
+        assert_eq!(
+            count_vcpu_threads(["vcpu0", "vcpu1", "vcpu2"].into_iter()),
+            3
+        );
+        // Cloud Hypervisor's other threads (I/O, event loop, vhost-user) do
+        // not start with "vcpu" at all here, but a near-miss must not count.
+        assert_eq!(
+            count_vcpu_threads(["vcpu0", "vhost_user", "vcpux", "vcpu"].into_iter()),
+            1
+        );
+        assert_eq!(count_vcpu_threads(std::iter::empty()), 0);
     }
 }

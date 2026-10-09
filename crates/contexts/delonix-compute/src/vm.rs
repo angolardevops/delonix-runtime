@@ -9,8 +9,8 @@
 use crate::capability::Capability;
 use crate::ports::{LocalDiskImages, SeedBuilder, VmBackends, VmNetwork};
 use crate::vm_backend::{
-    mem_mib, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage, GuestInfo, MoveOptions,
-    VmBackend, VmConfig,
+    mem_mib, parse_mem_mib, CloudInitIntent, CreateStage, DestroyStage, GuestInfo, HotplugOutcome,
+    MoveOptions, VmBackend, VmConfig,
 };
 use crate::vm_error::{Error, Result};
 use crate::vm_firewall as firewall;
@@ -19,7 +19,7 @@ use delonix_model::ports::StateRepository;
 use delonix_model::records::Status;
 use delonix_node::proc_starttime;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// `--disk-size`'s unit, everywhere in this crate: whole GiB.
 const GIB_BYTES: u64 = 1024 * 1024 * 1024;
@@ -262,6 +262,8 @@ where
         }
         vm.devices = cfg.devices.clone();
         vm.boot = boot_spec_of(cfg);
+        vm.vcpus_max = cfg.vcpus_max;
+        vm.memory_max_mib = cfg.memory_max_mib;
         vm.started_unix = Some(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -725,6 +727,86 @@ where
         st.set(name, &vm).map_err(Error::from)?;
         Ok(vm)
     }
+    /// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1) — ONE verb
+    /// for both states: on a RUNNING VM it hot-adds, live, up to the
+    /// declared ceiling (D3); on a STOPPED one it is exactly [`Self::resize`]
+    /// (the cold path, unchanged), so nothing has to ask which verb applies.
+    ///
+    /// Only ADD (D10): a target at or below what the VM already has is
+    /// refused, naming `vm resize` (stopped) as the way to decrease — hot
+    /// removal is a separate, later capability, not a silent downgrade to
+    /// the cold path. Disk and NIC hotplug are later phases (3/4/5); this is
+    /// CPU/memory only.
+    ///
+    /// Each field that changes is written to the record as soon as the
+    /// backend confirms it (D6, "hypervisor first, read-back, record last,
+    /// one operation at a time" — the same order [`Self::resize`] already
+    /// uses, no transaction across the two fields), so a `Partial` CPU add
+    /// still leaves memory free to be asked for separately, and a failure on
+    /// the second field never rolls back the first.
+    ///
+    /// Returns the updated record and, for a RUNNING VM, the
+    /// [`HotplugOutcome`] of every field that was asked for — empty for the
+    /// cold path, which has nothing live to report.
+    pub fn update(
+        &self,
+        name: &str,
+        vcpus: Option<u32>,
+        memory: Option<&str>,
+        wait: Duration,
+    ) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
+        if vcpus.is_none() && memory.is_none() {
+            return Err(Error::InvalidResize(format!(
+                "nothing to update on VM '{name}': give --vcpus and/or --memory"
+            )));
+        }
+        let target_mib = match memory {
+            Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+                Error::InvalidResize(format!(
+                    "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+                ))
+            })?),
+            None => None,
+        };
+        let vm = self.load_vm(name)?;
+        if vm.status != Status::Running {
+            let vm = self.resize(name, vcpus, memory, None)?;
+            return Ok((vm, Vec::new()));
+        }
+        let vmdir = self.vmdir();
+        let st = &self.repo;
+        let backend = self.backends.for_vm(&vm)?;
+        let mut vm = vm;
+        let mut outcomes = Vec::new();
+        if let Some(target) = vcpus {
+            if target <= vm.vcpus {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{name}' already has {} vCPUs — `vm update` only adds; use `vm resize` \
+                     on a stopped VM for a decrease",
+                    vm.vcpus
+                )));
+            }
+            let (assigned, outcome) = backend.hotplug_add_cpu(&vmdir, &vm, target, wait)?;
+            vm.vcpus = assigned;
+            st.set(name, &vm).map_err(Error::from)?;
+            outcomes.push(("vcpus", outcome));
+        }
+        if let Some(target_mib) = target_mib {
+            let current_mib = mem_mib(&vm.memory);
+            if target_mib <= current_mib {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{name}' already has {current_mib} MiB — `vm update` only adds; use \
+                     `vm resize` on a stopped VM for a decrease"
+                )));
+            }
+            let (assigned_mib, outcome) =
+                backend.hotplug_add_memory(&vmdir, &vm, target_mib, wait)?;
+            vm.memory = format!("{assigned_mib}M");
+            st.set(name, &vm).map_err(Error::from)?;
+            outcomes.push(("memory", outcome));
+        }
+        Ok((vm, outcomes))
+    }
     /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
     /// ADR-0053 decision 1; see [`VmBackend::move_to_node`]).
     ///
@@ -1133,6 +1215,8 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         disk: _,
         vcpus: _,
         memory: _,
+        vcpus_max: _,
+        memory_max_mib: _,
         network: _,
         namespace: _,
         restart_policy: _,
@@ -1225,6 +1309,8 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         disk: vm.disk.clone(),
         vcpus: vm.vcpus,
         memory: vm.memory.clone(),
+        vcpus_max: vm.vcpus_max,
+        memory_max_mib: vm.memory_max_mib,
         network: vm.network.clone(),
         namespace: Some(vm.namespace.clone()),
         restart_policy: vm.restart_policy.clone(),
@@ -1442,6 +1528,11 @@ mod tests {
         unrecorded: bool,
         /// What this backend answers to [`VmBackend::holds_at_boot`].
         holds_at_boot: bool,
+        /// `Some` makes `hotplug_add_cpu`/`hotplug_add_memory` succeed,
+        /// echoing the target back with this outcome (ADR-0068); `None`
+        /// keeps them refusing, the same shape as the trait's own
+        /// fail-closed default, to exercise the refusal path too.
+        hotplug_outcome: RefCell<Option<HotplugOutcome>>,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1490,6 +1581,55 @@ mod tests {
             self.0.calls.borrow_mut().push(format!("stop {}", vm.name));
             *self.0.running.borrow_mut() = false;
             Ok(())
+        }
+        fn resize_cold(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            vcpus: u32,
+            memory_mib: u64,
+        ) -> delonix_model::Result<()> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("resize_cold {} {vcpus} {memory_mib}", vm.name));
+            Ok(())
+        }
+        fn hotplug_add_cpu(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            target_vcpus: u32,
+            _wait: Duration,
+        ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_cpu {} -> {target_vcpus}", vm.name));
+            match self.0.hotplug_outcome.borrow().clone() {
+                Some(outcome) => Ok((target_vcpus, outcome)),
+                None => Err(delonix_model::Error::Invalid(
+                    "hotplug cpu add not configured on this fake".into(),
+                )),
+            }
+        }
+        fn hotplug_add_memory(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            target_mib: u64,
+            _wait: Duration,
+        ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_memory {} -> {target_mib}", vm.name));
+            match self.0.hotplug_outcome.borrow().clone() {
+                Some(outcome) => Ok((target_mib, outcome)),
+                None => Err(delonix_model::Error::Invalid(
+                    "hotplug memory add not configured on this fake".into(),
+                )),
+            }
         }
     }
 
@@ -1733,5 +1873,137 @@ mod tests {
         e.stop("app").expect("stop");
         assert!(calls(&seen).contains(&"stop app".to_string()));
         assert_eq!(e.repo.get("app").unwrap().status, Status::Stopped);
+    }
+
+    // ---- `update` (ADR-0068 D1) --------------------------------------------
+
+    /// Nothing to change is refused before any port is asked anything —
+    /// the same guard `resize` already has.
+    #[test]
+    fn update_refuses_when_nothing_is_asked_for() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let before = calls(&seen).len();
+        let err = e
+            .update("app", None, None, Duration::from_secs(1))
+            .unwrap_err();
+        assert!(err.to_string().contains("nothing to update"), "{err}");
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+    }
+
+    /// On a STOPPED VM, `update` is exactly `resize`'s cold path: no
+    /// `HotplugOutcome` to report, and the backend's `resize_cold` is what
+    /// gets called — never `hotplug_add_cpu`/`hotplug_add_memory`.
+    #[test]
+    fn update_on_a_stopped_vm_is_the_cold_resize() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.stop("app").expect("stop");
+        let (vm, outcomes) = e
+            .update("app", Some(2), Some("128M"), Duration::from_secs(1))
+            .expect("cold update");
+        assert!(outcomes.is_empty(), "{outcomes:?}");
+        assert_eq!(vm.vcpus, 2);
+        assert_eq!(vm.memory, "128M");
+        assert!(
+            calls(&seen).contains(&"resize_cold app 2 128".to_string()),
+            "{:?}",
+            calls(&seen)
+        );
+        assert!(
+            !calls(&seen).iter().any(|c| c.starts_with("hotplug_add_")),
+            "{:?}",
+            calls(&seen)
+        );
+    }
+
+    /// On a RUNNING VM, `update` hot-adds each field through the backend,
+    /// writes the record after EACH one (D6 — no transaction across the
+    /// two), and returns the `HotplugOutcome` of every field asked for.
+    #[test]
+    fn update_on_a_running_vm_adds_live_and_reports_the_outcome() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create"); // vcpus=1, memory=64M, Running.
+        *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Complete);
+        let (vm, outcomes) = e
+            .update("app", Some(3), Some("128M"), Duration::from_millis(1))
+            .expect("live update");
+        assert_eq!(vm.vcpus, 3);
+        assert_eq!(vm.memory, "128M");
+        assert_eq!(
+            outcomes,
+            vec![
+                ("vcpus", HotplugOutcome::Complete),
+                ("memory", HotplugOutcome::Complete),
+            ]
+        );
+        assert!(
+            calls(&seen).contains(&"hotplug_add_cpu app -> 3".to_string()),
+            "{:?}",
+            calls(&seen)
+        );
+        assert!(
+            calls(&seen).contains(&"hotplug_add_memory app -> 128".to_string()),
+            "{:?}",
+            calls(&seen)
+        );
+        // Persisted, not just returned.
+        assert_eq!(e.repo.get("app").unwrap().vcpus, 3);
+        assert_eq!(e.repo.get("app").unwrap().memory, "128M");
+    }
+
+    /// A `Partial` outcome is not downgraded to an error, and the record
+    /// STILL takes the hypervisor-assigned value (D6: a restart must not
+    /// drop it) — the caller decides what a partial outcome means.
+    #[test]
+    fn a_partial_outcome_still_updates_the_record() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Partial {
+            reason: "guest activation not observable".into(),
+        });
+        let (vm, outcomes) = e
+            .update("app", Some(2), None, Duration::from_millis(1))
+            .expect("partial is Ok, not Err");
+        assert_eq!(vm.vcpus, 2);
+        assert_eq!(e.repo.get("app").unwrap().vcpus, 2);
+        assert_eq!(outcomes.len(), 1);
+        assert!(matches!(outcomes[0].1, HotplugOutcome::Partial { .. }));
+    }
+
+    /// A target at or below what the VM already has is refused — removal is
+    /// a separate, later capability (D10), not a silent no-op on `update`.
+    #[test]
+    fn update_refuses_a_cpu_or_memory_decrease() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create"); // vcpus=1, memory=64M.
+        let before = calls(&seen).len();
+        let err = e
+            .update("app", Some(1), None, Duration::from_secs(1))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("already has 1 vCPUs")
+                && err.to_string().contains("vm resize"),
+            "{err}"
+        );
+        let err = e
+            .update("app", None, Some("32M"), Duration::from_secs(1))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("already has 64 MiB") && err.to_string().contains("vm resize"),
+            "{err}"
+        );
+        // Neither refusal reached the backend.
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
     }
 }

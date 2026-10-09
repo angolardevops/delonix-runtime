@@ -16,6 +16,7 @@ use crate::vm_error::{Error, Result};
 use crate::vm_firewall as firewall;
 use crate::{CpuTopology, ExtraDisk, ExtraNic, Vm, VmVolume};
 use std::path::Path;
+use std::time::Duration;
 
 /// The user the golden image creates at build time (`sudo` NOPASSWD), and the
 /// account everything else assumes is the login target — the serial autologin
@@ -48,6 +49,14 @@ pub struct VmConfig {
     pub vcpus: u32,
     /// Memory (e.g. `"2G"`, `"1024M"`).
     pub memory: String,
+    /// Hotplug ceiling for vCPUs (ADR-0068 D2/D3). `None`/equal to `vcpus` =
+    /// no headroom, which is what every VM without this field already is —
+    /// the domain's shape (memory topology, PCIe ports, hotplug regions)
+    /// only changes when a ceiling ABOVE the boot size is actually declared.
+    pub vcpus_max: Option<u32>,
+    /// Hotplug ceiling for memory, in MiB (ADR-0068 D2/D3). Same convention
+    /// as `vcpus_max`.
+    pub memory_max_mib: Option<u64>,
     /// Ingress network for the `tap`.
     pub network: String,
     /// Logical isolation namespace (`None`/`"default"` = the open SDN), the same
@@ -322,6 +331,19 @@ pub struct Boot {
     pub lease_floor: Option<String>,
 }
 
+/// The result of a hot `add` (ADR-0068 D4): the hypervisor side is always
+/// true by the time this is returned — the question this type answers is
+/// whether the GUEST is confirmed using the resource too. `Complete` is the
+/// only state a caller may read as "done"; `Partial` still means the host
+/// holds the resource (a restart must not drop it, D6) and the guest has not
+/// — yet, or ever, on a backend with no channel to see into it — activated
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum HotplugOutcome {
+    Complete,
+    Partial { reason: String },
+}
+
 /// What a guest reports about itself through its agent ([`VmBackend::guest_info`]).
 /// Every field is what the guest SAID — `None` or empty when it did not say.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -481,6 +503,54 @@ pub trait VmBackend {
         _memory_mib: u64,
     ) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "resize"))
+    }
+
+    /// Adds vCPUs to a RUNNING VM, up to `vm.vcpus_max` (ADR-0068 D1). Called
+    /// only after the engine has confirmed the VM is running and the target
+    /// does not exceed the declared ceiling; the backend still refuses a
+    /// target beyond what IT can honour (the hypervisor's own ceiling, fixed
+    /// at boot) rather than trust the caller's bookkeeping.
+    ///
+    /// Returns the vCPU count read back from the LIVE VM (ADR-0068 D5 — never
+    /// the request's own answer) and whether the GUEST is confirmed using it
+    /// (ADR-0068 D4): a hypervisor that accepts the request is not proof the
+    /// guest onlined anything. `Partial` is not a failure — the record still
+    /// takes the hypervisor-assigned value (D6) — it is reported as the
+    /// `Operation`'s state, never silently rounded up to success.
+    ///
+    /// `wait` is how long to poll the guest-activation channel before
+    /// settling for `Partial` (D4's `--wait`, default 60s at the CLI) — a
+    /// backend with no such channel (CH's CPU add, D4/Q5) may ignore it and
+    /// return `Partial` immediately, which is honest, not lazy.
+    ///
+    /// Default: unsupported (fail closed). A backend overrides this only
+    /// once it actually has a mechanism, never as an optimistic no-op.
+    fn hotplug_add_cpu(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _target_vcpus: u32,
+        _wait: Duration,
+    ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+        Err(unsupported_pause(self.id(), "hotplug cpu add"))
+    }
+
+    /// Adds memory to a RUNNING VM, up to `vm.memory_max_mib` (ADR-0068 D1).
+    /// Same contract as [`VmBackend::hotplug_add_cpu`]: returns the memory
+    /// size, in MiB, read back from the LIVE VM (D5), and whether the GUEST
+    /// is confirmed using it (D4) — a virtio-mem/DIMM request the hypervisor
+    /// accepts plugs nothing without a guest driver to claim it. `wait` is
+    /// the same deadline, for a backend that CAN see the guest side poll it.
+    ///
+    /// Default: unsupported (fail closed).
+    fn hotplug_add_memory(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _target_mib: u64,
+        _wait: Duration,
+    ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+        Err(unsupported_pause(self.id(), "hotplug memory add"))
     }
 
     /// `vm resize --disk-size`: grows a STOPPED VM's boot disk to `new_bytes`

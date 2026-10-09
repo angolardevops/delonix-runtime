@@ -255,6 +255,7 @@
 =	vm stop
 →	vm unbridge
 ~	vm unpause
+=	vm update
 ~	vm vnc
 ~	volume apply
 ~	volume create

@@ -1165,6 +1165,16 @@ pub struct Vm {
     /// which is not the same as "this VM has none": see `config_from`.
     #[serde(default, skip_serializing_if = "VmBootSpec::is_empty")]
     pub boot: VmBootSpec,
+    /// The hotplug ceiling for vCPUs (ADR-0068 D2/D3), fixed at boot. `None`
+    /// means "the maximum is the boot size" — zero headroom, which is, byte
+    /// for byte, what every VM without a declared ceiling already is. Never
+    /// confused with `vcpus`, which is "what the next boot starts with".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vcpus_max: Option<u32>,
+    /// The hotplug ceiling for memory, in MiB (ADR-0068 D2/D3). Same "`None` =
+    /// no headroom" convention as `vcpus_max`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_max_mib: Option<u64>,
 }
 
 /// Default backend for VMs persisted before multi-backend support.
@@ -1224,6 +1234,9 @@ impl Vm {
             // is booting this VM; empty here so `Vm::new` keeps its signature
             // (nine positional arguments is already too many).
             boot: VmBootSpec::default(),
+            // Same reasoning: filled in by `create_with` from `VmConfig`.
+            vcpus_max: None,
+            memory_max_mib: None,
         }
     }
 }

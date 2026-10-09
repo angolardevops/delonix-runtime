@@ -118,7 +118,14 @@ pub fn report(host: &StorageHost) -> ProviderReport {
             | C::VmClone
             | C::VmTemplate
             | C::VmResizeCold
-            | C::VmHotplug
+            | C::VmHotplugCpuAdd
+            | C::VmHotplugCpuRemove
+            | C::VmHotplugMemoryAdd
+            | C::VmHotplugMemoryRemove
+            | C::VmHotplugDiskAdd
+            | C::VmHotplugDiskRemove
+            | C::VmHotplugNicAdd
+            | C::VmHotplugNicRemove
             | C::VmExtraDisks
             | C::VmExtraNics
             | C::VmDiskResize

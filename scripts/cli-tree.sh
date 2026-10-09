@@ -91,6 +91,9 @@ classify() {
       else if (c ~ /^container /)                                 cls = "="
       else if (c ~ /^vm (start|stop|restart|console|ssh)$/)       cls = "="
       else if (c ~ /^vm snapshot /)                               cls = "="
+      # `vm update` (ADR-0068 D1): new verb for live hotplug add, no rename
+      # behind it — same reason as `api-resources` above.
+      else if (c == "vm update")                                  cls = "="
       # `systemcontainer` (plan 63 slice 5, D3 revised) is new surface with no
       # rename behind it — born at its destination.
       else if (c ~ /^systemcontainer /)                           cls = "="
