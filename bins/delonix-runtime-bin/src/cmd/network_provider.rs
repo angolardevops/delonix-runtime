@@ -15,6 +15,7 @@
 //!       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
 //!       reservations: [{ ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }]
 //!       dns: { server: pdns, zone: lab.example }   # per zone: all its networks must agree
+//!       ipam: pve                    # per zone too (ADR-0063 D1); `pve` when omitted
 //! ```
 //!
 //! A zone is shared by its vnets (created with the first, removed with the
@@ -36,12 +37,16 @@ use super::manifest::{ManifestDoc, Metadata};
 pub(crate) const LOWERED_FROM: &str = "delonix.io/lowered-from";
 
 /// Keys of `provider.proxmox`.
-const PROXMOX_KEYS: &[&str] = &["zone", "alias", "dhcpRange", "reservations", "dns"];
+const PROXMOX_KEYS: &[&str] = &["zone", "alias", "dhcpRange", "reservations", "dns", "ipam"];
 /// Provider-neutral `Network` fields that make no sense for a provider segment.
 const NATIVE_ONLY: &[&str] = &["driver", "parent", "vni", "peers", "wgIp", "wg_ip"];
+/// The keys of `provider.spec` that are settings of the ZONE, not of the
+/// network: every network that names the zone must declare the same.
+const ZONE_KEYS: &[&str] = &["dns", "ipam"];
 
-/// A zone being assembled: its vnets, and the zone-level `dns` with the network that declared it.
-type ZoneParts = (Vec<Value>, Option<(Value, String)>);
+/// A zone being assembled: its vnets, and each zone-level setting
+/// ([`ZONE_KEYS`]) with the network that declared it first.
+type ZoneParts = (Vec<Value>, BTreeMap<&'static str, (Value, String)>);
 
 fn bad(net: &str, msg: &str) -> Error {
     Error::Invalid(format!("Network '{net}': {msg}"))
@@ -179,26 +184,31 @@ pub(crate) fn lower_network_providers(docs: Vec<ManifestDoc>) -> Result<Vec<Mani
             return Err(bad(&net, &format!("declared twice in zone '{zone}'")));
         }
         entry.0.push(Value::Mapping(vnet));
-        if let Some(dns) = px.get("dns") {
-            match &entry.1 {
-                Some((prev, first)) if prev != dns => {
+        for key in ZONE_KEYS {
+            let Some(value) = px.get(*key) else {
+                continue;
+            };
+            match entry.1.get(key) {
+                Some((prev, first)) if prev != value => {
                     return Err(bad(
                         &net,
                         &format!(
-                            "provider.proxmox.dns differs from the one on Network '{first}' — DNS settings belong to the zone '{zone}', so every network in it must declare the same"
+                            "provider.proxmox.{key} differs from the one on Network '{first}' — it is a setting of the zone '{zone}', so every network in it must declare the same"
                         ),
                     ));
                 }
                 Some(_) => {}
-                None => entry.1 = Some((dns.clone(), net.clone())),
+                None => {
+                    entry.1.insert(key, (value.clone(), net.clone()));
+                }
             }
         }
     }
-    for (zone, (vnets, dns)) in zones {
+    for (zone, (vnets, settings)) in zones {
         let mut spec = Mapping::new();
         spec.insert("vnets".into(), Value::Sequence(vnets));
-        if let Some((d, _)) = dns {
-            spec.insert("dns".into(), d);
+        for (key, (value, _)) in settings {
+            spec.insert(key.into(), value);
         }
         out.push(ManifestDoc {
             api_version: "networking.delonix.io/v1alpha1".into(),
@@ -323,5 +333,21 @@ mod tests {
         let c = n("c", "lab", ", dns: { server: pdns, zone: lab.example }");
         let out = lower_network_providers(vec![a, c]).unwrap();
         assert_eq!(out[0].spec["dns"]["server"], Value::from("pdns"));
+    }
+
+    /// ADR-0063 D1: the IPAM controller is the zone's, like its DNS.
+    #[test]
+    fn the_ipam_controller_is_a_zone_setting_and_must_agree_across_its_networks() {
+        let a = n("a", "lab", ", ipam: pve");
+        let b = n("b", "lab", ", ipam: netbox1");
+        let e = lower_network_providers(vec![a.clone(), b])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("provider.proxmox.ipam differs"), "{e}");
+        let out = lower_network_providers(vec![a, n("c", "lab", "")]).unwrap();
+        assert_eq!(out[0].spec["ipam"], Value::from("pve"));
+        let spec: super::super::network_zone::NetworkZoneSpecDoc =
+            serde_yaml::from_value(out[0].spec.clone()).unwrap();
+        assert_eq!(spec.ipam.as_deref(), Some("pve"));
     }
 }

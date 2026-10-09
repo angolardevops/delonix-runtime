@@ -1,7 +1,8 @@
 # ADR-0063: IPAM beyond Proxmox's own: external controllers, subnets changed in place, VMs as DHCP guests
 
-- **Status:** Accepted (2026-10-06, by the owner). D3's defect fix is implemented in the F5b PR (#654); **D1 and D2 are not
-  implemented** and are named in Sprint 2 of `docs/discovery/66_CONTINUITY_PLAN.md`.
+- **Status:** Accepted (2026-10-06, by the owner). D3's defect fix is implemented in the F5b PR (#654). D1.1, D1.2 and
+  D2 are implemented (2026-10-09, see «Implementation» below). **D1.3/D1.4 (NetBox, after its spike) and D3.3 (a
+  reservation that names a VM) are not implemented.**
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0059 (network providers by role; F5b is its IPAM slice), ADR-0049 D3 (the
@@ -160,3 +161,40 @@ The CIDR is the subnet's identity (its id is `<zone>-<network>-<len>`); it canno
 - Seen while measuring, not part of this ADR: `stack apply` applies a `NetworkZone` once in its
   layer and again in the converge of a hot change, so one apply runs two SDN transactions. The
   same pattern exists for `NetworkGateway`. It costs a second reload and should be fixed on its own.
+
+## Implementation (2026-10-09)
+
+D1.1, D1.2 and D2 are built. Every fact below was measured on the lab cluster (PVE 9.2.2, two
+nodes) by `crates/providers/delonix-proxmox/tests/live.rs::a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired`
+and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless it says otherwise.
+
+- **D1.1.** `spec.ipam` names the controller (default `pve`; also `provider.spec.ipam` of a
+  `kind: Network`, a zone setting every network of the zone must agree on). A controller the
+  cluster does not list (`GET /cluster/sdn/ipams`) is refused before any write — measured: the
+  zone was not created. `ipam` is a cold field: the node refuses to change it once a subnet exists.
+- **D1.2, D1.3.** The provider serves only a controller of plugin `pve`. `phpipam` is refused by
+  name with the node's `die`; `netbox` is refused by name until the D1.3 spike; any other plugin
+  as never measured. Proved by unit test only: the lab has no external controller, and the node
+  verifies a controller's URL before it registers one.
+- **D2.1, D2.2.** `subnets` (vnet and CIDR) stays cold; a new hot field, `subnetSettings`
+  (gateway and ranges), is read from the provider, so a gateway changed by hand on the node
+  converges back too (measured). The write is `PUT …/subnets/<id>` with the exact target:
+  **`delete=dhcp-range` clears every range** (measured here for the first time). `delete=gateway`
+  is sent when a gateway is declared absent, and was not measured.
+- **D2.4.** A new gateway that an IPAM entry holds is refused before the `PUT` (measured: the
+  entry did not move).
+- **D2.3 — the measured sequence was incomplete.** Injected exactly as the Context describes
+  (a gateway staged, the transaction failed and rolled back): the IPAM's gateway entry stayed on
+  the staged address. The move-and-back then put a gateway entry on the running gateway **and
+  left the stale one, still flagged gateway** — two gateway entries for one subnet, the stale one
+  holding its address, and the node refusing the subnet's delete (`cannot delete subnet …, not
+  empty`). The repair therefore also releases every other gateway entry of the subnet with
+  `DELETE …/ips` (the delete measured to work in «Alternatives»), and reads back exactly one
+  entry, on the running gateway. It runs after a failed transaction and before the transaction
+  of an apply that follows an interrupted run (a dead process's staged change is discarded by
+  the next lock), as the ledger step `repair_gateways`, only on vnets carrying the record's mark.
+  Measured through the CLI with a natural failure: two subnets, the first moved its gateway, the
+  second was refused by D2.4 inside the same transaction; the repair put the first one's entry
+  back, and the ledger reads `transaction: failed`, `repair_gateways: done`.
+- **D2.5** is a warning naming each guest allocation outside the new ranges; the node's
+  behaviour in that case is still not measured.

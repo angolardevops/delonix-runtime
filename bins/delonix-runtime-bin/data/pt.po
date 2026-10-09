@@ -15256,6 +15256,24 @@ msgstr "controlador DNS '{id}' no provider '{provider}' — o motor não cria co
 msgid "networkzone/{name}: dns record '{record}' and its PTR left on DNS server '{server}': the provider writes a subnet gateway's records and never removes them"
 msgstr "networkzone/{name}: o registo dns '{record}' e o seu PTR ficaram no servidor DNS '{server}': o provider escreve os registos da gateway de uma subnet e nunca os remove"
 
+msgid "NetworkZone/{name}: ipam '{id}' is not an IPAM controller id (a lowercase letter, then up to 7 lowercase letters or digits)"
+msgstr "NetworkZone/{name}: ipam '{id}' não é um id de controlador IPAM (uma letra minúscula, depois até 7 letras minúsculas ou dígitos)"
+
+msgid "NetworkZone/{name}: ipam: no subnet is declared, so the zone allocates nothing from '{id}' — declare a subnet, or drop `ipam:`"
+msgstr "NetworkZone/{name}: ipam: nenhuma subnet está declarada, por isso a zona não aloca nada de '{id}' — declara uma subnet, ou tira o `ipam:`"
+
+msgid "IPAM controller '{id}' on provider '{provider}' — the engine does not create IPAM controllers: register it on the cluster (it holds the IPAM's credential)"
+msgstr "controlador IPAM '{id}' no provider '{provider}' — o motor não cria controladores IPAM: regista-o no cluster (é ele que guarda a credencial do IPAM)"
+
+msgid "networkzone/{name}: the IPAM gateway repair after the failed transaction failed too: {error}"
+msgstr "networkzone/{name}: a reparação da gateway no IPAM depois da transacção falhada também falhou: {error}"
+
+msgid "networkzone/{name}: subnet {cidr} changed its gateway in place — the DNS record '{vnet}-gw' keeps the old address {old}; the provider never rewrites it"
+msgstr "networkzone/{name}: a subnet {cidr} mudou de gateway no lugar — o registo DNS '{vnet}-gw' fica com o endereço antigo {old}; o provider nunca o reescreve"
+
+msgid "networkzone/{name}: IPAM gateway entry repaired — {line}"
+msgstr "networkzone/{name}: entrada da gateway no IPAM reparada — {line}"
+
 msgid "networkzone/{name}: dns changed — the records the provider already wrote (each subnet gateway's and each guest's) stay as they are; a guest is registered under the new settings when it next gets an address"
 msgstr "networkzone/{name}: o dns mudou — os registos que o provider já escreveu (os de cada gateway de subnet e os de cada guest) ficam como estão; um guest é registado com as novas definições quando voltar a receber um endereço"
 

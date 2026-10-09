@@ -9418,3 +9418,30 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   política só com concessões já não dispara o lint `POLICY-SILENT`.
 - `SystemContainer` tem o bloco `spec.provider: { type: proxmox, spec: { swap, network } }` (2026-10-03): `lower_system_container_provider` dobra-o nos campos planos no `manifest::load`, a grafia plana continua válida e quer dizer o mesmo, repetir um campo nos dois sítios é recusado. `examples/systemcontainer.yaml`.
 - `NetworkGateway` aceita `spec.provider: { type }` (2026-10-03), dobrado no escalar por `lower_network_gateway_provider`; `provider.spec` só vazio. O Kind fica (vocabulário de perímetro genérico, não um Kind por recurso do provider). Só testado por unidade: a VM OPNsense do laboratório não arranca.
+
+## IPAM de uma zona: o controlador que ela nomeia, e subnets mudadas no lugar (ADR-0063 D1/D2, 2026-10-09)
+
+- **`spec.ipam`** de um `NetworkZone` (e `provider.spec.ipam` de um `kind: Network`, definição
+  da zona que todas as redes dela têm de repetir igual) nomeia o controlador; `pve` por omissão.
+  O motor nunca cria um controlador: um que o cluster não lista é recusado antes de qualquer
+  escrita (DX-1380), e o provider recusa pelo nome o que não sabe servir
+  (`IpamProvider::refuse_unsupported`: só `pve`; phpIPAM pelo `die` do nó; NetBox até ao spike
+  do D1.3). `ipam` é campo frio — o nó recusa mudá-lo com subnets.
+- **`subnets` passou a ser só a identidade** (vnet|CIDR, frio). O gateway e os ranges vivem no
+  campo QUENTE `subnetSettings`, lido do provider: uma mudança no manifesto ou feita à mão no nó
+  converge no lugar (`set_sdn_subnet_addressing`, alvo exacto; `delete=dhcp-range` limpa os
+  ranges, medido; `delete=gateway` não medido). Uma regra só decide o que é identidade e o que é
+  ajuste: `delonix_networking::ipam::subnet_change`.
+- **Um gateway em staging move a entrada de gateway do IPAM no instante do `PUT`, e o rollback
+  não a devolve.** O reparo (`repair_gateways`, passo `repair_gateways` do ledger) corre depois
+  de uma transacção falhada e antes da transacção de um apply que segue uma corrida interrompida.
+  **A sequência que o ADR descrevia estava incompleta** (medido): mover-e-voltar põe uma entrada
+  no gateway certo e DEIXA a antiga, ainda marcada gateway — duas entradas, e o nó recusa apagar
+  a subnet («not empty»). O reparo liberta as outras com `DELETE …/ips` e relê exactamente uma.
+  `Client::sdn_discarded_change` segura o lock e faz SEMPRE rollback: nada do reparo fica staged.
+- **Um gateway novo sobre um endereço que uma entrada do IPAM segura é recusado antes do `PUT`**
+  (D2.4). As reservas saem DEPOIS das subnets, por isso largar uma reserva e mover o gateway para
+  o endereço dela são dois applies.
+- Prova: `tests/live.rs::a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired`
+  (falha injectada e reparada) e o ciclo pela CLI no laboratório de dois nós, com uma falha
+  NATURAL (duas subnets, a segunda recusada pelo D2.4 dentro da mesma transacção).

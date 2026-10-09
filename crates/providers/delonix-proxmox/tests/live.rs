@@ -5814,7 +5814,7 @@ fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
                 },
                 &owner,
             )?;
-            ipam.prepare_zone(&zone, true)?;
+            ipam.prepare_zone(&zone, "pve", true)?;
             assert_eq!(
                 ipam.ensure_subnet(&zone, &subnet, &owner)?,
                 EnsureOutcome::Created
@@ -5980,6 +5980,255 @@ fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
             .any(|z| z["zone"] == zone.as_str()),
         "the zone is still running"
     );
+    assert!(
+        !client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .any(|e| e["zone"] == zone.as_str()),
+        "an IPAM entry of the zone was left behind"
+    );
+}
+
+/// ADR-0063 D1 and D2 against a real node, with no guest: the cluster's IPAM
+/// controllers are listed and the built-in one is served (D1); a subnet's
+/// gateway and DHCP ranges change in place, a range is cleared, and a new
+/// gateway an entry holds is refused before any write (D2.1, D2.2, D2.4);
+/// and the failure ADR-0063 measured — a gateway change staged, the
+/// transaction failed and rolled back, the IPAM's gateway entry left on the
+/// new address — is injected and then repaired (D2.3).
+#[test]
+fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
+    use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamReservation, IpamSubnet};
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let owner = OwnerMark::from_random(
+        &(std::process::id() ^ 0x0063_d200)
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("k{suffix}");
+    let vnet = format!("m{suffix}");
+    let octet = suffix % 200 + 20;
+    let at = |last: u8| format!("10.83.{octet}.{last}");
+    let subnet = |gateway: u8, ranges: &[(u8, u8)]| IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.83.{octet}.0/24"),
+        gateway: Some(at(gateway)),
+        dhcp_ranges: ranges
+            .iter()
+            .map(|(s, e)| DhcpRange {
+                start: at(*s),
+                end: at(*e),
+            })
+            .collect(),
+    };
+    // The IPAM's gateway entries in the vnet, as the node lists them.
+    let gateway_entries = || -> Vec<String> {
+        client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .filter(|e| e["zone"] == zone.as_str() && e["vnet"] == vnet.as_str())
+            .filter(|e| match &e["gateway"] {
+                serde_json::Value::Number(n) => n.as_u64() == Some(1),
+                serde_json::Value::Bool(b) => *b,
+                serde_json::Value::String(s) => s == "1",
+                _ => false,
+            })
+            .map(|e| e["ip"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+    let running = || {
+        ipam.observe(&zone, std::slice::from_ref(&vnet))
+            .expect("observe")
+            .subnets
+    };
+
+    // D1: the cluster's controllers; the built-in one is there and served.
+    let controllers = ipam.controllers().expect("controllers");
+    eprintln!("IPAM controllers on the node: {controllers:?}");
+    let pve = controllers
+        .iter()
+        .find(|c| c.id == "pve")
+        .expect("the built-in controller");
+    assert_eq!(pve.kind, "pve");
+    ipam.refuse_unsupported(pve)
+        .expect("the built-in controller is served");
+
+    let first = subnet(1, &[(100, 150)]);
+    segment
+        .transaction(&mut || {
+            segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?;
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("d2".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, "pve", true)?;
+            ipam.ensure_subnet(&zone, &first, &owner)?;
+            Ok(())
+        })
+        .expect("zone, vnet and subnet");
+    assert_eq!(running(), vec![first.clone()]);
+    assert_eq!(gateway_entries(), vec![at(1)]);
+    let reserved = IpamReservation {
+        vnet: vnet.clone(),
+        ip: at(20),
+        mac: "BC:24:11:83:00:20".into(),
+    };
+    assert_eq!(
+        ipam.ensure_reservation(&zone, &reserved).expect("reserve"),
+        EnsureOutcome::Created
+    );
+
+    // D2.4: a gateway onto the reserved address is refused before any write.
+    let onto_reserved = subnet(20, &[(100, 150)]);
+    let e = segment
+        .transaction(&mut || {
+            ipam.ensure_subnet(&zone, &onto_reserved, &owner)
+                .map(|_| ())
+        })
+        .expect_err("a gateway onto a held address");
+    assert!(e.to_string().contains("already held"), "{e}");
+    assert_eq!(
+        gateway_entries(),
+        vec![at(1)],
+        "the refusal moved the entry"
+    );
+
+    // D2.1: gateway and ranges in place, in one transaction (a range covering
+    // the reservation is accepted, ADR-0063 D2.5).
+    let moved = subnet(254, &[(10, 30)]);
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                ipam.ensure_subnet(&zone, &moved, &owner)?,
+                EnsureOutcome::Created
+            );
+            Ok(())
+        })
+        .expect("the gateway and the ranges in place");
+    assert_eq!(running(), vec![moved.clone()]);
+    assert_eq!(gateway_entries(), vec![at(254)]);
+    segment
+        .transaction(&mut || {
+            assert_eq!(
+                ipam.ensure_subnet(&zone, &moved, &owner)?,
+                EnsureOutcome::AlreadyPresent
+            );
+            Ok(())
+        })
+        .expect("unchanged");
+
+    // D2.2: every range cleared (`delete=dhcp-range`), then one put back.
+    let cleared = subnet(254, &[]);
+    segment
+        .transaction(&mut || ipam.ensure_subnet(&zone, &cleared, &owner).map(|_| ()))
+        .expect("the ranges cleared");
+    assert_eq!(running(), vec![cleared.clone()]);
+    let settled = subnet(254, &[(100, 150)]);
+    segment
+        .transaction(&mut || ipam.ensure_subnet(&zone, &settled, &owner).map(|_| ()))
+        .expect("a range back");
+    assert_eq!(running(), vec![settled.clone()]);
+
+    // D2.3: inject the measured failure — a gateway change staged, then the
+    // transaction fails and is rolled back.
+    let staged = subnet(200, &[(100, 150)]);
+    let e = segment
+        .transaction(&mut || {
+            ipam.ensure_subnet(&zone, &staged, &owner)?;
+            Err(delonix_model::Error::Invalid(
+                "injected failure after the gateway was staged".into(),
+            ))
+        })
+        .expect_err("the injected failure");
+    assert!(e.to_string().contains("injected failure"), "{e}");
+    assert_eq!(
+        running(),
+        vec![settled.clone()],
+        "the rollback kept the subnet"
+    );
+    let left = gateway_entries();
+    eprintln!("after the rollback the IPAM gateway entries are {left:?}");
+    assert!(
+        !left.contains(&at(254)),
+        "ADR-0063 measured the entry left on the staged address; the node now restores it: \
+         {left:?}"
+    );
+
+    // Another owner's repair touches nothing: the vnet is not its own.
+    let stranger = OwnerMark::new("dlx-ffffffffffffffff").unwrap();
+    assert!(ipam
+        .repair_gateways(&zone, std::slice::from_ref(&vnet), &stranger)
+        .expect("a stranger's repair")
+        .is_empty());
+    assert_eq!(
+        gateway_entries(),
+        left,
+        "a stranger's repair changed the IPAM"
+    );
+
+    let repaired = ipam
+        .repair_gateways(&zone, std::slice::from_ref(&vnet), &owner)
+        .expect("repair");
+    eprintln!("repair: {repaired:?}");
+    assert_eq!(repaired.len(), 1, "{repaired:?}");
+    let after = gateway_entries();
+    eprintln!("after the repair the IPAM gateway entries are {after:?}");
+    assert_eq!(
+        after,
+        vec![at(254)],
+        "one gateway entry, on the running gateway"
+    );
+    assert_eq!(
+        running(),
+        vec![settled.clone()],
+        "the repair changed the subnet"
+    );
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "the repair left staged changes"
+    );
+    assert!(
+        ipam.repair_gateways(&zone, std::slice::from_ref(&vnet), &owner)
+            .expect("again")
+            .is_empty(),
+        "a second repair found something to do"
+    );
+
+    assert_eq!(
+        ipam.remove_reservation(&zone, &reserved).expect("release"),
+        delonix_networking::ownership::RemoveOutcome::Removed
+    );
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &settled, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
     assert!(
         !client
             .sdn_ipam_status("pve")
@@ -6217,7 +6466,7 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
                 },
                 &owner,
             )?;
-            ipam.prepare_zone(&zone, true)?;
+            ipam.prepare_zone(&zone, "pve", true)?;
             dns.prepare_zone(&zone, Some(&declared))?;
             ipam.ensure_subnet(&zone, &subnet, &owner)?;
             Ok(())

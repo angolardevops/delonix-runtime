@@ -304,7 +304,10 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // the dead process staged (ADR-0059 D4). Every other field of a
         // gateway stays cold — the appliance has no update in place.
         k::NETWORK_GATEWAY => &["applied"],
-        k::NETWORK_ZONE => &["applied", "reservations", "dns"],
+        // A subnet's gateway and DHCP ranges are written in place
+        // (ADR-0063 D2); which subnets exist (`subnets`, their CIDRs) and the
+        // IPAM controller (`ipam`) stay cold.
+        k::NETWORK_ZONE => &["applied", "reservations", "dns", "subnetSettings"],
         // `ippool::apply_one` overwrites the definition and keeps the leases.
         k::IPPOOL => &["addresses", "announce", "interface"],
         // The use of a pool is two numbers in a record; the pool itself is
