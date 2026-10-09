@@ -122,8 +122,13 @@ fn one_record_is_removed_and_the_rest_of_its_rrset_kept() {
         "the last record did not delete the rrset"
     );
     assert_eq!(
-        c.remove_record("no-such-zone.invalid", "x.no-such-zone.invalid", "A", "10.99.0.1")
-            .unwrap(),
+        c.remove_record(
+            "no-such-zone.invalid",
+            "x.no-such-zone.invalid",
+            "A",
+            "10.99.0.1"
+        )
+        .unwrap(),
         Removal::ZoneAbsent
     );
 
