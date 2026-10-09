@@ -1,0 +1,18 @@
+[package]
+name = "delonix-powerdns"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+delonix-model = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+# The same client, features and TLS stack as `delonix-proxmox`/`delonix-opnsense`.
+# It lives HERE and not in `delonix-networking`: a context crate does not grow an
+# HTTP client (ADR-0008/ADR-0009's reasoning, ADR-0064 D6).
+reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
+
+[lints]
+workspace = true

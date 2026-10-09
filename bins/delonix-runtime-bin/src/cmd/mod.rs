@@ -13,6 +13,7 @@ pub mod container;
 pub mod dash;
 pub mod dependency;
 pub mod diff;
+pub mod dns_cleanup;
 pub mod dockerapi;
 pub mod drift;
 pub mod etcd;

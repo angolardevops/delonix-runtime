@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (29 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (30 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 29 crates)
+## C4 — Nível 3: Componentes (os 30 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
@@ -155,6 +155,7 @@ graph TB
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
     OPN["delonix-opnsense<br>GatewayProvider REMOTO contra a API REST de UMA appliance OPNsense<br>(ADR-0051) — fora do delonix-sdn por trazer cliente HTTP"]
+    PDNS["delonix-powerdns<br>cliente minimo da API de UM servidor PowerDNS, com a credencial<br>do PROPRIO motor (ADR-0064 D6) — remove os registos de gateway que o no deixa"]
     MODEL["delonix-model<br>modelo partilhado PURO (foundation, ADR-0040) —<br>o Error e o dicionario DX-CDNN, Status, ContainerFw,<br>typestate, o modelo do segredo e os nomes gerados"]
     STACK["delonix-stack<br>contexto Stack (ADR-0040): tabela de Kinds,<br>reconciliador de 3 vias, Condition, revisões"]
     COMPUTE["delonix-compute<br>contexto Compute (ADR-0040): a especificacao<br>de execucao unica (RunOpts) que as entradas traduzem"]
@@ -178,6 +179,7 @@ graph TB
     BIN --> PVE
     BIN --> NAS
     BIN --> OPN
+    BIN --> PDNS
     MCPBIN --> MCP
     MGMTBIN --> MGMT
     NODEAPIBIN --> NODEAPI
@@ -264,6 +266,7 @@ graph TB
     STATECRATE --> COMPUTE
     NAS --> MODEL
     OPN --> MODEL
+    PDNS --> MODEL
     VM2 --> NODECTX
     VM2 --> MODEL
     VOL --> STORCTX
@@ -325,6 +328,11 @@ Notas de leitura do grafo (todas verificadas):
   `GatewayProvider` do OPNsense (ADR-0051) implementa a porta do contexto `delonix-networking`
   (ADR-0059 F2a; até lá vivia no `delonix-sdn`), os dois a partir de fora, e **registam-se** (`register_backend`/`register_gateway_provider`), com
   o alvo conhecido só pelo `-bin`, não pelo motor.
+- **`delonix-powerdns` está fora pela mesma razão** (ADR-0064 D6): fala com UM servidor
+  PowerDNS, com a credencial que o operador dá ao MOTOR no `providers.yaml`, para remover
+  os registos de gateway que o nó Proxmox escreve e nunca remove. Depende só do
+  `delonix-model`; quem sabe QUE registos são é o contexto `delonix-networking`
+  (`gateway_records`) e o provider (`DnsProvider::reverse_zone`), e quem os liga é o `-bin`.
 - **Nada depende de `delonix-proxmox`, `delonix-truenas` nem `delonix-opnsense` a não ser
   o `-bin` e, no caso do `delonix-proxmox`, o `delonix-node-api`** (que o lista entre os
   providers do nó, como o `delonix provider ls` faz) — são folhas do grafo, e é o que permite que um alvo remoto mal configurado

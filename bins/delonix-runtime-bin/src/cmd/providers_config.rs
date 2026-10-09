@@ -13,6 +13,10 @@
 //!   - type: opnsense                     # ADR-0059 F1
 //!     url: https://fw.example
 //!     auth: { keyFile: /etc/delonix/opnsense.key, secretFile: /etc/delonix/opnsense.secret }
+//!   - type: powerdns                     # ADR-0064 D6: the engine's OWN DNS credential
+//!     url: https://dns.example/api/v1/servers/localhost
+//!     controllers: [pdnslab]             # the cluster's DNS controllers this server is
+//!     auth: { keyFile: /etc/delonix/powerdns.key }
 //! networkDefaults:                       # which provider answers a network role
 //!   segment: proxmox
 //!   gateway: opnsense
@@ -119,6 +123,7 @@ pub enum ProviderEntry {
     CloudHypervisor(LocalEntry),
     Proxmox(Box<ProxmoxEntry>),
     Opnsense(Box<OpnsenseEntry>),
+    Powerdns(Box<PowerdnsEntry>),
 }
 
 impl ProviderEntry {
@@ -128,6 +133,7 @@ impl ProviderEntry {
             ProviderEntry::CloudHypervisor(_) => "cloud-hypervisor",
             ProviderEntry::Proxmox(_) => "proxmox",
             ProviderEntry::Opnsense(_) => "opnsense",
+            ProviderEntry::Powerdns(_) => "powerdns",
         }
     }
     fn name(&self) -> Option<&str> {
@@ -135,6 +141,7 @@ impl ProviderEntry {
             ProviderEntry::Libvirt(e) | ProviderEntry::CloudHypervisor(e) => e.name.as_deref(),
             ProviderEntry::Proxmox(e) => e.name.as_deref(),
             ProviderEntry::Opnsense(e) => e.name.as_deref(),
+            ProviderEntry::Powerdns(e) => e.name.as_deref(),
         }
     }
 }
@@ -224,6 +231,44 @@ pub struct OpnsenseAuth {
     secret: Option<serde_yaml::Value>,
 }
 
+/// A PowerDNS server the engine talks to with ITS OWN credential (ADR-0064
+/// D6): to remove the gateway records a segment provider's node writes there
+/// and never removes. The node's own controller credential is never read for
+/// this (ADR-0064 D5), so the operator says here which of the cluster's DNS
+/// controllers (`controllers`, by id) this server is.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PowerdnsEntry {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `<scheme>://<host>:<port>/api/v1/servers/<id>` — the form a Proxmox
+    /// `powerdns` controller takes.
+    pub url: String,
+    /// The DNS controller ids (on the segment provider) whose records live on
+    /// this server. A zone's controller that no entry names is left as it is,
+    /// and the teardown says so.
+    pub controllers: Vec<String>,
+    pub auth: PowerdnsAuth,
+    /// `http://` sends the API key in the clear; PowerDNS's own webserver has
+    /// no TLS. Refused unless this is `true`.
+    #[serde(default)]
+    pub allow_plain_http: bool,
+    #[serde(default)]
+    pub tls: Tls,
+}
+
+/// The API key, by reference only: a file only its owner reads.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PowerdnsAuth {
+    #[serde(default)]
+    pub key_file: Option<String>,
+    // Out of the schema: it exists only to be refused by name.
+    #[serde(default)]
+    #[schemars(skip)]
+    key: Option<serde_yaml::Value>,
+}
+
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Tls {
@@ -297,6 +342,33 @@ pub fn parse(content: &str, origin: &Path) -> Result<ProviderConfig> {
                 )));
             }
         }
+        if let ProviderEntry::Powerdns(d) = p {
+            if d.auth.key.is_some() {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: a secret VALUE is never written in this file — use `keyFile` (a 0600 \
+                     file) for the PowerDNS API key",
+                    &[("path", &at)],
+                )));
+            }
+            if d.controllers.is_empty() {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: the powerdns entry names no `controllers` — list the cluster's DNS \
+                     controller ids whose records live on this server",
+                    &[("path", &at)],
+                )));
+            }
+            if let Some(bad) = d
+                .controllers
+                .iter()
+                .find(|c| !delonix_networking::dns::valid_controller_id(c))
+            {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: powerdns controllers: '{id}' is not a DNS controller id (a letter, \
+                     then letters and digits, at least 2)",
+                    &[("path", &at), ("id", bad)],
+                )));
+            }
+        }
         if let ProviderEntry::Opnsense(o) = p {
             if o.auth.secret.is_some() {
                 return Err(Error::Invalid(po::tf(
@@ -306,6 +378,13 @@ pub fn parse(content: &str, origin: &Path) -> Result<ProviderConfig> {
                 )));
             }
         }
+    }
+    if cfg.default_provider.as_deref() == Some("powerdns") {
+        return Err(Error::Invalid(po::tf(
+            "{path}: defaultProvider is the COMPUTE default and powerdns is not a compute \
+             provider — a powerdns entry only gives the engine its own DNS credential",
+            &[("path", &at)],
+        )));
     }
     if cfg.default_provider.as_deref() == Some("opnsense") {
         return Err(Error::Invalid(po::tf(
@@ -513,6 +592,18 @@ pub fn opnsense_lookup_with<'a>(
     Box::new(move |k| keys.get(k).cloned())
 }
 
+/// The PowerDNS entry of the loaded providers file, if it has one.
+pub fn powerdns_entry() -> Result<Option<&'static PowerdnsEntry>> {
+    match loaded() {
+        Ok(None) => Ok(None),
+        Ok(Some((_, cfg))) => Ok(cfg.providers.iter().find_map(|p| match p {
+            ProviderEntry::Powerdns(d) => Some(&**d),
+            _ => None,
+        })),
+        Err(e) => Err(Error::Invalid(e.to_string())),
+    }
+}
+
 /// Hands the file's default provider to the engine (ADR-0054 D3). A file that
 /// could not be read is handed over as an error, so a VM request that would
 /// have used its default fails with the reason instead of guessing one.
@@ -618,6 +709,9 @@ pub fn validate(cfg: &ProviderConfig, origin: &Path) -> Result<()> {
         }
     }
     for p in &cfg.providers {
+        if let ProviderEntry::Powerdns(d) = p {
+            super::dns_cleanup::target_of(d)?;
+        }
         if let ProviderEntry::Opnsense(o) = p {
             let keys = opnsense_keys(o);
             let lookup = |k: &str| keys.get(k).cloned();
@@ -1113,6 +1207,38 @@ networkDefaults:
             "the published providers schema is stale — regenerate it with \
              `delonix provider config schema > docs/schema/v1/providers.json`"
         );
+    }
+
+    /// ADR-0064 D6: a `powerdns` entry parses with its controllers; an inline
+    /// key, an entry with no controller or a malformed one, and powerdns as the
+    /// compute default are each refused by name.
+    #[test]
+    fn a_powerdns_entry_parses_and_its_mistakes_are_refused_by_name() {
+        let ok = "apiVersion: config.delonix.io/v1\nproviders:\n  - type: powerdns\n    url: http://dns.invalid:8081/api/v1/servers/localhost\n    controllers: [pdnslab]\n    allowPlainHttp: true\n    auth:\n      keyFile: /etc/delonix/powerdns.key\n";
+        let cfg = parse(ok, Path::new("p.yaml")).expect("parse");
+        let ProviderEntry::Powerdns(d) = &cfg.providers[0] else {
+            panic!("not a powerdns entry");
+        };
+        assert_eq!(d.controllers, vec!["pdnslab"]);
+        assert!(d.allow_plain_http);
+        let inline = ok.replace("keyFile: /etc/delonix/powerdns.key", "key: s3cr3t");
+        let e = parse(&inline, Path::new("p.yaml")).unwrap_err().to_string();
+        assert!(e.contains("keyFile") && !e.contains("s3cr3t"), "{e}");
+        let none = ok.replace("controllers: [pdnslab]", "controllers: []");
+        assert!(parse(&none, Path::new("p.yaml"))
+            .unwrap_err()
+            .to_string()
+            .contains("names no `controllers`"));
+        let bad = ok.replace("controllers: [pdnslab]", "controllers: [pdns-lab]");
+        assert!(parse(&bad, Path::new("p.yaml"))
+            .unwrap_err()
+            .to_string()
+            .contains("'pdns-lab'"));
+        let compute = ok.replace("providers:", "defaultProvider: powerdns\nproviders:");
+        assert!(parse(&compute, Path::new("p.yaml"))
+            .unwrap_err()
+            .to_string()
+            .contains("not a compute provider"));
     }
 
     /// The schema is as strict as the parser: an unknown key, a wrong

@@ -1257,6 +1257,27 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>四项缺一时跳过 DNS 实机用例。</td>
 </tr>
 <tr>
+<td><code>DELONIX_POWERDNS_TEST_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>PowerDNS 服务器的 API（<code>http(s):/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>），<code>delonix-powerdns</code> 实机用例在其上删除记录（ADR-0064 D6）。</td>
+<td>http(s) URL。</td>
+<td>与下面两项一起启用该用例。它写入自己的一个 rrset，并在任何退出时删除。</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>保存该服务器 API 密钥的文件。</td>
+<td>文件路径。</td>
+<td>从不打印。</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>服务器已提供的区域，用例在其中写入 rrset。</td>
+<td>域名，例如 <code>f5c.lab</code>。</td>
+<td>三项缺一时跳过该用例。</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>防火墙测试的系统容器所接入的节点网桥：防火墙需要一个 <code>net0</code> 来设置 <code>firewall=1</code>。</td>

@@ -105,6 +105,20 @@
       },
       "type": "object"
     },
+    "PowerdnsAuth": {
+      "additionalProperties": false,
+      "description": "The API key, by reference only: a file only its owner reads.",
+      "properties": {
+        "keyFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ProviderEntry": {
       "description": "One provider. Tagged by `type`, the same name `--backend` and a VM record use.",
       "oneOf": [
@@ -222,6 +236,52 @@
           "required": [
             "type",
             "url",
+            "auth"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A PowerDNS server the engine talks to with ITS OWN credential (ADR-0064\nD6): to remove the gateway records a segment provider's node writes there\nand never removes. The node's own controller credential is never read for\nthis (ADR-0064 D5), so the operator says here which of the cluster's DNS\ncontrollers (`controllers`, by id) this server is.",
+          "properties": {
+            "allowPlainHttp": {
+              "default": false,
+              "description": "`http://` sends the API key in the clear; PowerDNS's own webserver has\nno TLS. Refused unless this is `true`.",
+              "type": "boolean"
+            },
+            "auth": {
+              "$ref": "#/$defs/PowerdnsAuth"
+            },
+            "controllers": {
+              "description": "The DNS controller ids (on the segment provider) whose records live on\nthis server. A zone's controller that no entry names is left as it is,\nand the teardown says so.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tls": {
+              "$ref": "#/$defs/Tls"
+            },
+            "type": {
+              "const": "powerdns",
+              "type": "string"
+            },
+            "url": {
+              "description": "`<scheme>://<host>:<port>/api/v1/servers/<id>` — the form a Proxmox\n`powerdns` controller takes.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url",
+            "controllers",
             "auth"
           ],
           "type": "object"

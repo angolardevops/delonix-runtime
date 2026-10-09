@@ -15428,3 +15428,43 @@ msgstr "secret/{name}: rodado para a versão {v} (alteradas: {keys})"
 
 msgid "its values come from fromEnv/fromEnvFile, which a plan does not read — ensured at apply"
 msgstr "os valores vêm de fromEnv/fromEnvFile, que um plano não lê — garantidos no apply"
+
+# ---- ADR-0064 D6: the engine's own PowerDNS credential cleans the records a node leaves ----
+msgid "the powerdns entry has no `auth.keyFile` — the engine needs its own API key"
+msgstr "a entrada powerdns não tem `auth.keyFile` — o motor precisa da sua própria chave de API"
+
+msgid "{path} is readable by other users — chmod 600 it before using it as the PowerDNS keyFile"
+msgstr "{path} pode ser lido por outros utilizadores — faz chmod 600 antes de o usar como keyFile do PowerDNS"
+
+msgid "{path} is empty — it holds the PowerDNS API key"
+msgstr "{path} está vazio — é ele que guarda a chave de API do PowerDNS"
+
+msgid "the PowerDNS server '{url}' is plain http, which sends the API key in the clear — put a TLS proxy in front of it, or set `allowPlainHttp: true`"
+msgstr "o servidor PowerDNS '{url}' é http simples, que envia a chave de API em claro — põe um proxy TLS à frente dele, ou define `allowPlainHttp: true`"
+
+msgid "{doc}: dns record '{record}' removed from zone '{zone}' (controller '{server}')"
+msgstr "{doc}: registo dns '{record}' removido da zona '{zone}' (controlador '{server}')"
+
+msgid "{doc}: dns record '{record}' is not on zone '{zone}' (controller '{server}') — nothing to remove"
+msgstr "{doc}: o registo dns '{record}' não está na zona '{zone}' (controlador '{server}') — nada a remover"
+
+msgid "{doc}: dns record '{record}' left on zone '{zone}' (controller '{server}'): the provider writes a subnet gateway's records and never removes them — give the engine a `type: powerdns` entry naming '{server}' in providers.yaml to have it removed"
+msgstr "{doc}: o registo dns '{record}' ficou na zona '{zone}' (controlador '{server}'): o provider escreve os registos da gateway de uma subnet e nunca os remove — dá ao motor uma entrada `type: powerdns` que nomeie '{server}' no providers.yaml para o remover"
+
+msgid "{doc}: dns record '{record}' left on zone '{zone}' (controller '{server}'): {why}"
+msgstr "{doc}: o registo dns '{record}' ficou na zona '{zone}' (controlador '{server}'): {why}"
+
+msgid "{path}: a secret VALUE is never written in this file — use `keyFile` (a 0600 file) for the PowerDNS API key"
+msgstr "{path}: um VALOR secreto nunca se escreve neste ficheiro — usa `keyFile` (um ficheiro 0600) para a chave de API do PowerDNS"
+
+msgid "{path}: the powerdns entry names no `controllers` — list the cluster's DNS controller ids whose records live on this server"
+msgstr "{path}: a entrada powerdns não nomeia `controllers` — lista os ids dos controladores DNS do cluster cujos registos vivem neste servidor"
+
+msgid "{path}: powerdns controllers: '{id}' is not a DNS controller id (a letter, then letters and digits, at least 2)"
+msgstr "{path}: powerdns controllers: '{id}' não é um id de controlador DNS (uma letra, depois letras e dígitos, pelo menos 2)"
+
+msgid "{path}: defaultProvider is the COMPUTE default and powerdns is not a compute provider — a powerdns entry only gives the engine its own DNS credential"
+msgstr "{path}: defaultProvider é o default de COMPUTAÇÃO e powerdns não é um provider de computação — uma entrada powerdns só dá ao motor a sua própria credencial de DNS"
+
+msgid "api key from file {path}"
+msgstr "chave de API do ficheiro {path}"

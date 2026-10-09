@@ -26,7 +26,13 @@
 //!   (no node API removes them): a deleted subnet keeps its gateway's A and
 //!   PTR; a changed gateway keeps the old address in `<vnet>-gw`; a renamed
 //!   guest keeps its old A, which then outlives the guest. The caller says
-//!   so out loud ([`gateway_record_names`]).
+//!   so out loud ([`gateway_record_names`]);
+//! * ADR-0064 D6: the first two are cleaned by the engine itself, talking to
+//!   the DNS server with ITS OWN credential (never the controller's). This
+//!   port names them exactly — [`gateway_records`], with the content a
+//!   cleanup must match and the reverse zone the provider derives
+//!   ([`DnsProvider::reverse_zone`]). A renamed guest's A is not a gateway
+//!   record and stays out of the cleanup's rule.
 
 use crate::error::{Error, Result};
 
@@ -174,6 +180,82 @@ pub fn gateway_record_names(dns: &ZoneDns, gateways: &[(String, String)]) -> Vec
     out
 }
 
+/// One record a provider wrote on a DNS server, as a cleanup names it
+/// (ADR-0064 D6). Every name is fully qualified, with its trailing dot.
+/// Serialisable: a record a cleanup could not remove is kept, and retried.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DnsRecord {
+    /// The DNS controller (by id on the provider) the record went to: the
+    /// zone's `server` for an A, its `reverseServer` for a PTR.
+    pub controller: String,
+    /// The DNS zone the record lives in (`f5c.lab.`, `10.in-addr.arpa.`).
+    pub zone: String,
+    /// The record's owner name.
+    pub name: String,
+    /// `A` or `PTR`.
+    pub kind: String,
+    /// The address (an A) or the name it points back to (a PTR). A cleanup
+    /// removes a record only when its content is this.
+    pub content: String,
+}
+
+/// One subnet's gateway, as [`gateway_records`] reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GatewayOf {
+    pub vnet: String,
+    /// `a.b.c.d/len`: a provider may derive the reverse zone from the prefix.
+    pub cidr: String,
+    pub gateway: String,
+}
+
+/// `ip`'s IPv4 PTR owner name, `d.c.b.a.in-addr.arpa.`; `None` for anything
+/// that is not a dotted IPv4 address (IPv6 is out of ADR-0064's scope).
+pub fn ipv4_ptr_name(ip: &str) -> Option<String> {
+    let addr: std::net::Ipv4Addr = ip.trim().parse().ok()?;
+    let o = addr.octets();
+    Some(format!("{}.{}.{}.{}.in-addr.arpa.", o[3], o[2], o[1], o[0]))
+}
+
+/// The records the provider wrote for each gateway under `dns`, with the
+/// content each one carries (ADR-0064 D6): `<vnet>-gw.<zone>.` A `<gateway>`
+/// in the forward zone, and — with a reverse controller — the PTR of the
+/// gateway's address pointing back at that name, in the zone `reverse_zone`
+/// gives (the provider's own rule; `None`: the provider writes no PTR there).
+/// A gateway that is not an IPv4 address gives no record.
+pub fn gateway_records(
+    dns: &ZoneDns,
+    gateways: &[GatewayOf],
+    reverse_zone: &dyn Fn(&str, &str) -> Option<String>,
+) -> Vec<DnsRecord> {
+    let forward = format!("{}.", dns.zone.trim_end_matches('.'));
+    let mut out = Vec::new();
+    for g in gateways {
+        let Some(ptr) = ipv4_ptr_name(&g.gateway) else {
+            continue;
+        };
+        let name = format!("{}-gw.{forward}", g.vnet);
+        out.push(DnsRecord {
+            controller: dns.server.clone(),
+            zone: forward.clone(),
+            name: name.clone(),
+            kind: "A".into(),
+            content: g.gateway.trim().to_string(),
+        });
+        if let (Some(rev), Some(zone)) = (&dns.reverse_server, reverse_zone(&g.cidr, &g.gateway)) {
+            out.push(DnsRecord {
+                controller: rev.clone(),
+                zone,
+                name: ptr,
+                kind: "PTR".into(),
+                content: name,
+            });
+        }
+    }
+    out.sort_by(|a, b| (&a.zone, &a.name, &a.content).cmp(&(&b.zone, &b.name, &b.content)));
+    out.dedup();
+    out
+}
+
 /// A backend that registers the guests of the segments it serves in DNS.
 /// Extends the provider skeleton (ADR-0059 D1 rule 4).
 pub trait DnsProvider: delonix_compute::vm_provider::Provider {
@@ -192,6 +274,12 @@ pub trait DnsProvider: delonix_compute::vm_provider::Provider {
     /// The DNS settings the provider RUNS for `zone`; `None` when it has
     /// none (or the zone is not running). Read-only.
     fn observe(&self, zone: &str) -> delonix_model::Result<Option<ZoneDns>>;
+
+    /// The reverse zone this provider writes the PTR of `ip` (an address of
+    /// the subnet `cidr`) in, as the provider itself derives it; `None` when
+    /// it writes none. Pure: no round trip (ADR-0064 D6 — what a cleanup
+    /// looks for must be exactly what the provider wrote).
+    fn reverse_zone(&self, cidr: &str, ip: &str) -> Option<String>;
 }
 
 /// Builds a [`DnsProvider`], or reports why it could not.
@@ -340,6 +428,49 @@ mod tests {
         assert_eq!(d.len(), 2, "{d:?}");
         assert!(d[0].contains("other.lab"));
         assert!(d[1].contains("reverseServer is 'none'"));
+    }
+
+    #[test]
+    fn gateway_records_carry_the_content_a_cleanup_matches() {
+        let gws = vec![
+            GatewayOf {
+                vnet: "v1".into(),
+                cidr: "10.84.0.0/24".into(),
+                gateway: "10.84.0.1".into(),
+            },
+            GatewayOf {
+                vnet: "v6".into(),
+                cidr: "fd00::/64".into(),
+                gateway: "fd00::1".into(),
+            },
+        ];
+        let rev = |_: &str, _: &str| Some("10.in-addr.arpa.".to_string());
+        let got = gateway_records(&dns(), &gws, &rev);
+        assert_eq!(
+            got,
+            vec![
+                DnsRecord {
+                    controller: "pdnslab".into(),
+                    zone: "10.in-addr.arpa.".into(),
+                    name: "1.0.84.10.in-addr.arpa.".into(),
+                    kind: "PTR".into(),
+                    content: "v1-gw.f5c.lab.".into(),
+                },
+                DnsRecord {
+                    controller: "pdnslab".into(),
+                    zone: "f5c.lab.".into(),
+                    name: "v1-gw.f5c.lab.".into(),
+                    kind: "A".into(),
+                    content: "10.84.0.1".into(),
+                },
+            ],
+            "the IPv6 gateway gives no record"
+        );
+        let mut forward_only = dns();
+        forward_only.reverse_server = None;
+        assert_eq!(gateway_records(&forward_only, &gws, &rev).len(), 1);
+        let none = |_: &str, _: &str| None;
+        assert_eq!(gateway_records(&dns(), &gws, &none).len(), 1);
     }
 
     #[test]

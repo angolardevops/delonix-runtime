@@ -240,6 +240,13 @@ struct NetworkZoneRecord {
     /// `None` — and every record from before the field — is the default.
     #[serde(default)]
     ipam: Option<String>,
+    /// Gateway records the provider left on a DNS server that a cleanup could
+    /// not remove yet — no `powerdns` entry for their controller, or the
+    /// server refused or did not answer (ADR-0064 D6). Retried on every apply
+    /// and on the teardown; reported again only on the teardown, the last
+    /// chance before the record goes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dns_left: Vec<delonix_networking::dns::DnsRecord>,
 }
 
 /// One reservation this engine holds.
@@ -959,9 +966,11 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 .map_err(at(provider_id, "ipam_controllers"))?;
         }
     }
-    // The gateways the zone ran with before this apply, to say which ones a
-    // DNS server keeps the old record of (ADR-0064).
+    // The gateways the zone ran with before this apply, and the DNS settings
+    // the node wrote their records under, to remove the old record a gateway
+    // changed in place leaves on the DNS server (ADR-0064 D6).
     let prior_subnets = declared_subnets(&rec.vnets);
+    let prior_dns = rec.dns.as_ref().map(DnsInput::port);
     let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = provider_id.to_string();
@@ -1112,33 +1121,57 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     rec.dns = spec.dns.clone();
     rec.ipam = spec.ipam.clone();
     s.save(&name, &rec)?;
-    if spec.dns.is_some() {
+    if let Some(prior) = &prior_dns {
         // ADR-0064: the node writes `<vnet>-gw` when a subnet is created and
         // never rewrites it, so a gateway changed in place keeps its old
-        // address on the DNS server.
-        for now in &subnets {
-            if let Some(before) = prior_subnets.iter().find(|p| {
-                p.vnet == now.vnet
-                    && p.cidr == now.cidr
-                    && p.gateway.is_some()
-                    && p.gateway != now.gateway
-            }) {
-                println!(
-                    "{}",
-                    super::po::tf(
-                        "networkzone/{name}: subnet {cidr} changed its gateway in place — the DNS \
-                         record '{vnet}-gw' keeps the old address {old}; the provider never \
-                         rewrites it",
-                        &[
-                            ("name", &name),
-                            ("cidr", &now.cidr),
-                            ("vnet", &now.vnet),
-                            ("old", before.gateway.as_deref().unwrap_or_default()),
-                        ],
-                    )
-                );
-            }
+        // address on the DNS server. D6: that old address (and its PTR, if
+        // the node left it) is removed with the engine's own credential, or
+        // said to be left.
+        let old: Vec<delonix_networking::dns::GatewayOf> = subnets
+            .iter()
+            .filter_map(|now| {
+                prior_subnets
+                    .iter()
+                    .find(|p| {
+                        p.vnet == now.vnet
+                            && p.cidr == now.cidr
+                            && p.gateway.is_some()
+                            && p.gateway != now.gateway
+                    })
+                    .map(|before| delonix_networking::dns::GatewayOf {
+                        vnet: before.vnet.clone(),
+                        cidr: before.cidr.clone(),
+                        gateway: before.gateway.clone().unwrap_or_default(),
+                    })
+            })
+            .collect();
+        for g in &old {
+            println!(
+                "{}",
+                super::po::tf(
+                    "networkzone/{name}: subnet {cidr} changed its gateway in place — the DNS \
+                     record '{vnet}-gw' keeps the old address {old}; the provider never \
+                     rewrites it",
+                    &[
+                        ("name", &name),
+                        ("cidr", &g.cidr),
+                        ("vnet", &g.vnet),
+                        ("old", &g.gateway),
+                    ],
+                )
+            );
         }
+        // Only the A: the node removes the old address's PTR itself when it
+        // re-adds the gateway (measured on PVE 9.2.2, ADR-0064 D6).
+        let fresh: Vec<_> = gateway_records_of(&name, provider_id, prior, &old)
+            .into_iter()
+            .filter(|r| r.kind == "A")
+            .collect();
+        settle_dns_left(&name, &mut rec, fresh, false);
+        s.save(&name, &rec)?;
+    } else if !rec.dns_left.is_empty() {
+        settle_dns_left(&name, &mut rec, Vec::new(), false);
+        s.save(&name, &rec)?;
     }
     if dns_changed {
         // Measured on PVE 9.2.2: the node writes records when it hands out an
@@ -1332,26 +1365,109 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
         report_left(name, kind, object, why);
     }
     // The node writes a subnet gateway's A and PTR and no node API removes
-    // them (measured on PVE 9.2.2, ADR-0064): said out loud, never left
-    // silently in someone's DNS.
+    // them (measured on PVE 9.2.2, ADR-0064). D6: removed from the DNS
+    // server with the engine's own credential — only the subnets this
+    // teardown deleted (a vnet left as someone else's kept its subnets) —
+    // or said out loud, never left silently in someone's DNS.
     if let Some(dns) = rec.dns.as_ref().map(DnsInput::port) {
-        let gateways: Vec<(String, String)> = subnets
+        let kept: Vec<&str> = left
             .iter()
-            .filter_map(|s| s.gateway.clone().map(|g| (s.vnet.clone(), g)))
+            .filter(|(kind, _, _)| kind == "vnet")
+            .map(|(_, v, _)| v.as_str())
             .collect();
-        for record in delonix_networking::dns::gateway_record_names(&dns, &gateways) {
-            println!(
-                "{}",
-                super::po::tf(
-                    "networkzone/{name}: dns record '{record}' and its PTR left on DNS server \
-                     '{server}': the provider writes a subnet gateway's records and never \
-                     removes them",
-                    &[("name", name), ("record", &record), ("server", &dns.server)],
-                )
-            );
-        }
+        let deleted: Vec<delonix_networking::dns::GatewayOf> = subnets
+            .iter()
+            .filter(|s| !kept.contains(&s.vnet.as_str()))
+            .filter_map(|s| {
+                s.gateway
+                    .clone()
+                    .map(|g| delonix_networking::dns::GatewayOf {
+                        vnet: s.vnet.clone(),
+                        cidr: s.cidr.clone(),
+                        gateway: g,
+                    })
+            })
+            .collect();
+        let fresh = gateway_records_of(name, provider_id, &dns, &deleted);
+        settle_dns_left(name, &mut rec, fresh, true);
+    } else if !rec.dns_left.is_empty() {
+        settle_dns_left(name, &mut rec, Vec::new(), true);
     }
     s.remove(name).map_err(Into::into)
+}
+
+/// ADR-0064 D6: the records the provider wrote for `gateways` under `dns`.
+/// A gateway that gives no record the cleanup can name (not IPv4) is said to
+/// be left, as before D6.
+fn gateway_records_of(
+    name: &str,
+    provider_id: &str,
+    dns: &ZoneDns,
+    gateways: &[delonix_networking::dns::GatewayOf],
+) -> Vec<delonix_networking::dns::DnsRecord> {
+    if gateways.is_empty() {
+        return Vec::new();
+    }
+    // The reverse zone is the provider's own rule; a provider whose DNS role
+    // cannot be built now gives no PTR to look for (the A is still cleaned).
+    let provider = dns_provider(provider_id).ok().flatten();
+    let reverse = |cidr: &str, ip: &str| provider.as_ref().and_then(|p| p.reverse_zone(cidr, ip));
+    let records = delonix_networking::dns::gateway_records(dns, gateways, &reverse);
+    for g in gateways {
+        if delonix_networking::dns::ipv4_ptr_name(&g.gateway).is_none() {
+            for record in delonix_networking::dns::gateway_record_names(
+                dns,
+                &[(g.vnet.clone(), g.gateway.clone())],
+            ) {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "networkzone/{name}: dns record '{record}' and its PTR left on DNS server \
+                         '{server}': the provider writes a subnet gateway's records and never \
+                         removes them",
+                        &[("name", name), ("record", &record), ("server", &dns.server)],
+                    )
+                );
+            }
+        }
+    }
+    records
+}
+
+/// ADR-0064 D6: removes `fresh` and the records the zone still holds as left
+/// (`rec.dns_left`) from their DNS servers, with the engine's own credential,
+/// says what happened to each, and keeps in `rec.dns_left` the ones still
+/// there. A record kept from before that still cannot be removed is said
+/// again only when `last` (the teardown) — the operator heard it already.
+fn settle_dns_left(
+    name: &str,
+    rec: &mut NetworkZoneRecord,
+    fresh: Vec<delonix_networking::dns::DnsRecord>,
+    last: bool,
+) {
+    let mut all = std::mem::take(&mut rec.dns_left);
+    for r in fresh.iter() {
+        if !all.contains(r) {
+            all.push(r.clone());
+        }
+    }
+    if all.is_empty() {
+        return;
+    }
+    let outcomes = super::dns_cleanup::clean(&all);
+    // A record kept from before is said again when it moved (removed, or
+    // found gone); one that still cannot be removed only on the teardown —
+    // `stack apply` may converge twice, and the operator heard it already.
+    let shown: Vec<_> = outcomes
+        .iter()
+        .filter(|(r, c)| {
+            use super::dns_cleanup::Cleaned;
+            last || fresh.contains(r) || matches!(c, Cleaned::Removed | Cleaned::NotThere)
+        })
+        .map(|(r, c)| (r.clone(), c.clone()))
+        .collect();
+    super::dns_cleanup::report(&format!("networkzone/{name}"), &shown);
+    rec.dns_left = super::dns_cleanup::still_left(&outcomes);
 }
 
 /// The audible half of a teardown that skipped an object.

@@ -328,7 +328,10 @@ cada um e qual serve um pedido que não nomeia nenhum. Desde o catálogo 1.1.0
 (ADR-0059 F1) aceita também um appliance OPNsense (`type: opnsense`) e o bloco
 `networkDefaults`, que diz que provider responde a cada papel de rede
 (`segment`, `gateway`; `nat`, `ipam` e `dns` são recusados até existir quem os
-sirva). O `defaultProvider` continua a ser só o de computação. Procura-se por
+sirva). Desde o ADR-0064 D6 aceita também `type: powerdns`: a credencial do
+PRÓPRIO motor para um servidor PowerDNS (`url`, `controllers`, `auth.keyFile`,
+`allowPlainHttp`), usada só para remover os registos de gateway que o nó
+Proxmox escreve e nunca remove. O `defaultProvider` continua a ser só o de computação. Procura-se por
 esta ordem, e **o primeiro ficheiro que existe ganha, sem fusão**:
 `DELONIX_PROVIDERS_CONFIG`, `$XDG_CONFIG_HOME/delonix/providers.yaml` (ou
 `~/.config/…`), `/etc/delonix/providers.yaml`.

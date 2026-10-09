@@ -710,6 +710,8 @@ command, no residing process:
      - Dataset, quota and share provisioning on a TrueNAS appliance.
    * - ``delonix-opnsense``
      - A ``GatewayProvider`` against an OPNsense appliance's REST API (``kind: NetworkGateway``, ADR-0051).
+   * - ``delonix-powerdns``
+     - A minimal PowerDNS API client with the engine's own credential: removes the gateway records a Proxmox node leaves behind (ADR-0064 D6).
    * - **Interfaces and binaries**
      -
    * - ``delonix-cri``
