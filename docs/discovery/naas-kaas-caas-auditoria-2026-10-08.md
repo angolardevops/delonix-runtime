@@ -112,8 +112,24 @@ first), independent of which domain each came from:
    path to the fact — closed afterward (`46e3222a`, §4.11), gated on `verbose` exactly
    like `StatusResponse.info`'s `capabilityCeiling` already was.
 4. **KaaS — `oom_score_adj`/`cpuset_mems`/`unified`/hugepages silently dropped on the CRI
-   path.** `oom_score_adj` `FIXED` (§4.5); `cpuset_mems`/`unified`/hugepages still not —
-   contradicts ADR-0038's own decision text. See §8.
+   path.** `oom_score_adj` `FIXED` (§4.5); `cpuset_mems`/`unified`/hugepages
+   **FIXED in a later session** (#752, `f72a4f55`/`61e901bf`: `CriResources` gained the
+   three fields, `refuse_unenforceable_resources` runs before `StartContainer` reports
+   success against whichever leaf the container actually lands in, and the write side
+   mirrors `cpuset.cpus` across all three placement paths; `cpuset_cpus` itself — wired
+   into `apply_resources` since before this gap was even filed, with no preflight of its
+   own — was closed in the same pass). `UpdateContainerResources`, named alongside this
+   gap in ADR-0038's own decision text as item 4, is **also fixed** (#755,
+   `724925a6`, pending merge at the time of this note): `CriResources::merge_update`
+   treats a zero/empty field as "leave unchanged" rather than "no limit" (the opposite
+   of `CreateContainer`'s own reading of the same wire value), and
+   `delonix_linux::update_kube_resources` dispatches to `SetUnitProperties` under a
+   kubelet systemd scope or a direct write otherwise. Both validated live on the
+   non-systemd leaf path (real `crictl`); the systemd `SetUnitProperties` branch for
+   either fix still needs a stable kubelet to measure for real — unit/pure tests only,
+   same boundary §8 already names for the rest of this ADR. ADR-0038's four decision
+   items are now all implemented; what §8 below still calls open for this gap is
+   superseded.
 5. **CaaS — multi-tenant admission is open by default, with zero warning event.** `NOT
    FIXED` — deliberate for the engine's documented single-tenant use, but a CaaS layer that
    forgets to configure both `RuntimePolicy` and `DELONIX_CRI_CAP_CEILING` gets node
@@ -636,6 +652,63 @@ already has gRPC-transport proof; the substantive logic is covered, revert-verif
 the lib level — the same bar the CLI half of this exact gap (`1e5562e6`) was closed
 against.
 
+### 4.12 Gap #4, remaining half closed in two later sessions — `f72a4f55`/`61e901bf` (PR #752), `724925a6` (PR #755)
+
+§3's gap #4 itself named four fields contradicting ADR-0038's own "honour or refuse,
+never ignore" decision text: `oom_score_adj` was fixed here (§4.5); `cpuset_mems`,
+`unified`, `hugepage_limits` and `UpdateContainerResources` (ADR-0038's own items 3 and
+4) were not — and §8 counted the gap as only half-fixed. Both were closed afterward, on
+this same tree, each its own PR.
+
+**Item 3 (PR #752, `f72a4f55`, e2e coverage `61e901bf`).** The CRI had no preflight for
+ANY resource field, not even `cpuset_cpus` — the fields simply did not reach
+`CriResources` at all, so a kubelet asking for a controller the leaf does not delegate
+got a container reporting `Running` with the limit silently absent, the exact "accept
+and ignore" shape this section's gap #1 (`--secret-files`) was fixed for, on a different
+field. `CriResources` gained the three proto fields; `refuse_unenforceable_resources`
+runs in `start_container`, before `StartContainer` answers success, checking the
+controller the container is ACTUALLY about to land in — the engine's own
+`leaf_controllers()` without a kubelet `cgroup_parent`, that parent's own
+`cgroup.controllers` with one (ADR-0038 item 1's placement decides which; asking the
+wrong one would refuse legitimate requests under a well-delegated parent, or accept
+requests the kubelet's own parent cannot honour at all). The write side mirrors
+`cpuset.cpus` across the three placement paths, with `AllowedMemoryNodes` added as a
+systemd unit property and raw writes for `hugepage_limits`/`unified` (neither has a
+systemd property). `cpuset_cpus` itself — wired into `apply_resources` since before this
+gap was filed, with no preflight of its own — was closed in the same preflight,
+alongside its sibling `cpuset_mems`. Live `crictl` coverage (6 checks, `scripts/e2e.sh`,
+no root needed) proves the refusal, the field+controller naming, the escape hatch
+(`DELONIX_ALLOW_UNENFORCED_LIMITS`), and the path-traversal guard on
+`hugepage_limits[].page_size`/a `unified` key end to end, against a real `serve cri`.
+
+**Item 4 (PR #755, `724925a6`).** `UpdateContainerResources` always answered `todo` —
+the RPC the kubelet's in-place pod resize (KEP-1287) and `crictl update` both call.
+`CriResources::merge_update` treats the request's zero/empty fields as "leave
+unchanged", the OPPOSITE of `CreateContainer`'s own reading of the identical wire value
+(there, zero means "no limit" — a new container has nothing to inherit; here, an update
+is a PARTIAL request, and replacing the record wholesale would erase every other field
+the container was created with the moment any one is touched). `cpu_quota`/`cpu_period`
+merge as a pair, by design, rather than letting one half of an incomplete request pair
+with the OTHER half's old value. The same `refuse_unenforceable_resources` check from
+item 3 gates it first. `delonix_linux::update_kube_resources` is `update_limits` widened
+to every item-3 field and placement-aware: `SetUnitProperties` (only the properties the
+request actually gives — the rest stay as systemd already has them) under a kubelet
+systemd scope, a direct cgroup write otherwise; `hugepage_limits`/`unified` always write
+straight to the scope/leaf's cgroup (no systemd property either way), and
+`oom_score_adj` writes `/proc/<pid>/oom_score_adj` from outside this time (a new sibling
+of the init's own self-write). Validated live, non-systemd leaf path, real `crictl
+update` against an isolated root: `memory_limit_in_bytes` and `cpu_quota`/`cpu_period`
+landed on the SAME pid's live cgroup, and a second, memory-only update left `cpu.max`
+untouched — the partial-merge guarantee this item exists for.
+
+**Both share the same stated boundary** this section already uses elsewhere: the
+systemd `SetUnitProperties` branch, for item 3's write side and item 4's update path
+alike, needs a stable kubelet to measure for real and has unit/pure test coverage only —
+the control-plane crash-loop investigated separately (and never reached by this audit)
+still blocks that. With item 4 closed, ADR-0038's four decision items are now all
+implemented; what remains for the ADR as a whole is exactly that end-to-end kubelet
+validation, not new behavior.
+
 ## 5. Test results, exact
 
 Two environments ended up involved, and the results below say which is which.
@@ -754,10 +827,12 @@ and leaves written down, for whoever does that work next:
 - **5 of the 12 originally-ranked gaps are not fixed by this pass — but all five were
   reviewed with evidence, not left on the earlier one-line guess (§4.10).** Of the twelve,
   six have a behavior fix: #1, #2 (single-node), #3, #4 (`oom_score_adj` half), #8, and
-  #10 — **#3 and #10 closed in full** in a later session on this same tree (§4.11: #3's
+  #10 — **#3, #4 and #10 closed in full** in later sessions on this same tree (§4.11: #3's
   CRI/`ContainerStatus` half, `46e3222a`; #10's `etcdctl snapshot` backup/restore half,
-  `7d529876`), both stated as not validated against a real cluster/kubelet, same as this
-  section's own earlier fixes. Gap #6 (§4.9) got real work — a precise diagnosis of
+  `7d529876`; #4's remaining `cpuset_mems`/`unified`/hugepages half and
+  `UpdateContainerResources`, ADR-0038's own items 3 and 4, `f72a4f55`/`61e901bf`/
+  `724925a6` — see the gap's own entry above), all stated as not validated against a
+  real cluster/kubelet, same as this section's own earlier fixes. Gap #6 (§4.9) got real work — a precise diagnosis of
   exactly why the obvious fix cannot
   land without an owner decision, and doc-comment hardening in the meantime — but no
   behavior changed, so it stays counted as open. The live-only gap #13 (stale CLI on
