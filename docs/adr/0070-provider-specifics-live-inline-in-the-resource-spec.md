@@ -1,6 +1,6 @@
 # ADR-0070: Provider specifics live in a `provider` block of the resource's own spec
 
-- **Status:** Accepted (2026-10-03, owner's direction) — D1–D2 implemented for `VirtualMachine`, D3 for `NetworkZone` (now `Network` + `provider.proxmox`); the table lists what is still to move
+- **Status:** Accepted (2026-10-03, owner's direction) — D1–D2 implemented for `VirtualMachine`, D3 for `NetworkZone` (now `Network` + `provider.proxmox`); the two rows the table left to move were closed by ADR-0072 and ADR-0073 (accepted 2026-10-08)
 - **Date:** 2026-10-03
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0008 (VM backend registry), ADR-0044 (provider ports), ADR-0049/0051/0059 (Proxmox, OPNsense, network providers by role), ADR-0058 (system containers), ADR-0069

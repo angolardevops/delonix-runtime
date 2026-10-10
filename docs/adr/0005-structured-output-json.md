@@ -1,6 +1,6 @@
 # ADR-0005: Structured output (`-o json`) for listing commands
 
-- **Status:** Accepted (contract + first slice; remaining commands are follow-up)
+- **Status:** Accepted (implemented: 10/10 listing commands, see «Rollout status»)
 - **Date:** 2026-07-30
 - **Deciders:** Walter (owner) + Chief Runtime Architect review (DevOps / SRE / Platform lens)
 - **Related:** `AGENTS.md` ("Por fazer, deliberadamente: `--format json`… merece desenho próprio"),
@@ -59,9 +59,10 @@ enum + the emit helper land in `output.rs` so the remaining commands adopt them 
 **Rollout status: COMPLETE (10/10 listing commands).**
 `workload ls`, `container ps`, `vm ls`, `pod ls`, `network ls`, `volumes ls`,
 `secret ls` (key names only — never values), `storage ls`, `sharevolume ls`, and `image ls`
-(all three entry points — `image ls`, `image --vm ls`, `image vm ls` — the dual-purpose `Ls`
-threads `output` through to `VmImageCmd::Ls`, so the `--vm` path does NOT silently ignore the
-flag). Every one emits a stable, language-independent JSON array; the default `table` is unchanged.
+(and the VM-image listing, which `VmImageCmd::Ls` serves). The command names are the ones of
+when this was written: `storage ls` and `sharevolume ls` were folded into `volume ls` (B5),
+and the VM-image listing moved from `image vm ls`/`image --vm ls` to `vm image ls` (Sprint 9
+of the CLI restructuring); the JSON shape did not change. Every one emits a stable, language-independent JSON array; the default `table` is unchanged.
 
 ## Alternatives considered
 

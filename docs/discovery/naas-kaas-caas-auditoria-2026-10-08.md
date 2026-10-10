@@ -130,8 +130,9 @@ first), independent of which domain each came from:
    same boundary §8 already names for the rest of this ADR. ADR-0038's four decision
    items are now all implemented; what §8 below still calls open for this gap is
    superseded.
-5. **CaaS — multi-tenant admission is open by default, with zero warning event.** `NOT
-   FIXED` — deliberate for the engine's documented single-tenant use, but a CaaS layer that
+5. **CaaS — multi-tenant admission is open by default, with zero warning event.** `FIXED
+   2026-10-10 (#767)`: an admission that nothing constrains is now recorded. As first
+   written: `NOT FIXED` — deliberate for the engine's documented single-tenant use, but a CaaS layer that
    forgets to configure both `RuntimePolicy` and `DELONIX_CRI_CAP_CEILING` gets node
    compromise with no structural signal. See §8.
 6. **NaaS — Proxmox-native vnet firewall is accepted and read back but does not actually

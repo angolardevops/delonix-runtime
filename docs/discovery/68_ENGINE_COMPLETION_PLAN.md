@@ -195,7 +195,7 @@ Each row's «Live validation» is the gate that closes the sprint.
 | # | Item |
 |---|---|
 | 10.1 | Merge the `vm image` migration (fresh battery run, `cli_exec_trace.tsv` re-recorded, C12 included) |
-| 10.2 | Fix C1–C11 in the documents that carry them |
+| 10.2 | **Done 2026-10-10**: C1–C11 fixed in the documents that carry them — ADR statuses in place, dated reports with a dated correction next to the original sentence |
 | 10.3 | `scripts/lab_budget.sh` (§4 rule 1) |
 | 10.4 | Remove the `aprendizados-v5` worktree and branch; N29; N30 |
 | 10.5 | N1: `install.sh` end to end |
