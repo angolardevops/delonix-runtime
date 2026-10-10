@@ -16,7 +16,7 @@
 
 | Bloco | Requisitos | Estado |
 |---|---|---|
-| **0 — Segurança imediata** | RF-NET-11 (mitigação), RF-NET-02 | ✅ **FEITO** — ver `docs/releases/v0.37.1.md` |
+| **0 — Segurança imediata** | RF-NET-11 (mitigação), RF-NET-02 | ✅ **FEITO** — ver `docs/releases/archive/v0.md`, secção v0.37.1 |
 | 1 — A′ | RF-NET-03, RF-NET-05 (reformulado) | por fazer |
 | 2 — A″ | RF-NET-01 (reformulado) | por fazer |
 | 3 — B | RF-NET-07 → RF-NET-06 | por fazer |
