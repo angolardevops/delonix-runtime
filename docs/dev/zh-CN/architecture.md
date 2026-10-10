@@ -713,6 +713,7 @@ flowchart TB
   delonix_cri --> delonix_node
   delonix_cri --> delonix_oci
   delonix_cri --> delonix_sdn
+  delonix_cri --> delonix_security_runtime
   delonix_cri --> delonix_state
   delonix_cri --> delonix_telemetry
   delonix_linux --> delonix_compute
