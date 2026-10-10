@@ -1,6 +1,6 @@
 # ADR-0012: A third convergence class for VMs — reboot, between update and replace
 
-- **Status:** **Proposed** (2026-08-12)
+- **Status:** **Accepted (2026-10-10, by the owner)** — decided together with ADR-0068's open question 1: a field that is neither hot nor hot-pluggable plans a reboot, not a replace (completion plan Sprint 18). The premise «no hotplug» below predates ADR-0068 Phase 1
 - **Date:** 2026-08-12
 - **Deciders:** Walter Angolar
 

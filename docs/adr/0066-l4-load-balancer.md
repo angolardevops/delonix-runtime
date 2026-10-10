@@ -1,6 +1,6 @@
 # ADR-0066: An L4 load balancer in the engine — a VIP per `Service`, nftables DNAT in the holder, readiness-gated backends
 
-- **Status:** Proposed (2026-10-02). Nothing implemented; the evidence is the spike in
+- **Status:** Accepted (2026-10-10, by the owner); F1–F3 are completion plan Sprint 17. Nothing implemented yet; the evidence is the spike in
   «Measurements», run in a throwaway unprivileged namespace. The owner's answers of 2026-10-02 are
   recorded as decided (D2, D8, D9, «Owner decisions»).
 - **Date:** 2026-10-02

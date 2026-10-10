@@ -1,6 +1,6 @@
 # ADR-0027: Rootless changes the answer — seccomp user-notification, not eBPF, is this engine's sensor
 
-- **Status:** Proposed (GO/NO-GO spike closed; the decision to BUILD is the owner's)
+- **Status:** Accepted (2026-10-10, by the owner) — to build; the per-syscall cost is measured first (completion plan Sprint 24)
 - **Date:** 2026-08-29
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0026 (the security runtime is a decision crate), `crates/adapters/delonix-net/src/bpf.rs`,

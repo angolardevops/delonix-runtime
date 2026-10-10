@@ -1,6 +1,6 @@
 # ADR-0003: A tenancy-free capability model at the control-socket boundary
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — the trigger ADR-0041 names is met; built with the node API (completion plan Sprint 13)
 - **Date:** 2026-07-30
 - **Deciders:** Walter (owner) + Chief Runtime Architect review
 - **Related:** `docs/runtime/current-state.md` §7 (security posture), `docs/runtime/runtime-architecture.md`

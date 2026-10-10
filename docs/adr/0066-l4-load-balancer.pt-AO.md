@@ -3,7 +3,7 @@
 > **Cópia de revisão interna, em português (pt-AO).** O ADR canónico é
 > `0066-l4-load-balancer.md`, em inglês; as decisões são as mesmas nos dois.
 
-- **Estado:** Proposed (2026-10-02). Nada implementado; a evidência é o spike da secção
+- **Estado:** Accepted (2026-10-10, pelo dono); F1–F3 são a Sprint 17 do plano de conclusão. Nada implementado ainda; a evidência é o spike da secção
   «Medições», corrido num namespace descartável sem privilégio. As respostas do dono de
   2026-10-02 ficam registadas como decididas (D2, D8, D9, «Decisões do dono»).
 - **Data:** 2026-10-02

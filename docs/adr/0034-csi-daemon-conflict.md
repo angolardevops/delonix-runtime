@@ -1,6 +1,6 @@
 # ADR-0034: A real CSI driver needs a persistent daemon — that's a philosophy decision, not a storage-driver decision
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — a decision not to build: no CSI daemon
 - **Date:** 2026-09-06
 - **Deciders:** Walter (owner)
 - **Related:** `docs/runtime/runtime-architecture.md` §"Storage Engine" ("CSI specifically edges

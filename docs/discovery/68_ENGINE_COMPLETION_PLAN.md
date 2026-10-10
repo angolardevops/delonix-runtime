@@ -100,7 +100,7 @@ which decides where its live validation happens (§4).
 | N18 | ADR-0063 | plan does not read IPAM gateway entries; D3.3 has unit proof only | proxmox-ve | M |
 | N19 | ADR-0063 D1.3/D1.4 | NetBox spike (called off on host resources) | NetBox + proxmox-ve | M |
 | N20 | ADR-0067 P1–P6 | storage helper, btrfs, ZFS, LVM-thin, VM disks in pools, destroy guards | root VM with spare disks | L |
-| N21 | ADR-0065 P1–P6 | IPv6 dataplane (P0 done) | golden VM; a v6-egress host for G3 | L |
+| N21 | ADR-0065 P1–P6 | IPv6 dataplane | golden VM; a v6-egress host for G3 | L |
 | N22 | ADR-0066 F1–F3 | L4 VIP Service, `svc` chain, readiness | golden VM | L |
 | N23 | ADR-0068 Ph1 rest, Ph2–6 | hotplug on libvirt and Proxmox; base images that online (D8); disk add, NIC add, removal | golden VM, proxmox-ve | L |
 | N24 | ADR-0048 Ph3 | service credentials (`--credentials`/`--reveal`) | nothing | M |
@@ -113,32 +113,36 @@ which decides where its live validation happens (§4).
 
 ---
 
-## 3. The sixteen `Proposed` ADRs — a recommendation each
+## 3. The sixteen `Proposed` ADRs — decided by the owner on 2026-10-10
 
-The owner decides; this table is the recommendation, written so that one reading
-is enough to say yes or no to each row. «Accept» on a built ADR records what the
-code already does — it is not new work.
+The recommendation was written so one reading was enough to say yes or no to
+each row; the owner answered the same day. «Accept» on a built ADR records what
+the code already does — it is not new work. Where the decision differs from the
+recommendation, both are kept, so the reason for the difference is not lost.
 
-| ADR | Decides | Evidence today | Recommendation | Then |
-|---|---|---|---|---|
-| 0026 | security runtime as a decision crate | built (#163), extended (#767) | **Accept** — status lags the code (C6) | none |
-| 0057 | Proxmox VM from an image of the engine's store | built and live-measured (#541) | **Accept** — status lags the code (C6) | live re-check in Sprint 11 |
-| 0068 | VM hotplug CPU/memory/disk/NIC | spike + Phase 1 on CH (#749) | **Accept**, phases 2–6 scheduled (Sprint 18) | decide its open question 1 together with 0012 |
-| 0012 | `Action::Reboot` convergence class | gap measured; its «no hotplug» premise is stale | **Accept merged with 0068 OQ1**: a field that is neither hot nor hot-pluggable plans `Reboot`, not `Replace` | Sprint 18 |
-| 0048 | service names and credentials | phases 1–2 built (#448, #449) | **Accept**, phase 3 scheduled (Sprint 20) | — |
-| 0003 | default-off capability gate at socket dispatch | ADR-0041 says the trigger is met | **Accept** (C5) | built with the node API, Sprint 13 |
-| 0047 | the L7 proxy authorises container sources | ADR-0046 Ph1b left the hole | **Accept the spike** (holder netns only, no root) | Sprint 17 |
-| 0065 | IPv6 dataplane | spike done, P0 done | **Accept**, P1–P6 scheduled; G3 (v6 egress) stays `partial` until a v6 uplink exists | Sprint 17 |
-| 0066 | L4 load balancer | spike done | **Accept**, F1–F3 scheduled | Sprint 17 |
-| 0033 | OCI hooks stay unimplemented | no consumer | **Accept as a decision not to build** — the refusal by name already exists for CDI specs that declare hooks | none |
-| 0034 | no CSI daemon | daemonless principle | **Accept as a decision not to build** | none |
-| 0021 | `kind: GitOpsSource` pull reconciler | baseline only | **Defer** — keep `Proposed` with the trigger written: a consumer that cannot run `stack apply` from its own CI | none until the trigger |
-| 0027 (sensor) | seccomp unotify sensor | GO/NO-GO closed; per-syscall cost not measured | **Measure the cost first** (one bench in Sprint 21), then accept or reject on the number | Sprint 21 |
-| 0004 | rootless CRIU checkpoint | no spike; CRIU absent | **Reject for now** — no consumer named; reopen with one | none |
-| 0036 | macOS/Windows as a VM launcher | design only | **Stays `Proposed`, blocked**: needs a Windows host and a real Mac (§5) | — |
-| 0039 | OpenStack `VmBackend` | spike plan only | **Stays `Proposed`, blocked**: needs a live cloud; the `openstack:2026.1` image asks 8 vCPU / 16 GiB, past this host's budget (§4) | — |
-| X1 | (not an ADR) cut `v3.1.1` from `backport/v3.1-rota-multi-homed`? | backport pushed | owner's call: only if a consumer is still pinned to v3.1 | — |
-| X2 | (not an ADR) renumber one of the two ADR-0027 | — | **Renumber the sensor ADR to the next free number** and leave a stub pointing to it, so existing links survive | Sprint 11 |
+| ADR | Decides | Evidence | Recommended | **Decided** | Sprint |
+|---|---|---|---|---|---|
+| 0026 | security runtime as a decision crate | built (#163), extended (#767) | accept (C6) | **Accepted** | — |
+| 0057 | Proxmox VM from an image of the engine's store | built and live-measured (#541) | accept (C6) | **Accepted** | live re-check in 11 |
+| 0068 | VM hotplug CPU/memory/disk/NIC | spike + Phase 1 on CH (#749) | accept | **Accepted** | 18 |
+| 0012 | the reboot convergence class | gap measured; its «no hotplug» premise is stale | accept, merged with 0068 OQ1 | **Accepted**, merged with 0068 OQ1 | 18 |
+| 0048 | service names and credentials | phases 1–2 built (#448, #449) | accept | **Accepted** | 20 |
+| 0003 | default-off capability gate at socket dispatch | ADR-0041 says the trigger is met (C5) | accept | **Accepted** | 13 |
+| 0047 | the L7 proxy authorises container sources | ADR-0046 Ph1b left the hole | accept the spike | **Accepted**, spike first | 17 |
+| 0065 | IPv6 dataplane | spike done; nothing implemented | accept | **Accepted**; G3 (v6 egress) stays `partial` until a v6 uplink exists | 17 |
+| 0066 | L4 load balancer | spike done | accept | **Accepted** | 17 |
+| 0033 | OCI hooks stay unimplemented | no consumer | accept as not-to-build | **Accepted — not to build** | — |
+| 0034 | no CSI daemon | daemonless principle | accept as not-to-build | **Accepted — not to build** | — |
+| 0021 | `kind: GitOpsSource` pull reconciler | baseline only | defer until a consumer | **Accepted — to build** | 24 |
+| 0027 (sensor) | seccomp user-notification sensor | GO/NO-GO closed; per-syscall cost not measured | measure, then decide | **Accepted — to build**, the cost measured first | 24 |
+| 0004 | rootless CRIU checkpoint | no spike; CRIU absent | reject for now | **Accepted — to build**, behind its GO/NO-GO spike | 24 |
+| 0036 | macOS/Windows as a VM launcher | design only | stays blocked | **Stays `Proposed`, blocked** on a Windows host and a real Mac (§6) | — |
+| 0039 | OpenStack `VmBackend` | spike plan only | stays blocked | **Stays `Proposed`, blocked** on a live cloud; the `openstack:2026.1` appliance asks 8 vCPU / 16 GiB, past this host's budget (§4) | — |
+| X1 | (not an ADR) cut `v3.1.1` from `backport/v3.1-rota-multi-homed`? | backport pushed | only if a consumer is pinned to v3.1 | **No** — the line is v5.0.0; the local worktree is removed, the remote branch stays as history | — |
+| X2 | (not an ADR) renumber one of the two ADR-0027 | — | renumber the sensor ADR, stub at the old file | — | 11 |
+
+The statuses and index rows were updated in the same change that recorded these
+decisions, and `adr_status_gate.py` passes on them.
 
 ---
 
@@ -205,7 +209,7 @@ guest.
 
 | # | Item |
 |---|---|
-| 11.1 | Owner decides §3; statuses, index and `adr_status_gate.py` updated in one commit |
+| 11.1 | **Done 2026-10-10**: the owner decided §3; statuses and index updated with the plan |
 | 11.2 | X2 renumbering |
 | 11.3 | N2: revoke `dlxs6` |
 
@@ -312,6 +316,18 @@ N27, N10, ADR-0027 sensor measurement.
 SLI exporter is scraped from a golden guest.
 
 **Release v6.0.0** if N10 changes a public crate boundary; otherwise a minor.
+
+### Sprint 24 — The three builds the owner chose over the recommendation
+
+Each starts with the measurement its ADR names, and the build follows the
+number; a spike that comes back NO-GO is recorded as such and the ADR's status
+says so, rather than the build being forced.
+
+| # | Item | First step | Live validation |
+|---|---|---|---|
+| 24.1 | ADR-0021 `kind: GitOpsSource` (opt-in, systemd timer, daemonless) | the security pass the ADR asks for (a pull source is untrusted input) | in a golden guest, a bare git repo served locally; a commit to it converges a stack on the next timer tick, and a commit that fails `stack plan` leaves the running stack untouched |
+| 24.2 | ADR-0027 seccomp user-notification sensor | the per-syscall cost, measured with `bench.sh` against the same workload with and without the filter | a container under the sensor raises the decision event for a denied syscall and the cost stays inside the budget the ADR writes down |
+| 24.3 | ADR-0004 rootless CRIU checkpoint/restore | GO/NO-GO in a golden guest with CRIU installed (rootless needs `CAP_CHECKPOINT_RESTORE`, kernel ≥ 5.9) | a container checkpointed and restored in the guest keeps its PID-1 state (a counter it holds in memory continues) |
 
 ---
 
