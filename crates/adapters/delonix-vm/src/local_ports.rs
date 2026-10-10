@@ -7,7 +7,9 @@
 //! layer (P5) absorbs the composition.
 
 use delonix_compute::capability::Capability;
-use delonix_compute::ports::{LocalDiskImages, SeedBuilder, VmBackends};
+use delonix_compute::ports::{
+    ImageDefaults, ImageDefaultsReader, LocalDiskImages, SeedBuilder, VmBackends,
+};
 use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_compute::Vm;
 use std::path::{Path, PathBuf};
@@ -79,6 +81,64 @@ impl LocalDiskImages for QemuImgDisks {
         on: &dyn Fn(CreateStage),
     ) -> delonix_model::Result<(PathBuf, PathBuf)> {
         Ok(prepare_local_overlay(vmdir, name, base, size_gib, on)?)
+    }
+}
+
+/// Reads an image's own recorded defaults straight off
+/// `<root>/vm-images/<name>.json` (ADR-0076 D3) — independently of, and
+/// without depending on, `bins/delonix-runtime-bin`'s `VmImageStore`/
+/// `VmImage`. Deliberately reads only the THREE fields this port's
+/// [`ImageDefaults`] carries: that struct's build/registry metadata
+/// (`ubuntu_release`, `kernel_version`, `packages`, `built_by`, …) belongs
+/// to the CLI's `image vm build`/`push`/`pull`/`ls`/`describe` commands,
+/// which stay exactly where they are. Two readers of one JSON shape is real
+/// duplication (ADR-0076 names and accepts this cost); the alternatives —
+/// moving the whole rich struct down here, or an `interfaces`/`delonix-vm`
+/// dependency on `bins/delonix-runtime-bin` — were rejected on measurement
+/// and on this engine's own layering rule, respectively.
+pub struct VmImageJsonDefaults;
+
+/// Same character-class allowlist as `VmImageStore::sanitize`
+/// (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`) — the two have to agree,
+/// or a name that round-trips through the CLI's store resolves to a
+/// DIFFERENT file here than the one the CLI itself reads.
+fn sanitize_image_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Only the three fields [`ImageDefaults`] carries — everything else in the
+/// real `VmImage` JSON is ignored by `serde`'s default "unknown fields pass
+/// through unused" behaviour, not read, not round-tripped.
+#[derive(serde::Deserialize)]
+struct RecordedDefaults {
+    #[serde(default)]
+    default_vcpus: Option<u32>,
+    #[serde(default)]
+    default_memory: Option<String>,
+    #[serde(default)]
+    default_backend: Option<String>,
+}
+
+impl ImageDefaultsReader for VmImageJsonDefaults {
+    fn defaults(&self, root: &Path, reference: &str) -> Option<ImageDefaults> {
+        let path = root
+            .join("vm-images")
+            .join(format!("{}.json", sanitize_image_name(reference)));
+        let bytes = std::fs::read(path).ok()?;
+        let rec: RecordedDefaults = serde_json::from_slice(&bytes).ok()?;
+        Some(ImageDefaults {
+            vcpus: rec.default_vcpus,
+            memory: rec.default_memory,
+            backend: rec.default_backend,
+        })
     }
 }
 

@@ -429,3 +429,28 @@ pub fn network() -> Result<&'static dyn crate::ports::VmNetwork> {
             message: "no VM network provider is registered in this process".into(),
         })
 }
+
+/// The node's reader of a VM image's own recorded defaults (ADR-0076 D3),
+/// registered once per process. Unlike [`NETWORK`], absence is NOT an
+/// error: a caller that finds nothing registered here simply has no better
+/// source than its own fixed fallback — the same as an image reference this
+/// reader does not recognize.
+static IMAGE_DEFAULTS: std::sync::OnceLock<Box<dyn crate::ports::ImageDefaultsReader>> =
+    std::sync::OnceLock::new();
+
+/// Registers the node's [`ImageDefaultsReader`]. First registration wins,
+/// same rule as [`set_network`].
+pub fn set_image_defaults(reader: Box<dyn crate::ports::ImageDefaultsReader>) {
+    let _ = IMAGE_DEFAULTS.set(reader);
+}
+
+/// `reference`'s recorded defaults under `root`, or `None` when no reader is
+/// registered OR the registered reader does not recognize `reference` — the
+/// two "nothing better than the fixed fallback" cases are NOT distinguished,
+/// because a caller only ever does one thing with either: fall back.
+pub fn image_defaults(
+    root: &std::path::Path,
+    reference: &str,
+) -> Option<crate::ports::ImageDefaults> {
+    IMAGE_DEFAULTS.get()?.defaults(root, reference)
+}

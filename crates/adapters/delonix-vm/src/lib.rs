@@ -153,10 +153,33 @@ const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
 
 /// Seeds the registry with this crate's two local backends, once, before
 /// anything reads it (P4b.4a): the composition root's job, until the
-/// application layer (P5) takes it.
+/// application layer (P5) takes it. Also registers the [`ImageDefaults`]
+/// reader (ADR-0076 D3): unlike [`vm_registry::set_network`], which needs a
+/// consumer-supplied endpoint/credential and so stays an explicit call from
+/// `bin`'s own `main.rs`, this reader needs nothing but a state root it
+/// already receives per call — self-sufficient, so every consumer of this
+/// crate (the CLI, the node API) gets it for free, the same as the two
+/// backends below.
+///
+/// [`ImageDefaults`]: delonix_compute::ports::ImageDefaults
 fn seeded() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| vm_registry::seed(builtin_backends(), KNOWN_UNREGISTERED));
+    ONCE.call_once(|| {
+        vm_registry::seed(builtin_backends(), KNOWN_UNREGISTERED);
+        vm_registry::set_image_defaults(Box::new(local_ports::VmImageJsonDefaults));
+    });
+}
+
+/// `reference`'s own recorded vCPU/memory/backend recommendation under
+/// `root`, if any (ADR-0076 D3) — ensures the registry is seeded first, so a
+/// caller never has to know that matters, the same discipline as
+/// [`register_backend`]/[`provider_reports`] above.
+pub fn image_defaults(
+    root: &Path,
+    reference: &str,
+) -> Option<delonix_compute::ports::ImageDefaults> {
+    seeded();
+    vm_registry::image_defaults(root, reference)
 }
 
 pub fn provider_reports() -> Vec<delonix_compute::capability::ProviderReport> {

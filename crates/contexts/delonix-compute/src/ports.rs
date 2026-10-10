@@ -179,6 +179,35 @@ pub trait LocalDiskImages {
     ) -> Result<(std::path::PathBuf, std::path::PathBuf)>;
 }
 
+/// A VM image's own recorded recommendation (ADR-0076 D3): the `VCPUS`/
+/// `MEMORY`/`HYPERVISOR` a `VMfile` set when the image was built, read back
+/// so a caller that says "0 vCPUs"/"0 memory" (the contract's own "0 = image
+/// default" convention — `proto/delonix/node/v1/compute.proto`'s
+/// `VirtualMachineSpec.vcpus`/`memory_bytes`) gets what the image actually
+/// recommends instead of a fixed fallback. Every field is `None` when the
+/// image carries no such recommendation, or is not found at all — the
+/// caller's own fixed fallback (today `1` vCPU / `"1G"`) is unchanged in
+/// either case, this port only gives it something better to prefer first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImageDefaults {
+    pub vcpus: Option<u32>,
+    pub memory: Option<String>,
+    pub backend: Option<String>,
+}
+
+/// Reads [`ImageDefaults`] for a disk reference. Deliberately NOT the same
+/// port as [`LocalDiskImages`]: that one resolves a reference to a qcow2
+/// path AND builds the overlay (a write, and local-disk-only); this one only
+/// reads three fields that may already be known before any overlay exists —
+/// a resolved bin-side `VmImageStore`/`VmImage` is NOT this port's shape
+/// (ADR-0076 D3: those carry build/registry metadata — `ubuntu_release`,
+/// `kernel_version`, `packages`, `built_by`, … — that no caller through this
+/// port needs, and an interface/context crate must not depend on the bin
+/// crate those live in to get at the three fields it does need).
+pub trait ImageDefaultsReader: Send + Sync {
+    fn defaults(&self, root: &std::path::Path, reference: &str) -> Option<ImageDefaults>;
+}
+
 /// The cloud-init seed a local VM boots with: the realized form of `cfg`'s
 /// hostname, user, keys and volumes, as a file under `root`.
 pub trait SeedBuilder {

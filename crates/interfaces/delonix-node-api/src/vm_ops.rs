@@ -15,14 +15,17 @@
 //! namespace mismatch. A failure of the work itself is the operation,
 //! `FAILED`, with the engine's own `DX-` code.
 //!
-//! **Known gap, named rather than hidden**: resolving "0 vcpus/memory = this
-//! image's own recorded default" (the contract's own comment on
-//! `VirtualMachineSpec`) needs `VmImageStore`, which lives in the CLI's `bin`
-//! crate (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`) — unreachable from
-//! an INTERFACE crate under ADR-0040's layering. This module falls back to a
-//! fixed default (1 vCPU, 1 GiB) instead, same as the engine's own default
-//! when nothing — CLI, manifest, or here — says otherwise. Unifying the three
-//! divergent resolutions is its own follow-up, not done in this pass.
+//! **"0 vcpus/memory = this image's own recorded default"** (the contract's
+//! own comment on `VirtualMachineSpec`) is resolved through
+//! `delonix_vm::image_defaults` (ADR-0076 D3) — a minimal port
+//! (`delonix_compute::ports::ImageDefaultsReader`) that reads only the three
+//! fields this needs straight off an image's JSON sidecar, independently of
+//! `bins/delonix-runtime-bin`'s richer `VmImageStore` (build/registry
+//! metadata that resolution has no use for, and that an INTERFACE crate must
+//! not depend on `bin` to reach — ADR-0040's layering). A reference this
+//! port does not recognize (no sidecar, or none registered) falls back to
+//! the fixed `1` vCPU / `1 GiB`, same as the engine's own default when
+//! nothing else — CLI, manifest, or here — says otherwise.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -159,6 +162,7 @@ fn mib_ceil(bytes: i64, field: &str) -> Result<Option<u64>, Status> {
 /// Everything that can be decided here is decided before any operation is
 /// acknowledged, never inside the work closure.
 fn config_from_spec(
+    root: &Path,
     name: &str,
     namespace: Option<String>,
     spec: &VirtualMachineSpec,
@@ -173,19 +177,28 @@ fn config_from_spec(
         ));
     }
     let (network, static_ip) = network_of(&spec.networks)?;
+    // "0 = image default, then 1" (the contract's own comment): look up the
+    // image's own recommendation ONCE, reuse it for whichever of
+    // vcpus/memory/backend the request left unspecified.
+    let image_defaults = delonix_vm::image_defaults(root, &spec.image);
     let vcpus = match spec.vcpus {
-        0 => 1,
+        0 => image_defaults.as_ref().and_then(|d| d.vcpus).unwrap_or(1),
         n if n > 0 => n as u32,
         _ => return Err(Status::invalid_argument("spec.vcpus cannot be negative")),
     };
     let memory = match mib_ceil(spec.memory_bytes, "spec.memory_bytes")? {
         Some(mib) => format!("{mib}M"),
-        None => "1G".to_string(),
+        None => image_defaults
+            .as_ref()
+            .and_then(|d| d.memory.clone())
+            .unwrap_or_else(|| "1G".to_string()),
     };
     let disk_size_gib = gib_ceil(spec.disk_bytes, "spec.disk_bytes")?;
     let (hostname, ssh_keys, cloud_init) = cloud_init_of(spec.cloud_init.as_ref())?;
     let restart_policy = restart_policy_of(spec.restart)?;
-    let backend = (!spec.provider.is_empty()).then(|| spec.provider.clone());
+    let backend = (!spec.provider.is_empty())
+        .then(|| spec.provider.clone())
+        .or_else(|| image_defaults.and_then(|d| d.backend));
     Ok(VmConfig {
         name: name.to_string(),
         disk: spec.image.clone(),
@@ -378,7 +391,7 @@ pub fn create_with_fn(
     }
     let namespace = namespace_of(&req.namespace);
     let spec = req.spec.clone().unwrap_or_default();
-    let cfg = config_from_spec(&req.name, namespace, &spec)?;
+    let cfg = config_from_spec(root, &req.name, namespace, &spec)?;
     let target = format!("VirtualMachine/{}", req.name);
     let fp = create_fingerprint(&cfg, &req.labels, &req.annotations);
     if let Some(found) = operations::replay(root, "create", &target, &req.request_id, &fp)? {
@@ -934,5 +947,92 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    /// D3's regression test (review 2026-10-09, ADR-0076): writes the exact
+    /// on-disk shape `bins/delonix-runtime-bin/src/cmd/vmimage.rs::
+    /// VmImageStore::save` produces — `<root>/vm-images/<name>.json` —
+    /// recommending 4 vCPUs / 4 GiB, and asks `config_from_spec` to resolve
+    /// `vcpus: 0, memory_bytes: 0` against it. Before this fix, this always
+    /// resolved to the fixed `(1, "1G")`, ignoring the fixture entirely; the
+    /// node API and the CLI's own `resolve_vm_defaults` (`bins/delonix-
+    /// runtime-bin/src/cmd/vm.rs`) now agree on the identical input. Goes
+    /// through the REAL `delonix_vm::image_defaults`/`VmImageJsonDefaults`
+    /// reader, not a fake — the port this fixes is exactly the thing under
+    /// test.
+    #[test]
+    fn zero_vcpus_and_memory_resolve_the_named_images_own_recorded_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let images_dir = dir.path().join("vm-images");
+        std::fs::create_dir_all(&images_dir).unwrap();
+        std::fs::write(
+            images_dir.join("golden.json"),
+            serde_json::json!({
+                "name": "golden",
+                "tag": "latest",
+                "digest": "sha256:0",
+                "size": 0,
+                "ubuntu_release": null,
+                "k8s_version": null,
+                "created_unix": 0,
+                "default_vcpus": 4,
+                "default_memory": "4G",
+                "default_backend": null,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let cfg = config_from_spec(
+            dir.path(),
+            "web",
+            None,
+            &VirtualMachineSpec {
+                image: "golden".into(),
+                vcpus: 0,
+                memory_bytes: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cfg.vcpus, 4, "the image's own recorded vCPU default");
+        assert_eq!(
+            cfg.memory, "4G",
+            "the image's own recorded memory default, verbatim — same as the \
+             CLI's resolve_vm_defaults, which also never normalizes it"
+        );
+
+        // An EXPLICIT value still wins over the image, same as the CLI.
+        let explicit = config_from_spec(
+            dir.path(),
+            "web",
+            None,
+            &VirtualMachineSpec {
+                image: "golden".into(),
+                vcpus: 2,
+                memory_bytes: 2 * 1024 * 1024 * 1024,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(explicit.vcpus, 2);
+        assert_eq!(explicit.memory, "2048M");
+
+        // An image reference with no sidecar at all still falls back to the
+        // fixed default — this scenario was never the gap.
+        let unregistered = config_from_spec(
+            dir.path(),
+            "web",
+            None,
+            &VirtualMachineSpec {
+                image: "unregistered-disk.qcow2".into(),
+                vcpus: 0,
+                memory_bytes: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(unregistered.vcpus, 1);
+        assert_eq!(unregistered.memory, "1G");
     }
 }
