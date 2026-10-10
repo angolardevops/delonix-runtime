@@ -3541,6 +3541,23 @@ else
     bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
 fi
 
+# --- a state root written by the previous release opens unchanged ----------
+# Plan 65 F0.6. DELONIX_UPGRADE_FROM names a directory with the PUBLISHED
+# binaries of the previous release (checked against SHA256SUMS and the
+# repository's minisign key); without it there is nothing to compare with,
+# and the check says so. See the header of `e2e_state_upgrade.sh`.
+UPG_CHECK="upgrade: um root escrito pela release anterior abre igual (plan sem diferenças, dados, segredo, pid)"
+if [[ -z "${DELONIX_UPGRADE_FROM:-}" ]]; then
+  skip "$UPG_CHECK" "DELONIX_UPGRADE_FROM não está definido (diretório com os binários publicados da release anterior)"
+else
+  _out=$(bash "$(dirname "$0")/e2e_state_upgrade.sh" "$DELONIX_UPGRADE_FROM" "$(dirname "$BIN")" "$OUT/upg" "$IMG" 2>&1); _rc=$?
+  if [[ $_rc -eq 77 ]]; then
+    skip "$UPG_CHECK" "$_out"
+  else
+    check "$UPG_CHECK" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+  fi
+fi
+
 ########################################
 section "schema gerado + explain + init"
 ########################################

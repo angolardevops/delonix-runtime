@@ -231,7 +231,7 @@ uploaded and imported by the node; the appliance and the VM are destroyed after.
 | # | Item |
 |---|---|
 | 12.1 | N4: the < 100 MiB test guest image |
-| 12.2 | N5: state-upgrade test (a v5.0.0 root opened by the tip) |
+| 12.2 | N5: state-upgrade test (a v5.0.0 root opened by the tip) — **done 2026-10-10**: `scripts/e2e_state_upgrade.sh`, wired into the battery behind `DELONIX_UPGRADE_FROM`; the published v5.0.0 → tip 14/14 twice, and a build that cannot find the old root fails all 14 |
 | 12.3 | 65 F0.1: the cell metric ratchet — **already done** (`c539df7a`, 2026-10-06; re-measured by #771: 103/273 = 37.7 %) |
 
 **Live validation**: the N4 image boots on libvirt **and** Cloud Hypervisor,
