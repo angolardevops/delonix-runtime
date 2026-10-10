@@ -817,14 +817,76 @@ fn delonix_detached_why_in(
         return Ok(None);
     }
     let why = String::from_utf8_lossy(&stderr);
-    let why = why.trim();
-    Ok(Some(if why.is_empty() {
-        format!("`delonix {}` exited {}", args.join(" "), status)
-    } else {
-        // First line only: clap appends usage text, and a kubelet event that
-        // carries a whole help screen is unreadable where it actually shows up.
-        why.lines().next().unwrap_or(why).to_string()
-    }))
+    let exited = format!("`delonix {}` exited {}", args.join(" "), status);
+    Ok(Some(failure_reason(&why, &exited)))
+}
+
+/// PURE. The one line of a failed engine command's stderr that names WHY it
+/// failed, for a kubelet event.
+///
+/// One line, because clap appends usage text and a kubelet event that carries a
+/// whole help screen is unreadable where it shows up. But NOT simply the first
+/// line: `delonix __apirun` reports its steps (`• unpacking the image`,
+/// `✓ unpacking the image 📦 0.8s`) on stderr before it fails, and the first
+/// line then names a step that SUCCEEDED. Measured on a kubeadm node
+/// (2026-10-10, #792): `failed to start container 1feeb556fcf0cbb5: ✓ unpacking
+/// the image 📦 0.8s`, with the real refusal three lines further down.
+///
+/// The order: the first ERROR line (`delonix: …` that is not a warning,
+/// `error …`, `error[DX-…] …`, clap's `error: …`); else the first line that is
+/// neither progress nor a notice; else `exited`, with the last progress step
+/// named as the step it reached — never as the reason.
+fn failure_reason(stderr: &str, exited: &str) -> String {
+    let lines: Vec<String> = stderr
+        .lines()
+        .map(|l| strip_ansi(l).trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let is_progress = |l: &str| l.starts_with(['•', '✓', '✗']) || l.starts_with(BRAILLE_SPINNER);
+    // `warning`/`info` are the labels `output::warn`/`output::info` print; a
+    // notice is context, never the reason a command failed.
+    let is_warning = |l: &str| {
+        l.starts_with("delonix: warning") || l.starts_with("warning") || l.starts_with("info ")
+    };
+    let is_error =
+        |l: &str| (l.starts_with("delonix:") && !is_warning(l)) || l.starts_with("error");
+    if let Some(l) = lines.iter().find(|l| is_error(l)) {
+        return l.clone();
+    }
+    if let Some(l) = lines.iter().find(|l| !is_progress(l) && !is_warning(l)) {
+        return l.clone();
+    }
+    match lines.iter().rev().find(|l| is_progress(l)) {
+        Some(step) => format!("{exited} (last step reported: {step})"),
+        None => exited.to_string(),
+    }
+}
+
+/// The braille frames an interactive `Progress` spinner draws (`SPIN_FRAMES` in
+/// the CLI's `output`); a stderr that is not a TTY never gets them, but a
+/// harness that gives the engine a pty can.
+const BRAILLE_SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/// `line` without ANSI CSI sequences (`ESC [ … letter`), so a coloured label
+/// classifies like a plain one.
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.clone().next() == Some('[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Loads a CRI container and **reconciles** its status against the kernel
@@ -4769,5 +4831,76 @@ mod tests {
             };
             assert_eq!(pod.container_metrics[0].container_id, expected_ct);
         }
+    }
+    const EXITED: &str = "`delonix __apirun spec` exited exit status: 1";
+
+    /// #792: the stderr a kubeadm node produced — progress first, refusal after.
+    /// The first-line rule answered with a step that succeeded.
+    #[test]
+    fn the_reason_is_the_error_line_not_the_progress_before_it() {
+        let stderr = " • unpacking the image 📦\n ✓ unpacking the image 📦 0.8s\n\
+                      delonix: system call `container start` failed: cgroup limit: \
+                      hugetlb.2MB.limit_in_bytes=0: the `hugetlb` controller is not delegated\n";
+        let why = failure_reason(stderr, EXITED);
+        assert!(
+            why.starts_with("delonix: system call `container start` failed"),
+            "{why}"
+        );
+        assert!(!why.contains("unpacking"), "{why}");
+    }
+
+    #[test]
+    fn a_warning_is_context_not_the_reason() {
+        let stderr = " ✓ unpacking the image 📦 11.1s\n\
+                      delonix: warning: cri-x did not finish mounting within 60000ms\n\
+                      error[DX-4101] no such container: cri-x\n";
+        assert_eq!(
+            failure_reason(stderr, EXITED),
+            "error[DX-4101] no such container: cri-x"
+        );
+    }
+
+    /// The rule the first-line choice was written for still holds: clap's error
+    /// line, not the usage screen after it.
+    #[test]
+    fn clap_usage_text_is_not_the_reason() {
+        let stderr = "error: unexpected argument '--bogus' found\n\nUsage: delonix container run [OPTIONS]\n\nFor more information, try '--help'.\n";
+        assert_eq!(
+            failure_reason(stderr, EXITED),
+            "error: unexpected argument '--bogus' found"
+        );
+    }
+
+    #[test]
+    fn colour_does_not_hide_a_line_from_the_classifier() {
+        let stderr = " \u{1b}[32m✓\u{1b}[0m unpacking the image\n\u{1b}[31merror\u{1b}[0m failed to prepare the rootfs: EPERM\n";
+        assert_eq!(
+            failure_reason(stderr, EXITED),
+            "error failed to prepare the rootfs: EPERM"
+        );
+    }
+
+    /// Only progress on stderr: the exit status is the reason, and the step is
+    /// named as where it got to — never as why it failed.
+    #[test]
+    fn progress_alone_names_the_exit_and_where_it_got_to() {
+        let why = failure_reason(" • unpacking the image 📦\n", EXITED);
+        assert_eq!(
+            why,
+            format!("{EXITED} (last step reported: • unpacking the image 📦)")
+        );
+    }
+
+    #[test]
+    fn an_empty_stderr_is_the_exit_status() {
+        assert_eq!(failure_reason("\n  \n", EXITED), EXITED);
+    }
+
+    /// A plain line with no recognised label is still the reason when nothing
+    /// better is there (an `nsenter` failure prints its own words).
+    #[test]
+    fn an_unlabelled_line_is_kept_when_it_is_all_there_is() {
+        let stderr = "nsenter: cannot open /var/run/netns/cri-x: No such file or directory\n";
+        assert_eq!(failure_reason(stderr, EXITED), stderr.trim());
     }
 }
