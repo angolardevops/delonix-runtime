@@ -5416,6 +5416,17 @@ fn create_form(
         // `scsi0` before its first `:` (`local-lvm:8`, `local-lvm:0,import-from=…`).
         let storage = scsi0.split(':').next().unwrap_or(scsi0);
         form.push(("ide2", format!("{storage}:cloudinit")));
+        // A serial port, because a cloud image boots with `console=ttyS0` and
+        // the node's API gives a VM none. Measured on a PVE 9.2.2 node
+        // (2026-10-10) with `delonix-vm-base:debian-bookworm` imported by
+        // ADR-0057: without it, the FIRST boot of the imported disk ended in
+        // «Kernel panic - Attempted to kill init!» four times in five (the
+        // fifth was still in the initramfs at 15 s); with `serial0: socket`,
+        // four boots in four reached systemd. Later boots without it pass,
+        // which is why a reboot used to look like a fix — and why #541 blamed
+        // the CPU model. Proxmox documents the same port for cloud-init
+        // images. An appliance (no cloud-init) is left as it was.
+        form.push(("serial0", "socket".into()));
     }
     form
 }
@@ -7582,10 +7593,17 @@ mod tests {
             f.contains(&("ipconfig0", "ip=10.0.0.5/24,gw=10.0.0.1".into())),
             "{f:?}"
         );
-        // An appliance gets neither cloud-init network config nor a drive.
+        // A cloud image gets the serial port its `console=ttyS0` boots on.
+        for cfg in &cases[..3] {
+            let f = create_form(100, "no1", cfg, "local-lvm:8", "virtio");
+            assert!(f.contains(&("serial0", "socket".into())), "{f:?}");
+        }
+        // An appliance gets neither cloud-init network config, nor a drive,
+        // nor the serial port that only a cloud image asked for.
         let f = create_form(100, "no1", &cases[3], "local-lvm:8", "virtio");
         assert!(
-            !f.iter().any(|(k, _)| *k == "ipconfig0" || *k == "ide2"),
+            !f.iter()
+                .any(|(k, _)| *k == "ipconfig0" || *k == "ide2" || *k == "serial0"),
             "{f:?}"
         );
     }
