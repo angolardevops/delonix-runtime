@@ -1682,7 +1682,15 @@ check "/dev/net/tun"                   test -e /dev/net/tun
 if [ "$NEED_GPU_PROOF" = 1 ]; then
   check "CDI spec (--gpus all)"        sh -c 'ls /etc/cdi/*.yaml /etc/cdi/*.json /var/run/cdi/*.yaml /var/run/cdi/*.json >/dev/null 2>&1'
 fi
-check "user namespaces"                unshare -r -n true
+# Where the host restricts unprivileged userns, only the delonix profile
+# grants them, and a bare `unshare` is not under it: the check would fail on
+# every Ubuntu 23.10+ host while the engine works. Ask through the profile.
+if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ] \
+   && command -v aa-exec >/dev/null 2>&1; then
+  check "user namespaces (through the delonix AppArmor profile)" aa-exec -p delonix -- unshare -r -n true
+else
+  check "user namespaces"              unshare -r -n true
+fi
 if [ "$WITH_VM" = 1 ]; then
   check "VM backend (cloud-hypervisor or virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
 fi
