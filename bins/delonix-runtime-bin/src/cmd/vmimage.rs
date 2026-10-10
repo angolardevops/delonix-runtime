@@ -5624,7 +5624,11 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
              Until then everything runs under software emulation, which is very slow.",
         ));
     }
-    if t.contains("supermin") || t.contains("libguestfs") {
+    // Only when the appliance did not start. Every error virt-customize relays
+    // is prefixed «libguestfs error:», so matching that word gave this advice to
+    // a recipe whose `COPY` named a bad target — sending the reader to debug a
+    // launch that had worked (measured 2026-10-10).
+    if t.contains("supermin") || t.contains("guestfs_launch") || t.contains("launch failed") {
         return Some(String::from(
             "libguestfs could not start its appliance. To see its own diagnosis:\n  \
              export LIBGUESTFS_DEBUG=1 LIBGUESTFS_TRACE=1\n  \
@@ -7431,6 +7435,19 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             tool_failure_hint("some unrelated explosion", Family::Debian),
             None
         );
+        // A step that failed inside a guest that DID start is not an appliance
+        // that could not start, whatever word virt-customize prefixes it with.
+        assert_eq!(
+            tool_failure_hint(
+                "virt-customize: error: libguestfs error: target '/tmp/repo' is not a directory",
+                Family::Debian
+            ),
+            None
+        );
+        let launch = "libguestfs: error: guestfs_launch failed.\nThis usually means the libguestfs appliance failed to start";
+        assert!(tool_failure_hint(launch, Family::Debian)
+            .expect("a launch that failed still gets the diagnosis")
+            .contains("libguestfs-test-tool"));
     }
 
     /// Builds a `VmImage` with every field empty — the shape a `vm pull`
