@@ -15361,6 +15361,15 @@ msgstr "Um driver de pool de armazenamento foi registado sem id. É um erro de p
 msgid "Report it: the composition root registers the drivers, and one of them has an empty id."
 msgstr "Reporta-o: a raiz de composição regista os drivers, e um deles tem o id vazio."
 
+msgid "usage could not be fully measured"
+msgstr "a utilização não pôde ser medida por completo"
+
+msgid "A directory inside the volume could not be read (commonly sub-uid data from a container), so the measured usage is a lower bound, not the real total — shrinking on an unverified number can truncate data."
+msgstr "Um directório dentro do volume não pôde ser lido (normalmente dados de subuid de um container), por isso a utilização medida é um limite inferior, não o total real — encolher com um número não verificado pode truncar dados."
+
+msgid "Run as a user that can read every file in the volume, or verify its real size another way before shrinking."
+msgstr "Corre como um utilizador que consiga ler todos os ficheiros do volume, ou verifica o tamanho real de outra forma antes de encolher."
+
 msgid "no such storage pool"
 msgstr "esse pool de armazenamento não existe"
 
