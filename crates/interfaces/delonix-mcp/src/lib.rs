@@ -755,6 +755,14 @@ impl DelonixMcp {
         Parameters(AuditQueryParams { limit }): Parameters<AuditQueryParams>,
     ) -> String {
         let events = self.audit.tail(limit.unwrap_or(50));
+        self.log(
+            "audit.query",
+            "ok",
+            &json!({ "limit": limit }),
+            None,
+            None,
+            None,
+        );
         pretty(events)
     }
 }
@@ -1215,5 +1223,28 @@ mod tests {
     #[test]
     fn capabilities_table_matches_the_risk_table_length() {
         assert_eq!(capabilities_table().len(), risk::TOOL_RISK.len());
+    }
+
+    #[test]
+    fn audit_query_logs_its_own_call() {
+        // BUG regression guard: `audit.query` was the one tool, out of all
+        // fourteen, that never called `self.log(...)` — including tools with
+        // zero parameters (`runtime.info`, `metrics.query`, `network.inspect`)
+        // that would have had just as little reason to skip it. ADR-0025 §8
+        // promises "one JSON line per tool call", with no exception named for
+        // this one.
+        let dir = tempfile::tempdir().unwrap();
+        let server = DelonixMcp::new(dir.path().to_path_buf()).unwrap();
+        assert_eq!(server.audit.tail(10).len(), 0, "starts with an empty log");
+        // The returned text reads the log BEFORE appending this call's own
+        // line (so a query never sees itself in its own answer), but the
+        // write still lands — a read right after sees it.
+        let output = server.audit_query(Parameters(AuditQueryParams { limit: Some(10) }));
+        assert_eq!(output.trim(), "[]");
+        let events = server.audit.tail(10);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["tool"], "audit.query");
+        assert_eq!(events[0]["result"], "ok");
+        assert_eq!(events[0]["risk"], "READ");
     }
 }
