@@ -205,6 +205,43 @@ fn config_from_spec(
     })
 }
 
+/// [`operations::fingerprint_of`] of a `CreateVirtualMachine` request's
+/// content — built from `cfg` (the already-normalized `VmConfig`, so
+/// `memory_bytes: 2147483648` and a request that resolved to the same
+/// normalized `"2048M"` some other way fingerprint identically) plus
+/// `labels`/`annotations`, which `config_from_spec` does not carry.
+fn create_fingerprint(
+    cfg: &VmConfig,
+    labels: &std::collections::HashMap<String, String>,
+    annotations: &std::collections::HashMap<String, String>,
+) -> String {
+    let vcpus = cfg.vcpus.to_string();
+    let disk_size_gib = cfg.disk_size_gib.map(|g| g.to_string()).unwrap_or_default();
+    let cloud_init = cfg.cloud_init.map(|b| b.to_string()).unwrap_or_default();
+    let ssh_keys = cfg.ssh_keys.join("\u{1f}");
+    let required = cfg.required_capabilities.join("\u{1f}");
+    operations::fingerprint_of(&[
+        ("disk", &cfg.disk),
+        ("vcpus", &vcpus),
+        ("memory", &cfg.memory),
+        ("network", &cfg.network),
+        ("namespace", cfg.namespace.as_deref().unwrap_or("")),
+        ("static_ip", cfg.static_ip.as_deref().unwrap_or("")),
+        ("disk_size_gib", &disk_size_gib),
+        ("hostname", cfg.hostname.as_deref().unwrap_or("")),
+        ("ssh_keys", &ssh_keys),
+        ("cloud_init", &cloud_init),
+        (
+            "restart_policy",
+            cfg.restart_policy.as_deref().unwrap_or(""),
+        ),
+        ("backend", cfg.backend.as_deref().unwrap_or("")),
+        ("required_capabilities", &required),
+        ("labels", &operations::canonical_map(labels)),
+        ("annotations", &operations::canonical_map(annotations)),
+    ])
+}
+
 /// Stamps `labels`/`annotations` on an already-created VM. A failure here
 /// rolls the create back — handing back a VM created WITHOUT the labels it
 /// was asked with would be reporting a different resource as a success, the
@@ -343,7 +380,8 @@ pub fn create_with_fn(
     let spec = req.spec.clone().unwrap_or_default();
     let cfg = config_from_spec(&req.name, namespace, &spec)?;
     let target = format!("VirtualMachine/{}", req.name);
-    if let Some(found) = operations::replay(root, "create", &target, &req.request_id)? {
+    let fp = create_fingerprint(&cfg, &req.labels, &req.annotations);
+    if let Some(found) = operations::replay(root, "create", &target, &req.request_id, &fp)? {
         return Ok(operations::message(&found));
     }
     if delonix_vm::exists(root, &req.name) {
@@ -352,7 +390,7 @@ pub fn create_with_fn(
             req.name
         )));
     }
-    let rec = match operations::begin(root, "create", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "create", &target, &req.request_id, &fp)? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -383,7 +421,7 @@ pub fn delete_with_fn(
     work: DeleteWork<'_>,
 ) -> Result<Operation, Status> {
     let target = format!("VirtualMachine/{}", req.name);
-    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id, "")? {
         return Ok(operations::message(&found));
     }
     let missing = || {
@@ -421,7 +459,7 @@ pub fn delete_with_fn(
             )));
         }
     }
-    let rec = match operations::begin(root, "delete", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "delete", &target, &req.request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -467,11 +505,11 @@ fn verb_in(
     work: SimpleWork<'_>,
 ) -> Result<Operation, Status> {
     let target = format!("VirtualMachine/{name}");
-    if let Some(found) = operations::replay(root, verb, &target, request_id)? {
+    if let Some(found) = operations::replay(root, verb, &target, request_id, "")? {
         return Ok(operations::message(&found));
     }
     missing_vm(root, name, namespace)?;
-    let rec = match operations::begin(root, verb, &target, request_id)? {
+    let rec = match operations::begin(root, verb, &target, request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -567,11 +605,11 @@ pub fn create_snapshot_in(root: &Path, req: &CreateSnapshotRequest) -> Result<Op
         ));
     }
     let target = snapshot_target(&req.virtual_machine, &req.snapshot);
-    if let Some(found) = operations::replay(root, "create", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "create", &target, &req.request_id, "")? {
         return Ok(operations::message(&found));
     }
     missing_vm(root, &req.virtual_machine, &req.namespace)?;
-    let rec = match operations::begin(root, "create", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "create", &target, &req.request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -586,11 +624,11 @@ pub fn create_snapshot_in(root: &Path, req: &CreateSnapshotRequest) -> Result<Op
 /// `RestoreSnapshot` under `root`.
 pub fn restore_snapshot_in(root: &Path, req: &RestoreSnapshotRequest) -> Result<Operation, Status> {
     let target = snapshot_target(&req.virtual_machine, &req.snapshot);
-    if let Some(found) = operations::replay(root, "restore", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "restore", &target, &req.request_id, "")? {
         return Ok(operations::message(&found));
     }
     missing_vm(root, &req.virtual_machine, &req.namespace)?;
-    let rec = match operations::begin(root, "restore", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "restore", &target, &req.request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };
@@ -605,11 +643,11 @@ pub fn restore_snapshot_in(root: &Path, req: &RestoreSnapshotRequest) -> Result<
 /// `DeleteSnapshot` under `root`.
 pub fn delete_snapshot_in(root: &Path, req: &DeleteSnapshotRequest) -> Result<Operation, Status> {
     let target = snapshot_target(&req.virtual_machine, &req.snapshot);
-    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id)? {
+    if let Some(found) = operations::replay(root, "delete", &target, &req.request_id, "")? {
         return Ok(operations::message(&found));
     }
     missing_vm(root, &req.virtual_machine, &req.namespace)?;
-    let rec = match operations::begin(root, "delete", &target, &req.request_id)? {
+    let rec = match operations::begin(root, "delete", &target, &req.request_id, "")? {
         Begun::Replay(found) => return Ok(operations::message(&found)),
         Begun::New(rec) => rec,
     };

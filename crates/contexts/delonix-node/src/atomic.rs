@@ -10,6 +10,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// A name fragment unique to THIS call, in this process: `<pid>.<sequence>`.
+///
+/// For a caller that stages its own file under a name it builds from a
+/// request/resource identity (not a bare temp name `write_atomic_mode` already
+/// handles) — `operations::begin`'s exclusive-creation staging file is the
+/// first such caller. Sharing this crate's own counter, rather than each
+/// caller keeping a private one, is the same "one copy of the discipline"
+/// this module's doc comment already asks for: a second private
+/// `AtomicU64` here would be exactly the kind of duplicate this file exists
+/// to prevent.
+pub fn unique_tmp_suffix() -> String {
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{}.{}", std::process::id(), seq)
+}
+
 /// [`write_atomic`] with an explicit file mode, set **atomically at creation**.
 ///
 /// For anything secret this is the only correct form. The alternative —
