@@ -11412,6 +11412,15 @@ msgstr "O nome já está tomado, ou o estado pedido entra em conflito com o que 
 msgid "Pick another name, remove the existing resource, or use the command's --force/--replace if it has one."
 msgstr "Escolhe outro nome, remove o recurso existente, ou usa o --force/--replace do comando, se o tiver."
 
+msgid "request_id reused for a different request"
+msgstr "request_id reutilizado para um pedido diferente"
+
+msgid "The node API's operation ledger answers a retried mutation with its first recorded result (ADR-0042 D2 \"Idempotency\"), identified by request_id, verb and target. This request_id already produced an operation for the same verb and target, but its recorded request does not match this one's content (image, size, namespace or similar fields differ) — a request_id names one exact request, not a resource."
+msgstr "O registo de operações da API do nó responde a uma mutação repetida com o primeiro resultado gravado (ADR-0042 D2 \"Idempotência\"), identificado por request_id, verbo e alvo. Este request_id já produziu uma operação para o mesmo verbo e alvo, mas o pedido gravado não corresponde ao conteúdo deste (imagem, tamanho, namespace ou campos semelhantes diferem) — um request_id nomeia um pedido exacto, não um recurso."
+
+msgid "Generate a new request_id (an idempotency key is meant to be unique per distinct request, e.g. a fresh UUID per call site), and send the two requests with their own keys."
+msgstr "Gera um request_id novo (uma chave de idempotência deve ser única por pedido distinto, por exemplo um UUID novo por chamada), e envia os dois pedidos com as suas próprias chaves."
+
 msgid "unavailable on this host"
 msgstr "indisponível neste host"
 
