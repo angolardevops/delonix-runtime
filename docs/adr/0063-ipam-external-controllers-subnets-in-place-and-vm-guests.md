@@ -1,8 +1,10 @@
 # ADR-0063: IPAM beyond Proxmox's own: external controllers, subnets changed in place, VMs as DHCP guests
 
 - **Status:** Accepted (2026-10-06, by the owner). D3's defect fix is implemented in the F5b PR (#654). D1.1, D1.2 and
-  D2 are implemented (2026-10-09, see «Implementation» below). **D1.3/D1.4 (NetBox, after its spike) and D3.3 (a
-  reservation that names a VM) are not implemented.**
+  D2 are implemented (2026-10-09, see «Implementation» below). D3.3 (a reservation that names a VM) is implemented
+  (2026-10-10, see «Implementation»). **D1.3/D1.4 (NetBox) is not implemented — the live spike was attempted and
+  called off on measured infrastructure grounds (2026-10-10, see «Implementation»); it is not blocked on anything
+  structural and can be retried once the shared host has the resources.**
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0059 (network providers by role; F5b is its IPAM slice), ADR-0049 D3 (the
@@ -268,3 +270,101 @@ and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless 
   `the_dns_provider_registers_a_guest_in_the_zones_dns_server`), whose `prepare_zone` calls now
   name the controller, pass again against the lab (an `alpine:3.20` OCI archive, the lab's
   PowerDNS on the second node), and leave no zone, guest or DNS record behind.
+
+## D1.3/D1.4 — the NetBox spike was attempted and called off (2026-10-10)
+
+Before writing a single line of `IpamProvider` code for NetBox, this session measured whether a
+live spike was even safe to run on the shared dev host. The ADR's own D1.3/D1.4 require a real
+NetBox reachable from a real Proxmox node — nothing short of that answers the three questions
+(does `…/ips` on a NetBox zone store the MAC; what does NetBox return for the gateway entry;
+does the node's `ethers` get the reserved address for a guest started on the vnet).
+
+- **The lab node came up, and still answers.** `pve-lab-475` (the libvirt VM the lab cluster of
+  ADR-0049/0059/0063/0064 runs on) was `shut off` — the normal state between sessions on this
+  host, per `docs/discovery/66_CONTINUITY_PLAN.md` Sprint 0.3. Started it (`virsh -c qemu:///
+  system start pve-lab-475`): it came up with `192.168.122.91`, SSH as root worked (a key already
+  authorized by an earlier session), and `pveproxy`/`pve-cluster` answered (`GET /api2/json/
+  version` → 401 "No ticket", the expected answer with no auth token). So the Proxmox half of the
+  spike is reachable and ready whenever it is retried.
+- **The host itself was not safe to load with a NetBox stack right then, measured and not
+  guessed.** At the time of the attempt: free RAM dipped to **~1.1 GiB** (of 30 GiB total, with
+  8.4 GiB already in swap) while several production containers already ran on this shared host
+  (Odoo, a Postgres for `device-sentinel`, Mattermost/Meet's coturn, an Ollama instance, and
+  other sessions' own worktree containers); disk was at **93 % used** (71 G free); and the
+  outbound link was degraded enough that `docker pull redis:7-alpine` — a ~40 MiB image, the
+  smallest sane test — did not finish inside 60 s (confirmed twice), against a plain `curl` to
+  github.com measuring **~340 KB/s**. A NetBox spike needs a multi-container stack (NetBox +
+  PostgreSQL + Redis + an RQ worker, on the order of 1–2 GiB of RAM once up, plus several hundred
+  MiB of image pulls) layered on top of a Proxmox VM that itself holds 3 GiB. Running it under
+  these conditions risked starving the other live tenants of this host (the AGENTS.md "host de
+  produção, não laboratório" doctrine — this host is shared, not disposable) for an uncertain
+  payoff, since a stack that cannot even pull its images reliably cannot be trusted to produce a
+  clean measurement either.
+- **The call: stop here, not "impossible", not silent.** This is a resource-availability call,
+  not a structural one — nothing about NetBox's own behaviour was found to make D1.3/D1.4
+  unreachable; the `unsupported_reason("netbox")` refusal in `delonix-proxmox/src/ipam.rs` and the
+  `IpamProvider::refuse_unsupported` port method stay exactly as the 2026-10-09 Implementation
+  entry left them. `pve-lab-475` was shut back down to `shut off` (`virsh -c qemu:///system
+  shutdown pve-lab-475`; it answered `shut off` already by the time this session checked back,
+  consistent with the lab node's own idle behaviour) — the host was left as it was found, and the
+  spike is retried whenever this host (or another with the lab infra reachable) has headroom to
+  spare: the Proxmox side is proven reachable, so the next attempt only needs the NetBox side.
+
+## D3.3 — a reservation that names a VM-guest workload (2026-10-10)
+
+Implemented in `bins/delonix-runtime-bin/src/cmd/network_zone.rs` (the `kind: NetworkZone`
+manifest layer), not in `delonix-networking::ipam` or `delonix-proxmox::network_zone` — the
+provider-facing `IpamReservation` port type is untouched. The reason is the same one the
+Decision section already gives for needing two passes: `crates/providers/delonix-proxmox/src/
+network_zone.rs` is the `SegmentProvider` implementation (zones and vnets only — it has no
+reservation logic to extend), and a provider only ever sees a reservation once it already has a
+real MAC. Naming a workload instead of a MAC is therefore resolved entirely above the provider
+boundary, in the manifest layer that decides what to hand the provider, matching the shape the
+Decision section names: `{ ip, workload: "VirtualMachine/<name>" }`.
+
+- `ReservationInput.mac` became optional and gained a sibling `workload: Option<String>`.
+  `validate_reservation_sources` enforces exactly one of the two per reservation (neither, or
+  both, is refused by name before any I/O) and `vm_workload_name` accepts only the
+  `VirtualMachine/<name>` form — anything else is a parse error naming what is accepted.
+  `ReservationRec` carries the same `workload` field through to the applied/held record, with
+  `mac` defaulting to empty (`#[serde(default)]`, so reservations recorded before this change keep
+  loading) until it is resolved.
+- Resolution reads the engine's own VM registry (`delonix_vm::status(base, name)`) — the same
+  record `vm create`/`vm ls` already read — right before a reservation is ensured, in
+  `resolve_reservation_mac`. It never computes a MAC: the Proxmox backend does not set one at
+  create time (the node assigns its own `BC:24:11:xx:xx:xx`; confirmed by reading `net0_arg`/
+  `create_form` in `delonix-proxmox/src/lib.rs`), so there is no pure formula to resolve against,
+  unlike the two local backends' deterministic `mac_for(name)`. A VM that does not exist yet (or
+  was removed) is a **hold, not a failure** — `apply_found_mac` (the pure decision the I/O wrapper
+  delegates to) leaves the record unresolved, `apply_one`'s reservation loop skips the provider
+  call for it and prints which named workload it is still waiting on, by name — the same "say what
+  is missing by name" rule the engine already applies to a missing IPAM controller (D1.1) — and
+  the rest of the zone's subnets and reservations still converge.
+- **Two passes, not one**, because `run_layers_inner` (`cmd/stack.rs`) applies the `NetworkZone`
+  layer before the `VirtualMachine` layer: a reservation naming a VM that the same `stack apply`
+  is about to create cannot resolve on the zone's own pass. `ensure_workload_reservations` runs
+  right after the VM layer (not wrapped in `layers.run`: it is a resolution step of the zone layer
+  already announced above it, not a layer of its own) and resolves any reservation the first pass
+  left held, now that the VM it names may exist.
+- The fingerprint used to detect drift (`reservations_field`) and the identity used to decide
+  what is newly declared versus gone (`ReservationRec::same_as`) both key on the workload name
+  instead of the MAC for a workload-sourced reservation — resolving the MAC on a later pass must
+  not read as a change on every subsequent `stack apply`. `reservations_held` (the `actual()`
+  side) carries the original record's `workload` marker over by `(vnet, ip)` match for the same
+  reason: without it, a resolved reservation's observed fingerprint would show the real MAC while
+  `desired()` always shows the workload name, and the two would permanently disagree.
+- Validated by unit test only, not live: the NetBox spike's host-resource call-off above means no
+  fresh lab run was attempted for this fatia either (the lab node was deliberately returned to
+  `shut off`, and spinning it up again for an unrelated measurement in the same session was judged
+  not worth re-opening that resource question). Nine unit tests in
+  `bins/delonix-runtime-bin/src/cmd/network_zone.rs` cover the pure logic without any backend or
+  I/O: the exactly-one-of and `VirtualMachine/<name>` format checks, that ip/subnet validation
+  still applies to a workload reservation (via a placeholder MAC), fingerprint and identity
+  stability across the unresolved→resolved transition, two reservations that genuinely differ
+  still comparing as different, and all four branches of `apply_found_mac` (fill in an unresolved
+  record, stay held when the VM is still missing, never overwrite an already-resolved MAC, and a
+  plain MAC-keyed record passing through untouched). **Not validated live**: `delonix_vm::status`
+  actually resolving a MAC from a VM this engine created, and a Proxmox `ensure_reservation`/
+  `remove_reservation` round-trip for a reservation that names a workload — the I/O wrapper
+  (`resolve_reservation_mac`) and the provider call in `apply_one` are exercised only by the pure
+  tests above, not against a live node or a live VM backend.

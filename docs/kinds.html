@@ -3854,6 +3854,11 @@ spec:
       alias: &quot;lab network 1&quot;
       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
       reservations: [{ ip: 10.80.0.20, mac: &quot;BC:24:11:00:00:20&quot; }]
+      # A reservation can name a VM-guest workload instead of a literal MAC
+      # (ADR-0063 D3.3) — its real MAC is not known before the VM exists, so
+      # this engine resolves it once a VirtualMachine named &quot;web-1&quot; has been
+      # applied (a pass right after the VM layer; held and named until then):
+      #   - { ip: 10.80.0.21, workload: &quot;VirtualMachine/web-1&quot; }
       # dns: { server: pdns, zone: lab.example, reverseServer: pdns }
       #   `server`/`reverseServer` name DNS controllers registered on the cluster
       #   by its administrator; the engine never creates one. The node writes the

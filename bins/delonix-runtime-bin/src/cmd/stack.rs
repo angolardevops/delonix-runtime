@@ -2080,6 +2080,13 @@ fn run_layers_inner(
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
     layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
+    // A NetworkZone reservation naming a workload (`VirtualMachine/<name>`,
+    // ADR-0063 D3.3) cannot resolve the VM's MAC until the VM layer just
+    // above has had its turn — the zone's own layer ran before it. Not
+    // wrapped in `layers.run`: it is a resolution step of the NetworkZone
+    // layer already announced above, not a layer of its own, and it is a
+    // no-op whenever nothing is held.
+    super::network_zone::ensure_workload_reservations(docs)?;
     layers.run(k::SYSTEM_CONTAINER, "🧊", || {
         super::system_container::apply(docs)
     })?;

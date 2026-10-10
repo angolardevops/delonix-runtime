@@ -2218,12 +2218,22 @@
           "type": "string"
         },
         "mac": {
-          "type": "string"
+          "description": "The MAC to reserve the address for. Exactly one of `mac`/`workload`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workload": {
+          "description": "A workload whose MAC is not known until it exists — `VirtualMachine/\n<name>` (ADR-0063 D3.3), resolved from that VM's own record once it\nhas been created. Zones apply before VMs (`run_layers`), so this\nreservation is a HOLD, not a failure, until the engine's pass right\nafter the VM layer (or a later apply) finds the VM and fills the MAC\nin. Exactly one of `mac`/`workload`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "ip",
-        "mac"
+        "ip"
       ],
       "type": "object"
     },

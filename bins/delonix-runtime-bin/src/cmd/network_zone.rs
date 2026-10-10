@@ -159,7 +159,17 @@ pub struct DhcpRangeInput {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct ReservationInput {
     pub ip: String,
-    pub mac: String,
+    /// The MAC to reserve the address for. Exactly one of `mac`/`workload`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
+    /// A workload whose MAC is not known until it exists — `VirtualMachine/
+    /// <name>` (ADR-0063 D3.3), resolved from that VM's own record once it
+    /// has been created. Zones apply before VMs (`run_layers`), so this
+    /// reservation is a HOLD, not a failure, until the engine's pass right
+    /// after the VM layer (or a later apply) finds the VM and fills the MAC
+    /// in. Exactly one of `mac`/`workload`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<String>,
 }
 
 /// Known fields of the `spec` (drift-guard, the pattern every other Kind's
@@ -254,7 +264,16 @@ struct NetworkZoneRecord {
 struct ReservationRec {
     vnet: String,
     ip: String,
+    /// The MAC held on the provider. Empty while a `workload` reservation's
+    /// VM does not exist yet (ADR-0063 D3.3) — such a record is never sent
+    /// to `ensure_reservation`/`remove_reservation` until this fills in.
+    #[serde(default)]
     mac: String,
+    /// `VirtualMachine/<name>`, when this reservation names a workload
+    /// instead of a literal MAC (ADR-0063 D3.3). `None` for an ordinary
+    /// MAC-keyed reservation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workload: Option<String>,
 }
 
 impl ReservationRec {
@@ -265,7 +284,45 @@ impl ReservationRec {
             mac: self.mac.clone(),
         }
     }
+
+    /// A `workload` reservation whose VM has not been found yet.
+    fn is_unresolved(&self) -> bool {
+        self.workload.is_some() && self.mac.is_empty()
+    }
+
+    /// Whether `self` and `other` declare the SAME reservation. For a
+    /// `workload` one the resolved MAC is not part of its identity: it
+    /// starts empty and this engine fills it in once the named VM exists,
+    /// and that fill-in must never read as "removed, then recreated" on the
+    /// apply that follows (ADR-0063 D3.3).
+    fn same_as(&self, other: &ReservationRec) -> bool {
+        self.vnet == other.vnet
+            && self.ip == other.ip
+            && self.workload == other.workload
+            && (self.workload.is_some() || self.mac == other.mac)
+    }
 }
+
+/// The MAC this reservation's `workload:` names — `VirtualMachine/<name>`
+/// is the only accepted form (ADR-0063 D3.3 only ever asks for VMs).
+fn vm_workload_name(workload: &str) -> Result<&str> {
+    workload
+        .strip_prefix("VirtualMachine/")
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "reservation workload '{workload}' is not understood — the accepted form is \
+                 `VirtualMachine/<name>` (ADR-0063 D3.3)",
+                &[("workload", workload)],
+            ))
+        })
+}
+
+/// A MAC that is not a real device's, used only to run the shared ip/subnet
+/// check (`IpamReservation::validate`) for a `workload` reservation, whose
+/// real MAC is not known before the VM it names exists.
+const PLACEHOLDER_MAC: &str = "00:00:00:00:00:00";
 
 /// The declared subnets of `vnets`, as the port's type.
 fn declared_subnets(vnets: &[VNetSpecInput]) -> Vec<IpamSubnet> {
@@ -290,7 +347,10 @@ fn declared_subnets(vnets: &[VNetSpecInput]) -> Vec<IpamSubnet> {
 }
 
 /// The declared reservations of `vnets`, MAC in the node's form (an invalid
-/// MAC is kept as written; validation names it).
+/// MAC is kept as written; validation names it). A `workload` reservation's
+/// MAC is left empty here — this function does no I/O, and resolving a
+/// workload's MAC means reading that VM's own record (ADR-0063 D3.3); it is
+/// resolved in `apply_one`/`ensure_workload_reservations`, never here.
 fn declared_reservations(vnets: &[VNetSpecInput]) -> Vec<ReservationRec> {
     vnets
         .iter()
@@ -299,11 +359,50 @@ fn declared_reservations(vnets: &[VNetSpecInput]) -> Vec<ReservationRec> {
                 s.reservations.iter().map(|r| ReservationRec {
                     vnet: v.name.clone(),
                     ip: r.ip.trim().to_string(),
-                    mac: normalize_mac(&r.mac).unwrap_or_else(|| r.mac.clone()),
+                    mac: r
+                        .mac
+                        .as_deref()
+                        .map(|m| normalize_mac(m).unwrap_or_else(|| m.to_string()))
+                        .unwrap_or_default(),
+                    workload: r
+                        .workload
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|w| !w.is_empty())
+                        .map(str::to_string),
                 })
             })
         })
         .collect()
+}
+
+/// A reservation that names neither `mac` nor `workload`, or both — refused
+/// before anything else runs, against the manifest's own shape (ADR-0063
+/// D3.3: the two are alternatives, never a pair).
+fn validate_reservation_sources(vnets: &[VNetSpecInput]) -> Result<()> {
+    for v in vnets {
+        for s in &v.subnets {
+            for r in &s.reservations {
+                match (&r.mac, &r.workload) {
+                    (Some(_), Some(_)) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "reservation {ip} in vnet '{vnet}': give exactly one of `mac` or \
+                             `workload`, not both",
+                            &[("ip", &r.ip), ("vnet", &v.name)],
+                        )))
+                    }
+                    (None, None) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "reservation {ip} in vnet '{vnet}': needs `mac` or `workload`",
+                            &[("ip", &r.ip), ("vnet", &v.name)],
+                        )))
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Every subnet and reservation of a spec checked before anything is
@@ -387,13 +486,26 @@ fn resolve_dns(provider_id: &str) -> Result<Box<dyn DnsProvider>> {
 }
 
 fn validate_addressing(vnets: &[VNetSpecInput]) -> Result<()> {
+    validate_reservation_sources(vnets)?;
     let subnets = declared_subnets(vnets);
     for s in &subnets {
         s.validate()?;
     }
     let reservations = declared_reservations(vnets);
     for (i, r) in reservations.iter().enumerate() {
-        r.port().validate(&subnets)?;
+        if let Some(w) = &r.workload {
+            vm_workload_name(w)?;
+            // The MAC is not known yet (ADR-0063 D3.3) — only the ip/subnet
+            // half of the shared check applies here.
+            IpamReservation {
+                vnet: r.vnet.clone(),
+                ip: r.ip.clone(),
+                mac: PLACEHOLDER_MAC.into(),
+            }
+            .validate(&subnets)?;
+        } else {
+            r.port().validate(&subnets)?;
+        }
         if reservations[..i].iter().any(|o| o.ip == r.ip) {
             return Err(Error::Invalid(format!(
                 "address {} is reserved twice in this zone",
@@ -483,10 +595,19 @@ fn validate_ipam(name: &str, spec: &NetworkZoneSpecDoc) -> Result<()> {
     Ok(())
 }
 
+/// A reservation's fingerprint: `vnet|ip|source`, where `source` is the
+/// literal MAC, or — for a `workload` one — the workload name itself
+/// (ADR-0063 D3.3). Using the workload name instead of its resolved MAC is
+/// what lets `desired()` build this WITHOUT reading the VM's record (no I/O,
+/// as every other `desired()` promises) and still compare equal to
+/// `actual()`'s once the MAC is filled in.
 fn reservations_field(rs: &[ReservationRec]) -> String {
     let mut items: Vec<String> = rs
         .iter()
-        .map(|r| format!("{}|{}|{}", r.vnet, r.ip, r.mac))
+        .map(|r| {
+            let source: &str = r.workload.as_deref().unwrap_or(&r.mac);
+            format!("{}|{}|{}", r.vnet, r.ip, source)
+        })
         .collect();
     items.sort();
     items.join(";")
@@ -778,10 +899,25 @@ fn reservations_held(rec: &NetworkZoneRecord) -> Result<String> {
     let held: Vec<ReservationRec> =
         delonix_networking::ipam::held_reservations(&wanted, &observe_ipam(provider_id, rec)?)
             .into_iter()
-            .map(|r| ReservationRec {
-                vnet: r.vnet,
-                ip: r.ip,
-                mac: r.mac,
+            .map(|r| {
+                // The `IpamReservation` the provider confirms carries no
+                // `workload` marker — only vnet/ip/mac. Carried over from the
+                // record by identity, so a resolved `workload` reservation's
+                // field still reads by its workload name and not its MAC
+                // (ADR-0063 D3.3), the same way `desired()` reads it — or
+                // every apply would see this as a hot change that never
+                // settles.
+                let workload = rec
+                    .reservations
+                    .iter()
+                    .find(|o| o.vnet == r.vnet && o.ip == r.ip)
+                    .and_then(|o| o.workload.clone());
+                ReservationRec {
+                    vnet: r.vnet,
+                    ip: r.ip,
+                    mac: r.mac,
+                    workload,
+                }
             })
             .collect();
     Ok(reservations_field(&held))
@@ -1190,12 +1326,15 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     // Reservations are immediate and need the subnet RUNNING: after the
     // transaction, one ledger step each, the record updated after every one.
     // The ones no longer declared go first, so an address can move to
-    // another MAC in one apply.
+    // another MAC in one apply. Identity is `same_as`, not `==`: a
+    // `workload` reservation's resolved MAC is not part of it (ADR-0063
+    // D3.3), so filling it in here must never read as "removed, then
+    // recreated".
     if let Some(ipam) = &ipam {
         let gone: Vec<ReservationRec> = rec
             .reservations
             .iter()
-            .filter(|r| !declared.contains(r))
+            .filter(|r| !declared.iter().any(|d| d.same_as(r)))
             .cloned()
             .collect();
         for r in gone {
@@ -1207,15 +1346,42 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
             rec.ledger
                 .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
             if done.is_ok() {
-                rec.reservations.retain(|o| o != &r);
+                rec.reservations.retain(|o| !o.same_as(&r));
             }
             s.save(&name, &rec)?;
             done?;
         }
         // Every declared one, not only the new ones: ensuring is idempotent,
         // and one released on the node (by hand, or by destroying the guest
-        // that held the MAC) comes back on the next apply.
+        // that held the MAC) comes back on the next apply. A `workload` one
+        // is resolved first — if the VM it names does not exist yet, it is
+        // held and NOT sent to the provider (ADR-0063 D3.3): zones apply
+        // before VMs (`run_layers`), so on a fresh apply this is the normal
+        // case, and `ensure_workload_reservations` (run right after the VM
+        // layer) retries it.
         for r in declared.clone() {
+            let r = resolve_reservation_mac(&r)?;
+            if r.is_unresolved() {
+                if !rec.reservations.iter().any(|o| o.same_as(&r)) {
+                    println!(
+                        "{}",
+                        super::po::tf(
+                            "networkzone/{name}: reservation {ip} is held — workload \
+                             '{workload}' does not exist yet; it is ensured once the VM layer \
+                             creates it",
+                            &[
+                                ("name", &name),
+                                ("ip", &r.ip),
+                                ("workload", r.workload.as_deref().unwrap_or("")),
+                            ],
+                        )
+                    );
+                    rec.reservations.retain(|o| !o.same_as(&r));
+                    rec.reservations.push(r);
+                    s.save(&name, &rec)?;
+                }
+                continue;
+            }
             let step = rec.ledger.open("ensure_reservation", &r.ip);
             s.save(&name, &rec)?;
             let done = ipam
@@ -1223,7 +1389,8 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
                 .map_err(at(provider_id, "ensure_reservation"));
             rec.ledger
                 .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
-            if done.is_ok() && !rec.reservations.contains(&r) {
+            if done.is_ok() {
+                rec.reservations.retain(|o| !o.same_as(&r));
                 rec.reservations.push(r);
             }
             s.save(&name, &rec)?;
@@ -1252,6 +1419,122 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, k::NETWORK_ZONE) {
         apply_one(doc)?;
+    }
+    Ok(())
+}
+
+/// Fills in a `workload` reservation's MAC from that VM's own record
+/// (ADR-0063 D3.3), leaving a MAC-keyed one and an already-resolved one
+/// untouched. The MAC is never computed: a VM's primary NIC is `mac_for`'s
+/// deterministic formula for the two LOCAL backends, but the Proxmox node
+/// assigns its own (`net0=virtio,bridge=…` names no MAC — measured, see
+/// ADR-0008) when the VM is created, so the only honest source is the
+/// record itself, once it exists. A VM not found yet is a hold, never an
+/// error: `apply_one` runs in the NetworkZone layer, which `run_layers`
+/// applies BEFORE the VM layer.
+fn resolve_reservation_mac(r: &ReservationRec) -> Result<ReservationRec> {
+    let Some(workload) = &r.workload else {
+        return Ok(r.clone());
+    };
+    if !r.mac.is_empty() {
+        return Ok(r.clone());
+    }
+    let vm_name = vm_workload_name(workload)?;
+    match delonix_vm::status(&state_root(), vm_name) {
+        Ok(vm) => Ok(apply_found_mac(r, Some(&vm.mac))),
+        Err(e) if e.is_not_found() => Ok(apply_found_mac(r, None)),
+        Err(e) => Err(delonix_model::Error::from(e)),
+    }
+}
+
+/// The decision `resolve_reservation_mac` makes once it knows whether the
+/// named VM was found, and with what MAC — pure, so it is testable without
+/// a VM registry: a plain MAC reservation, or one already resolved, is
+/// returned unchanged regardless of `found`; an unresolved `workload` one
+/// is filled in when `found` names a MAC, and stays held when it is `None`.
+fn apply_found_mac(r: &ReservationRec, found: Option<&str>) -> ReservationRec {
+    match (&r.workload, r.mac.is_empty(), found) {
+        (Some(_), true, Some(mac)) => ReservationRec {
+            mac: mac.to_string(),
+            ..r.clone()
+        },
+        _ => r.clone(),
+    }
+}
+
+/// The pass this engine runs right after the VM layer (`run_layers`),
+/// resolving every `workload` reservation `apply_one` left held because the
+/// VM it names did not exist yet (ADR-0063 D3.3) — the ordinary case on a
+/// fresh apply, since zones apply before VMs. Idempotent, and a no-op for a
+/// zone with nothing held. A VM still not found (not declared in this
+/// manifest, or its own layer failed) stays held and NAMED — never a
+/// failure for the rest of the apply, the same "say what is missing by
+/// name" rule a missing IPAM controller already follows (D1.1).
+pub fn ensure_workload_reservations(docs: &[ManifestDoc]) -> Result<()> {
+    let s = store()?;
+    for doc in manifest::of_kind(docs, k::NETWORK_ZONE) {
+        let name = doc.metadata.name.clone();
+        let Ok(mut rec) = s.load(&name) else {
+            continue;
+        };
+        let held: Vec<ReservationRec> = rec
+            .reservations
+            .iter()
+            .filter(|r| r.is_unresolved())
+            .cloned()
+            .collect();
+        if held.is_empty() {
+            continue;
+        }
+        let Ok((provider_id, _)) = resolve_provider(&rec.provider) else {
+            continue;
+        };
+        let Ok(ipam) = resolve_ipam(provider_id) else {
+            continue;
+        };
+        for r in held {
+            let r = resolve_reservation_mac(&r)?;
+            if r.is_unresolved() {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "networkzone/{name}: reservation {ip} is still held — workload \
+                         '{workload}' was not created by this apply",
+                        &[
+                            ("name", &name),
+                            ("ip", &r.ip),
+                            ("workload", r.workload.as_deref().unwrap_or("")),
+                        ],
+                    )
+                );
+                continue;
+            }
+            let step = rec.ledger.open("ensure_reservation", &r.ip);
+            s.save(&name, &rec)?;
+            let done = ipam
+                .ensure_reservation(&name, &r.port())
+                .map_err(at(provider_id, "ensure_reservation"));
+            rec.ledger
+                .settle(step, done.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+            if done.is_ok() {
+                rec.reservations.retain(|o| !o.same_as(&r));
+                rec.reservations.push(r.clone());
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "networkzone/{name}: reservation {ip} resolved — workload '{workload}' \
+                         now holds it",
+                        &[
+                            ("name", &name),
+                            ("ip", &r.ip),
+                            ("workload", r.workload.as_deref().unwrap_or("")),
+                        ],
+                    )
+                );
+            }
+            s.save(&name, &rec)?;
+            done?;
+        }
     }
     Ok(())
 }
@@ -1582,7 +1865,12 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
             }
         }
         for r in &rec.reservations {
-            d.field("  Reservation", format!("{} {} ({})", r.ip, r.mac, r.vnet));
+            let holder = match &r.workload {
+                Some(w) if r.mac.is_empty() => format!("{w}, held"),
+                Some(w) => format!("{w} ({})", r.mac),
+                None => r.mac.clone(),
+            };
+            d.field("  Reservation", format!("{} {} ({})", r.ip, holder, r.vnet));
         }
         if let Some(dns) = &rec.dns {
             d.field(
@@ -1808,5 +2096,158 @@ mod tests {
             Ok(_) => panic!("expected a refusal"),
             Err(e) => assert!(e.to_string().contains("DELONIX_PROXMOX_URL"), "{e}"),
         }
+    }
+
+    // ADR-0063 D3.3 — a reservation naming a VM-guest workload.
+
+    fn workload_addressed() -> Vec<VNetSpecInput> {
+        serde_yaml::from_str(
+            r#"
+- name: v1
+  subnets:
+    - cidr: 10.78.0.0/24
+      gateway: 10.78.0.1
+      reservations:
+        - {ip: 10.78.0.20, workload: "VirtualMachine/web-1"}
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_workload_reservation_validates_without_resolving_any_mac() {
+        // No VM named "web-1" exists anywhere this test can see — proving
+        // this needs no I/O at all, which is the point: `declared_reservations`
+        // and `validate_addressing` never read a VM's record.
+        let v = workload_addressed();
+        validate_addressing(&v).unwrap();
+        let r = declared_reservations(&v);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].workload.as_deref(), Some("VirtualMachine/web-1"));
+        assert_eq!(r[0].mac, "", "not known before the VM exists");
+        assert!(r[0].is_unresolved());
+    }
+
+    #[test]
+    fn a_reservation_naming_neither_mac_nor_workload_is_refused() {
+        let mut v = workload_addressed();
+        v[0].subnets[0].reservations[0].workload = None;
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("needs `mac` or `workload`"), "{e}");
+    }
+
+    #[test]
+    fn a_reservation_naming_both_mac_and_workload_is_refused() {
+        let mut v = workload_addressed();
+        v[0].subnets[0].reservations[0].mac = Some("BC:24:11:00:00:20".into());
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("not both"), "{e}");
+    }
+
+    #[test]
+    fn a_workload_naming_anything_but_a_virtual_machine_is_refused() {
+        let mut v = workload_addressed();
+        v[0].subnets[0].reservations[0].workload = Some("Pod/web-1".into());
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("VirtualMachine/<name>"), "{e}");
+        v[0].subnets[0].reservations[0].workload = Some("VirtualMachine/".into());
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("VirtualMachine/<name>"), "{e}");
+    }
+
+    #[test]
+    fn a_workload_reservation_still_refuses_an_address_outside_its_subnet() {
+        let mut v = workload_addressed();
+        v[0].subnets[0].reservations[0].ip = "10.79.0.5".into();
+        let e = validate_addressing(&v).unwrap_err().to_string();
+        assert!(e.contains("no subnet declared"), "{e}");
+    }
+
+    fn workload_rec(mac: &str) -> ReservationRec {
+        ReservationRec {
+            vnet: "v1".into(),
+            ip: "10.78.0.20".into(),
+            mac: mac.into(),
+            workload: Some("VirtualMachine/web-1".into()),
+        }
+    }
+
+    /// ADR-0063 D3.3's own "pure" half: `desired()` fingerprints a `workload`
+    /// reservation by its workload NAME, never its MAC — so `reservations_field`
+    /// reads the same for the held entry before AND after the MAC is filled in.
+    /// Without this, the fill-in itself would read as drift on every apply.
+    #[test]
+    fn a_workload_reservations_fingerprint_does_not_depend_on_its_resolved_mac() {
+        let unresolved = workload_rec("");
+        let resolved = workload_rec("BC:24:11:00:00:20");
+        assert_eq!(
+            reservations_field(std::slice::from_ref(&unresolved)),
+            reservations_field(std::slice::from_ref(&resolved))
+        );
+        assert!(unresolved.same_as(&resolved));
+        assert!(resolved.same_as(&unresolved));
+    }
+
+    /// A plain MAC reservation's identity is UNCHANGED by this: two
+    /// different MACs at the same address are still two different
+    /// reservations (the existing "the last one wins" semantics), and two
+    /// workload reservations for DIFFERENT VMs are never conflated.
+    #[test]
+    fn same_as_still_tells_apart_two_different_mac_or_workload_reservations() {
+        let a = ReservationRec {
+            vnet: "v1".into(),
+            ip: "10.78.0.20".into(),
+            mac: "BC:24:11:00:00:20".into(),
+            workload: None,
+        };
+        let mut b = a.clone();
+        b.mac = "BC:24:11:00:00:21".into();
+        assert!(!a.same_as(&b), "a plain reservation's MAC is its identity");
+        let mut c = workload_rec("BC:24:11:00:00:20");
+        c.workload = Some("VirtualMachine/web-2".into());
+        assert!(!c.same_as(&workload_rec("BC:24:11:00:00:20")));
+    }
+
+    #[test]
+    fn is_unresolved_only_holds_for_an_unfilled_workload_reservation() {
+        assert!(workload_rec("").is_unresolved());
+        assert!(!workload_rec("BC:24:11:00:00:20").is_unresolved());
+        assert!(!ReservationRec {
+            vnet: "v1".into(),
+            ip: "10.78.0.20".into(),
+            mac: "".into(),
+            workload: None,
+        }
+        .is_unresolved());
+    }
+
+    /// `apply_found_mac` is the pure decision `resolve_reservation_mac` makes
+    /// once it knows whether the node reported the VM — the part that is
+    /// testable without a live VM registry (ADR-0063 D3.3).
+    #[test]
+    fn apply_found_mac_fills_in_only_an_unresolved_workload_reservation() {
+        let unresolved = workload_rec("");
+        assert_eq!(
+            apply_found_mac(&unresolved, Some("BC:24:11:00:00:20")).mac,
+            "BC:24:11:00:00:20"
+        );
+        // Not found yet: stays held, exactly as declared.
+        assert_eq!(apply_found_mac(&unresolved, None), unresolved);
+        // Already resolved: a second lookup never overwrites it, even with a
+        // DIFFERENT answer (the engine never re-resolves what it already
+        // holds for this reservation).
+        let resolved = workload_rec("BC:24:11:00:00:20");
+        assert_eq!(
+            apply_found_mac(&resolved, Some("BC:24:11:00:00:FF")).mac,
+            "BC:24:11:00:00:20"
+        );
+        // A plain MAC reservation is untouched regardless of `found`.
+        let plain = ReservationRec {
+            vnet: "v1".into(),
+            ip: "10.78.0.20".into(),
+            mac: "BC:24:11:00:00:20".into(),
+            workload: None,
+        };
+        assert_eq!(apply_found_mac(&plain, Some("ff:ff:ff:ff:ff:ff")), plain);
     }
 }
