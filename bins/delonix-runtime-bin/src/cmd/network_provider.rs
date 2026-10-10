@@ -14,6 +14,9 @@
 //!       alias: "lab network 1"
 //!       dhcpRange: [{ start: 10.80.0.100, end: 10.80.0.150 }]
 //!       reservations: [{ ip: 10.80.0.20, mac: "BC:24:11:00:00:20" }]
+//!       # or, for a VM this engine manages (ADR-0063 D3.3), naming the
+//!       # workload instead of a MAC it cannot know before the VM exists:
+//!       #   reservations: [{ ip: 10.80.0.21, workload: "VirtualMachine/web-1" }]
 //!       dns: { server: pdns, zone: lab.example }   # per zone: all its networks must agree
 //!       ipam: pve                    # per zone too (ADR-0063 D1); `pve` when omitted
 //! ```
