@@ -717,6 +717,69 @@ fn resolve_base(
     }
 }
 
+/// What a `COPY <src> <dst>` becomes inside the guest, with the meaning a
+/// Dockerfile gives it: a directory's CONTENTS land in `<dst>`, which is
+/// created; a file lands in `<dst>` when that is a directory (or ends in `/`),
+/// and otherwise becomes `<dst>`.
+///
+/// `virt-customize --copy-in SRC:DIR` means something else — it puts SRC
+/// INSIDE a directory that must already exist — and passing `<dst>` to it
+/// verbatim made the obvious recipes fail: `COPY repo /tmp/repo` and the
+/// documented `COPY --from=builder /src/app /usr/local/bin/app` both ended in
+/// «target … is not a directory» (measured 2026-10-10 building the test guest
+/// image, completion plan N4).
+///
+/// For a file whose `<dst>` has no trailing `/`, whether `<dst>` is a directory
+/// is only known inside the guest, so the choice is made there: the file is
+/// copied into a scratch directory and moved by the guest's own shell. Deciding
+/// it here would have to guess — and guessing «a file path» for `COPY app.conf
+/// /etc` would have put a file named `etc` over a directory.
+fn copy_ops(src: &std::path::Path, dst: &str, step: usize) -> Result<Vec<CustomizeOp>> {
+    let q = super::remote::shell_quote;
+    let dir_of = |d: &str| {
+        let d = d.trim_end_matches('/');
+        if d.is_empty() {
+            "/".to_string()
+        } else {
+            d.to_string()
+        }
+    };
+    if src.is_dir() {
+        let to = dir_of(dst);
+        let mut kids = std::fs::read_dir(src)?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        kids.sort();
+        let mut ops = vec![CustomizeOp::RunCommand(format!("mkdir -p {}", q(&to)))];
+        ops.extend(kids.into_iter().map(|k| CustomizeOp::CopyIn(k, to.clone())));
+        return Ok(ops);
+    }
+    if dst.ends_with('/') {
+        let to = dir_of(dst);
+        return Ok(vec![
+            CustomizeOp::RunCommand(format!("mkdir -p {}", q(&to))),
+            CustomizeOp::CopyIn(src.to_path_buf(), to),
+        ]);
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| Error::Invalid(format!("COPY: bad source '{}'", src.display())))?
+        .to_string_lossy()
+        .into_owned();
+    let scratch = format!("/tmp/.delonix-copy-{step}");
+    let landed = format!("{scratch}/{name}");
+    Ok(vec![
+        CustomizeOp::RunCommand(format!("mkdir -p {}", q(&scratch))),
+        CustomizeOp::CopyIn(src.to_path_buf(), scratch.clone()),
+        CustomizeOp::RunCommand(format!(
+            "if [ -d {d} ]; then mv -f {f} {d}/; else mkdir -p \"$(dirname {d})\" && mv -f {f} {d}; fi && rmdir {s}",
+            d = q(dst),
+            f = q(&landed),
+            s = q(&scratch),
+        )),
+    ])
+}
+
 /// Translates a stage's steps into `virt-customize` operations.
 fn stage_ops(
     stage: &Stage,
@@ -738,7 +801,7 @@ fn stage_ops(
                 // doing the build — the same traversal this repo already closed
                 // for `delonix build`.
                 let real = super::build::safe_join(context, src)?;
-                ops.push(CustomizeOp::CopyIn(real, dst.clone()));
+                ops.extend(copy_ops(&real, dst, i)?);
             }
             Step::CopyFrom {
                 stage: from,
@@ -765,7 +828,7 @@ fn stage_ops(
                 let base = std::path::Path::new(src)
                     .file_name()
                     .ok_or_else(|| Error::Invalid(format!("COPY --from: bad source '{src}'")))?;
-                ops.push(CustomizeOp::CopyIn(staging.join(base), dst.clone()));
+                ops.extend(copy_ops(&staging.join(base), dst, i)?);
             }
             Step::Env { key, value } => ops.push(CustomizeOp::RunCommand(format!(
                 "printf '%s=%s\\n' {key} {value} >> /etc/environment"
@@ -867,6 +930,102 @@ fn finalize(work_dir: &std::path::Path, disk: &std::path::Path, compress: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `COPY` keeps the meaning a Dockerfile gives it. Each shape is the one a
+    /// recipe writes: a directory to a new path, a file into a directory, and a
+    /// file to a file path (the documented `COPY --from=builder /src/app
+    /// /usr/local/bin/app`). Before, all three reached `--copy-in` verbatim and
+    /// the first and last failed with «target … is not a directory».
+    #[test]
+    fn copy_keeps_the_dockerfile_meaning() {
+        let ctx = tempfile::tempdir().unwrap();
+        let repo = ctx.path().join("repo");
+        std::fs::create_dir_all(repo.join("main")).unwrap();
+        std::fs::write(repo.join("README"), "x").unwrap();
+        let app = ctx.path().join("app");
+        std::fs::write(&app, "bin").unwrap();
+
+        // A directory: its contents, into a directory that is created.
+        let ops = copy_ops(&repo, "/tmp/repo", 3).unwrap();
+        assert!(
+            matches!(&ops[0], CustomizeOp::RunCommand(c) if c == "mkdir -p '/tmp/repo'"),
+            "{ops:?}"
+        );
+        let into: Vec<_> = ops[1..]
+            .iter()
+            .map(|o| match o {
+                CustomizeOp::CopyIn(s, d) => (
+                    s.file_name().unwrap().to_string_lossy().into_owned(),
+                    d.clone(),
+                ),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            into,
+            vec![
+                ("README".into(), "/tmp/repo".into()),
+                ("main".into(), "/tmp/repo".into())
+            ]
+        );
+
+        // A file into a directory named with a trailing slash.
+        let ops = copy_ops(&app, "/opt/bin/", 4).unwrap();
+        assert!(
+            matches!(&ops[1], CustomizeOp::CopyIn(s, d) if s == &app && d == "/opt/bin"),
+            "{ops:?}"
+        );
+
+        // A file to a path: the guest decides, so a directory is never overwritten.
+        let ops = copy_ops(&app, "/usr/local/bin/app", 5).unwrap();
+        assert!(
+            matches!(&ops[1], CustomizeOp::CopyIn(s, d) if s == &app && d == "/tmp/.delonix-copy-5"),
+            "{ops:?}"
+        );
+        match &ops[2] {
+            CustomizeOp::RunCommand(c) => {
+                assert!(c.starts_with("if [ -d '/usr/local/bin/app' ]; then mv -f '/tmp/.delonix-copy-5/app' '/usr/local/bin/app'/;"), "{c}");
+                assert!(c.contains("else mkdir -p \"$(dirname '/usr/local/bin/app')\" && mv -f '/tmp/.delonix-copy-5/app' '/usr/local/bin/app';"), "{c}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The translation above is only worth anything if `stage_ops` USES it: a
+    /// `COPY` step of a parsed recipe must reach the guest as the `mkdir` plus
+    /// per-entry copy, never as the bare `--copy-in <dir> <new path>` that the
+    /// tool rejects.
+    #[test]
+    fn a_parsed_copy_step_goes_through_the_translation() {
+        let ctx = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(ctx.path().join("repo")).unwrap();
+        std::fs::write(ctx.path().join("repo/README"), "x").unwrap();
+        let vf = parse("FROM ubuntu:24.04\nCOPY repo /tmp/repo\n").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let ops = stage_ops(
+            vf.final_stage(),
+            ctx.path(),
+            &Default::default(),
+            work.path(),
+            "s0",
+        )
+        .unwrap();
+        assert!(
+            matches!(&ops[0], CustomizeOp::RunCommand(c) if c == "mkdir -p '/tmp/repo'"),
+            "{ops:?}"
+        );
+        assert!(
+            ops.iter().any(
+                |o| matches!(o, CustomizeOp::CopyIn(s, d) if s.ends_with("repo/README") && d == "/tmp/repo")
+            ),
+            "{ops:?}"
+        );
+        assert!(
+            !ops.iter()
+                .any(|o| matches!(o, CustomizeOp::CopyIn(s, _) if s.ends_with("repo"))),
+            "the directory itself must not be copied to a new path: {ops:?}"
+        );
+    }
 
     #[test]
     fn parseia_o_scaffold_que_escrevemos() {
