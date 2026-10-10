@@ -4,6 +4,60 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v5.0.2 — uma rota entre redes passa a servir os containers ligados a mais de uma
+
+Release de correcção sobre a `v5.0.1`, cortada do mesmo ramo de manutenção
+(`release/5.0.x`) com **exactamente um commit de código** em cima da tag — o
+`cherry-pick -x` de `delonix-runtime#733`. Os commits que entraram na `main` desde
+a `v5.0.0` e trazem funcionalidade nova continuam fora: saem na próxima MINOR.
+
+---
+
+### Uma `NetworkRoute` aberta não passava tráfego a um container ligado por `network connect` (`9d0f5ec2`, #733)
+
+Uma `NetworkRoute` é um par `iifname A . oifname B` no mapa `@netpair` do holder:
+serve um pacote que ENTRA no holder pela bridge da rede A. Um container ligado à
+rede A com `network connect` (uma rede adicional, não a primária) ficava com a
+tabela de rotas que tinha: um pacote para a rede B saía pela rota por omissão,
+entrava pela bridge da rede PRIMÁRIA, e nunca casava com o par. A rota aparecia
+listada, o par estava instalado, e nada a atravessava — medido na v4.5.0: 100 % de
+perda nos dois sentidos, com as rotas abertas nos dois sentidos.
+
+O holder passa a manter, em cada container com mais de uma rede, uma rota para o
+prefixo da outra rede pelo gateway desta rede, na interface que o container tem
+aqui, e a rota espelhada do outro lado, para a resposta voltar por onde veio (pela
+rota por omissão levaria um endereço de origem que o anti-spoofing dessa interface
+recusa).
+
+- `route_plan::plan` calcula-o, puro e com testes unitários: a interface por
+  omissão fica intocada, um destino directamente ligado nunca é encaminhado por um
+  gateway, um destino dá uma rota.
+- `sync_workload_routes` executa-o: no `netroute add`/`del` (todos os
+  containers) e no `attach-extra`/`detach-extra` (esse container). As rotas levam
+  um identificador de protocolo próprio, por isso só se remove o que o motor
+  instalou.
+
+A regra de composição do ADR-0013 mantém-se: uma rota na tabela de um container
+diz por onde o pacote sai; o par continua a decidir se é encaminhado. Medido com a
+correcção na `main`: A → B 0 % de perda, B → A continua 100 % (a rota é dirigida),
+os dois sentidos abertos 0 %/0 %, um container ligado depois de a rota existir
+0 %, e com as rotas fechadas 100 % e nada nas duas tabelas. A tabela de uma
+microVM é do convidado e não é coberta.
+
+---
+
+### Como foi validada esta release
+
+- O cherry-pick aplicou sem conflito sobre a `v5.0.1`.
+- Neste ramo: `cargo test -p delonix-sdn --lib`, `cargo clippy -D warnings` do
+  `delonix-sdn`, `version_gate`, `arch_fitness` e `lang_ratchet`.
+- **Não corrido neste ramo**: a bateria `scripts/e2e.sh` (a secção de 8 checks que
+  o #733 acrescentou) e o arnês de caos. A medição ao vivo acima foi feita na
+  `main`, com o mesmo commit. A CI completa corre no PR que funde a `v5.0.2` de
+  volta na `main`.
+
+---
+
 ## v5.0.1 — duas falhas que abriam em vez de fechar: `--secret-files` e a admissão por scan
 
 Release de correcção sobre a `v5.0.0`, cortada de um ramo de manutenção
