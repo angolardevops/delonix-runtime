@@ -56,6 +56,18 @@ pub enum Error {
     #[error("the new quota is smaller than the current usage — free up space first")]
     QuotaBelowUsage,
 
+    /// A shrink was asked where the usage walk could not read everything
+    /// (commonly a sub-uid's directory in rootless, `chmod 700`'d by the
+    /// container that owns it): the measured total is a lower bound, not
+    /// proof the data fits in the new quota, so a shrink is refused rather
+    /// than risking truncation on an unverified number.
+    #[error(
+        "cannot verify the volume fits the new quota — some of its directories could not be \
+         read (commonly sub-uid data from a container), so the measured usage is a lower bound, \
+         not the real total; shrinking on an unverified number can truncate data"
+    )]
+    UsageUnmeasurable,
+
     /// A shrink that needs the volume unmounted while something holds it.
     #[error("volume in use — stop the containers to shrink the quota")]
     InUse,
@@ -144,6 +156,7 @@ impl Error {
             Error::InvalidSpec(_) => 1209,
             Error::UnsupportedBindOption(_) => 1210,
             Error::RelativeTarget(_) => 1211,
+            Error::UsageUnmeasurable => 1220,
             Error::NoSuchVolume(_) => 4201,
             Error::NoSuchSnapshot { .. } => 4202,
             Error::Command { .. } => 9201,
@@ -188,6 +201,7 @@ mod tests {
             Error::InvalidSnapshotName("..".into()),
             Error::QuotaOnNonEmpty,
             Error::QuotaBelowUsage,
+            Error::UsageUnmeasurable,
             Error::InUse,
             Error::Ambiguous {
                 src: "v".into(),
