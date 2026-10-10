@@ -10,7 +10,7 @@
 //! It does not help the case B4 of the CLI restructuring plan needed, though:
 //! `net ingress allow`/`net egress allow` are INCREMENTAL — add one rule, keep
 //! the others — and nothing declarative could express that until now. Measured
-//! twice (`docs/releases/v0.68.0.md`) that this is what blocked collapsing
+//! twice (`docs/releases/archive/v0.md`, section v0.68.0) that this is what blocked collapsing
 //! `net ingress`/`net egress`'s CLI surface into a Kind.
 //!
 //! **The mechanism**: `FwRule` gained an `origin: Option<String>` field — the

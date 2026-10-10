@@ -8,7 +8,7 @@ Accepted.
 
 Block B4 of the CLI restructuring plan (`docs/discovery/52_CLI_PLANO_MIGRACAO.md`)
 promised to collapse `net ingress`/`net egress` (17 leaves) into a declarative
-Kind, for −41 leaves. Measured twice already (`docs/releases/v0.68.0.md`) and
+Kind, for −41 leaves. Measured twice already (`docs/releases/archive/v0.md`, section v0.68.0) and
 confirmed a third time in this session: it only ever achieved 4 leaves.
 
 The reason is structural, not an oversight. `net ingress allow`/`deny` and

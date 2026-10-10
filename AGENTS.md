@@ -1405,20 +1405,20 @@ Esta secção estava em falta neste ficheiro — encontrada a auditar `cmd/kinds
 `Gateway`, `KubernetesCluster` e o nome canónico `VirtualMachine` não apareciam em lado nenhum do
 AGENTS.md, apesar de o resto do ficheiro documentar com o mesmo detalhe renomeações muito mais
 pequenas (uma única flag). Reconstruído por `git log -p`/`git show` de
-`bins/delonix-runtime-bin/src/cmd/kinds.rs` e `cmd/manifest.rs`, contra `docs/releases/v0.64.0.md`
+`bins/delonix-runtime-bin/src/cmd/kinds.rs` e `cmd/manifest.rs`, contra `docs/releases/archive/v0.md`, secção v0.64.0
 (o registo público já escrito) e confirmado ao vivo — não é hipótese, é o que o binário desta
 sessão (`93ec5842`, v3.1.0, construído com `CARGO_TARGET_DIR` isolado) responde.
 
 **Não é código morto nem trabalho de outra sessão por terminar.** As três entradas fazem parte de
 UM commit fechado e testado (`0b0a6ba3`, #127, 2026-08-27, squash de duas sessões de trabalho —
 `38c4e28d` mediu o custo com a primeira renomeação antes de o multiplicar, `10b889cd` fez as
-restantes três), com release note própria (`docs/releases/v0.64.0.md`) e um seguimento (#166,
+restantes três), com release note própria (`docs/releases/archive/v0.md`, secção v0.64.0) e um seguimento (#166,
 2026-08-29) que corrigiu uma regressão real que ESTA mudança deixou passar. Estão em produção desde
 a v0.64.0; a v3.1.0 de hoje é a mesma tabela.
 
 **O que mudou — grupos por `apiVersion`, e quatro renomeações com alias silencioso.** Os grupos
 abaixo são o `delonix api-resources` de HOJE (`93ec5842`, v3.1.0) e não o instantâneo do
-`docs/releases/v0.64.0.md` — `Storage`/`ShareVolume` fundiram-se em `Volume` e `Egress` fundiu-se na
+`docs/releases/archive/v0.md`, secção v0.64.0 — `Storage`/`ShareVolume` fundiram-se em `Volume` e `Egress` fundiu-se na
 `NetworkPolicy` num commit do MESMO dia (`e3e3c272`, #128, já coberto acima em "Fusões de Kinds"),
 e `Service`/`NetworkAccessRule` chegaram depois (secções próprias mais abaixo):
 
@@ -4022,7 +4022,7 @@ lib.rs` (104 `unsafe`, NUNCA antes auditado), `delonix-sdn/infra.rs` (holder/
 control-socket), e todo o código desta MESMA sessão anterior (Tunnel, ShareVolume,
 `cluster.rs`, specs agrupados) — código com zero revisão prévia. 2 CRITICAL + 3
 HIGH, **todos já em produção no v0.10.0**, corrigidos de imediato (ver
-[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md) para o detalhe completo).
+[docs/releases/archive/v0.md](docs/releases/archive/v0.md) (secção v0.10.1) para o detalhe completo).
 **Confirmado de forma independente em 2026-07-26**: uma auditoria adversarial
 fresca sobre estes DOIS mesmos ficheiros (mapeamento uid/gid, seccomp/`clone3`,
 `safe_bind_target`, eBPF do device-cgroup, higiene de fd em todos os forks,
@@ -4746,7 +4746,7 @@ check pelo rc ficaria verde por cima dele.
 ### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
 
 Discovery da Fase 0 em `docs/discovery/33_GAPS_ENCONTRADOS.md`; notas em
-`docs/releases/v0.37.1.md`. Este bloco existe porque o discovery encontrou um contorno
+`docs/releases/archive/v0.md`, secção v0.37.1. Este bloco existe porque o discovery encontrou um contorno
 COMPLETO do modelo de política, e nenhum outro trabalho fazia sentido antes de o fechar.
 
 **A SDN atribuía IPv6 ULA a cada container (`fd00:<o2>::<o3>:<o4>`, derivado do IPv4) e
@@ -5001,7 +5001,7 @@ exportou, publicou por IP em HTTP simples, puxou de volta, e a imagem final
 
 O B4 do plano de reestruturação da CLI prometia colapsar `net ingress`/`net
 egress` (17 folhas) numa Kind declarativa. Medido duas vezes
-(`docs/releases/v0.68.0.md`) e confirmado outra vez nesta sessão: só chegou a
+(`docs/releases/archive/v0.md`, secção v0.68.0) e confirmado outra vez nesta sessão: só chegou a
 4 folhas, porque `net ingress allow`/`net egress allow` são **incrementais**
 (acrescentam uma regra, mantendo as outras) e a única Kind declarativa que
 existia para o firewall — `kind: FirewallPolicy`, também alcançável como
@@ -5976,7 +5976,7 @@ parâmetros, e identificar bugs, gaps, problemas de segurança e crashes silenci
 possam comprometer produção ou perder dados de volumes/storage. Superfície mapeada por
 dump recursivo de `-h` (208 subcomandos), testada **ao vivo num host real** — não só
 lida. 23 achados, todos reproduzidos antes de corrigidos. Notas completas em
-[docs/releases/v0.37.0.md](docs/releases/v0.37.0.md).
+[docs/releases/archive/v0.md](docs/releases/archive/v0.md) (secção v0.37.0).
 
 **A lição transversal, que vale mais do que os bugs**: a classe dominante não foi
 "comando em falta" nem "comando errado" — foi **relato desonesto**. Três formas, todas
