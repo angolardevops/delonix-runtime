@@ -186,8 +186,35 @@ fn show_lints(p: &SecurityPolicy, w: Workload) {
 /// refused it» is one an operator must never have to infer.
 pub(crate) fn enforce(root: &Path, resource: &str, r: &Request<'_>) -> Result<()> {
     let Some(p) = load(root)? else {
+        // No `policy.json` at all — the engine's documented default, and
+        // also the state in which admission refuses nothing AND, until now,
+        // recorded nothing: a caller admitting many resources through this
+        // node had no structural way to see that posture without reading
+        // the filesystem by hand.
+        srt::SecurityEvent::unconstrained(
+            srt::event::unconstrained::NO_RUNTIME_POLICY,
+            srt::Severity::Low,
+            r.workload,
+            resource,
+            None,
+        )
+        .emit(root);
         return Ok(());
     };
+    if !p.constrains(r.workload) {
+        // A `RuntimePolicy` IS configured, but none of its fields apply to
+        // this workload's own path — the same asymmetry `SecurityPolicy::
+        // lint` already warns about on a terminal, now a fact the engine's
+        // own event log carries too.
+        srt::SecurityEvent::unconstrained(
+            srt::event::unconstrained::WORKLOAD_POLICY_SILENT,
+            srt::Severity::Low,
+            r.workload,
+            resource,
+            None,
+        )
+        .emit(root);
+    }
     show_lints(&p, r.workload);
 
     let decision = srt::admission::evaluate(&p, r);
@@ -824,6 +851,75 @@ mod tests {
         let d = tmp.path();
         assert_eq!(load(d).unwrap(), None);
         assert!(enforce(d, "web", &Request::container("alpine:latest", true, true)).is_ok());
+    }
+
+    /// `rule` doubles as `Event::action` in the engine log (see
+    /// `SecurityEvent::emit`); count a specific gap-#5 rule on `root`.
+    fn unconstrained_events(root: &Path, rule: &str) -> usize {
+        delonix_node::events::read(root)
+            .iter()
+            .filter(|e| e.kind == "security" && e.action == rule)
+            .count()
+    }
+
+    /// Gap #5: a node with no `RuntimePolicy` at all refuses nothing — that
+    /// is unchanged — but until now it also recorded nothing. Now every
+    /// `enforce` on such a node leaves a line a caller can count.
+    #[test]
+    fn no_policy_at_all_is_recorded_as_unconstrained() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        enforce(d, "web", &Request::container("alpine:latest", true, true)).unwrap();
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::NO_RUNTIME_POLICY),
+            1
+        );
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::WORKLOAD_POLICY_SILENT),
+            0,
+            "no policy at all is NO_RUNTIME_POLICY, not WORKLOAD_POLICY_SILENT"
+        );
+    }
+
+    /// A `RuntimePolicy` is configured, but every field that applies is on
+    /// the CONTAINER path — a VM request still finds nothing that could have
+    /// refused it, which is the asymmetry `SecurityPolicy::lint` already
+    /// warns about, now also a fact in the event log.
+    #[test]
+    fn a_policy_silent_for_this_workloads_path_is_recorded_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(path(d), r#"{"denyPrivileged": true}"#).unwrap();
+        let devices = vec!["0000:01:00.0".to_string()];
+        enforce(d, "db-01", &Request::virtual_machine(None, &devices, None)).unwrap();
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::WORKLOAD_POLICY_SILENT),
+            1
+        );
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::NO_RUNTIME_POLICY),
+            0,
+            "a policy DOES exist here — this is the other half of the gap"
+        );
+    }
+
+    /// A policy that constrains the workload's own path records neither
+    /// unconstrained rule, even when the request is clean and `evaluate`
+    /// itself produces no event (`Decision::Allow`).
+    #[test]
+    fn a_policy_that_constrains_this_workload_records_nothing_unconstrained() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(d.join("policy.json"), r#"{"denyPrivileged": true}"#).unwrap();
+        enforce(d, "web", &Request::container("alpine:3.20", false, false)).unwrap();
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::NO_RUNTIME_POLICY),
+            0
+        );
+        assert_eq!(
+            unconstrained_events(d, srt::event::unconstrained::WORKLOAD_POLICY_SILENT),
+            0
+        );
     }
 
     /// The gap this crate was written to close, end to end through the file.

@@ -29,7 +29,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::admission::{Decision, Request, Rule, Violation};
+use crate::admission::{Decision, Request, Rule, Violation, Workload};
 use crate::redact::redact_text;
 use crate::severity::{Confidence, Severity};
 
@@ -77,6 +77,18 @@ pub enum Outcome {
     /// Allowed under `mode: warn`. The workload EXISTS and the rule did not
     /// stop it — a distinction an operator must never have to infer.
     Warned,
+    /// Allowed because nothing at this admission point constrains the
+    /// workload's own path — not a rule that was checked and satisfied, but
+    /// the absence of any rule that could have fired at all.
+    ///
+    /// ADR-0026 calls the gap this closes "deliberate for the engine's
+    /// documented single-tenant use": a node with no `RuntimePolicy` and no
+    /// `DELONIX_CRI_CAP_CEILING` refuses nothing by design, and until this
+    /// variant existed it also *recorded* nothing — a caller admitting many
+    /// resources through one node had no structural way to see that posture
+    /// without reading `policy.json` by hand. [`Outcome::Warned`] still means
+    /// "a rule fired and did not stop it"; this means there was no rule.
+    Unconstrained,
 }
 
 impl Outcome {
@@ -84,8 +96,36 @@ impl Outcome {
         match self {
             Outcome::Denied => "denied",
             Outcome::Warned => "warned",
+            Outcome::Unconstrained => "unconstrained",
         }
     }
+}
+
+/// Stable identifiers for an [`Outcome::Unconstrained`] event.
+///
+/// Deliberately **not** [`Rule`]: a [`Rule`] names something
+/// [`crate::admission::evaluate`] checked a request against and found
+/// wanting. These name the opposite fact — that nothing was checked at all —
+/// so an `Unconstrained` event never has to invent a [`Violation`] with
+/// nothing behind it, and no `match` on [`Violation`]/[`Rule`] has to grow a
+/// case that can never actually occur.
+pub mod unconstrained {
+    /// The CLI's own admission point (`policy::enforce`, called from
+    /// `container run`/`vm create`) ran with no `RuntimePolicy`/`policy.json`
+    /// configured on this node at all.
+    pub const NO_RUNTIME_POLICY: &str = "ADM-NO-RUNTIME-POLICY";
+    /// A `RuntimePolicy` is configured, but none of its fields apply to the
+    /// requesting workload's own path — the same asymmetry
+    /// [`crate::policy::SecurityPolicy::lint`] already warns about at load
+    /// time (a line only a terminal sees), now a fact the engine's own event
+    /// log carries too.
+    pub const WORKLOAD_POLICY_SILENT: &str = "ADM-WORKLOAD-POLICY-SILENT";
+    /// The CRI admitted a `privileged: true` or explicit `capabilities.add`
+    /// request with no node capability ceiling configured
+    /// (`DELONIX_CRI_CAP_CEILING`) — the half of this gap a `RuntimePolicy`
+    /// file cannot reach, because `policy::enforce` has no caller on the CRI
+    /// path (see `delonix-cri::cap_ceiling`).
+    pub const NO_CAP_CEILING: &str = "ADM-NO-CAP-CEILING";
 }
 
 /// One security finding, tenancy-free.
@@ -139,6 +179,40 @@ impl SecurityEvent {
             .collect()
     }
 
+    /// One event recording that this admission point ran with nothing
+    /// configured to constrain `workload`'s path — [`Outcome::Unconstrained`],
+    /// never [`Outcome::Denied`]/[`Outcome::Warned`]: the request was not
+    /// evaluated against a rule and found wanting, there was no rule to
+    /// evaluate it against.
+    ///
+    /// `rule` is one of the [`unconstrained`] constants, never a [`Rule`] id —
+    /// see that module's doc. `severity` is a parameter rather than derived
+    /// from `rule`, the same way [`Violation::severity`] varies by what was
+    /// actually requested: a privileged container admitted with no
+    /// capability ceiling is not the same finding as an ordinary one running
+    /// on a node that simply has no `RuntimePolicy` at all. Always
+    /// [`Confidence::CERTAIN`] — the absence of a configured constraint is a
+    /// fact about this node's configuration, not a guess about the request.
+    pub fn unconstrained(
+        rule: &'static str,
+        severity: Severity,
+        workload: Workload,
+        resource: &str,
+        detail: Option<&str>,
+    ) -> SecurityEvent {
+        SecurityEvent {
+            ts: now_unix(),
+            category: Category::Admission,
+            severity,
+            confidence: Confidence::CERTAIN,
+            outcome: Outcome::Unconstrained,
+            rule: rule.to_string(),
+            workload: workload.as_str().to_string(),
+            resource: resource.to_string(),
+            detail: detail.and_then(bounded_detail),
+        }
+    }
+
     /// Appends to the engine's log. Best-effort, like every other event — see
     /// the module doc for why that is a stated limitation and not a design
     /// choice made here.
@@ -184,10 +258,22 @@ fn detail_of(v: &Violation) -> Option<String> {
         Violation::DevicePassthrough { devices } => devices.join(","),
         Violation::ImageUrlHost { host, .. } => host.clone(),
     };
+    bounded_detail(&raw)
+}
+
+/// Redacts then bounds a raw piece of context for the log — shared by
+/// [`detail_of`] (a [`Violation`]'s context) and
+/// [`SecurityEvent::unconstrained`] (an unconstrained admission's context),
+/// so the two can never disagree about what "short, redacted, bounded" means.
+///
+/// Redaction runs FIRST. Truncating a secret does not make it not a secret, and
+/// a 512-byte prefix of a private key is still key material. An empty input
+/// (nothing worth saying) is `None`, never an empty string in the log.
+fn bounded_detail(raw: &str) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    let safe = redact_text(&raw);
+    let safe = redact_text(raw);
     let (cut, truncated) = truncate_on_boundary(&safe, MAX_DETAIL);
     Some(if truncated {
         format!("{cut}…")
@@ -310,5 +396,65 @@ mod tests {
         for forbidden in ["tenant", "project", "environment"] {
             assert!(!json.contains(forbidden), "{json}");
         }
+    }
+
+    #[test]
+    fn outcome_as_str_covers_the_new_variant() {
+        assert_eq!(Outcome::Unconstrained.as_str(), "unconstrained");
+    }
+
+    #[test]
+    fn unconstrained_round_trips_through_json_with_no_tenant_whatsoever() {
+        let ev = SecurityEvent::unconstrained(
+            unconstrained::NO_CAP_CEILING,
+            Severity::High,
+            Workload::Container,
+            "cri-abc123",
+            Some("privileged: true"),
+        );
+        assert_eq!(ev.outcome, Outcome::Unconstrained);
+        assert_eq!(ev.category, Category::Admission);
+        assert_eq!(ev.confidence, Confidence::CERTAIN);
+        assert_eq!(ev.rule, "ADM-NO-CAP-CEILING");
+        let json = serde_json::to_string(&ev).unwrap();
+        assert_eq!(&serde_json::from_str::<SecurityEvent>(&json).unwrap(), &ev);
+        assert!(json.contains("\"outcome\":\"unconstrained\""), "{json}");
+        // Guardrail #2, same as every other event this crate produces.
+        for forbidden in ["tenant", "project", "environment"] {
+            assert!(!json.contains(forbidden), "{json}");
+        }
+    }
+
+    #[test]
+    fn unconstrained_detail_is_redacted_and_bounded_like_any_violation_detail() {
+        // `unconstrained()` must not be a second, unredacted path into the log.
+        let secret = "token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop";
+        let ev = SecurityEvent::unconstrained(
+            unconstrained::NO_RUNTIME_POLICY,
+            Severity::Low,
+            Workload::Container,
+            "web",
+            Some(secret),
+        );
+        let detail = ev.detail.unwrap();
+        assert!(!detail.contains("eyJ"), "{detail}");
+
+        // Empty/absent context is `None`, never an empty string in the log.
+        let ev = SecurityEvent::unconstrained(
+            unconstrained::NO_RUNTIME_POLICY,
+            Severity::Low,
+            Workload::Container,
+            "web",
+            None,
+        );
+        assert_eq!(ev.detail, None);
+        let ev = SecurityEvent::unconstrained(
+            unconstrained::NO_RUNTIME_POLICY,
+            Severity::Low,
+            Workload::Container,
+            "web",
+            Some(""),
+        );
+        assert_eq!(ev.detail, None);
     }
 }

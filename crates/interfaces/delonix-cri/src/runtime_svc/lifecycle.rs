@@ -1382,6 +1382,36 @@ pub fn create_container(
             crate::cap_ceiling::CEILING_ENV,
         )));
     }
+    // The node has no capability ceiling at all: nothing stands between this
+    // elevated request and the full capability set the engine would
+    // otherwise grant. `policy::enforce` (the CLI's own admission point)
+    // cannot reach this path — it lives in the `-bin` crate, which this
+    // interface cannot depend on — so without this, an elevated pod admitted
+    // here left no structural signal anywhere. Only when the request itself
+    // asks for something elevated: an ordinary pod with no privilege and no
+    // added capability is not the posture this gap is about, and logging it
+    // too would drown the signal — the same restraint `SecurityEvent::
+    // from_decision` already applies to a plain `Decision::Allow`.
+    if ceiling.is_unlimited() && (privileged || !cap_add.is_empty()) {
+        let asked = if privileged {
+            "privileged: true".to_string()
+        } else {
+            cap_add.join(",")
+        };
+        let severity = if privileged {
+            delonix_security_runtime::Severity::High
+        } else {
+            delonix_security_runtime::Severity::Medium
+        };
+        delonix_security_runtime::SecurityEvent::unconstrained(
+            delonix_security_runtime::event::unconstrained::NO_CAP_CEILING,
+            severity,
+            delonix_security_runtime::Workload::Container,
+            &format!("cri-{id}"),
+            Some(&asked),
+        )
+        .emit(base);
+    }
     let seccomp_unconfined = sc
         .and_then(|s| s.seccomp.as_ref())
         .map(|p| p.profile_type == security_profile::ProfileType::Unconfined as i32)
@@ -3795,6 +3825,59 @@ mod tests {
         let clamp = crate::CapCeiling::parse("default", "clamp").unwrap();
         create_container(base, req_with_caps(&["SYS_ADMIN"], true), clamp)
             .expect("clamp corta, não recusa");
+    }
+
+    /// Counts of `delonix_security_runtime::event::unconstrained::NO_CAP_CEILING`
+    /// events on `base`'s log, since `rule` doubles as the generic `Event::action`.
+    fn no_cap_ceiling_events(base: &std::path::Path) -> usize {
+        delonix_node::events::read(base)
+            .iter()
+            .filter(|e| e.kind == "security" && e.action == "ADM-NO-CAP-CEILING")
+            .count()
+    }
+
+    /// The gap this closes: a node with no ceiling configured refuses
+    /// nothing (unchanged) — but until now it also *recorded* nothing. The
+    /// event is for ELEVATED requests only: an ordinary pod with no
+    /// privilege and no added capability is not the posture gap #5 names,
+    /// and logging every ordinary pod would drown the signal.
+    #[test]
+    fn unconstrained_is_recorded_only_for_elevated_requests_with_no_ceiling() {
+        let base_dir = tmp_base();
+        let base = base_dir.path();
+        let unlimited = crate::CapCeiling::unlimited();
+
+        // An ordinary, unprivileged pod with no added capability: no ceiling
+        // to speak of, and nothing elevated either — zero events.
+        create_container(base, req_with_caps(&[], false), unlimited)
+            .expect("an ordinary pod is admitted as before");
+        assert_eq!(
+            no_cap_ceiling_events(base),
+            0,
+            "an ordinary pod must never produce this signal"
+        );
+
+        // `privileged: true` with no ceiling at all: this is the gap.
+        create_container(base, req_with_caps(&[], true), unlimited)
+            .expect("still admitted — this gap never refuses, only records");
+        assert_eq!(no_cap_ceiling_events(base), 1);
+
+        // An explicit `capabilities.add` with no ceiling is the same gap.
+        create_container(base, req_with_caps(&["NET_ADMIN"], false), unlimited)
+            .expect("still admitted");
+        assert_eq!(no_cap_ceiling_events(base), 2);
+
+        // With a REAL ceiling configured, even an elevated request records
+        // nothing here — the node has an answer, whether it allows or
+        // refuses this particular one.
+        let real = crate::CapCeiling::parse("default,NET_ADMIN", "reject").unwrap();
+        create_container(base, req_with_caps(&["NET_ADMIN"], false), real)
+            .expect("NET_ADMIN is within the real ceiling");
+        assert_eq!(
+            no_cap_ceiling_events(base),
+            2,
+            "a configured ceiling is not this gap, even for an elevated request"
+        );
     }
 
     /// The flags `start_container` actually puts on the `delonix run` command line.
