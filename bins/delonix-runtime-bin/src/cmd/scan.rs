@@ -430,6 +430,31 @@ fn valid_admission_policy(policy: &str) -> bool {
     policy == "warn" || Severity::parse(policy).is_some()
 }
 
+/// `true` when a scan failure means "this image has no package manager this
+/// scanner reads" (`delonix_scanner::Error::EmptySbom`, DX-1401) — the one
+/// scan outcome that is NOT a reason to refuse admission. Compares by
+/// dictionary number rather than the message text, because by the time
+/// `scan_image`'s `?` has converted the error it is already a
+/// `delonix_model::Error` and the original variant is gone — the number
+/// survives the conversion (`delonix-scanner/src/error.rs`'s own test
+/// requires it to). Factored out, like `valid_admission_policy`, so the
+/// EmptySbom-vs-everything-else split is unit-testable without an
+/// `ImageStore`.
+fn is_nothing_to_scan(e: &Error) -> bool {
+    e.number() == delonix_scanner::Error::EmptySbom.number()
+}
+
+/// The removal clause for a rejection/failure message — honest about whether
+/// the undo actually worked, instead of the message claiming "Image removed"
+/// regardless of what `images.remove` returned.
+fn removed_note(removed: bool) -> &'static str {
+    if removed {
+        " Image removed."
+    } else {
+        " The image could NOT be removed — remove it by hand before retrying."
+    }
+}
+
 /// **CVE admission policy on pull** (supply-chain). Controlled by
 /// `DELONIX_SCAN_ON_PULL`: unset/empty = off (no latency); `warn` = scan +
 /// report; `low|medium|high|critical` = fail-closed GATE — removes the image and
@@ -469,21 +494,45 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
     );
     let worst = match scan_image(images, img) {
         Ok(w) => w,
-        // No SBOM (scratch/distroless) or scan unavailable → don't block, warn.
-        Err(e) => {
+        // No package manager this scanner reads (scratch/distroless) — nothing
+        // to scan, not a failure: warn and let the pull through.
+        Err(e) if is_nothing_to_scan(&e) => {
             output::warn(&super::po::tf(
-                "admission scan unavailable ({e}); pull allowed.",
-                &[("e", &e.to_string())],
+                "no SBOM for '{reference}' ({e}) — admission scan skipped, pull allowed.",
+                &[("reference", reference), ("e", &e.to_string())],
             ));
             return Ok(());
         }
+        // Any OTHER scan failure — a corrupted advisories database, an
+        // unreadable layer blob — is an infrastructure fault, not "nothing to
+        // scan". Treating it the same as the case above would let a broken
+        // feed or a damaged CAS blob silently disable the gate: the exact
+        // mistake the bad-policy-value refusal above already exists to
+        // prevent. Fail closed, same as that one.
+        Err(e) => {
+            let removed = images.remove(reference).is_ok();
+            return Err(Error::Invalid(super::po::tf(
+                "admission scan FAILED for '{reference}': {e} — refused (the policy is a \
+                 fail-closed gate; a broken scan is not treated as 'nothing to scan').{removed} \
+                 Fix the advisories database or the image store and retry.",
+                &[
+                    ("reference", reference),
+                    ("e", &e.to_string()),
+                    ("removed", removed_note(removed)),
+                ],
+            )));
+        }
     };
     if admission_rejects(worst, &policy) {
-        let _ = images.remove(reference); // undoes the pull (fail-closed)
+        let removed = images.remove(reference).is_ok();
         return Err(Error::Invalid(super::po::tf(
             "image '{reference}' REJECTED by the admission policy: vulnerability >= {policy} \
-             (DELONIX_SCAN_ON_PULL). Image removed. Fix the image or adjust the policy.",
-            &[("reference", reference), ("policy", &policy)],
+             (DELONIX_SCAN_ON_PULL).{removed} Fix the image or adjust the policy.",
+            &[
+                ("reference", reference),
+                ("policy", &policy),
+                ("removed", removed_note(removed)),
+            ],
         )));
     }
     Ok(())
@@ -525,5 +574,37 @@ mod tests {
     fn base_embebida_parseia() {
         // If the embedded placeholder doesn't parse, the whole scan fails silently.
         assert!(AdvisoryDb::load(EMBEDDED_ADVISORIES).is_ok());
+    }
+
+    #[test]
+    fn is_nothing_to_scan_only_matches_empty_sbom() {
+        // BUG regression guard: `admission_scan_on_pull` used to treat EVERY
+        // scan failure — not just "this image has no package manager" — as
+        // "nothing to scan, allow it". A corrupted advisories.json or an
+        // unreadable layer blob is an infrastructure fault, and must NOT take
+        // this branch: that would silently disable a "fail-closed GATE" the
+        // moment its own database broke.
+        assert!(is_nothing_to_scan(
+            &delonix_scanner::Error::EmptySbom.into()
+        ));
+        let bad_json = || serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        assert!(!is_nothing_to_scan(
+            &delonix_scanner::Error::AdvisoryDb(bad_json()).into()
+        ));
+        assert!(!is_nothing_to_scan(
+            &delonix_scanner::Error::OsvShape.into()
+        ));
+        assert!(!is_nothing_to_scan(&Error::NotFound("image x".into())));
+    }
+
+    #[test]
+    fn removed_note_reflects_whether_the_undo_actually_worked() {
+        // BUG regression guard: the rejection/failure messages used to say
+        // "Image removed" unconditionally, even when `images.remove`'s
+        // result was discarded with `let _ =` and may have failed.
+        assert!(removed_note(true).contains("Image removed"));
+        assert!(!removed_note(true).contains("NOT"));
+        assert!(removed_note(false).contains("NOT"));
+        assert!(!removed_note(false).contains("Image removed."));
     }
 }
