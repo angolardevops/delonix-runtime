@@ -170,6 +170,6 @@ esac
 TAG=${VER%%-*}
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t $STEM:${TAG:-latest} --appliance \\"
+echo "  delonix vm image import $FINAL -t $STEM:${TAG:-latest} --appliance \\"
 echo "      --distro $STEM --release ${VER:-unknown} \\"
 echo "      --default-vcpus $DEF_CPU --default-memory $DEF_MEM"

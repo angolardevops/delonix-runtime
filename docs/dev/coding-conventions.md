@@ -212,8 +212,11 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   `unrecognized subcommand`, never silently do something else. Before you cut, grep for internal
   callers across the **whole** workspace. **Decided**: `docs/cli-stability.md` § "Como uma quebra é
   feita". The groups listed as stable in that file may only break in a major release.
-- **A command reachable from several paths must be wired on all of them** (for example
-  `vm pull` / `image vm pull` / `image --vm pull`). **Decided**: `CONTRIBUTING.md`; see
+- **A command reachable from several paths must be wired on all of them** — but prefer ONE path
+  over several when the job is a single resource's lifecycle. `vm pull` / `image vm pull` /
+  `image --vm pull` used to be three such paths, kept in sync by hand; they were folded into one
+  nested group, `vm image <verb>` (AGENTS.md's CLI restructuring Sprint 9). **Decided**:
+  `CONTRIBUTING.md`; see
   [Contribution workflow](contributing-workflow.md#adding-or-changing-a-cli-command).
 - **Leaf changes update the CLI baseline** (`scripts/cli-tree.sh --update`) in the same commit.
   **Enforced (gate)**: see [Contribution workflow](contributing-workflow.md#adding-or-changing-a-cli-command).

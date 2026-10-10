@@ -161,15 +161,22 @@ A routine feature inside an existing boundary does not need one. Format and the 
 
 ## Adding or changing a CLI command
 
-- **Wire every entry point.** Several commands are reachable by more than one path (for example
-  `delonix vm pull` and `delonix image vm pull`). Change all of them, then check each one with the
-  binary you built — including shell completion, because the `clap` declaration you edited may
-  not be the one the user's path parses. The completion engine can be probed directly;
-  `_CLAP_COMPLETE_INDEX` is the position of the word being completed:
+- **Wire every entry point.** When the same job is genuinely reachable by more than one path (the
+  compose/pod/Docker-API translators that all funnel into one `RunOpts` is the live example),
+  change every one of them, then check each one with the binary you built — including shell
+  completion, because the `clap` declaration you edited may not be the one the user's path parses.
+  The completion engine can be probed directly; `_CLAP_COMPLETE_INDEX` is the position of the word
+  being completed:
 
   ```bash
-  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm ''
+  COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix vm image ''
   ```
+
+  **Prefer one entry point over several when the job is a single resource's lifecycle.**
+  `delonix vm pull`/`image vm pull`/`image --vm pull` used to be three independent definitions of
+  the same command, kept in sync by hand — the recurring source of exactly the drift this bullet
+  warns about. They were folded into one nested group, `delonix vm image <verb>` (AGENTS.md's CLI
+  restructuring Sprint 9); that consolidation is the thing to copy, not the duplication it closed.
 - **Validate against the binary**, not the source: `./target/debug/delonix <group> <command> --help`
   and a real run with the state roots isolated (see [Clone, build and test](build-and-test.md#isolating-the-engines-state)).
 - **Update the CLI baseline** (`scripts/cli-tree.sh --update`) in the same commit when you add or

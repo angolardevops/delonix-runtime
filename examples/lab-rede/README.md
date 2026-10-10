@@ -27,8 +27,8 @@ Tudo junto pede ~11 GiB de RAM. O motor recusa criar uma VM que não caiba (rese
 - a imagem base e as dos *appliances*:
 
 ```bash
-delonix image vm ls        # ver o que já existe
-delonix vm ls-remote       # ver o que há publicado
+delonix vm image ls        # ver o que já existe
+delonix vm image ls-remote  # ver o que há publicado
 ```
 
 O laboratório usa `delonix-vm-base:ubuntu-24.04`, `truenas-scale:25.10` e

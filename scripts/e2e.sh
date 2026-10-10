@@ -467,7 +467,7 @@ check "container ls" ok "$BIN" container ls
 check "container ls -a" ok "$BIN" container ls -a
 check "container ls -q" ok "$BIN" container ls -q
 check "image ls" ok "$BIN" image ls
-check "image vm ls" ok "$BIN" image vm ls
+check "vm image ls" ok "$BIN" vm image ls
 check "volume ls" ok "$BIN" volume ls
 check "network ls" ok "$BIN" network ls
 
@@ -573,7 +573,7 @@ check "completion shell bash" ok "$BIN" completion shell bash
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------
 # O `completion shell bash` acima prova que o script de registo SAI; não prova que um
 # TAB sobre um argumento sugere alguma coisa. A distinção não é teórica: o
-# `image vm rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
+# `vm image rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
 # ao lado sugeria, e ninguém deu por isso porque o registo saía na mesma.
 #
 # Sonda o motor dinâmico do clap com a MESMA forma que o script de registo usa
@@ -590,10 +590,10 @@ check "man completa nomes de comando" ok completa delonix man ""
 check "system snapshot restore completa caminhos" ok completa delonix system snapshot restore ""
 # Este só vale onde o recurso existe — zero num host sem imagens VM é a resposta
 # honesta, não uma falha, e um SKIP declarado conta como NÃO COBERTO.
-if [ "$("$BIN" image vm ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
-  check "image vm rm completa (o destrutivo)" ok completa delonix image vm rm ""
+if [ "$("$BIN" vm image ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
+  check "vm image rm completa (o destrutivo)" ok completa delonix vm image rm ""
 else
-  skip "image vm rm completa" "não há imagens VM neste host"
+  skip "vm image rm completa" "não há imagens VM neste host"
 fi
 
 ########################################
@@ -922,7 +922,7 @@ if command -v virt-customize >/dev/null 2>&1; then
   skip "ferramenta em falta diz 69" "este host TEM virt-customize — o caminho não é exercitável aqui"
 else
   check "ferramenta em falta diz 69" 69 \
-    "$BIN" image vm build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
+    "$BIN" vm image build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
 fi
 
 # Convenções instaladas que NÃO podem ter mudado.

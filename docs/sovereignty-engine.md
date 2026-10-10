@@ -96,7 +96,7 @@ control-plane real — num host partilhado com carga de outras sessões, esse
 gasto de recursos não se justifica fora de uma sessão dedicada ao exercício.
 
 Fica como o próprio `AGENTS.md` já documenta (secção "Pré-semear as imagens
-do `kubeadm`"): um `image vm build --offline` fetcha as 7 imagens core do
+do `kubeadm`"): um `vm image build --offline` fetcha as 7 imagens core do
 Kubernetes (apiserver, controller-manager, scheduler, etcd, coredns, pause)
 no HOST de build e injecta-as no `ImageStore` embutido no qcow2 — **se** a
 imagem golden publicada foi construída por esse caminho. A imagem usada neste
@@ -119,7 +119,7 @@ conveniência):
 | **Arranque** (`container run` sem a imagem em cache) | `registry-1.docker.io` (default quando o cliente não qualifica o registo) | run-time, **acção explícita do cliente** | Só se o cliente pedir uma imagem nova — não é um "chamar casa" automático do motor |
 | **Primeiro `vm pull`/`cluster kubeadm --vm-image` sem cache** | `ghcr.io/angolardevops/delonix-vm-*` | run-time, primeiro uso | **Sim**, para um nó a criar o PRIMEIRO cluster/VM; local depois disso |
 | **`kubeadm init`** | `registry.k8s.io` | run-time — condicional a `--offline build` da golden | Condicional ao modo de build; não garantido por omissão (ver secção acima) |
-| **Build de imagem golden** (`image vm build`) | `cloud-images.ubuntu.com`, `cloud.debian.org`, `dl.rockylinux.org`, `download.fedoraproject.org`, `pkgs.k8s.io`, `archive.ubuntu.com` | **build-time**, não run-time | Não — a doutrina já classifica build-time como fora da conta crítica |
+| **Build de imagem golden** (`vm image build`) | `cloud-images.ubuntu.com`, `cloud.debian.org`, `dl.rockylinux.org`, `download.fedoraproject.org`, `pkgs.k8s.io`, `archive.ubuntu.com` | **build-time**, não run-time | Não — a doutrina já classifica build-time como fora da conta crítica |
 | **Firmware Cloud Hypervisor** (`install.sh`) | `github.com/cloud-hypervisor/edk2` (releases) | instalação do host, uma vez | Não — por-host, não por-VM |
 
 **O que isto não cobre**: dependências de build do próprio Rust (`crates.io`

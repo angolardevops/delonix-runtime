@@ -13,7 +13,7 @@ a new upstream release usually needs no change here beyond a version argument.
 ## Why these are "appliances"
 
 None of them run cloud-init. They install and configure themselves, through a
-console or a web UI on first boot. `delonix image vm import --appliance` marks
+console or a web UI on first boot. `delonix vm image import --appliance` marks
 that in the image's metadata, and `vm create` then:
 
 - does **not** generate the NoCloud seed it builds for every cloud image, and
@@ -127,10 +127,10 @@ guest.
 ## Registering and publishing
 
 ```bash
-delonix image vm import opnsense-26.1.2.qcow2 -t opnsense:26.1 --appliance \
+delonix vm image import opnsense-26.1.2.qcow2 -t opnsense:26.1 --appliance \
     --distro opnsense --release 26.1.2 --default-vcpus 2 --default-memory 3G
 
-delonix image vm push opnsense:26.1 ghcr.io/angolardevops/delonix-vm-appliances:opnsense-26.1
+delonix vm image push opnsense:26.1 ghcr.io/angolardevops/delonix-vm-appliances:opnsense-26.1
 ```
 
 `push` stamps the metadata onto the OCI manifest as annotations and `pull`
@@ -142,10 +142,10 @@ The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
 for why it still wants the NoCloud seed:
 
 ```bash
-delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r4.qcow2 -t monitoring:7.0-r4 \
+delonix vm image import monitoring-zabbix7.0-grafana13.2.2-r4.qcow2 -t monitoring:7.0-r4 \
     --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 4G
 
-delonix image vm push monitoring:7.0-r4 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r4
+delonix vm image push monitoring:7.0-r4 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r4
 ```
 
 ## Credentials

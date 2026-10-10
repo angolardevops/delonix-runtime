@@ -331,7 +331,7 @@ and you never need to set them:
 - `DELONIX_IMAGE`, `DELONIX_DISTRO`, `DELONIX_RELEASE`, `DELONIX_BUILT_BY`, `DELONIX_BASE_IMAGE`,
   `DELONIX_BASE_SHA256`, `DELONIX_K8S_VERSION`, `DELONIX_OFFLINE`, `DELONIX_NODE_EXPORTER`,
   `DELONIX_EXTRA_PACKAGES` — keys of the provenance file `/etc/delonix-image-release` that
-  `image vm build` writes **inside** a built VM image (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`).
+  `vm image build` writes **inside** a built VM image (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`).
   Read them in the guest with `cat /etc/delonix-image-release`; no process reads them.
 
 ---

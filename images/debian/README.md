@@ -67,8 +67,8 @@ official Delonix base on ghcr, then the distro's own cloud image. Add
 ## 3. Check the result
 
 ```bash
-delonix image vm ls
-delonix image vm describe bookworm
+delonix vm image ls
+delonix vm image describe bookworm
 ```
 
 `describe` shows the size, the distro (`debian:bookworm`), the recorded defaults

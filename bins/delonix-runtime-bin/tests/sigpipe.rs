@@ -2,7 +2,7 @@
 //!
 //! `main` used to put SIGPIPE back to SIG_DFL for `delonix image ls | head`,
 //! and that killed the process on every EPIPE — including the one a registry
-//! causes by closing the connection in the middle of a `vm push` upload. The
+//! causes by closing the connection in the middle of a `vm image push` upload. The
 //! push then died with 141 and not one word: no retry, no error line (seen
 //! 2026-09-28 against ghcr.io). These run the real binary, because the test
 //! harness runs with SIGPIPE ignored and would never see the signal.
@@ -97,7 +97,7 @@ fn a_push_whose_connection_is_closed_says_why() {
 
     let out = delonix()
         .env("DELONIX_ROOT", &root)
-        .args(["image", "vm", "push", "big"])
+        .args(["vm", "image", "push", "big"])
         .arg(format!("127.0.0.1:{port}/t/vm:1"))
         .stdin(Stdio::null())
         .output()

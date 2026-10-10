@@ -457,31 +457,12 @@ para um container já desanexado, por isso <code>-i</code> é recusado com erro 
     },
     "image": {
         "title": "delonix image",
-        "tagline": "Imagens OCI: pull, list, remove, export — e, com `image vm`, as imagens VM douradas (build/push).",
+        "tagline": "Imagens OCI de container: pull, list, remove, export. As imagens VM douradas mudaram-se para `vm image`.",
         "intro": """Gestão de imagens de container (registos OCI: Docker Hub, ghcr.io, …) com
-verificação de digest no pull. <code>image vm &lt;comando&gt;</code> opera sobre as
-<strong>imagens VM douradas</strong> (um <code>.qcow2</code> + metadados por imagem): Ubuntu cloud
-image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>delonix cluster</code>.""",
+verificação de digest no pull. As imagens VM douradas (um <code>.qcow2</code> + metadados por
+imagem: Ubuntu cloud image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do
+<code>delonix cluster</code>) vivem agora em <code><a href="vm.html#image">vm image</a></code>.""",
         "subs": {
-            "vm": {"examples": [
-                ('O mesmo grupo de imagens VM, por outro caminho',
-                 'delonix image vm ls'),
-                ('Scaffold de um VMfile (equivalente a vm init --vmfile)',
-                 'delonix image vm init minha-base'),
-                ('Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)',
-                 'delonix image vm build -t k8s-golden --k8s-version 1.34'),
-                ('Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)',
-                 'delonix image vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34'),
-                ('Registar um disco que NÃO foi construído aqui — o único ponto de '
-                 'entrada para `import`, que não tem forma `delonix vm …`',
-                 'delonix image vm import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \\\n'
-                 '  --appliance --distro opnsense --release 26.1.2 \\\n'
-                 '  --default-vcpus 2 --default-memory 2G'),
-                ('`--appliance` diz que o convidado se configura sozinho (OPNsense, '
-                 'Proxmox, TrueNAS) — o `vm create` salta o seed NoCloud em vez de lhe '
-                 'colar um ISO que ninguém lá dentro lê, e RECUSA `--hostname`/'
-                 '`--ssh-key` a nomeá-los, em vez de os aceitar e deitar fora',
-                 'delonix vm create fw --disk opnsense:26.1.2')]},
             "logout": {"examples": [
                 ('Esquecer as credenciais desse registo',
                  'delonix image logout ghcr.io')]},
@@ -555,7 +536,7 @@ para saltar; modo root continua sem cache). Sem BuildKit real (sem
     },
     "vm": {
         "title": "delonix vm",
-        "tagline": "microVMs declarativas: create, ls, stop, apply.",
+        "tagline": "microVMs declarativas: create, ls, stop, apply — e, com `vm image`, as imagens VM douradas (build/push).",
         "intro": """MicroVMs geridas pelo trait <code>VmBackend</code> — Cloud Hypervisor ou libvirt.
 O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-init por instância:
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
@@ -569,14 +550,6 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  'delonix vm ssh dev -- systemctl is-system-running'),
                 ('Ir directamente a um endereço, com outro utilizador e outra chave',
                  'delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/id_ed25519')]},
-            "convert": {"examples": [
-                ('Levar uma imagem construída aqui para outro ecossistema',
-                 'delonix vm convert minha-base --to vmdk        # VMware\n'
-                 'delonix vm convert minha-base --to vdi         # VirtualBox\n'
-                 'delonix vm convert minha-base --to vhdx        # Hyper-V / Azure'),
-                ('Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é '
-                 'recusado com a lista, em vez de entregue ao qemu-img para falhar lá',
-                 'delonix vm convert minha-base --to qcow2 --compress')]},
             "default-backend": {"examples": [
                 ('Fixar o backend que o `vm create` usa quando não lhe dizem nada',
                  'delonix vm default-backend --set libvirt'),
@@ -620,26 +593,44 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             "console": {"examples": [
                 ('Consola série (voltar ao host: Ctrl+])',
                  'delonix vm console dev')]},
-            "push": {"examples": [
-                ('Publicar a tua imagem como artefacto OCI',
-                 'printf \'%s\' "$GHCR_TOKEN" | delonix image login ghcr.io --username aminhaorg\ndelonix vm push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0')]},
-            "ls-remote": {"examples": [
-                ('Que versões existem publicadas, antes de puxar',
-                 'delonix vm ls-remote'),
-                ('As tags de um repositório teu',
-                 'delonix vm ls-remote ghcr.io/aminhaorg/base')]},
-            "pull": {"examples": [
+            "image": {"examples": [
                 ('A golden oficial com Kubernetes (sem argumento)',
-                 'delonix vm pull'),
+                 'delonix vm image pull'),
                 ('A golden SEM Kubernetes — só o motor, pronta a rootless',
-                 'delonix vm pull --no-k8s'),
+                 'delonix vm image pull --no-k8s'),
                 ('De um registo teu, com nome local próprio',
-                 'delonix vm pull ghcr.io/aminhaorg/base:24.04 --name base:24.04')]},
+                 'delonix vm image pull ghcr.io/aminhaorg/base:24.04 --name base:24.04'),
+                ('Que versões existem publicadas, antes de puxar',
+                 'delonix vm image ls-remote'),
+                ('As tags de um repositório teu',
+                 'delonix vm image ls-remote ghcr.io/aminhaorg/base'),
+                ('O que já está local',
+                 'delonix vm image ls'),
+                ('Scaffold de um VMfile para CONSTRUIR a tua imagem',
+                 'delonix vm image init --name minha-base'),
+                ('Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)',
+                 'delonix vm image build -t k8s-golden --k8s-version 1.34'),
+                ('Publicar a tua imagem como artefacto OCI',
+                 'printf \'%s\' "$GHCR_TOKEN" | delonix image login ghcr.io --username aminhaorg\ndelonix vm image push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0'),
+                ('Registar um disco que NÃO foi construído aqui',
+                 'delonix vm image import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \\\n'
+                 '  --appliance --distro opnsense --release 26.1.2 \\\n'
+                 '  --default-vcpus 2 --default-memory 2G'),
+                ('`--appliance` diz que o convidado se configura sozinho (OPNsense, '
+                 'Proxmox, TrueNAS) — o `vm create` salta o seed NoCloud em vez de lhe '
+                 'colar um ISO que ninguém lá dentro lê, e RECUSA `--hostname`/'
+                 '`--ssh-key` a nomeá-los, em vez de os aceitar e deitar fora',
+                 'delonix vm create fw --disk opnsense:26.1.2'),
+                ('Levar uma imagem construída aqui para outro ecossistema',
+                 'delonix vm image convert minha-base --to vmdk        # VMware\n'
+                 'delonix vm image convert minha-base --to vdi         # VirtualBox\n'
+                 'delonix vm image convert minha-base --to vhdx        # Hyper-V / Azure'),
+                ('Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é '
+                 'recusado com a lista, em vez de entregue ao qemu-img para falhar lá',
+                 'delonix vm image convert minha-base --to qcow2 --compress')]},
             "init": {"examples": [
                 ('Projecto com manifesto, pronto a correr',
-                 'delonix vm init --name lab'),
-                ('Scaffold de um VMfile para CONSTRUIR a tua imagem',
-                 'delonix vm init --vmfile --name minha-base')]},
+                 'delonix vm init --name lab')]},
             "create": {"examples": [
                 ("VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL",
                  "delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub"),
@@ -1714,9 +1705,9 @@ N containers allowed). <strong>Known limitation:</strong> the <strong>PID</stron
 keeps its own process tree; that's the next slice.""",
     },
     "image": {
-        "tagline": "OCI images: pull, list, remove, export — and, with `image vm`, the golden VM images (build/push).",
+        "tagline": "OCI images: pull, list, remove, export — and, with `vm image`, the golden VM images (build/push).",
         "intro": """Container image management (OCI registries: Docker Hub, ghcr.io, …) with
-digest verification on pull. <code>image vm &lt;command&gt;</code> operates on <strong>golden VM
+digest verification on pull. <code>vm image &lt;command&gt;</code> operates on <strong>golden VM
 images</strong> (a <code>.qcow2</code> plus per-image metadata): Ubuntu cloud image +
 kubeadm/kubelet/kubectl + <code>delonix-cri</code> — the base <code>delonix cluster</code> builds
 on.""",
@@ -2320,13 +2311,13 @@ delonix image history my-alpine:v1
 delonix image export my-alpine:v1 -o alpine.tar</code></pre>"""},
         "challenge": {"pt": """<p>Antes de trazer a imagem VM dourada, vê que versões existem
 publicadas com <code>ls-remote</code> — sem descarregar nada — e só depois traz a que quiseres.</p>
-<pre><code>delonix image vm ls-remote
-delonix image vm pull</code></pre>""",
+<pre><code>delonix vm image ls-remote
+delonix vm image pull</code></pre>""",
                 "en": """<p>Before pulling the golden VM image, check which versions are
 published with <code>ls-remote</code> — without downloading anything — and only then pull the one
 you want.</p>
-<pre><code>delonix image vm ls-remote
-delonix image vm pull</code></pre>"""},
+<pre><code>delonix vm image ls-remote
+delonix vm image pull</code></pre>"""},
     },
     "build": {
         "lab": {"pt": """<p>Escreve um <code>Delonixfile</code> multi-stage pequeno e constrói-o
@@ -2838,18 +2829,6 @@ EXAMPLES_EN = {
         "Logs from the pod's 1st container",
         "Logs from a specific container (short name inside the pod)",
     ],
-    ("image", "vm"): [
-        "The same VM image group, via another path",
-        "Scaffold a VMfile (equivalent to vm init --vmfile)",
-        "Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)",
-        "Publish the golden VM image as an OCI artifact (ORAS-style)",
-        "Register a disk this engine did NOT build — the only entry point for "
-        "`import`, which has no `delonix vm …` spelling",
-        "`--appliance` says the guest configures itself (OPNsense, Proxmox, TrueNAS) — "
-        "`vm create` then skips the NoCloud seed instead of attaching an ISO nothing "
-        "inside reads, and REFUSES `--hostname`/`--ssh-key` by name rather than "
-        "accepting and discarding them",
-    ],
     ("image", "logout"): ["Forget that registry's credentials"],
     ("image", "login"): ["Authenticate to a registry (the password comes from stdin, out of history)"],
     ("image", "load"): ["Import that tar on the other end"],
@@ -2889,14 +2868,26 @@ EXAMPLES_EN = {
     ("vm", "reach"): ["Which container ports VMs can reach"],
     ("vm", "vnc"): ["Open the VM's graphical screen"],
     ("vm", "console"): ["Serial console (back to the host: Ctrl+])"],
-    ("vm", "push"): ["Publish your image as an OCI artifact"],
-    ("vm", "ls-remote"): ["Which versions are published, before pulling", "The tags of a repository of yours"],
-    ("vm", "pull"): [
+    ("vm", "image"): [
         "The official golden image with Kubernetes (no argument)",
         "The golden image WITHOUT Kubernetes — just the engine, rootless-ready",
         "From a registry of yours, with your own local name",
+        "Which versions are published, before pulling",
+        "The tags of a repository of yours",
+        "What is already local",
+        "Scaffold a VMfile to BUILD your own image",
+        "Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)",
+        "Publish your image as an OCI artifact",
+        "Register a disk this engine did NOT build",
+        "`--appliance` says the guest configures itself (OPNsense, Proxmox, TrueNAS) — "
+        "`vm create` then skips the NoCloud seed instead of attaching an ISO nothing "
+        "inside reads, and REFUSES `--hostname`/`--ssh-key` by name rather than "
+        "accepting and discarding them",
+        "Take an image built here to another ecosystem",
+        "Compress — only `qcow2` and `vmdk` know how; the others are refused "
+        "with the list, instead of handed to qemu-img to fail there",
     ],
-    ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
+    ("vm", "init"): ["Project with a manifest, ready to run"],
     ("vm", "ssh"): [
         "Enter a VM by NAME — the IP comes from the record, and the default user is "
         "`delonix` (not the distro's own, which exists and does not carry the key)",
@@ -3946,7 +3937,7 @@ apertado do que a especificação pede.</p>
 
 <h2>Do zero a um cluster</h2>
 <p>É esta peça que fecha o ciclo do <code>delonix cluster</code>: a imagem VM dourada
-(<code>delonix image vm build</code>) já traz kubeadm/kubelet/kubectl e o
+(<code>delonix vm image build</code>) já traz kubeadm/kubelet/kubectl e o
 <code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
 bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
 """
@@ -4000,7 +3991,7 @@ container with no declared seccomp profile runs under the engine's built-in allo
 
 <h2>From zero to a cluster</h2>
 <p>This is the piece that closes the <code>delonix cluster</code> loop: the golden VM image
-(<code>delonix image vm build</code>) already ships kubeadm/kubelet/kubectl and
+(<code>delonix vm image build</code>) already ships kubeadm/kubelet/kubectl and
 <code>delonix-cri</code> running; <code>delonix cluster kubeadm</code> provisions the VMs and does
 the bootstrap — the resulting cluster runs Kubernetes with Delonix as the runtime end to end.</p>
 """
@@ -4560,7 +4551,7 @@ KINDS_DOC = [
      "CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de "
      "depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store."),
     ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. "
-     "As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix image vm build</code>."),
+     "As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix vm image build</code>."),
     ("VirtualMachine", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
     ("Container", "container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
@@ -4688,7 +4679,7 @@ KINDS_DOC_EN = [
     "CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a "
     "deprecation warning — the two described the same mount two ways and landed in the same store.",
     "Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images "
-    "have no Kind of their own — they're built with <code>delonix image vm build</code>.",
+    "have no Kind of their own — they're built with <code>delonix vm image build</code>.",
     "A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. "
     "It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.",
     "The everyday workload. Only <code>image</code> is required; every other field "
@@ -4893,15 +4884,15 @@ imagem de container.</p>
 <pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
 
 # Scaffold que CONSTRÓI COMO ESTÁ — apaga o que não precisares
-delonix vm init --vmfile --name minha-base
+delonix vm image init --name minha-base
 cat VMfile
 
 # Precisa de libguestfs no host: sudo apt install libguestfs-tools
-delonix image vm build -t minha-base:1.0 .
+delonix vm image build -t minha-base:1.0 .
 delonix vm ls
 
 # Um RUN com `apt-get install` precisa de rede no convidado, e pede-se:
-#   delonix image vm build --network -t minha-base:1.0 .
+#   delonix vm image build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
 delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
@@ -5153,15 +5144,15 @@ image.</p>
 <pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
 
 # Scaffold that BUILDS AS-IS — delete what you don't need
-delonix vm init --vmfile --name my-base
+delonix vm image init --name my-base
 cat VMfile
 
 # Needs libguestfs on the host: sudo apt install libguestfs-tools
-delonix image vm build -t my-base:1.0 .
+delonix vm image build -t my-base:1.0 .
 delonix vm ls
 
 # A RUN with `apt-get install` needs guest networking, so ask for it:
-#   delonix image vm build --network -t my-base:1.0 .
+#   delonix vm image build --network -t my-base:1.0 .
 
 # Boot from it
 delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
@@ -5427,8 +5418,8 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>Arranque em milissegundos, isolamento por namespace, ou alcançar containers por IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>Personalizar UMA VM</td><td>cloud-init por instância: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>image vm build</code></td></tr>
-<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>image vm build</code> → <code>vm push</code></td></tr>
+<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>vm image build</code></td></tr>
+<tr><td>Um disco à tua medida, publicável</td><td><code>vm image init</code> → <code>vm image build</code> → <code>vm image push</code></td></tr>
 </table>
 
 <h2>Onde isto falha, e o que ver</h2>
@@ -5443,7 +5434,7 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>A VM não arranca em Cloud Hypervisor</td>
     <td>Falta o firmware. CH não faz boot BIOS: precisa de
     <code>--firmware</code> ou de <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>O disco enche a meio do <code>image vm build</code></td>
+<tr><td>O disco enche a meio do <code>vm image build</code></td>
     <td><code>SIZE</code> em falta, ou depois de um <code>RUN</code>. É
     propriedade da stage, e corre antes de tudo.</td></tr>
 <tr><td>Mudaste o <code>user-data</code> e nada muda</td>
@@ -5597,8 +5588,8 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>Millisecond boot, per-namespace isolation, or to reach containers by IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>To customize ONE VM</td><td>Per-instance cloud-init: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>image vm build</code></td></tr>
-<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>image vm build</code> → <code>vm push</code></td></tr>
+<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>vm image build</code></td></tr>
+<tr><td>Your own publishable disk</td><td><code>vm image init</code> → <code>vm image build</code> → <code>vm image push</code></td></tr>
 </table>
 
 <h2>Where this breaks, and what to check</h2>
@@ -5613,7 +5604,7 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>The VM won't boot under Cloud Hypervisor</td>
     <td>Missing firmware. CH doesn't do BIOS boot: it needs
     <code>--firmware</code> or <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>The disk fills up mid-<code>image vm build</code></td>
+<tr><td>The disk fills up mid-<code>vm image build</code></td>
     <td>Missing <code>SIZE</code>, or set after a <code>RUN</code>. It's a
     stage property, and runs before everything else.</td></tr>
 <tr><td>You changed <code>user-data</code> and nothing changes</td>

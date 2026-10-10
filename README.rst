@@ -153,7 +153,7 @@ which carry ``-m``, from summing to more than the machine has.
 Golden VM images ship no password
 =================================
 
-The golden VM images (``delonix vm pull`` / ``delonix image vm build``) ship
+The golden VM images (``delonix vm image pull`` / ``delonix vm image build``) ship
 **no password on any account**: ``root`` and the ``delonix`` user are locked
 (``passwd -l``), and ``delonix`` has passwordless ``sudo``. A password written
 in a public build recipe is not a secret, so none is baked into the published
@@ -171,7 +171,7 @@ your image or your VM, never a default:
 .. code-block:: bash
 
    # at build time, only for the image you build
-   delonix image vm build --root-password '<your password>' ...
+   delonix vm image build --root-password '<your password>' ...
 
    # or per VM, in the cloud-init user-data you pass with --user-data
    #   chpasswd: { expire: false, users: [{name: root, password: <...>, type: text}] }
@@ -456,7 +456,7 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
    * - ``workload``
      - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
    * - ``image``
-     - OCI images: pull, ls, remove, export, scan, sign, verify. ``image vm <cmd>`` for golden VM images (build/import/push/convert).
+     - OCI images: pull, ls, remove, export, scan, sign, verify. ``vm image <cmd>`` for golden VM images (build/import/push/convert).
    * - ``build``
      - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
    * - ``volume``

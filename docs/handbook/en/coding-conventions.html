@@ -470,8 +470,11 @@ Err(Error::Invalid(super::po::tf(
   <code>unrecognized subcommand</code>, never silently do something else. Before you cut, grep for internal
   callers across the <strong>whole</strong> workspace. <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Como uma quebra é
   feita". The groups listed as stable in that file may only break in a major release.</li>
-<li><strong>A command reachable from several paths must be wired on all of them</strong> (for example
-  <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>). <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>; see
+<li><strong>A command reachable from several paths must be wired on all of them</strong> — but prefer ONE path
+  over several when the job is a single resource's lifecycle. <code>vm pull</code> / <code>image vm pull</code> /
+  <code>image --vm pull</code> used to be three such paths, kept in sync by hand; they were folded into one
+  nested group, <code>vm image &lt;verb&gt;</code> (AGENTS.md's CLI restructuring Sprint 9). <strong>Decided</strong>:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>; see
   <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Contribution workflow</a>.</li>
 <li><strong>Leaf changes update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit.
   <strong>Enforced (gate)</strong>: see <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Contribution workflow</a>.</li>

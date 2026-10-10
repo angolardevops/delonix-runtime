@@ -4,8 +4,8 @@
 #   delonix stack apply -f examples/full-virtualmachine.yaml --dry-run
 #   delonix stack validate -f examples/full-virtualmachine.yaml
 #
-# The base disk is a VM image from the local store (`delonix image vm ls`, e.g. built by
-# `delonix image vm build` or pulled with `delonix image vm pull`) or a path to a qcow2/raw.
+# The base disk is a VM image from the local store (`delonix vm image ls`, e.g. built by
+# `delonix vm image build` or pulled with `delonix vm image pull`) or a path to a qcow2/raw.
 #
 # Documents in this file (variants are alternatives, hence separate documents):
 #   1. supporting resources: a Volume (9p share) and a Network

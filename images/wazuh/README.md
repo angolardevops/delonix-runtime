@@ -48,7 +48,7 @@ WAZUH_VERSION=X.Y.Z delonix vm build -f images/wazuh/vm.yaml
 `vm build` runs the builder with its own scratch directory next to your image
 store, streams the builder's output, then registers the resulting disk with the
 recipe's defaults and deletes the scratch directory whether it worked or not.
-The builder prints an `image vm import …` command at the end: that is what
+The builder prints an `vm image import …` command at the end: that is what
 `vm build` has just done for you, so you do not run it.
 
 `--network` means nothing here and is refused: the builder decides its own
@@ -59,8 +59,8 @@ the top of `scripts/appliances/build-wazuh.sh`.
 ## 3. Check the result
 
 ```bash
-delonix image vm ls
-delonix image vm describe wazuh-4.14.7-1-r1
+delonix vm image ls
+delonix vm image describe wazuh-4.14.7-1-r1
 ```
 
 ## 4. Prove it serves something
@@ -86,7 +86,7 @@ once, next to the scripts that set them.
 ## 6. Publish it
 
 ```bash
-delonix image vm push wazuh-4.14.7-1-r1 ghcr.io/angolardevops/delonix-vm-appliances:<tag>
+delonix vm image push wazuh-4.14.7-1-r1 ghcr.io/angolardevops/delonix-vm-appliances:<tag>
 ```
 
 ## Troubleshooting

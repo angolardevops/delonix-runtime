@@ -370,7 +370,7 @@ the same CLI. A server started directly (for example by a unit) finds the CLI th
 <code>DELONIX_BIN</code>, then a <code>delonix</code> next to itself, then <code>PATH</code> (<code>cli_bin</code> in
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Keep the five binaries of one build
 together</strong>; a mix of your build and a release is refused, or runs code you did not mean to test.</p>
-<p><code>delonix cluster kubeadm</code> and <code>delonix image vm build</code> look for <code>delonix-cri</code> in their own order
+<p><code>delonix cluster kubeadm</code> and <code>delonix vm image build</code> look for <code>delonix-cri</code> in their own order
 (<code>resolve_cri_bin</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>): <code>--cri-bin</code>, then next to
 <code>delonix</code>, then a <code>cargo build --release -p delonix-cri</code> if the current directory is inside a
 source checkout, and only then a download of the released asset.</p>

@@ -349,25 +349,29 @@ structural boundary, for example:</p>
 <strong>Accepted ADRs are never rewritten</strong> — a new ADR supersedes them.</p>
 <h2 id="adding-or-changing-a-cli-command">Adding or changing a CLI command<a class="hanchor" href="#adding-or-changing-a-cli-command" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Wire every entry point.</strong> Several commands are reachable by more than one path (for example
-  <code>delonix vm pull</code> and <code>delonix image vm pull</code>). Change all of them, then check each one with the
-  binary you built — including shell completion, because the <code>clap</code> declaration you edited may
-  not be the one the user's path parses. The completion engine can be probed directly;
-  <code>_CLAP_COMPLETE_INDEX</code> is the position of the word being completed:</li>
+<li><strong>Wire every entry point.</strong> When the same job is genuinely reachable by more than one path (the
+  compose/pod/Docker-API translators that all funnel into one <code>RunOpts</code> is the live example),
+  change every one of them, then check each one with the binary you built — including shell
+  completion, because the <code>clap</code> declaration you edited may not be the one the user's path parses.
+  The completion engine can be probed directly; <code>_CLAP_COMPLETE_INDEX</code> is the position of the word
+  being completed:</li>
 </ul>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm &#x27;&#x27;
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix vm image &#x27;&#x27;
 </code></pre></div>
-<ul>
-<li><strong>Validate against the binary</strong>, not the source: <code>./target/debug/delonix &lt;group&gt; &lt;command&gt; --help</code>
-  and a real run with the state roots isolated (see <a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>).</li>
-<li><strong>Update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit when you add or
+<p><strong>Prefer one entry point over several when the job is a single resource's lifecycle.</strong>
+  <code>delonix vm pull</code>/<code>image vm pull</code>/<code>image --vm pull</code> used to be three independent definitions of
+  the same command, kept in sync by hand — the recurring source of exactly the drift this bullet
+  warns about. They were folded into one nested group, <code>delonix vm image &lt;verb&gt;</code> (AGENTS.md's CLI
+  restructuring Sprint 9); that consolidation is the thing to copy, not the duplication it closed.
+- <strong>Validate against the binary</strong>, not the source: <code>./target/debug/delonix &lt;group&gt; &lt;command&gt; --help</code>
+  and a real run with the state roots isolated (see <a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>).
+- <strong>Update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit when you add or
   remove a leaf, and regenerate the site (<code>python3 docs/gen.py</code> with a release build) when help text
-  changes.</li>
-<li><strong>Unit-test every new pure function</strong> — parsers, validators, argument builders. This codebase has
-  a long record of real bugs caught exactly there.</li>
-<li><strong>Classify errors.</strong> Exit codes carry a class (not found, conflict, …) decided in one place from
-  the error type; return the right <code>Error</code> variant rather than a generic one.</li>
-</ul>
+  changes.
+- <strong>Unit-test every new pure function</strong> — parsers, validators, argument builders. This codebase has
+  a long record of real bugs caught exactly there.
+- <strong>Classify errors.</strong> Exit codes carry a class (not found, conflict, …) decided in one place from
+  the error type; return the right <code>Error</code> variant rather than a generic one.</p>
 <h2 id="commits-and-pull-requests">Commits and pull requests<a class="hanchor" href="#commits-and-pull-requests" aria-label="#">#</a></h2>
 <ul>
 <li>One logical change per commit; say <strong>why</strong> in the message — the diff already shows what.</li>

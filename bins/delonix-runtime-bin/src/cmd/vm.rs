@@ -16,7 +16,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 
-/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image vm build`.
+/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix vm image build`.
 ///
 /// The fields are the flags of that command, one for one, so the two paths
 /// cannot describe different builds. Nothing here is a second implementation:
@@ -72,7 +72,7 @@ pub(crate) struct VmSpec {
     /// to VMs.
     ///
     /// Without it, a project whose VM image is built from a `VMfile` needed two
-    /// commands and a hand-copied tag between them: `delonix image vm build -t x` and
+    /// commands and a hand-copied tag between them: `delonix vm image build -t x` and
     /// then a manifest saying `disk: x`. The tag was written in two places and
     /// nothing kept them in step.
     #[serde(default)]
@@ -839,7 +839,8 @@ pub enum VmCmd {
     /// Bootstrap a project with a VM manifest.
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without editing
-    /// anything.
+    /// anything. For BUILDING your own qcow2 instead of running an existing
+    /// one, see `vm image init` — a different job, so a different verb.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
@@ -853,11 +854,6 @@ pub enum VmCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a
-        /// manifest for RUNNING an existing one. The two are different jobs and
-        /// this is the same verb for both: `init` starts a project either way.
-        #[arg(long)]
-        vmfile: bool,
         /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
@@ -885,11 +881,11 @@ pub enum VmCmd {
         #[arg(long = "url-img", conflicts_with_all = ["disk"])]
         url_img: Option<String>,
         /// Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the
-        /// local golden VM image (if there is exactly one; `image vm ls`).
+        /// local golden VM image (if there is exactly one; `vm image ls`).
         #[arg(long, add = ArgValueCandidates::new(super::complete::vm_images))]
         disk: Option<String>,
         /// vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS`
-        /// in `delonix vm init --vmfile` — when `--disk` names a local image).
+        /// in `delonix vm image init` — when `--disk` names a local image).
         #[arg(long)]
         vcpus: Option<u32>,
         /// Memory (`"2G"`/`"1024M"`; default: `1G`, or the image's `MEMORY`
@@ -1007,64 +1003,19 @@ pub enum VmCmd {
         #[arg(long = "rm-after", value_name = "DURATION")]
         rm_after: Option<String>,
     },
-    /// Pull a golden VM image from an OCI registry.
+    /// VM image management — build/pull/push/ls/rm/describe/import/convert/init/ls-remote.
     ///
-    /// With no argument, the OFFICIAL Delonix image (ready for
-    /// `vm create`/`cluster kubeadm`).
-    Pull {
-        /// OCI reference (default: the official Delonix image).
-        source: Option<String>,
-        /// Local name (default: derived from the reference).
-        #[arg(long)]
-        name: Option<String>,
-        /// With no `source`, pull the official NO-Kubernetes golden (just
-        /// the `delonix` engine, rootless-ready) instead of the Kubernetes
-        /// one.
-        #[arg(long)]
-        no_k8s: bool,
+    /// Everything about the DISK, never a running instance — one nested
+    /// group instead of flat verbs, so `vm ls`/`vm rm` never have to answer
+    /// "an instance or an image?" (`image vm` retired, folded in here
+    /// together with the five verbs that were already flat directly under
+    /// `vm` — `build`/`convert`/`ls-remote`/`pull`/`push` — which is why
+    /// those five no longer have their own `VmCmd` variant; see AGENTS.md's
+    /// "image vm → vm image" section).
+    Image {
+        #[command(subcommand)]
+        action: super::vmimage::VmImageCmd,
     },
-    /// List the tags available in a remote OCI repository.
-    ///
-    /// With no argument, the OFFICIAL Delonix golden image repo (discover
-    /// which k8s versions are published before `pull`).
-    LsRemote {
-        source: Option<String>,
-        /// With no `source`, list the official NO-Kubernetes golden's repo
-        /// instead of the Kubernetes one.
-        #[arg(long)]
-        no_k8s: bool,
-    },
-    /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
-    Push {
-        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
-        name: String,
-        /// Destination. Omit it to publish to the OFFICIAL repository this
-        /// image belongs in (decided from the image's own metadata).
-        target: Option<String>,
-    },
-    /// Convert a VM disk to the format another ecosystem imports.
-    ///
-    /// `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd`
-    /// (Hyper-V, Azure). Flattened either way, so the result is a standalone
-    /// file with no backing chain. This engine's own two backends already
-    /// share `qcow2`/`raw`; the rest exist so an image built here is
-    /// importable elsewhere without a backend per product.
-    Convert {
-        /// A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path.
-        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
-        source: String,
-        #[arg(long = "to", value_enum)]
-        to: super::vmimage::ConvertFormat,
-        /// Destination file (default: alongside the source, with the new extension).
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
-        output: Option<PathBuf>,
-        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
-        /// others rather than handed to `qemu-img` to fail on.
-        #[arg(long)]
-        compress: bool,
-    },
-    /// Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe.
-    Build(super::vmimage::BuildArgs),
     /// Get or set the default VM backend.
     ///
     /// Used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND`
@@ -1233,7 +1184,7 @@ pub enum VmCmd {
     ///
     /// Stops the VM (if running), flattens its overlay to a standalone qcow2,
     /// transfers it over SSH, registers it as a VM image on the target
-    /// (`image vm import --appliance` — the disk already carries its own
+    /// (`vm image import --appliance` — the disk already carries its own
     /// configured state, a fresh cloud-init pass would be wrong there), and
     /// creates the VM from it. True live migration (near-zero downtime) is
     /// out of scope: Cloud Hypervisor has no disk-migration primitive, and
@@ -2676,28 +2627,11 @@ pub fn run(action: VmCmd) -> Result<()> {
         name,
         image,
         force,
-        vmfile,
         template,
         template_version,
         up,
     } = action
     {
-        if vmfile {
-            // Building an image and running one are different jobs; `init`
-            // starts a project for either. The name defaults to the directory,
-            // like the manifest scaffold already does.
-            let project = name.unwrap_or_else(|| {
-                dir.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .filter(|n| !n.is_empty() && n != ".")
-                    .unwrap_or_else(|| "myimage".to_string())
-            });
-            return super::vmimage::run(super::vmimage::VmImageCmd::Init {
-                name: project,
-                dir: Some(dir),
-                force,
-            });
-        }
         return init_for(
             super::scaffold::Target::Vm,
             dir,
@@ -2801,7 +2735,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
                     // Downloads the official golden when nothing is local — the
                     // same helper `cluster kubeadm` uses. This path used to
-                    // fail with "run `image --vm build` (or `pull`) first",
+                    // fail with "run `vm image build` (or `pull`) first",
                     // which is a research task for an image the project
                     // publishes so it never has to be built by hand.
                     let tag = super::cluster::resolve_or_pull_vm_image(&store, None, None)?;
@@ -2979,7 +2913,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "{}",
                 super::po::tf("Creating VM '{name}'…", &[("name", &cfg.name)])
             );
-            // Same live display as `image vm build`: a spinner while a stage runs, a
+            // Same live display as `vm image build`: a spinner while a stage runs, a
             // green tick and how long it took when it ends. The engine reports
             // only that a stage STARTED, so each report closes the previous one
             // — correct here because a stage that failed never reaches the next
@@ -3075,44 +3009,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             print_vm_next_steps(&vm.name, ip.as_deref(), injected_key, ssh_user, ephemeral);
             Ok(())
         }
-        VmCmd::Pull {
-            source,
-            name,
-            no_k8s,
-        } => {
-            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            // Same rule as `image vm pull`: a reference with no registry is
-            // resolved against the official catalogue, one with a `/` is used
-            // as given.
-            let src = match source {
-                Some(s) => super::vmimage::resolve_official_ref(&s)?,
-                None => super::vmimage::default_pull_source(no_k8s).to_string(),
-            };
-            super::vmimage::cmd_pull(&store, &src, name)
-        }
-        VmCmd::LsRemote { source, no_k8s } => match source {
-            Some(s) => super::vmimage::cmd_ls_remote(&super::vmimage::resolve_official_ref(&s)?),
-            None if no_k8s => super::vmimage::cmd_ls_remote(
-                super::vmimage::default_pull_source(true)
-                    .rsplit_once(':')
-                    .map_or(super::vmimage::default_pull_source(true), |(r, _)| r),
-            ),
-            None => super::vmimage::cmd_ls_remote_official(),
-        },
-        VmCmd::Push { name, target } => {
-            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            super::vmimage::cmd_push(&store, &name, target.as_deref())
-        }
-        VmCmd::Convert {
-            source,
-            to,
-            output,
-            compress,
-        } => {
-            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            super::vmimage::cmd_convert(&store, &source, to, output, compress)
-        }
-        VmCmd::Build(args) => super::vmimage::run(super::vmimage::VmImageCmd::Build(args)),
+        VmCmd::Image { action } => super::vmimage::run(action),
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
                 let target = super::providers_config::write_target()?;
@@ -4479,7 +4376,7 @@ fn migrate_transfer_and_create(
     // exactly the surprise this flag exists to prevent for an appliance's own
     // baked-in state.
     let import_cmd =
-        format!("delonix image vm import {remote_tmp} --tag {image_tag} --appliance --force");
+        format!("delonix vm image import {remote_tmp} --tag {image_tag} --appliance --force");
     let import_result = remote::ssh_run_as_user(&target, &import_cmd);
     if let Err(e) = &import_result {
         let _ = remote::ssh_run_as_user(&target, &format!("rm -f -- {remote_tmp}"));
@@ -4504,7 +4401,7 @@ fn migrate_transfer_and_create(
     create_result.map_err(|e| {
         Error::Invalid(format!(
             "[{host}] creating the VM from the imported disk: {e} (the image was imported as \
-             '{image_tag}' — `delonix image vm rm {image_tag}` to clean it up, or retry `vm create` \
+             '{image_tag}' — `delonix vm image rm {image_tag}` to clean it up, or retry `vm create` \
              by hand against it)"
         ))
     })?;

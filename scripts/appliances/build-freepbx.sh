@@ -185,12 +185,12 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t freepbx:17-asterisk$ASTERISK_MAJOR-r$IMAGE_REV \\"
+echo "  delonix vm image import $FINAL -t freepbx:17-asterisk$ASTERISK_MAJOR-r$IMAGE_REV \\"
 echo "      --distro debian --release $DEBIAN_VER \\"
 echo "      --default-vcpus 2 --default-memory 4G"
 echo
 echo "Publish it with:"
-echo "  delonix image vm push freepbx:17-asterisk$ASTERISK_MAJOR-r$IMAGE_REV \\"
+echo "  delonix vm image push freepbx:17-asterisk$ASTERISK_MAJOR-r$IMAGE_REV \\"
 echo "      ghcr.io/angolardevops/delonix-vm-appliances:freepbx-17-asterisk$ASTERISK_MAJOR-r$IMAGE_REV"
 echo
 echo "PROVEN by this script: the base image matched Debian's SHA512SUMS, the"

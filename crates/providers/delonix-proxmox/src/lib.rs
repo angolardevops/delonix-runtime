@@ -4631,7 +4631,7 @@ fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
             "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to \
              clone a template, `<storage>:<size-in-GiB>` for a fresh disk (e.g. \
              `local-lvm:8`), or an image of the engine's store, which is uploaded to the node \
-             (`delonix image vm ls`)"
+             (`delonix vm image ls`)"
         ))
     };
     let path = Path::new(disk);

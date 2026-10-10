@@ -69,8 +69,8 @@ list each build got is in `/etc/delonix/freepbx-modules.txt` inside the image.
 ## 3. Check the result
 
 ```bash
-delonix image vm ls
-delonix image vm describe freepbx-17-asterisk22-r1
+delonix vm image ls
+delonix vm image describe freepbx-17-asterisk22-r1
 ```
 
 ## 4. Prove it serves something

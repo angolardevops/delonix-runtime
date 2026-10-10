@@ -64,8 +64,8 @@ official Delonix base on ghcr, then the distro's own cloud image. Add
 ## 3. Check the result
 
 ```bash
-delonix image vm ls
-delonix image vm describe 42
+delonix vm image ls
+delonix vm image describe 42
 ```
 
 `describe` shows the size, the distro (`fedora:42`), the recorded defaults

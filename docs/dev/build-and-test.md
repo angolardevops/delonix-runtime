@@ -131,7 +131,7 @@ the same CLI. A server started directly (for example by a unit) finds the CLI th
 `crates/contexts/delonix-node/src/dispatch.rs`). **Keep the five binaries of one build
 together**; a mix of your build and a release is refused, or runs code you did not mean to test.
 
-`delonix cluster kubeadm` and `delonix image vm build` look for `delonix-cri` in their own order
+`delonix cluster kubeadm` and `delonix vm image build` look for `delonix-cri` in their own order
 (`resolve_cri_bin` in `bins/delonix-runtime-bin/src/cmd/vmimage.rs`): `--cri-bin`, then next to
 `delonix`, then a `cargo build --release -p delonix-cri` if the current directory is inside a
 source checkout, and only then a download of the released asset.

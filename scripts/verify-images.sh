@@ -207,7 +207,7 @@ check_custom() { # check_custom <distro> <qcow2>
 
 # What the store says about an image, from the record `vm build` wrote.
 check_record() { # check_record <name> <cloud-init yes|no> <distro-substr> <vcpus> <mem>
-  local out ci; out=$(dl image vm describe "$1" 2>&1)
+  local out ci; out=$(dl vm image describe "$1" 2>&1)
   ci=$(printf '%s\n' "$out" | sed -n 's/^Cloud-init: *//p' | head -1)
   case "$ci" in "$2"*) ok "$1: record says cloud-init $2";; *) bad "$1: record says cloud-init $2" "the Cloud-init line was '${ci:-<none>}'";; esac
   if [ -n "$3" ]; then
@@ -424,11 +424,11 @@ stage_appliance() { # stage_appliance <name>
     skip "appliance $n" "needs ${min_ram} GiB RAM and ${min_disk} GiB free; this host has ${ram}/${disk}"; return
   fi
   local before after
-  before=$(dl image vm ls -o json 2>/dev/null | python3 -c 'import json,sys
+  before=$(dl vm image ls -o json 2>/dev/null | python3 -c 'import json,sys
 try: print("\n".join(sorted(str(r.get("name")) for r in json.load(sys.stdin))))
 except Exception: pass')
   build "appliance-$n" -f "$REPO/images/$n/vm.yaml" ${target:+--target "$target"} || return
-  after=$(dl image vm ls -o json 2>/dev/null | python3 -c 'import json,sys
+  after=$(dl vm image ls -o json 2>/dev/null | python3 -c 'import json,sys
 try: print("\n".join(sorted(str(r.get("name")) for r in json.load(sys.stdin))))
 except Exception: pass')
   local new; new=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)

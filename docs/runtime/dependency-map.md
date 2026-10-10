@@ -77,8 +77,9 @@ graph TD
 ## 4. Structural risks (for the architecture campaign)
 
 - **`delonix-runtime-bin` is a 38 kLOC god-crate** — 54 % of all source, 44 `cmd/*` modules. It
-  is where the product lives, but also where the most-duplicated logic sits (the triplicated
-  `vm`/`image vm`/`image --vm` paths, the compose/pod/docker-api schema translators). The
+  is where the product lives, but also where the most-duplicated logic sits (the compose/pod/
+  docker-api schema translators — the once-triplicated `vm`/`image vm`/`image --vm` paths were
+  consolidated into one `vm image <verb>` group). The
   `Workload` unification (vision Phase 1) is largely a **`-bin` refactor**, and any move of a
   trait *down* into core (vision Phase 2) has to extract it out of here without dragging CLI deps.
 - **`spawn()` (~405 lines, `delonix-runtime/lib.rs`)** — the single riskiest function; its
