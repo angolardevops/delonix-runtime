@@ -198,13 +198,21 @@ Each row's «Live validation» is the gate that closes the sprint.
 | 10.1 | Merge the `vm image` migration — PR #772: battery PASS=1235 FAIL=0 SKIP=13 on its tree, `cli_exec_trace.tsv` re-recorded at 182/270 = 67.4 %, C12 included |
 | 10.2 | **Done 2026-10-10**: C1–C11 fixed in the documents that carry them — ADR statuses in place, dated reports with a dated correction next to the original sentence |
 | 10.3 | **Done 2026-10-10** (branch `lab/budget-preflight`): `scripts/lab_budget.sh` (§4 rule 1) with eight tests |
-| 10.4 | Remove the `aprendizados-v5` worktree and branch; N29; N30 |
-| 10.5 | N1: `install.sh` end to end |
+| 10.4 | Remove the `aprendizados-v5` worktree and branch (**done 2026-10-10**: no worktree left, the remote branch was fully merged by #734 and is deleted); N29 (in this PR: `crates/providers/delonix-proxmox/tests/live.rs` header); N30 |
+| 10.5 | N1: `install.sh` end to end — **done 2026-10-10**, see the result below |
 
 **Live validation**: N1 on a fresh `delonix-vm-base:ubuntu-24.04` guest (libvirt,
 2 vCPU / 2 GiB): run the published `install.sh`, then `delonix --version` reports
 the v5.0.0 commit and `delonix container run --rm alpine true` exits 0 inside the
 guest.
+
+**Result (2026-10-10)**: `lab_budget.sh --ram 2 --vcpus 2` said go (20 GiB available,
+load 7.3 on 32 threads). The guest booted in 15 s; `install.sh` from `origin/main` installed
+v5.0.0 (`2837f5863` = `v5.0.0^{commit}`) in 51 s; `container run --rm alpine:3.20` exited 0, and
+`-m 128M` under a delegated scope read back as `memory.max` 134217728. **One defect**: the
+installer's own `user namespaces` check failed on every Ubuntu 23.10+ host, because it ran a
+bare `unshare` the delonix AppArmor profile does not cover — fixed in #775 and re-measured OK
+on the same guest. Teardown: the owner's 15 libvirt domains unchanged, 578.7 MiB freed.
 
 ### Sprint 11 — The ADR decisions
 
@@ -224,7 +232,7 @@ uploaded and imported by the node; the appliance and the VM are destroyed after.
 |---|---|
 | 12.1 | N4: the < 100 MiB test guest image |
 | 12.2 | N5: state-upgrade test (a v5.0.0 root opened by the tip) |
-| 12.3 | 65 F0.1: the cell metric ratchet, if not yet two-way |
+| 12.3 | 65 F0.1: the cell metric ratchet — **already done** (`c539df7a`, 2026-10-06; re-measured by #771: 103/273 = 37.7 %) |
 
 **Live validation**: the N4 image boots on libvirt **and** Cloud Hypervisor,
 answers on its port, and its guest agent reports an address; the N5 test runs
