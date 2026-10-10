@@ -855,20 +855,21 @@ impl VolumeStore {
         dir_usage(path)
     }
 
-    /// Is the volume at (or above) the alert threshold? `(in_alert, above_quota)`.
-    pub fn quota_state(&self, vol: &Volume) -> (bool, bool) {
-        quota_state_of(self.usage(&vol.name), vol.quota_bytes, vol.alert_pct)
-    }
-
-    /// Like [`Self::quota_state`], but carries whether the usage was actually
-    /// measurable — an unreadable subtree must not read as "within quota".
+    /// Carries whether the usage was actually measurable — an unreadable
+    /// subtree must not read as "within quota". The one form of this check:
+    /// the unchecked `quota_state`/`quota_state_at` that used to sit beside
+    /// it had zero callers outside their own tests and the exact bug
+    /// `refuse_shrink_below` fixes elsewhere in this file (an incomplete
+    /// measurement reading as "fine"), so they were removed rather than kept
+    /// as a trap for the next caller who reaches for the shorter name.
     pub fn quota_state_checked(&self, vol: &Volume) -> QuotaState {
         let u = self.usage_checked(&vol.name);
         quota_state_checked_of(u, vol.quota_bytes, vol.alert_pct)
     }
 
     /// [`Self::quota_state_checked`] for an arbitrary path/limit (the
-    /// `kind: ShareVolume` case — see [`Self::usage_at_checked`]).
+    /// `kind: ShareVolume` case — see [`Self::usage_at_checked`]), for a
+    /// caller tracking quota against an external path/limit of its own.
     pub fn quota_state_at_checked(
         &self,
         path: &std::path::Path,
@@ -876,18 +877,6 @@ impl VolumeStore {
         alert_pct: Option<u8>,
     ) -> QuotaState {
         quota_state_checked_of(self.usage_at_checked(path), quota_bytes, alert_pct)
-    }
-
-    /// Like [`Self::quota_state`], parameterized directly instead of reading
-    /// a stored [`Volume`] — for a caller tracking quota against an external
-    /// path/limit of its own (see [`Self::usage_at`]).
-    pub fn quota_state_at(
-        &self,
-        path: &std::path::Path,
-        quota_bytes: Option<u64>,
-        alert_pct: Option<u8>,
-    ) -> (bool, bool) {
-        quota_state_of(self.usage_at(path), quota_bytes, alert_pct)
     }
 
     fn run(cmd: &str, args: &[&str]) -> Result<()> {
@@ -933,9 +922,7 @@ impl VolumeStore {
         let data_s = data.to_string_lossy().into_owned();
         if !img.exists() {
             // we only create a loopback over an EMPTY `_data` (otherwise we'd hide data).
-            if self.usage(name) > 0 {
-                return Err(Error::QuotaOnNonEmpty);
-            }
+            refuse_loopback_on_nonempty(self.usage_checked(name))?;
             // sparse image the size of the quota → ext4 → loop mount.
             Self::run(
                 "truncate",
@@ -968,10 +955,10 @@ impl VolumeStore {
             Self::run("resize2fs", &[&dev])?; // online grow
         } else if quota < cur {
             // SHRINK: ext4 does not shrink online — do it offline (unmount/resize/mount).
-            // Refuses if busy (container in use) or if the quota < current usage.
-            if self.usage(name) > quota {
-                return Err(Error::QuotaBelowUsage);
-            }
+            // Refuses if busy (container in use), if the measurement could not
+            // see everything (see `refuse_shrink_below`), or if the quota <
+            // current usage.
+            refuse_shrink_below(self.usage_checked(name), quota)?;
             if std::process::Command::new("umount")
                 .arg(&data_s)
                 .output()
@@ -1308,11 +1295,6 @@ fn dir_usage_parallel(p: &std::path::Path, threads: usize) -> Usage {
     out
 }
 
-/// `(in_alert, above_quota)` from a measured `used` against `quota_bytes`/`alert_pct`
-/// — the shared implementation behind [`VolumeStore::quota_state`]/[`VolumeStore::quota_state_at`].
-/// [`quota_state_of`] carrying the "was it measurable at all?" bit. An
-/// incomplete walk yields `measured: false` with both verdicts `false`, which
-/// the caller must render as *unknown* — never as "within quota".
 /// Bytes a file actually occupies on disk, `du`-style: `st_blocks` is defined
 /// by POSIX in 512-byte units regardless of the filesystem's own block size.
 fn allocated_bytes(m: &fs::Metadata) -> u64 {
@@ -1353,6 +1335,40 @@ fn dir_usage_inner(
         }
     }
     out
+}
+
+/// Whether a hard-quota SHRINK to `quota` bytes is safe given a measured
+/// `used`. Refuses when the walk could not read everything — `used.bytes` is
+/// then a LOWER BOUND, not the real usage (see [`Usage`]) — because shrinking
+/// the ext4 loopback on an unverified number can truncate data the walk
+/// simply never saw, the exact failure [`Usage::is_complete`] exists to let a
+/// caller catch instead of silently trusting a floor. Pure, so the decision
+/// is testable without the loop device and root `apply_loopback` otherwise
+/// needs for every other step of a shrink.
+fn refuse_shrink_below(used: Usage, quota: u64) -> Result<()> {
+    if !used.is_complete() {
+        return Err(Error::UsageUnmeasurable);
+    }
+    if used.bytes > quota {
+        return Err(Error::QuotaBelowUsage);
+    }
+    Ok(())
+}
+
+/// Whether creating a NEW hard-quota loopback over `_data` is safe given a
+/// measured `used` — it must be genuinely empty, or the image masks real
+/// data instead of refusing the way [`Error::QuotaOnNonEmpty`] promises. The
+/// same reasoning as [`refuse_shrink_below`]: on an incomplete measurement,
+/// `used.bytes == 0` is indistinguishable from "actually empty" and from
+/// "the only thing in here was a directory this walk could not read".
+fn refuse_loopback_on_nonempty(used: Usage) -> Result<()> {
+    if !used.is_complete() {
+        return Err(Error::UsageUnmeasurable);
+    }
+    if used.bytes > 0 {
+        return Err(Error::QuotaOnNonEmpty);
+    }
+    Ok(())
 }
 
 fn quota_state_checked_of(
@@ -1645,16 +1661,55 @@ mod tests {
         // quota chosen so `used` sits at ~95 % of it ⇒ in alert, not above.
         let quota = used * 100 / 95;
         let v = s.set_quota("qv", Some(quota), Some(90), false).unwrap();
-        let (warn, over) = s.quota_state(&v);
+        let qs = s.quota_state_checked(&v);
         assert!(
-            warn && !over,
-            "{used}/{quota} (~95%) deve estar em alerta mas não acima"
+            qs.measured && qs.in_alert && !qs.above_quota,
+            "{used}/{quota} (~95%) deve estar em alerta mas não acima: {qs:?}"
         );
 
         // grow past the quota
         std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 64 * 1024]).unwrap();
-        let (_, over2) = s.quota_state(&v);
-        assert!(over2, "{}/{quota} deve estar acima da quota", s.usage("qv"));
+        let qs2 = s.quota_state_checked(&v);
+        assert!(
+            qs2.above_quota,
+            "{}/{quota} deve estar acima da quota",
+            s.usage("qv")
+        );
+    }
+
+    /// BUG regression guard: a hard-quota SHRINK used to decide against
+    /// `self.usage(name)` — a BARE byte count that is a LOWER BOUND whenever
+    /// some directory could not be read (the rootless sub-uid case this same
+    /// file documents extensively). An incomplete measurement that happens to
+    /// read as "under quota" must refuse, not approve a shrink that could
+    /// truncate data the walk never saw. A complete one is judged normally.
+    #[test]
+    fn a_shrink_refuses_when_the_usage_walk_could_not_see_everything() {
+        let complete_under = Usage {
+            bytes: 10,
+            unreadable: 0,
+        };
+        assert!(refuse_shrink_below(complete_under, 100).is_ok());
+
+        let complete_over = Usage {
+            bytes: 200,
+            unreadable: 0,
+        };
+        assert!(matches!(
+            refuse_shrink_below(complete_over, 100),
+            Err(Error::QuotaBelowUsage)
+        ));
+
+        // The dangerous case: looks comfortably under quota, but the walk
+        // missed a directory — the real total could be anything.
+        let incomplete_looks_fine = Usage {
+            bytes: 10,
+            unreadable: 1,
+        };
+        assert!(matches!(
+            refuse_shrink_below(incomplete_looks_fine, 100),
+            Err(Error::UsageUnmeasurable)
+        ));
     }
 
     /// REGRESSION: a file reachable through several hardlinks must be charged
@@ -1791,7 +1846,7 @@ mod tests {
         assert_eq!(v2.quota_bytes, Some(2000));
         assert_eq!(v2.mountpoint, external.to_string_lossy());
 
-        // usage_at/quota_state_at measure the EXTERNAL path directly.
+        // usage_at/quota_state_at_checked measure the EXTERNAL path directly.
         // Derivado da medição real, não de um número aparente fixo — ver a nota
         // em `quota_state_alerts` sobre porque o valor absoluto deixou de ser
         // uma asserção legítima depois de `dir_usage` passar a contar blocos.
@@ -1799,10 +1854,10 @@ mod tests {
         let used = s.usage_at(&external);
         assert!(used > 0, "o caminho externo tem de ser medível");
         let quota = used * 100 / 95;
-        let (warn, over) = s.quota_state_at(&external, Some(quota), Some(90));
+        let qs = s.quota_state_at_checked(&external, Some(quota), Some(90));
         assert!(
-            warn && !over,
-            "{used}/{quota} (~95%) devia estar em alerta mas não acima"
+            qs.measured && qs.in_alert && !qs.above_quota,
+            "{used}/{quota} (~95%) devia estar em alerta mas não acima: {qs:?}"
         );
 
         // `remove` deletes ONLY this store's own bookkeeping dir — the
