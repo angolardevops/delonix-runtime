@@ -1,5 +1,10 @@
 # Continuity plan — one session owns the engine's open work
 
+> **Superseded from Sprint 3 on (2026-10-10).** Sprints 0–2 below are delivered
+> and stay here as the record. The order of delivery for everything still open —
+> including every `Proposed` ADR and the live validation that closes each sprint —
+> is now [`68_ENGINE_COMPLETION_PLAN.md`](68_ENGINE_COMPLETION_PLAN.md).
+
 > **What this document is.** The consolidation of work that was spread over
 > several parallel sessions into a single owner, with the order in which the open
 > items are delivered. It names, for every programme already running, where it
