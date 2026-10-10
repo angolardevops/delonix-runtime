@@ -1,4 +1,4 @@
-// End-to-end proof (ADR-0027): can a supervisor with NO privilege observe a
+// End-to-end proof (ADR-0077): can a supervisor with NO privilege observe a
 // syscall, attribute it to a PID, and REFUSE it, on a child process?
 #define _GNU_SOURCE
 #include <stdio.h>

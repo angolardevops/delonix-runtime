@@ -464,7 +464,8 @@ into a caveat where it should be a plain "not done":
   records the node leaves behind) is still "decided and not implemented," for the same reason
   this repository's own prior `auditoria/naas-kaas-caas` pass already left it open: it needs a
   live DNS server to validate against, and names that as a precondition in its own text. Nothing
-  in this session changes that gap's status.
+  in this session changes that gap's status. **Corrected 2026-10-10:** D6 shipped the same
+  day in #758 and was measured against the lab's PowerDNS (`pdnslab`); see ADR-0064.
 - **The guest-agent-dependent tests** (`o_ip_vem_do_agente_de_um_convidado_a_serio` and its
   siblings already proven once) need a prepared VM with `qemu-guest-agent` running, which this
   session's fresh lab did not have time to build on top of everything else done.

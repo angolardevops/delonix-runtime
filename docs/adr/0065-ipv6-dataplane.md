@@ -1,6 +1,6 @@
 # ADR-0065: IPv6 in the SDN dataplane — one `inet` table, addresses derived from the v4 lease, anti-spoof in the `bridge` family
 
-- **Status:** Proposed (2026-10-02). Nothing implemented; the spike is done and recorded below.
+- **Status:** Accepted (2026-10-10, by the owner); P1–P6 are completion plan Sprint 17. Nothing implemented yet; the spike is done and recorded below.
   The owner decided D2 (prerequisite), D7 (port publishing) and D8 (opt-in) on 2026-10-02.
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar

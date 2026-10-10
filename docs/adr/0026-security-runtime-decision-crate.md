@@ -1,6 +1,6 @@
 # ADR-0026: The security runtime is a decision crate, not a sensor platform — and it has no tenants
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — built: `delonix-security-runtime` (#163), extended by #767
 - **Date:** 2026-08-29
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0010 (remote management API, **Rejected**), ADR-0003 (tenancy-free capability

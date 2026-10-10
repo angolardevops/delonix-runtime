@@ -1,4 +1,4 @@
-// Spike (ADR-0027): what a security sensor can open with NO privilege at all.
+// Spike (ADR-0077): what a security sensor can open with NO privilege at all.
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stddef.h>

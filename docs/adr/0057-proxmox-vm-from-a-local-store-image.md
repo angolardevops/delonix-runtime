@@ -1,6 +1,6 @@
 # ADR-0057: A Proxmox VM boots from an image in the engine's own store, uploaded and imported by the node
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — built and live-measured (#541)
 - **Date:** 2026-09-27
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0008 (the remote backend and why its disk names something on the far

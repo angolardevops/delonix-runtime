@@ -304,7 +304,8 @@ metric moved from 100/252 (39.7%) through 102/252 (40.5%) to **103/252
 
 ### Open, in priority order (none attempted in this pass — scope and ADR sequencing)
 
-1. **Node-API `VirtualMachineService`** (§4). Already specified, already
+1. **Node-API `VirtualMachineService`** (§4). **Corrected 2026-10-10:** served since
+   6d8606bc, all but `Console`. As first written: already specified, already
    staged behind ADR-0040 P5. The highest-leverage next step for actual
    PaaS consumption, and the one this audit explicitly did NOT jump ahead
    of — it is Sprint 7 of the engine's own continuity plan, after work

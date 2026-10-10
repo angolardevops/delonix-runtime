@@ -1,6 +1,6 @@
 # ADR-0033: OCI runtime hooks stay unimplemented — no concrete consumer, and the security class is the one this repo already gates behind a spike
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — a decision not to build: OCI hooks stay unimplemented until a consumer is named
 - **Date:** 2026-09-06
 - **Deciders:** Walter (owner)
 - **Related:** `docs/runtime/runtime-architecture.md` §"Plugin Engine" (dynamic loading flagged as

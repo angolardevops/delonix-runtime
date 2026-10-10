@@ -1,6 +1,6 @@
 # ADR-0021: A pull reconciler (`delonix gitops`) — opt-in, and still daemonless
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — to build (completion plan Sprint 24)
 - **Date:** 2026-08-27
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0010 (remote management API, **rejected**), ADR-0019 (stack

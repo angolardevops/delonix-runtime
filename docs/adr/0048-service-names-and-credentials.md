@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed 2026-09-20. Scope decided with the owner the same day (table below). Phases 1 (names, the shared
+Accepted (2026-10-10, by the owner); phase 3 is completion plan Sprint 20. Proposed 2026-09-20; scope decided with the owner the same day (table below). Phases 1 (names, the shared
 view, the `SVC` column in `container ls`, `vm ls` and `stack ls`, `describe` and JSON) and 2 (`delonix hosts
 sync`) are built; phase 3 (credentials) is not.
 

@@ -1,6 +1,6 @@
 # ADR-0004: Container checkpoint/restore is gated on a rootless-CRIU GO/NO-GO spike
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-10, by the owner) — to build, behind the rootless-CRIU GO/NO-GO spike this ADR names first (completion plan Sprint 24)
 - **Date:** 2026-07-30
 - **Deciders:** Walter (owner) + Chief Runtime Architect review
 - **Related:** `docs/runtime/current-state.md` §5 (verified stub), `docs/runtime/runtime-architecture.md`

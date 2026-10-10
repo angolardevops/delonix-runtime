@@ -166,5 +166,7 @@ leave the untouched field alone) and what is still only unit-tested (the systemd
 `SetUnitProperties` branch, which needs a stable kubelet to measure for real).
 
 With items 1–4 all implemented, this ADR's decision is fully built. What remains is the
-end-to-end validation against a live kubelet, blocked by the unrelated control-plane
-crash-loop investigated separately.
+end-to-end validation against a live kubelet. The control-plane crash-loop that blocked it
+is closed — it was the kubelet's cgroup driver, and the CRI now answers `cgroupfs`
+(AGENTS.md, «RESOLVIDO — o crash-loop do control-plane de nó único») — so what remains is
+a kubelet run, scheduled as Sprint 19 of `docs/discovery/68_ENGINE_COMPLETION_PLAN.md`.

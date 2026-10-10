@@ -22,6 +22,15 @@
 //! numerator of the coverage matrix: `scripts/proxmox_api_inventory.py --trace`
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
+//!
+//! Order matters in one run. The firewall tests (`the_vms_own_firewall_*`,
+//! `a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back`,
+//! `a_system_containers_firewall_is_applied_and_reads_back`) need the
+//! datacenter firewall ON and leave it on. A SDN zone created AFTER that is not
+//! exempted by the node's default forward policy, so a DHCP-backed guest in it
+//! gets no address — measured on the first attempt (report of 2026-10-09,
+//! §5.4/§6.2). Run the SDN/DHCP cases before the firewall ones, or in a
+//! separate run, and read a DHCP timeout after a firewall test as this first.
 
 use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};

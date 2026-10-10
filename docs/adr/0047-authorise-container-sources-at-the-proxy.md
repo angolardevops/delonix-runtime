@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Nothing is implemented. It follows from ADR-0046 phase 1b, where `hosts: containers` was
+Accepted (2026-10-10, by the owner); the spike comes first (completion plan Sprint 17). Nothing is implemented yet. It follows from ADR-0046 phase 1b, where `hosts: containers` was
 built, measured, and withdrawn because of the control described below.
 
 ## Context

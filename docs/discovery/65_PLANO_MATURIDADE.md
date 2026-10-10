@@ -100,8 +100,8 @@ A métrica de célula é a honesta: uma capacidade provada no Proxmox e só
 | Docker Engine API | 15 rotas servidas, 11 recusadas com razão | 2026-10-02 |
 | Compose, por serviço | 28 servidas, 12 recusadas, **49 em falta**, de 89 | 2026-10-02 |
 | Compose, topo | 7 servidas, 1 recusada, de 8 | 2026-10-02 |
-| Contrato de nó | 1 RPC servido (`ListProviders`) | 2026-10-02 |
-| CLI executada pela bateria | **37 %** (91 de 244 folhas; medido no cabeçalho do `scripts/e2e.sh`); 63 % no ramo `auditoria-cobertura`, por integrar | 2026-09-09, v3.0.0 — **por remedir** |
+| Contrato de nó | 1 RPC servido (`ListProviders`) → **2026-10-10**: Node, Network, leituras de Volume, VirtualMachine (menos `Console`) e Operations servidos | 2026-10-02; remedido 2026-10-10 |
+| CLI executada pela bateria | **37 %** (91 de 244 folhas; medido no cabeçalho do `scripts/e2e.sh`); 63 % no ramo `auditoria-cobertura`, por integrar → **2026-10-10: 65,8 %** (181 de 275, `scripts/cli_exec_trace.tsv`; o ramo perdeu-se e a cobertura foi refeita) | 2026-09-09, v3.0.0; remedido 2026-10-10 |
 | Checks na bateria E2E | 735 linhas `check` | 2026-10-02 |
 | Cenários de caos | 25 | 2026-10-02 |
 | Testes no workspace | 2658 | 2026-10-02 |
@@ -241,7 +241,7 @@ nunca desaparece da matriz.
 
 | Fase | Métrica de célula | Outras saídas |
 |---|---|---|
-| Hoje | 37 % (99/265) | — |
+| Hoje | 37 % (99/265) → **2026-10-10: 37,7 % (103/273)**, cabeçalho de `docs/providers/capability-matrix.md` | — |
 | F0 | 37 % (não muda; muda a confiança) | laboratório a correr; CLI executada medida; CRI remedido; teste de upgrade |
 | F1 | ≥ 60 % | 0 células N2 sem check a chumbar com reversão |
 | F2 | ≥ 60 % em N3 nos domínios Containers, VMs, Protecção | `WatchEvents` servido; eventos por falha |

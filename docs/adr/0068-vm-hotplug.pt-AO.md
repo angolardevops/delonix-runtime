@@ -1,6 +1,6 @@
 # ADR-0068: Hotplug de VM — CPU, memória, disco e NIC com a VM a correr
 
-- **Estado:** Proposed (2026-10-02). Nada implementado; o spike está no Anexo A. As respostas do
+- **Estado:** Accepted (2026-10-10, pelo dono). A Fase 1 está construída no Cloud Hypervisor (#749); o resto é a Sprint 18 do plano de conclusão. O spike está no Anexo A. As respostas do
   dono de 2026-10-02 estão registadas como decisões (D2, D4, D8, D10); as questões que deixou em
   aberto continuam abertas, com recomendação.
 - **Data:** 2026-10-02
