@@ -69,7 +69,7 @@ Sprint 10, in the document that carries them.
 | C10 | 67 §4, §7.1 | `VirtualMachineService` «zero served» | served except `Console` (6d8606bc) |
 | C11 | naas audit §3 #5 | admission warning not fixed | fixed (#767) |
 | C12 | `scripts/e2e.sh` | `xfail ACH-034` | fixed in bbf2a972; the mark fails the battery by XPASS — turned into a `check` on the `vm-image-migration` branch |
-| C13 | ADR numbering | two ADRs carry 0027 (pidfd, rootless sensor) | renumbering is the owner's call (§3, row X2) |
+| C13 | ADR numbering | two ADRs carry 0027 (pidfd, rootless sensor) | renumbering is the owner's call (§3, row X2) — done in 11.2: ADR-0077 |
 
 ---
 
@@ -219,7 +219,7 @@ on the same guest. Teardown: the owner's 15 libvirt domains unchanged, 578.7 MiB
 | # | Item |
 |---|---|
 | 11.1 | **Done 2026-10-10**: the owner decided §3; statuses and index updated with the plan |
-| 11.2 | X2 renumbering |
+| 11.2 | X2 renumbering — **done 2026-10-10**: the sensor ADR is ADR-0077, the old file a stub, the spike directory moved with it |
 | 11.3 | N2: revoke `dlxs6` |
 
 **Live validation**: ADR-0057's path re-measured on a `proxmox-ve:9.2-r2`
@@ -319,7 +319,7 @@ the budget.
 
 ### Sprint 23 — Production pillars (F5) and the structural rest
 
-N27, N10, ADR-0027 sensor measurement.
+N27, N10, ADR-0077 sensor measurement.
 
 **Live validation**: the fuzzers run for a fixed budget with zero crashes; the
 SLI exporter is scraped from a golden guest.
@@ -335,7 +335,7 @@ says so, rather than the build being forced.
 | # | Item | First step | Live validation |
 |---|---|---|---|
 | 24.1 | ADR-0021 `kind: GitOpsSource` (opt-in, systemd timer, daemonless) | the security pass the ADR asks for (a pull source is untrusted input) | in a golden guest, a bare git repo served locally; a commit to it converges a stack on the next timer tick, and a commit that fails `stack plan` leaves the running stack untouched |
-| 24.2 | ADR-0027 seccomp user-notification sensor | the per-syscall cost, measured with `bench.sh` against the same workload with and without the filter | a container under the sensor raises the decision event for a denied syscall and the cost stays inside the budget the ADR writes down |
+| 24.2 | ADR-0077 seccomp user-notification sensor | the per-syscall cost, measured with `bench.sh` against the same workload with and without the filter | a container under the sensor raises the decision event for a denied syscall and the cost stays inside the budget the ADR writes down |
 | 24.3 | ADR-0004 rootless CRIU checkpoint/restore | GO/NO-GO in a golden guest with CRIU installed (rootless needs `CAP_CHECKPOINT_RESTORE`, kernel ≥ 5.9) | a container checkpointed and restored in the guest keeps its PID-1 state (a counter it holds in memory continues) |
 
 ---

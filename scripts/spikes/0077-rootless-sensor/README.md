@@ -1,6 +1,6 @@
-# Spike ADR-0027 — what a security sensor can observe, rootless
+# Spike ADR-0077 — what a security sensor can observe, rootless
 
-Three probes behind [ADR-0027](../../../docs/adr/0027-rootless-sensor-spike.md).
+Three probes behind [ADR-0077](../../../docs/adr/0077-rootless-sensor-spike.md).
 They need **no privilege** and no fixture beyond `/tmp`.
 
 ```sh
