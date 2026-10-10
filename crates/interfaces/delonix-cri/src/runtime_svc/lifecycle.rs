@@ -149,11 +149,13 @@ impl CriResources {
                 cpuset_cpus: r.cpuset_cpus.clone(),
                 oom_score_adj: r.oom_score_adj,
                 cpuset_mems: r.cpuset_mems.clone(),
-                hugepage_limits: r
-                    .hugepage_limits
-                    .iter()
-                    .map(|h| (h.page_size.clone(), h.limit))
-                    .collect(),
+                hugepage_limits: drop_vacuous_zero_hugepage_limits(
+                    r.hugepage_limits
+                        .iter()
+                        .map(|h| (h.page_size.clone(), h.limit))
+                        .collect(),
+                    host_hugepage_pool,
+                ),
                 unified,
             }
         })
@@ -252,6 +254,67 @@ fn apply_resources(r: &CriResources, o: &mut delonix_compute::RunOpts) {
     if !r.unified.is_empty() {
         o.unified = r.unified.clone();
     }
+}
+
+/// PURE. Drops the `hugepage_limits` entries that ask for nothing the kernel
+/// does not already enforce: a limit of `0` for a page size whose host pool is
+/// empty (`pool(size) == Some(0)`).
+///
+/// The kubelet sends a limit for EVERY page size the node reports, `0` for the
+/// ones the pod did not request, so a pod with no hugepages still carries
+/// `hugetlb.2MB.limit_in_bytes=0`. On a node whose kubelet parent does not
+/// delegate `hugetlb`, honouring that entry literally refused every pod —
+/// measured on a kubeadm node built from main (2026-10-10): etcd and the
+/// apiserver never started, `kubeadm init` timed out in `wait-control-plane`.
+/// With no pages in the pool, no process can allocate one, so a zero cap is
+/// already in force without the controller; nothing is being ignored.
+///
+/// Everything else is kept and goes through the honour-or-refuse path: a
+/// non-zero limit, and a zero limit over a pool that HAS pages (there the
+/// controller is what stops the container taking them). A pool that cannot be
+/// read (`None`) also keeps the entry — not knowing is never read as empty.
+fn drop_vacuous_zero_hugepage_limits(
+    limits: Vec<(String, u64)>,
+    pool: impl Fn(&str) -> Option<u64>,
+) -> Vec<(String, u64)> {
+    limits
+        .into_iter()
+        .filter(|(size, limit)| !(*limit == 0 && pool(size) == Some(0)))
+        .collect()
+}
+
+/// Pages in the host pool for a CRI page size (`"2MB"`, `"1GB"`, `"64KB"`):
+/// `nr_hugepages + nr_overcommit_hugepages` under
+/// `/sys/kernel/mm/hugepages/hugepages-<kB>kB/`. `None` when the size does not
+/// parse or the files cannot be read.
+fn host_hugepage_pool(page_size: &str) -> Option<u64> {
+    let kb = hugepage_size_kb(page_size)?;
+    let dir = format!("/sys/kernel/mm/hugepages/hugepages-{kb}kB");
+    let read = |f: &str| -> Option<u64> {
+        std::fs::read_to_string(format!("{dir}/{f}"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    Some(read("nr_hugepages")? + read("nr_overcommit_hugepages")?)
+}
+
+/// PURE. `"2MB"` → 2048, `"1GB"` → 1048576, `"64KB"` → 64. The kubelet
+/// normalises page sizes to this unit form before sending them.
+fn hugepage_size_kb(page_size: &str) -> Option<u64> {
+    let digits: String = page_size
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let n: u64 = digits.parse().ok()?;
+    let mult = match &page_size[digits.len()..] {
+        "KB" => 1,
+        "MB" => 1024,
+        "GB" => 1024 * 1024,
+        _ => return None,
+    };
+    n.checked_mul(mult)
 }
 
 /// ADR 0038 item 3: `cpuset_mems`/`hugepage_limits`/`unified` are honoured or
@@ -3143,6 +3206,55 @@ mod tests {
         };
         apply_resources(&half, &mut o);
         assert!(o.cpus.is_none());
+    }
+
+    /// The kubelet's zero cap for an unrequested page size is dropped only
+    /// when the pool is empty; a real cap, a zero over a populated pool, and a
+    /// pool that cannot be read are all kept for honour-or-refuse.
+    #[test]
+    fn a_zero_hugepage_cap_over_an_empty_pool_is_not_a_request() {
+        let pool = |size: &str| match size {
+            "2MB" => Some(0),
+            "1GB" => Some(4),
+            _ => None,
+        };
+        let asked = vec![
+            ("2MB".to_string(), 0),
+            ("1GB".to_string(), 0),
+            ("64KB".to_string(), 0),
+            ("2MB".to_string(), 1 << 21),
+        ];
+        assert_eq!(
+            drop_vacuous_zero_hugepage_limits(asked, pool),
+            vec![
+                ("1GB".to_string(), 0),
+                ("64KB".to_string(), 0),
+                ("2MB".to_string(), 1 << 21),
+            ]
+        );
+    }
+
+    /// What every pod without hugepages carries on a node with 2MB and 1GB
+    /// sizes and empty pools: nothing left to ask a controller for.
+    #[test]
+    fn a_pod_without_hugepages_on_an_empty_pool_wants_no_hugetlb() {
+        let r = CriResources {
+            hugepage_limits: drop_vacuous_zero_hugepage_limits(
+                vec![("2MB".to_string(), 0), ("1GB".to_string(), 0)],
+                |_| Some(0),
+            ),
+            ..Default::default()
+        };
+        assert!(wanted_resource_controllers(&r).is_empty());
+    }
+
+    #[test]
+    fn hugepage_sizes_parse_to_kib() {
+        assert_eq!(hugepage_size_kb("2MB"), Some(2048));
+        assert_eq!(hugepage_size_kb("1GB"), Some(1_048_576));
+        assert_eq!(hugepage_size_kb("64KB"), Some(64));
+        assert_eq!(hugepage_size_kb("2M"), None);
+        assert_eq!(hugepage_size_kb("MB"), None);
     }
 
     /// ADR 0038 item 4: an `UpdateContainerResources` is PARTIAL — touching
