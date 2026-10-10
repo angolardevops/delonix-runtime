@@ -38,12 +38,11 @@ fn target() -> Option<(Target, String)> {
     ))
 }
 
+#[ignore = "DELONIX_TRUENAS_TEST_URL (a real TrueNAS appliance) is not set -- run with --ignored"]
 #[test]
 fn provisiona_partilha_e_destroi_contra_uma_appliance_real() {
-    let Some((t, pool)) = target() else {
-        eprintln!("SKIP: DELONIX_TRUENAS_TEST_URL is not set");
-        return;
-    };
+    let (t, pool) = target()
+        .expect("DELONIX_TRUENAS_TEST_URL must be set to run this --ignored test against a real TrueNAS appliance");
     let c = Client::connect(&t).expect("connect");
     eprintln!("connected to TrueNAS {}", c.version());
 
