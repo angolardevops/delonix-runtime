@@ -149,15 +149,16 @@ decisions, and `adr_status_gate.py` passes on them.
 ## 4. The lab budget — how a live validation runs on this workstation
 
 Every sprint closes with a live validation, and this host is a development
-workstation (32 threads, 30 GiB RAM, **76 GiB free on a 938 GiB disk, 92 % used**
-on 2026-10-10), with a self-hosted CI runner of another repository sharing it. A
+workstation (32 threads, 30 GiB RAM; on 2026-10-10, **68–76 GiB free on `/`**, where the
+isolated roots of a validation live, and 200 GiB on the separate disk of the real state root), with a self-hosted CI runner of another repository sharing it. A
 validation that freezes the machine is a validation nobody runs twice. So:
 
 1. **Preflight, refused rather than squeezed.** Before booting anything: free RAM
-   ≥ 8 GiB, free disk ≥ 30 GiB, load(1m) below 24. If any fails, the validation
+   that leaves ≥ 4 GiB after the guest, ≥ 30 GiB free on the filesystem of the
+   `DELONIX_ROOT` in force, load(1m) below three quarters of the threads. If any fails, the validation
    waits and the sprint report says so — it is never run on a starved host and
-   then blamed on the engine. A script, `scripts/lab_budget.sh`, makes the check
-   and prints the three numbers (Sprint 10).
+   then blamed on the engine. `scripts/lab_budget.sh` makes the check and prints the
+   three numbers (Sprint 10.3, branch `lab/budget-preflight`).
 2. **One guest at a time**, two only where the item is about two (N15, N17).
    Golden images and Proxmox appliances are capped at **2 vCPU / 4 GiB**;
    `truenas-scale` (asks 4/8) only when ≥ 12 GiB are free; `openstack` (8/16)
@@ -194,9 +195,9 @@ Each row's «Live validation» is the gate that closes the sprint.
 
 | # | Item |
 |---|---|
-| 10.1 | Merge the `vm image` migration (fresh battery run, `cli_exec_trace.tsv` re-recorded, C12 included) |
+| 10.1 | Merge the `vm image` migration — PR #772: battery PASS=1235 FAIL=0 SKIP=13 on its tree, `cli_exec_trace.tsv` re-recorded at 182/270 = 67.4 %, C12 included |
 | 10.2 | **Done 2026-10-10**: C1–C11 fixed in the documents that carry them — ADR statuses in place, dated reports with a dated correction next to the original sentence |
-| 10.3 | `scripts/lab_budget.sh` (§4 rule 1) |
+| 10.3 | **Done 2026-10-10** (branch `lab/budget-preflight`): `scripts/lab_budget.sh` (§4 rule 1) with eight tests |
 | 10.4 | Remove the `aprendizados-v5` worktree and branch; N29; N30 |
 | 10.5 | N1: `install.sh` end to end |
 
