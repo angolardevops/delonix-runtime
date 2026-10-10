@@ -4,6 +4,81 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v5.0.1 — duas falhas que abriam em vez de fechar: `--secret-files` e a admissão por scan
+
+Release de correcção sobre a `v5.0.0`, cortada de um ramo de manutenção
+(`release/5.0.x`) com **exactamente dois commits** em cima da tag — os dois
+`cherry-pick -x` da `main`. Os outros ~140 commits que entraram na `main` desde a
+`v5.0.0` **não** vêm aqui: trazem funcionalidade nova, e funcionalidade não sai
+numa PATCH. Quem precisa só de segurança actualiza para esta; o resto sai na
+próxima MINOR.
+
+As duas falhas são da mesma família, a que este motor persegue em todo o lado:
+um caminho de erro que, em vez de recusar, seguia em frente e deixava o resultado
+parecer bom.
+
+---
+
+### `--secret-files` deixava de fechar quando o tmpfs não montava (`3626ae70`)
+
+Cada passo do `write_secret_files` — o `create_dir_all`, as duas chamadas
+`mount(2)` do tmpfs em `/run/secrets`, e cada escrita de ficheiro — tinha o erro
+descartado. Se o tmpfs não montasse (uma flag recusada por um kernel, um
+`/run/secrets` já ocupado, um userns mais restrito que o esperado), o ciclo
+continuava a escrever **directamente no `/run/secrets` que existisse**, ou seja na
+camada persistente do container. Daí o segredo sobrevive a um `container commit`
+para uma imagem publicada e a qualquer backup ou snapshot do container — a
+exposição exacta que `--secret-files` existe para evitar face às variáveis de
+ambiente.
+
+Agora a montagem e a escrita são duas funções que propagam o erro, e o init do
+container **aborta** (exit 126, o mesmo padrão do `setup_rootfs`) em vez de
+arrancar um container cujos segredos podem estar em disco. Um container que não
+arranca não fuga nada; um que escreveu em silêncio o segredo para a camada
+persistente já fugiu.
+
+**O que está provado e o que não está**: a metade de escrita (`write_secret_values`)
+tem teste unitário próprio contra uma pasta temporária; a propagação do erro da
+montagem é imposta pelo compilador (`?`), não por um `mount(2)` simulado. A falha
+de montagem em si **não foi reproduzida ao vivo**.
+
+### A admissão por scan deixava passar quando o próprio scan falhava (`f59c9f8a`, #778)
+
+Com `DELONIX_SCAN_ON_PULL=<severidade>`, o `admission_scan_on_pull` tratava
+**qualquer** erro do scanner como «esta imagem não tem gestor de pacotes que eu
+leia» (DX-1401, o caso legítimo de uma imagem `scratch`): avisava e deixava o pull
+passar. Um `advisories.json` truncado (o `scan --update` escrevia-o sem
+atomicidade, e uma escrita interrompida deixava-o cortado) ou um blob de layer
+ilegível seguiam o mesmo caminho. Um portão documentado como *fail-closed* passava
+a não fazer nada no instante em que a sua própria base de dados se partia, com um
+aviso no stderr como único sinal.
+
+Agora só o DX-1401 deixa passar — a distinção é feita pelo número do dicionário,
+não pelo texto da mensagem. Qualquer outra falha do scan **recusa o pull e remove
+a imagem**. E a mensagem «Image removed» deixou de ser dita incondicionalmente:
+diz se a remoção correu mesmo.
+
+Medido ao vivo na `main`, com `DELONIX_ROOT` isolado: imagem `scratch`
+(`hello-world`) avisa e entra (rc 0, inalterado); vulnerabilidade real
+(`alpine:3.19`, busybox < 1.37.0) é recusada (rc 1, inalterado);
+`advisories.json` corrompido à mão é agora **recusado e removido** (rc 1) — antes
+entrava com rc 0.
+
+---
+
+### Como foi validada esta release
+
+- Os dois cherry-picks aplicaram sem conflito sobre a `v5.0.0`.
+- Neste ramo: `cargo test -p delonix-linux --lib`, os testes `scan` do
+  `delonix-runtime-bin`, `cargo clippy -D warnings` dos dois crates tocados,
+  `version_gate`, `arch_fitness` (o `library_prints` sobe de 89 para 90 com a
+  linha de erro do init, já na linha de base do commit) e `lang_ratchet`.
+- **Não corrido neste ramo**: a bateria `scripts/e2e.sh` e o arnês de caos — o
+  ramo de manutenção não tem CI própria (o `ci.yml` só corre na `main`). A CI
+  completa corre no PR que funde a `v5.0.1` de volta na `main`.
+
+---
+
 ## v5.0.0 — o `USER` da imagem é quem corre, o bloco `provider` tipado, e o contrato de nó servido
 
 Duzentos e dois commits desde a `v4.5.0` (162 sem contar os merges), de `#572` a
