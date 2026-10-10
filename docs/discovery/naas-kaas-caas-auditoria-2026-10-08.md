@@ -154,7 +154,10 @@ first), independent of which domain each came from:
    `dns`/`powerdns` credential entry anywhere), the ADR's own text names a live DNS server
    as a precondition this session does not have, and it is already its own scheduled
    slice of work (Sprint 2, `docs/discovery/66_CONTINUITY_PLAN.md`) — not a bounded fix
-   the way gap #6 turned out to be.
+   the way gap #6 turned out to be. **`CLOSED` later (§4.14)**: a new provider crate
+   (`delonix-powerdns`) talks to the zone's PowerDNS with the operator's own credential
+   and removes a deleted subnet's gateway A/PTR on teardown, and the old A when a gateway
+   changes in place — measured against a real PowerDNS server, not just the sandbox.
 8. **NaaS — asymmetric rollback in `netops::remove`** can leave an orphaned `NetDef` that
    blocks future creates with a false `NetworkPrefixConflict`. `FIXED` (§4.4).
 9. **Contracts — no request anywhere carries caller identity.** `ListOperationsRequest`
@@ -749,6 +752,50 @@ mock receives the `PUT` it has no script for). The live case's step 4 now assert
 refusal and reads the vnet back unchanged — **not re-run against the lab node** (the
 change is client-side; nothing reaches the node to measure).
 
+### 4.14 Gap #7 closed — the engine cleans the gateway records a Proxmox node leaves (ADR-0064 D6)
+
+§4.10 left gap #7 waiting on scaffolding that did not exist and a live DNS server this
+session could not reach. Both arrived in a later session on this same tree (`81b1b3f8`,
+PR #758): the engine talks to the zone's own PowerDNS server directly, with a credential
+the OPERATOR gives it — never the one the node returns (ADR-0064 D5), which is the
+distinction the ADR's own text insists on.
+
+- **`delonix-powerdns`** (new provider crate): a minimal PowerDNS API client.
+  `connect` proves the server URL and key with a `GET` against the server (a 404 there
+  means a wrong server id, which PowerDNS answers the same way as a missing zone — the
+  client does not try to tell the two apart). `remove_record` removes exactly one
+  `(name, type, content)` record and either rewrites the rest of the rrset (a `REPLACE`
+  with its own TTL) or deletes an emptied rrset — the same two cases the node's own
+  provisioning plugin handles. It never creates anything. Its own error type carries the
+  ADR-0059 D5 reason (a refused key is 77, a server that does not answer is 69).
+- **`providers.yaml`** gained `type: powerdns` (`url`, `controllers`, `auth.keyFile`,
+  `tls`, `allowPlainHttp`) — the key only by a file the operator owns, never inline (an
+  inline `key:` is refused by name, the same rule the other provider types already
+  enforce); plain `http://` is refused unless explicitly allowed, because PowerDNS's own
+  webserver has no TLS of its own. Schema regenerated; `provider config show` lists it.
+- **`delonix_networking::dns`** gained `gateway_records` (names the exact record a
+  cleanup has to match) and a new required `DnsProvider::reverse_zone` method; Proxmox's
+  own implementation (`node_reverse_zone`) ports the node plugin's `get_reversedns_zone`
+  logic, read live against PVE 9.2.2.
+- **`network_zone.rs`**: a teardown removes the A **and** PTR of every subnet it
+  deletes; a gateway changed in place removes only the OLD A (the node removes that PTR
+  itself — measured, not assumed). A record that a missing credential or a server
+  refusal leaves behind is said out loud and kept on the zone's own record (`dns_left`),
+  retried on the next apply and on the next teardown — a DNS cleanup failure never fails
+  the apply or the teardown it rides on.
+
+**Measured on the lab** (PVE 9.2.2, PowerDNS 4.9.17 `pdnslab`, the same instance ADR-0064
+D4 already used — not rebuilt), through the CLI and not just unit tests: a gateway moved
+`.1 → .254` with no PowerDNS entry configured (left behind, said); `.254 → .200` with a
+wrong key (401, said, kept); `.200 → .150` with the right key (`.1`, `.254` and `.200`
+all removed, `.150` kept); a hand-added `.77` record in the same rrset survived a
+teardown that correctly removed `.150`'s own A and PTR. A renamed guest's leaked A
+record (a separate, already-known leak, not this gap) was measured and confirmed
+**outside** D6's own rule — the cleanup does not claim to fix it.
+`delonix-powerdns/tests/live.rs::one_record_is_removed_and_the_rest_of_its_rrset_kept`
+passes against the same server; `tests/mock.rs` covers the shared-rrset, last-record,
+missing-zone, wrong-key/wrong-server and server-error cases without one.
+
 ## 5. Test results, exact
 
 Two environments ended up involved, and the results below say which is which.
@@ -877,12 +924,14 @@ and leaves written down, for whoever does that work next:
   land without an owner decision, and doc-comment hardening in the meantime — but no
   behavior changed, so it stays counted as open. **That decision was made later and the
   gap closed (§4.13)**: the writes refuse unconditionally, no probe, no boundary crossed. The live-only gap #13 (stale CLI on
-  golden images) is also now fixed (§4.7). The five that remain untouched each have a
-  specific, measured reason, not a restated assumption: the admission warning event (gap
+  golden images) is also now fixed (§4.7), and **gap #7 (DNS cleanup, ADR-0064 D6) is
+  closed as well (§4.14)**: a new provider crate talks to the zone's PowerDNS with the
+  operator's own credential and removes the gateway records a teardown or an in-place
+  gateway change leaves behind, measured against a real PowerDNS server (`pdnslab`,
+  PVE 9.2.2) through the CLI. The four that remain untouched each have a specific,
+  measured reason, not a restated assumption: the admission warning event (gap
   #5) requires adding a new case to `delonix-security-runtime`'s `Outcome`/`Category`
-  taxonomy, an architectural decision inside a crate this audit does not own; gap #7 (DNS
-  cleanup, ADR-0064 D6) has zero existing credential/client scaffolding and needs a live
-  DNS server this session cannot reach, a precondition the ADR itself states; gap #9
+  taxonomy, an architectural decision inside a crate this audit does not own; gap #9
   (caller identity) is structurally a non-issue today — the socket's own accept path
   refuses any peer whose uid differs from the server's own, confirmed at
   `delonix-node-api/src/lib.rs:134` — so there is nothing to record that would carry
