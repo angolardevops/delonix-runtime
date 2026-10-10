@@ -371,11 +371,14 @@ pub fn serve_blocking(
         // for `delonix serve cri`; the journal, for `delonix-cri.service`): a
         // ceiling that is in force but invisible would be diagnosed as "the
         // runtime dropped my capabilities for no reason".
-        eprintln!(
-            "delonix-cri: capability ceiling: {}",
-            ceiling.describe()
-        );
-        tracing::info!(ceiling = %ceiling.describe(), "delonix-cri: capability ceiling");
+        let (banner, is_warning) = ceiling.startup_banner();
+        if is_warning {
+            eprintln!("delonix-cri: WARNING: {banner}");
+            tracing::warn!("delonix-cri: {banner}");
+        } else {
+            eprintln!("delonix-cri: {banner}");
+            tracing::info!("delonix-cri: {banner}");
+        }
 
         let img = DelonixImage { base: base.clone() };
         let rtsvc = runtime_svc::DelonixRuntime::new(base, streamer, ceiling);
