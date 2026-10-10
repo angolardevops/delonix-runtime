@@ -43,17 +43,6 @@ fn target() -> Option<Target> {
     })
 }
 
-/// The target, or `None` after saying the test was skipped — the one place
-/// a skipped live case speaks, so a run without an appliance never reads as
-/// a pass.
-fn target_or_skip() -> Option<Target> {
-    let t = target();
-    if t.is_none() {
-        eprintln!("SKIP: DELONIX_OPNSENSE_TEST_URL is not set");
-    }
-    t
-}
-
 /// A fresh mark per run — `RandomState` is seeded from the OS, which is all
 /// a test needs to keep two runs (or two scenarios) apart.
 fn fresh_mark() -> OwnerMark {
@@ -146,11 +135,10 @@ impl Hand {
     }
 }
 
+#[ignore = "DELONIX_OPNSENSE_TEST_URL (a real OPNsense appliance) is not set -- run with --ignored"]
 #[test]
 fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
-    let Some(t) = target_or_skip() else {
-        return;
-    };
+    let t = target().expect("DELONIX_OPNSENSE_TEST_URL must be set to run this --ignored test against a real OPNsense appliance");
     let provider = OpnsenseGatewayProvider::connect(&t).expect("connect and authenticate");
     let owner = fresh_mark();
 
@@ -239,13 +227,12 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
         .expect("the appliance is left with nothing staged");
 }
 
+#[ignore = "DELONIX_OPNSENSE_TEST_URL (a real OPNsense appliance) is not set -- run with --ignored"]
 #[test]
 fn a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_commit() {
     // No SKIP line: a print in a library crate's tests is counted debt, and
     // the first case already says it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_OPNSENSE_TEST_URL must be set to run this --ignored test against a real OPNsense appliance");
     let hand = Hand::new(&t);
     let provider = OpnsenseGatewayProvider::connect(&t).expect("connect");
     let owner = fresh_mark();
@@ -336,11 +323,10 @@ fn a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_c
 /// returns it, and the order pf loaded the rules in (`pf_statistics`, one
 /// line per pf rule with the rule's uuid as its label) — never the `Ok` of a
 /// call. Then it is all removed and the owner retired.
+#[ignore = "DELONIX_OPNSENSE_TEST_URL (a real OPNsense appliance) is not set -- run with --ignored"]
 #[test]
 fn a_lowered_policy_lands_on_the_appliance_in_its_order_with_its_fields() {
-    let Some(t) = target_or_skip() else {
-        return;
-    };
+    let t = target().expect("DELONIX_OPNSENSE_TEST_URL must be set to run this --ignored test against a real OPNsense appliance");
     use delonix_networking::policy::{from_container_fw, gateway_rules, golden};
     let provider = OpnsenseGatewayProvider::connect(&t).expect("connect and authenticate");
     let hand = Hand::new(&t);
@@ -508,12 +494,11 @@ fn nat_lines(hand: &Hand) -> Vec<String> {
 /// ADR-0059 F5: a source and a destination NAT rule under an owner mark,
 /// proven in the RUNNING packet filter — a NAT rule has no label there, so
 /// what is read is the line itself.
+#[ignore = "DELONIX_OPNSENSE_TEST_URL (a real OPNsense appliance) is not set -- run with --ignored"]
 #[test]
 fn a_source_and_a_destination_nat_rule_load_in_pf_and_are_removed() {
     use delonix_networking::nat::{nat_drift, NatKind, NatProvider, NatRule, INTERFACE_ADDRESS};
-    let Some(t) = target_or_skip() else {
-        return;
-    };
+    let t = target().expect("DELONIX_OPNSENSE_TEST_URL must be set to run this --ignored test against a real OPNsense appliance");
     let provider = delonix_opnsense::OpnsenseNatProvider::connect(&t).expect("connect");
     let hand = Hand::new(&t);
     let owner = fresh_mark();

@@ -103,12 +103,10 @@ fn auth_from_env() -> Option<Auth> {
     })
 }
 
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn cria_arranca_e_destroi_contra_um_no_real() {
-    let Some(t) = target() else {
-        eprintln!("SKIP: DELONIX_PROXMOX_TEST_URL is not set");
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -353,13 +351,10 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
 /// that matters, because a VM this backend cannot copy a disk FOR locally
 /// (`manages_own_storage`) has no other honest way to prove "nothing had to
 /// stop".
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_backup_lands_on_the_storage_and_comes_off_it() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -508,13 +503,10 @@ fn a_backup_lands_on_the_storage_and_comes_off_it() {
 /// deleted it and want it back" story — and proves the restored VM is the
 /// SAME shape (same boot disk size) as what was destroyed, read from the
 /// node's own config, never from what the call said.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_deleted_vm_comes_back_from_its_own_backup() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let backup_storage =
@@ -647,12 +639,10 @@ fn a_deleted_vm_comes_back_from_its_own_backup() {
 /// (`download-url` com `content=import` + `qm set --scsi0 …,import-from=…`),
 /// dar-lhe `--net0`/`--net1` e um drive de cloud-init, e lá dentro
 /// `apt install qemu-guest-agent`.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
-    let Some(t) = target() else {
-        eprintln!("SKIP: DELONIX_PROXMOX_TEST_URL is not set");
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(vmid) = std::env::var("DELONIX_PROXMOX_TEST_AGENT_VMID") else {
         eprintln!("SKIP: DELONIX_PROXMOX_TEST_AGENT_VMID is not set");
         return;
@@ -686,13 +676,10 @@ fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
 /// possibly answer). Proven against a REAL node and not only the TLS mock:
 /// `Ok(false)`, never an `Err`, matching the same "no agent is not a
 /// failure" rule `ip()` already established for this backend.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn agent_ping_answers_false_without_an_agent() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -740,13 +727,10 @@ fn agent_ping_answers_false_without_an_agent() {
 /// COMMAND and reports back a real exit code and stdout, through
 /// `agent_exec_wait`'s poll loop and not just the pure translation the unit
 /// tests already cover.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn agent_exec_wait_runs_a_real_command_in_the_guest() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling case already says it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(vmid) = std::env::var("DELONIX_PROXMOX_TEST_AGENT_VMID") else {
         return;
     };
@@ -794,13 +778,10 @@ fn agent_exec_wait_runs_a_real_command_in_the_guest() {
 /// What is asserted is read back from the node (`GET …/config`, the boot
 /// disk's `size=`), never taken from the call's answer; and a SHRINK is
 /// refused before anything exists on the node, which the VM count proves.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_template_clone_gets_the_disk_size_asked_for() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -1022,13 +1003,10 @@ fn a_template_clone_gets_the_disk_size_asked_for() {
 /// images by default on a stock node — the live run enables `content=images`
 /// on it once, out of band, the same way the backup case's own storage
 /// (`DELONIX_PROXMOX_TEST_BACKUP_STORAGE`) needs `content=backup` enabled.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn move_disk_unlink_and_cloudinit_dump() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -1140,13 +1118,10 @@ fn move_disk_unlink_and_cloudinit_dump() {
 /// on — and the full loop of a rule (add, read back two ways, update,
 /// delete), every assertion against what the node reports, never against
 /// what a call merely claimed.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_vms_own_firewall_rule_round_trips_through_the_node() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -1306,11 +1281,10 @@ fn the_vms_own_firewall_rule_round_trips_through_the_node() {
 /// `source /etc/network/interfaces.d/*` removed from the second node, whose
 /// reload then warned `missing 'source /etc/network/interfaces.d/sdn'
 /// directive`, while the apply's own task said `OK`.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn sdn_apply_waits_for_every_nodes_network_reload() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let dir = tempfile::tempdir().expect("tempdir");
     let ledger = delonix_proxmox::Ledger::at(dir.path());
@@ -1333,13 +1307,10 @@ fn sdn_apply_waits_for_every_nodes_network_reload() {
 /// VLAN-capable hardware on the lab node to prove the cycle end to end.
 /// `vlan`/`vxlan`/`qinq` are real Proxmox zone types this crate does not
 /// implement.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let client = b.client();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1486,11 +1457,10 @@ fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
 /// the list is well-formed (an empty list is success, not a probe failure),
 /// `regenerate` does not error, and — the part that matters to a caller —
 /// the RENDERED file genuinely carries the write once `regenerate` has run.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn cloudinit_pending_answers_and_regenerate_reaches_the_rendered_file() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -1586,13 +1556,10 @@ fn cloudinit_pending_answers_and_regenerate_reaches_the_rendered_file() {
 /// rule test does, never trusting what the write call itself claimed —
 /// and confirms a field an update did not name survives it, the same
 /// property the rule test's update case proves for a rule.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_vms_own_firewall_aliases_ipsets_log_and_refs_round_trip_through_the_node() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -1821,11 +1788,10 @@ fn the_vms_own_firewall_aliases_ipsets_log_and_refs_round_trip_through_the_node(
 /// zone/vnet, same cleanup order, same "read the ledger, not just `Ok(())`"
 /// discipline — extended with the one thing that test does not cover: a
 /// subnet, and the single-item `GET`/`PUT` for a zone and a vnet.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn sdn_subnet_and_the_single_item_zone_vnet_routes_are_staged_applied_and_torn_down() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let client = b.client();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -2099,12 +2065,11 @@ impl ControllerStub {
 /// address the NODE can reach this host at); without it that half is
 /// skipped and the rest still runs. No SKIP line: a print in a library
 /// crate's tests is counted debt.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node() {
     use delonix_proxmox::{DhcpRange, FabricProtocol, IpamKind, SubnetOptions, ZoneOptions};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let client = b.client();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -2602,12 +2567,11 @@ fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node()
 /// whole cycle runs — the three switches, the rules in policy order above a
 /// hand-made rule that must survive, a re-apply that replaces instead of
 /// appending, and the other direction left alone.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back() {
     use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -2825,13 +2789,10 @@ fn a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back() {
 ///
 /// The ledger is read at the end: every task that was meant to succeed did,
 /// and the only failures are the two the guest caused.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn power_operations_round_trip_through_the_node() {
-    // No SKIP line: a print in a library crate's tests is counted debt, and
-    // the sibling cases already say it.
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -2976,11 +2937,10 @@ fn power_operations_round_trip_through_the_node() {
 ///   is empty: the numbers are the ones the VM boots with;
 /// - it boots with them: after `resume` the config still says so and the
 ///   node reports the VM's `cpus`/`maxmem` from the new definition.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -3075,11 +3035,10 @@ fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
 /// slots asked for and with the sizes asked for; the extra NICs carry the
 /// model, the fixed MAC and the bridge asked for; and a destroy takes every
 /// disk with it (`storage/.../content?content=images`), not only the boot one.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -3181,11 +3140,10 @@ fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
 /// - stopped, the change reaches the drive: the new hostname, the new user
 ///   and the new key are in the user-data, the old key is not, and
 ///   `…/cloudinit` has nothing pending.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -3263,11 +3221,10 @@ fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
 /// resource list places a VM this backend created on its node, and an id
 /// nobody has is not placed anywhere. On a single node this proves the READ;
 /// following a VM to ANOTHER node needs a second node and is not measured here.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_cluster_resource_list_places_a_vm_on_its_node() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -3362,11 +3319,10 @@ fn record_of(
 ///   stopped on the target, through the configured node's API (the
 ///   behaviour ADR-0053 marked "not measured": a request for
 ///   `/nodes/<other>/…` served for a cluster member).
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Some((to, shared)) = move_env() else {
         return;
     };
@@ -3513,11 +3469,10 @@ fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
 /// — the second move settles the ledger's first `qmigrate`, whose worker is
 /// on the other node, through the task's own node (a status read aimed at
 /// the wrong node answered "no such task").
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Some((to, shared)) = move_env() else {
         return;
     };
@@ -3595,11 +3550,10 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
 /// live move is refused by name (DX-5507) and the VM stays where it was;
 /// with it, the VM is running on the target and its config names the target
 /// storage, not the source one.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Some((to, shared)) = move_env() else {
         return;
     };
@@ -3693,11 +3647,10 @@ fn agent_guest(t: &Target) -> Option<(u32, delonix_compute::Vm)> {
 /// come back, and the hostname is the SAME one the guest's own
 /// `/etc/hostname` holds, read through `agent/exec` — the block is the
 /// guest's answer, not a field filled from anywhere else.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_guest_agent_reports_the_os_hostname_and_filesystems() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Some((vmid, vm)) = agent_guest(&t) else {
         return;
     };
@@ -3739,11 +3692,10 @@ fn the_guest_agent_reports_the_os_hostname_and_filesystems() {
 /// and the thaw) and the guest reporting `thawed` afterwards, and the archive
 /// is on the storage. A running VM with no agent is refused with DX-6509
 /// BEFORE any backup runs: its archive count does not change.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_backup_of_a_running_vm_is_taken_with_its_filesystem_frozen() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Some((vmid, _)) = agent_guest(&t) else {
         return;
     };
@@ -3888,6 +3840,7 @@ impl Drop for SdnLabCleanup<'_> {
 ///    policy. The writes' own round trip was measured live on 2026-09-27
 ///    (`docs/proxmox/trace-9.2.2.routes`) before the refusal was decided.
 /// 5. The teardown, under the lock again, and the node back as it was found.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
     use delonix_proxmox::{
@@ -3895,9 +3848,7 @@ fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
         PrefixListEntryUpdate, RouteMapClause, RouteMapEntry, RouteMapEntryUpdate, RoutingAction,
         VnetFirewallOptions,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let shared = b.client();
     let client: &delonix_proxmox::Client = &shared;
@@ -4402,11 +4353,10 @@ fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
 /// an earlier run), the VM's boot disk is imported onto the disk storage and
 /// grown to `diskSize`, and a second staging of the same image uploads
 /// nothing. The node must have `import` enabled on the import storage.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(image) = std::env::var("DELONIX_PROXMOX_TEST_IMAGE") else {
         return;
     };
@@ -4482,11 +4432,10 @@ fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
 /// (the node does not parse it on upload; slice 1 proved it parses the
 /// engine's OCI archive on create). It stays on the storage, as the cache;
 /// its bytes are fixed, so a later run takes the cached path.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_container_archive_is_staged_as_vztmpl_and_a_wrong_checksum_is_refused() {
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     init_log();
     let storage = t.import_storage.clone().unwrap_or_else(|| "local".into());
     let b = backend(&t).expect("connect");
@@ -4595,14 +4544,13 @@ fn oci_archive_manifest_digest(path: &std::path::Path) -> String {
 /// (the lab's `vmbr0` has no DHCP server, so `NotReady` with the node's
 /// warning is the expected answer there); stop and destroy leave no container
 /// and no volume; and the task ledger is read at the end.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_container_runs_its_lifecycle_through_the_node() {
     use delonix_compute::system_container::{
         NetworkState, SystemContainerNet, SystemContainerProvider, SystemContainerSpec,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -4724,14 +4672,13 @@ fn a_system_container_runs_its_lifecycle_through_the_node() {
 /// leaves the container running as it was. A taken name is a conflict
 /// (DX-5503), a missing one not found (DX-4503), and `current` — the API's
 /// pseudo-entry for the live state — is neither listed nor accepted.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_containers_snapshot_is_rolled_back_and_deleted() {
     use delonix_compute::system_container::{
         SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -4841,14 +4788,13 @@ fn a_system_containers_snapshot_is_rolled_back_and_deleted() {
 /// container change without recreating it — the node grows the volume
 /// (`PUT …/resize`) and never shrinks it, and a smaller size is refused
 /// before any request (DX-1540), leaving the volume as it was.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
     use delonix_compute::system_container::{
         SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -4931,13 +4877,12 @@ fn a_system_containers_root_volume_grows_live_and_never_shrinks() {
 /// default verdict last — reads back as it was written, and a second apply
 /// leaves the same rules, not twice as many. A container with no network has
 /// nothing to filter and is refused before any rule is written.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_containers_firewall_is_applied_and_reads_back() {
     use delonix_compute::system_container::{SystemContainerProvider, SystemContainerSpec};
     use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -5061,12 +5006,11 @@ fn a_system_containers_firewall_is_applied_and_reads_back() {
 /// snapshot, so the provider takes a temporary one and deletes it. The copy
 /// is created stopped with the source's configuration, the source keeps
 /// running, and a name the node cannot take is refused before any request.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_running_system_container_is_cloned_from_a_temporary_snapshot() {
     use delonix_compute::system_container::{SystemContainerProvider, SystemContainerSpec};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -5176,14 +5120,13 @@ fn a_running_system_container_is_cloned_from_a_temporary_snapshot() {
 /// offline and starts it on the target. A root volume on `local-lvm`, which
 /// the cluster does not share, is refused without `with_local_disks`; every
 /// refusal leaves the container where and as it was.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_container_moves_to_another_node_offline_and_by_restart() {
     use delonix_compute::system_container::{
         SystemContainerMoveOptions, SystemContainerProvider, SystemContainerSpec,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -5351,14 +5294,13 @@ fn a_system_container_moves_to_another_node_offline_and_by_restart() {
 /// node's backup storage without stopping it, a restore puts the container
 /// back over itself and leaves it running, another container's archive is
 /// refused before any request, and a delete removes only this archive.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_system_containers_backup_is_restored_over_it_and_deleted() {
     use delonix_compute::system_container::{
         SystemContainerProvider, SystemContainerResources, SystemContainerSpec,
     };
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -5516,14 +5458,13 @@ fn a_system_containers_backup_is_restored_over_it_and_deleted() {
 /// and never deleted; a vnet edited on the cluster is drift; and someone
 /// else's staged change refuses the whole transaction before it writes,
 /// leaving that change pending and not applied.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change() {
     use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
     use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
 
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let opts = delonix_proxmox::ClientOptions {
         trace_routes: std::env::var_os(delonix_proxmox::TRACE_ROUTES_ENV)
             .filter(|v| !v.is_empty())
@@ -5671,6 +5612,7 @@ fn network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_cha
 /// that MAC there when the guest starts. The teardown releases the
 /// reservation before the subnet (the node refuses a subnet that still holds
 /// one), and leaves no zone and no IPAM entry.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
     use delonix_compute::system_container::{
@@ -5681,9 +5623,7 @@ fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
     };
     use delonix_networking::ownership::OwnerMark;
     use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(archive) = std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE") else {
         return;
     };
@@ -5921,14 +5861,13 @@ fn the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp() {
 /// and the failure ADR-0063 measured — a gateway change staged, the
 /// transaction failed and rolled back, the IPAM's gateway entry left on the
 /// new address — is injected and then repaired (D2.3).
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
     use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamReservation, IpamSubnet};
     use delonix_networking::ownership::OwnerMark;
     use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let b = backend(&t).expect("connect");
     let client = b.client();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -6170,13 +6109,12 @@ fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
 /// while the built-in `pve` one stays served. The stub sees only the node's
 /// own verification: the engine never talks to an external IPAM. Needs
 /// `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`, like the controller half above.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn an_external_ipam_controller_is_listed_and_refused_by_name() {
     use delonix_networking::ipam::IpamProvider;
     use delonix_proxmox::IpamKind;
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let Ok(callback) = std::env::var("DELONIX_PROXMOX_TEST_CALLBACK_ADDR") else {
         return;
     };
@@ -6293,14 +6231,13 @@ fn an_external_ipam_controller_is_listed_and_refused_by_name() {
 /// * D2.5: a guest's allocation (made by the node at the VM's create), then
 ///   the subnet's range narrowed so the allocation falls outside it — the
 ///   node accepts the change and leaves the allocation where it is.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn a_gateway_is_removed_and_added_in_place_and_a_range_narrows_under_a_guest() {
     use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamSubnet};
     use delonix_networking::ownership::OwnerMark;
     use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let storage =
         std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
     let b = backend(&t).expect("connect");
@@ -6676,6 +6613,7 @@ impl Drop for DnsLabGuard {
 /// (`DELONIX_PROXMOX_TEST_DNS_ZONE`) and `10.in-addr.arpa.` on that server,
 /// and the server's API reachable from the test (`DELONIX_PROXMOX_TEST_DNS_URL`,
 /// key in `DELONIX_PROXMOX_TEST_DNS_KEY_FILE`) to read the records back.
+#[ignore = "DELONIX_PROXMOX_TEST_URL (a real Proxmox node) is not set -- run with --ignored"]
 #[test]
 fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
     use delonix_compute::system_container::{
@@ -6685,9 +6623,7 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
     use delonix_networking::ipam::{DhcpRange, IpamProvider, IpamSubnet};
     use delonix_networking::ownership::OwnerMark;
     use delonix_networking::segment::{EnsureOutcome, NetworkZoneSpec, SegmentProvider, VNetSpec};
-    let Some(t) = target() else {
-        return;
-    };
+    let t = target().expect("DELONIX_PROXMOX_TEST_URL must be set to run this --ignored test against a real Proxmox node");
     let (Ok(archive), Ok(controller), Ok(domain), Ok(url), Ok(key_file)) = (
         std::env::var("DELONIX_PROXMOX_TEST_OCI_ARCHIVE"),
         std::env::var("DELONIX_PROXMOX_TEST_DNS_CONTROLLER"),
