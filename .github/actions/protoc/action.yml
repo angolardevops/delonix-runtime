@@ -1,0 +1,59 @@
+name: Install protoc (pinned, verified)
+description: >-
+  Installs a pinned, digest-verified `protoc` into /usr/local, so a job never
+  depends on whatever the runner image happens to ship.
+
+# WHY THIS EXISTS, and why it is an action and not a snippet.
+#
+# `apt-get install -y protobuf-compiler` resolves to the runner image's version,
+# and the images differ. Measured 2026-10-08, publishing v5.0.0: the release's
+# arm64 job (ubuntu-22.04-arm, protoc 3.12) died on
+#
+#   delonix/node/v1/compute.proto: This file contains proto3 optional fields,
+#   but --experimental_allow_proto3_optional was not set
+#
+# while `ci.yml`'s arm64 job (ubuntu-24.04-arm, protoc 3.21) passed. The install
+# command was IDENTICAL in both files — only the image differed, so a green CI
+# did not prove the release builds. proto3 `optional` became stable in 3.15.
+#
+# `ci.yml` installed protoc in EIGHT places and `release.yml` in two. Ten copies
+# of the same shell is ten places for the version to drift apart again, which is
+# the very defect above. One action, N uses: the version and the digests live in
+# a single file.
+#
+# The `include/` directory is installed too, and the /usr/local layout is not
+# incidental: `scripts/contract_gate.py` derives the well-known-type `-I` from
+# `$(dirname $(which protoc))/../include`.
+
+inputs:
+  version:
+    description: protoc release, without the leading `v`.
+    required: false
+    default: "36.2"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PROTOC_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # Digests read from the GitHub release API per asset, not transcribed by
+        # hand. A pin without a digest only moves the trust, it does not reduce it.
+        case "$(uname -m)" in
+          x86_64)  arch=linux-x86_64;   sum=121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278 ;;
+          aarch64) arch=linux-aarch_64; sum=8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a ;;
+          *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+        esac
+        if [ "$PROTOC_VERSION" != "36.2" ]; then
+          echo "::error::the digests here are for 36.2; bump them together with the version"
+          exit 1
+        fi
+        curl -fsSL -o /tmp/protoc.zip \
+          "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-$arch.zip"
+        echo "$sum  /tmp/protoc.zip" | sha256sum -c -
+        sudo unzip -q -o /tmp/protoc.zip -d /usr/local 'bin/protoc' 'include/*'
+        sudo chmod 0755 /usr/local/bin/protoc
+        rm -f /tmp/protoc.zip
+        protoc --version
