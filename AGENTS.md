@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 29 crates.
+[README.md](README.md) para a arquitectura dos 30 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -367,7 +367,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 crates/foundation/   delonix-model, delonix-net-rules
 crates/contexts/     delonix-stack, delonix-compute, delonix-networking, delonix-storage, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
-crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
+crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense, delonix-powerdns
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
 ```
@@ -7982,7 +7982,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (29 crates)
+## Arquitetura (30 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -8003,6 +8003,7 @@ antes de qualquer commit:
 | `delonix-provider-libvirt` | backend `VmBackend` libvirt/KVM (QEMU via `virsh`), com a sua declaração ADR-0050, a sonda do host, o backup a quente e o domínio sem registo. Saiu do `delonix-vm` na P4b.4b; depende só da fundação e dos contextos, e a raiz de composição semeia-o com `registration()` |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
 | `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |
+| `delonix-powerdns` | cliente mínimo da API de UM servidor PowerDNS, com a credencial que o operador dá ao MOTOR no `providers.yaml` (`type: powerdns`, ADR-0064 D6): remove UM registo `(nome, tipo, conteúdo)` mantendo o resto do rrset. Usado pelo `-bin` (`cmd::dns_cleanup`) para limpar os registos de gateway que o nó Proxmox escreve e nunca remove |
 | `delonix-opnsense` | `GatewayProvider` remoto contra a API REST de UMA appliance OPNsense (ADR-0051). Fora do `delonix-sdn` pela mesma razão que o `delonix-proxmox` está fora do `delonix-vm` — um cliente HTTP não entra num crate de motor; registado pelo `-bin` (`cmd::gatewayproviders`), que é quem conhece o alvo |
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |

@@ -242,6 +242,9 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_PROXMOX_TEST_DNS_ZONE` | `crates/providers/delonix-proxmox/tests/live.rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server` | 实机用例为其客户机注册所用的域名，不带结尾的点；它和 `10.in-addr.arpa.` 必须已存在于 DNS 服务器上。 | 域名，例如 `f5c.lab`。 | 四项缺一时跳过 DNS 实机用例。 |
 | `DELONIX_PROXMOX_TEST_DNS_URL` | `crates/providers/delonix-proxmox/tests/live.rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server` | DNS 服务器的 API 基址（`http://…:8081/api/v1/servers/localhost`），由本机访问，供测试读回记录；引擎从不调用它。 | http(s) URL。 | 四项缺一时跳过 DNS 实机用例。 |
 | `DELONIX_PROXMOX_TEST_DNS_KEY_FILE` | `crates/providers/delonix-proxmox/tests/live.rs:the_dns_provider_registers_a_guest_in_the_zones_dns_server` | 存放 DNS 服务器 API 密钥的文件，用于测试自身的读取与清理。 | 存放密钥的文件路径。 | 四项缺一时跳过 DNS 实机用例。 |
+| `DELONIX_POWERDNS_TEST_URL` | `crates/providers/delonix-powerdns/tests/live.rs:lab` | PowerDNS 服务器的 API（`http(s)://…:8081/api/v1/servers/localhost`），`delonix-powerdns` 实机用例在其上删除记录（ADR-0064 D6）。 | http(s) URL。 | 与下面两项一起启用该用例。它写入自己的一个 rrset，并在任何退出时删除。 |
+| `DELONIX_POWERDNS_TEST_KEY_FILE` | `crates/providers/delonix-powerdns/tests/live.rs:lab` | 保存该服务器 API 密钥的文件。 | 文件路径。 | 从不打印。 |
+| `DELONIX_POWERDNS_TEST_ZONE` | `crates/providers/delonix-powerdns/tests/live.rs:lab` | 服务器已提供的区域，用例在其中写入 rrset。 | 域名，例如 `f5c.lab`。 | 三项缺一时跳过该用例。 |
 | `DELONIX_PROXMOX_TEST_BRIDGE` | `crates/providers/delonix-proxmox/tests/live.rs:a_system_containers_firewall_is_applied_and_reads_back` | 防火墙测试的系统容器所接入的节点网桥：防火墙需要一个 `net0` 来设置 `firewall=1`。 | 节点上存在的网桥。 | `vmbr0`。 |
 | `DELONIX_PROXMOX_TEST_AGENT_VMID` | `crates/providers/delonix-proxmox/tests/live.rs:o_ip_vem_do_agente_de_um_convidado_a_serio` | 一个已经存在、跑着 QEMU guest agent 的 VM，测试会读取它的 IP。 | 一个 VM id。 | 未设置时跳过，即使 URL 已经设置了也一样。 |
 | `DELONIX_TRUENAS_TEST_URL` | `crates/providers/delonix-truenas/tests/live.rs:target` | 用来跑实机配置器测试的 TrueNAS 设备。 | `https://<host>`。 | 启用这些测试。它们会创建并销毁 `<pool>/dlxlive-<pid>`。 |

@@ -1298,6 +1298,27 @@ variável quando o programa corre.</p>
 <td>Sem as quatro, o caso ao vivo do DNS é saltado.</td>
 </tr>
 <tr>
+<td><code>DELONIX_POWERDNS_TEST_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>A API de um servidor PowerDNS (<code>http(s):/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>) onde o caso ao vivo do <code>delonix-powerdns</code> remove registos (ADR-0064 D6).</td>
+<td>Um URL http(s).</td>
+<td>Activa o caso, com as duas de baixo. Escreve um rrset seu e remove-o em qualquer saída.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>Um ficheiro com a chave de API desse servidor.</td>
+<td>Um caminho.</td>
+<td>Nunca é impressa.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>Uma zona que o servidor já serve, onde o caso escreve o seu rrset.</td>
+<td>Um domínio, ex. <code>f5c.lab</code>.</td>
+<td>Sem as três, o caso é saltado.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>A bridge do nó onde o container de sistema do teste de firewall é ligado: a firewall precisa de um <code>net0</code> onde pôr <code>firewall=1</code>.</td>

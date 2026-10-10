@@ -730,6 +730,20 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
                 rows.push(serde_json::json!({"type": "cloud-hypervisor", "source": "file"}))
             }
             pc::ProviderEntry::Proxmox(_) | pc::ProviderEntry::Opnsense(_) => {}
+            // ADR-0064 D6: the engine's own DNS credential, by where it lives.
+            pc::ProviderEntry::Powerdns(d) => rows.push(serde_json::json!({
+                "type": "powerdns",
+                "source": "file",
+                "url": d.url,
+                "controllers": d.controllers,
+                "credential": d.auth.key_file.as_ref().map(|f| super::po::tf(
+                    "api key from file {path}",
+                    &[("path", f)],
+                )),
+                "allowPlainHttp": d.allow_plain_http,
+                "caFile": d.tls.ca_file,
+                "insecureSkipVerify": d.tls.insecure_skip_verify,
+            })),
         }
     }
     let px_lookup = super::vmbackends::configured_lookup()?;

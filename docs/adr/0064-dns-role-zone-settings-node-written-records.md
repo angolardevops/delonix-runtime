@@ -1,8 +1,7 @@
 # ADR-0064: The DNS role sets a zone's DNS settings; the node writes the records
 
-- **Status:** Accepted (2026-10-06, by the owner). D1–D5 are implemented in the ADR-0059 F5c PR; **D6 is decided and not
-  implemented** — it needs a live case against a real DNS server, and is named in Sprint 2 of
-  `docs/discovery/66_CONTINUITY_PLAN.md`.
+- **Status:** Accepted (2026-10-06, by the owner). D1–D5 are implemented in the ADR-0059 F5c PR; D6 is implemented
+  (2026-10-09, see «Implementation of D6» below — Sprint 2.4 of `docs/discovery/66_CONTINUITY_PLAN.md`).
 - **Date:** 2026-10-02
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0059 (network providers by role; F5c is its DNS slice), ADR-0063 D1 (the
@@ -98,7 +97,7 @@ for the SDN DNS and IPAM controller routes never quotes the body in an error (th
 quotes 160 characters, which would carry the key). The engine does not reuse the key the node
 returns to talk to the DNS server.
 
-### D6 — Cleaning the leaked records (decided, not implemented)
+### D6 — Cleaning the leaked records (implemented 2026-10-09)
 
 When the engine has to remove what the node leaves (D4), it talks to the DNS server with a
 credential the operator gives **the engine** in `providers.yaml` (a `dns:` entry with the
@@ -125,6 +124,89 @@ their PTR. It needs its own live case, including the guest-rename leak (3).
 - Easier: a zone's guests get A and PTR records with no engine-side DNS code; a hand-made change
   converges on the next apply; the settings change without recreating the zone.
 - Harder: every plan of a zone on a provider with the role reads the running zones once more.
-- Known limits: the leaked records (D4) until D6; no records for reservations; the reverse zone
-  for a private network is the node's fixed one, not configurable; the public-prefix defect is
-  read, not measured; IPv6 is out of scope.
+- Known limits: the leaked gateway records (D4) are removed only where the operator gave the
+  engine a `type: powerdns` entry (D6), and a renamed guest's A is not a gateway record and stays;
+  no records for reservations; the reverse zone for a private network is the node's fixed one, not
+  configurable; the public-prefix defect is read, not measured; IPv6 is out of scope.
+
+## Implementation of D6 (2026-10-09)
+
+Built and measured on the lab cluster (PVE 9.2.2, two nodes) against the lab's PowerDNS 4.9.17
+(`pdnslab`, the controller F5c already registered), through the CLI (`stack apply`/`delete
+networkzones` of a `NetworkZone` with `dns:`, a `/24` with a DHCP range) and through
+`crates/providers/delonix-powerdns/tests/live.rs`, unless a line says otherwise.
+
+**The pieces.**
+
+- `crates/providers/delonix-powerdns` — a minimal client of the PowerDNS HTTP API: `connect` proves
+  the server URL and the key with `GET <server>`; `remove_record(zone, name, type, content)`
+  removes ONE record and rewrites the rest of the rrset (`REPLACE` with its TTL) or deletes an
+  emptied one — the read-filter-rewrite the node's plugin does itself (`del_a_record`,
+  `Dns/PowerdnsPlugin.pm`, read). It creates nothing. Its own error converts into the shared
+  class with the ADR-0059 D5 reason: a refused key exits 77, a server that does not answer 69.
+- `providers.yaml` gets `type: powerdns` (`url` = the server's `/api/v1/servers/<id>`,
+  `controllers` = the cluster's DNS controller ids this server is, `auth.keyFile`, `tls`,
+  `allowPlainHttp`). The key is only by file, refused unless only its owner reads it; an inline
+  `key:` is refused by name. `http://` is refused unless `allowPlainHttp: true` — PowerDNS's own
+  webserver has no TLS, and the key would travel in the clear.
+- `delonix_networking::dns::gateway_records` names each record with the content a cleanup must
+  match: `<vnet>-gw.<domain>.` A `<gateway>`, and the PTR of the gateway's address pointing back
+  at that name, in the reverse zone `DnsProvider::reverse_zone` gives — for Proxmox,
+  `delonix_proxmox::node_reverse_zone`, the plugin's `get_reversedns_zone` (read): the fixed zone
+  of an RFC 1918 block, the /24 zone of a public prefix up to /24 (the upstream defect mirrored on
+  purpose), none past /24.
+- `cmd::dns_cleanup` (the composition root) removes them with the entry's credential; a record
+  whose controller no entry names, or whose server refuses or does not answer, is NOT removed and
+  is said, with the reason. A cleanup never fails the apply or the teardown that called it. What
+  could not be removed is kept on the zone's record (`dns_left`) and retried on every apply and on
+  the teardown; it is said again only when it moves, or on the teardown.
+
+**The two triggers, and what was measured at each.**
+
+- **A teardown** (`delete networkzones`, `--prune`, `stack destroy`, `--replace`): the gateway
+  records of the subnets the teardown deleted — never those of a vnet left as someone else's (by
+  the code: such a vnet keeps its subnets; not exercised live).
+  Measured: the subnet's delete leaves `v6d-gw.f5c.lab. A 10.87.0.150` and
+  `150.0.87.10.in-addr.arpa. PTR v6d-gw.f5c.lab.` (leak 1, again); with the engine's key, both are
+  `removed`, and the zone and vnet are gone from the cluster. With no `powerdns` entry, both are
+  named `left` (D4) and stay — measured on the same run.
+- **A gateway changed in place** (ADR-0063 D2): the old address only. Measured leak 2 on the
+  node: `.1 → .254` turns `v6d-gw` into `A 10.87.0.1, 10.87.0.254` and the node removes `.1`'s PTR
+  itself (only `254.0.87.10.in-addr.arpa.` remains). So this trigger removes the old A and does
+  not name a PTR — naming the PTR «left» there would be false, and the first version did, until
+  the run showed it.
+
+**What the live run showed, step by step** (one zone, gateway `.1 → .254 → .200 → .150`):
+
+| step | providers.yaml | engine says | DNS server after |
+|---|---|---|---|
+| `.1 → .254` | no `powerdns` entry | `v6d-gw … A 10.87.0.1` left, with how to fix | `A .1, .254` |
+| `.254 → .200` | entry with a wrong key | `… A 10.87.0.254` left: `refused the API key (401)` | `A .1, .200, .254` |
+| `.200 → .150` | entry with the engine's key | `.1`, `.254` (kept from before) and `.200` removed | `A .150` |
+| hand-added `.77` in the same rrset | — | — | `A .150, .77` |
+| teardown | engine's key | `A .150` and its PTR removed | `A .77` (not the engine's: kept) |
+
+- `stack plan --detailed-exitcode` was 0 after each apply; the zone record's `dns_left` held
+  `.1` and `.254` after the third step and was empty after the fourth.
+- The key file's content appeared in no output of the run (grepped).
+- `delonix-powerdns/tests/live.rs` against the same server: one record of a two-record rrset
+  removed and the other kept, a second removal `Absent`, the last removal deletes the rrset, an
+  unknown zone `ZoneAbsent`, a wrong key exit 77 without the key in the message.
+- Measured on PowerDNS 4.9.17: an unknown zone and a wrong server id answer the same bare
+  `404 Not Found`, which is why `connect` checks the server first; the `rrset_name`/`rrset_type`
+  filter of `GET …/zones/<zone>` is honoured.
+
+**Leak 3, measured and left out by D6's own rule.** A container created on the vnet got
+`dlxd6a.f5c.lab. A 10.87.0.100` and its PTR; `PUT …/lxc/<vmid>/config hostname=dlxd6b` changed
+nothing on the DNS server; the destroy removed the PTR and left the A. It is a guest's record,
+not `<vnet>-gw`, so the cleanup never touches it: an engine that removed every A pointing into a
+subnet it owned would remove records it never wrote (measured: a hand-added `.77` in the gateway's
+own rrset survived the teardown).
+
+**Not validated.** A TLS proxy in front of PowerDNS (`https://`, `tls.caFile`) — the lab server
+is plain http, so the client's TLS path is the same `reqwest` stack the other providers use, not
+measured here; a reverse controller on a different server from the forward one (the lab has one
+server; the code looks the PTR's controller up separately); a public prefix (the reverse-zone
+rule for it is read, not measured); the race between the cleanup's read and its write with
+another writer on the same rrset (the API has no conditional write; the node's plugin has the
+same window).

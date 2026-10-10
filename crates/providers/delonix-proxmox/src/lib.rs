@@ -63,7 +63,7 @@ pub use sdn_routing::{
     VnetFirewallOptions,
 };
 
-pub use dns::ProxmoxDnsProvider;
+pub use dns::{node_reverse_zone, ProxmoxDnsProvider};
 pub use ipam::ProxmoxIpamProvider;
 pub use network_zone::{ProxmoxSegmentProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 

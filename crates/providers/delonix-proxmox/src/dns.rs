@@ -63,6 +63,38 @@ pub(crate) fn controllers_from(rows: &[serde_json::Value]) -> Vec<DnsController>
         .collect()
 }
 
+/// The reverse zone the node's `powerdns` plugin writes the PTR of `ip` in,
+/// for an address of the subnet `cidr` — `get_reversedns_zone` of
+/// `Dns/PowerdnsPlugin.pm`, PVE 9.2.2 (read), IPv4 only:
+///
+/// * an RFC 1918 subnet goes to the fixed zone of its block, whatever the
+///   prefix: `10.in-addr.arpa.`, `16-31.172.in-addr.arpa.`,
+///   `168.192.in-addr.arpa.` (PowerDNS's built-in private zones);
+/// * any other subnet with a prefix up to /24 goes to the /24 zone of the
+///   address — the plugin tests `<= 24` before `<= 16` and `<= 8`, so a /16
+///   is given a /24 zone (the upstream defect ADR-0064 records; mirrored on
+///   purpose: a cleanup looks where the node wrote);
+/// * a longer public prefix gets no zone (the plugin's empty string).
+pub fn node_reverse_zone(cidr: &str, ip: &str) -> Option<String> {
+    let (net, len) = cidr.trim().split_once('/')?;
+    let net: std::net::Ipv4Addr = net.parse().ok()?;
+    let len: u8 = len.parse().ok()?;
+    let addr: std::net::Ipv4Addr = ip.trim().parse().ok()?;
+    let n = net.octets();
+    let a = addr.octets();
+    let rfc1918 =
+        n[0] == 10 || (n[0] == 172 && (16..=31).contains(&n[1])) || (n[0] == 192 && n[1] == 168);
+    if rfc1918 {
+        return match a[0] {
+            192 => Some("168.192.in-addr.arpa.".into()),
+            172 => Some("16-31.172.in-addr.arpa.".into()),
+            10 => Some("10.in-addr.arpa.".into()),
+            _ => None,
+        };
+    }
+    (len <= 24).then(|| format!("{}.{}.{}.in-addr.arpa.", a[2], a[1], a[0]))
+}
+
 impl delonix_compute::vm_provider::Provider for ProxmoxDnsProvider {
     fn id(&self) -> delonix_compute::vm_provider::ProviderId {
         delonix_compute::vm_provider::ProviderId(crate::network_zone::ID)
@@ -108,6 +140,10 @@ impl DnsProvider for ProxmoxDnsProvider {
                 }),
             )
             .map_err(delonix_model::Error::from)
+    }
+
+    fn reverse_zone(&self, cidr: &str, ip: &str) -> Option<String> {
+        node_reverse_zone(cidr, ip)
     }
 
     fn observe(&self, zone: &str) -> delonix_model::Result<Option<ZoneDns>> {
@@ -157,6 +193,37 @@ mod tests {
             }]
         );
         assert!(!format!("{got:?}").contains("SECRET"));
+    }
+
+    /// `get_reversedns_zone` of the node's plugin, case by case (read,
+    /// PVE 9.2.2); the private one was also measured: a 10.85.x.0/24 subnet's
+    /// gateway PTR landed in `10.in-addr.arpa.` (the F5c live case).
+    #[test]
+    fn the_reverse_zone_is_the_plugins() {
+        assert_eq!(
+            node_reverse_zone("10.85.20.0/24", "10.85.20.1").as_deref(),
+            Some("10.in-addr.arpa.")
+        );
+        assert_eq!(
+            node_reverse_zone("172.20.4.0/22", "172.20.7.254").as_deref(),
+            Some("16-31.172.in-addr.arpa.")
+        );
+        assert_eq!(
+            node_reverse_zone("192.168.5.0/24", "192.168.5.1").as_deref(),
+            Some("168.192.in-addr.arpa.")
+        );
+        // Public: a /16 gets the /24 zone (the upstream defect), a /28 none.
+        assert_eq!(
+            node_reverse_zone("203.0.0.0/16", "203.0.113.1").as_deref(),
+            Some("113.0.203.in-addr.arpa.")
+        );
+        assert_eq!(node_reverse_zone("203.0.113.0/28", "203.0.113.1"), None);
+        // 172.32/12 is not private.
+        assert_eq!(
+            node_reverse_zone("172.32.0.0/24", "172.32.0.1").as_deref(),
+            Some("0.32.172.in-addr.arpa.")
+        );
+        assert_eq!(node_reverse_zone("fd00::/64", "fd00::1"), None);
     }
 
     /// An answer that cannot be read must not carry the controller's key into

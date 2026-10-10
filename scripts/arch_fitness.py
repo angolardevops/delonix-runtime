@@ -73,6 +73,7 @@ LAYERS = {
     "delonix-provider-cloud-hypervisor": PROVIDER,
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
     "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
+    "delonix-powerdns": PROVIDER,  # ADR-0064 D6: the engine's own PowerDNS credential, record cleanup
     "delonix-cri": INTERFACE,
     "delonix-mgmt": INTERFACE,  # replaced by delonix-node-api (P5)
     "delonix-mcp": INTERFACE,

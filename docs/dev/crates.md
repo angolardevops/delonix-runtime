@@ -36,7 +36,7 @@ Two conventions you will meet everywhere:
 <!-- dev-docs:begin crates-table -->
 | Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |
 |---|---|---|---|---|---|
-| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
+| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-powerdns`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-compute`, `delonix-networking`, `delonix-runtime-bin`, `delonix-sdn` |
 | `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-model`, `delonix-net-rules`, `delonix-node` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-networking`, `delonix-node-api`, `delonix-oci`, `delonix-opnsense`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-state`, `delonix-vm`, `delonix-volume` |
 | `delonix-networking` | Contexts | `crates/contexts/delonix-networking` | — | `delonix-compute`, `delonix-model`, `delonix-net-rules` | `delonix-opnsense`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn` |
@@ -53,6 +53,7 @@ Two conventions you will meet everywhere:
 | `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-provider-cloud-hypervisor`, `delonix-provider-libvirt`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
 | `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state`, `delonix-storage` | `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`, `delonix-runtime-bin` |
 | `delonix-opnsense` | Providers | `crates/providers/delonix-opnsense` | — | `delonix-compute`, `delonix-model`, `delonix-networking` | `delonix-node-api`, `delonix-runtime-bin` |
+| `delonix-powerdns` | Providers | `crates/providers/delonix-powerdns` | — | `delonix-model` | `delonix-runtime-bin` |
 | `delonix-provider-cloud-hypervisor` | Providers | `crates/providers/delonix-provider-cloud-hypervisor` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-vm` |
 | `delonix-provider-libvirt` | Providers | `crates/providers/delonix-provider-libvirt` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-vm` |
 | `delonix-proxmox` | Providers | `crates/providers/delonix-proxmox` | — | `delonix-compute`, `delonix-model`, `delonix-networking` | `delonix-node-api`, `delonix-runtime-bin` |
@@ -64,7 +65,7 @@ Two conventions you will meet everywhere:
 | `delonix-mcp-bin` | Binaries | `bins/delonix-mcp-bin` | `delonix-mcp` | `delonix-mcp`, `delonix-node`, `delonix-telemetry` | — |
 | `delonix-mgmt-bin` | Binaries | `bins/delonix-mgmt-bin` | `delonix-mgmt` | `delonix-mgmt`, `delonix-node`, `delonix-telemetry` | — |
 | `delonix-node-api-bin` | Binaries | `bins/delonix-node-api-bin` | `delonix-node-api` | `delonix-node`, `delonix-node-api`, `delonix-telemetry` | — |
-| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-net-rules`, `delonix-networking`, `delonix-node`, `delonix-oci`, `delonix-opnsense`, `delonix-proxmox`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
+| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-net-rules`, `delonix-networking`, `delonix-node`, `delonix-oci`, `delonix-opnsense`, `delonix-powerdns`, `delonix-proxmox`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-storage`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
 <!-- dev-docs:end crates-table -->
 
 ## Foundation

@@ -1309,6 +1309,27 @@ variable when the program runs.</p>
 <td>Without all four, the DNS live case is skipped.</td>
 </tr>
 <tr>
+<td><code>DELONIX_POWERDNS_TEST_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>A PowerDNS server's API (<code>http(s):/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>) the <code>delonix-powerdns</code> live case removes records on (ADR-0064 D6).</td>
+<td>An http(s) URL.</td>
+<td>Enables the case, with the two below. It writes one rrset of its own and removes it on every exit.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>A file holding that server's API key.</td>
+<td>A file path.</td>
+<td>Never printed.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>A zone the server already serves, where the case writes its rrset.</td>
+<td>A domain, e.g. <code>f5c.lab</code>.</td>
+<td>Without all three, the case is skipped.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>The node bridge the system container of the firewall test is put on: the firewall needs a <code>net0</code> to set <code>firewall=1</code> on.</td>

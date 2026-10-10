@@ -1294,6 +1294,27 @@ variable au moment où le programme s’exécute.</p>
 <td>Sans les quatre, le cas en direct du DNS est ignoré.</td>
 </tr>
 <tr>
+<td><code>DELONIX_POWERDNS_TEST_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>L’API d’un serveur PowerDNS (<code>http(s):/<wbr>/<wbr>…:8081/<wbr>api/<wbr>v1/<wbr>servers/<wbr>localhost</code>) sur laquelle le cas en direct de <code>delonix-powerdns</code> supprime des enregistrements (ADR-0064 D6).</td>
+<td>Une URL http(s).</td>
+<td>Active le cas, avec les deux ci-dessous. Il écrit son propre rrset et le supprime à chaque sortie.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_KEY_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>Un fichier contenant la clé d’API de ce serveur.</td>
+<td>Un chemin.</td>
+<td>Jamais affichée.</td>
+</tr>
+<tr>
+<td><code>DELONIX_POWERDNS_TEST_ZONE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-powerdns/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-powerdns/<wbr>tests/<wbr>live.<wbr>rs:lab</code></a></td>
+<td>Une zone que le serveur sert déjà, où le cas écrit son rrset.</td>
+<td>Un domaine, p. ex. <code>f5c.lab</code>.</td>
+<td>Sans les trois, le cas est ignoré.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_BRIDGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:a_system_containers_firewall_is_applied_and_reads_back</code></a></td>
 <td>Le pont du nœud sur lequel le conteneur système du test de pare-feu est branché : le pare-feu a besoin d’un <code>net0</code> où poser <code>firewall=1</code>.</td>

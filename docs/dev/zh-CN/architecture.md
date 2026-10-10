@@ -686,6 +686,7 @@ flowchart TB
   end
   subgraph provider["Providers"]
     delonix_opnsense["delonix-opnsense"]
+    delonix_powerdns["delonix-powerdns"]
     delonix_provider_cloud_hypervisor["delonix-provider-cloud-hypervisor"]
     delonix_provider_libvirt["delonix-provider-libvirt"]
     delonix_proxmox["delonix-proxmox"]
@@ -768,6 +769,7 @@ flowchart TB
   delonix_opnsense --> delonix_compute
   delonix_opnsense --> delonix_model
   delonix_opnsense --> delonix_networking
+  delonix_powerdns --> delonix_model
   delonix_provider_cloud_hypervisor --> delonix_compute
   delonix_provider_cloud_hypervisor --> delonix_model
   delonix_provider_cloud_hypervisor --> delonix_node
@@ -786,6 +788,7 @@ flowchart TB
   delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_opnsense
+  delonix_runtime_bin --> delonix_powerdns
   delonix_runtime_bin --> delonix_proxmox
   delonix_runtime_bin --> delonix_scanner
   delonix_runtime_bin --> delonix_sdn
@@ -839,6 +842,7 @@ flowchart TB
   class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
+  class delonix_powerdns external
   class delonix_provider_cloud_hypervisor external
   class delonix_provider_libvirt external
   class delonix_proxmox external

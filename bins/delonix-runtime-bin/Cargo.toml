@@ -35,6 +35,8 @@ delonix-proxmox = { workspace = true }
 # The OPNsense GatewayProvider (ADR-0051). Same reasoning as delonix-proxmox
 # above, one line up: the bin is where the target is known.
 delonix-opnsense = { workspace = true }
+# ADR-0064 D6: the engine's own PowerDNS credential, to remove the records a node leaves.
+delonix-powerdns = { workspace = true }
 delonix-scanner = { workspace = true }
 # The node's security decisions (ADR-0026). Pure: three dependencies, no daemon,
 # no privileges — see the crate doc for what it deliberately does NOT do.
