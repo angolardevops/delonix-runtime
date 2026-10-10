@@ -229,7 +229,7 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 # `--ssh-key` and hand over a VM nobody can log into.
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t openstack:$RELEASE \\"
+echo "  delonix vm image import $FINAL -t openstack:$RELEASE \\"
 echo "      --distro ubuntu --release $UBUNTU_VER \\"
 echo "      --default-vcpus 6 --default-memory 16G"
 echo

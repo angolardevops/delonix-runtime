@@ -90,16 +90,6 @@
 ~	image sign
 =	image tag
 =	image verify
-~	image vm build
-~	image vm convert
-~	image vm describe
-~	image vm import
-~	image vm init
-~	image vm ls
-~	image vm ls-remote
-~	image vm pull
-~	image vm push
-~	image vm rm
 =	init
 =	man
 ~	manifest render
@@ -227,22 +217,27 @@
 =	version
 ~	vm apply
 →	vm bridge
-~	vm build
 ~	vm cloud-init
 =	vm console
-~	vm convert
 ~	vm create
 ~	vm default-backend
 ~	vm destroy
+~	vm image build
+~	vm image convert
+~	vm image describe
+~	vm image import
+~	vm image init
+~	vm image ls
+~	vm image ls-remote
+~	vm image pull
+~	vm image push
+~	vm image rm
 ~	vm init
 ~	vm ls
-~	vm ls-remote
 ~	vm migrate
 ~	vm move
 ~	vm pause
 ~	vm prune
-~	vm pull
-~	vm push
 ~	vm reach
 ~	vm resize
 =	vm restart

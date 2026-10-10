@@ -67,8 +67,8 @@ official Delonix base on ghcr, then the distro's own cloud image. Add
 ## 3. Check the result
 
 ```bash
-delonix image vm ls
-delonix image vm describe 9
+delonix vm image ls
+delonix vm image describe 9
 ```
 
 `describe` shows the size, the distro (`rocky:9`), the recorded defaults

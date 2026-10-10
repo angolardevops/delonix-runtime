@@ -64,8 +64,12 @@ description (command run, expected vs. actual behavior).
   left in code is counted by `scripts/lang_ratchet.py` in CI — a string that shows up in Portuguese
   when running with the default (English) language is a bug.
 - If the command has multiple entry points that should behave the same way (a common pattern in
-  this codebase — see `delonix vm`/`delonix image vm`/`delonix image --vm`), wire all of them, not
-  just the first one you find.
+  this codebase — see the compose/pod/Docker-API translators that all funnel into one `RunOpts`),
+  wire all of them, not just the first one you find. Prefer ONE entry point over several when the
+  job is a single resource's lifecycle — `delonix vm image <verb>` used to exist as three
+  independent definitions (`vm <verb>`, `image vm <verb>`, `image --vm <verb>`) that had to be
+  kept in sync by hand; it is now a single nested group precisely to remove that duplication, not
+  an example to copy.
 - Write a unit test for any new pure function (parsers, validators, URL builders) — this codebase
   has a strong track record of catching real bugs this way.
 

@@ -2610,7 +2610,7 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
 /// and digest of its single layer, plus whatever
 /// [`push_oci_artifact_with_annotations`] stamped on the manifest.
 ///
-/// Enough for `image vm ls-remote` to show what a tag actually is — distro,
+/// Enough for `vm image ls-remote` to show what a tag actually is — distro,
 /// size, whether it runs cloud-init — instead of a bare list of names that
 /// tells the reader nothing about which one to pull.
 #[derive(Debug, Clone)]

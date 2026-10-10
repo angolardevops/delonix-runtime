@@ -708,7 +708,7 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<Vec<u8>> {
 /// Packs one VM's record and its overlay disk.
 ///
 /// The overlay travels and the BASE does not. A VM's overlay is its state; the
-/// base is a golden image that `image vm pull` puts back. Carrying the base
+/// base is a golden image that `vm image pull` puts back. Carrying the base
 /// would multiply every archive by a gigabyte to hold bytes that are already
 /// content-addressed somewhere else.
 fn write_vm_archive(
@@ -1768,7 +1768,7 @@ fn restore_vm(unpacked: &Path, meta: &Meta, root: &Path) -> Result<()> {
         if !Path::new(base).is_file() {
             return Err(Error::Invalid(po::tf(
                 "restore: the base disk this overlay needs is missing: {base}. Pull it \
-                 (`delonix image vm pull`) before restoring — an overlay without its base is \
+                 (`delonix vm image pull`) before restoring — an overlay without its base is \
                  unreadable",
                 &[("base", base)],
             )));

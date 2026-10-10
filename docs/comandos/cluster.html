@@ -214,7 +214,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix cluster kube generate · delonix stack apply · delonix vm create ·
-  delonix image vm pull
+  delonix vm image pull
 
   delonix › cluster</code></pre></div>
 <h2 id='kube'><code>cluster kube</code></h2>
@@ -477,7 +477,7 @@ Options:
           [default: 2]
 
       --vm-image &lt;VM_IMAGE&gt;
-          Tag of the golden VM image (`delonix image vm ls`). Omit = uses the only local image that exists
+          Tag of the golden VM image (`delonix vm image ls`). Omit = uses the only local image that exists
 
       --network &lt;NETWORK&gt;
           Already-created network (`delonix network create`) — no magic default
@@ -532,7 +532,7 @@ EXAMPLES:
   delonix cluster kubeadm --name lab --network k8s --etcd-cluster 3
 
 SEE ALSO:
-  delonix cluster apply · delonix get · delonix vm ls · delonix image vm pull
+  delonix cluster apply · delonix get · delonix vm ls · delonix vm image pull
 
   delonix › cluster › kubeadm</code></pre></div>
 <div class='lang-pt'><p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM

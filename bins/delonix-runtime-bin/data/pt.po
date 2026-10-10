@@ -1486,8 +1486,8 @@ msgstr "os templates de app criam apps em containers — usa `delonix stack init
 msgid "-v/--template-version needs a template to apply it to — pass -t/--template"
 msgstr "-v/--template-version precisa de um template a que se aplicar — passa -t/--template"
 
-msgid "no local VM images — run `delonix image vm build` (or `pull`) first, or pass the image/disk explicitly"
-msgstr "sem imagens VM locais — corre `delonix image vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
+msgid "no local VM images — run `delonix vm image build` (or `pull`) first, or pass the image/disk explicitly"
+msgstr "sem imagens VM locais — corre `delonix vm image build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
 
 msgid "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create), or `--k8s-version <v>` if `delonix-vm-k8s:<v>` is one of them. Available: {names}"
 msgstr "há {n} imagens VM locais — especifica qual: `--vm-image <tag>` (cluster) ou `--disk <caminho>` (vm create), ou `--k8s-version <v>` se `delonix-vm-k8s:<v>` for uma delas. Disponíveis: {names}"
@@ -3869,14 +3869,14 @@ msgstr "Sobrescreve um `VMfile` existente."
 msgid "{path} already exists — use --force to overwrite"
 msgstr "{path} já existe — usa --force para sobrescrever"
 
-msgid "Next: `delonix image vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
-msgstr "A seguir: `delonix image vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
+msgid "Next: `delonix vm image build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
+msgstr "A seguir: `delonix vm image build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
 
 msgid "no VMfile at {path} — run `delonix vm init` to scaffold one"
 msgstr "não há VMfile em {path} — corre `delonix vm init` para criar um"
 
-msgid "FROM {name}: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`"
-msgstr "FROM {name}: não há imagem VM local com esse nome, e não é um URL nem uma cloud image conhecida (ubuntu:/debian:/rocky:) — ver `delonix vm ls`"
+msgid "FROM {name}: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm image ls`"
+msgstr "FROM {name}: não há imagem VM local com esse nome, e não é um URL nem uma cloud image conhecida (ubuntu:/debian:/rocky:) — ver `delonix vm image ls`"
 
 msgid "downloading {url}..."
 msgstr "a descarregar {url}..."
@@ -3932,8 +3932,8 @@ msgstr "entrar com a chave que injectaste"
 
 # ---- vm convert / default-backend / HYPERVISOR do VMfile -------------------
 
-msgid "no such local VM image or file: {source} (see `delonix image vm ls`)"
-msgstr "sem tal imagem VM local nem ficheiro: {source} (ver `delonix image vm ls`)"
+msgid "no such local VM image or file: {source} (see `delonix vm image ls`)"
+msgstr "sem tal imagem VM local nem ficheiro: {source} (ver `delonix vm image ls`)"
 
 msgid "destination is the same as the source — pass `-o <file>` to convert in place"
 msgstr "o destino é igual à origem — passa `-o <ficheiro>` para converter no lugar"
@@ -4221,7 +4221,7 @@ msgstr "Network '{name}': `{field}` — {why}"
 msgid "WARNING: network '{name}': the manifest asks for {want} but it exists as {have} — NOT renumbered (workloads are addressed on it). Remove and recreate it to change the subnet."
 msgstr "AVISO: rede '{name}': o manifesto pede {want} mas ela existe como {have} — NÃO foi renumerada (há workloads endereçados nela). Remove-a e cria-a de novo para mudar a subnet."
 
-# saidas mais informativas do image vm ls / ls-remote
+# saidas mais informativas do vm image ls / ls-remote
 
 msgid "appliance"
 msgstr "appliance"
@@ -4370,10 +4370,10 @@ msgstr "Tira o `defaultProvider` do ficheiro de providers."
 
 msgid ""
 "Register an existing disk image under a name, so `vm create --disk <name>` "
-"and `image vm push` can use it."
+"and `vm image push` can use it."
 msgstr ""
 "Regista um disco já existente sob um nome, para que o `vm create --disk "
-"<nome>` e o `image vm push` o possam usar."
+"<nome>` e o `vm image push` o possam usar."
 
 msgid "Move the pre-scoping share records into the `default` namespace."
 msgstr ""
@@ -5087,11 +5087,11 @@ msgstr "Release E build do Fedora (ex.: `42-1.1`) — só com `--distro fedora`"
 msgid "Give the guest network access during `RUN` — VMfile builds only. The golden recipe already decides this with `--offline`"
 msgstr "Dá acesso à rede ao convidado durante os `RUN` — só em builds de VMfile. A receita dourada já decide isto com `--offline`"
 
-msgid "Kernel baked into the image (`uname -r` shape), for `image vm ls`. Omit to let it be probed from the image — which only works where libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS)"
-msgstr "Kernel embutido na imagem (na forma do `uname -r`), para o `image vm ls`. Omite-o para ser sondado a partir da imagem — o que só funciona onde o libguestfs consegue ler o `/boot` (não em FreeBSD, não com raiz em ZFS)"
+msgid "Kernel baked into the image (`uname -r` shape), for `vm image ls`. Omit to let it be probed from the image — which only works where libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS)"
+msgstr "Kernel embutido na imagem (na forma do `uname -r`), para o `vm image ls`. Omite-o para ser sondado a partir da imagem — o que só funciona onde o libguestfs consegue ler o `/boot` (não em FreeBSD, não com raiz em ZFS)"
 
-msgid "Name to register it under (`image vm ls`)"
-msgstr "Nome sob o qual o registar (`image vm ls`)"
+msgid "Name to register it under (`vm image ls`)"
+msgstr "Nome sob o qual o registar (`vm image ls`)"
 
 msgid "(only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one"
 msgstr "(só com `--vm`) Sem argumento, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
@@ -5135,11 +5135,11 @@ msgstr "Guarda o qcow2 sem compressão (maior, mas sem custo de descompressão n
 msgid "The guest does NOT run cloud-init: it is a self-configuring appliance (OPNsense, Proxmox, TrueNAS). `vm create` then skips the NoCloud seed instead of attaching one nothing in the guest reads"
 msgstr "O convidado NÃO corre cloud-init: é uma appliance que se configura sozinha (OPNsense, Proxmox, TrueNAS). O `vm create` passa então a saltar o seed NoCloud, em vez de lhe colar um que nada lá dentro lê"
 
-msgid "Version, for `image vm ls` (e.g. `26.1.2`)"
-msgstr "Versão, para o `image vm ls` (ex.: `26.1.2`)"
+msgid "Version, for `vm image ls` (e.g. `26.1.2`)"
+msgstr "Versão, para o `vm image ls` (ex.: `26.1.2`)"
 
-msgid "What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`)"
-msgstr "O que isto é, para o `image vm ls` (ex.: `opnsense`, `proxmox-ve`)"
+msgid "What this is, for `vm image ls` (e.g. `opnsense`, `proxmox-ve`)"
+msgstr "O que isto é, para o `vm image ls` (ex.: `opnsense`, `proxmox-ve`)"
 
 msgid "With no argument, list the official NO-Kubernetes golden's repo instead of the Kubernetes one"
 msgstr "Sem argumento, lista o repositório da dourada oficial SEM Kubernetes em vez do da de Kubernetes"
@@ -5159,8 +5159,8 @@ msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
 msgid "Actually run the privileged teardown (requires root). Without it: dry-run"
 msgstr "Executa mesmo o desmontar privilegiado (precisa de root). Sem isto: dry-run"
 
-msgid "A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path"
-msgstr "Um nome de imagem VM local (`vm ls`) ou um caminho literal `.qcow2`/`.raw`"
+msgid "A local VM image name (`vm image ls`) or a literal `.qcow2`/`.raw` path"
+msgstr "Um nome de imagem VM local (`vm image ls`) ou um caminho literal `.qcow2`/`.raw`"
 
 msgid "Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM's IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM"
 msgstr "Sonda também uma lista curta de portas conhecidas (22, 6443, 10250, 80, 443) no IP de cada VM e mostra quais respondem — um connect TCP real por porta, com timeout curto, em paralelo. Desligado por omissão: ao contrário do resto do `ls` (só estado local), isto faz I/O de rede ao vivo e pode acrescentar latência, sobretudo para uma VM inalcançável ou a arrancar"
@@ -5198,8 +5198,8 @@ msgstr "Nome do snapshot"
 msgid "Snapshot name to revert to"
 msgstr "Nome do snapshot para o qual voltar"
 
-msgid "vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm init --vmfile` — when `--disk` names a local image)"
-msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCPUS` em `delonix vm init --vmfile` — quando o `--disk` nomeia uma imagem local)"
+msgid "vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm image init` — when `--disk` names a local image)"
+msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCPUS` em `delonix vm image init` — quando o `--disk` nomeia uma imagem local)"
 
 msgid "VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable"
 msgstr "Subnet(s) de VM a rotear de volta (por omissão: as `virbr*` auto-detectadas). Repetível"
@@ -5476,8 +5476,8 @@ msgstr "Destino. Omite-o para um repositório OFICIAL: qual deles é decidido pe
 msgid "Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository this image belongs in."
 msgstr "Publica uma imagem VM local num registo OCI. Omite o destino para publicar no repositório OFICIAL a que esta imagem pertence."
 
-msgid "no official repository has the tag '{tag}' — run `delonix image vm ls-remote` to see what is published"
-msgstr "nenhum repositório oficial tem a tag '{tag}' — corre `delonix image vm ls-remote` para ver o que está publicado"
+msgid "no official repository has the tag '{tag}' — run `delonix vm image ls-remote` to see what is published"
+msgstr "nenhum repositório oficial tem a tag '{tag}' — corre `delonix vm image ls-remote` para ver o que está publicado"
 
 msgid "the tag '{tag}' exists in more than one official repository ({repos}) — name the one you mean"
 msgstr "a tag '{tag}' existe em mais do que um repositório oficial ({repos}) — indica qual deles queres"
@@ -6035,8 +6035,8 @@ msgstr "Hyper-V e Azure — `vhdx` e `vhd` são formatos diferentes, não duas g
 msgid "compressed, which only qcow2 and vmdk can be"
 msgstr "comprimida, coisa que só qcow2 e vmdk podem ser"
 
-msgid "scaffold a `VMfile` in the current directory, ready for `image vm build`"
-msgstr "gerar um `VMfile` no directório actual, pronto para o `image vm build`"
+msgid "scaffold a `VMfile` in the current directory, ready for `vm image build`"
+msgstr "gerar um `VMfile` no directório actual, pronto para o `vm image build`"
 
 msgid "write it somewhere else, overwriting whatever is already there"
 msgstr "escrevê-lo noutro sítio, por cima do que já lá estiver"
@@ -6053,23 +6053,8 @@ msgstr "uma imagem tua a partir de um `VMfile`, com rede durante o `RUN` para se
 msgid "extra packages on top of the golden recipe, without touching the code"
 msgstr "pacotes extra por cima da receita dourada, sem tocar no código"
 
-msgid "the same as `image vm ls-remote` — this spelling needs the group's `--vm` flag"
-msgstr "o mesmo que `image vm ls-remote` — esta grafia precisa da flag `--vm` do grupo"
-
 msgid "the same for the Kubernetes-free golden repo"
 msgstr "o mesmo para o repositório da dourada sem Kubernetes"
-
-msgid "the same as `image vm import` — this spelling needs the group's `--vm` flag"
-msgstr "o mesmo que `image vm import` — esta grafia precisa da flag `--vm` do grupo"
-
-msgid "the same as `image vm convert` — this spelling needs the group's `--vm` flag"
-msgstr "o mesmo que `image vm convert` — esta grafia precisa da flag `--vm` do grupo"
-
-msgid "the same as `image vm init` — this spelling needs the group's `--vm` flag"
-msgstr "o mesmo que `image vm init` — esta grafia precisa da flag `--vm` do grupo"
-
-msgid "the same as `image vm build` — this spelling needs the group's `--vm` flag"
-msgstr "o mesmo que `image vm build` — esta grafia precisa da flag `--vm` do grupo"
 
 msgid "read the manual for a command, the way you would any other tool"
 msgstr "ler o manual de um comando, como farias com qualquer outra ferramenta"
@@ -7633,6 +7618,17 @@ msgstr ""
 "\n"
 "Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
 
+msgid ""
+"Bootstrap a project with a VM manifest."
+"\n"
+"\n"
+"Files ALREADY FILLED IN (images included), ready to use without editing anything. For BUILDING your own qcow2 instead of running an existing one, see `vm image init` — a different job, so a different verb."
+msgstr ""
+"Arranca um projecto com um manifesto de VM."
+"\n"
+"\n"
+"Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada. Para CONSTRUIR o teu próprio qcow2 em vez de correr um já existente, ver `vm image init` — um trabalho diferente, por isso um verbo diferente."
+
 msgid "Pull a golden VM image from an OCI registry."
 msgstr "Puxa uma imagem VM dourada de um registo OCI."
 
@@ -8336,9 +8332,9 @@ msgstr "Serve uma fatia da Docker Engine API num socket unix."
 msgid "Serve a slice of the Docker Engine API on a unix socket.\n\n`docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
 msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
 
-# --- image vm rm ---
-msgid "no such VM image: {name} (see `delonix image vm ls`)"
-msgstr "não existe a imagem VM: {name} (ver `delonix image vm ls`)"
+# --- vm image rm ---
+msgid "no such VM image: {name} (see `delonix vm image ls`)"
+msgstr "não existe a imagem VM: {name} (ver `delonix vm image ls`)"
 
 msgid "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix delete vm <name>`), or pass --force to make them unreadable"
 msgstr "a imagem VM '{name}' é o ficheiro base de: {vms} — remove essas VMs primeiro (`delonix delete vm <nome>`), ou passa --force para as tornar ilegíveis"
@@ -8355,8 +8351,8 @@ msgstr "uma ou mais imagens VM não foram removidas"
 msgid "Remove a local VM image (its disk and its metadata)"
 msgstr "Remove uma imagem VM local (o disco e os metadados)"
 
-msgid "Image name(s), as shown by `image vm ls`"
-msgstr "Nome(s) da imagem, como aparecem em `image vm ls`"
+msgid "Image name(s), as shown by `vm image ls`"
+msgstr "Nome(s) da imagem, como aparecem em `vm image ls`"
 
 msgid "Remove it even while VMs back onto it — **those VMs stop being readable**, and there is no way back"
 msgstr "Remove mesmo com VMs assentes nela — **essas VMs deixam de ser legíveis**, e não há volta"
@@ -8912,8 +8908,8 @@ msgstr "backup: recuso agendar com um caminho relativo — um temporizador não 
 msgid "restore: '{name}' is running — stop it first, or pass --force to have this command stop and restart it"
 msgstr "restore: '{name}' está a correr — pára-o primeiro, ou passa --force para este comando o parar e voltar a arrancar"
 
-msgid "restore: the base disk this overlay needs is missing: {base}. Pull it (`delonix image vm pull`) before restoring — an overlay without its base is unreadable"
-msgstr "restore: falta o disco base de que este overlay precisa: {base}. Descarrega-o (`delonix image vm pull`) antes de repor — um overlay sem a base dele é ilegível"
+msgid "restore: the base disk this overlay needs is missing: {base}. Pull it (`delonix vm image pull`) before restoring — an overlay without its base is unreadable"
+msgstr "restore: falta o disco base de que este overlay precisa: {base}. Descarrega-o (`delonix vm image pull`) antes de repor — um overlay sem a base dele é ilegível"
 
 #
 # exemplos do manual: backup / restore
@@ -10612,16 +10608,16 @@ msgstr "delonix system thermal (baixa o tecto de CPU do motor até arrefecer)"
 msgid "Show the SIZE column — each container's own writable-layer usage (never the shared read-only image layers). Off by default: it walks a directory tree per container, the same cost `volumes inspect` already opts into rather than pays on every listing"
 msgstr "Mostra a coluna SIZE — o espaço da própria camada de escrita de cada container (nunca as layers de imagem partilhadas e só de leitura). Desligado por omissão: percorre uma árvore de directórios por container, o mesmo custo que o `volumes inspect` já assume em vez de pagar em toda a listagem"
 
-# ---- help: cli-b6-drop-vm-flag (--vm flag removed, image vm <cmd> is the sole form) ----
+# ---- help: cli-b6-drop-vm-flag (--vm flag removed, vm image <cmd> is the sole form) ----
 
-msgid "Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image vm ls`)"
-msgstr "Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `image vm ls`)"
+msgid "Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `vm image ls`)"
+msgstr "Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `vm image ls`)"
 
-msgid "Tag of the golden VM image (`delonix image vm ls`). Omit = uses the only local image that exists"
-msgstr "Tag da imagem VM dourada (`delonix image vm ls`). Omitir = usa a única imagem local existente"
+msgid "Tag of the golden VM image (`delonix vm image ls`). Omit = uses the only local image that exists"
+msgstr "Tag da imagem VM dourada (`delonix vm image ls`). Omitir = usa a única imagem local existente"
 
-msgid "OCI images: pull/ls/remove/export. `image vm <cmd>` for golden VM images"
-msgstr "Imagens OCI: pull/ls/remove/export. `image vm <cmd>` para as imagens VM douradas"
+msgid "OCI images: pull/ls/remove/export. `vm image <cmd>` for golden VM images"
+msgstr "Imagens OCI: pull/ls/remove/export. `vm image <cmd>` para as imagens VM douradas"
 
 msgid "Human-readable detail of one or more images, `kubectl describe`-style.\n\nTags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir."
 msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`.\n\nTags/digest/tamanho/layers + a config OCI: entrypoint/cmd/env/workdir."
@@ -10730,7 +10726,7 @@ msgid ""
 "Move a VM to another `delonix` host — real downtime, no shared storage.\n"
 "\n"
 "Stops the VM (if running), flattens its overlay to a standalone qcow2, "
-"transfers it over SSH, registers it as a VM image on the target (`image vm "
+"transfers it over SSH, registers it as a VM image on the target (`vm image "
 "import --appliance` — the disk already carries its own configured state, a "
 "fresh cloud-init pass would be wrong there), and creates the VM from it. "
 "True live migration (near-zero downtime) is out of scope: Cloud Hypervisor "
@@ -10742,7 +10738,7 @@ msgstr ""
 "partilhado.\n"
 "\n"
 "Pára a VM (se estiver a correr), achata o seu overlay num qcow2 "
-"autónomo, transfere-o por SSH, regista-o como imagem VM no alvo (`image vm "
+"autónomo, transfere-o por SSH, regista-o como imagem VM no alvo (`vm image "
 "import --appliance` — o disco já traz o seu próprio estado configurado, uma "
 "passagem de cloud-init nova seria errada aí), e cria a VM a partir dele. "
 "Live migration a sério (downtime quase nulo) fica fora de âmbito: o Cloud "
@@ -14442,8 +14438,8 @@ msgstr "não foi possível ler a imagem local"
 msgid "A Proxmox VM created from an image of the engine's store is uploaded to the node first (ADR-0057). The file the image resolved to could not be opened or read, or it is empty."
 msgstr "Uma VM Proxmox criada a partir de uma imagem do store do motor é primeiro enviada para o nó (ADR-0057). O ficheiro para onde a imagem aponta não pôde ser aberto nem lido, ou está vazio."
 
-msgid "Check the image with `delonix image vm ls` and `delonix image vm describe <name>`; pull or build it again if the file is missing."
-msgstr "Verifica a imagem com `delonix image vm ls` e `delonix image vm describe <nome>`; volta a descarregá-la ou a construí-la se o ficheiro faltar."
+msgid "Check the image with `delonix vm image ls` and `delonix vm image describe <name>`; pull or build it again if the file is missing."
+msgstr "Verifica a imagem com `delonix vm image ls` e `delonix vm image describe <nome>`; volta a descarregá-la ou a construí-la se o ficheiro faltar."
 
 msgid "the node's import storage does not accept images"
 msgstr "o storage de importação do nó não aceita imagens"
@@ -15487,3 +15483,101 @@ msgstr "{path}: defaultProvider é o default de COMPUTAÇÃO e powerdns não é 
 
 msgid "api key from file {path}"
 msgstr "chave de API do ficheiro {path}"
+
+msgid "VM image management — build/pull/push/ls/rm/describe/import/convert/init/ls-remote"
+msgstr "Gestão de imagens de VM — build/pull/push/ls/rm/describe/import/convert/init/ls-remote"
+
+msgid ""
+"VM image management — build/pull/push/ls/rm/describe/import/convert/init/ls-remote."
+"\n"
+"\n"
+"Everything about the DISK, never a running instance — one nested group instead of flat verbs, so `vm ls`/`vm rm` never have to answer \"an instance or an image?\" (`image vm` retired, folded in here together with the five verbs that were already flat directly under `vm` — `build`/`convert`/`ls-remote`/`pull`/`push` — which is why those five no longer have their own `VmCmd` variant; see AGENTS.md's \"image vm → vm image\" section)."
+msgstr ""
+"Gestão de imagens de VM — build/pull/push/ls/rm/describe/import/convert/init/ls-remote."
+"\n"
+"\n"
+"Tudo sobre o DISCO, nunca uma instância a correr — um grupo aninhado em vez de verbos soltos, para `vm ls`/`vm rm` nunca terem de responder \"uma instância ou uma imagem?\" (`image vm` retirado, fundido aqui junto com os cinco verbos que já estavam soltos directamente sob `vm` — `build`/`convert`/`ls-remote`/`pull`/`push` — por isso esses cinco deixaram de ter variante própria em `VmCmd`; ver a secção \"image vm → vm image\" do AGENTS.md)."
+
+
+msgid ""
+"Register an existing disk image under a name, so `vm create --disk <name>` and `vm image push` can use it."
+"\n"
+"\n"
+"The counterpart to `build` for a disk this engine did not produce: a vendor appliance installed from its own ISO, or an image exported from somewhere else. The file is copied into the store as-is — nothing is booted, nothing is inspected."
+msgstr ""
+"Regista um disco existente sob um nome, para `vm create --disk <nome>` e `vm image push` o poderem usar."
+"\n"
+"\n"
+"O contraponto do `build` para um disco que este motor não produziu: um appliance de fabricante instalado a partir do seu próprio ISO, ou uma imagem exportada de outro lado. O ficheiro é copiado para o store tal como está — nada arranca, nada é inspeccionado."
+
+
+msgid ""
+"Scaffold a `VMfile` (and a cloud-init) for building your own image."
+"\n"
+"\n"
+"Writes a recipe that BUILDS AS WRITTEN — a scaffold nobody can run is documentation that lies. Delete what you do not need."
+msgstr ""
+"Gera o esqueleto de um `VMfile` (e um cloud-init) para construíres a tua própria imagem."
+"\n"
+"\n"
+"Escreve uma receita que CONSTRÓI COMO ESTÁ ESCRITA — um esqueleto que ninguém consegue correr é documentação que mente. Apaga o que não precisares."
+
+
+msgid "Target format"
+msgstr "Formato de destino"
+
+msgid "Convert a VM disk between `qcow2` and `raw`"
+msgstr "Converte um disco de VM entre `qcow2` e `raw`"
+
+msgid ""
+"Convert a VM disk between `qcow2` and `raw`."
+"\n"
+"\n"
+"Flattened (no backing file) either way, ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor already share this same pair of formats; there is no separate \"per-hypervisor\" format here). `qcow2` is the default — it is the per-VM overlay format."
+msgstr ""
+"Converte um disco de VM entre `qcow2` e `raw`."
+"\n"
+"\n"
+"Achatado (sem backing file) nos dois casos, pronto a arrancar em qualquer backend (libvirt/QEMU e Cloud Hypervisor já partilham este mesmo par de formatos; não há um formato \"por hypervisor\" aqui). `qcow2` é a omissão — é o formato de overlay por VM."
+
+msgid "Pull a VM image from an OCI registry"
+msgstr "Traz uma imagem VM de um registo OCI"
+
+msgid ""
+"Pull a VM image from an OCI registry."
+"\n"
+"\n"
+"With no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)."
+msgstr ""
+"Traz uma imagem VM de um registo OCI."
+"\n"
+"\n"
+"Sem argumento, a imagem OFICIAL da Delonix (pronta para `vm create`/`cluster kubeadm`)."
+
+msgid "List the tags available in a remote OCI repository"
+msgstr "Lista as tags disponíveis num repositório OCI remoto"
+
+msgid ""
+"List the tags available in a remote OCI repository."
+"\n"
+"\n"
+"With no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)."
+msgstr ""
+"Lista as tags disponíveis num repositório OCI remoto."
+"\n"
+"\n"
+"Sem argumento, o repositório OFICIAL da imagem dourada Delonix (descobre que versões de k8s estão publicadas antes do `pull`/`--k8s-version`)."
+
+msgid "Build a VM image"
+msgstr "Constrói uma imagem VM"
+
+msgid ""
+"Build a VM image."
+"\n"
+"\n"
+"From a `VMfile` when there is one, otherwise the built-in golden recipe (Ubuntu cloud image + kubeadm/kubelet/kubectl + `delonix-cri`), via `virt-customize`."
+msgstr ""
+"Constrói uma imagem VM."
+"\n"
+"\n"
+"A partir de um `VMfile` quando existe um, senão a receita dourada embutida (cloud image Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), via `virt-customize`."

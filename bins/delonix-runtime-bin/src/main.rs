@@ -134,7 +134,7 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
     },
-    /// OCI images: pull/ls/remove/export. `image vm <cmd>` for golden VM images.
+    /// OCI images: pull/ls/remove/export. `vm image <cmd>` for golden VM images.
     Image {
         #[command(subcommand)]
         action: cmd::image::ImageCmd,

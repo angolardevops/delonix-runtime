@@ -467,7 +467,7 @@ check "container ls" ok "$BIN" container ls
 check "container ls -a" ok "$BIN" container ls -a
 check "container ls -q" ok "$BIN" container ls -q
 check "image ls" ok "$BIN" image ls
-check "image vm ls" ok "$BIN" image vm ls
+check "vm image ls" ok "$BIN" vm image ls
 check "volume ls" ok "$BIN" volume ls
 check "network ls" ok "$BIN" network ls
 
@@ -573,7 +573,7 @@ check "completion shell bash" ok "$BIN" completion shell bash
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------
 # O `completion shell bash` acima prova que o script de registo SAI; não prova que um
 # TAB sobre um argumento sugere alguma coisa. A distinção não é teórica: o
-# `image vm rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
+# `vm image rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
 # ao lado sugeria, e ninguém deu por isso porque o registo saía na mesma.
 #
 # Sonda o motor dinâmico do clap com a MESMA forma que o script de registo usa
@@ -590,10 +590,10 @@ check "man completa nomes de comando" ok completa delonix man ""
 check "system snapshot restore completa caminhos" ok completa delonix system snapshot restore ""
 # Este só vale onde o recurso existe — zero num host sem imagens VM é a resposta
 # honesta, não uma falha, e um SKIP declarado conta como NÃO COBERTO.
-if [ "$("$BIN" image vm ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
-  check "image vm rm completa (o destrutivo)" ok completa delonix image vm rm ""
+if [ "$("$BIN" vm image ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
+  check "vm image rm completa (o destrutivo)" ok completa delonix vm image rm ""
 else
-  skip "image vm rm completa" "não há imagens VM neste host"
+  skip "vm image rm completa" "não há imagens VM neste host"
 fi
 
 ########################################
@@ -922,7 +922,7 @@ if command -v virt-customize >/dev/null 2>&1; then
   skip "ferramenta em falta diz 69" "este host TEM virt-customize — o caminho não é exercitável aqui"
 else
   check "ferramenta em falta diz 69" 69 \
-    "$BIN" image vm build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
+    "$BIN" vm image build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
 fi
 
 # Convenções instaladas que NÃO podem ter mudado.
@@ -6141,31 +6141,29 @@ check "secret rotate-key: recifra tudo e os valores em claro continuam os MESMOS
   '$BIN' secret rotate-key >/dev/null || exit 1
   depois=\$('$BIN' secret inspect sec-$PFX --reveal 2>&1 | grep 'k=')
   [ \"\$antes\" = \"\$depois\" ] || { echo \"a rotação da chave-mestra perdeu o valor: '\$antes' -> '\$depois'\"; exit 1; }"
-# --- ACH-034: a rotação da chave-mestra põe a VERSÃO a 1 ---------------------
-# Medido 2026-10-08, com o check acima a passar: os valores sobrevivem e a
-# VERSÃO recua (4 -> 1). A regra da versão tem um dono só e está escrita no
+# --- ACH-034: a rotação da chave-mestra punha a VERSÃO a 1 -------------------
+# Medido 2026-10-08, com o check acima a passar: os valores sobreviviam e a
+# VERSÃO recuava (4 -> 1). A regra da versão tem um dono só e está escrita no
 # `SecretStore::save` (ADR-0069 item 6): valores iguais -> mesma versão;
 # valores diferentes -> a anterior + 1; primeira gravação -> 1. Uma rotação de
-# chave não muda valor nenhum, logo pela regra do próprio store a versão tinha
+# chave não muda valor nenhum, logo pela regra do próprio store a versão tem
 # de ficar igual.
 #
-# A causa é a ORDEM dentro do `SecretStore::rotate_key`: roda a chave-mestra
-# ANTES de regravar, e o `save` de cada segredo faz `self.load(&s.name)` para
-# comparar — contra um ficheiro ainda selado com a chave ANTIGA. A leitura
-# falha, cai no ramo «primeira gravação» e escreve 1. O caminho que não
-# consegue aplicar a regra não diz nada: devolve a resposta do caso errado.
+# A causa era a ORDEM dentro do `SecretStore::rotate_key`: rodava a
+# chave-mestra ANTES de regravar, e o `save` de cada segredo comparava contra
+# um ficheiro ainda selado com a chave ANTIGA, caía no ramo «primeira
+# gravação» e escrevia 1.
 #
-# Fica como `xfail` e não como correcção: um consumidor que use a versão para
-# decidir «isto mudou?» lê 4 -> 1 e conclui o contrário do que aconteceu, mas
-# não há perda de dados (o check acima prova-o) e a correcção é no motor, não
-# na bateria. Sai desta marca por XPASS no dia em que for corrigida.
-xfail ACH-034 "secret rotate-key: a versão NÃO recua (os valores não mudaram)" ok bash -c "
+# Corrigido em bbf2a972 (o `rotate_key` regrava com a versão que já leu). Foi
+# `xfail` até lá e passou a check normal quando deu XPASS; a asserção pede
+# IGUAL, que é o que a regra diz, e não apenas «não recua».
+check "secret rotate-key: a versão fica igual (os valores não mudaram)" ok bash -c "
   '$BIN' secret set sec-$PFX k=para-a-versao >/dev/null || exit 1
   '$BIN' secret set sec-$PFX k=outro-valor >/dev/null || exit 1
   antes=\$('$BIN' secret inspect sec-$PFX 2>&1 | sed -n 's/^Version: *//p')
   '$BIN' secret rotate-key >/dev/null || exit 1
   depois=\$('$BIN' secret inspect sec-$PFX 2>&1 | sed -n 's/^Version: *//p')
-  [ \"\$depois\" -ge \"\$antes\" ] || { echo \"a versão recuou: \$antes -> \$depois\"; exit 1; }"
+  [ -n \"\$antes\" ] && [ \"\$depois\" = \"\$antes\" ] || { echo \"a versão mudou numa rotação de chave: \$antes -> \$depois\"; exit 1; }"
 
 check "secret unset: a chave sai, o segredo fica" ok bash -c "
   '$BIN' secret unset sec-$PFX k >/dev/null || exit 1

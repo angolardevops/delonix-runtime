@@ -2000,9 +2000,11 @@ na reconstrução completa. Cenário de caos `control_restart`, que compara **PI
 conectividade — uma recuperação por reinício também deixaria a rede a funcionar e seria
 indistinguível de outra forma. Arnês: 17/17.
 
-## Imagem VM dourada (`delonix image --vm`)
+## Imagem VM dourada (`delonix vm image`)
 
-`delonix image --vm ls|pull|push|build` gere imagens VM à parte das imagens de container
+**Renomeado para `delonix vm image` na Sprint 9 da reestruturação da CLI (abaixo) — esta secção
+usa a grafia de quando foi escrita e fica como está, por ser história.** `delonix vm image
+ls|pull|push|build` gere imagens VM à parte das imagens de container
 (`ImageStore`) — um `.qcow2` solto + `.json` de metadados por imagem, em `<root>/vm-images/`
 (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`, `VmImageStore`). Prepara o terreno para
 `delonix cluster kubeadm` (secção "Cluster kubeadm" abaixo — já implementado): a imagem já vem
@@ -2827,6 +2829,80 @@ sprint existe para fechar. `--parent` continua exclusivo (`conflicts_with`) com 
 grupos estáveis): `--type`/`--server`/`--share`/`--username`/`--password`/`--password-secret`/
 `--read-only`/`--device`/`--options` deixam de existir; um script que ainda os use falha com
 `unrecognized argument`, nunca em silêncio.
+
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 9: `image vm`/`image --vm` → `vm image`
+
+Pedido do utilizador: `delonix image` deve ser só para imagens de CONTAINER; tudo o que gere
+discos de VM muda-se para dentro de `delonix vm`. A pergunta tinha uma resposta já medida antes de
+qualquer código: a forma `image --vm <verbo>` (uma flag a reinterpretar o mesmo grupo como outro
+Kind) já tinha saído na Fase B6 (2026-09-02, commit/PR #214) — a `skill delonix-feature-dev` já o
+tinha por fechado, e esta secção do AGENTS.md é que ainda nomeava "3 pontos de entrada" por nunca
+ter sido corrigida nessa altura (ver as notas marcadas "a 3.ª grafia já não existe" abaixo). O que
+sobrava — e era o ponto real do pedido — era o nested `image vm <verbo>` ao lado de CINCO verbos
+que já tinham saído do nested group para ficar FLAT directamente sob `delonix vm`
+(`build`/`convert`/`ls-remote`/`pull`/`push`), deixando metade da superfície dentro de `image vm`
+e metade já fora dela, sem ninguém ter decidido a forma final.
+
+**A forma nova é um só grupo aninhado**, ao estilo `docker image <verbo>` — todos os DEZ verbos
+de imagem de VM (os cinco que já estavam flat + os cinco que ainda estavam em `image vm`) ficam
+debaixo de `vm image`, nunca soltos directamente em `vm`:
+
+```
+delonix vm image build|convert|describe|import|init|ls|ls-remote|pull|push|rm
+```
+
+`delonix vm` fica só com o ciclo de vida de uma INSTÂNCIA (`create`/`ls`/`start`/`stop`/`rm`/…) —
+a mesma distinção que `container`/`image` já fazem para containers, e que esta Kind nunca tinha
+tido: antes de hoje, perguntar "`vm ls` lista instâncias ou discos?" exigia ler o `--help` duas
+vezes.
+
+**`VmImageCmd` (`cmd/vmimage.rs`) continua a ser a ÚNICA implementação** — é a `vm pull`/`vm
+build`/etc. que já corriam flat, mais a `image vm X` que correu para dentro de `cmd/image.rs` via
+um `VmSub` que era um espelho 1:1 campo-a-campo do mesmo enum, com um bloco de conversão manual
+chave-a-chave entre os dois. **Esse `VmSub` e o seu bloco de conversão foram REMOVIDOS por
+inteiro** (não redireccionados) — era a SEGUNDA cópia do mesmo enum que esta Sprint existe para
+fechar, e mantê-la como alias duplicaria outra vez o que a consolidação tira. `VmCmd` ganhou uma
+variante `Image { action: VmImageCmd }` que delega direitinho, e os cinco `VmCmd::{Pull,
+LsRemote, Push, Convert, Build}` que existiam flat foram apagados (deixaram de ter variante
+própria — o seu trabalho passou a ser feito pelo `Image` genérico).
+
+**Bug real herdado desta duplicação, corrigido de caminho**: o comentário "BUG FIXED HERE" que
+vivia dentro do `VmImageCmd::Pull` (ver a linha 697 de antes desta Sprint) narrava um defeito real
+de quando havia DUAS definições de CLI separadas — `cmd/vm.rs` chegou a ter a sua própria cópia de
+`vm pull` com a sua própria cópia desta mesma resolução, e essa cópia nunca ganhou o default "sem
+argumento = imagem oficial" que o doc-comment do struct já prometia. Um utilizador num host real
+bateu nisso: `delonix image vm pull --name delonix-vm-k8s:1.34` (sem `source`) respondia "required
+arguments were not provided: <SOURCE>". Com esta Sprint há só UMA cópia desta resolução para
+divergir — a classe de bug não pode voltar a acontecer, porque não há segunda cópia para a
+reintroduzir.
+
+**`manual_entries.rs` tinha a MESMA duplicação, e pior**: 11 `Entry` para `image vm *` e, ao lado,
+7 `Entry` FLAT para `vm build`/`convert`/`ls-remote`/`pull`/`push`/`init` a descrever os MESMOS
+comandos — com conjuntos de exemplos DIFERENTES (não idênticos) entre as duas cópias. Fundidas
+num só conjunto de entradas `vm image *`, com os exemplos mais ricos de cada par preservados; as
+7 entradas flat duplicadas foram apagadas.
+
+**Corte limpo, sem alias.** `delonix image vm <verbo>` e `delonix image --vm <verbo>` falham com
+`unrecognized subcommand`/`unrecognized argument`, nunca em silêncio; `vm build`/`vm convert`/`vm
+ls-remote`/`vm pull`/`vm push` (as formas antes flat) idem. `vm` está na lista dos grupos AINDA não
+estáveis do `docs/cli-stability.md` ("`cluster`, `vm`, `pod`, `workload`, `net`,
+`systemcontainer`"), por isso não há promessa de semver a proteger aqui.
+
+**`docs/gen.py` tinha a MESMA duplicação estrutural que o `manual_entries.rs`**: a entrada
+`GROUPS["image"]["subs"]["vm"]` chamava `delonix image vm --help` (um binário real, para gerar a
+página), e `GROUPS["vm"]["subs"]` tinha entradas FLAT `convert`/`push`/`ls-remote`/`pull`/`init`
+(esta última com um exemplo `--vmfile`, a flag que esta Sprint também removeu). As duas foram
+fundidas numa só `GROUPS["vm"]["subs"]["image"]`, com o mesmo cuidado de preservar os exemplos de
+ambos os lados — e os `EXAMPLES_EN` paralelos (uma lista de legendas por POSIÇÃO, não por
+dicionário) tiveram de ser recompostos na mesma ordem, senão o gerador recusa com "N legenda(s)
+EN para M exemplo(s)" em vez de publicar as duas línguas desalinhadas.
+
+**Nota para quem ler esta secção do ficheiro antes da Sprint 9**: várias entradas mais antigas
+deste AGENTS.md (a secção "Imagem VM dourada" logo abaixo, e notas pontuais em `cluster.rs`/
+`rbackup.rs`/etc.) ainda diziam "3 pontos de entrada" (`vm`, `image vm`, `image --vm`) depois de a
+B6 já ter fechado o terceiro — ficam como estavam por serem narração histórica (o que era verdade
+QUANDO foram escritas), mas o estado actual é o desta secção: UM ponto de entrada,
+`delonix vm image <verbo>`.
 
 ## `delonix init -t <template> --up` corria um `container run` à parte do manifesto (2026-09-13)
 
@@ -8689,9 +8765,10 @@ Testes que **falham com a correcção revertida** — os três de retomada com `
 do progresso agregado com o adaptador antigo (é preciso uma layer de vários chunks de 64 KiB: com
 uma layer de um chunk só, o adaptador errado acerta por acidente).
 
-**Gap encontrado de passagem, não corrigido** (fora do âmbito): `vm pull` e `image vm pull` aceitam
-`--name`, a forma legada `image --vm pull` não — divergência entre os três pontos de entrada que o
-resto do grupo mantém alinhados.
+**Gap encontrado de passagem, não corrigido nesta altura** (fora do âmbito): `vm pull` e `image vm
+pull` aceitam `--name`, a forma legada `image --vm pull` não — divergência entre os três pontos de
+entrada que o resto do grupo mantém alinhados. **Fechado pela Sprint 9 da reestruturação da CLI**
+(acima): com um único ponto de entrada (`vm image pull`), não há segunda cópia com que divergir.
 
 ## Um `exec` logo a seguir ao `run -d` pode escrever para o sítio errado (medido 2026-08-28)
 

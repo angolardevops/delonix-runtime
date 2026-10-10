@@ -110,7 +110,7 @@ handles them, and `tool_failure_hint` (`cmd/vmimage.rs`) names them when a build
 
    ```bash
    mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
-   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
+   XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix vm image build --network …
    ```
 
    and, if it still fails, a current passt **first on `PATH`** (the installer builds one into
@@ -243,7 +243,7 @@ code for it.
 ## 3. Images
 
 VM images live in `VmImageStore` (`cmd/vmimage.rs`) under `<DELONIX_ROOT>/vm-images/`: one qcow2 plus
-a JSON metadata record (`VmImage`) per image. `delonix image vm ls` lists them with `TYPE`
+a JSON metadata record (`VmImage`) per image. `delonix vm image ls` lists them with `TYPE`
 (cloud-init / appliance) and `DEFAULTS` (recorded vCPU/memory).
 
 ### Official images
@@ -257,32 +257,31 @@ a JSON metadata record (`VmImage`) per image. `delonix image vm ls` lists them w
 | `appliances` | `ghcr.io/angolardevops/delonix-vm-appliances` | vendor appliances, no cloud-init |
 
 ```bash
-delonix vm ls-remote                 # tags of the Kubernetes golden repo
-delonix vm ls-remote --no-k8s        # tags of the base repo
-delonix vm pull                      # the official Kubernetes golden
-delonix vm pull --no-k8s             # the official base image
-delonix vm pull <oci-ref> --name <local-name>
+delonix vm image ls-remote                 # tags of the Kubernetes golden repo
+delonix vm image ls-remote --no-k8s        # tags of the base repo
+delonix vm image pull                      # the official Kubernetes golden
+delonix vm image pull --no-k8s             # the official base image
+delonix vm image pull <oci-ref> --name <local-name>
 ```
 
 Images are single-blob OCI artifacts; the pull verifies the manifest and blob digests and restores
-the metadata from manifest annotations. The same verbs exist as `delonix image vm pull/ls-remote/push`.
+the metadata from manifest annotations.
 **Note:** `vm create` with no `--disk` and no local image downloads the official golden image, so it
 needs network.
 
 ### Building the golden recipe
 
-`delonix vm build -t <tag>` (the same command as `delonix image vm build`; both share one set of
-arguments) with no `vm.yaml` and no `VMfile` in the context runs the built-in recipe. The examples
-below use the `image vm` spelling:
+`delonix vm image build -t <tag>` with no `vm.yaml` and no `VMfile` in the context runs the
+built-in recipe:
 
 ```bash
 # Kubernetes node, packages fetched and verified on the HOST, guest offline
-delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+delonix vm image build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
-delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
+delonix vm image build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
 ```
 
-Relevant flags (check `image vm build --help` for defaults): `--distro ubuntu|debian|rocky|fedora`,
+Relevant flags (check `vm image build --help` for defaults): `--distro ubuntu|debian|rocky|fedora`,
 `--ubuntu-release`, `--debian-release`, `--rocky-release`, `--fedora-release` (release **and** build,
 e.g. `42-1.1`), `--k8s-version`, `--offline`, `--no-k8s`, `--extra-package`, `--extra-run`,
 `--cri-bin`, `--delonix-bin`, `--root-password` (without it no account has a password),
@@ -297,11 +296,11 @@ the built images and the appliance builders have **not been validated yet** (v4.
 ### Converting and importing
 
 ```bash
-delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
+delonix vm image convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
+delonix vm image import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
-`vm convert` flattens (no backing chain); `--compress` is accepted only for `qcow2` and `vmdk`.
+`vm image convert` flattens (no backing chain); `--compress` is accepted only for `qcow2` and `vmdk`.
 `import --appliance` records `cloud_init: false`: `vm create` then attaches **no** seed and refuses
 `--hostname`/`--ssh-key`/`--user-data` by name, because the guest would never read them. Appliance
 build scripts live in `scripts/appliances/`.

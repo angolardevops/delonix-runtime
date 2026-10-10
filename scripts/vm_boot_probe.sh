@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Boots a VM image under BOTH firmwares and fails unless each one reaches the
-# guest kernel. Meant to run between `image --vm build` and `image --vm push`.
+# guest kernel. Meant to run between `vm image build` and `vm image push`.
 #
 # Why this exists: `ghcr.io/angolardevops/delonix-vm-k8s:1.36` was published on
 # 2026-08-24 from a build that exited 0, and it does not boot under SeaBIOS —

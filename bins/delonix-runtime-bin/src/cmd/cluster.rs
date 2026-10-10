@@ -614,7 +614,7 @@ pub enum ClusterCmd {
         control_plane: u32,
         #[arg(long, default_value_t = 2)]
         workers: u32,
-        /// Tag of the golden VM image (`delonix image vm ls`). Omit = uses the
+        /// Tag of the golden VM image (`delonix vm image ls`). Omit = uses the
         /// only local image that exists.
         #[arg(long = "vm-image", add = ArgValueCandidates::new(super::complete::vm_images))]
         vm_image: Option<String>,
@@ -2275,7 +2275,7 @@ pub(crate) fn resolve_vm_image(
     }
     match images.len() {
         0 => Err(Error::Invalid(
-            super::po::t("no local VM images — run `delonix image vm build` (or `pull`) first, or pass the image/disk explicitly")
+            super::po::t("no local VM images — run `delonix vm image build` (or `pull`) first, or pass the image/disk explicitly")
                 .into(),
         )),
         1 => Ok(images.remove(0).name),
@@ -2305,7 +2305,7 @@ pub(crate) fn resolve_vm_image(
 /// Shared by `cluster kubeadm` and `vm create` on purpose. The pull already
 /// existed on the cluster path only, so the same missing image was a helpful
 /// download in one command and a dead end in the other — `vm create` answered
-/// "no local VM images — run `delonix image vm build` (or `pull`) first",
+/// "no local VM images — run `delonix vm image build` (or `pull`) first",
 /// which is a research task for something the project publishes as an OCI
 /// artifact precisely so it never has to be built by hand.
 ///
@@ -2365,7 +2365,7 @@ fn pull_official(store: &VmImageStore, tag: &str) -> Result<()> {
             }
             Err(Error::Invalid(super::po::tf(
                 "could not download '{source}': {e}. Published there: {choices} — pick one with \
-                 `delonix vm pull {repo}:<tag>`, or build your own with `delonix image vm build`.",
+                 `delonix vm image pull {repo}:<tag>`, or build your own with `delonix vm image build`.",
                 &[
                     ("source", &source),
                     ("e", &e.to_string()),
@@ -3872,7 +3872,7 @@ users:
 
     #[test]
     fn resolve_vm_image_explicita_prefere_a_convencao_local_ja_puxada() {
-        // Bug found live: `delonix vm pull` (no --name) saves under the
+        // Bug found live: `delonix vm image pull` (no --name) saves under the
         // convention name `delonix-vm-k8s:1.34`, but a user naturally types
         // `--vm-image 1.34` — the short form. Before this fix that returned
         // "1.34" verbatim, `qcow2_path("1.34")` never matched the real file,

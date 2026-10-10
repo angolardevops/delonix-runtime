@@ -976,7 +976,7 @@ pub static CATALOG: &[Code] = &[
     code!(1539, "vm.proxmox_image_unreadable", InvalidArgument, Vm, 1,
         "the local image could not be read",
         "A Proxmox VM created from an image of the engine's store is uploaded to the node first (ADR-0057). The file the image resolved to could not be opened or read, or it is empty.",
-        "Check the image with `delonix image vm ls` and `delonix image vm describe <name>`; pull or build it again if the file is missing."),
+        "Check the image with `delonix vm image ls` and `delonix vm image describe <name>`; pull or build it again if the file is missing."),
     code!(1540, "vm.proxmox_invalid_system_container", InvalidArgument, Vm, 1,
         "the system container asks for something the node cannot hold",
         "A system container on a Proxmox node is always unprivileged: a privileged one would be a privilege decision on a remote host, with its own spike (ADR-0058). Its entrypoint is stored as one line split on spaces, so an argument with a space or a control character cannot be kept as written; its environment is a list of NAME=value, where the name is letters, digits and underscores.",

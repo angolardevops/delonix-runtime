@@ -42,7 +42,7 @@ spec:
   workers:
     replicas: 2
   vm:                                # only read in mode: vm
-    image: k8s-golden                # tag from `delonix image vm ls` (omit = the only local one)
+    image: k8s-golden                # tag from `delonix vm image ls` (omit = the only local one)
     network: lab-net                 # network created beforehand
     vcpus: 2                         # per node
     memory: 2G                       # per node

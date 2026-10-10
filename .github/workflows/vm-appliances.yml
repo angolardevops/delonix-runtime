@@ -233,13 +233,13 @@ jobs:
           echo "versão descarregada: $VER · tag publicada: $TAG"
           # `--appliance`: nenhuma destas corre cloud-init, e sem esta marca o
           # `vm create` do outro lado voltaria a anexar-lhes um seed NoCloud.
-          $D image vm import "$IMG" -t "$N:$TAG" --appliance \
+          $D vm image import "$IMG" -t "$N:$TAG" --appliance \
             --distro "$N" --release "$VER" \
             --default-vcpus "$VCPUS" --default-memory "$MEM"
-          $D image vm ls
+          $D vm image ls
           echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | $D image login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
-          $D image vm push "$N:$TAG" "${{ inputs.dest_repo }}:$N-$TAG"
+          $D vm image push "$N:$TAG" "${{ inputs.dest_repo }}:$N-$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Sumário

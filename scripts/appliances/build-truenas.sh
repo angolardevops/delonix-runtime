@@ -129,5 +129,5 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 # cloud-init seed this guest cannot read.
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t truenas-scale:${VER%.*} --appliance \\"
+echo "  delonix vm image import $FINAL -t truenas-scale:${VER%.*} --appliance \\"
 echo "      --distro truenas --release ${VER:-unknown} --default-vcpus 2 --default-memory 8G"

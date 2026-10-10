@@ -965,7 +965,7 @@ fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result
     let ctx = |m: String| ctx_err(name, m);
     // A builder owns everything about how the image is made; the fields of a
     // custom image would be ignored, and ignoring is the failure this file
-    // exists to avoid. Only what `image vm import` can record is allowed.
+    // exists to avoid. Only what `vm image import` can record is allowed.
     let mut refused: Vec<&str> = used_content_fields(img)
         .into_iter()
         .filter(|f| !matches!(*f, "distro" | "release" | "vcpus" | "memory"))

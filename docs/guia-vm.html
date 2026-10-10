@@ -290,7 +290,7 @@ original — que também é idempotente.</p>
 delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
 delonix vm ls -o json  # para script
 delonix describe vm [nome]
-delonix image vm describe &lt;nome&gt;...  # detalhe de uma IMAGEM de VM
+delonix vm image describe &lt;nome&gt;...  # detalhe de uma IMAGEM de VM
 delonix dashboard --scope vm --once    # KPIs + tabela
 </code></pre>
 <pre><code>NAME      IMAGE                          BACKEND   VCPUS  MEMORY  STATUS   IP             UPTIME        PORTS OPEN
@@ -325,11 +325,11 @@ delonix vm vnc dev                        # só para VMs criadas com --vnc
 OPNsense do laboratório, que arranca sem endereço utilizável.</p>
 <hr />
 <h2 id="5-cheatsheet-imagens">5. Cheatsheet: imagens</h2>
-<pre><code class="language-bash">delonix image vm ls          # o que está local
-delonix vm ls-remote         # o que há publicado, sem descarregar nada
-delonix vm pull &lt;ref&gt;        # trazer
-delonix image vm build -t &lt;tag&gt; .  # construir a partir de um VMfile
-delonix vm convert &lt;src&gt; --to qcow2|raw|vmdk|vdi|vhdx|vhd
+<pre><code class="language-bash">delonix vm image ls          # o que está local
+delonix vm image ls-remote   # o que há publicado, sem descarregar nada
+delonix vm image pull &lt;ref&gt;  # trazer
+delonix vm image build -t &lt;tag&gt; .  # construir a partir de um VMfile
+delonix vm image convert &lt;src&gt; --to qcow2|raw|vmdk|vdi|vhdx|vhd
 </code></pre>
 <p><code>ls-remote</code> lê só manifestos (poucos KB) e mostra os três repositórios oficiais:
 <code>delonix-vm-k8s</code> (nós Kubernetes), <code>delonix-vm-base</code> (Ubuntu 24.04/26.04, Debian
@@ -368,9 +368,9 @@ quatro produtos Proxmox).</p>
 </table>
 <p>Uma imagem construída aqui é importável por VMware, VirtualBox e Hyper-V — sem que
 este motor tenha um backend para nenhum deles.</p>
-<h3 id="image-vm-build-imagem-a-partir-de-um-vmfile"><code>image vm build</code> — imagem a partir de um <code>VMfile</code></h3>
-<pre><code class="language-bash">delonix image vm init --vmfile   # gera VMfile + cloud-init/user-data.yaml
-delonix image vm build -t app:1.0 .
+<h3 id="vm-image-build-imagem-a-partir-de-um-vmfile"><code>vm image build</code> — imagem a partir de um <code>VMfile</code></h3>
+<pre><code class="language-bash">delonix vm image init   # gera VMfile + cloud-init/user-data.yaml
+delonix vm image build -t app:1.0 .
 </code></pre>
 <pre><code>[1/1] stage-1: FROM ubuntu:24.04
 FROM ubuntu:24.04: official delonix base delonix-vm-base:ubuntu-24.04 (local)
@@ -985,12 +985,12 @@ o aviso ou sonde por si (<code>delonix vm ls --ports</code>, um <code>ssh</code>
 no mesmo motor, rede e firmware — logo a rede está boa e o que varia é a imagem. As
 <code>delonix-vm-base:*</code> não arrancam com o <code>hypervisor-fw</code> que o instalador coloca.
 <strong>Para VMs em Cloud Hypervisor, use a golden.</strong></p>
-<h3 id="image-vm-build-network-esbarra-no-host"><code>image vm build --network</code> esbarra no host</h3>
+<h3 id="vm-image-build-network-esbarra-no-host"><code>vm image build --network</code> esbarra no host</h3>
 <pre><code>virt-customize: error: libguestfs error: passt exited with status 1
 </code></pre>
 <p>O erro traz o remédio, e é meio caminho:</p>
 <pre><code class="language-bash">mkdir -p /tmp/delonix-run &amp;&amp; chmod 700 /tmp/delonix-run
-XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network -t img:1.0 .
+XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm image build --network -t img:1.0 .
 </code></pre>
 <p>Passa o problema de AppArmor, mas neste host o <code>passt</code> continua sem dar resolução de
 nomes ao <em>appliance</em>:</p>
@@ -1002,8 +1002,8 @@ primeiro arranque. A VM já tem a rede NAT do libvirt, com internet e DNS a func
 (verificado: <code>HTTP/1.1 200 OK</code> de <code>archive.ubuntu.com</code>), e a configuração fica
 declarada no manifesto, à vista de quem o ler.</p>
 <h3 id="vm-pull-numa-ligacao-que-cai-a-meio-corrigido-na-v0510"><code>vm pull</code> numa ligação que cai a meio <em>(corrigido na v0.51.0)</em></h3>
-<p>Durante a montagem deste laboratório, um <code>vm pull</code> de 276 MiB morreu assim:</p>
-<pre><code>$ time delonix vm pull ghcr.io/angolardevops/delonix-vm-base:debian-bookworm
+<p>Durante a montagem deste laboratório, um <code>vm image pull</code> de 276 MiB morreu assim:</p>
+<pre><code>$ time delonix vm image pull ghcr.io/angolardevops/delonix-vm-base:debian-bookworm
 error registry error: blob read: request or response body error
 real 8m19s
 </code></pre>
@@ -1018,7 +1018,7 @@ batem certo ou são descartados. Coberto por
 <code>blob_retoma_uma_ligacao_cortada_a_meio</code> e por
 <code>blob_recomeca_quando_o_servidor_ignora_o_range</code>.</p>
 <p><strong>A retomada é dentro da mesma invocação</strong> — cobre a ligação a cair, não o processo a
-ser morto. Matar um <code>vm pull</code> a meio e voltar a lançá-lo continua a começar do
+ser morto. Matar um <code>vm image pull</code> a meio e voltar a lançá-lo continua a começar do
 princípio.</p>
 <blockquote>
 <p>Uma nota de honestidade sobre a medição original: quando isto falhou, a ligação
@@ -1027,9 +1027,9 @@ deste host ao <code>ghcr.io</code> dava <strong>416 KB/s</strong>; horas depois,
 correcção é a certa, mas os 416 KB/s eram um mau momento da rede — não uma
 característica do host.</p>
 </blockquote>
-<p><code>delonix vm ls-remote</code> funciona bem mesmo em ligações fracas, porque lê só
+<p><code>delonix vm image ls-remote</code> funciona bem mesmo em ligações fracas, porque lê só
 manifestos. Se a rede for genuinamente má, traga as imagens por outro meio e
-registe-as com <code>delonix image vm import</code>.</p>
+registe-as com <code>delonix vm image import</code>.</p>
 <h3 id="um-apply-por-ficheiro-um-stack-por-directorio">Um <code>apply</code> por ficheiro, um <em>stack</em> por directório</h3>
 <p>O nome do <em>stack</em> vem do <strong>directório</strong> do manifesto (a menos que haja um <code>kind:
 Stack</code> com nome, ou <code>--name</code>). Os seis ficheiros do laboratório são, para o motor, o
@@ -1073,7 +1073,7 @@ run cloud-init, so these would be silently ignored — configure it on first boo
 </code></pre>
 <p>Continua a valer a pena <strong>nomear a imagem</strong>: é ao nome que estão associados os
 metadados que o motor usa sem lhos pedir — se é <em>appliance</em>, e que vCPU, memória e
-motor a imagem recomenda (o <code>resolve_vm_defaults</code>). <code>delonix image vm ls</code> mostra os
+motor a imagem recomenda (o <code>resolve_vm_defaults</code>). <code>delonix vm image ls</code> mostra os
 nomes disponíveis.</p>
 <hr />
 <h2 id="referencia-rapida">Referência rápida</h2>
@@ -1090,9 +1090,9 @@ delonix vm ls [--ports] [-o json] · status [n] · describe &lt;n&gt;... · dash
 delonix vm ssh &lt;n&gt; [-l user] [-- cmd] · console &lt;n&gt; · vnc &lt;n&gt;
 
 # imagens
-delonix image vm ls · vm ls-remote · vm pull &lt;ref&gt; · vm push &lt;n&gt; &lt;alvo&gt;
-delonix image vm build -t &lt;tag&gt; [--network] . · vm convert &lt;src&gt; --to &lt;fmt&gt;
-delonix vm init --vmfile
+delonix vm image ls · ls-remote · pull &lt;ref&gt; · push &lt;n&gt; &lt;alvo&gt;
+delonix vm image build -t &lt;tag&gt; [--network] . · convert &lt;src&gt; --to &lt;fmt&gt;
+delonix vm image init
 
 # instantâneos (libvirt, VM a correr)
 delonix vm snapshot create|ls|restore|rm &lt;n&gt; [&lt;s&gt;]

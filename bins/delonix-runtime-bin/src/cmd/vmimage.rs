@@ -1,4 +1,4 @@
-//! `delonix image vm` — golden VM images (Ubuntu + kubeadm/kubelet/
+//! `delonix vm image` — golden VM images (Ubuntu + kubeadm/kubelet/
 //! kubectl + `delonix-cri`), managed separately from container images (those
 //! live in `cmd::image`/`ImageStore`). One standalone `.qcow2` per image (no
 //! CAS/layers — there is only one blob per image, nothing to deduplicate) + a
@@ -115,7 +115,7 @@ impl VmImage {
     }
 }
 
-/// Target format for `image vm convert` — **the integration point with every
+/// Target format for `vm image convert` — **the integration point with every
 /// other hypervisor's ecosystem**.
 ///
 /// This engine runs two backends (libvirt/QEMU and Cloud Hypervisor) and will
@@ -409,7 +409,7 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
             Ok(i) => i,
             Err(_) => {
                 super::output::error(&super::po::tf(
-                    "no such VM image: {name} (see `delonix image vm ls`)",
+                    "no such VM image: {name} (see `delonix vm image ls`)",
                     &[("name", name)],
                 ));
                 failed = true;
@@ -459,7 +459,7 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
         // **But the summary must not come back as an `Error`, and that is what
         // produced a broken sentence.** `NotFound`'s Display is `no such {0}`,
         // built to receive a NOUN (`VM image: x`), and it was being handed a
-        // whole sentence: measured 2026-09-10, `image vm rm <missing>` answered
+        // whole sentence: measured 2026-09-10, `vm image rm <missing>` answered
         // with TWO lines — the good one ("no such VM image: naoexiste (see …)")
         // and, under it, "error no such one or more VM images were not removed".
         //
@@ -488,7 +488,7 @@ pub enum VmImageCmd {
     /// under a live overlay does not free the VM, it makes it permanently
     /// unreadable. `--force` overrides, and says what it is breaking.
     Rm {
-        /// Image name(s), as shown by `image vm ls`.
+        /// Image name(s), as shown by `vm image ls`.
         #[arg(required = true, add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
         names: Vec<String>,
         /// Remove it even while VMs back onto it — **those VMs stop being
@@ -517,12 +517,14 @@ pub enum VmImageCmd {
         /// to publish anywhere else.
         target: Option<String>,
     },
-    /// Convert a VM disk between `qcow2` (default, per-VM overlay) and `raw`
-    /// — flattened (no backing file) either way, ready to boot on either
+    /// Convert a VM disk between `qcow2` and `raw`.
+    ///
+    /// Flattened (no backing file) either way, ready to boot on either
     /// backend (libvirt/QEMU and Cloud Hypervisor already share this same
     /// pair of formats; there is no separate "per-hypervisor" format here).
+    /// `qcow2` is the default — it is the per-VM overlay format.
     Convert {
-        /// A local VM image name (`image vm ls`) or a literal `.qcow2`/`.raw` path.
+        /// A local VM image name (`vm image ls`) or a literal `.qcow2`/`.raw` path.
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
         source: String,
         /// Target format.
@@ -537,15 +539,17 @@ pub enum VmImageCmd {
         compress: bool,
     },
     /// Register an existing disk image under a name, so `vm create --disk
-    /// <name>` and `image vm push` can use it.
+    /// <name>` and `vm image push` can use it.
     ///
     /// The counterpart to `build` for a disk this engine did not produce: a
     /// vendor appliance installed from its own ISO, or an image exported from
     /// somewhere else. The file is copied into the store as-is — nothing is
     /// booted, nothing is inspected.
     Import(ImportArgs),
-    /// Pull a VM image from an OCI registry — with no argument, the OFFICIAL
-    /// Delonix image (ready for `vm create`/`cluster kubeadm`).
+    /// Pull a VM image from an OCI registry.
+    ///
+    /// With no argument, the OFFICIAL Delonix image (ready for `vm
+    /// create`/`cluster kubeadm`).
     Pull {
         source: Option<String>,
         #[arg(long)]
@@ -555,9 +559,10 @@ pub enum VmImageCmd {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// List the tags available in a remote OCI repository — with no
-    /// argument, the OFFICIAL Delonix golden image repo (discover which
-    /// k8s versions are published before `pull`/`--k8s-version`).
+    /// List the tags available in a remote OCI repository.
+    ///
+    /// With no argument, the OFFICIAL Delonix golden image repo (discover
+    /// which k8s versions are published before `pull`/`--k8s-version`).
     LsRemote {
         source: Option<String>,
         /// With no `source`, list the official NO-Kubernetes golden's repo
@@ -580,13 +585,15 @@ pub enum VmImageCmd {
         #[arg(long)]
         force: bool,
     },
-    /// Build a VM image: from a `VMfile` when there is one, otherwise the
-    /// built-in golden recipe (Ubuntu cloud image + kubeadm/kubelet/kubectl +
+    /// Build a VM image.
+    ///
+    /// From a `VMfile` when there is one, otherwise the built-in golden
+    /// recipe (Ubuntu cloud image + kubeadm/kubelet/kubectl +
     /// `delonix-cri`), via `virt-customize`.
     Build(BuildArgs),
 }
 
-/// Everything `vm build` / `image vm build` accept — ONE struct behind every
+/// Everything `vm build` / `vm image build` accept — ONE struct behind every
 /// entry point, so they cannot drift (the same reason as [`ImportArgs`]).
 #[derive(clap::Args, Clone, Debug)]
 pub struct BuildArgs {
@@ -694,14 +701,18 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             name,
             no_k8s,
         } => {
-            // BUG FIXED HERE, found live: this is the shared engine command
-            // behind `image vm pull` — it never got the "no argument =
-            // official image" default that `delonix
-            // vm pull` (a separate, sibling CLI definition in `cmd/vm.rs`)
-            // already has, despite this exact struct's own doc comment
-            // claiming it. A user on a real host hit this: `delonix image vm
-            // pull --name delonix-vm-k8s:1.34` (no source) errored "required
-            // arguments were not provided: <SOURCE>".
+            // BUG FIXED HERE, found live, back when this was still two
+            // separate CLI definitions: this is the shared engine command,
+            // but `cmd/vm.rs` used to carry its OWN sibling definition of
+            // `vm pull` with its own copy of this same resolution — and that
+            // copy never got the "no argument = official image" default this
+            // struct's doc comment already claimed. A user on a real host
+            // hit it: `delonix vm image pull --name delonix-vm-k8s:1.34` (no
+            // source) errored "required arguments were not provided:
+            // <SOURCE>". The "vm image → vm image" consolidation (AGENTS.md)
+            // folded `vm image`/the flat `vm pull`/… into this one `vm image`
+            // group, so there is now only ONE copy of this resolution to
+            // drift from — the duplication that caused this bug cannot recur.
             // A reference WITHOUT a registry (`opnsense:26.1`) is looked up in
             // the official catalogue; one with a `/` is used verbatim, so the
             // argument keeps meaning "somewhere of your own".
@@ -803,7 +814,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                         super::po::t("`-t <tag>` is required to build a VMfile").to_string(),
                     )
                 })?;
-                // This path (`image vm build -f VMfile`) has no `--verbose` of
+                // This path (`vm image build -f VMfile`) has no `--verbose` of
                 // its own; `DELONIX_VERBOSE` still unfolds it, which is what
                 // `Progress::new` reads.
                 return super::vmfile::build(
@@ -961,7 +972,7 @@ fn build_spec(
 /// Every builder in `scripts/appliances/` honours `OUT_DIR` and writes exactly
 /// one `<slug>.qcow2` there (next to a `.raw.qcow2` it discards), so the output
 /// is found by looking, not by guessing a name that depends on the version.
-/// The builders print the `image vm import` command to run by hand; this does
+/// The builders print the `vm image import` command to run by hand; this does
 /// the same import with the same flags, which is the point of `vm build`.
 fn run_appliance(
     store: &VmImageStore,
@@ -1105,14 +1116,14 @@ fn cmd_init(name: &str, dir: Option<PathBuf>, force: bool) -> Result<()> {
     println!(
         "\n{}",
         super::po::tf(
-            "Next: `delonix image vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
+            "Next: `delonix vm image build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
             &[("name", name), ("dir", &dir.display().to_string())],
         )
     );
     Ok(())
 }
 
-/// `image vm ls -o json` / `image vm ls -o json` row (ADR-0005): machine-friendly
+/// `vm image ls -o json` / `vm image ls -o json` row (ADR-0005): machine-friendly
 /// values (`created_unix`/`size_bytes` as numbers; nullable kernel/k8s).
 #[derive(serde::Serialize)]
 struct VmImageLsRow {
@@ -1181,7 +1192,7 @@ fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
     Ok(())
 }
 
-/// `image vm describe` — human-readable detail, `kubectl describe` style.
+/// `vm image describe` — human-readable detail, `kubectl describe` style.
 fn cmd_describe(store: &VmImageStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let img = store.get(name)?;
@@ -1313,7 +1324,7 @@ pub(crate) const OFFICIAL_REPOS: &[OfficialRepo] = &[
 /// appliances, an image carrying a Kubernetes version with the golden nodes,
 /// anything else with the base images.
 ///
-/// This is what lets `image vm push <name>` work with no destination. `None`
+/// This is what lets `vm image push <name>` work with no destination. `None`
 /// when the metadata does not settle it — and then the caller must be told to
 /// name a target instead of having one guessed.
 pub(crate) fn official_repo_for(img: &VmImage) -> Option<&'static OfficialRepo> {
@@ -1375,7 +1386,7 @@ pub(crate) fn official_tag_candidate(reference: &str) -> String {
 /// string says so.
 ///
 /// This used to fall back to the appliances repository for every bare tag. That
-/// is what turned `delonix vm pull rocky-9` into `no such image
+/// is what turned `delonix vm image pull rocky-9` into `no such image
 /// …/delonix-vm-appliances:rocky-9` — a 404 naming a repository the user had
 /// never typed, about an image that was published and public the whole time.
 /// The fallback was right when appliances were the only repository with product
@@ -1403,7 +1414,7 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
         [one] => Ok(format!("{one}:{want}")),
         [] => {
             let mut msg = super::po::tf(
-                "no official repository has the tag '{tag}' — run `delonix image vm ls-remote` to see what is published",
+                "no official repository has the tag '{tag}' — run `delonix vm image ls-remote` to see what is published",
                 &[("tag", &want)],
             );
             for u in &unreachable {
@@ -1598,7 +1609,7 @@ pub(crate) fn image_of_disk(disk: &str) -> Option<VmImage> {
 /// (`official_tag_for`), which is exactly what a `FROM ubuntu:24.04` becomes.
 ///
 /// The LOCAL copy is checked first, and it is not an optimization: a base
-/// already in `image vm ls` makes the build cost nothing and reach nothing,
+/// already in `vm image ls` makes the build cost nothing and reach nothing,
 /// which is the same reason `RUN` is offline by default — a build that touches
 /// the network gives a different image depending on when it ran.
 ///
@@ -1675,7 +1686,7 @@ pub(crate) fn official_distro_base(
     };
     // Same metadata path a plain `vm pull` takes, so the base lands in the
     // store indistinguishable from one pulled by hand — including showing up
-    // in `image vm ls` with its distro and kernel.
+    // in `vm image ls` with its distro and kernel.
     let img = apply_pulled_annotations(img, &annotations);
     store.save(&img).ok()?;
     Some(path)
@@ -1786,7 +1797,7 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
     Ok(())
 }
 
-/// Arguments of `image vm import`, defined ONCE and `flatten`ed into it —
+/// Arguments of `vm image import`, defined ONCE and `flatten`ed into it —
 /// `image --vm import` (a second, older entry point into this same struct)
 /// is gone (B6 of the CLI restructuring). Kept as a named struct rather than
 /// inlined so a future second entry point cannot drift from this one.
@@ -1795,7 +1806,7 @@ pub struct ImportArgs {
     /// Path to a `.qcow2` (or any format `qemu-img` reads — it is converted).
     #[arg(value_hint = clap::ValueHint::FilePath)]
     pub source: PathBuf,
-    /// Name to register it under (`image vm ls`).
+    /// Name to register it under (`vm image ls`).
     #[arg(short = 't', long = "tag")]
     pub tag: String,
     /// The guest does NOT run cloud-init: it is a self-configuring appliance
@@ -1803,10 +1814,10 @@ pub struct ImportArgs {
     /// instead of attaching one nothing in the guest reads.
     #[arg(long)]
     pub appliance: bool,
-    /// What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`).
+    /// What this is, for `vm image ls` (e.g. `opnsense`, `proxmox-ve`).
     #[arg(long)]
     pub distro: Option<String>,
-    /// Version, for `image vm ls` (e.g. `26.1.2`).
+    /// Version, for `vm image ls` (e.g. `26.1.2`).
     #[arg(long)]
     pub release: Option<String>,
     /// Recommended vCPUs, applied by `vm create` when `--vcpus` is absent.
@@ -1822,14 +1833,14 @@ pub struct ImportArgs {
     /// backing-file reads at runtime) — same flag, same trade-off, as `build`.
     #[arg(long)]
     pub no_compress: bool,
-    /// Kernel baked into the image (`uname -r` shape), for `image vm ls`.
+    /// Kernel baked into the image (`uname -r` shape), for `vm image ls`.
     /// Omit to let it be probed from the image — which only works where
     /// libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS).
     #[arg(long)]
     pub kernel_version: Option<String>,
 }
 
-/// `image vm import` — registers a disk this engine did not build.
+/// `vm image import` — registers a disk this engine did not build.
 ///
 /// Always goes through `qemu-img convert`, never a plain copy: the source may
 /// be raw, or a qcow2 with a backing file (which would leave the store holding
@@ -1998,7 +2009,7 @@ pub(crate) fn apply_pulled_annotations(
     img
 }
 
-/// `image vm convert` — flattens/converts a disk to the format another
+/// `vm image convert` — flattens/converts a disk to the format another
 /// ecosystem imports (`vmdk` for VMware, `vdi` for VirtualBox, `vhdx`/`vhd`
 /// for Hyper-V and Azure, plus this engine's own `qcow2`/`raw`), using
 /// `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
@@ -2032,7 +2043,7 @@ pub(crate) fn cmd_convert(
     };
     if !src_path.exists() {
         return Err(Error::Invalid(super::po::tf(
-            "no such local VM image or file: {source} (see `delonix image vm ls`)",
+            "no such local VM image or file: {source} (see `delonix vm image ls`)",
             &[("source", source)],
         )));
     }
@@ -2191,7 +2202,7 @@ pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
     tags.sort();
     // A bare list of tags does not answer the question the reader has, which is
     // "which of these do I want" — so each tag's MANIFEST is read (one GET, no
-    // blob transfer) for its size and for the annotations `image vm push`
+    // blob transfer) for its size and for the annotations `vm image push`
     // stamps: distro/release, and whether the guest runs cloud-init.
     //
     // A tag whose manifest cannot be read still gets its row, with `-` in the
@@ -3132,7 +3143,7 @@ pub(crate) fn fetch_node_exporter(store: &VmImageStore, version: &str) -> Result
 /// newline would split into a second, forged `KEY=value` line, and this file is
 /// meant to be sourced.
 pub(crate) fn build_manifest(fields: &[(&str, String)]) -> String {
-    let mut out = String::from("# Generated by `delonix image vm build` — do not edit.\n");
+    let mut out = String::from("# Generated by `delonix vm image build` — do not edit.\n");
     for (k, v) in fields {
         let v = v.replace(['\n', '\r'], " ");
         out.push_str(&format!("{k}=\"{}\"\n", v.replace('"', "'")));
@@ -5082,7 +5093,7 @@ fn shared_account_steps(
         )),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
-    // Records the installed kernel's `uname -r` string for `image vm ls`'s
+    // Records the installed kernel's `uname -r` string for `vm image ls`'s
     // KERNEL column — `virt-customize` never boots the image's own kernel (it
     // chroots via its OWN appliance kernel), so there is no `uname -r` to run
     // here; `/boot/vmlinuz-<release>` is named by the exact release string
@@ -5573,13 +5584,13 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
              Most often passt's AppArmor profile forbids the runtime directory libguestfs uses. \
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm image build --network …"
         } else {
             "the appliance's network helper (passt) failed, so `--network` could not start.\n\
              Most often its AppArmor profile forbids the runtime directory libguestfs uses.\n\
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm image build --network …"
         });
         if f == Family::Debian {
             // Building it is only half the remedy, and the half that was

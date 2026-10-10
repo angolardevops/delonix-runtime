@@ -211,12 +211,12 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 # Zabbix and Grafana pre-installed and pre-wired.
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
+echo "  delonix vm image import $FINAL -t monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
 echo "      --distro ubuntu --release $UBUNTU_VER \\"
 echo "      --default-vcpus 2 --default-memory 4G"
 echo
 echo "Publish it with:"
-echo "  delonix image vm push monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
+echo "  delonix vm image push monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
 echo "      ghcr.io/angolardevops/delonix-vm-appliances:monitoring-$ZABBIX_SERIES-r$IMAGE_REV"
 echo
 echo "PROVEN by this script: the versions are pinned, the base image matched"

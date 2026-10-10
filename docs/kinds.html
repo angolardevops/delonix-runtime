@@ -1881,7 +1881,7 @@ spec:
   workers:
     replicas: 2
   vm:                                # only read in mode: vm
-    image: k8s-golden                # tag from `delonix image vm ls` (omit = the only local one)
+    image: k8s-golden                # tag from `delonix vm image ls` (omit = the only local one)
     network: lab-net                 # network created beforehand
     vcpus: 2                         # per node
     memory: 2G                       # per node
@@ -2268,7 +2268,7 @@ spec:
     passwordSecret: cloud-creds
     readOnly: false</code></pre>
 <h2 id='image'>Image</h2>
-<p class='lang-pt'>Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix image vm build</code>.</p><p class='lang-en'>Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images have no Kind of their own — they're built with <code>delonix image vm build</code>.</p>
+<p class='lang-pt'>Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. As imagens VM douradas não têm Kind próprio — geram-se por <code>delonix vm image build</code>.</p><p class='lang-en'>Pre-pulls (or builds) an image before the containers that depend on it. Golden VM images have no Kind of their own — they're built with <code>delonix vm image build</code>.</p>
 <pre><code># Image — ensure an image is present: either pull it, or build it. Mutually exclusive.
 # Apply with:  delonix image apply -f examples/image.yaml
 apiVersion: artifact.delonix.io/v1alpha1
@@ -2343,7 +2343,7 @@ spec:
 <p class='lang-pt'>Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.</p><p class='lang-en'>A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.</p>
 <pre><code># Vm — a declarative microVM (Cloud Hypervisor or libvirt). Apply with:
 #   delonix vm apply -f examples/vm.yaml
-# The golden VM image is built once with:  delonix image vm build --name k8s-golden --k8s-version 1.34
+# The golden VM image is built once with:  delonix vm image build --name k8s-golden --k8s-version 1.34
 #
 # Fields are grouped by concern (resources/network/boot/cloudInit/libvirt) so
 # a spec this size stays readable. The OLD flat form (every field at the top
@@ -2411,8 +2411,8 @@ spec:
 #   delonix stack apply -f examples/full-virtualmachine.yaml --dry-run
 #   delonix stack validate -f examples/full-virtualmachine.yaml
 #
-# The base disk is a VM image from the local store (`delonix image vm ls`, e.g. built by
-# `delonix image vm build` or pulled with `delonix image vm pull`) or a path to a qcow2/raw.
+# The base disk is a VM image from the local store (`delonix vm image ls`, e.g. built by
+# `delonix vm image build` or pulled with `delonix vm image pull`) or a path to a qcow2/raw.
 #
 # Documents in this file (variants are alternatives, hence separate documents):
 #   1. supporting resources: a Volume (9p share) and a Network

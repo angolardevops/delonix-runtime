@@ -1685,7 +1685,7 @@ fn manifest_vm(o: &InitOpts) -> String {
 /// its time removing.
 const VM_REFERENCE: &str = r#"# Apply with:  delonix stack apply   (or `delonix vm apply` for the Vm alone)
 # The golden VM image is built once with:
-#   delonix image vm build -t {image} --k8s-version 1.34
+#   delonix vm image build -t {image} --k8s-version 1.34
 ---
 apiVersion: delonix.io/v1
 kind: Network
@@ -1834,7 +1834,7 @@ fn cluster_vm(o: &InitOpts) -> String {
         "# Cluster Kubernetes em microVMs (kernel próprio por nó — isolamento de\n\
          # hipervisor). A imagem dourada já traz kubeadm/kubelet/kubectl + delonix-cri:\n\
          # arrancar um nó NÃO instala nada.\n\
-         #   delonix image vm build -t {img} --k8s-version 1.34   # uma vez\n\
+         #   delonix vm image build -t {img} --k8s-version 1.34   # uma vez\n\
          #   delonix network create {name}-net\n\
          #   delonix cluster apply -f cluster-vm.yaml\n\
          apiVersion: delonix.io/v1\n\

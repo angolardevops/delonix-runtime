@@ -171,12 +171,12 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t wazuh:${WAZUH_VERSION%-*}-r$IMAGE_REV \\"
+echo "  delonix vm image import $FINAL -t wazuh:${WAZUH_VERSION%-*}-r$IMAGE_REV \\"
 echo "      --distro ubuntu --release $UBUNTU_VER \\"
 echo "      --default-vcpus 4 --default-memory 8G"
 echo
 echo "Publish it with:"
-echo "  delonix image vm push wazuh:${WAZUH_VERSION%-*}-r$IMAGE_REV \\"
+echo "  delonix vm image push wazuh:${WAZUH_VERSION%-*}-r$IMAGE_REV \\"
 echo "      ghcr.io/angolardevops/delonix-vm-appliances:wazuh-${WAZUH_VERSION%-*}-r$IMAGE_REV"
 echo
 echo "PROVEN by this script: the versions are pinned, the vendor's signing key matched"

@@ -1445,7 +1445,7 @@ and you never need to set them:</p>
 <li><code>DELONIX_IMAGE</code>, <code>DELONIX_DISTRO</code>, <code>DELONIX_RELEASE</code>, <code>DELONIX_BUILT_BY</code>, <code>DELONIX_BASE_IMAGE</code>,
   <code>DELONIX_BASE_SHA256</code>, <code>DELONIX_K8S_VERSION</code>, <code>DELONIX_OFFLINE</code>, <code>DELONIX_NODE_EXPORTER</code>,
   <code>DELONIX_EXTRA_PACKAGES</code> — keys of the provenance file <code>/etc/delonix-image-release</code> that
-  <code>image vm build</code> writes <strong>inside</strong> a built VM image (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>).
+  <code>vm image build</code> writes <strong>inside</strong> a built VM image (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>).
   Read them in the guest with <code>cat /etc/delonix-image-release</code>; no process reads them.</li>
 </ul>
 <hr />

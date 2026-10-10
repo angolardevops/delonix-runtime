@@ -162,7 +162,7 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t carbonio:$CARBONIO_RELEASE-r$IMAGE_REV \\"
+echo "  delonix vm image import $FINAL -t carbonio:$CARBONIO_RELEASE-r$IMAGE_REV \\"
 echo "      --distro ubuntu --release $UBUNTU_VER \\"
 echo "      --default-vcpus 4 --default-memory 16G"
 echo

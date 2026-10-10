@@ -357,11 +357,6 @@ pub enum ImageCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::registries))]
         registry: String,
     },
-    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/describe.
-    Vm {
-        #[command(subcommand)]
-        action: VmSub,
-    },
     /// Publish a local image to an OCI registry.
     ///
     /// Without `target`, publishes under the image's own reference.
@@ -370,108 +365,6 @@ pub enum ImageCmd {
         name: String,
         target: Option<String>,
     },
-}
-
-/// Subcommands of `image vm` — mirror `cmd::vmimage::VmImageCmd` 1:1.
-// A CLI enum parsed once per invocation, not a hot path — the same
-// justification the sibling command enums already carry.
-#[allow(clippy::large_enum_variant)]
-#[derive(Subcommand)]
-pub enum VmSub {
-    /// Remove a local VM image (its disk and its metadata).
-    ///
-    /// **Refused while a VM still uses it**: a VM runs on a thin overlay whose
-    /// backing file IS the image, so deleting it makes that VM permanently
-    /// unreadable rather than freeing anything.
-    Rm {
-        /// Image name(s), as shown by `image vm ls`.
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vm_images))]
-        names: Vec<String>,
-        /// Remove it even while VMs back onto it — **those VMs stop being
-        /// readable**.
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
-    /// List the local VM images.
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005).
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: super::output::OutputFormat,
-    },
-    /// Human-readable detail of one or more VM images, `kubectl describe`-style.
-    Describe {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vm_images))]
-        names: Vec<String>,
-    },
-    /// Fetch a VM image from an OCI registry (single-blob artifact) — with
-    /// no argument, the OFFICIAL Delonix image.
-    Pull {
-        source: Option<String>,
-        /// Local name (default: derived from the reference).
-        #[arg(long)]
-        name: Option<String>,
-        /// With no `source`, pull the official NO-Kubernetes golden instead
-        /// of the Kubernetes one.
-        #[arg(long)]
-        no_k8s: bool,
-    },
-    /// List the tags available in a remote OCI repository.
-    ///
-    /// With no argument, the OFFICIAL Delonix golden image repo (discover
-    /// which k8s versions are published before `pull`/`--k8s-version`).
-    LsRemote {
-        source: Option<String>,
-        /// With no `source`, list the official NO-Kubernetes golden's repo
-        /// instead of the Kubernetes one.
-        #[arg(long)]
-        no_k8s: bool,
-    },
-    /// Publish a local VM image to an OCI registry.
-    ///
-    /// Omit the destination to publish to the OFFICIAL repository the image
-    /// belongs in.
-    Push {
-        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
-        name: String,
-        target: Option<String>,
-    },
-    /// Register an existing disk image under a name, so `vm create --disk
-    /// <name>` and `image vm push` can use it.
-    Import(super::vmimage::ImportArgs),
-    /// Convert a VM disk to the format another ecosystem imports.
-    ///
-    /// `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd`
-    /// (Hyper-V, Azure). Flattened either way: the result is a standalone
-    /// file.
-    Convert {
-        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
-        source: String,
-        #[arg(long = "to", value_enum)]
-        to: super::vmimage::ConvertFormat,
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
-        output: Option<PathBuf>,
-        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
-        /// others rather than handed to `qemu-img` to fail on.
-        #[arg(long)]
-        compress: bool,
-    },
-    /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
-    ///
-    /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl +
-    /// `delonix-cri`).
-    Init {
-        /// Name to use in the scaffold (image tag, hostname, account).
-        #[arg(default_value = "myimage")]
-        name: String,
-        /// Where to write it (default: the current directory).
-        #[arg(value_hint = clap::ValueHint::DirPath, short = 'd', long)]
-        dir: Option<PathBuf>,
-        /// Overwrite an existing `VMfile`.
-        #[arg(long)]
-        force: bool,
-    },
-    /// Build a VM image: a `vm.yaml`, your own `VMfile`, or the golden recipe.
-    Build(super::vmimage::BuildArgs),
 }
 
 pub fn run(action: ImageCmd) -> Result<()> {
@@ -496,39 +389,6 @@ pub fn run(action: ImageCmd) -> Result<()> {
             return Ok(());
         }
         _ => {}
-    }
-    if let ImageCmd::Vm { action } = action {
-        use super::vmimage::{self, VmImageCmd};
-        return vmimage::run(match action {
-            VmSub::Rm { names, force } => VmImageCmd::Rm { names, force },
-            VmSub::Ls { output } => VmImageCmd::Ls { output },
-            VmSub::Describe { names } => VmImageCmd::Describe { names },
-            VmSub::Pull {
-                source,
-                name,
-                no_k8s,
-            } => VmImageCmd::Pull {
-                source,
-                name,
-                no_k8s,
-            },
-            VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
-            VmSub::Push { name, target } => VmImageCmd::Push { name, target },
-            VmSub::Import(args) => VmImageCmd::Import(args),
-            VmSub::Convert {
-                source,
-                to,
-                output,
-                compress,
-            } => VmImageCmd::Convert {
-                source,
-                to,
-                output,
-                compress,
-            },
-            VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
-            VmSub::Build(args) => VmImageCmd::Build(args),
-        });
     }
     let (images, store) = open_stores()?;
     match action {
@@ -572,7 +432,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
             apply(&docs)
         }
         ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => {
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } => {
             unreachable!("tratados acima")
         }
     }

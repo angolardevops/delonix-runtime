@@ -1,10 +1,10 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: kaeso-sys-01, 2026-10-10, binário delonix 5.0.0+92 (2b9087b0), corrida real PASS=1215 FAIL=8 SKIP=16 XPASS=1 (os FAIL são flakiness de carga do host, não relacionados com as folhas novas)
-# commit: 2b9087b0
-# executed: 181
-# leaves: 275
+# recorded: 2026-10-10, kaeso-sys-01, isolated root OUT=/tmp/dlxvi, scripts/e2e.sh on target/release/delonix (vm image migration): PASS=1235 FAIL=0 SKIP=13 XFAIL=0 XPASS=0; the 13 SKIP are host properties (no OPNsense/Proxmox credentials, rootless without NFS, tools present so failure paths not reachable, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
+# commit: 82a5a4e4
+# executed: 182
+# leaves: 270
 api-resources
 apply
 backup create
@@ -70,7 +70,6 @@ image prune
 image pull
 image save
 image tag
-image vm ls
 init
 man
 manifest render
@@ -101,6 +100,7 @@ network describe
 network diagnose
 network disconnect
 network inspect
+network ipam ls
 network ipam prune
 network ls
 network rm
@@ -159,6 +159,7 @@ version
 vm cloud-init
 vm create
 vm default-backend
+vm image ls
 vm ls
 vm move
 vm pause

@@ -341,7 +341,7 @@ handles them, and <code>tool_failure_hint</code> (<code>cmd/vmimage.rs</code>) n
    build continues <strong>without</strong> network, failing later on a package mirror. Remedies:</li>
 </ol>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">mkdir -p /tmp/delonix-run &amp;&amp; chmod 700 /tmp/delonix-run
-XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
+XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix vm image build --network …
 </code></pre></div>
 <p>and, if it still fails, a current passt <strong>first on <code>PATH</code></strong> (the installer builds one into
    <code>/usr/local/bin</code>). Do not "disable" passt with a failing stub: libguestfs then uses the stub and
@@ -505,7 +505,7 @@ code for it.</p>
 <hr />
 <h2 id="3-images">3. Images<a class="hanchor" href="#3-images" aria-label="#">#</a></h2>
 <p>VM images live in <code>VmImageStore</code> (<code>cmd/vmimage.rs</code>) under <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>: one qcow2 plus
-a JSON metadata record (<code>VmImage</code>) per image. <code>delonix image vm ls</code> lists them with <code>TYPE</code>
+a JSON metadata record (<code>VmImage</code>) per image. <code>delonix vm image ls</code> lists them with <code>TYPE</code>
 (cloud-init / appliance) and <code>DEFAULTS</code> (recorded vCPU/memory).</p>
 <h3 id="official-images">Official images<a class="hanchor" href="#official-images" aria-label="#">#</a></h3>
 <p><code>OFFICIAL_REPOS</code> in <code>cmd/vmimage.rs</code>:</p>
@@ -535,26 +535,25 @@ a JSON metadata record (<code>VmImage</code>) per image. <code>delonix image vm 
 </tr>
 </tbody>
 </table></div>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix vm ls-remote                 # tags of the Kubernetes golden repo
-delonix vm ls-remote --no-k8s        # tags of the base repo
-delonix vm pull                      # the official Kubernetes golden
-delonix vm pull --no-k8s             # the official base image
-delonix vm pull &lt;oci-ref&gt; --name &lt;local-name&gt;
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix vm image ls-remote                 # tags of the Kubernetes golden repo
+delonix vm image ls-remote --no-k8s        # tags of the base repo
+delonix vm image pull                      # the official Kubernetes golden
+delonix vm image pull --no-k8s             # the official base image
+delonix vm image pull &lt;oci-ref&gt; --name &lt;local-name&gt;
 </code></pre></div>
 <p>Images are single-blob OCI artifacts; the pull verifies the manifest and blob digests and restores
-the metadata from manifest annotations. The same verbs exist as <code>delonix image vm pull/ls-remote/push</code>.
+the metadata from manifest annotations.
 <strong>Note:</strong> <code>vm create</code> with no <code>--disk</code> and no local image downloads the official golden image, so it
 needs network.</p>
 <h3 id="building-the-golden-recipe">Building the golden recipe<a class="hanchor" href="#building-the-golden-recipe" aria-label="#">#</a></h3>
-<p><code>delonix vm build -t &lt;tag&gt;</code> (the same command as <code>delonix image vm build</code>; both share one set of
-arguments) with no <code>vm.yaml</code> and no <code>VMfile</code> in the context runs the built-in recipe. The examples
-below use the <code>image vm</code> spelling:</p>
+<p><code>delonix vm image build -t &lt;tag&gt;</code> with no <code>vm.yaml</code> and no <code>VMfile</code> in the context runs the
+built-in recipe:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash"># Kubernetes node, packages fetched and verified on the HOST, guest offline
-delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+delonix vm image build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
-delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
+delonix vm image build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
 </code></pre></div>
-<p>Relevant flags (check <code>image vm build --help</code> for defaults): <code>--distro ubuntu|debian|rocky|fedora</code>,
+<p>Relevant flags (check <code>vm image build --help</code> for defaults): <code>--distro ubuntu|debian|rocky|fedora</code>,
 <code>--ubuntu-release</code>, <code>--debian-release</code>, <code>--rocky-release</code>, <code>--fedora-release</code> (release <strong>and</strong> build,
 e.g. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--extra-package</code>, <code>--extra-run</code>,
 <code>--cri-bin</code>, <code>--delonix-bin</code>, <code>--root-password</code> (without it no account has a password),
@@ -566,10 +565,10 @@ e.g. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>, <
 the built images and the appliance builders have <strong>not been validated yet</strong> (v4.2.0 release notes). Image builds are amd64 only
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
 <h3 id="converting-and-importing">Converting and importing<a class="hanchor" href="#converting-and-importing" aria-label="#">#</a></h3>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix vm image convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
+delonix vm image import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 </code></pre></div>
-<p><code>vm convert</code> flattens (no backing chain); <code>--compress</code> is accepted only for <code>qcow2</code> and <code>vmdk</code>.
+<p><code>vm image convert</code> flattens (no backing chain); <code>--compress</code> is accepted only for <code>qcow2</code> and <code>vmdk</code>.
 <code>import --appliance</code> records <code>cloud_init: false</code>: <code>vm create</code> then attaches <strong>no</strong> seed and refuses
 <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code> by name, because the guest would never read them. Appliance
 build scripts live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>

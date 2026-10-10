@@ -1,6 +1,6 @@
 # Cluster Kubernetes em **microVMs** a partir da imagem dourada.
 #
-#   delonix image vm build -t k8s-golden --k8s-version 1.34   # uma vez
+#   delonix vm image build -t k8s-golden --k8s-version 1.34   # uma vez
 #   delonix network create lab-net
 #   delonix cluster apply -f examples/cluster-vm.yaml
 #
@@ -28,7 +28,7 @@ spec:
 
   # --- específico do modo vm ---
   vm:
-    # Tag em `delonix image vm ls`. Omitir = usa a única imagem local, se houver
+    # Tag em `delonix vm image ls`. Omitir = usa a única imagem local, se houver
     # exactamente uma (com 0 ou várias, erro claro — nunca escolhe às cegas).
     image: k8s-golden
     network: lab-net   # criada antes com `delonix network create`

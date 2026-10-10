@@ -8,7 +8,7 @@ can read both. What they build is different.
 - A **Delonixfile** builds an **OCI container image** (layers of a filesystem). It is a Dockerfile
   grammar with a few Delonix instructions on top, built by `delonix build`.
 - A **VMfile** builds a **bootable qcow2 disk** for a VM. It borrows the Dockerfile *shape*, but the
-  mechanism is `qemu-img` + `virt-customize` on a whole disk, built by `delonix image vm build`.
+  mechanism is `qemu-img` + `virt-customize` on a whole disk, built by `delonix vm image build`.
 
 This page describes what the parsers in this repository actually accept — not what Docker accepts.
 Every rule below points at the code that enforces it. After it you can write both files, predict
@@ -259,10 +259,10 @@ templates.
 ### Scaffold
 
 ```bash
-delonix vm init --vmfile [DIR] [--name <n>]   # or: delonix image vm init <name> [-d DIR]
+delonix vm image init [DIR] [--name <n>]
 ```
 
-Both write `VMfile` and `cloud-init/user-data.yaml` (*run* in a scratch directory). The scaffold is
+Writes `VMfile` and `cloud-init/user-data.yaml` (*run* in a scratch directory). The scaffold is
 meant to be a working recipe, and the `parseia_o_scaffold_que_escrevemos` test keeps it parseable.
 Two things to correct by hand in the "Next:" hint it prints: the flag is `vm create --disk`, not
 `--disk-image`; and see the `CLOUDINIT` note below about the file name.
@@ -270,10 +270,12 @@ Two things to correct by hand in the "Next:" hint it prints: the flag is `vm cre
 ### Building
 
 ```bash
-delonix vm build [-f vm.yaml|VMfile] [-t <tag>] [--target <image>] [--network] [--no-compress] [CONTEXT]
+delonix vm image build [-f vm.yaml|VMfile] [-t <tag>] [--target <image>] [--network] [--no-compress] [CONTEXT]
 ```
 
-`delonix image vm build` is the same command (both share one `BuildArgs`). Which recipe runs is
+`delonix image vm build` used to be a second, independent spelling of this same command (both
+shared one `BuildArgs` struct); it was folded into this single `vm image build` by the "image vm
+→ vm image" consolidation (AGENTS.md's CLI restructuring Sprint 9). Which recipe runs is
 decided like `docker build` decides between files: an explicit `-f` wins (a `.yaml`/`.yml` is read
 as a `vm.yaml`, anything else as a `VMfile`); with no `-f`, a `vm.yaml` in the context beats a
 `VMfile`, which beats the built-in golden recipe (see [Building microVMs](microvm-setup.md)). The
@@ -355,7 +357,7 @@ There is no `CMD`/`ENTRYPOINT`: a VM boots an init. `CLOUDINIT` is the closest e
    verified against the publisher's checksum file (`vmimage::download_base`).
 3. **`http://` / `https://` URL** — downloaded; verified against `<url>.sha256` when the publisher
    offers one, otherwise trusted on TLS alone and the build says so.
-4. **Anything else** — a VM image already in the local store (`delonix image vm ls`). Any other
+4. **Anything else** — a VM image already in the local store (`delonix vm image ls`). Any other
    `name:tag` is treated as a local tag, not as an unknown distro.
 
 ### What a stage is, and where the result lands
@@ -426,7 +428,7 @@ With no image called `my-base:1.0` in the scratch store, the file parses and the
 base resolution — before any disk work:
 
 ```text
-$ delonix image vm build -t web:1.0 .
+$ delonix vm image build -t web:1.0 .
 [1/2] builder: FROM my-base:1.0
 error invalid argument: FROM my-base:1.0: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`
 ```
@@ -446,7 +448,7 @@ A full build (`virt-customize`, downloads, compression) was **not executed in th
 
 ## Comparison
 
-| | Dockerfile (Docker/BuildKit) | Delonixfile (`delonix build`) | VMfile (`delonix image vm build`) |
+| | Dockerfile (Docker/BuildKit) | Delonixfile (`delonix build`) | VMfile (`delonix vm image build`) |
 |---|---|---|---|
 | Output | OCI image | OCI image (pushable, pullable by Docker) | bootable qcow2 + `VmImage` metadata |
 | Unit of a stage | filesystem layers | a working container + rootfs | a whole flattened disk |

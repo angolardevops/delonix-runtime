@@ -352,7 +352,7 @@ pub(crate) fn scaffold(name: &str) -> String {
     format!(
         r#"# VMfile — a bootable qcow2, built from a distro's cloud image.
 #
-#   delonix image vm build -t {name}:1.0 .
+#   delonix vm image build -t {name}:1.0 .
 #   delonix vm create dev --disk-image {name}:1.0
 #
 # Builds as written. Delete what you do not need.
@@ -362,7 +362,7 @@ pub(crate) fn scaffold(name: &str) -> String {
 #   rocky:9      | fedora:42                  distro (ghcr), or the distro's own
 #                                             cloud image when there is none
 #   https://…/whatever.qcow2                  any absolute URL
-#   my-other-image:1.0                        one already in `delonix image vm ls`
+#   my-other-image:1.0                        one already in `delonix vm image ls`
 FROM ubuntu:24.04
 
 # The disk a cloud image ships with is small (a couple of GB). Grow it BEFORE
@@ -376,12 +376,12 @@ HOSTNAME {name}
 # gives a different image depending on when it ran.
 #
 # These two build as written, with no network:
-RUN echo "built by delonix image vm build" > /etc/motd
+RUN echo "built by delonix vm image build" > /etc/motd
 RUN systemctl enable ssh
 
 # To install packages the guest needs the network, and you ask for it:
 #
-#   delonix image vm build --network -t {name}:1.0 .
+#   delonix vm image build --network -t {name}:1.0 .
 #
 # with the RUN you actually want, for example:
 #
@@ -613,7 +613,7 @@ pub(crate) fn build_parsed(
         //
         // Half-inheriting was measurably worse than not inheriting: taking the
         // distro from the base while leaving this as the FROM ref made
-        // `image vm ls` print `debian/delonix-vm-base:debian-bookworm` in the
+        // `vm image ls` print `debian/delonix-vm-base:debian-bookworm` in the
         // DISTRO column — a distro glued to an image name. Either both come
         // from the base (which knows them, so it is not a guess) or neither
         // does.
@@ -627,7 +627,7 @@ pub(crate) fn build_parsed(
         // unknown otherwise.
         //
         // A build customizes a rootfs; it does not swap the distro or the
-        // kernel. Recording `None` for both meant `image vm ls` — the command
+        // kernel. Recording `None` for both meant `vm image ls` — the command
         // whose whole job is to say what an image IS — showed `-` under KERNEL
         // and DISTRO for every image this engine built, while showing them for
         // the very base it was built from. Measured: building `FROM
@@ -710,7 +710,7 @@ fn resolve_base(
                 return Ok(p);
             }
             Err(Error::Invalid(super::po::tf(
-                "FROM {name}: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`",
+                "FROM {name}: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm image ls`",
                 &[("name", &name)],
             )))
         }
