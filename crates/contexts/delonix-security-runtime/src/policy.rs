@@ -169,6 +169,36 @@ impl SecurityPolicy {
             && !self.allow_source_check_opt_out
     }
 
+    /// `true` when at least one field of this policy could refuse a request
+    /// on `w`'s path — the per-workload mirror of [`Self::is_silent`]. A
+    /// policy that denies `--privileged` constrains the container path and
+    /// says nothing about VMs; asking the wrong half of [`admission::
+    /// evaluate`]'s split here is exactly the asymmetry [`Self::lint`]
+    /// already reports at load time, turned into a question a caller can
+    /// ask before admission instead of a warning only a terminal sees.
+    ///
+    /// Deliberately excludes the anti-spoofing GRANTS
+    /// (`allowed_source_prefixes`, `allow_source_check_opt_out`): those are
+    /// not evaluated by [`crate::admission::evaluate`] at all, so they are
+    /// not what "constrains this workload's admission path" means here —
+    /// mirrors exactly the fields [`crate::admission::evaluate`] actually
+    /// reads for each [`Workload`].
+    pub fn constrains(&self, w: Workload) -> bool {
+        match w {
+            Workload::Container => {
+                self.deny_privileged
+                    || self.deny_host_network
+                    || self.deny_latest_tag
+                    || !self.allowed_registries.is_empty()
+            }
+            Workload::VirtualMachine => {
+                self.deny_device_passthrough
+                    || self.deny_latest_vm_image
+                    || !self.allowed_image_url_hosts.is_empty()
+            }
+        }
+    }
+
     /// Semantic checks that a schema cannot express.
     ///
     /// The three that matter are all the same shape: the operator guarded the
@@ -358,6 +388,40 @@ mod tests {
     fn a_file_that_refuses_nothing_is_pointed_at() {
         let p = SecurityPolicy::parse("{}").unwrap();
         assert!(p.lint().iter().any(|l| l.id == "POLICY-SILENT"));
+    }
+
+    #[test]
+    fn constrains_is_scoped_to_the_workloads_own_path() {
+        let container_only = SecurityPolicy {
+            deny_privileged: true,
+            ..Default::default()
+        };
+        assert!(container_only.constrains(Workload::Container));
+        assert!(!container_only.constrains(Workload::VirtualMachine));
+
+        let vm_only = SecurityPolicy {
+            deny_device_passthrough: true,
+            ..Default::default()
+        };
+        assert!(!vm_only.constrains(Workload::Container));
+        assert!(vm_only.constrains(Workload::VirtualMachine));
+
+        assert!(!SecurityPolicy::default().constrains(Workload::Container));
+        assert!(!SecurityPolicy::default().constrains(Workload::VirtualMachine));
+    }
+
+    #[test]
+    fn constrains_ignores_the_anti_spoofing_grants() {
+        // A policy that only grants `--allow-source`/`--no-source-check`
+        // constrains nothing: those two fields are not read by
+        // `admission::evaluate` at all, for either workload.
+        let p = SecurityPolicy {
+            allowed_source_prefixes: vec!["10.99.0.0/16".into()],
+            allow_source_check_opt_out: true,
+            ..Default::default()
+        };
+        assert!(!p.constrains(Workload::Container));
+        assert!(!p.constrains(Workload::VirtualMachine));
     }
 
     #[test]
