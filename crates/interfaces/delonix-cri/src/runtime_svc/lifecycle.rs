@@ -1790,6 +1790,47 @@ pub fn start_container(
     Ok(Response::new(StartContainerResponse {}))
 }
 
+/// PURE. The `cpu.max` ratio string an `UpdateContainerResources` call must write to
+/// the live cgroup, or the refusal it must answer with instead of writing one.
+///
+/// [`CriResources::merge_update`] pairs `cpu_quota`/`cpu_period` together: a request
+/// that only sends ONE of the two (a bare `crictl update --cpu-quota N`, with no
+/// `--cpu-period`) merges to a pair where the field the caller did NOT send is 0 — by
+/// design, see that function's own doc comment. Dividing that pair blindly used to do
+/// one of two things, and only one of them failed loudly: a given period over a ZERO
+/// quota computed `0.000` cores, which [`cpu_quota_usec_or_unlimited`]
+/// (`delonix_linux`) correctly rejects (`v > 0.0`); but a given QUOTA over a zero
+/// PERIOD computed `quota / period.max(1)` = `quota` cores (e.g. `50000.000`), which
+/// that same guard happily accepts — and `update_kube_resources` then writes to the
+/// live cgroup as an absurd, effectively unenforced CPU limit, SILENTLY. Measured: a
+/// partial update that asked only for `cpu_quota: 50000` wrote a quota 50000 CORES
+/// wide, removing whatever throttling the container had instead of changing it.
+///
+/// This treats both halves of the pair the same way: a touched request that does not
+/// resolve, after the merge, to a positive quota AND a positive period is refused up
+/// front — never silently computed into nonsense, never silently dropped.
+fn cpus_for_update(
+    asked: &CriResources,
+    merged: &CriResources,
+) -> std::result::Result<Option<String>, Status> {
+    if asked.cpu_quota == 0 && asked.cpu_period == 0 {
+        return Ok(None);
+    }
+    if merged.cpu_quota > 0 && merged.cpu_period > 0 {
+        Ok(Some(format!(
+            "{:.3}",
+            merged.cpu_quota as f64 / merged.cpu_period as f64
+        )))
+    } else {
+        Err(Status::invalid_argument(format!(
+            "cpu_quota and cpu_period must both be positive after this update (asked \
+             quota={}, period={}; merged quota={}, period={}) — a partial update that \
+             only sends one of the two must send it together with the other",
+            asked.cpu_quota, asked.cpu_period, merged.cpu_quota, merged.cpu_period
+        )))
+    }
+}
+
 /// CRI `UpdateContainerResources` (ADR 0038 item 4) — the live counterpart of
 /// `StartContainer`'s own resource path, on a container already created (and
 /// usually running; a stopped one is a normal case too, see below).
@@ -1832,15 +1873,11 @@ pub fn update_container_resources(
 
     // What THIS request actually asked to change — recomputed from the full
     // MERGED pair for cpus (never just `asked`'s own cpu_quota/cpu_period),
-    // so touching only one of the two still reads a consistent core count.
+    // so touching only one of the two still reads a consistent core count,
+    // or is refused instead of computed into nonsense (`cpus_for_update`).
     let memory =
         (asked.memory_limit_in_bytes != 0).then(|| merged.memory_limit_in_bytes.to_string());
-    let cpus = (asked.cpu_quota != 0 || asked.cpu_period != 0).then(|| {
-        format!(
-            "{:.3}",
-            merged.cpu_quota as f64 / merged.cpu_period.max(1) as f64
-        )
-    });
+    let cpus = cpus_for_update(&asked, &merged)?;
     let cpu_weight =
         (asked.cpu_shares != 0).then(|| shares_to_weight(merged.cpu_shares).to_string());
     let cpuset = (!asked.cpuset_cpus.is_empty()).then(|| merged.cpuset_cpus.clone());
@@ -3126,6 +3163,73 @@ mod tests {
             "the pair moves together, not independently"
         );
         assert_eq!(merged.cpu_period, 50_000);
+    }
+
+    /// ADR 0038 item 4, the asymmetric half `merge_update_keeps_cpu_quota_and_period_
+    /// paired` does not cover: a partial update that sends only `cpu_quota` (a bare
+    /// `crictl update --cpu-quota N`, no `--cpu-period`) merges to a pair whose PERIOD
+    /// is 0 — the field the caller did not send. Dividing that pair naively
+    /// (`quota / period.max(1)`) computes `quota` as a core count, which silently
+    /// writes an absurd, effectively unenforced CPU limit to the live cgroup instead
+    /// of refusing the ill-formed partial request. Both halves of the pair must be
+    /// refused the same way: `merge_update_keeps_cpu_quota_and_period_paired` already
+    /// proves the "only period" half fails loudly (`0.000` cores is rejected by
+    /// `cpu_quota_usec_or_unlimited`); this proves the "only quota" half does too,
+    /// instead of silently accepting `50000.000` cores.
+    #[test]
+    fn cpus_for_update_refuses_a_quota_without_a_period_instead_of_computing_nonsense() {
+        let created = CriResources {
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            ..Default::default()
+        };
+        let only_quota = CriResources {
+            cpu_quota: 50_000,
+            ..Default::default()
+        };
+        let merged = created.merge_update(&only_quota);
+        assert_eq!(
+            merged.cpu_period, 0,
+            "the pair moves together, not independently"
+        );
+        let err = cpus_for_update(&only_quota, &merged)
+            .expect_err("a quota without a period must be refused, not computed");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(
+            !err.message().contains("50000.000") && !err.message().contains("cores"),
+            "must not echo the nonsense ratio it refused to write: {}",
+            err.message()
+        );
+    }
+
+    /// The symmetric control: a request that gives BOTH halves of the pair computes
+    /// the real ratio, never a refusal.
+    #[test]
+    fn cpus_for_update_computes_the_ratio_when_both_halves_are_given() {
+        let created = CriResources::default();
+        let both = CriResources {
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            ..Default::default()
+        };
+        let merged = created.merge_update(&both);
+        assert_eq!(
+            cpus_for_update(&both, &merged).unwrap(),
+            Some("0.500".to_string())
+        );
+    }
+
+    /// A request that touches neither field asks for no cgroup write at all.
+    #[test]
+    fn cpus_for_update_is_a_noop_when_neither_field_is_asked() {
+        let created = CriResources {
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            ..Default::default()
+        };
+        let nothing = CriResources::default();
+        let merged = created.merge_update(&nothing);
+        assert_eq!(cpus_for_update(&nothing, &merged).unwrap(), None);
     }
 
     /// The runc/crun map: the kubelet's floor (2) and ceiling (262144) land on
