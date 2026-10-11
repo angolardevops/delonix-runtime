@@ -36,14 +36,20 @@ impl SshTarget {
     /// the caller makes the difference visible at each call site instead of
     /// hidden in here.
     fn conn_args(&self, port_flag: &str) -> Vec<String> {
-        let mut a = vec![
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            "-o".to_string(),
-            "StrictHostKeyChecking=accept-new".to_string(),
-            "-o".to_string(),
-            "ConnectTimeout=10".to_string(),
-        ];
+        let mut a = vec!["-o".to_string(), "BatchMode=yes".to_string()];
+        // Host-key verification. Default stays `accept-new` so a greenfield
+        // bootstrap of a host never seen before still connects; the two env opt-ins
+        // let an operator pin trust and close the first-contact MITM window. See
+        // `host_key_opts` and issue #790.
+        let strict = std::env::var("DELONIX_SSH_STRICT")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let known = std::env::var("DELONIX_SSH_KNOWN_HOSTS")
+            .ok()
+            .filter(|s| !s.is_empty());
+        a.extend(host_key_opts(strict, known.as_deref()));
+        a.push("-o".to_string());
+        a.push("ConnectTimeout=10".to_string());
         if let Some(p) = self.port {
             a.push(port_flag.to_string());
             a.push(p.to_string());
@@ -58,6 +64,36 @@ impl SshTarget {
     fn user_host(&self) -> String {
         format!("{}@{}", self.user, self.host)
     }
+}
+
+/// The host-key verification `-o` options.
+///
+/// TOFU (`accept-new`) is the default so a greenfield bootstrap of a host never
+/// seen before still connects. But that first contact is exactly where a MITM
+/// becomes the "known" host for every later `sudo -n bash -c` session, so an
+/// operator who can pin trust should be able to:
+///
+/// - `DELONIX_SSH_KNOWN_HOSTS=<path>` pins trust to that file —
+///   `StrictHostKeyChecking=yes` against it, so an unknown or changed key is
+///   refused instead of silently trusted.
+/// - `DELONIX_SSH_STRICT=1` alone sets `yes` against the user's default
+///   known_hosts.
+/// - neither: `accept-new`, byte-for-byte the historical behavior.
+///
+/// Pure (env is read by the caller) so the three branches are tested without
+/// touching the process environment.
+fn host_key_opts(strict: bool, known_hosts: Option<&str>) -> Vec<String> {
+    let mut a = vec!["-o".to_string()];
+    match known_hosts {
+        Some(path) => {
+            a.push("StrictHostKeyChecking=yes".to_string());
+            a.push("-o".to_string());
+            a.push(format!("UserKnownHostsFile={path}"));
+        }
+        None if strict => a.push("StrictHostKeyChecking=yes".to_string()),
+        None => a.push("StrictHostKeyChecking=accept-new".to_string()),
+    }
+    a
 }
 
 pub(crate) fn shell_quote(s: &str) -> String {
@@ -158,12 +194,40 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_quote, SshTarget};
+    use super::{host_key_opts, shell_quote, SshTarget};
 
     #[test]
     fn shell_quote_escapa_plicas() {
         assert_eq!(shell_quote("echo hi"), "'echo hi'");
         assert_eq!(shell_quote("echo 'hi'"), "'echo '\\''hi'\\'''");
+    }
+
+    /// Default is TOFU (the greenfield bootstrap still connects); a known_hosts file
+    /// pins trust with strict checking; `strict` alone tightens the default file.
+    #[test]
+    fn host_key_opts_default_is_tofu_and_a_known_hosts_pins_it() {
+        assert_eq!(
+            host_key_opts(false, None),
+            vec!["-o", "StrictHostKeyChecking=accept-new"]
+        );
+        assert_eq!(
+            host_key_opts(true, None),
+            vec!["-o", "StrictHostKeyChecking=yes"]
+        );
+        assert_eq!(
+            host_key_opts(false, Some("/etc/delonix/known_hosts")),
+            vec![
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "UserKnownHostsFile=/etc/delonix/known_hosts"
+            ]
+        );
+        // A known_hosts wins over `strict` alone: both pin, and the file is what pins.
+        assert_eq!(
+            host_key_opts(true, Some("/k")),
+            host_key_opts(false, Some("/k"))
+        );
     }
 
     fn alvo(port: Option<u16>) -> SshTarget {
