@@ -39,6 +39,34 @@ VM não tinha política de nó nenhuma.
 | `denyLatestVmImage` | uma imagem de disco de VM sem etiqueta ou com `:latest`. Separado do `denyLatestTag` de propósito — um `vm build` etiqueta o que produz como `<nome>:latest` por omissão, e juntar os dois teria recusado uma construção normal a quem actualizasse |
 | `allowedImageUrlHosts` | um `vm create --url-img` de um host fora da lista. Sem um `.sha256` publicado ao lado, esse descarregamento é confiado **só no TLS** — e o TLS prova que chegaste ao host que nomeaste, não que o host merecia ser nomeado |
 
+### Caminho de rede — egress para espaço de endereços privado
+
+O único campo que **não** decide na admissão: é aplicado pelo plano de rede (o holder),
+pacote a pacote, a toda a carga ligada a uma rede do motor.
+
+| Campo | O que faz |
+|---|---|
+| `denyPrivateEgress` | recusa ligações NOVAS de uma carga numa rede do motor para espaço privado que só se alcança pelo uplink do nó: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC 1918) e `100.64.0.0/10` (CGNAT). É aí que vivem a LAN do nó, as APIs de gestão do host e os vizinhos — sem isto, uma carga que chega ao uplink chega a tudo o que o host alcança. Link-local e loopback já eram negados sempre (`fwguard`) |
+| `allowedEgressPrefixes` | os destinos privados que continuam alcançáveis com a guarda ligada (um resolvedor, um gateway, um registo de que o nó depende). Prefixos canónicos `a.b.c.d/len`. É uma **concessão**: vazio = nenhuma, e só a política do nó a dá — a carga não a reabre por si |
+
+- **A rede da própria carga, e qualquer rede encaminhada para ela (`kind: NetworkRoute`),
+  nunca são tocadas.** Não é uma lista de excepções: esse tráfego sai do holder por uma
+  bridge, nunca pelo uplink, e a guarda só olha para o uplink. O isolamento entre redes
+  continua a ser o do `@netpair`.
+- **Respostas passam.** Um cliente da LAN que chegou a uma porta publicada recebe a
+  resposta; só a ligação NOVA é recusada.
+- **Nem uma `allowlist:` de rede nem um `egress allow` de carga a reabrem**: a chain
+  (`fwprivate`, prioridade -15) corre antes do `fwdeny` (-10), e um `drop` entre base
+  chains é final.
+- `mode: "warn"` conta e deixa passar (o contador da regra diz quanto teria sido recusado).
+- **Só cobre cargas numa rede do motor.** Um `--net host`, ou um container com o seu
+  próprio slirp (sem `--net`, só com `-p`), não passa pelo uplink do holder — por isso o
+  lint `POLICY-EGRESS-HOST-NET-OPEN` pede `denyHostNetwork: true` ao lado.
+- Toma efeito no `apply` de uma `RuntimePolicy`, no `policy unset`, e no próximo
+  `container run` depois de uma edição à mão do `policy.json`. Um registo da guarda que o
+  holder não consegue ler **falha fechado**: todos os intervalos recusados, nenhuma
+  concessão.
+
 ### Modo
 
 | Campo | Efeito |
@@ -57,7 +85,10 @@ VM não tinha política de nó nenhuma.
 
   "denyDevicePassthrough": true,
   "denyLatestVmImage": true,
-  "allowedImageUrlHosts": ["cloud.debian.org"]
+  "allowedImageUrlHosts": ["cloud.debian.org"],
+
+  "denyPrivateEgress": true,
+  "allowedEgressPrefixes": ["192.168.50.10/32"]
 }
 ```
 
@@ -79,6 +110,8 @@ aviso: política de runtime [POLICY-VM-PASSTHROUGH-OPEN] este nó recusa contain
 | `POLICY-VM-URL-OPEN` | restringes registos e o `--url-img` continua a ir a qualquer host |
 | `POLICY-SILENT` | o ficheiro existe e não recusa nada — quase sempre um engano |
 | `POLICY-REGISTRY-NOT-A-HOST` | puseste uma referência (`ghcr.io/org/app`) onde se espera um host |
+| `POLICY-EGRESS-HOST-NET-OPEN` | recusas egress privado mas admites cargas fora de qualquer rede do motor, que não passam pela guarda |
+| `POLICY-EGRESS-GRANT-UNUSED` | concedeste destinos em `allowedEgressPrefixes` sem `denyPrivateEgress` — a concessão não muda nada |
 
 Aparecem **uma vez por comando** (este motor não tem daemon: cada comando é um
 processo que nasce, trabalha e morre). Para os calar, depois de os teres lido e
@@ -109,7 +142,9 @@ prova de adulteração é a cadeia de hashes com âncora Ed25519, e essa vive no
 
 Escrito para ninguém confundir o nome com o alcance:
 
-- **Não vigia nada em execução.** Decide na admissão, e mais nada. Não há sensores
+- **Não vigia nada em execução.** Decide na admissão, e mais nada — com UMA excepção,
+  dita acima: `denyPrivateEgress` é uma regra de dataplane, e o que ela faz é recusar
+  pacotes, não observá-los. Não há sensores
   eBPF, monitorização de integridade de ficheiros, detecção de malware, pontuação
   comportamental de ransomware nem detecção de anomalias de rede. Todos esses são
   processos residentes, e este motor é *daemonless* por desenho — abrir essa porta é

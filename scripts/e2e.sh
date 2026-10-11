@@ -2306,6 +2306,47 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
 else
   skip "antispoof: concessões" "estado partilhado — o check escreveria o policy.json do nó real"
 fi
+
+# The private-egress guard (denyPrivateEgress / allowedEgressPrefixes): a workload
+# on an engine network must not open connections into private address space
+# through the uplink, unless the node policy grants the destination. The probe is
+# a listener on the host's own primary address, which is what a workload reaches
+# through the slirp, so it only runs when that address is private. Writes
+# policy.json, so isolated state only; `policy unset` at the end lifts the guard
+# from the running holder too.
+if [[ "$E2E_ISOLATED" == 1 ]]; then
+  PE="pe-$PFX"; PC="pc-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
+  HIP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+  HPORT=$((20000 + $$ % 20000))
+  is_private() { python3 -c 'import ipaddress,sys; a=ipaddress.ip_address(sys.argv[1]); sys.exit(0 if any(a in ipaddress.ip_network(n) for n in ("10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","100.64.0.0/10")) else 1)' "$1" 2>/dev/null; }
+  if [[ -n "$HIP" ]] && is_private "$HIP" \
+     && { python3 -m http.server --bind "$HIP" "$HPORT" >/dev/null 2>&1 & HSRV=$!; sleep 1; kill -0 "$HSRV" 2>/dev/null; } \
+     && "$BIN" network create "$PE" >/dev/null 2>&1 \
+     && "$BIN" container run -d --name "$PC" --net "$PE" "$IMG" sleep 900 >/dev/null 2>&1; then
+    reach() { timeout 15 "$BIN" container exec "$PC" wget -q -T 3 -O /dev/null "http://$HIP:$HPORT/" >/dev/null 2>&1; }
+    # Every `container run` hands the node policy to the running holder.
+    sync_run() { "$BIN" container run --rm --name "ps-$PFX" --net "$PE" "$IMG" true >/dev/null 2>&1; }
+    if reach; then
+      printf '{"denyPrivateEgress":true,"denyHostNetwork":true}\n' > "$POL"; sync_run
+      check "private egress: the guard is recorded for the holder" ok test -f "$DELONIX_ROOT/ingress/private-egress.json"
+      check "private egress: the host's private address is refused once the policy denies it" fail reach
+      printf '{"denyPrivateEgress":true,"denyHostNetwork":true,"allowedEgressPrefixes":["%s/32"]}\n' "$HIP" > "$POL"; sync_run
+      check "private egress: a destination the node policy grants is reachable again" ok reach
+      "$BIN" policy unset --force >/dev/null 2>&1
+      check "private egress: policy unset lifts the guard from the running holder" ok reach
+    else
+      skip "private egress" "the host's private address is not reachable from a container even without a policy"
+    fi
+  else
+    skip "private egress" "no private primary address on this host, or the probe could not be prepared"
+  fi
+  [[ -n "${HSRV:-}" ]] && kill "$HSRV" 2>/dev/null
+  "$BIN" container rm -f "$PC" >/dev/null 2>&1
+  "$BIN" network rm "$PE" >/dev/null 2>&1
+  rm -f "$POL"
+else
+  skip "private egress" "shared state — the check would write the real node's policy.json"
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
