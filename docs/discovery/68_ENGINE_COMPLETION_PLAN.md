@@ -49,7 +49,7 @@ release cleanup»), with its PR (#786) merged and no worktree.
 | N1 `install.sh` end to end | #775 (and the userns check fixed in the same PR) |
 | 12.2 / N5 state-upgrade test | #777 |
 | N29 live-suite ordering note | `crates/providers/delonix-proxmox/tests/live.rs` header |
-| releases v5.0.1, v5.0.2 | #784, #797; v5.0.2 carries the multi-homed route fix (`9e43cb0e`), so #785 is resolved |
+| releases v5.0.1, v5.0.2 | #784, #797; v5.0.2 carries the multi-homed route fix (`9e43cb0e`), so #785 is resolved (closed 2026-10-11) |
 | #753 golden `delonix-vm-k8s:1.36` boots and forms a kubeadm cluster | validated live with the v5.0.2 assets; issue closed |
 | #792 CRI start failure names the error line, not the last progress step | #795 |
 | #798 a failed start no longer undoes the network of a running container | #801 (per-container start lock + live-owner guard; A/B: 5/5 → 0/5) |
@@ -64,8 +64,8 @@ release cleanup»), with its PR (#786) merged and no worktree.
 | N31 | #793 | a container that misses the 60 s mount ceiling under I/O saturation is reported as started | 16 |
 | N32 | #799 (= N15) | multi-node kubeadm: refuse by name before creating anything unless a cross-node CNI is chosen | 19 (code half pulled forward) |
 | N33 | #801 | the e2e gate «dois starts concorrentes» has not yet been seen red on v5.0.2 and green on the tip: on 2026-10-11 the host's writeback (~3 GB dirty) held every `stop` past 3 min and both runs skipped | 10 (with N30) |
-| N34 | #791 | the remaining setuid-root bits on the real-root path are kept on purpose (ADR-0062); the owner decides whether to accept and close | owner |
-| N35 | #736, #737 | pod-to-pod loss and the first cross-namespace connection do not reproduce on v5.0.2 (0 % loss; 6/6); the owner decides whether to close or ask the reporter for the exact shape | owner |
+| N34 | #791 | the remaining setuid-root bits on the real-root path are kept on purpose (ADR-0062) | **decided 2026-10-11**: residual accepted, issue closed as not planned |
+| N35 | #736, #737 | pod-to-pod loss and the first cross-namespace connection do not reproduce on v5.0.2 (0 % loss; 6/6) | **decided 2026-10-11**: kept open; not covered yet are the single-node «days later» case and the reporter's exact shapes |
 | N36 | #438 | arm64: build, test and run on aarch64 | blocked (§6): an aarch64 runner or host |
 
 ### 0.3 How the remaining sprints run: code in parallel, live validation in series
