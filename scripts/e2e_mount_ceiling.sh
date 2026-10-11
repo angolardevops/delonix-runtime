@@ -41,7 +41,16 @@ cleanup() {
     "$BIN" container inspect "$name" >/dev/null 2>&1 || break
     sleep 5
   done
-  [[ -n "$grp_dir" ]] && rmdir "$grp_dir" 2>/dev/null
+  if [[ -n "$grp_dir" ]]; then
+    # The engine leaves a removed container's EMPTY leaf behind when it sat
+    # under a `cgroupParent` group (measured on v5.0.2 and on this branch);
+    # an empty cgroup dir can only be rmdir'ed, never holds data.
+    local leaf
+    for leaf in "${grp_dir:?}"/dlx-*; do
+      [[ -d "$leaf" ]] && rmdir "$leaf" 2>/dev/null
+    done
+    rmdir "${grp_dir:?}" 2>/dev/null
+  fi
   rm -f "$manifest"
 }
 die() { echo "$*"; cleanup; exit 1; }
