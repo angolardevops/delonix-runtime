@@ -6969,30 +6969,57 @@ check "net flow: the veth fallback lists the container with its SDN address" ok 
   '$BIN' net flow 2>&1 | grep -E \"^$L3C +\$ip \" >/dev/null || { '$BIN' net flow 2>&1 | tail -5; exit 1; }"
 
 # --- net capture: tcpdump inside the container's netns ------------------------
-# Two packets of the container's own ICMP to its gateway, to stdout: a pcap
-# whose records carry the container's address as the IPv4 source.
+# Two checks, because the one that stood here asked one capture two questions.
+# It kept the first 2 frames (`-c 2`) and wanted the container's ICMP among
+# them, while the first frames on a fresh bridge are often ICMPv6 Neighbor
+# Solicitations, IGMP from the gateway or ARP: measured 2026-10-11, origin/main
+# passed it 4 times in 10. Now `-c` is judged by the COUNT alone (any frames),
+# and the container's own traffic by a larger capture that the pings keep fed
+# until it stops — neither depends on which frame comes first.
+#
+# `--duration` is not checked here, and on purpose: it stops tcpdump with a
+# SIGINT, and Ubuntu's tcpdump AppArmor profile only accepts signals from
+# `unconfined` peers. From a normal shell it stops on time (measured 3.2 s for
+# `--duration 3`); from a process under another AppArmor label the signal is
+# denied and the capture runs on. A check would read the label of whoever runs
+# the battery, not the engine.
 if command -v tcpdump >/dev/null 2>&1; then
-  check "net capture: a pcap of the container's own traffic, to stdout" ok bash -c "
-    ip=\$('$BIN' container inspect '$L3C' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"ip\"])')
-    gw=\$(echo \"\$ip\" | awk -F. '{print \$1\".\"\$2\".0.1\"}')
-    ( for _ in 1 2 3 4 5 6 7 8 9 10; do '$BIN' container exec '$L3C' ping -c1 -W1 \"\$gw\" >/dev/null 2>&1; sleep 0.3; done ) &
-    timeout -s KILL 60 '$BIN' net capture '$L3C' -w - -c 2 >'$L3/cap.pcap' 2>/dev/null; wait
-    python3 - '$L3/cap.pcap' \"\$ip\" <<'PY'
+  # $1 = how many frames to capture, $2 = the pcap. Pings to the gateway run
+  # until the capture exits, so it always has traffic to count.
+  e2e_capture() {
+    local ip gw cap
+    ip=$("$BIN" container inspect "$L3C" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["ip"])')
+    gw=$(echo "$ip" | awk -F. '{print $1"."$2".0.1"}')
+    ( timeout -s KILL 60 "$BIN" net capture "$L3C" -w - -c "$1" >"$2" 2>/dev/null ) & cap=$!
+    while kill -0 "$cap" 2>/dev/null; do
+      "$BIN" container exec "$L3C" ping -c1 -W1 "$gw" >/dev/null 2>&1; sleep 0.2
+    done
+    wait "$cap"
+    echo "$ip $gw"
+  }
+  cat >"$L3/pcap.py" <<'PY'
 import socket, struct, sys
 b = open(sys.argv[1], 'rb').read()
-assert b[:4] in (b'\\xd4\\xc3\\xb2\\xa1', b'\\xa1\\xb2\\xc3\\xd4'), b[:4]
-le = b[:4] == b'\\xd4\\xc3\\xb2\\xa1'
-off, n, srcs = 24, 0, set()
+assert b[:4] in (b'\xd4\xc3\xb2\xa1', b'\xa1\xb2\xc3\xd4'), ('not a pcap', b[:4])
+le = b[:4] == b'\xd4\xc3\xb2\xa1'
+off, frames = 24, []
 while off + 16 <= len(b):
     incl = struct.unpack('<I' if le else '>I', b[off+8:off+12])[0]
-    pkt = b[off+16:off+16+incl]
-    if len(pkt) >= 34 and pkt[12:14] == b'\\x08\\x00':
-        srcs.add(socket.inet_ntoa(pkt[26:30]))
-    off += 16 + incl
-    n += 1
-assert n == 2, n
-assert sys.argv[2] in srcs, (sys.argv[2], srcs)
-PY"
+    frames.append(b[off+16:off+16+incl]); off += 16 + incl
+if sys.argv[2] == 'count':
+    assert len(frames) == int(sys.argv[3]), (len(frames), 'frames, wanted', sys.argv[3])
+else:
+    ip, gw = sys.argv[3], sys.argv[4]
+    req = [f for f in frames if len(f) >= 35 and f[12:14] == b'\x08\x00' and f[23] == 1
+           and f[34] == 8 and socket.inet_ntoa(f[26:30]) == ip and socket.inet_ntoa(f[30:34]) == gw]
+    assert req, ('no ICMP echo request', ip, '->', gw, 'in', len(frames), 'frames')
+PY
+  check "net capture -c 2: stops after exactly two frames, to stdout" ok bash -c "
+    $(declare -f e2e_capture); BIN='$BIN' L3C='$L3C' e2e_capture 2 '$L3/c2.pcap' >/dev/null
+    python3 '$L3/pcap.py' '$L3/c2.pcap' count 2"
+  check "net capture: the pcap carries the container's own ICMP echo requests" ok bash -c "
+    $(declare -f e2e_capture); set -- \$(BIN='$BIN' L3C='$L3C' e2e_capture 40 '$L3/c40.pcap')
+    python3 '$L3/pcap.py' '$L3/c40.pcap' icmp \"\$1\" \"\$2\""
 else
   skip "net capture" "tcpdump is not installed"
 fi
