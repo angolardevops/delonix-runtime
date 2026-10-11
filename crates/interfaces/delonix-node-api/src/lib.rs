@@ -10,7 +10,7 @@
 //! the same functions `delonix system info` reads. `GET /openapi.json` serves
 //! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
 //! render it from UI files embedded in the binary ([`docs`]). `WatchEvents`
-//! answers `UNIMPLEMENTED` with the step that brings it; every service of the
+//! streams the engine's event log ([`events`]); every service of the
 //! contract this socket does not implement at all (`ContainerService`,
 //! `PodService`) is not registered either.
 //!
@@ -30,6 +30,16 @@
 //! `OperationService.GetOperation` and `ListOperations`. `request_id` (REST:
 //! `Idempotency-Key`) makes a retry the first answer; `etag` (REST:
 //! `If-Match`) makes a stale delete 412.
+//!
+//! `VolumeService` ([`volumes`] reads, [`volume_ops`] writes): `CreateVolume`
+//! of a local volume (quota, alert, labels) and `DeleteVolume` of a local
+//! volume or a share's record, on the same ledger; a remote share, a share,
+//! provisioning, a pool volume and `destroy_remote` answer `UNIMPLEMENTED`
+//! with the CLI command that does them. `OperationService.WatchOperation`
+//! streams an operation until it ends (gRPC only: the REST encoding does not
+//! carry streams), and `CancelOperation` answers `FAILED_PRECONDITION`
+//! (DX-5002) — no served mutation has a cancellation point, and an operation
+//! is never reported cancelled for work that ran.
 //!
 //! `VirtualMachineService` ([`vms`] reads, [`vm_ops`] writes), full: create/
 //! get/list/delete, start/stop (the same `Operation` ledger as networks),
@@ -70,6 +80,7 @@ pub mod proto {
 }
 
 pub mod docs;
+pub mod events;
 pub mod network_ops;
 pub mod networks;
 pub mod node;
@@ -81,6 +92,7 @@ mod service;
 pub mod transcode;
 pub mod vm_ops;
 pub mod vms;
+pub mod volume_ops;
 pub mod volumes;
 
 pub use service::{
@@ -88,9 +100,29 @@ pub use service::{
     OPENAPI_YAML,
 };
 
+/// The node API's composition root: the ports this process registers before it
+/// serves anything, once.
+///
+/// Today one: the node's VM network ([`delonix_sdn::vm_network::HostVmNetwork`]),
+/// the same registration the CLI's `main` makes. Without it a
+/// `CreateVirtualMachine` that names a network attachment on Cloud Hypervisor
+/// reached the backend and failed with «no VM network provider is registered
+/// in this process» (plan 68 item N3): `delonix-vm` seeds its own backends, but
+/// the network needs a state root, which only the composition root knows.
+/// Idempotent; the first registration in a process wins.
+pub fn compose() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
+            state_root: node::state_root(),
+        }));
+    });
+}
+
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
 /// path or `unix:///path`. Same pattern as `delonix_mgmt::serve_blocking`.
 pub fn serve_blocking(addr: &str) -> Result<(), Error> {
+    compose();
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     delonix_node::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()

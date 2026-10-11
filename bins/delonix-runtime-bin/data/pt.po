@@ -15604,6 +15604,34 @@ msgstr ""
 msgid "{name}: the start reported a failure, but its process {pid} is running — its network ({ip}) is kept instead of undone. Check it with `delonix container describe {name}`, and remove it with `delonix container rm -f {name}` if it should not be running"
 msgstr "{name}: o arranque reportou uma falha, mas o processo {pid} está a correr — a rede ({ip}) foi mantida em vez de desfeita. Verifica com `delonix container describe {name}`, e remove-o com `delonix container rm -f {name}` se não devia estar a correr"
 
+# DX-5002, DX-5203, DX-6205: the node API's CancelOperation and DeleteVolume
+msgid "the operation cannot be cancelled"
+msgstr "a operação não pode ser cancelada"
+
+msgid "The operation already ended, or it is running past its point of no return: every mutation this engine serves on the node API runs to its end once acknowledged, so nothing was cancelled and the operation's state is unchanged."
+msgstr "A operação já terminou, ou está a correr para lá do ponto sem retorno: cada mutação que este motor serve na API de nó corre até ao fim depois de aceite, por isso nada foi cancelado e o estado da operação não mudou."
+
+msgid "Watch the operation to its end (`WatchOperation`, or `GET /v1/operations/{id}`), then undo what it did with the inverse request if that is what you wanted."
+msgstr "Acompanha a operação até ao fim (`WatchOperation`, ou `GET /v1/operations/{id}`) e depois desfaz o que ela fez com o pedido inverso, se era isso que querias."
+
+msgid "volume is in use"
+msgstr "o volume está em uso"
+
+msgid "A container mounts the volume, or a share is carved out of its data, and removing it would take their data from under them."
+msgstr "Um container monta o volume, ou uma partilha foi recortada dos seus dados, e removê-lo tirava-lhes os dados debaixo dos pés."
+
+msgid "Remove what the message lists first (`delonix container rm`, `delonix volume rm <share>`), or ask for the removal with force to destroy the data anyway."
+msgstr "Remove primeiro o que a mensagem lista (`delonix container rm`, `delonix volume rm <partilha>`), ou pede a remoção com force para destruir os dados na mesma."
+
+msgid "this process cannot remove the volume's data"
+msgstr "este processo não consegue remover os dados do volume"
+
+msgid "Some of the volume's data is owned by a mapped subuid (written by a container in a user namespace), and the node API has no way into that user namespace yet; removing what it can read would leave the volume half deleted. Nothing was removed."
+msgstr "Parte dos dados do volume pertence a um subuid mapeado (escritos por um container num user namespace), e a API de nó ainda não tem forma de entrar nesse user namespace; remover o que consegue ler deixaria o volume meio apagado. Nada foi removido."
+
+msgid "Remove it with `delonix volume rm <name>`, which removes mapped data from inside the user namespace that owns it."
+msgstr "Remove-o com `delonix volume rm <nome>`, que remove os dados mapeados de dentro do user namespace a que pertencem."
+
 # cluster kubeadm/apply: a CNI de um cluster multi-nó (#799, DX-1701, DX-6701)
 msgid "Pod network. `default` = the engine's node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI (Cilium, Calico...)."
 msgstr "Rede dos pods. `default` = a bridge local ao nó do próprio motor, que só serve um cluster de UM nó: com mais nós é recusada antes de se criar qualquer VM. `none` = não instala nada; todos os nós ficam NotReady até aplicares a tua CNI (Cilium, Calico...)."

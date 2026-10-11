@@ -1446,11 +1446,61 @@ fn ensure_up_locked() -> Result<()> {
 /// `-m` as well as `-U -n`: the control needs the pin's MOUNT namespace, where
 /// `/run/netns` lives — that is where every named netns of every pod and
 /// `--net <custom>` container is pinned.
-fn start_control(pin: i32) -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Command {
+/// The binary that understands `netns pin` / `netns control`: the engine CLI.
+///
+/// Not this process's own executable, blindly. A server that reaches this code — the node API
+/// (`delonix-node-api`) or the CRI (`delonix-cri`) — is a different program, and
+/// the holder spawned from it exited at once with «unknown argument: netns»
+/// (measured 2026-10-11: a VM created through the node API on a network failed
+/// with «the pin exited before creating its namespaces»). Inside the `delonix`
+/// CLI itself the answer stays its own executable, so the holder and the CLI are
+/// always one build; elsewhere it is the dispatch module's CLI binary
+/// (`DELONIX_BIN`, or the `delonix` next to this executable).
+fn engine_exe() -> Result<std::path::PathBuf> {
+    let current = std::env::current_exe().map_err(|e| Error::Command {
         context: "current_exe",
         message: e.to_string(),
     })?;
+    Ok(engine_exe_from(current, delonix_node::dispatch::cli_bin))
+}
+
+fn engine_exe_from(
+    current: std::path::PathBuf,
+    cli_bin: impl FnOnce() -> std::path::PathBuf,
+) -> std::path::PathBuf {
+    if current.file_name().is_some_and(|n| n == "delonix") {
+        current
+    } else {
+        cli_bin()
+    }
+}
+
+#[cfg(test)]
+mod engine_exe_tests {
+    use super::engine_exe_from;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_server_spawns_the_holder_from_the_engine_cli_not_from_itself() {
+        let cli = || PathBuf::from("/opt/delonix/bin/delonix");
+        assert_eq!(
+            engine_exe_from(PathBuf::from("/opt/delonix/bin/delonix-node-api"), cli),
+            PathBuf::from("/opt/delonix/bin/delonix")
+        );
+        assert_eq!(
+            engine_exe_from(PathBuf::from("/usr/bin/delonix-cri"), cli),
+            PathBuf::from("/opt/delonix/bin/delonix")
+        );
+        // The CLI keeps its own build for the holder.
+        assert_eq!(
+            engine_exe_from(PathBuf::from("/tree/target/debug/delonix"), cli),
+            PathBuf::from("/tree/target/debug/delonix")
+        );
+    }
+}
+
+fn start_control(pin: i32) -> Result<i32> {
+    let exe = engine_exe()?;
     let _ = std::fs::remove_file(status_path());
     let mut cmd = Command::new("nsenter");
     // Restartable and long-lived: it must not keep the descriptors of
@@ -1589,10 +1639,7 @@ pub(crate) fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
 }
 
 fn start_pin() -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Command {
-        context: "current_exe",
-        message: e.to_string(),
-    })?;
+    let exe = engine_exe()?;
     let _ = std::fs::remove_file(status_path());
     // The pin creates its own user, network and mount namespaces, and this
     // process — still outside them — writes the id maps: see `pin_userns` for why
@@ -1764,10 +1811,7 @@ fn start_pin() -> Result<i32> {
 /// had. A `teardown_locked()` here — as `start_pin` does on the same timeout —
 /// would kill the live control plane this function exists to preserve.
 fn adopt_pin(control: i32) -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Command {
-        context: "current_exe",
-        message: e.to_string(),
-    })?;
+    let exe = engine_exe()?;
     let _ = std::fs::remove_file(status_path());
     let mut cmd = Command::new("nsenter");
     let child = crate::leave_callers_descriptors(&mut cmd)

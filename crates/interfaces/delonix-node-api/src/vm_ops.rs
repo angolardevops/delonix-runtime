@@ -201,7 +201,7 @@ fn config_from_spec(
         .or_else(|| image_defaults.and_then(|d| d.backend));
     Ok(VmConfig {
         name: name.to_string(),
-        disk: spec.image.clone(),
+        disk: delonix_vm::store_image_disk(root, &spec.image),
         vcpus,
         memory,
         network,
@@ -996,6 +996,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.vcpus, 4, "the image's own recorded vCPU default");
+        // The disk is the store's qcow2 for that name, not the name read as a
+        // path: the overlay would answer NOT_FOUND for an image the store lists.
+        assert_eq!(
+            cfg.disk,
+            images_dir.join("golden.qcow2").to_string_lossy(),
+            "a store reference resolves to the store's own disk"
+        );
         assert_eq!(
             cfg.memory, "4G",
             "the image's own recorded memory default, verbatim — same as the \

@@ -142,6 +142,50 @@ impl ImageDefaultsReader for VmImageJsonDefaults {
     }
 }
 
+/// The disk a VM spec's `image` names, resolved the way the CLI resolves it
+/// (`cmd::vm::resolve_image_ref`): a reference registered in this root's VM
+/// image store — `<root>/vm-images/<name>.json` exists — becomes that store's
+/// qcow2; anything else passes through as a path. Without this, the node API
+/// handed a store name to the overlay as a file path and answered NOT_FOUND for
+/// an image `vm image ls` lists (the contract's `image` field says «image store
+/// reference or path»).
+pub fn store_image_disk(root: &Path, reference: &str) -> String {
+    let images = root.join("vm-images");
+    let stem = sanitize_image_name(reference);
+    if images.join(format!("{stem}.json")).is_file() {
+        return images
+            .join(format!("{stem}.qcow2"))
+            .to_string_lossy()
+            .into_owned();
+    }
+    reference.to_string()
+}
+
+#[cfg(test)]
+mod store_image_disk_tests {
+    use super::store_image_disk;
+
+    #[test]
+    fn a_registered_name_resolves_to_the_store_qcow2_and_a_path_passes_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let images = dir.path().join("vm-images");
+        std::fs::create_dir_all(&images).unwrap();
+        std::fs::write(images.join("delonix-vm-base_ubuntu-24.04.json"), "{}").unwrap();
+        assert_eq!(
+            store_image_disk(dir.path(), "delonix-vm-base:ubuntu-24.04"),
+            images
+                .join("delonix-vm-base_ubuntu-24.04.qcow2")
+                .to_string_lossy()
+        );
+        // Not registered: the reference is a path, untouched.
+        assert_eq!(
+            store_image_disk(dir.path(), "/srv/disk.qcow2"),
+            "/srv/disk.qcow2"
+        );
+        assert_eq!(store_image_disk(dir.path(), "other:1"), "other:1");
+    }
+}
+
 /// The NoCloud seed built with `cloud-localds`.
 pub struct CloudLocaldsSeed;
 

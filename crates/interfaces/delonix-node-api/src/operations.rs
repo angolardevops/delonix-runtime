@@ -528,6 +528,114 @@ pub fn list_in(root: &Path, req: &ListOperationsRequest) -> Result<ListOperation
     })
 }
 
+/// `CancelOperation` under `root`, which today never cancels anything, and
+/// says so instead of pretending.
+///
+/// Every mutation this socket serves runs to its end inside the request that
+/// acknowledged it: there is no cancellation point in that work, so a running
+/// operation is past its point of no return from the moment it exists, and
+/// one that ended has nothing left to cancel. Both answer
+/// `FAILED_PRECONDITION` (DX-5002) with the operation's state in the message,
+/// and the record is left exactly as it was — an operation is never reported
+/// `CANCELLED` for work that ran.
+pub fn cancel_in(root: &Path, id: &str) -> Result<Operation, Status> {
+    let missing = || Status::not_found(format!("operation '{id}'"));
+    if !valid_id(id) {
+        return Err(missing());
+    }
+    let rec = settled(root, read(root, id)?.ok_or_else(missing)?)?;
+    let why = match rec.state {
+        State::Running => format!(
+            "operation '{id}' ({} {}) is running and past its point of no return: the work \
+             runs to its end once acknowledged; watch it to the end, then undo it with the \
+             inverse request",
+            rec.verb, rec.target
+        ),
+        State::Succeeded | State::Failed => format!(
+            "operation '{id}' ({} {}) already ended {}; there is nothing to cancel",
+            rec.verb,
+            rec.target,
+            if rec.state == State::Succeeded {
+                "SUCCEEDED"
+            } else {
+                "FAILED"
+            }
+        ),
+    };
+    let mut status = Status::failed_precondition(why);
+    status.metadata_mut().insert(
+        crate::network_ops::DX_METADATA,
+        tonic::metadata::MetadataValue::from_static("5002"),
+    );
+    Err(status)
+}
+
+/// How often [`watch`] reads the record. The work may run in another
+/// process (the server is socket-activated), so the record on disk is the
+/// only thing to watch.
+pub const WATCH_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// What a watcher has already been sent: the fields that change while an
+/// operation runs.
+fn seen(op: &Operation) -> (i32, String, i32, Option<i64>) {
+    (
+        op.state,
+        op.progress_message.clone(),
+        op.progress_percent,
+        op.end_time.as_ref().map(|t| t.seconds),
+    )
+}
+
+/// `WatchOperation` under `root`: the operation now, then again each time it
+/// changes, ending after the message that says it ended. An id nothing was
+/// given is `NOT_FOUND` before the stream starts. A watcher that goes away
+/// stops the polling; an operation whose owner exits mid-way is read
+/// `FAILED/Interrupted` (the same settling `GetOperation` does), so a watch
+/// never waits on a process that is gone.
+pub fn watch(
+    root: PathBuf,
+    id: String,
+    poll: std::time::Duration,
+) -> Result<tokio_stream::wrappers::ReceiverStream<Result<Operation, Status>>, Status> {
+    let first = get_in(&root, &id)?;
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    tokio::spawn(async move {
+        let mut last = seen(&first);
+        let mut ended = first.state != OperationState::Running as i32;
+        if tx.send(Ok(first)).await.is_err() {
+            return;
+        }
+        while !ended {
+            tokio::select! {
+                _ = tx.closed() => return,
+                _ = tokio::time::sleep(poll) => {}
+            }
+            let (r, i) = (root.clone(), id.clone());
+            let now = match tokio::task::spawn_blocking(move || get_in(&r, &i)).await {
+                Ok(now) => now,
+                Err(e) => Err(Status::internal(format!("watching {id}: {e}"))),
+            };
+            let op = match now {
+                Ok(op) => op,
+                Err(e) => {
+                    // The record went away (a retention prune) or could not
+                    // be read: said, and the stream ends.
+                    let _ = tx.send(Err(e)).await;
+                    return;
+                }
+            };
+            ended = op.state != OperationState::Running as i32;
+            if seen(&op) != last {
+                last = seen(&op);
+                if tx.send(Ok(op)).await.is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,5 +950,91 @@ mod tests {
             hard_errors.len(),
             hard_errors.join("\n")
         );
+    }
+
+    #[test]
+    fn cancel_never_reports_cancelled_and_leaves_the_record_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let missing = cancel_in(root, "op-nothing").unwrap_err();
+        assert_eq!(missing.code(), tonic::Code::NotFound);
+
+        let running = new(root, "create", "Volume/default/data", "");
+        let refused = cancel_in(root, &running.id).unwrap_err();
+        assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
+        assert_eq!(
+            refused
+                .metadata()
+                .get(crate::network_ops::DX_METADATA)
+                .unwrap(),
+            "5002"
+        );
+        assert!(
+            refused.message().contains("point of no return"),
+            "{}",
+            refused.message()
+        );
+        assert_eq!(read(root, &running.id).unwrap().unwrap(), running);
+
+        let ended = finish(root, running, Ok(String::new())).unwrap();
+        let refused = cancel_in(root, &ended.id).unwrap_err();
+        assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
+        assert!(
+            refused.message().contains("already ended SUCCEEDED"),
+            "{}",
+            refused.message()
+        );
+        assert_eq!(read(root, &ended.id).unwrap().unwrap(), ended);
+    }
+
+    #[tokio::test]
+    async fn watch_sends_the_operation_then_its_end_and_stops() {
+        use tokio_stream::StreamExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        assert_eq!(
+            watch(root.clone(), "op-nothing".into(), WATCH_POLL)
+                .err()
+                .map(|s| s.code()),
+            Some(tonic::Code::NotFound)
+        );
+        let rec = new(&root, "create", "Volume/default/data", "");
+        let mut stream = watch(
+            root.clone(),
+            rec.id.clone(),
+            std::time::Duration::from_millis(20),
+        )
+        .unwrap();
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first.state, OperationState::Running as i32);
+        let r = root.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            finish(&r, rec, Ok("/v1/namespaces/default/volumes/data".into())).unwrap();
+        });
+        let last = tokio::time::timeout(std::time::Duration::from_secs(10), stream.next())
+            .await
+            .expect("the watch never saw the end")
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.state, OperationState::Succeeded as i32);
+        assert!(last.links.iter().any(|l| l.rel == "target"));
+        // And the stream ends after the end.
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn watching_an_operation_whose_owner_is_gone_ends_with_it_interrupted() {
+        use tokio_stream::StreamExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mut rec = new(&root, "create", "Volume/default/data", "");
+        rec.owner_starttime += 1;
+        write(&root, &rec).unwrap();
+        let mut stream = watch(root, rec.id, WATCH_POLL).unwrap();
+        let only = stream.next().await.unwrap().unwrap();
+        assert_eq!(only.state, OperationState::Failed as i32);
+        assert_eq!(only.error.unwrap().reason, "Interrupted");
+        assert!(stream.next().await.is_none());
     }
 }
