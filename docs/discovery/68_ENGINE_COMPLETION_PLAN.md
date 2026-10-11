@@ -63,7 +63,7 @@ release cleanup»), with its PR (#786) merged and no worktree.
 |---|---|---|---|
 | N31 | #793 | a container that misses the 60 s mount ceiling under I/O saturation is reported as started | 16 |
 | N32 | #799 (= N15) | multi-node kubeadm: refuse by name before creating anything unless a cross-node CNI is chosen | 19 (code half pulled forward) |
-| N33 | #801 | the e2e gate «dois starts concorrentes» has not yet been seen red on v5.0.2 and green on the tip: on 2026-10-11 the host's writeback (~3 GB dirty) held every `stop` past 3 min and both runs skipped | 10 (with N30) |
+| N33 | #801 | the e2e gate «dois starts concorrentes» had not been seen red on v5.0.2 and green on the tip. **Closed 2026-10-11**: v5.0.2 FAIL (6/6 rounds left the winner without `eth0`), tip PASS (0/6). **Correction**: the skips were only partly the host's writeback — the gate waited for the container to leave `container ps`, which lists stopped containers too, so no round ever counted (fixed with the trace) | 10 (with N30) |
 | N34 | #791 | the remaining setuid-root bits on the real-root path are kept on purpose (ADR-0062) | **decided 2026-10-11**: residual accepted, issue closed as not planned |
 | N35 | #736, #737 | pod-to-pod loss and the first cross-namespace connection do not reproduce on v5.0.2 (0 % loss; 6/6) | **decided 2026-10-11**: kept open; not covered yet are the single-node «days later» case and the reporter's exact shapes |
 | N36 | #438 | arm64: build, test and run on aarch64 | blocked (§6): an aarch64 runner or host |
@@ -77,7 +77,7 @@ and then runs the live validations one at a time, each behind `scripts/lab_budge
 
 | Wave | In parallel (code, no guest) | Then, in series on the host |
 |---|---|---|
-| A (started 2026-10-11) | Sprint 13 part 1 (N3, `WatchOperation`/`CancelOperation`, `Create/DeleteVolume`, then `WatchEvents` and ADR-0003); Sprint 16 starting with N31; N32; Sprint 15 N11 checks runnable without a guest | N30 + N33 (full battery and chaos on a quiet host, the trace re-recorded); Sprint 13's live validation on Cloud Hypervisor |
+| A (started 2026-10-11) | Sprint 13 part 1 (N3, `WatchOperation`/`CancelOperation`, `Create/DeleteVolume`, then `WatchEvents` and ADR-0003); Sprint 16 starting with N31; N32; Sprint 15 N11 checks runnable without a guest **Done 2026-10-11**: N30 + N33 — battery PASS=1345 FAIL=0 SKIP=13 on the tip (`b5e153b3`), CLI coverage re-recorded at **258 / 270 = 95.6 %**, chaos 53 PASS / 0 FAIL / 2 SKIP; Sprint 13 validated live on Cloud Hypervisor through the socket (#814). Two battery runs before the clean one found a broken check (httproute `Content-Length`), the #801 gate defect above, and a real engine defect: a partially deleted build-cache entry is trusted (#815) |
 | B | Sprint 14 (P5 socket activation, N9); Sprint 17 (ADR-0065, ADR-0066, ADR-0047 spike); Sprint 20 (Compose, Docker API, N24) | N4 test image; Sprint 11 (N2, ADR-0057 on `proxmox-ve`); Sprint 14 in a golden guest |
 | C | Sprint 18 (ADR-0068 + ADR-0012); Sprint 21 (ADR-0067); Sprint 23 (N27, N10) | Sprint 19 live (critest, kubelet, two nodes); Sprint 15/16 live cells |
 | D | Sprint 22 (Proxmox depth); Sprint 24 spikes | Sprint 18, 21, 22 live, each alone |

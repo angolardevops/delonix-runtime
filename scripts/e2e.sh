@@ -1938,10 +1938,14 @@ if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null
     # Com o disco do host ocupado, o PID 1 fica em D à espera do writeback e o
     # `stop` desiste aos 30 s (DX-8101) com o container ainda registado a correr
     # (ADR-0056 D4). Repete-se até ele sair; uma ronda que não chega lá não conta.
+    # `container ps` lists stopped containers too (unlike `docker ps`), so
+    # «gone from ps» was never true and every round was skipped. The state is
+    # read from the record instead.
     _gone=0
     for _i in 1 2 3 4 5 6; do
       "$BIN" container stop -t 0 "$CR" >/dev/null 2>&1
-      "$BIN" container ps 2>/dev/null | grep -qE " $CR\$" || { _gone=1; break; }
+      "$BIN" container inspect "$CR" 2>/dev/null | grep -qE '"status": *"Running"' \
+        || { _gone=1; break; }
     done
     [[ $_gone -eq 1 ]] || continue
     "$BIN" container start "$CR" >/dev/null 2>&1 & _p1=$!
@@ -6845,9 +6849,12 @@ fi
 # /etc/hosts is the user's. The backend is busybox `nc` in a loop — alpine's
 # busybox has no `httpd`.
 L3HR="hr-$PFX.e2e.test"; L3HP=$(( 29500 + RANDOM % 150 )); L3HF="$L3/hosts"
+# The body's length follows $PFX (the run's pid): a fixed Content-Length cut the
+# answer, and the proxy was right to honour it.
+L3PONG="pong-$PFX"
 printf '127.0.0.1 localhost\n' >"$L3HF"
 if "$BIN" container run -d --name "$L3C-web" --net "$L3N" "$IMG" sh -c \
-     "while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: 10\r\n\r\npong-$PFX' | nc -l -p 80; done" >/dev/null 2>&1; then
+     "while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: ${#L3PONG}\r\n\r\n$L3PONG' | nc -l -p 80; done" >/dev/null 2>&1; then
   cat >"$L3/route.yaml" <<YAML
 apiVersion: gateway.delonix.io/v1alpha1
 kind: HTTPRoute
