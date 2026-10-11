@@ -88,9 +88,29 @@ pub use service::{
     OPENAPI_YAML,
 };
 
+/// The node API's composition root: the ports this process registers before it
+/// serves anything, once.
+///
+/// Today one: the node's VM network ([`delonix_sdn::vm_network::HostVmNetwork`]),
+/// the same registration the CLI's `main` makes. Without it a
+/// `CreateVirtualMachine` that names a network attachment on Cloud Hypervisor
+/// reached the backend and failed with «no VM network provider is registered
+/// in this process» (plan 68 item N3): `delonix-vm` seeds its own backends, but
+/// the network needs a state root, which only the composition root knows.
+/// Idempotent; the first registration in a process wins.
+pub fn compose() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
+            state_root: node::state_root(),
+        }));
+    });
+}
+
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
 /// path or `unix:///path`. Same pattern as `delonix_mgmt::serve_blocking`.
 pub fn serve_blocking(addr: &str) -> Result<(), Error> {
+    compose();
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     delonix_node::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()
