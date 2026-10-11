@@ -964,9 +964,9 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
 interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
 auditoria ofensiva do projecto, com testes a replicar o exploit.</p>"""},
             "kubeadm": {"examples": [
-                ("Do zero: 1 control-plane + 2 workers", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
-                ("HA: 2 control-planes + 3 workers (HAProxy automático)", "delonix cluster kubeadm --name lab --control-plane 2 --workers 3"),
-                ("Etcd externo dedicado (3 VMs extra, quórum ímpar)", "delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3"),
+                ("Do zero: 1 control-plane + 2 workers, com a tua CNI (a por omissão só serve um nó)", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2 --cni none"),
+                ("HA: 2 control-planes + 3 workers (HAProxy automático)", "delonix cluster kubeadm --name lab --control-plane 2 --workers 3 --cni none"),
+                ("Etcd externo dedicado (3 VMs extra, quórum ímpar)", "delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3 --cni none"),
             ], "notes": """<p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM
 extra a correr HAProxy (L4, passthrough — a TLS do apiserver termina sempre no control-plane real)
 à frente da porta 6443 de cada control-plane, e usa-a como <code>controlPlaneEndpoint</code> — sem
@@ -2434,12 +2434,12 @@ the containers.</p>"""},
     "cluster": {
         "lab": {"pt": """<p>Um comando, do zero a um cluster Kubernetes real a correr —
 sem Docker, sem containerd, com <code>delonix-cri</code> como runtime.</p>
-<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 0
 export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
 kubectl get nodes</code></pre>""",
                 "en": """<p>One command, from zero to a real Kubernetes cluster running — no
 Docker, no containerd, with <code>delonix-cri</code> as the runtime.</p>
-<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 0
 export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
 kubectl get nodes</code></pre>"""},
         "challenge": {"pt": """<p>Constrói uma imagem local com <code>delonix build</code>,
@@ -2968,7 +2968,7 @@ EXAMPLES_EN = {
     ("cluster", "init"): ["Scaffold a cloud.yaml for cluster apply"],
     ("cluster", "apply"): ["Bootstrap from a `kind: KubernetesCluster` manifest"],
     ("cluster", "kubeadm"): [
-        "From scratch: 1 control-plane + 2 workers",
+        "From scratch: 1 control-plane + 2 workers, with your own CNI (the default one serves a single node only)",
         "HA: 2 control-planes + 3 workers (automatic HAProxy)",
         "Dedicated external etcd (3 extra VMs, odd quorum)",
     ],
@@ -4478,7 +4478,7 @@ CHEAT_TASKS = [
      "delonix volume create nas --driver nfs --opt server=10.0.0.5 --opt share=/pool/data\n"
      "delonix volume create tenant-a --parent nas --quota 5G"),
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
-    ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
+    ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 0"),
     ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
     ("Persistir os containers no arranque", "delonix system boot enable"),
     ("Recuperar espaço (GC)", "delonix system prune"),

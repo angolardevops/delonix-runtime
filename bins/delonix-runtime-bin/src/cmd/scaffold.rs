@@ -1845,9 +1845,11 @@ fn cluster_vm(o: &InitOpts) -> String {
          k8sVersion: \"1.34\"\n  \
          podSubnet: 10.244.0.0/16\n  \
          serviceSubnet: 10.96.0.0/12\n  \
+         # default serves ONE node only here (refused above one); for workers\n  \
+         # use none and apply your own CNI after the bootstrap\n  \
          cni: default\n  \
          controlPlane:\n    replicas: 1   # >1 exige controlPlaneEndpoint (LB/VIP)\n  \
-         workers:\n    replicas: 2\n  \
+         workers:\n    replicas: 0\n  \
          vm:\n    \
          image: {img}\n    \
          network: {name}-net\n    \
