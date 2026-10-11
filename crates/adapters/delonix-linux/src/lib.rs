@@ -6120,9 +6120,15 @@ unsafe fn close_range_raw(first: u32, last: u32) {
 ///   follows already hands the real exit code to the caller;
 /// * the ceiling — a mount that hangs (a bind onto an unresponsive NFS server is
 ///   the real case) must not hang `run` forever, because before this change it
-///   did not. It is said out loud rather than swallowed: the caller has to know
-///   the guarantee did not hold, because that is exactly when an `exec` next can
-///   land on the host.
+///   did not. It is said out loud rather than swallowed, and it is not the end
+///   of the story: [`spawn`] marks the record `mount_pending`, which makes every
+///   operation that ENTERS the container refuse ([`require_mounted`]), and hands
+///   this descriptor to [`watch_late_mount`], which clears the mark when the
+///   byte does arrive. Before that, the record read plain `Running` and an
+///   `exec` in the next instant could land on the host (issue #793).
+///
+/// The descriptor is NOT closed here: past the ceiling it is the only way left
+/// to learn that the mounts finished, and the caller decides who keeps it.
 fn wait_for_mounts(ready_r: i32, name: &str) -> MountWait {
     // Generous by design: real mounts take milliseconds, so anything near this
     // is already pathological, and a tight ceiling would reintroduce the race on
@@ -6156,9 +6162,9 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
     let mut outcome = MountWait::Unknown;
     if n == 0 {
         eprintln!(
-            "delonix: warning: {name} did not finish mounting within {}ms — it is running, but a \
-             command that enters it right now may see the HOST's filesystem instead of the \
-             container's",
+            "delonix: warning: {name} did not finish mounting within {}ms — its process is \
+             running, but it is not reported as mounted: exec, cp and live mounts into it are \
+             refused until its mounts are done",
             ceiling_ms
         );
     } else if n > 0 {
@@ -6172,9 +6178,132 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
             _ => MountWait::Unknown,
         };
     }
-    // SAFETY: ours, and unused from here on.
-    unsafe { libc::close(ready_r) };
     outcome
+}
+
+/// Waits, with no ceiling, for the «mounted» byte that [`wait_for_mounts`] gave
+/// up on. Unbounded on purpose and safely so: it runs in [`watch_late_mount`]'s
+/// own process, never in the caller of `run`, and it always ends — the write end
+/// is close-on-exec in the init, so the init's `execvp` or its exit closes it
+/// and an EOF arrives if the byte does not.
+fn await_late_mount(ready_r: RawFd) -> MountWait {
+    loop {
+        let outcome = wait_for_mounts_with(ready_r, "", -1);
+        if outcome != MountWait::Unknown
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR)
+        {
+            return outcome;
+        }
+    }
+}
+
+/// Clears `mount_pending` on the record of the incarnation `(pid, starttime)`
+/// when the late wait ended with the byte. Says whether it cleared it.
+///
+/// Only that incarnation, and only on [`MountWait::Ready`]: an EOF is an init
+/// that exited before mounting (the supervisor's wait records that death), and a
+/// record that names another process — a restart — or none is not ours to
+/// touch. The mark is what keeps an `exec` off the host's filesystem; clearing it
+/// on anything but the proof would reopen exactly that.
+fn settle_late_mount(
+    store: &impl StateRepository<Container>,
+    id: &str,
+    pid: i32,
+    starttime: Option<u64>,
+    outcome: &MountWait,
+) -> bool {
+    if *outcome != MountWait::Ready {
+        return false;
+    }
+    let mut cleared = false;
+    let _ = store.update(id, |c| {
+        let same = c.pid == Some(pid) && (starttime.is_none() || c.pid_starttime == starttime);
+        cleared = same && c.mount_pending;
+        if cleared {
+            c.mount_pending = false;
+        }
+        cleared
+    });
+    cleared
+}
+
+/// Keeps waiting for the «mounted» byte of a start that passed its ceiling, in
+/// a process of its own, and clears the record's `mount_pending` when it comes.
+/// Returns the watcher's pid, or `None` when it could not be forked — then the
+/// mark stays and entering the container stays refused until it restarts, the
+/// safe side of the two.
+///
+/// A forked process and not a thread: the caller is a supervisor that forks and
+/// `clone`s later (health monitor, policy restarts) on the assumption that it is
+/// single-threaded — the same reason the log shim and the health monitor are
+/// processes. Like the shim it keeps nothing of its caller: every other
+/// descriptor is closed and stdio goes to `/dev/null`, so a caller capturing
+/// `run -d`'s output never waits on it (the third occurrence of «detached is not
+/// without the caller's fds» was a helper that kept them). It ends with the
+/// byte or with the init — see [`await_late_mount`].
+fn watch_late_mount(
+    store: &impl StateRepository<Container>,
+    c: &Container,
+    ready: OwnedFd,
+) -> Option<Pid> {
+    let pid = c.pid?;
+    let starttime = c.pid_starttime;
+    // SAFETY: the caller is single-threaded (the same assumption the `clone` in
+    // `spawn` makes); the child only waits, updates the record and `_exit`s.
+    match unsafe { fork() } {
+        Ok(ForkResult::Child) => {
+            let fd = ready.as_raw_fd();
+            // SAFETY: in the forked watcher, which never returns: no Rust object
+            // owns the closed fds; `fd` is excluded from both ranges; `/dev/null`
+            // is a static C string and checked before `dup2`.
+            unsafe {
+                if fd > 3 {
+                    close_range_raw(3, fd as u32 - 1);
+                }
+                close_range_raw(fd as u32 + 1, u32::MAX);
+                libc::setsid();
+                let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+                if null >= 0 {
+                    libc::dup2(null, 0);
+                    libc::dup2(null, 1);
+                    libc::dup2(null, 2);
+                    if null > 2 {
+                        libc::close(null);
+                    }
+                }
+            }
+            let outcome = await_late_mount(fd);
+            settle_late_mount(store, &c.id, pid, starttime, &outcome);
+            // SAFETY: leaves without running the caller's destructors.
+            unsafe { libc::_exit(0) }
+        }
+        Ok(ForkResult::Parent { child }) => Some(child),
+        // Fails closed, and quietly on purpose: the ceiling's warning has already
+        // said that entering is refused until the mounts are seen done, and with
+        // no watcher that stays true until the container restarts.
+        Err(_) => None,
+    }
+}
+
+/// Refuses to enter a container whose mounts were never seen finished.
+///
+/// `exec`, `cp` and live mounts all join the init's mount namespace, and until
+/// the init says its root filesystem is in place `/` in there may still be the
+/// HOST's — measured: a `container exec` in that window ran the host's `/bin/sh`
+/// and wrote host files, exit 0. A start that waited for the proof leaves the
+/// mark clear; only one that passed its ceiling sets it (see
+/// [`Container::mount_pending`](delonix_compute::Container)), and the proof
+/// arriving later clears it. Class «unavailable»: wait and retry.
+pub fn require_mounted(container: &Container) -> Result<()> {
+    if container.mount_pending {
+        return Err(Error::MountPending(format!(
+            "container {} has not finished mounting: its process runs, but its root filesystem \
+             was never seen in place, and entering it now could land on the host's filesystem \
+             — retry once its mounts are done",
+            container.short_id()
+        )));
+    }
+    Ok(())
 }
 
 /// Says on stderr why an `execvp` failed and returns the reason. One function
@@ -6922,7 +7051,19 @@ fn spawn(
     // or a CI job reads that 0 as success. We are the parent, so the real exit code is
     // one `waitpid` away, and the record is never published. The foreground path needs
     // nothing: its `waitpid` below already returns the code to the caller.
-    let mounted = wait_for_mounts(ready.0, &container.name);
+    // SAFETY: the read end of the readiness pipe, ours alone from here on: every
+    // early return below drops (closes) it, and a start that passed the ceiling
+    // hands it to the late-mount watcher instead.
+    let ready_r = unsafe { OwnedFd::from_raw_fd(ready.0) };
+    let mounted = wait_for_mounts(ready_r.as_raw_fd(), &container.name);
+    // Past the ceiling the process runs, but nobody has seen its root filesystem
+    // in place: the record says so, and whatever enters it refuses until the
+    // proof arrives (`require_mounted`). It used to be published as plain
+    // `Running`, which a CRI `StartContainer` answered as success and an
+    // `ExecSync` could then run on the host's filesystem (issue #793). Never a
+    // failure: the container may well come up a moment later, and killing it
+    // would turn a slow disk into a crash loop.
+    container.mount_pending = mounted == MountWait::Unknown;
     // A DETACHED start whose command could not be executed is a failed start too.
     // `run -d /no-such-binary` returned 0 and the container turned up `Exited (127)`
     // a moment later (measured); Docker refuses it on the spot with 127. Bounded:
@@ -7011,6 +7152,11 @@ fn spawn(
         container.pid_starttime = None;
         return Err(e);
     }
+    if container.mount_pending {
+        watch_late_mount(store, container, ready_r);
+    } else {
+        drop(ready_r);
+    }
 
     if detach {
         return Ok(container.status.clone());
@@ -7021,6 +7167,7 @@ fn spawn(
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
     container.status = wait_to_status(status);
     container.pid = None;
+    container.mount_pending = false;
     if died_of_oom(&container.status, oom_before, oom_kill_count(&cgroup)) {
         container.crash_reason = Some(OOM_KILLED.to_string());
         container.crashed_at = Some(now_unix());
@@ -7225,6 +7372,8 @@ fn record_exit(
         status.clone()
     };
     c.pid = None;
+    // The mark belongs to the incarnation that just ended.
+    c.mount_pending = false;
     // Not over a requested stop: the operator's `stop` is the cause there,
     // whatever the counter did meanwhile.
     if oom && !stopped {
@@ -7571,6 +7720,7 @@ pub fn exec_with(
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    require_mounted(container)?;
 
     // Joins the user namespace FIRST (to gain caps in that ns and be able to join the
     // rest); then UTS, NET, PID and MNT (mnt last). The `user` is ALWAYS included:
@@ -8084,6 +8234,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    require_mounted(container)?;
     let src_is_dir = std::fs::metadata(&m.source)
         .map_err(|_| {
             Error::MountSourceMissing(format!("mount source does not exist: {}", m.source))
@@ -8197,6 +8348,7 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    require_mounted(container)?;
     // Always the `user` (skip-by-inode in `open_container_ns`) — see the extensive
     // note in `mount_live`: `container.userns` is not the same as "is in a
     // userns different from mine".
@@ -12358,5 +12510,125 @@ mod publish_tests {
         .unwrap_err();
         assert!(matches!(e, Error::AlreadyRunning(_)), "{e}");
         assert_eq!(s.store.load(&stopped.id).unwrap().pid, Some(me));
+    }
+}
+
+#[cfg(test)]
+mod late_mount_tests {
+    use super::{
+        await_late_mount, exec, proc_starttime, record_exit, require_mounted, settle_late_mount,
+        MountWait, Status,
+    };
+    use delonix_compute::Container;
+    use delonix_state::Store;
+
+    fn record(pid: i32, starttime: Option<u64>) -> Container {
+        let mut c = Container::new(
+            "6a1f0c33e2b94d17".into(),
+            "late".into(),
+            "alpine:3.20".into(),
+            vec!["sleep".into(), "300".into()],
+            "64M".into(),
+        );
+        c.pid = Some(pid);
+        c.pid_starttime = starttime;
+        c.status = Status::Running;
+        c
+    }
+
+    /// A pipe; the caller owns both ends.
+    fn pipe() -> (i32, i32) {
+        let mut fds = [0i32; 2];
+        // SAFETY: `fds` is an owned `[c_int; 2]`, the buffer `pipe(2)` fills.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        (fds[0], fds[1])
+    }
+
+    /// **A container whose mounts were never seen finished is never entered**
+    /// (issue #793). Its init passed the start's ceiling with `/` possibly still
+    /// the host's, so an `exec` there is what ran the host's shell and wrote host
+    /// files, exit 0. The record is a LIVE incarnation (this test process), so
+    /// nothing but the mark stands between the call and the `setns`.
+    ///
+    /// With the refusal removed from `exec_with`, this test runs `true` in the
+    /// «container» and gets `Ok(0)`: red.
+    #[test]
+    fn an_unproven_mount_is_never_entered() {
+        let me = std::process::id() as i32;
+        let mut c = record(me, proc_starttime(me));
+        assert!(c.is_live(), "the record must describe a live incarnation");
+        c.mount_pending = true;
+
+        let e = exec(&c, &["true".to_string()], false).expect_err("entered an unmounted container");
+        assert_eq!(e.number(), 6101, "{e}");
+        assert_eq!(
+            delonix_model::codes::lookup(6101).map(|c| c.exit),
+            Some(69),
+            "«unavailable»: wait and retry"
+        );
+        let e = require_mounted(&c).unwrap_err();
+        assert!(e.to_string().contains("has not finished mounting"), "{e}");
+
+        // The proof clears the way: no mark, no refusal.
+        c.mount_pending = false;
+        assert!(require_mounted(&c).is_ok());
+    }
+
+    /// The late wait ends exactly as the start's does, with no ceiling: the
+    /// byte is `Ready`, an init that died first is an EOF.
+    #[test]
+    fn the_late_wait_ends_on_the_byte_or_on_the_init() {
+        let (r, w) = pipe();
+        // SAFETY: `w` is the write end just created: one byte from a live
+        // buffer, then closed once.
+        unsafe {
+            let b = [1u8; 1];
+            assert_eq!(libc::write(w, b.as_ptr() as *const libc::c_void, 1), 1);
+            libc::close(w);
+        }
+        assert_eq!(await_late_mount(r), MountWait::Ready);
+        // SAFETY: ours, closed once.
+        unsafe { libc::close(r) };
+
+        let (r, w) = pipe();
+        // SAFETY: ours, closed once.
+        unsafe { libc::close(w) };
+        assert_eq!(await_late_mount(r), MountWait::InitExited);
+        // SAFETY: ours, closed once.
+        unsafe { libc::close(r) };
+    }
+
+    /// The proof clears the mark of ITS incarnation, and nothing else does.
+    #[test]
+    fn the_mark_is_cleared_only_by_the_proof_of_its_own_incarnation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("containers")).unwrap();
+        let mut c = record(4242, Some(7));
+        c.mount_pending = true;
+        store.save(&c).unwrap();
+        let settle = |pid, starttime, w| settle_late_mount(&store, &c.id, pid, starttime, &w);
+        let pending = || store.load(&c.id).unwrap().mount_pending;
+
+        // An EOF (the init died before mounting) is no proof.
+        assert!(!settle(4242, Some(7), MountWait::InitExited));
+        assert!(pending());
+        // The byte of ANOTHER incarnation (a restart reused the record).
+        assert!(!settle(4242, Some(8), MountWait::Ready));
+        assert!(!settle(999, Some(7), MountWait::Ready));
+        assert!(pending());
+        // Its own byte.
+        assert!(settle(4242, Some(7), MountWait::Ready));
+        assert!(!pending());
+    }
+
+    /// The mark belongs to the incarnation: its end takes the mark with it, so a
+    /// later start never inherits a refusal it did not earn.
+    #[test]
+    fn an_ended_incarnation_takes_its_mark_with_it() {
+        let mut c = record(4242, Some(7));
+        c.mount_pending = true;
+        let ours = record_exit(&mut c, 4242, Some(7), &Status::Failed(1), false);
+        assert!(ours);
+        assert!(!c.mount_pending);
     }
 }

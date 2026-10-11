@@ -758,6 +758,23 @@ pub struct Container {
     /// When `crash_reason` was set (Unix seconds). `None` iff `crash_reason` is `None`.
     #[serde(default)]
     pub crashed_at: Option<u64>,
+    /// `true` while the init of the CURRENT incarnation has not been seen to
+    /// finish shaping its mount namespace.
+    ///
+    /// A start waits for the init's «mounted» proof, but only up to a ceiling: a
+    /// mount that hangs must not hang `run`. Past the ceiling the process runs
+    /// and the record says so, and this flag says the other half — that nobody
+    /// has seen its root filesystem in place yet. Until then `/` inside its mount
+    /// namespace may still be the HOST's, so whatever ENTERS the container
+    /// (`exec`, `cp`, a live mount) refuses instead of running there. The proof
+    /// arriving late clears it. Measured on a kubeadm node (issue #793): with the
+    /// disk saturated two control-plane containers missed the 60 s ceiling and
+    /// the record read plain `Running`.
+    ///
+    /// `#[serde(default)]` and omitted when `false`: an older record never missed
+    /// the ceiling under this name, and an ordinary start writes nothing new.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mount_pending: bool,
 }
 
 fn default_cpus() -> String {
@@ -879,6 +896,7 @@ impl Container {
             user_fallback_to_root: false,
             crash_reason: None,
             crashed_at: None,
+            mount_pending: false,
         }
     }
 
