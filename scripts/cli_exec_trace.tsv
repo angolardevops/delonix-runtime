@@ -1,9 +1,9 @@
 # The CLI leaves a real battery run executed and asserted (F0.2 of the
 # maturity plan). Derived, never edited by hand:
 #   scripts/cli_exec_ratchet.py --from-results <results.jsonl> --update
-# recorded: 2026-10-10, kaeso-sys-01, isolated root OUT=/tmp/dlxvi, scripts/e2e.sh on target/release/delonix (vm image migration): PASS=1235 FAIL=0 SKIP=13 XFAIL=0 XPASS=0; the 13 SKIP are host properties (no OPNsense/Proxmox credentials, rootless without NFS, tools present so failure paths not reachable, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
-# commit: 82a5a4e4
-# executed: 182
+# recorded: 2026-10-11, kaeso-sys-01, isolated root OUT=/tmp/dlxn30c, scripts/e2e.sh (f9110526) on the main tip b5e153b3 release build with the five binaries side by side, DELONIX_UPGRADE_FROM=v5.0.2: PASS=1345 FAIL=0 SKIP=13 XFAIL=0 XPASS=0; the 13 SKIP are host properties (no OPNsense/Proxmox credentials, rootless without NFS, virt-customize and wg present so their failure paths are not reachable, no VM images in the isolated store, boot units outside the root, CRI root/CNI path)
+# commit: f9110526
+# executed: 258
 # leaves: 270
 api-resources
 apply
@@ -14,9 +14,22 @@ backup remove
 backup restore
 backup schedule
 build
+cluster apply
+cluster backup
+cluster destroy
+cluster drain
+cluster health
+cluster init
+cluster kube generate
 cluster kubeconfig
+cluster load
 cluster ls
 cluster prune
+cluster restore
+cluster start
+cluster stop
+cluster uncordon
+cluster upgrade
 compatibility compose
 compatibility docker
 completion editor
@@ -30,6 +43,7 @@ config get
 config set
 config unset
 container apply
+container attach
 container commit
 container cp
 container describe
@@ -58,18 +72,27 @@ container wait
 dashboard
 delete
 describe
+diff
 drift
 explain
 get
+hosts sync
 image apply
 image describe
+image export
 image history
 image load
+image login
+image logout
 image ls
 image prune
 image pull
+image remove
 image save
+image sbom
+image scan
 image tag
+image verify
 init
 man
 manifest render
@@ -77,22 +100,42 @@ manifest schema
 manifest validate
 mcp capabilities
 mcp doctor
+mcp serve
 migrate assess
+net capture
 net egress allow
+net egress clear
 net egress deny
+net egress host
 net egress ls
+net egress net
+net egress policy
 net egress rm
+net egress show
+net flow
+net httproute apply
+net httproute rm
 net ingress allow
+net ingress clear
 net ingress deny
 net ingress ls
 net ingress policy
 net ingress publish
 net ingress rm
 net ingress unpublish
+net l4guard status
+net netns attach
+net netns detach
 net netns down
+net netns exec
+net netns firewall
 net netns gc
+net netns publish
 net netns status
+net netns unpublish
 net netns up
+net tunnel apply
+net tunnel expose
 network apply
 network connect
 network create
@@ -103,13 +146,18 @@ network inspect
 network ipam ls
 network ipam prune
 network ls
+network node init
+network node key
 network rm
 network route
+network vlan
+plan
 pod attach
 pod cp
 pod create
 pod exec
 pod logs
+pod port-forward
 policy unset
 provider config schema
 provider config show
@@ -148,30 +196,57 @@ system events
 system features
 system info
 system metrics
+system monitor
 system namespace describe
 system namespace ls
 system prune
+system regulate
 system resources
 system setup
+system snapshot create
 system snapshot restore
+system thermal
 system virt
+systemcontainer clone
+systemcontainer move
+systemcontainer snapshot create
+systemcontainer snapshot ls
+systemcontainer snapshot restore
+systemcontainer snapshot rm
 version
+vm apply
+vm bridge
 vm cloud-init
+vm console
 vm create
 vm default-backend
+vm destroy
+vm image convert
+vm image describe
+vm image import
+vm image init
 vm image ls
+vm image rm
+vm init
 vm ls
+vm migrate
 vm move
 vm pause
 vm prune
+vm reach
 vm resize
+vm restart
 vm snapshot create
 vm snapshot ls
 vm snapshot restore
 vm snapshot rm
+vm ssh
 vm start
 vm stop
+vm unbridge
 vm unpause
+vm update
+vm vnc
 volume apply
 volume create
 volume describe
@@ -183,6 +258,7 @@ volume snapshot create
 volume snapshot ls
 volume snapshot restore
 volume snapshot rm
+wait
 workload describe
 workload ls
 workload rm
