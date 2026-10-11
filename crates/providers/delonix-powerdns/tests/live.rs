@@ -1,13 +1,14 @@
-//! The client against a REAL PowerDNS (ADR-0064 D6). Skipped unless
+//! The client against a REAL PowerDNS (ADR-0064 D6). `#[ignore]`d — `cargo
+//! test` lists it as `ignored`, never as `passed`. Run with `--ignored` and
 //! `DELONIX_POWERDNS_TEST_URL` (`http(s)://<host>:<port>/api/v1/servers/<id>`),
 //! `DELONIX_POWERDNS_TEST_KEY_FILE` and `DELONIX_POWERDNS_TEST_ZONE` (a zone
-//! the server already serves) are set:
+//! the server already serves); one left unset fails the test naming it:
 //!
 //! ```text
 //! DELONIX_POWERDNS_TEST_URL=http://192.168.122.55:8081/api/v1/servers/localhost \
 //! DELONIX_POWERDNS_TEST_KEY_FILE=$HOME/.cache/dlx-slice6/pdns-lab.key \
 //! DELONIX_POWERDNS_TEST_ZONE=f5c.lab \
-//! cargo test -p delonix-powerdns --test live -- --nocapture
+//! cargo test -p delonix-powerdns --test live -- --ignored --nocapture
 //! ```
 //!
 //! It writes one rrset of its own (named after the process id), with the
@@ -22,14 +23,24 @@ struct Lab {
     zone: String,
 }
 
-fn lab() -> Option<Lab> {
-    let url = std::env::var("DELONIX_POWERDNS_TEST_URL").ok()?;
-    let key = std::fs::read_to_string(std::env::var("DELONIX_POWERDNS_TEST_KEY_FILE").ok()?)
-        .ok()?
+/// A variable the test needs. It runs only under `--ignored`, so a missing
+/// one FAILS naming it: returning instead would read as `passed`.
+fn need(var: &str) -> String {
+    std::env::var(var)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| panic!("{var} must be set to run this --ignored test"))
+}
+
+fn lab() -> Lab {
+    let url = need("DELONIX_POWERDNS_TEST_URL");
+    let key_file = need("DELONIX_POWERDNS_TEST_KEY_FILE");
+    let key = std::fs::read_to_string(&key_file)
+        .unwrap_or_else(|e| panic!("DELONIX_POWERDNS_TEST_KEY_FILE={key_file}: {e}"))
         .trim()
         .to_string();
-    let zone = std::env::var("DELONIX_POWERDNS_TEST_ZONE").ok()?;
-    Some(Lab { url, key, zone })
+    let zone = need("DELONIX_POWERDNS_TEST_ZONE");
+    Lab { url, key, zone }
 }
 
 fn patch(lab: &Lab, rrset: serde_json::Value) {
@@ -65,12 +76,10 @@ impl Drop for Cleanup<'_> {
     }
 }
 
+#[ignore = "needs DELONIX_POWERDNS_TEST_URL, DELONIX_POWERDNS_TEST_KEY_FILE, DELONIX_POWERDNS_TEST_ZONE and a reachable PowerDNS: cargo test -p delonix-powerdns --test live -- --ignored"]
 #[test]
 fn one_record_is_removed_and_the_rest_of_its_rrset_kept() {
-    // Skipped (passing) without the three variables; with them it runs.
-    let Some(lab) = lab() else {
-        return;
-    };
+    let lab = lab();
     let zone = lab.zone.trim_end_matches('.').to_string();
     let name = format!("dlx-d6-{}.{zone}.", std::process::id());
     let _cleanup = Cleanup(&lab, name.clone());

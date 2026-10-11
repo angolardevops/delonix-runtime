@@ -1,6 +1,6 @@
 //! Live proof of `vm.guest-agent` (ADR-0050) against a REAL libvirt domain,
 //! booted from a real cloud-init base disk, with `qemu-guest-agent` actually
-//! running inside the guest — `#[ignore]`, opt-in by env var, because this is
+//! running inside the guest — `#[ignore]`, run with `--ignored`, because this is
 //! exactly the gap the matrix's own evidence-gate exists to close: a
 //! `supported` claim nobody can re-run is the same as an unverified one.
 //!
@@ -11,7 +11,9 @@
 //!
 //! Needs a reachable `qemu:///system` (the invoking user in the `libvirt`
 //! group — `system_libvirt_usable()`), and `qemu-img`/`cloud-localds` on the
-//! `PATH`. The base disk has to be a real cloud-init image (NoCloud-capable);
+//! `PATH`; run with `--ignored`, a missing one FAILS the test naming it (a
+//! silent return would read as `passed`). The base disk has to be a real
+//! cloud-init image (NoCloud-capable);
 //! this test asks cloud-init itself to install and enable
 //! `qemu-guest-agent` on first boot (`packages:`/`runcmd:`) — the published
 //! `delonix-vm-base` tags do not ship it yet, which is exactly the gap this
@@ -100,25 +102,22 @@ fn write_seed(dir: &Path, name: &str) -> PathBuf {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs DELONIX_LIBVIRT_LIVE_DISK (a cloud-init qcow2), qemu-img, cloud-localds and a usable qemu:///system: cargo test -p delonix-provider-libvirt --test live -- --ignored"]
 fn libvirt_guest_agent_answers_on_a_real_cloud_init_boot() {
-    let Some(disk) = std::env::var("DELONIX_LIBVIRT_LIVE_DISK")
+    let disk = std::env::var("DELONIX_LIBVIRT_LIVE_DISK")
         .ok()
         .filter(|s| !s.is_empty())
-    else {
-        eprintln!(
-            "SKIP: set DELONIX_LIBVIRT_LIVE_DISK to a real cloud-init base qcow2 to run this test"
+        .expect("DELONIX_LIBVIRT_LIVE_DISK must name a real cloud-init base qcow2 to run this --ignored test");
+    for tool in ["qemu-img", "cloud-localds"] {
+        assert!(
+            !tool_missing(tool),
+            "{tool} must be on PATH to run this --ignored test"
         );
-        return;
-    };
-    if tool_missing("qemu-img") || tool_missing("cloud-localds") {
-        eprintln!("SKIP: qemu-img/cloud-localds not on PATH");
-        return;
     }
-    if !system_libvirt_usable() {
-        eprintln!("SKIP: qemu:///system is not usable here (join the `libvirt` group?)");
-        return;
-    }
+    assert!(
+        system_libvirt_usable(),
+        "qemu:///system must be usable to run this --ignored test (join the `libvirt` group?)"
+    );
 
     let name = format!("dlx-live-guestagent-{}", std::process::id());
     let dir = tempfile::tempdir().expect("tempdir");

@@ -25,8 +25,9 @@
 //! constructed [`Vm`] with no real network reaches them just as faithfully,
 //! and far more safely on a host that runs other people's VMs too.
 //!
-//! Needs `cloud-hypervisor`, `/dev/kvm` and a known firmware present; skips
-//! (does not fail) when any is missing — the same shape
+//! Needs `cloud-hypervisor`, `qemu-img`, `/dev/kvm` and a known firmware
+//! present. Run with `--ignored`, a missing one FAILS the test naming it — a
+//! silent return would read as `passed` — the same shape
 //! `delonix-provider-libvirt`'s own `tests/live.rs` uses.
 //!
 //! Cleans up unconditionally via `Drop`: the VMM is killed even if an
@@ -67,16 +68,19 @@ impl Drop for Guard {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs cloud-hypervisor, qemu-img, /dev/kvm and a Cloud Hypervisor firmware: cargo test -p delonix-provider-cloud-hypervisor --test live -- --ignored"]
 fn hotplug_add_reads_back_the_real_vmm_adr_0068() {
-    if tool_missing("cloud-hypervisor") || !Path::new("/dev/kvm").exists() {
-        eprintln!("skip: no cloud-hypervisor and/or /dev/kvm on this host");
-        return;
-    }
-    let Some(fw) = firmware() else {
-        eprintln!("skip: no Cloud Hypervisor firmware installed");
-        return;
-    };
+    assert!(
+        !tool_missing("cloud-hypervisor"),
+        "cloud-hypervisor must be on PATH to run this --ignored test"
+    );
+    assert!(
+        Path::new("/dev/kvm").exists(),
+        "/dev/kvm must exist to run this --ignored test"
+    );
+    let fw = firmware().unwrap_or_else(|| {
+        panic!("a Cloud Hypervisor firmware ({DEFAULT_CH_FIRMWARES:?}) must be installed to run this --ignored test")
+    });
     let dir = tempfile::tempdir().expect("tempdir");
     let disk = dir.path().join("boot.qcow2");
     let made = Command::new("qemu-img")

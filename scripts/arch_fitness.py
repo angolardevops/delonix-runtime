@@ -329,6 +329,149 @@ def consumer_mentions() -> list[str]:
                 bad.append(f"{rel}:{n}: names a consumer ({m.group(0)!r}) — the engine knows none")
     return bad
 
+# An integration test that RETURNS passes. `let Ok(url) = env::var(..) else { return; }`
+# is how live tests against real Proxmox, OPNsense, TrueNAS and PowerDNS read as
+# `passed` in every run that never had a target (B-66): a CI with none of the
+# variables set looked exactly like one that drove the appliances. A test that
+# needs something it cannot get is `#[ignore = "what it needs"]` and FAILS, naming
+# it, when run with `--ignored` -- never a silent pass. The rule is absolute (no
+# ratchet): measured 2026-10-11, every `return;` in an integration test body was
+# one of these skips.
+TEST_ROOTS = ("crates", "bins")
+TEST_ATTR = re.compile(r"#\[\s*(?:tokio::)?test\b")
+TEST_FN = re.compile(r"\bfn\s+(\w+)")
+EARLY_RETURN = re.compile(r"\breturn\s*(?:Ok\s*\(\s*\(\s*\)\s*\)\s*)?;")
+IGNORE_ATTR = re.compile(r"#\[\s*ignore\s*(?:=\s*\"([^\"]*)\")?\s*\]")
+RAW_STRING = re.compile(r'b?r(#*)"')
+CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^\\'])'")
+
+
+def rust_code_only(src: str) -> str:
+    """`src` with comments, string and char literals blanked, offsets kept.
+
+    So a brace or a `return;` inside a message or a comment is neither a block
+    nor a skip. Lifetimes (`'a`) are left as they are.
+    """
+    out = list(src)
+    i, n = 0, len(src)
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = src[i]
+        raw = RAW_STRING.match(src, i) if c in "br" else None
+        if raw and i and (src[i - 1].isalnum() or src[i - 1] == "_"):
+            raw = None  # the tail of an identifier, not a literal's prefix
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+        elif src.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif src.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            blank(i, j)
+            i = j
+        elif raw:
+            end = src.find('"' + raw.group(1), raw.end())
+            j = n if end < 0 else end + 1 + len(raw.group(1))
+            blank(i, j)
+            i = j
+        elif c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            blank(i, j + 1)
+            i = j + 1
+        elif c == "'" and (ch := CHAR_LITERAL.match(src, i)):
+            blank(i, ch.end())
+            i = ch.end()
+        else:
+            i += 1
+    return "".join(out)
+
+
+def test_functions(src: str) -> list[tuple[str, int, str, str]]:
+    """Every `#[test]` function: (name, line, its attributes, its body as code only)."""
+    code = rust_code_only(src)
+    found = []
+    for m in TEST_ATTR.finditer(code):
+        fn = TEST_FN.search(code, m.end())
+        if not fn:
+            continue
+        # The attributes around `#[test]`: from the end of the previous item to `fn`.
+        start = max(code.rfind("}", 0, m.start()), code.rfind(";", 0, m.start())) + 1
+        attrs = src[start : fn.start()]
+        open_ = code.find("{", fn.end())
+        if open_ < 0:
+            continue
+        depth, j = 0, open_
+        while j < len(code):
+            if code[j] == "{":
+                depth += 1
+            elif code[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        line = code.count("\n", 0, fn.start()) + 1
+        found.append((fn.group(1), line, attrs, code[open_ : j + 1]))
+    return found
+
+
+def integration_test_files(root: Path = ROOT) -> list[Path]:
+    """Every `.rs` under a `tests/` directory of a crate or a bin."""
+    files: list[Path] = []
+    for top in TEST_ROOTS:
+        files += [
+            f
+            for f in sorted((root / top).rglob("*.rs"))
+            if "tests" in f.relative_to(root).parts and "target" not in f.parts
+        ]
+    return files
+
+
+def silent_test_skips(files: list[Path], root: Path = ROOT) -> list[str]:
+    """Integration tests that pass without running, and live ones that hide what they need.
+
+    1. A `return;` (or `return Ok(());`) in a test body: the test reports
+       `passed` having proven nothing, whatever made it stop.
+    2. A bare `#[ignore]` in a `tests/*live*.rs` file: whoever reads the
+       `cargo test` output sees `ignored` and has to open the file to learn
+       which appliance, variable or tool turns it on.
+    """
+    bad: list[str] = []
+    for f in files:
+        rel = f.relative_to(root).as_posix()
+        src = f.read_text(encoding="utf-8", errors="replace")
+        live = "live" in f.stem
+        for name, line, attrs, body in test_functions(src):
+            n = len(EARLY_RETURN.findall(body))
+            if n:
+                bad.append(
+                    f"{rel}:{line}: {name} has {n} early return(s) -- a test that returns "
+                    f"passes without running; mark it #[ignore = \"needs ...\"] and fail "
+                    f"naming what is missing"
+                )
+            if live:
+                for ig in IGNORE_ATTR.finditer(attrs):
+                    if not (ig.group(1) or "").strip():
+                        bad.append(
+                            f"{rel}:{line}: {name} is #[ignore] without a reason -- write "
+                            f"#[ignore = \"needs <variable/tool>: <command> -- --ignored\"]"
+                        )
+    return bad
+
+
 DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
@@ -432,6 +575,7 @@ def main() -> int:
     bad += inline_package_fields(pkgs, shared)
     bad += misplaced(pkgs)
     bad += consumer_mentions()
+    bad += silent_test_skips(integration_test_files())
 
     # An exception with no phase is worse than the violation it covers.
     for key, (phase, reason) in EXCEPTIONS.items():
