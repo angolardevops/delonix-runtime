@@ -874,7 +874,7 @@ async fn handle(
         ("GET", "/info") => (StatusCode::OK, info_json(&state)),
         ("GET", "/containers/json") => (
             StatusCode::OK,
-            containers_json(&state).unwrap_or_else(|_| b"[]".to_vec()),
+            containers_json(&state, query_flag(&params, "all")).unwrap_or_else(|_| b"[]".to_vec()),
         ),
         ("GET", "/images/json") => (
             StatusCode::OK,
@@ -1228,10 +1228,7 @@ async fn handle_remove(
     id: &str,
     params: &std::collections::HashMap<String, String>,
 ) -> (StatusCode, Vec<u8>) {
-    let force = params
-        .get("force")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
+    let force = query_flag(params, "force");
     let state = state.clone();
     let id = id.to_string();
     match run_blocking(move || super::container::cmd_rm(&state.images, &state.store, &id, force))
@@ -1721,27 +1718,19 @@ fn docker_status_text(c: &Container) -> String {
     }
 }
 
-fn containers_json(state: &AppState) -> Result<Vec<u8>> {
+/// `GET /containers/json`: without `all` (or with `all=0`), only the running
+/// containers — the list `docker ps` asks for, by the same rule as
+/// `container ps` ([`super::container::listed_without_all`]). The parameter was
+/// ignored until 2026-10-11 and every container came back, the dead ones
+/// included. `filters` is still not applied: a client that sends one gets every
+/// container its `all` allows, and filters on its side.
+fn containers_json(state: &AppState, all: bool) -> Result<Vec<u8>> {
     let containers = state.store.list()?;
     let items: Vec<_> = containers
         .iter()
+        .filter(|c| all || super::container::listed_without_all(&c.status))
         .map(|c| {
-            let ports: Vec<_> = c
-                .ports
-                .iter()
-                .filter_map(|p| {
-                    // delonix stores "hostPort:contPort[/proto]" — best-effort parse.
-                    let (host_part, rest) = p.split_once(':')?;
-                    let (cport, proto) = rest.split_once('/').unwrap_or((rest, "tcp"));
-                    let host_port: u16 = host_part.parse().ok()?;
-                    let cport: u16 = cport.parse().ok()?;
-                    Some(json!({
-                        "PrivatePort": cport,
-                        "PublicPort": host_port,
-                        "Type": proto,
-                    }))
-                })
-                .collect();
+            let ports = docker_port_entries(&c.ports);
             json!({
                 "Id": c.id,
                 "Names": [format!("/{}", c.name)],
@@ -1765,6 +1754,39 @@ fn containers_json(state: &AppState) -> Result<Vec<u8>> {
         })
         .collect();
     Ok(serde_json::to_vec(&items)?)
+}
+
+/// A boolean query parameter as the Docker API spells it: `1` or `true`.
+fn query_flag(params: &std::collections::HashMap<String, String>, key: &str) -> bool {
+    params
+        .get(key)
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false)
+}
+
+/// The `Ports` of a container, read with the same parser the CLI publishes with
+/// ([`delonix_sdn::parse_publish_addr`]). The record has stored
+/// `addr:hostPort:contPort/proto` since 2026-10-07, and the hand parser that
+/// stood here only knew `hostPort:contPort`: it took the address for the host
+/// port, failed to read it as a number, and dropped every published port. A
+/// legacy record without an address carries no `IP`, because the address it
+/// bound with was never recorded.
+fn docker_port_entries(ports: &[String]) -> Vec<serde_json::Value> {
+    ports
+        .iter()
+        .filter_map(|p| {
+            let (addr, host_port, cont_port, proto) = delonix_sdn::parse_publish_addr(p).ok()?;
+            let mut entry = json!({
+                "PrivatePort": cont_port.parse::<u16>().ok()?,
+                "PublicPort": host_port.parse::<u16>().ok()?,
+                "Type": proto,
+            });
+            if let Some(ip) = addr {
+                entry["IP"] = json!(ip);
+            }
+            Some(entry)
+        })
+        .collect()
 }
 
 fn images_json(state: &AppState) -> Result<Vec<u8>> {
@@ -2093,5 +2115,42 @@ mod last_error_line_tests {
             last_error_line("delonix: conflict: x").as_deref(),
             Some("conflict: x")
         );
+    }
+}
+
+#[cfg(test)]
+mod containers_json_tests {
+    use super::*;
+
+    #[test]
+    fn ports_are_read_with_the_publish_parser() {
+        let entries = docker_port_entries(&[
+            "127.0.0.1:51888:80/tcp".to_string(),
+            "0.0.0.0:5070:5070/udp".to_string(),
+            "8080:80".to_string(),
+        ]);
+        assert_eq!(
+            entries,
+            vec![
+                json!({"PrivatePort": 80, "PublicPort": 51888, "Type": "tcp", "IP": "127.0.0.1"}),
+                json!({"PrivatePort": 5070, "PublicPort": 5070, "Type": "udp", "IP": "0.0.0.0"}),
+                json!({"PrivatePort": 80, "PublicPort": 8080, "Type": "tcp"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unreadable_spec_is_left_out_not_guessed() {
+        assert!(docker_port_entries(&["not-a-port".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn the_all_flag_reads_as_the_docker_api_spells_it() {
+        let q = |s: &str| parse_query(s);
+        assert!(query_flag(&q("all=1"), "all"));
+        assert!(query_flag(&q("all=true"), "all"));
+        assert!(!query_flag(&q("all=0"), "all"));
+        assert!(!query_flag(&q("all=false"), "all"));
+        assert!(!query_flag(&q(""), "all"));
     }
 }

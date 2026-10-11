@@ -7129,6 +7129,49 @@ fi
 rm -rf "$L3"
 fi
 
+section "container ps sem -a: só os que estão a correr, na CLI e na API Docker"
+# `container ps` sem `-a` listava `Exited (0)` — um `stop`, ou uma saída com 0 —
+# e escondia `Exited (3)` e `Dead`: a mesma situação listada ou escondida pelo
+# código de saída. O `--help` («# the running ones») e o `cli-stability.md` (a
+# semântica do `docker ps`) prometem só os que estão a correr. A API Docker
+# ignorava o `all` e devolvia tudo, e perdia as portas publicadas: o parser dela
+# esperava `hostPort:contPort` e o registo guarda `addr:hostPort:contPort/proto`
+# desde 2026-10-07. Medido a 2026-10-11 nos três.
+PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"
+if [ "$E2E_HAVE_IMAGE" = 1 ] \
+   && "$BIN" container run -d --name "$PSR" --net none -p 127.0.0.1:51889:80 "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$PSS" --net none "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$PSF" --net none "$IMG" sh -c 'exit 3' >/dev/null 2>&1; then
+  "$BIN" container stop -t 0 "$PSS" >/dev/null 2>&1
+  for _ in $(seq 1 50); do
+    "$BIN" container inspect "$PSF" 2>/dev/null | grep -qE '"status": *"Running"' || break; sleep 0.2
+  done
+  check "container ps lista o que está a correr" ok bash -c \
+    "'$BIN' container ps | grep -qE ' $PSR\$'"
+  check "container ps NÃO lista um container parado por stop" ok bash -c \
+    "! '$BIN' container ps | grep -qE ' $PSS\$'"
+  check "container ps NÃO lista um container que saiu com 3" ok bash -c \
+    "! '$BIN' container ps | grep -qE ' $PSF\$'"
+  check "container ps -a lista os três" ok bash -c \
+    "[ \"\$('$BIN' container ps -a | grep -cE ' ($PSR|$PSS|$PSF)\$')\" = 3 ]"
+  check "container ps -q e -o json seguem a mesma regra" ok bash -c \
+    "'$BIN' container ps -o json | python3 -c \"import json,sys; n={r['name'] for r in json.load(sys.stdin)}; sys.exit(0 if '$PSR' in n and '$PSS' not in n and '$PSF' not in n else 1)\""
+  PSSOCK="/tmp/dlx-srv-ps-$PFX.sock"
+  PSPID="$(e2e_serve_up docker-api "$PSSOCK")"
+  check "docker-api: GET /containers/json sem all só devolve os que estão a correr" ok bash -c \
+    "n=\"\$(curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json' | python3 -c \"import json,sys; print(' '.join(c['Names'][0][1:] for c in json.load(sys.stdin)))\")\"; [[ \" \$n \" == *' $PSR '* && \" \$n \" != *' $PSS '* && \" \$n \" != *' $PSF '* ]]"
+  check "docker-api: all=1 devolve também os parados" ok bash -c \
+    "n=\"\$(curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json?all=1' | python3 -c \"import json,sys; print(' '.join(c['Names'][0][1:] for c in json.load(sys.stdin)))\")\"; [[ \" \$n \" == *' $PSS '* && \" \$n \" == *' $PSF '* ]]"
+  check "docker-api: a porta publicada vem nos Ports, com o IP" ok bash -c \
+    "curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json' | python3 -c \"import json,sys; p=[c['Ports'] for c in json.load(sys.stdin) if c['Names'][0]=='/$PSR']; sys.exit(0 if p and {'PrivatePort':80,'PublicPort':51889,'Type':'tcp','IP':'127.0.0.1'} in p[0] else 1)\""
+  [ -n "$PSPID" ] && kill "$PSPID" 2>/dev/null
+  for _ in $(seq 1 40); do kill -0 "$PSPID" 2>/dev/null || break; sleep 0.2; done
+  rm -f "$PSSOCK"
+else
+  skip "container ps sem -a" "sem imagem, ou um dos três containers não arrancou"
+fi
+"$BIN" container rm -f "$PSR" "$PSS" "$PSF" >/dev/null 2>&1
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1

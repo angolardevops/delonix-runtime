@@ -1154,7 +1154,7 @@ scrape Prometheus nunca divergirem na aritmética.
   (0.14-0.2s, gauges caras a preencherem-se depois da 1ª passagem em
   background) e `/v1/dash` (JSON completo, ~33s) via socket unix real.
 
-- `container ls` tem as 7 colunas do `docker ps`. O `Up …` sai do `pid_starttime` do init e **não**
+- `container ls` tem as 7 colunas do `docker ps`. **E lista o que o `docker ps` lista** (2026-10-11): sem `-a`, só `Running` e `Paused` (`listed_without_all`, partilhada com o `GET /containers/json` da API Docker, que passou a respeitar o `all`). Antes escondia só `Failed`/`Crashed`, por isso um `stop` ou uma saída com 0 ficavam na listagem e uma saída com 3 não — e o check da bateria que espera um container parado sair do `ps` saltava todas as rondas. A mesma passagem achou a API Docker a devolver `"Ports": []`: o parser dela esperava `hostPort:contPort` e o registo guarda `addr:hostPort:contPort/proto` desde 2026-10-07; lê agora com o `parse_publish_addr`. O `Up …` sai do `pid_starttime` do init e **não**
   do `created_unix`: um container criado ontem e reiniciado há 5 min mostraria "Up 1 day" — falso
   exactamente quando interessa (a depurar um crash-loop).
 - `fmt_duration_secs` porta o `units.HumanDuration` do docker **à letra**, baldes incluídos (dias

@@ -3723,6 +3723,20 @@ fn restart_counts(root: &std::path::Path) -> std::collections::HashMap<String, u
     counts
 }
 
+/// Whether a container is listed by `container ps` WITHOUT `-a`: the running
+/// ones, as `docker ps` and `podman ps` list them (a paused container is still
+/// running there). The `--help` and `docs/cli-stability.md` promise exactly this.
+///
+/// Until 2026-10-11 the rule was the opposite shape — hide only `Failed` and
+/// `Crashed` — so a container stopped by `stop`, or one that exited 0 by itself,
+/// stayed in the default listing while one that exited 3 did not: the same
+/// situation listed or hidden by its exit code. The battery check that waits for
+/// a stopped container to leave `ps` could never pass, and was skipping every
+/// round. The Docker API's `GET /containers/json` uses this same function.
+pub(crate) fn listed_without_all(status: &Status) -> bool {
+    matches!(status, Status::Running | Status::Paused)
+}
+
 fn cmd_ps(
     images: &ImageStore,
     store: &Store,
@@ -3756,8 +3770,7 @@ fn cmd_ps(
     let mut included: Vec<Container> = Vec::new();
     for mut c in cs {
         reconcile_with_diagnostics(store, &mut c);
-        let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
-        if !all && hidden {
+        if !all && !listed_without_all(&c.status) {
             continue;
         }
         included.push(c);
@@ -8877,5 +8890,30 @@ mod attach_kept_tests {
             live_owner(&Some(record_of(Some(me), other_start))).is_none(),
             "recycled pid"
         );
+    }
+}
+
+#[cfg(test)]
+mod ps_default_listing_tests {
+    use super::*;
+
+    /// `container ps` without `-a` lists what `docker ps` lists: running and
+    /// paused. The old rule hid only `Failed`/`Crashed`, so `Stopped` (a `stop`,
+    /// or an exit with 0) stayed in the default listing.
+    #[test]
+    fn only_running_and_paused_are_listed_without_all() {
+        assert!(listed_without_all(&Status::Running));
+        assert!(listed_without_all(&Status::Paused));
+        for hidden in [
+            Status::Created,
+            Status::Stopped,
+            Status::Failed(3),
+            Status::Crashed,
+        ] {
+            assert!(
+                !listed_without_all(&hidden),
+                "{hidden:?} must need -a to be listed"
+            );
+        }
     }
 }
