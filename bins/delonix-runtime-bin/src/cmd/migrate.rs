@@ -201,8 +201,9 @@ pub fn run(cmd: MigrateCmd) -> Result<()> {
         } => {
             let path = resolve(file)?;
             let text = std::fs::read_to_string(&path)?;
-            let doc: serde_yaml::Value = serde_yaml::from_str(&text)
-                .map_err(|e| Error::Invalid(format!("parsing compose file: {e}")))?;
+            // The same parse `compose up` does, `<<` merge keys applied: the
+            // keys a service gets from `<<: *anchor` are the keys it uses.
+            let doc = super::compose::parse_compose_value(&text)?;
             let a = assess_doc(&doc, &path.display().to_string());
 
             match output {
@@ -279,7 +280,35 @@ mod tests {
     use super::*;
 
     fn assess(yaml: &str) -> Assessment {
-        assess_doc(&serde_yaml::from_str(yaml).unwrap(), "test.yaml")
+        assess_doc(
+            &super::super::compose::parse_compose_value(yaml).unwrap(),
+            "test.yaml",
+        )
+    }
+
+    /// A service built with `<<: *anchor` is scored on the keys it really
+    /// gets: `<<` was a «missing» row and the merged keys were not seen.
+    #[test]
+    fn merged_keys_are_scored_and_the_merge_key_is_not() {
+        let a = assess(
+            "x-app: &app\n  restart: always\n  init: true\nservices:\n  web:\n    <<: *app\n    image: nginx\n",
+        );
+        assert!(a.findings.iter().all(|f| f.key != "<<"), "{:?}", keys(&a));
+        assert!(a
+            .findings
+            .iter()
+            .any(|f| f.scope == "web" && f.key == "restart"));
+        assert!(a
+            .findings
+            .iter()
+            .any(|f| f.scope == "web" && f.key == "init" && f.state == "missing"));
+    }
+
+    fn keys(a: &Assessment) -> Vec<String> {
+        a.findings
+            .iter()
+            .map(|f| format!("{}:{}", f.scope, f.key))
+            .collect()
     }
 
     #[test]
@@ -314,9 +343,8 @@ mod tests {
         // The header says "key USES, not distinct keys" — this fixes it, because
         // the number a migration cares about is how many decisions it has to
         // make, and three services with `devices:` are three.
-        let a = assess(
-            "services:\n  a:\n    shm_size: 1g\n  b:\n    shm_size: 1g\n  c:\n    shm_size: 1g\n",
-        );
+        let a =
+            assess("services:\n  a:\n    init: true\n  b:\n    init: true\n  c:\n    init: true\n");
         assert_eq!(a.missing, 3);
     }
 

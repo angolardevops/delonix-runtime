@@ -664,6 +664,18 @@ check "migrate assess -o json" ok bash -c \
   "'$BIN' migrate assess -f '$COMPW/limpo.yml' -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['served']>0 and d['missing']==0\""
 check "migrate assess de um ficheiro inexistente diz 4" 4 \
   "$BIN" migrate assess -f "$COMPW/naoexiste.yml"
+# The repository's own sample stack (web + Postgres + Redis + worker, shared
+# settings through `<<: *anchor`, two networks on one service, `name:`). Every
+# key it uses is served, so the assessment is clean; and `compose config`
+# names the project from `name:` and keeps the second network. Three defects
+# this sample found (2026-10-11) are the three greps: `<<` refused,
+# `name:` ignored, the second network dropped with a warning.
+SAMPLE="$REPO/examples/compose-webapp/compose.yaml"
+check "migrate assess: the compose-webapp sample is fully served" 0 \
+  "$BIN" migrate assess -f "$SAMPLE" --detailed-exitcode
+check "compose config: the sample's project is its name: and web keeps both networks" ok bash -c \
+  "out=\$('$BIN' compose config -f '$SAMPLE' 2>&1) && grep -q '^# compose project: shop' <<<\"\$out\" \
+   && grep -A4 '^service web:' <<<\"\$out\" | grep -q 'extra networks: \\[\"shop_backend\"\\]'"
 rm -rf "$COMPW"
 
 ########################################
