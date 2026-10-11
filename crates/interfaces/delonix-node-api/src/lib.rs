@@ -10,7 +10,7 @@
 //! the same functions `delonix system info` reads. `GET /openapi.json` serves
 //! the published document, and `GET /docs` (Swagger UI) and `GET /redoc`
 //! render it from UI files embedded in the binary ([`docs`]). `WatchEvents`
-//! answers `UNIMPLEMENTED` with the step that brings it; every service of the
+//! streams the engine's event log ([`events`]); every service of the
 //! contract this socket does not implement at all (`ContainerService`,
 //! `PodService`) is not registered either.
 //!
@@ -80,6 +80,7 @@ pub mod proto {
 }
 
 pub mod docs;
+pub mod events;
 pub mod network_ops;
 pub mod networks;
 pub mod node;

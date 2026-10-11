@@ -235,17 +235,19 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .iter()
         .any(|l| l.rel == "self" && l.href == "/v1"));
 
-    // What is not served says so — and says with which step it arrives.
-    let watch = cli
-        .watch_events(WatchEventsRequest::default())
+    // WatchEvents is served: a stream opens. A namespace filter the event
+    // records cannot honour is refused, not ignored.
+    cli.watch_events(WatchEventsRequest::default())
         .await
-        .expect_err("WatchEvents is not served yet");
-    assert_eq!(watch.code(), tonic::Code::Unimplemented);
-    assert!(
-        watch.message().contains("ADR-0040 P5"),
-        "{}",
-        watch.message()
-    );
+        .expect("WatchEvents opens a stream");
+    let refused = cli
+        .watch_events(WatchEventsRequest {
+            namespace: "team-a".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("a namespace filter is refused");
+    assert_eq!(refused.code(), tonic::Code::Unimplemented);
 }
 
 /// The JSON routes of `GetNodeInfo`/`GetHealth`/`GetCapacity` answer with the

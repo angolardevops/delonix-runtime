@@ -45,15 +45,6 @@ use crate::{node, providers};
 #[derive(Clone, Default)]
 pub struct NodeApi;
 
-/// The RPC the contract has and this server does not serve yet answers with
-/// the step that brings it — a refusal a client can read, never a default body
-/// that looks like an answer.
-fn not_yet(rpc: &str) -> Status {
-    Status::unimplemented(format!(
-        "{rpc} is not served yet: it lands with ADR-0040 P5"
-    ))
-}
-
 /// Runs a host probe off the runtime's workers: every `NodeService` answer
 /// reads files, cgroups and provider probes, which block.
 async fn blocking<T: Send + 'static>(
@@ -157,9 +148,16 @@ impl NodeService for NodeApi {
 
     async fn watch_events(
         &self,
-        _req: Request<WatchEventsRequest>,
+        req: Request<WatchEventsRequest>,
     ) -> Result<Response<Self::WatchEventsStream>, Status> {
-        Err(not_yet("WatchEvents"))
+        let req = req.into_inner();
+        // The replay reads files: off the workers, and the polling task it
+        // spawns lands on the runtime (a blocking-pool thread is inside it).
+        let stream = blocking("events watch", move || {
+            crate::events::watch(node::state_root(), req, crate::events::POLL)
+        })
+        .await??;
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 
