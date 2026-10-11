@@ -18,9 +18,34 @@ use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_delonix-node-api");
 
+/// The started server, killed and reaped when the test ends — a failed
+/// assertion included, so a server the test expected to refuse and that
+/// served instead never outlives the run.
+struct Server(Child);
+
+impl std::ops::Deref for Server {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Server {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Starts the binary with `fd` as its descriptor 3 and the two variables set
 /// for its own pid.
-fn activate(fd: RawFd, root: &std::path::Path, args: &[&str]) -> Child {
+fn activate(fd: RawFd, root: &std::path::Path, args: &[&str]) -> Server {
     let mut cmd = Command::new("/bin/sh");
     cmd.arg("-c")
         .arg(r#"export LISTEN_PID=$$ LISTEN_FDS=1; exec "$0" "$@""#)
@@ -47,7 +72,7 @@ fn activate(fd: RawFd, root: &std::path::Path, args: &[&str]) -> Child {
             Ok(())
         });
     }
-    cmd.spawn().expect("spawning the node API")
+    Server(cmd.spawn().expect("spawning the node API"))
 }
 
 /// One `GET` over HTTP/1.1, answered or not within 10 s.
