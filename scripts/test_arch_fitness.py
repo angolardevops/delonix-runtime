@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Unit tests for the `[workspace.package]` rule of `scripts/arch_fitness.py` —
+"""Unit tests for the `[workspace.package]` and the silent-test-skip rules of
+`scripts/arch_fitness.py` —
 stdlib `unittest`, no new dependency (same reasoning as `test_release_verify.py`).
 
 The rule exists because of what the gate did NOT catch: `delonix-mgmt` said
@@ -105,6 +106,117 @@ class WorkspacePackageFields(unittest.TestCase):
     def test_the_real_root_still_declares_the_four_keys(self):
         """If the root stops sharing one, this gate quietly stops guarding it."""
         self.assertEqual(g.shared_package_keys(), SHARED)
+
+
+class SilentTestSkips(unittest.TestCase):
+    """The B-66 rule: an integration test that returns is a `passed` that ran nothing.
+
+    Measured before the rule: 33 early returns in 23 live tests (Proxmox,
+    PowerDNS, libvirt, Cloud Hypervisor, the VM providers, the cgroup parent),
+    each reported as `passed` by every `cargo test --workspace` that had no
+    target. The fix is `#[ignore = "needs ..."]` plus a failure naming what is
+    missing; these tests fix what the gate must and must not count.
+    """
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def judge(self, body: str, name: str = "live.rs") -> list[str]:
+        f = self.root / "crates" / "x" / "tests" / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(body, encoding="utf-8")
+        return g.silent_test_skips([f], root=self.root)
+
+    def test_a_let_else_return_on_a_missing_variable_fails(self):
+        (only,) = self.judge(
+            '#[ignore = "needs X: cargo test -- --ignored"]\n#[test]\nfn t() {\n'
+            '    let Ok(url) = std::env::var("X") else {\n        return;\n    };\n'
+            "    assert!(!url.is_empty());\n}\n"
+        )
+        self.assertIn("crates/x/tests/live.rs:3: t has 1 early return", only)
+
+    def test_an_early_ok_return_fails_too(self):
+        (only,) = self.judge(
+            "#[test]\nfn t() -> Result<(), String> {\n    if true {\n        return Ok(());\n    }\n"
+            "    Ok(())\n}\n",
+            name="other.rs",
+        )
+        self.assertIn("early return", only)
+
+    def test_a_failure_naming_the_variable_passes(self):
+        self.assertEqual(
+            self.judge(
+                '#[test]\n#[ignore = "needs X: cargo test -- --ignored"]\nfn t() {\n'
+                '    let url = std::env::var("X").expect("X must be set");\n'
+                "    assert!(!url.is_empty());\n}\n"
+            ),
+            [],
+        )
+
+    def test_a_return_outside_a_test_body_is_not_counted(self):
+        """A `Drop` or a helper may return; only a TEST that returns passes empty."""
+        self.assertEqual(
+            self.judge(
+                "struct G(bool);\nimpl Drop for G {\n    fn drop(&mut self) {\n"
+                "        if !self.0 {\n            return;\n        }\n    }\n}\n"
+                "fn helper() -> Option<u8> {\n    return None;\n}\n"
+                '#[ignore = "needs X: cmd"]\n#[test]\nfn t() {\n    let _ = helper();\n}\n'
+            ),
+            [],
+        )
+
+    def test_a_return_in_a_comment_or_a_string_is_not_counted(self):
+        self.assertEqual(
+            self.judge(
+                '#[ignore = "needs X: cmd"]\n#[test]\nfn t() {\n'
+                "    // return; was the old shape\n"
+                '    let s = "} return; {";\n'
+                '    let r = r#"return;"#;\n'
+                "    let c = '}';\n"
+                "    /* return; */\n"
+                "    assert!(!s.is_empty() && !r.is_empty() && c == '}');\n}\n"
+            ),
+            [],
+        )
+
+    def test_the_body_ends_at_its_own_closing_brace(self):
+        """A test after the bad one is judged on its own, and a good one is not blamed."""
+        problems = self.judge(
+            '#[ignore = "needs X: cmd"]\n#[test]\nfn good() {\n    if true {\n        let _ = 1;\n    }\n}\n'
+            '#[ignore = "needs X: cmd"]\n#[test]\nfn bad() {\n    return;\n}\n'
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn(": bad has 1 early return", problems[0])
+
+    def test_a_bare_ignore_in_a_live_file_fails(self):
+        (only,) = self.judge("#[test]\n#[ignore]\nfn t() {\n    assert!(true);\n}\n")
+        self.assertIn("t is #[ignore] without a reason", only)
+
+    def test_an_empty_reason_is_no_reason(self):
+        (only,) = self.judge('#[ignore = " "]\n#[test]\nfn t() {\n    assert!(true);\n}\n')
+        self.assertIn("without a reason", only)
+
+    def test_a_bare_ignore_outside_a_live_file_is_not_this_rules_business(self):
+        self.assertEqual(
+            self.judge("#[test]\n#[ignore]\nfn t() {\n    assert!(true);\n}\n", name="slow.rs"),
+            [],
+        )
+
+    def test_the_gate_reads_the_live_files_of_the_real_tree(self):
+        """If the walk stops finding them, the rule guards nothing and reads as green."""
+        found = {f.relative_to(g.ROOT).as_posix() for f in g.integration_test_files()}
+        for live in (
+            "crates/providers/delonix-proxmox/tests/live.rs",
+            "crates/providers/delonix-powerdns/tests/live.rs",
+            "crates/adapters/delonix-linux/tests/cgroup_parent.rs",
+        ):
+            self.assertIn(live, found)
+        proxmox = (g.ROOT / "crates/providers/delonix-proxmox/tests/live.rs").read_text(encoding="utf-8")
+        self.assertGreaterEqual(len(g.test_functions(proxmox)), 42)
 
 
 if __name__ == "__main__":
