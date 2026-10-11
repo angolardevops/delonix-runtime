@@ -31,6 +31,16 @@
 //! `Idempotency-Key`) makes a retry the first answer; `etag` (REST:
 //! `If-Match`) makes a stale delete 412.
 //!
+//! `VolumeService` ([`volumes`] reads, [`volume_ops`] writes): `CreateVolume`
+//! of a local volume (quota, alert, labels) and `DeleteVolume` of a local
+//! volume or a share's record, on the same ledger; a remote share, a share,
+//! provisioning, a pool volume and `destroy_remote` answer `UNIMPLEMENTED`
+//! with the CLI command that does them. `OperationService.WatchOperation`
+//! streams an operation until it ends (gRPC only: the REST encoding does not
+//! carry streams), and `CancelOperation` answers `FAILED_PRECONDITION`
+//! (DX-5002) — no served mutation has a cancellation point, and an operation
+//! is never reported cancelled for work that ran.
+//!
 //! `VirtualMachineService` ([`vms`] reads, [`vm_ops`] writes), full: create/
 //! get/list/delete, start/stop (the same `Operation` ledger as networks),
 //! the synchronous pause/resume, and the snapshot lifecycle. `Console` (a
@@ -81,6 +91,7 @@ mod service;
 pub mod transcode;
 pub mod vm_ops;
 pub mod vms;
+pub mod volume_ops;
 pub mod volumes;
 
 pub use service::{

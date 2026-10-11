@@ -381,6 +381,17 @@ impl VolumeStore {
         self.dir(name).join("meta.json")
     }
 
+    /// `name` as every method of this store will judge it, so a caller can
+    /// refuse a name before it acknowledges anything (the node API's
+    /// `CreateVolume` does).
+    pub fn validate_name(name: &str) -> Result<()> {
+        if Self::valid_name(name) {
+            Ok(())
+        } else {
+            Err(Error::InvalidName(name.to_string()))
+        }
+    }
+
     // BUG FIXED HERE (CRITICAL, found live by adversarial review): this charset
     // check alone accepts "." and ".." — a name made ENTIRELY of dots is still
     // "every char is alnum/-/_/.". `register_external`'s caller (`kind:

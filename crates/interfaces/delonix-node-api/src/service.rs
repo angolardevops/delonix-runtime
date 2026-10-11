@@ -261,16 +261,26 @@ impl VolumeService for NodeApi {
 
     async fn create_volume(
         &self,
-        _req: Request<CreateVolumeRequest>,
+        req: Request<CreateVolumeRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("VolumeService", "CreateVolume"))
+        let req = req.into_inner();
+        blocking("volume create", move || {
+            crate::volume_ops::create_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 
     async fn delete_volume(
         &self,
-        _req: Request<DeleteVolumeRequest>,
+        req: Request<DeleteVolumeRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("VolumeService", "DeleteVolume"))
+        let req = req.into_inner();
+        blocking("volume delete", move || {
+            crate::volume_ops::delete_in(&node::state_root(), &req)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
@@ -467,16 +477,29 @@ impl OperationService for NodeApi {
 
     async fn watch_operation(
         &self,
-        _req: Request<WatchOperationRequest>,
+        req: Request<WatchOperationRequest>,
     ) -> Result<Response<Self::WatchOperationStream>, Status> {
-        Err(unserved("OperationService", "WatchOperation"))
+        let id = req.into_inner().id;
+        let stream = blocking("operation watch", move || {
+            // The first read is blocking file I/O. A blocking-pool thread is
+            // inside the runtime, so the polling task `watch` spawns lands on
+            // it, and reads off the workers in turn.
+            crate::operations::watch(node::state_root(), id, crate::operations::WATCH_POLL)
+        })
+        .await??;
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn cancel_operation(
         &self,
-        _req: Request<CancelOperationRequest>,
+        req: Request<CancelOperationRequest>,
     ) -> Result<Response<Operation>, Status> {
-        Err(unserved("OperationService", "CancelOperation"))
+        let id = req.into_inner().id;
+        blocking("operation cancel", move || {
+            crate::operations::cancel_in(&node::state_root(), &id)
+        })
+        .await?
+        .map(Response::new)
     }
 }
 
@@ -608,6 +631,8 @@ async fn rest(
 const MUTATIONS: &[&str] = &[
     "CreateNetwork",
     "DeleteNetwork",
+    "CreateVolume",
+    "DeleteVolume",
     "CreateVirtualMachine",
     "DeleteVirtualMachine",
     "StartVirtualMachine",

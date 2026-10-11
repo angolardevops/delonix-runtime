@@ -836,9 +836,13 @@ code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (co
     V_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS/$E3V")" \
     L_JSON="$(curl -s --unix-socket "$NODESOCK" "$VOLS")" E3V="$E3V" \
     python3 -c 'import json,os; v=json.loads(os.environ["V_JSON"]); n=os.environ["E3V"]; assert v["meta"]["name"]==n and v["meta"]["namespace"]=="default", v["meta"]; assert int(v["used_bytes"])>0, v; assert int(v["spec"]["quota_bytes"])==1<<30 and "local" in v["spec"], v["spec"]; c=v["conditions"][0]; assert (c["type"],c["status"],c["reason"])==("UsageMeasured","CONDITION_STATUS_TRUE","Measured"), c; assert "etag: \""+v["meta"]["etag"]+"\"" in os.environ["V_HDR"].lower(), os.environ["V_HDR"]; l=[x for x in json.loads(os.environ["L_JSON"])["volumes"] if x["meta"]["name"]==n]; assert len(l)==1 and "used_bytes" not in l[0] and l[0]["conditions"][0]["reason"]=="NotMeasuredInList", l'
-  check "um volume que não existe é 404 DX-4000; criar e remover volumes pelo socket ainda é 501" ok bash -c \
-    "[[ \$(curl -s --unix-socket '$NODESOCK' '$VOLS/nao-existe' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"status\"],d[\"dx\"])') == '404 DX-4000' ]] && [[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE --unix-socket '$NODESOCK' '$VOLS/$E3V') == 501 ]] && '$BIN' volume inspect '$E3V' >/dev/null"
+  check "um volume que não existe é 404 DX-4000; DELETE pelo socket remove o volume do motor (Operation SUCCEEDED, a CLI deixa de o ver)" ok bash -c \
+    "[[ \$(curl -s --unix-socket '$NODESOCK' '$VOLS/nao-existe' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"status\"],d[\"dx\"])') == '404 DX-4000' ]] && [[ \$(curl -s -X DELETE --unix-socket '$NODESOCK' '$VOLS/$E3V' | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"state\"])') == OPERATION_STATE_SUCCEEDED ]] && ! '$BIN' volume inspect '$E3V' >/dev/null 2>&1"
   "$BIN" volume rm "$E3V" >/dev/null 2>&1
+  E3N="e3new-$$"
+  check "POST …/volumes cria um volume local com quota e labels: Operation SUCCEEDED, e a CLI vê-o com a quota" ok bash -c \
+    "[[ \$(curl -s -X POST --unix-socket '$NODESOCK' '$VOLS' -H 'content-type: application/json' -d '{\"name\":\"$E3N\",\"labels\":{\"app\":\"e3\"},\"spec\":{\"quota_bytes\":1073741824}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"state\"])') == OPERATION_STATE_SUCCEEDED ]] && '$BIN' volume inspect '$E3N' | grep -q 1073741824"
+  "$BIN" volume rm "$E3N" >/dev/null 2>&1
   # ADR-0042 D3: /docs (Swagger UI) e /redoc (ReDoc), servidos pelo próprio socket
   # a partir de ficheiros embebidos no binário; nada carregado de fora (CSP).
   check "GET /docs e GET /redoc servem HTML com um Content-Security-Policy que só deixa scripts do próprio socket" ok bash -c \

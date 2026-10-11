@@ -206,13 +206,22 @@ async fn list_providers_answers_over_grpc_on_the_unix_socket() {
         .await
         .expect_err("no such operation");
     assert_eq!(missing.code(), tonic::Code::NotFound);
+    // Served: an id nothing was given is NOT_FOUND here too (what it does to
+    // a real operation is covered where the state root is the test's own).
     let cancel = ops
         .cancel_operation(delonix_node_api::proto::v1::CancelOperationRequest {
             id: "op-no-such-operation".into(),
         })
         .await
-        .expect_err("not served yet");
-    assert_eq!(cancel.code(), tonic::Code::Unimplemented);
+        .expect_err("no such operation");
+    assert_eq!(cancel.code(), tonic::Code::NotFound);
+    let watch = ops
+        .watch_operation(delonix_node_api::proto::v1::WatchOperationRequest {
+            id: "op-no-such-operation".into(),
+        })
+        .await
+        .expect_err("no such operation");
+    assert_eq!(watch.code(), tonic::Code::NotFound);
 
     // ADR-0042 D2: the entry point, on the gRPC encoding too.
     let root = cli
@@ -602,10 +611,10 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         ("GET", "/v1/namespaces/default/containers"),
         ("POST", "/v1/namespaces/default/containers/web:start"),
         ("POST", "/v1/namespaces/default/networks/lab:connect"),
-        ("POST", "/v1/operations/op-1:cancel"),
-        ("DELETE", "/v1/namespaces/default/volumes/data"),
         ("POST", "/v1/images:pull"),
         ("GET", "/v1/events:watch"),
+        // A stream is served over gRPC; the REST encoding does not carry one.
+        ("GET", "/v1/operations/op-1:watch"),
     ] {
         let (status, _, v) = call(method, path, "").await;
         assert_eq!(status, 501, "{method} {path}: {v}");
@@ -623,6 +632,21 @@ async fn contract_routes_resolve_and_say_what_is_not_served() {
         let (status, _, v) = call(method, path, body).await;
         assert_eq!(status, 400, "{method} {path}: {v}");
         assert_eq!(v["grpc_status"], 3, "{v}");
+    }
+    // A volume of another namespace is a share, which CreateVolume does not
+    // create yet: 501, refused before anything is written.
+    let (status, _, v) = call("POST", "/v1/namespaces/outro/volumes", r#"{"name":"x"}"#).await;
+    assert_eq!(status, 501, "{v}");
+    assert_eq!(v["dx"], "DX-6001", "{v}");
+    // CancelOperation and DeleteVolume are served: what nothing was ever
+    // given is 404, decided before anything is written.
+    for (method, path) in [
+        ("POST", "/v1/operations/op-no-such-operation:cancel"),
+        ("DELETE", "/v1/namespaces/no-such-namespace/volumes/data"),
+    ] {
+        let (status, _, v) = call(method, path, "").await;
+        assert_eq!(status, 404, "{method} {path}: {v}");
+        assert_eq!(v["dx"], "DX-4000", "{v}");
     }
     // The volume reads are served: a namespace nothing was ever stored in has
     // no volumes and no volume of any name, whatever this host has.

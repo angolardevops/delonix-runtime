@@ -31,7 +31,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 axum = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 tokio-stream = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio", "server", "http1", "http2"] }

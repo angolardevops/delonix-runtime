@@ -35,10 +35,10 @@ pub const DEFAULT_NAMESPACE: &str = "default";
 
 /// One volume with the namespace it is reported in and whether it comes from
 /// the unscoped root.
-struct Entry {
-    namespace: String,
-    scoped: bool,
-    volume: delonix_volume::Volume,
+pub(crate) struct Entry {
+    pub(crate) namespace: String,
+    pub(crate) scoped: bool,
+    pub(crate) volume: delonix_volume::Volume,
 }
 
 impl Entry {
@@ -57,7 +57,7 @@ impl Entry {
 /// Every volume under `root`, as reported. A state root that never had a
 /// volume has no `volumes/` directory: an empty list, and reading does not
 /// create it.
-fn entries(root: &Path) -> Result<Vec<Entry>, Status> {
+pub(crate) fn entries(root: &Path) -> Result<Vec<Entry>, Status> {
     if !root.join("volumes").is_dir() {
         return Ok(Vec::new());
     }
@@ -79,7 +79,7 @@ fn entries(root: &Path) -> Result<Vec<Entry>, Status> {
 }
 
 /// What the caller asked to see: `""` is `default`, `*` is every namespace.
-fn wanted(namespace: &str) -> Option<&str> {
+pub(crate) fn wanted(namespace: &str) -> Option<&str> {
     match namespace {
         "*" => None,
         "" => Some(DEFAULT_NAMESPACE),
@@ -88,7 +88,7 @@ fn wanted(namespace: &str) -> Option<&str> {
 }
 
 /// How the usage of a volume is known.
-enum Measured {
+pub(crate) enum Measured {
     /// The walk read every directory.
     Yes(u64),
     /// Some directories are not readable by this uid (data written under a
@@ -148,7 +148,7 @@ fn source(v: &delonix_volume::Volume) -> volume_spec::Source {
     })
 }
 
-fn message(e: &Entry, measured: Measured) -> Volume {
+pub(crate) fn message(e: &Entry, measured: Measured) -> Volume {
     let v = &e.volume;
     let collection = format!("/v1/namespaces/{}/volumes", page::escape(&e.namespace));
     let (used_bytes, usage) = match measured {
@@ -194,9 +194,7 @@ fn message(e: &Entry, measured: Measured) -> Volume {
                 seconds: v.created_unix as i64,
                 nanos: 0,
             }),
-            // Of the record, not of the usage: data written to a volume does
-            // not change what the volume is.
-            etag: page::fnv(&format!("{}|{v:?}", e.scoped)),
+            etag: etag_of(e),
             ..Default::default()
         }),
         spec: Some(VolumeSpec {
@@ -214,26 +212,38 @@ fn message(e: &Entry, measured: Measured) -> Volume {
     }
 }
 
-/// `GetVolume` under `root`, with its usage measured.
-pub fn get_in(root: &Path, req: &GetVolumeRequest) -> Result<Volume, Status> {
-    let ns = wanted(&req.namespace).unwrap_or("*");
-    let missing = || Status::not_found(format!("volume '{}' in namespace '{ns}'", req.name));
-    if ns == "*" {
+/// A volume's `etag`: of the record, not of the usage — data written to a
+/// volume does not change what the volume is.
+pub(crate) fn etag_of(e: &Entry) -> String {
+    page::fnv(&format!("{}|{:?}", e.scoped, e.volume))
+}
+
+/// The one volume `name` names in `namespace` (`""` is `default`), the way
+/// `GetVolume` resolves it: not found, or refused when the unscoped store and
+/// the namespace's own sub-tree both have it.
+pub(crate) fn find(root: &Path, namespace: &str, name: &str) -> Result<Entry, Status> {
+    let ns = wanted(namespace).unwrap_or("*");
+    let missing = || Status::not_found(format!("volume '{name}' in namespace '{ns}'"));
+    if ns == "*" || name.is_empty() {
         return Err(missing());
     }
     let mut found: Vec<Entry> = entries(root)?
         .into_iter()
-        .filter(|e| e.namespace == ns && e.volume.name == req.name)
+        .filter(|e| e.namespace == ns && e.volume.name == name)
         .collect();
     if found.len() > 1 {
         return Err(Status::failed_precondition(format!(
-            "volume '{}' exists twice in namespace '{ns}': once in the node's unscoped store \
+            "volume '{name}' exists twice in namespace '{ns}': once in the node's unscoped store \
              and once in the namespace's own — remove or rename one of them (`delonix volume \
-             ls -A` shows both)",
-            req.name
+             ls -A` shows both)"
         )));
     }
-    let entry = found.pop().ok_or_else(missing)?;
+    found.pop().ok_or_else(missing)
+}
+
+/// `GetVolume` under `root`, with its usage measured.
+pub fn get_in(root: &Path, req: &GetVolumeRequest) -> Result<Volume, Status> {
+    let entry = find(root, &req.namespace, &req.name)?;
     let usage = delonix_volume::measure(Path::new(&entry.volume.mountpoint));
     let measured = if usage.is_complete() {
         Measured::Yes(usage.bytes)
