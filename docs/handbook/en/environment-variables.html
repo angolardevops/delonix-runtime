@@ -486,6 +486,20 @@ and how to tear the isolated infra down, is in
 <td>Must name an existing file — never falls back to another one. The first file found is the configuration; files are never merged. A file that cannot be read makes a VM request without <code>--backend</code> fail instead of guessing a provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_SSH_KNOWN_HOSTS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/remote.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>remote.<wbr>rs:conn_args</code></a> (<code>host_key_opts</code>)</td>
+<td>Pins SSH host-key trust for <code>cluster apply</code>/<code>vm migrate</code> to a known_hosts file instead of the default trust-on-first-use.</td>
+<td>A path to a <code>known_hosts</code> file. Unset: <code>StrictHostKeyChecking=accept-new</code> (TOFU).</td>
+<td>Set it to close the first-contact MITM window: <code>StrictHostKeyChecking=yes</code> + <code>UserKnownHostsFile=&lt;path&gt;</code>, so an unknown or changed host key is refused instead of silently trusted. Wins over <code>DELONIX_SSH_STRICT</code>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_SSH_STRICT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/remote.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>remote.<wbr>rs:conn_args</code></a> (<code>host_key_opts</code>)</td>
+<td>Tightens SSH host-key checking against the default <code>known_hosts</code> without naming a file.</td>
+<td><code>1</code>/<code>true</code> → <code>StrictHostKeyChecking=yes</code>; unset/<code>0</code>/anything else → <code>accept-new</code> (TOFU).</td>
+<td>Below <code>DELONIX_SSH_KNOWN_HOSTS</code>. The default stays <code>accept-new</code> so a greenfield bootstrap of a host never seen before still connects.</td>
+</tr>
+<tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>Path to the administrator's storage pool allowlist (ADR-0067 D3), instead of <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
