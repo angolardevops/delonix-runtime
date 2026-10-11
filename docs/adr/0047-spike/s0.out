@@ -1,0 +1,24 @@
+delonix 5.0.2
+netA created
+netB created
+alpine:3.20 pulled
+ • unpacking the image 📦
+ ✓ unpacking the image 📦 3.6s
+be-a ns=teamA net=netA ip=10.251.153.125
+cl-a ns=teamA net=netA ip=10.251.65.216
+cl-b ns=teamB net=netA ip=10.251.212.68
+cl-a2 ns=teamA net=netB ip=10.230.33.2
+cl-b2 ns=teamB net=netB ip=10.230.108.102
+cl-m ns=teamB net=netB ip=10.230.108.135
+cl-m: attached to network netA — 10.251.108.135 on eth1
+cl-m joined netA
+pod/po: 1 container(s) sharing netns + IPC/UTS (ip 10.251.0.2)
+httproute: proxy started (#549174) in the holder's netns
+httproute: 1 route(s) on 1 listener(s) — proxy serving
+## be-a answers itself: WIN-be-a
+holder pid: 547730
+  holder lo 127.0.0.1/8
+  holder delonix0 10.200.0.1/16
+  holder tap0 10.0.2.100/24
+  holder dlxn49bf6a5b 10.251.0.1/16
+  holder dlxn4abf6bee 10.230.0.1/16

@@ -1,0 +1,15 @@
+## cl-b2 (teamB, netB) is 10.230.108.102; cl-m is teamB, primary 10.230.108.135 on netB, extra on netA
+cl-m asks netB gw (source = primary): Address: 10.230.108.102
+cl-m asks netA gw (source = extra):   ** server can't find cl-b2.teamB.delonix.internal: NXDOMAIN
+po-c0 (teamB pod, 10.251.0.2) asks netA gw:  Address: 10.230.108.102
+cl-a (teamA) asks netA gw (control, must not see teamB): ** server can't find cl-b2.teamB.delonix.internal: NXDOMAIN
+## the dataplane DOES map the extra address (fwmap):
+    10.230.108.135 : jump fw888ae54f
+    10.251.108.135 : jump fw888ae54f
+## anti-spoof: cl-x (teamB, netA, NET_ADMIN) sends with cl-a's address 10.251.65.216
+cl-x, own address:    peer=10.251.156.17:39399 local=10.251.0.1:18472 host=
+cl-x, forged 10.251.65.216:  rc=0
+## probe log (what reached the holder):
+1791755084.829 peer=10.251.156.17:39399 local=10.251.0.1:18472 host=
+## dlxspoof drops:
+    iifname @ports ether type ip counter packets 3 bytes 180 drop

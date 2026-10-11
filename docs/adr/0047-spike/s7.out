@@ -1,0 +1,7 @@
+no route:       cl-a2 -> be-a direct: wget: download timed out 
+route open: netB -> netA
+route netB->netA: cl-a2 -> be-a direct: WIN-be-a 
+                  cl-b2 -> be-a direct: wget: download timed out    (route opens the path, the namespace still decides)
+netB--netA-f8306884.json
+route closed: netB -> netA
+route removed:  cl-a2 -> be-a direct: wget: download timed out 

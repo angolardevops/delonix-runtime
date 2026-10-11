@@ -1,0 +1,5 @@
+## records in the index: 8 containers, 0 VMs; load 88.44 70.89 48.94
+DNS after 2.5 s idle (index rebuilt): median 3.78 ms, max 5.99 ms
+DNS right after (index cached):       median 2.01 ms, max 3.55 ms
+## host -> proxy -> backend, 50 sequential requests
+median 4.47 ms, p90 7.96 ms, max 169.46 ms

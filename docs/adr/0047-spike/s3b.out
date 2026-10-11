@@ -1,0 +1,16 @@
+## cl-b -> be-a direct: wget: download timed out 
+    ip daddr 10.251.153.125 ip saddr @dlxall ct state new counter packets 4 bytes 240 drop
+## cl-b -> proxy:       WIN-be-a 
+    iifname @dlxbr tcp dport { 18471, 18472 } counter packets 5 bytes 352 accept comment "adr0047-spike-d2"
+## cl-a2 -> be-a direct: wget: download timed out 
+    iifname @dlxbr oifname @dlxbr counter packets 4 bytes 240 drop
+## cl-a2 -> proxy:       WIN-be-a 
+    iifname @dlxbr tcp dport { 18471, 18472 } counter packets 5 bytes 352 accept comment "adr0047-spike-d2"
+## cl-b2 -> be-a direct: wget: download timed out 
+    iifname @dlxbr oifname @dlxbr counter packets 4 bytes 240 drop
+## cl-b2 -> proxy:       WIN-be-a 
+    iifname @dlxbr tcp dport { 18471, 18472 } counter packets 5 bytes 352 accept comment "adr0047-spike-d2"
+## cl-m -> be-a direct: wget: download timed out 
+    ip daddr 10.251.153.125 ip saddr @dlxall ct state new counter packets 4 bytes 240 drop
+## cl-m -> proxy:       WIN-be-a 
+    iifname @dlxbr tcp dport { 18471, 18472 } counter packets 5 bytes 352 accept comment "adr0047-spike-d2"
