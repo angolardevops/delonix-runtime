@@ -23,6 +23,68 @@ use std::path::{Path, PathBuf};
 
 pub use delonix_compute::owners::{decode, encode, relative, Owner};
 
+/// Ceiling on the DECOMPRESSED size of one layer. The download side caps the
+/// COMPRESSED blob at 8 GiB (`registry::MAX_BLOB_BYTES`); that number says
+/// nothing about the decompressed side, where a few MB of zeros become
+/// terabytes. Applied by `overlay::with_layer_archive` through [`LimitReader`],
+/// so every real caller (pull, CRI, flat extract) inherits it. Generous for
+/// real layers (`kindest/node` runs to low single-digit GiB, AGENTS.md) and far
+/// below any bomb.
+pub(crate) const MAX_LAYER_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
+/// Ceiling on the NUMBER of entries in one layer, against the
+/// millions-of-tiny-files variant the byte ceiling alone misses: it exhausts
+/// inodes, not bytes, so a stream of zero-length entries slips under
+/// [`MAX_LAYER_UNCOMPRESSED_BYTES`]. A full distro image has well under a
+/// million files.
+pub(crate) const MAX_LAYER_ENTRIES: u64 = 4_000_000;
+
+/// A reader that refuses to yield more than `limit` bytes, so a decompressor
+/// behind it cannot be driven to produce an unbounded stream from a small blob.
+///
+/// Structural, not header-trusting: it counts the bytes the tar parser actually
+/// pulls, whatever the entry headers claim. Without it a crafted layer — a few
+/// MB of zeros that gzip/zstd expand to terabytes — fills the node's disk and
+/// the kubelet evicts every pod on it (a decompression bomb). The sibling cap
+/// on entry count lives in [`unpack_recording`]/[`scan`]; the two together are
+/// the layer-unpack half of the blob-size cap the download already had.
+pub(crate) struct LimitReader<R> {
+    inner: R,
+    remaining: u64,
+}
+
+impl<R> LimitReader<R> {
+    pub(crate) fn new(inner: R, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+        }
+    }
+}
+
+impl<R: Read> Read for LimitReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.remaining == 0 {
+            // We have already delivered the whole budget; one more byte would
+            // exceed it. Fail closed — a truncated extraction is a clear error,
+            // a filled disk is not.
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "layer exceeds the {} GiB uncompressed ceiling (possible decompression bomb)",
+                    MAX_LAYER_UNCOMPRESSED_BYTES / (1024 * 1024 * 1024)
+                ),
+            ));
+        }
+        let cap = buf
+            .len()
+            .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
+        let n = self.inner.read(&mut buf[..cap])?;
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
+
 /// The owner a header names, when it is worth recording: not root:root, not a
 /// whiteout (an instruction to the layer merge, not a file of the image).
 fn owner_of<R: Read>(entry: &tar::Entry<'_, R>) -> Option<Owner> {
@@ -52,6 +114,16 @@ pub fn unpack_recording<R: Read>(
     archive: &mut tar::Archive<R>,
     dst: &Path,
 ) -> io::Result<Vec<Owner>> {
+    unpack_recording_limited(archive, dst, MAX_LAYER_ENTRIES)
+}
+
+/// As [`unpack_recording`], with the entry ceiling as a parameter so a test can
+/// reach the limit cheaply instead of building four million entries.
+pub(crate) fn unpack_recording_limited<R: Read>(
+    archive: &mut tar::Archive<R>,
+    dst: &Path,
+    max_entries: u64,
+) -> io::Result<Vec<Owner>> {
     // The mode the image recorded, special bits included. `tar` drops setuid,
     // setgid and sticky unless told otherwise: measured, `/tmp` came out `777`
     // instead of `1777` (any user could delete another's files there) and
@@ -66,7 +138,12 @@ pub fn unpack_recording<R: Read>(
     let dst = &dst.canonicalize().unwrap_or(dst.to_path_buf());
     let mut owners = Vec::new();
     let mut directories = Vec::new();
+    let mut count: u64 = 0;
     for entry in archive.entries()? {
+        count += 1;
+        if count > max_entries {
+            return Err(too_many_entries(max_entries));
+        }
         let mut file = entry?;
         owners.extend(owner_of(&file));
         if file.header().entry_type() == tar::EntryType::Directory {
@@ -94,7 +171,12 @@ pub fn scan<R: Read>(
     unpacked: Option<&Path>,
 ) -> io::Result<Vec<Owner>> {
     let mut owners = Vec::new();
+    let mut count: u64 = 0;
     for entry in archive.entries()? {
+        count += 1;
+        if count > MAX_LAYER_ENTRIES {
+            return Err(too_many_entries(MAX_LAYER_ENTRIES));
+        }
         let entry = entry?;
         owners.extend(owner_of(&entry));
         if let Some(dir) = unpacked {
@@ -102,6 +184,15 @@ pub fn scan<R: Read>(
         }
     }
     Ok(owners)
+}
+
+/// The error both unpack paths raise when a layer has more entries than the
+/// ceiling — the inode-exhaustion half of the decompression-bomb defense.
+fn too_many_entries(max: u64) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("layer has more than {max} entries (possible tar bomb)"),
+    )
 }
 
 /// Gives an unpacked entry its setuid/setgid/sticky bits back. Best-effort, and
@@ -186,6 +277,64 @@ mod tests {
             uid,
             gid,
         }
+    }
+
+    /// The structural cap: a reader never yields past its ceiling, and the
+    /// error names the bomb so the caller's "failed to extract layer" is
+    /// actionable.
+    #[test]
+    fn the_limit_reader_refuses_a_stream_past_its_ceiling() {
+        let data = vec![0u8; 10 * 1024];
+        let mut r = LimitReader::new(&data[..], 1024);
+        let mut sink = Vec::new();
+        let err = io::copy(&mut r, &mut sink).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            sink.len() <= 1024,
+            "delivered {} bytes past the 1 KiB ceiling",
+            sink.len()
+        );
+        assert!(err.to_string().contains("decompression bomb"));
+    }
+
+    /// The exact composition `overlay::with_layer_archive` builds — a gzip
+    /// decoder behind a `LimitReader` — stops a bomb: ~1 MiB of zeros gzip to a
+    /// few hundred bytes, and the ceiling (here 64 KiB) fires long before the
+    /// MiB is written. Without the `LimitReader` the copy succeeds and this
+    /// fails: that is the regression it guards.
+    #[test]
+    fn a_gzip_bomb_is_refused_by_the_uncompressed_ceiling() {
+        use std::io::Write;
+        let payload = vec![0u8; 1024 * 1024];
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        enc.write_all(&payload).unwrap();
+        let gz = enc.finish().unwrap();
+        assert!(
+            gz.len() < 64 * 1024,
+            "the compressed bomb should be tiny, was {}",
+            gz.len()
+        );
+        let dec = flate2::read::GzDecoder::new(&gz[..]);
+        let mut r = LimitReader::new(dec, 64 * 1024);
+        let mut sink = Vec::new();
+        let err = io::copy(&mut r, &mut sink).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(sink.len() <= 64 * 1024);
+    }
+
+    /// The entry cap: a layer with more entries than the ceiling is refused
+    /// before it can exhaust the node's inodes, and nothing past the limit is
+    /// written. Measured against the limit, not four million real entries.
+    #[test]
+    fn too_many_entries_are_refused() {
+        let data = tar_of(&[("a", 0, 0, false), ("b", 0, 0, false), ("c", 0, 0, false)]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err =
+            unpack_recording_limited(&mut tar::Archive::new(&data[..]), tmp.path(), 2).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("entries"));
+        // The third entry, past the ceiling, never reached the disk.
+        assert!(!tmp.path().join("c").exists());
     }
 
     /// Unpacking records every non-root owner and nothing else, and the files
