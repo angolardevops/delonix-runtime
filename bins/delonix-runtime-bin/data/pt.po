@@ -15590,3 +15590,7 @@ msgstr ""
 "\n"
 "\n"
 "A partir de um `VMfile` quando existe um, senão a receita dourada embutida (cloud image Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), via `virt-customize`."
+
+# #798 — a failed --net start keeps the network of a live process
+msgid "{name}: the start reported a failure, but its process {pid} is running — its network ({ip}) is kept instead of undone. Check it with `delonix container describe {name}`, and remove it with `delonix container rm -f {name}` if it should not be running"
+msgstr "{name}: o arranque reportou uma falha, mas o processo {pid} está a correr — a rede ({ip}) foi mantida em vez de desfeita. Verifica com `delonix container describe {name}`, e remove-o com `delonix container rm -f {name}` se não devia estar a correr"

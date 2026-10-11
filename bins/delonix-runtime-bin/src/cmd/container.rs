@@ -4073,7 +4073,11 @@ fn reexec_into_netns(
         // Only detach if THIS container owns the netns (`--net <custom>`); in a pod the
         // netns belongs to the sandbox and is shared — detaching it would take down the peers.
         if detach_on_fail {
-            infra::detach_container(id, ip);
+            let record = stored_record(id);
+            match live_owner(&record) {
+                None => infra::detach_container(id, ip),
+                Some(c) => warn_attach_kept(c, ip),
+            }
         }
         // For a FOREGROUND run the 2nd pass IS the container's parent, so the code
         // it exits with is the CONTAINER's own code (see `propagate_exit_status`,
@@ -4097,6 +4101,77 @@ fn reexec_into_netns(
         return Err(netns_start_error(label, status.code()));
     }
     Ok(())
+}
+
+/// The record of container `id` as the store has it now, if it can be read.
+/// One start of a container at a time on the custom-network path (#798). The
+/// file lives in the container's own directory, which `rm` removes with it.
+struct StartLock(std::fs::File);
+
+impl StartLock {
+    fn acquire(id: &str) -> Result<StartLock> {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::io::AsRawFd;
+        let dir = super::util::state_root().join("containers").join(id);
+        std::fs::create_dir_all(&dir).map_err(|e| Error::Invalid(format!("start lock: {e}")))?;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(dir.join("start.lock"))
+            .map_err(|e| Error::Invalid(format!("start lock: {e}")))?;
+        // SAFETY: valid open fd; LOCK_EX blocks until the lock is ours.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(Error::Invalid(format!("{id}: could not lock its start")));
+        }
+        Ok(StartLock(f))
+    }
+}
+
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: fd still open; we own the File until here.
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+fn stored_record(id: &str) -> Option<Container> {
+    Store::open(super::util::state_root().join("containers"))
+        .ok()?
+        .load(id)
+        .ok()
+}
+
+/// PURE. The live container that forbids undoing a `--net <custom>` attach
+/// after the 2nd pass reported a failed start, or `None` when undoing is safe.
+///
+/// The 2nd pass's exit status says that ONE start attempt failed. It does not
+/// say that nothing of this container is running, and «live» is the `is_live`
+/// test every signal in this engine goes through (pid + start time). Measured
+/// (#798, v5.0.2, a 3-node kind cluster): a start reported «init exited with
+/// code 126», the 1st pass undid the attach — veth, ref marker and IPAM lease —
+/// and the container's `/sbin/init` kept running under its supervisor. It stayed
+/// `Up` with only `lo`, and its address was free for the next attach on the
+/// network. Keeping the network of a live process is the reversible choice; the
+/// failure is still returned.
+fn live_owner(record: &Option<Container>) -> Option<&Container> {
+    record.as_ref().filter(|c| c.is_live())
+}
+
+/// Says why the network of `c` stayed after a start that reported a failure.
+fn warn_attach_kept(c: &Container, ip: &str) {
+    output::warn(&super::po::tf(
+        "{name}: the start reported a failure, but its process {pid} is running — its network \
+         ({ip}) is kept instead of undone. Check it with `delonix container describe {name}`, \
+         and remove it with `delonix container rm -f {name}` if it should not be running",
+        &[
+            ("name", c.name.as_str()),
+            ("pid", &c.pid.map(|p| p.to_string()).unwrap_or_default()),
+            ("ip", ip),
+        ],
+    ));
 }
 
 /// Makes every relative bind source (`./x`, `../x`, `.`) absolute against
@@ -4363,6 +4438,22 @@ fn start_container(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
     if let Some(n) = c.network.clone() {
         if !reexec {
+            // Two concurrent starts of one container both pass the check above, and
+            // each one's attach and failure path then act on the other's network:
+            // measured (#798), the start that lost left the one that won running with
+            // no `eth0`. Held until the second pass returns, so the next start sees
+            // `Running` and is refused before it attaches anything. Only this branch:
+            // the second pass is exec'd (the descriptor is close-on-exec), whereas the
+            // host-network path forks a supervisor that would inherit the lock.
+            let _start = StartLock::acquire(&c.id)?;
+            let mut now = find(store, &c.id)?;
+            reconcile_with_diagnostics(store, &mut now);
+            if matches!(
+                now.status,
+                delonix_model::records::Status::Running | delonix_model::records::Status::Paused
+            ) {
+                return Err(Error::Invalid(format!("{} is already running", c.name)));
+            }
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
             // The attach re-pins the port to its own address only; the prefixes
             // the engine authorised (a Kind node's PodCIDR) come back from the
@@ -4661,9 +4752,13 @@ fn reexec_start(id: &str, netns: &str, label: &str, ip: &str, owns_netns: bool) 
         // network down too, and free an IPAM lease that is still in use, over one
         // member failing to come back.
         if owns_netns {
-            // The wire only: the container survives a failed start, and so
-            // does its lease (see `detach_container_keep_lease`).
-            infra::detach_container_keep_lease(id, ip);
+            let record = stored_record(id);
+            match live_owner(&record) {
+                // The wire only: the container survives a failed start, and so
+                // does its lease (see `detach_container_keep_lease`).
+                None => infra::detach_container_keep_lease(id, ip),
+                Some(c) => warn_attach_kept(c, ip),
+            }
         }
         // Same error as a failed `run` on a custom network: the user's network
         // name and the class the inner pass decided, not a hash and `Some(1)`.
@@ -8705,5 +8800,46 @@ mod isolation_verdict_tests {
     fn the_default_namespace_is_never_refused() {
         assert!(isolation_verdict("default", Some(false), false).is_ok());
         assert!(isolation_verdict("", Some(false), false).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod attach_kept_tests {
+    use super::*;
+
+    fn record_of(pid: Option<i32>, starttime: Option<u64>) -> Container {
+        let mut c = Container::new(
+            "0798aaaabbbbcccc".into(),
+            "n736-worker2".into(),
+            "kindest/node".into(),
+            vec!["/sbin/init".into()],
+            "64M".into(),
+        );
+        c.pid = pid;
+        c.pid_starttime = starttime;
+        c.status = Status::Running;
+        c
+    }
+
+    /// #798: the start that reported a failure is not the only thing that may
+    /// be running. A record naming a live process keeps its network.
+    #[test]
+    fn a_live_process_keeps_its_network_after_a_failed_start() {
+        let me = std::process::id() as i32;
+        let rec = Some(record_of(Some(me), delonix_node::proc_starttime(me)));
+        assert!(live_owner(&rec).is_some());
+    }
+
+    #[test]
+    fn without_a_live_process_the_attach_is_undone() {
+        assert!(live_owner(&None).is_none(), "no record");
+        assert!(live_owner(&Some(record_of(None, None))).is_none(), "no pid");
+        // A recycled pid: alive, but not the process the record started.
+        let me = std::process::id() as i32;
+        let other_start = delonix_node::proc_starttime(me).map(|t| t + 1);
+        assert!(
+            live_owner(&Some(record_of(Some(me), other_start))).is_none(),
+            "recycled pid"
+        );
     }
 }

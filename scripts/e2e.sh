@@ -1920,6 +1920,46 @@ for c in "$MH_WA" "$MH_WB" "$MH_WC"; do "$BIN" container rm -f "$c" >/dev/null 2
 for n in "$MH_A" "$MH_B" "$MH_BASE"; do "$BIN" network rm "$n" >/dev/null 2>&1 || true; done
 
 ########################################
+section "container em rede custom: dois starts concorrentes (#798)"
+########################################
+# Dois `container start` do mesmo container parado passavam os dois a verificação
+# «já está a correr»; o que perdia desfazia depois a rede do que ganhou, e o
+# container ficava a correr sem `eth0` — medido na v5.0.2, 5 em 5 rondas. Só
+# conta uma ronda em que exactamente um start ganhou: com o `stop` ainda a acabar
+# os dois recusam, e essa ronda não diz nada sobre a corrida.
+CR="cr-$PFX"
+if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
+  CR_ROUNDS=0 CR_LOST=0
+  for _r in 1 2 3 4 5 6; do
+    # Com o disco do host ocupado, o PID 1 fica em D à espera do writeback e o
+    # `stop` desiste aos 30 s (DX-8101) com o container ainda registado a correr
+    # (ADR-0056 D4). Repete-se até ele sair; uma ronda que não chega lá não conta.
+    _gone=0
+    for _i in 1 2 3 4 5 6; do
+      "$BIN" container stop -t 0 "$CR" >/dev/null 2>&1
+      "$BIN" container ps 2>/dev/null | grep -qE " $CR\$" || { _gone=1; break; }
+    done
+    [[ $_gone -eq 1 ]] || continue
+    "$BIN" container start "$CR" >/dev/null 2>&1 & _p1=$!
+    "$BIN" container start "$CR" >/dev/null 2>&1 & _p2=$!
+    wait $_p1; _r1=$?; wait $_p2; _r2=$?
+    [[ $((_r1 == 0)) -ne $((_r2 == 0)) ]] || continue
+    CR_ROUNDS=$((CR_ROUNDS+1))
+    "$BIN" container exec "$CR" ip -4 -o addr show eth0 2>/dev/null | grep -q inet \
+      || CR_LOST=$((CR_LOST+1))
+  done
+  if [[ $CR_ROUNDS -gt 0 ]]; then
+    check "start concorrente: o container que ganhou mantém a rede" ok \
+      bash -c "echo 'rondas=$CR_ROUNDS sem_eth0=$CR_LOST'; test $CR_LOST -eq 0"
+  else
+    skip "start concorrente" "nenhuma ronda teve exactamente um start vencedor"
+  fi
+  "$BIN" container rm -f "$CR" >/dev/null 2>&1
+else
+  skip "start concorrente" "container run --net falhou neste host"
+fi
+
+########################################
 section "container em rede custom: hot reconfig pelo ingress"
 ########################################
 CN="cn-$PFX"
