@@ -6915,7 +6915,9 @@ if [[ -n "$L3AIP" ]] && command -v socat >/dev/null 2>&1; then
   check "net netns unpublish: the host port stops answering" ok bash -c "
     '$BIN' net netns unpublish '$L3PP' >/dev/null || exit 1
     for _ in \$(seq 1 20); do [ \"\$(nc -w 1 127.0.0.1 $L3PP </dev/null 2>/dev/null)\" = pong-$PFX ] || exit 0; sleep 0.3; done; exit 1"
-  kill "$L3LPID" 2>/dev/null; wait "$L3LPID" 2>/dev/null
+  # The engine waits on the `timeout` it spawned and does not forward a signal
+  # to it: kill that child first (it forwards to socat), then the engine.
+  kill $(ps -o pid= --ppid "$L3LPID" 2>/dev/null) "$L3LPID" 2>/dev/null; wait "$L3LPID" 2>/dev/null
   check "net netns detach: the netns is gone, exec into it fails" ok bash -c "
     '$BIN' net netns detach '$L3B' >/dev/null || exit 1
     ! '$BIN' net netns exec '$L3B' true >/dev/null 2>&1"
