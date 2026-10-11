@@ -12697,6 +12697,15 @@ msgstr "O container existe, mas a operação precisa dele a correr."
 msgid "Start it first (`delonix container start <name>`)."
 msgstr "Arranca-o primeiro (`delonix container start <nome>`)."
 
+msgid "container has not finished mounting"
+msgstr "o container ainda não acabou de montar"
+
+msgid "The container's process runs, but its start passed the mount ceiling before the init said its filesystem was in place, so a command entering it now could run on the host's filesystem. Commands that enter it are refused until the init says so."
+msgstr "O processo do container corre, mas o arranque passou o tecto da montagem antes de o init dizer que o sistema de ficheiros estava no sítio, por isso um comando que entre agora pode correr no sistema de ficheiros do host. Os comandos que entram nele são recusados até o init o dizer."
+
+msgid "Wait and retry: the refusal lifts on its own once the mounts finish. If it never does, look at the volumes it mounts (an unresponsive NFS server is the usual cause) and restart the container."
+msgstr "Espera e tenta outra vez: a recusa levanta-se sozinha quando as montagens acabam. Se nunca acabarem, olha para os volumes que monta (um servidor NFS que não responde é a causa habitual) e reinicia o container."
+
 msgid "CDI device not found"
 msgstr "dispositivo CDI não encontrado"
 

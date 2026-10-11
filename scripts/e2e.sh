@@ -3581,6 +3581,20 @@ else
     bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
 fi
 
+# --- a container past the mount ceiling is never entered (issue #793) -------
+# A start whose init has not said its mounts are done within the ceiling is
+# published as running but NOT mounted: exec/cp refuse until the proof arrives,
+# and it comes up on its own after. See the header of `e2e_mount_ceiling.sh`
+# (how the init is held without saturating the disk). 77 = the host does not
+# let it measure. The scenario waits out the full 60 s ceiling.
+MC_CHECK="mount ceiling: a container not seen mounted is never entered, and comes up once it is"
+_out=$(bash "$(dirname "$0")/e2e_mount_ceiling.sh" "$BIN" "$IMG" "mc$PFX" 2>&1); _rc=$?
+if [[ $_rc -eq 77 ]]; then
+  skip "$MC_CHECK" "$_out"
+else
+  check "$MC_CHECK" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+fi
+
 # --- a state root written by the previous release opens unchanged ----------
 # Plan 65 F0.6. DELONIX_UPGRADE_FROM names a directory with the PUBLISHED
 # binaries of the previous release (checked against SHA256SUMS and the
