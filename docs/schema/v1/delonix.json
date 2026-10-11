@@ -114,7 +114,7 @@
       "properties": {
         "cni": {
           "default": "default",
-          "description": "`default` = the image's CNI (kindnet); `none` = install none.",
+          "description": "The pod network. `default` = the engine's own: kindnet in `mode: kind`,\na node-local bridge in `mode: vm`/`ssh`, which only serves a ONE-node\ncluster (more nodes are refused before anything is created); `none` =\ninstall nothing, and every node stays `NotReady` until you apply your\nown CNI.",
           "type": "string"
         },
         "controlPlane": {

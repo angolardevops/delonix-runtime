@@ -1875,7 +1875,7 @@ spec:
   k8sVersion: &quot;1.34&quot;
   podSubnet: 10.244.0.0/16
   serviceSubnet: 10.96.0.0/12
-  cni: default
+  cni: none                          # bring your own CNI; `default` serves ONE node only here (refused above one)
   controlPlane:
     replicas: 1
   workers:
