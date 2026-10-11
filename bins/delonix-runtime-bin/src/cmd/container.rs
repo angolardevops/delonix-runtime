@@ -2785,6 +2785,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         &opts.allow_source,
         opts.no_source_check,
     )?;
+    // The private-egress guard is the one rule of the policy enforced on the
+    // packet path rather than here: hand it to the network holder before this
+    // workload can be attached, so a `policy.json` edited by hand is in force
+    // for it. A no-op when nothing changed or the node never asked for one.
+    super::policy::sync_private_egress(&super::util::state_root())?;
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;

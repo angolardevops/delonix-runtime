@@ -338,6 +338,46 @@ pub(crate) fn authorise_source_overrides(
     ))
 }
 
+/// The private-egress guard the node policy asks the network holder to
+/// enforce. PURE.
+///
+/// A ceiling (`denyPrivateEgress`) with its grants (`allowedEgressPrefixes`):
+/// no policy, or the field unset, is no guard at all — the behaviour of every
+/// node before the field existed. `mode: warn` keeps the guard but counts
+/// instead of dropping, which is what `warn` means for every other ceiling.
+/// The grants only exist with the guard on; a grant with nothing to be an
+/// exception to is reported by `lint`, not enforced.
+pub(crate) fn private_egress_guard_of(
+    p: Option<&SecurityPolicy>,
+) -> delonix_sdn::infra::PrivateEgressGuard {
+    use delonix_sdn::infra::{PrivateEgressGuard, PrivateEgressMode};
+    match p {
+        Some(p) if p.deny_private_egress => PrivateEgressGuard {
+            mode: match p.mode {
+                srt::policy::Mode::Enforce => PrivateEgressMode::Deny,
+                srt::policy::Mode::Warn => PrivateEgressMode::Warn,
+            },
+            allowed: p.allowed_egress_prefixes.clone(),
+        },
+        _ => PrivateEgressGuard::default(),
+    }
+}
+
+/// Hands the node policy's private-egress guard to the network holder, which
+/// enforces it on every workload behind the node's uplink.
+///
+/// Called where the policy changes (`RuntimePolicy` apply, `policy unset`) and
+/// before a container is started, so a `policy.json` edited by hand takes
+/// effect at the next `container run` at the latest. Cheap when nothing
+/// changed: an unchanged record is not rewritten, and a holder already
+/// enforcing it is not touched. A policy that cannot be read is the same error
+/// [`enforce`] gives — never an absent guard.
+pub(crate) fn sync_private_egress(root: &Path) -> Result<()> {
+    let policy = load(root)?;
+    delonix_sdn::infra::set_private_egress_guard(&private_egress_guard_of(policy.as_ref()))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // `kind: RuntimePolicy`
 // ---------------------------------------------------------------------------
@@ -379,6 +419,15 @@ pub struct RuntimePolicySpec {
     /// GRANT: absent = refused.
     #[serde(default)]
     pub allow_source_check_opt_out: bool,
+    /// Refuse new connections from a workload on an engine network to private
+    /// address space (10/8, 172.16/12, 192.168/16, 100.64/10) through the
+    /// node's uplink. Its own and routed networks are never matched.
+    #[serde(default)]
+    pub deny_private_egress: bool,
+    /// Private destinations still reachable while `denyPrivateEgress` is on
+    /// (canonical `a.b.c.d/len`). A GRANT: empty = none.
+    #[serde(default)]
+    pub allowed_egress_prefixes: Vec<String>,
 }
 
 /// Names accepted in the `spec` of `kind: RuntimePolicy` (unknown-field warning,
@@ -395,6 +444,8 @@ pub const RUNTIME_POLICY_SPEC_FIELDS: &[&str] = &[
     "allowedImageUrlHosts",
     "allowedSourcePrefixes",
     "allowSourceCheckOptOut",
+    "denyPrivateEgress",
+    "allowedEgressPrefixes",
 ];
 pub const RECONCILED_RUNTIME_POLICY_FIELDS: &[&str] = RUNTIME_POLICY_SPEC_FIELDS;
 
@@ -422,6 +473,8 @@ pub(crate) fn to_security_policy(spec: &RuntimePolicySpec) -> Result<SecurityPol
         allowed_image_url_hosts: spec.allowed_image_url_hosts.clone(),
         allowed_source_prefixes: spec.allowed_source_prefixes.clone(),
         allow_source_check_opt_out: spec.allow_source_check_opt_out,
+        deny_private_egress: spec.deny_private_egress,
+        allowed_egress_prefixes: spec.allowed_egress_prefixes.clone(),
     })
 }
 
@@ -490,6 +543,14 @@ fn fields_of(p: &SecurityPolicy) -> BTreeMap<String, String> {
         "allowSourceCheckOptOut".into(),
         p.allow_source_check_opt_out.to_string(),
     );
+    f.insert(
+        "denyPrivateEgress".into(),
+        p.deny_private_egress.to_string(),
+    );
+    f.insert(
+        "allowedEgressPrefixes".into(),
+        sorted_joined(&p.allowed_egress_prefixes),
+    );
     f
 }
 
@@ -509,6 +570,10 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: RuntimePolicySpec = manifest::spec_of(doc)?;
     let policy = to_security_policy(&spec)?;
     write(&root, &policy)?;
+    // The private-egress guard is enforced by the network holder, not at
+    // admission: hand it the new policy now, so the running node changes
+    // with the file instead of at the next workload start.
+    sync_private_egress(&root)?;
     println!(
         "{}",
         super::po::tf(
@@ -616,6 +681,10 @@ struct LsRow {
     allowed_source_prefixes: Vec<String>,
     #[serde(rename = "allowSourceCheckOptOut")]
     allow_source_check_opt_out: bool,
+    #[serde(rename = "denyPrivateEgress")]
+    deny_private_egress: bool,
+    #[serde(rename = "allowedEgressPrefixes")]
+    allowed_egress_prefixes: Vec<String>,
     path: String,
 }
 
@@ -631,6 +700,8 @@ fn ls_row(root: &Path, p: &SecurityPolicy) -> LsRow {
         allowed_image_url_hosts: p.allowed_image_url_hosts.clone(),
         allowed_source_prefixes: p.allowed_source_prefixes.clone(),
         allow_source_check_opt_out: p.allow_source_check_opt_out,
+        deny_private_egress: p.deny_private_egress,
+        allowed_egress_prefixes: p.allowed_egress_prefixes.clone(),
         path: path(root).display().to_string(),
     }
 }
@@ -655,6 +726,8 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
         "URL-HOSTS",
         "SRC-PREFIXES",
         "SRC-CHECK-OFF",
+        "PRIVATE-EGRESS",
+        "EGRESS-GRANTS",
     ]);
     if let Some(p) = &current {
         t.row(vec![
@@ -668,6 +741,8 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
             list_or_dash(&p.allowed_image_url_hosts),
             list_or_dash(&p.allowed_source_prefixes),
             grant_flag(p.allow_source_check_opt_out).to_string(),
+            deny_flag(p.deny_private_egress).to_string(),
+            list_or_dash(&p.allowed_egress_prefixes),
         ]);
     }
     t.print();
@@ -720,6 +795,8 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 d.list("URL hosts", &p.allowed_image_url_hosts);
                 d.list("Src prefixes", &p.allowed_source_prefixes);
                 d.field("Src check off", grant_flag(p.allow_source_check_opt_out));
+                d.field("Private egress", deny_flag(p.deny_private_egress));
+                d.list("Egress grants", &p.allowed_egress_prefixes);
             }
         }
         d.print();
@@ -764,7 +841,8 @@ fn summarize(p: &SecurityPolicy) -> String {
         "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} \
          allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} \
          allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] \
-         allowSourceCheckOptOut={srcoff}",
+         allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} \
+         allowedEgressPrefixes=[{egressp}]",
         &[
             ("mode", mode_label(p.mode)),
             ("priv", &p.deny_privileged.to_string()),
@@ -776,6 +854,8 @@ fn summarize(p: &SecurityPolicy) -> String {
             ("hosts", &p.allowed_image_url_hosts.join(", ")),
             ("srcp", &p.allowed_source_prefixes.join(", ")),
             ("srcoff", &p.allow_source_check_opt_out.to_string()),
+            ("privegress", &p.deny_private_egress.to_string()),
+            ("egressp", &p.allowed_egress_prefixes.join(", ")),
         ],
     )
 }
@@ -814,6 +894,8 @@ fn cmd_unset(force: bool) -> Result<()> {
             &[("path", &p.display().to_string()), ("err", &e.to_string())],
         ))
     })?;
+    // No policy, no private-egress guard: the holder stops refusing too.
+    sync_private_egress(&root)?;
     // Printed even under `--force`, which skips the interactive preview
     // above: the ONE thing that must never be true of removing a security
     // ceiling is that nobody can see afterwards what it used to refuse.
@@ -1056,6 +1138,8 @@ mod tests {
             allowed_image_url_hosts: vec!["x".into()],
             allowed_source_prefixes: vec!["10.99.0.0/16".into()],
             allow_source_check_opt_out: true,
+            deny_private_egress: true,
+            allowed_egress_prefixes: vec!["192.168.50.10/32".into()],
         };
         let v = serde_yaml::to_value(&spec).unwrap();
         let serde_yaml::Value::Mapping(m) = v else {
@@ -1067,5 +1151,64 @@ mod tests {
                 "'{key}' is written by Serialize and missing from the accept list"
             );
         }
+    }
+    // ---- the private-egress guard the policy hands to the network holder ----
+
+    #[test]
+    fn no_policy_and_an_unset_field_mean_no_guard() {
+        use delonix_sdn::infra::PrivateEgressGuard;
+        assert_eq!(private_egress_guard_of(None), PrivateEgressGuard::default());
+        let p = SecurityPolicy::parse(r#"{"denyPrivileged": true}"#).unwrap();
+        assert_eq!(
+            private_egress_guard_of(Some(&p)),
+            PrivateEgressGuard::default()
+        );
+        // A grant alone opens nothing and closes nothing: there is no guard.
+        let p = SecurityPolicy::parse(r#"{"allowedEgressPrefixes": ["10.9.0.0/16"]}"#).unwrap();
+        assert_eq!(
+            private_egress_guard_of(Some(&p)),
+            PrivateEgressGuard::default()
+        );
+    }
+
+    #[test]
+    fn the_policy_guard_denies_and_carries_its_grants() {
+        use delonix_sdn::infra::PrivateEgressMode;
+        let p = SecurityPolicy::parse(
+            r#"{"denyPrivateEgress": true, "allowedEgressPrefixes": ["192.168.50.10/32"]}"#,
+        )
+        .unwrap();
+        let g = private_egress_guard_of(Some(&p));
+        assert_eq!(g.mode, PrivateEgressMode::Deny);
+        assert_eq!(g.allowed, ["192.168.50.10/32"]);
+        // And the holder gets a script that drops the private ranges.
+        let script = delonix_sdn::infra::private_egress_guard_script(&g).unwrap();
+        assert!(script.contains("192.168.0.0/16"), "{script}");
+        assert!(script.contains("counter drop"), "{script}");
+    }
+
+    #[test]
+    fn warn_mode_counts_instead_of_dropping() {
+        use delonix_sdn::infra::PrivateEgressMode;
+        let p = SecurityPolicy::parse(r#"{"mode": "warn", "denyPrivateEgress": true}"#).unwrap();
+        assert_eq!(
+            private_egress_guard_of(Some(&p)).mode,
+            PrivateEgressMode::Warn
+        );
+    }
+
+    #[test]
+    fn a_manifest_doc_carries_the_private_egress_fields() {
+        let d = doc(r#"
+            denyPrivateEgress: true
+            allowedEgressPrefixes: [192.168.50.10/32]
+            "#);
+        let policy =
+            to_security_policy(&manifest::spec_of::<RuntimePolicySpec>(&d).unwrap()).unwrap();
+        assert!(policy.deny_private_egress);
+        assert_eq!(policy.allowed_egress_prefixes, ["192.168.50.10/32"]);
+        let f = fields_of(&policy);
+        assert_eq!(f["denyPrivateEgress"], "true");
+        assert_eq!(f["allowedEgressPrefixes"], "192.168.50.10/32");
     }
 }

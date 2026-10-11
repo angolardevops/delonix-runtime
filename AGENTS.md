@@ -9567,3 +9567,43 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
 - Prova: `tests/live.rs::a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired`
   (falha injectada e reparada) e o ciclo pela CLI no laboratório de dois nós, com uma falha
   NATURAL (duas subnets, a segunda recusada pelo D2.4 dentro da mesma transacção).
+
+## Egress para espaço privado: uma guarda do nó no uplink do holder (`denyPrivateEgress`, 2026-10-11)
+
+- **O achado.** O `fwguard` só nega `169.254.0.0/16` e `127.0.0.0/8`. Tudo o resto que o
+  host alcança — a LAN do nó, as APIs de gestão do host e dos vizinhos — uma carga numa
+  rede do motor alcançava também, porque o uplink é o slirp e o slirp liga a partir do host.
+- **A forma: política do nó, não IPs no código.** `denyPrivateEgress` (tecto, desligado por
+  omissão — a regra 3 da política: um campo que ninguém põe nunca começa a recusar) e
+  `allowedEgressPrefixes` (concessão, só da política do nó). O `-bin` traduz a política
+  num `delonix_sdn::infra::PrivateEgressGuard` (`policy::private_egress_guard_of`, pura) e
+  entrega-o com `set_private_egress_guard`; o `delonix-sdn` não lê a política, só aplica o
+  que recebe.
+- **Onde vive.** Base chain própria, `fwprivate`, prioridade **-15**: depois do `fwguard`
+  (-20, incondicional) e ANTES do `fwdeny` (-10). Um `drop` aqui é final em todas as chains
+  seguintes, por isso nem uma `allowlist:` de rede nem um `egress allow` de carga reabrem o
+  intervalo; um `accept` (concessão) só acaba ESTA chain, e a política da rede e da carga
+  continuam a decidir. Regras: `ct state established,related accept` (respostas a clientes
+  da LAN numa porta publicada), uma regra por concessão (concessões podem sobrepor-se e o
+  `nft` recusa intervalos sobrepostos num set), e
+  `oifname "tap0" ip daddr { 10/8, 100.64/10, 172.16/12, 192.168/16 } counter drop`
+  (`warn` = `counter` sem verdict).
+- **A rede da carga e as redes encaminhadas para ela nunca casam, e é ESTRUTURAL**: todas
+  as regras estão ancoradas em `oifname "tap0"`, e o tráfego entre bridges do holder sai
+  por uma bridge. Um overlay sai pelo seu próprio device e o encapsulado é output do holder,
+  não forward. Teste: `the_own_network_and_a_routed_network_are_never_matched`, que lê o
+  TEXTO do script com um intérprete mínimo da gramática que o gerador escreve.
+- **Registo e entrega.** `<root>/ingress/private-egress.json`, escrito só quando muda (e
+  nunca criado num nó que nunca pediu a guarda). O holder aplica-o ao construir OU
+  reanexar a netns (`reattach_or_setup_infra_netns`, com `?`); o host traz um holder vivo
+  ao registo por `nsenter` (`ensure_private_egress_guard_current`, mesmo mecanismo do
+  `ensure_fw_dispatch_current`, que agora partilham `nft_in_pin`), com um carimbo por pin
+  com o hash do script — chega também a um plano de controlo de um binário mais antigo. Um
+  registo ilegível **falha fechado** (tudo recusado, nada concedido).
+- **Quando sincroniza**: `apply` de `RuntimePolicy`, `policy unset`, e cada `container run`
+  (cobre o `policy.json` editado à mão). O `ensure_up` aplica o REGISTO em cada attach.
+- **O que NÃO cobre**: `--net host` e o container com slirp próprio (sem `--net`, só `-p`)
+  não passam pelo uplink do holder — o lint `POLICY-EGRESS-HOST-NET-OPEN` pede
+  `denyHostNetwork: true` ao lado (a admissão conta ambos como rede do host). As VMs do
+  libvirt na rede `nat` também não. O `vm create` não sincroniza a política (só lê o
+  registo pelo `ensure_up`).

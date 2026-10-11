@@ -2268,6 +2268,14 @@
           "description": "Lets a container switch the source check off (`--no-source-check`). A\nGRANT: absent = refused.",
           "type": "boolean"
         },
+        "allowedEgressPrefixes": {
+          "default": [],
+          "description": "Private destinations still reachable while `denyPrivateEgress` is on\n(canonical `a.b.c.d/len`). A GRANT: empty = none.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "allowedImageUrlHosts": {
           "default": [],
           "description": "Hosts a `vm create --url-img` qcow2 may be fetched from. Empty = no opinion.",
@@ -2310,6 +2318,11 @@
         "denyLatestVmImage": {
           "default": false,
           "description": "Refuse a VM disk image reference with no tag or with `:latest`.",
+          "type": "boolean"
+        },
+        "denyPrivateEgress": {
+          "default": false,
+          "description": "Refuse new connections from a workload on an engine network to private\naddress space (10/8, 172.16/12, 192.168/16, 100.64/10) through the\nnode's uplink. Its own and routed networks are never matched.",
           "type": "boolean"
         },
         "denyPrivileged": {

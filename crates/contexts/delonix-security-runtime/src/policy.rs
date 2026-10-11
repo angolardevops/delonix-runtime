@@ -114,6 +114,29 @@ pub struct SecurityPolicy {
     /// bridge. Every use is written to the event log. Absent = refused.
     #[serde(default)]
     pub allow_source_check_opt_out: bool,
+
+    // ---- Egress towards private address space. A CEILING like the fields
+    // ---- above the grants: absent = no opinion, byte for byte what a node did
+    // ---- before it existed.
+    /// Refuse NEW connections from a workload on an engine network to private
+    /// address space reached through the node's uplink: RFC 1918
+    /// (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and shared/CGNAT space
+    /// (`100.64.0.0/10`). That is where the node's own management plane, its
+    /// neighbours and the rest of the LAN live; a workload that can open a
+    /// connection there can move laterally out of the network it was given.
+    ///
+    /// The workload's own network, and every network routed to it on this
+    /// node, are not reached through the uplink and are never matched. Under
+    /// `mode: warn` the connections are counted and let through.
+    #[serde(default)]
+    pub deny_private_egress: bool,
+    /// Private destinations a workload may still open connections to while
+    /// [`Self::deny_private_egress`] is on — a resolver, a gateway, a registry
+    /// the node legitimately depends on. Canonical `a.b.c.d/len` prefixes. A
+    /// GRANT: empty = none, and only the node policy can grant one, so a
+    /// workload cannot reopen the range on its own.
+    #[serde(default)]
+    pub allowed_egress_prefixes: Vec<String>,
 }
 
 /// A policy that parses but probably does not mean what its author intended.
@@ -167,6 +190,10 @@ impl SecurityPolicy {
             // on purpose; calling it «probably a mistake» would be wrong.
             && self.allowed_source_prefixes.is_empty()
             && !self.allow_source_check_opt_out
+            && !self.deny_private_egress
+            // A grant for an egress exception says something on purpose too —
+            // whether it has any effect is what `lint` is for.
+            && self.allowed_egress_prefixes.is_empty()
     }
 
     /// `true` when at least one field of this policy could refuse a request
@@ -182,7 +209,9 @@ impl SecurityPolicy {
     /// not evaluated by [`crate::admission::evaluate`] at all, so they are
     /// not what "constrains this workload's admission path" means here —
     /// mirrors exactly the fields [`crate::admission::evaluate`] actually
-    /// reads for each [`Workload`].
+    /// reads for each [`Workload`]. The private-egress fields are excluded
+    /// for the same reason: they are enforced in the node's dataplane, on
+    /// every packet, not at admission.
     pub fn constrains(&self, w: Workload) -> bool {
         match w {
             Workload::Container => {
@@ -243,6 +272,36 @@ impl SecurityPolicy {
                           in `allowedImageUrlHosts`",
                 severity: Severity::Medium,
                 workload: Some(Workload::VirtualMachine),
+            });
+        }
+
+        // The private-egress guard sits on the engine's network uplink. A
+        // workload outside every engine network — `--net host`, or a container
+        // with its own slirp (no `--net`, only `-p`) — never crosses it, and
+        // admission counts both as host network. Leaving them admitted reads
+        // like protection and is not.
+        if self.deny_private_egress && !self.deny_host_network {
+            out.push(Lint {
+                id: "POLICY-EGRESS-HOST-NET-OPEN",
+                field: "denyHostNetwork",
+                message: "this node refuses egress to private address space, but a workload \
+                          started without `--net <network>` is not behind that guard — set \
+                          `denyHostNetwork: true` so every container is placed on an engine \
+                          network",
+                severity: Severity::High,
+                workload: Some(Workload::Container),
+            });
+        }
+
+        // A grant with nothing to be an exception to.
+        if !self.allowed_egress_prefixes.is_empty() && !self.deny_private_egress {
+            out.push(Lint {
+                id: "POLICY-EGRESS-GRANT-UNUSED",
+                field: "allowedEgressPrefixes",
+                message: "`allowedEgressPrefixes` is set but `denyPrivateEgress` is not, so \
+                          nothing is refused and the grant changes nothing",
+                severity: Severity::Low,
+                workload: None,
             });
         }
 
@@ -422,6 +481,51 @@ mod tests {
         };
         assert!(!p.constrains(Workload::Container));
         assert!(!p.constrains(Workload::VirtualMachine));
+    }
+
+    #[test]
+    fn todays_policy_has_no_opinion_on_private_egress() {
+        // Upgrading must not start refusing anything: a file written before the
+        // field existed leaves the guard off and grants nothing.
+        let p = SecurityPolicy::parse(SHIPPED).unwrap();
+        assert!(!p.deny_private_egress);
+        assert!(p.allowed_egress_prefixes.is_empty());
+    }
+
+    #[test]
+    fn the_private_egress_fields_parse_by_their_manifest_names() {
+        let p = SecurityPolicy::parse(
+            r#"{"denyPrivateEgress": true, "allowedEgressPrefixes": ["192.168.50.10/32"]}"#,
+        )
+        .unwrap();
+        assert!(p.deny_private_egress);
+        assert_eq!(p.allowed_egress_prefixes, ["192.168.50.10/32"]);
+        assert!(!p.is_silent());
+        // Enforced in the dataplane, not at admission.
+        assert!(!p.constrains(Workload::Container));
+        assert!(!p.constrains(Workload::VirtualMachine));
+    }
+
+    #[test]
+    fn a_private_egress_guard_without_host_network_denied_is_pointed_at() {
+        let p = SecurityPolicy::parse(r#"{"denyPrivateEgress": true}"#).unwrap();
+        let ids: Vec<_> = p.lint().iter().map(|l| l.id).collect();
+        assert!(ids.contains(&"POLICY-EGRESS-HOST-NET-OPEN"), "{ids:?}");
+        let p = SecurityPolicy::parse(r#"{"denyPrivateEgress": true, "denyHostNetwork": true}"#)
+            .unwrap();
+        assert!(!p
+            .lint()
+            .iter()
+            .any(|l| l.id == "POLICY-EGRESS-HOST-NET-OPEN"));
+    }
+
+    #[test]
+    fn an_egress_grant_with_nothing_denied_is_pointed_at() {
+        let p = SecurityPolicy::parse(r#"{"allowedEgressPrefixes": ["10.9.0.0/16"]}"#).unwrap();
+        assert!(p
+            .lint()
+            .iter()
+            .any(|l| l.id == "POLICY-EGRESS-GRANT-UNUSED"));
     }
 
     #[test]

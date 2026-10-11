@@ -714,6 +714,11 @@ pub fn ingress_table_ruleset() -> String {
     // `serve cri` and `serve docker-api` all default to UNIX sockets, not TCP
     // (`unix:///run/delonix-*.sock`), so there is no address for a container to reach.
     //
+    // Private address space (RFC 1918, CGNAT) reached through the uplink is not here
+    // either: refusing it is the node's own policy decision, not an unconditional
+    // denial, so it lives in its own chain (see [`private_egress_guard_script`]),
+    // declared empty here and filled from the guard the node has recorded.
+    //
     // The services the holder itself exposes ARE covered now, by `dlxinput` below —
     // this comment used to record that as a follow-up, and the follow-up turned out to be
     // an exploitable bypass (measured, see `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2).
@@ -782,6 +787,8 @@ pub fn ingress_table_ruleset() -> String {
          \x20 map {NETPAIR_MAP} {{ type ifname . ifname : verdict; counter; }}\n\
          \x20 chain fwguard {{ type filter hook forward priority -20;\n\
          {guard}\
+         \x20 }}\n\
+         \x20 chain {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward priority {PRIVATE_EGRESS_PRIORITY};\n\
          \x20 }}\n\
          {dispatch}\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
@@ -902,16 +909,7 @@ pub fn ensure_fw_dispatch_current() -> Result<()> {
     if same_user_namespace(pin) {
         return Ok(());
     }
-    use std::io::Write;
-    let script = fw_dispatch_migration_script();
-    let pin_s = pin.to_string();
-    let spawned = Command::new("nsenter")
-        .args(fw_dispatch_nsenter_args(&pin_s))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn();
-    let fail = |why: String| Error::Command {
+    nft_in_pin(pin, &fw_dispatch_migration_script()).map_err(|why| Error::Command {
         context: "firewall dispatch migration",
         message: format!(
             "the running holder (pin {pin}) still has the old firewall dispatch, where a \
@@ -920,22 +918,37 @@ pub fn ensure_fw_dispatch_current() -> Result<()> {
              control plane (`delonix net netns status`, kill the control pid, then \
              `delonix net netns up`)"
         ),
-    };
-    let mut child = spawned.map_err(|e| fail(e.to_string()))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(script.as_bytes())
-            .map_err(|e| fail(e.to_string()))?;
-    }
-    let out = child.wait_with_output().map_err(|e| fail(e.to_string()))?;
-    if !out.status.success() {
-        return Err(fail(
-            String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        ));
-    }
+    })?;
     // Best effort: without the marker the next call migrates again, which is
     // idempotent — a cost, never a hole.
     let _ = std::fs::write(&marker, b"2\n");
+    Ok(())
+}
+
+/// Runs `script` through `nft -f -` inside the pin's user and network namespaces
+/// ([`fw_dispatch_nsenter_args`]), from the host. Works whatever binary started the
+/// running control plane, which is the point: it is how an in-place upgrade reaches
+/// a holder that predates the change. The error is the reason, for the caller to
+/// put in its own context.
+fn nft_in_pin(pin: i32, script: &str) -> std::result::Result<(), String> {
+    use std::io::Write;
+    let pin_s = pin.to_string();
+    let mut child = Command::new("nsenter")
+        .args(fw_dispatch_nsenter_args(&pin_s))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(script.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
     Ok(())
 }
 
@@ -981,6 +994,290 @@ pub fn fw_dispatch_nsenter_args(pin: &str) -> Vec<String> {
     .iter()
     .map(|s| s.to_string())
     .collect()
+}
+
+// ---- private-egress guard (RFC 1918 / CGNAT through the uplink) -------------
+//
+// A workload on an engine network reaches the outside world through ONE door: the
+// holder's uplink, the `tap0` side of the single slirp, which connects from the host.
+// Whatever the host can reach, the workload could reach — the host's LAN, the node's
+// own management services, its neighbours. `fwguard` closes link-local and loopback
+// unconditionally; private address space is different, because plenty of nodes have
+// legitimate private upstreams, so refusing it is the NODE's decision, recorded once
+// and enforced here for every workload behind the uplink.
+//
+// The workload's own network and every network routed to it on this node are never
+// matched, and that is structural, not an exception list: traffic between bridges of
+// the holder leaves by a bridge, never by the uplink (the isolation between networks is
+// the `@netpair` drop in `fwdeny`, unchanged). An overlay leaves by its own device, and
+// its encapsulated packets are the holder's own output, not forwarded traffic.
+
+/// The forward base chain that holds the private-egress guard.
+pub const PRIVATE_EGRESS_CHAIN: &str = "fwprivate";
+/// After `fwguard` (-20), whose denials are unconditional, and BEFORE `fwdeny` (-10),
+/// where a network's own egress policy lives. A `drop` here is final in every later
+/// chain, so neither a network's `allowlist:` nor a workload's `egress allow` can
+/// reopen a range the node refuses; an `accept` here only ends THIS chain, so a
+/// destination the node grants is still subject to both.
+pub const PRIVATE_EGRESS_PRIORITY: i32 = -15;
+/// The holder's side of the single slirp: everything that leaves the node, and
+/// nothing that stays on it.
+const UPLINK: &str = "tap0";
+/// Destinations the guard refuses: RFC 1918 and shared address space (RFC 6598).
+/// Link-local and loopback are not repeated here, `fwguard` already denies them. The
+/// slirp's own network ([`INFRA_TAP_SUBNET`]) falls inside `10.0.0.0/8`, and that is
+/// intended: its gateway and resolver ARE the host.
+pub const PRIVATE_EGRESS_DESTINATIONS: [&str; 4] = [
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+];
+
+/// What the guard does with a NEW connection to private address space.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrivateEgressMode {
+    /// No guard: the chain stays empty and the node behaves as it always did.
+    #[default]
+    Off,
+    /// Counted and let through — for rolling the guard out before it bites. The
+    /// counter on the rule says how much would have been refused.
+    Warn,
+    /// Dropped.
+    Deny,
+}
+
+/// The node's private-egress guard, as recorded for the holder to enforce.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrivateEgressGuard {
+    #[serde(default)]
+    pub mode: PrivateEgressMode,
+    /// Private destinations still reachable while the guard is on (a resolver, a
+    /// gateway, a registry the node depends on). Canonical `a.b.c.d/len`.
+    #[serde(default)]
+    pub allowed: Vec<String>,
+}
+
+/// A canonical `a.b.c.d/len` — four octets, host bits clear, no padding — parsed.
+/// `None` for anything else, including a bare address and the legacy two-octet form
+/// [`crate::Cidr::parse`] also accepts. Canonical so that what is written is exactly
+/// what is enforced: a typo never widens into a different prefix.
+pub fn canonical_ipv4_prefix(s: &str) -> Option<crate::Cidr> {
+    let (addr, len) = s.split_once('/')?;
+    if addr.split('.').count() != 4 || len.is_empty() || !len.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let c = crate::Cidr::parse(s)?;
+    (format!("{}/{}", crate::Cidr::fmt_u32(c.base), c.len) == s).then_some(c)
+}
+
+/// One `nft -f` transaction that brings the guard chain to `g`, whatever it held.
+/// PURE — the whole policy is in the text, so it is testable without a holder.
+///
+/// Idempotent and atomic: the chain is created if missing (a table built by an older
+/// holder has none), flushed and refilled in the same transaction, so no packet ever
+/// sees it half-written and running it twice changes nothing. A grant that is not a
+/// canonical prefix is refused here, before anything reaches `nft`.
+pub fn private_egress_guard_script(g: &PrivateEgressGuard) -> Result<String> {
+    let mut allowed = Vec::with_capacity(g.allowed.len());
+    for p in &g.allowed {
+        let Some(c) = canonical_ipv4_prefix(p) else {
+            return Err(Error::InvalidEgressPolicy(format!(
+                "private egress grant {p:?}: not a canonical a.b.c.d/len prefix"
+            )));
+        };
+        allowed.push(c);
+    }
+    Ok(render_private_egress(g.mode, &allowed))
+}
+
+/// [`private_egress_guard_script`] over grants already validated. Infallible, so the
+/// fail-closed path can never fail to produce a script.
+fn render_private_egress(mode: PrivateEgressMode, allowed: &[crate::Cidr]) -> String {
+    let t = INGRESS_TABLE;
+    let c = PRIVATE_EGRESS_CHAIN;
+    let mut s = format!(
+        "add chain ip {t} {c} {{ type filter hook forward priority {PRIVATE_EGRESS_PRIORITY}; }}\n\
+         flush chain ip {t} {c}\n"
+    );
+    let verdict = match mode {
+        PrivateEgressMode::Off => return s,
+        PrivateEgressMode::Warn => "counter",
+        PrivateEgressMode::Deny => "counter drop",
+    };
+    // Replies are not new connections: a client on the LAN that reached a published
+    // port gets its answer through the uplink, addressed to a private destination.
+    s.push_str(&format!(
+        "add rule ip {t} {c} ct state established,related accept\n"
+    ));
+    let mut granted: Vec<String> = allowed
+        .iter()
+        .map(|a| format!("{}/{}", crate::Cidr::fmt_u32(a.base), a.len))
+        .collect();
+    granted.sort();
+    granted.dedup();
+    // One rule per grant rather than one anonymous set: grants may overlap (a /16 and
+    // a /24 inside it), and `nft` refuses overlapping intervals in a set.
+    for a in granted {
+        s.push_str(&format!(
+            "add rule ip {t} {c} oifname \"{UPLINK}\" ip daddr {a} accept\n"
+        ));
+    }
+    s.push_str(&format!(
+        "add rule ip {t} {c} oifname \"{UPLINK}\" ip daddr {{ {} }} {verdict}\n",
+        PRIVATE_EGRESS_DESTINATIONS.join(", ")
+    ));
+    s
+}
+
+/// The script for the guard recorded in `raw` (the record's bytes; `None` = no record),
+/// and what was wrong with the record if anything. PURE.
+///
+/// No record is no guard. A record that does not parse, or names a grant that is not a
+/// canonical prefix, FAILS CLOSED: every range refused, nothing granted. The node's
+/// intent is unknown, and leaving the ranges open would be the silent degradation.
+pub fn private_egress_script_for_record(raw: Option<&[u8]>) -> (String, Option<String>) {
+    let Some(raw) = raw else {
+        return (render_private_egress(PrivateEgressMode::Off, &[]), None);
+    };
+    let checked = serde_json::from_slice::<PrivateEgressGuard>(raw)
+        .map_err(|e| e.to_string())
+        .and_then(|g| private_egress_guard_script(&g).map_err(|e| e.to_string()));
+    match checked {
+        Ok(script) => (script, None),
+        Err(why) => (
+            render_private_egress(PrivateEgressMode::Deny, &[]),
+            Some(why),
+        ),
+    }
+}
+
+/// `<ingress>/private-egress.json` — the guard the holder enforces. Absent on a node
+/// that never recorded one.
+fn private_egress_guard_path() -> PathBuf {
+    ingress_dir().join("private-egress.json")
+}
+
+/// The script the recorded guard asks for, failing closed on a record that exists and
+/// cannot be read — see [`private_egress_script_for_record`].
+fn recorded_private_egress_script() -> String {
+    let path = private_egress_guard_path();
+    let (script, problem) = match std::fs::read(&path) {
+        Ok(raw) => private_egress_script_for_record(Some(&raw)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            private_egress_script_for_record(None)
+        }
+        Err(e) => (
+            render_private_egress(PrivateEgressMode::Deny, &[]),
+            Some(e.to_string()),
+        ),
+    };
+    if let Some(why) = problem {
+        tracing::error!(
+            path = %path.display(),
+            error = %why,
+            "the recorded private-egress guard cannot be read; every private destination \
+             is refused until it is rewritten"
+        );
+    }
+    script
+}
+
+/// Where a pin's applied guard is stamped (the hash of the script it runs).
+fn private_egress_marker(pin: i32) -> PathBuf {
+    ingress_dir().join(format!("private-egress.{pin}"))
+}
+
+fn private_egress_stamp(script: &str) -> String {
+    format!("{:08x}\n", crate::fnv32(script))
+}
+
+/// Holder side: enforces the recorded guard in THIS netns and stamps the pin. Run by a
+/// control plane of this binary when it builds or reattaches to the infra netns, so a
+/// holder born after the record already enforces it.
+fn apply_recorded_private_egress() -> Result<()> {
+    let script = recorded_private_egress_script();
+    apply_nft_stdin(&script)?;
+    if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
+        // Best effort: without the stamp the host side applies it again, idempotently.
+        let _ = std::fs::write(private_egress_marker(pin), private_egress_stamp(&script));
+    }
+    Ok(())
+}
+
+/// Host side: brings the RUNNING holder's guard to the recorded one, from the host,
+/// the way [`ensure_fw_dispatch_current`] migrates the dispatch — so it also reaches a
+/// control plane started by an older binary. A stamp per pin keeps it to one `nft -f`
+/// per change.
+///
+/// A failure is an error, never a warning: a node that recorded a guard and runs
+/// without it is the hole this exists to close.
+pub fn ensure_private_egress_guard_current() -> Result<()> {
+    let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) else {
+        return Ok(()); // no holder: the next one enforces the record when it is built
+    };
+    let marker = private_egress_marker(pin);
+    // Never recorded, and never applied to this holder: nothing to bring current. A
+    // node that never asked for the guard does not pay for it.
+    if !private_egress_guard_path().exists() && !marker.exists() {
+        return Ok(());
+    }
+    let script = recorded_private_egress_script();
+    let stamp = private_egress_stamp(&script);
+    if std::fs::read_to_string(&marker).ok().as_deref() == Some(stamp.as_str()) {
+        return Ok(());
+    }
+    // Inside the pin's user namespace already: see `ensure_fw_dispatch_current`.
+    if same_user_namespace(pin) {
+        return Ok(());
+    }
+    nft_in_pin(pin, &script).map_err(|why| Error::Command {
+        context: "private egress guard",
+        message: format!(
+            "could not apply this node's private-egress guard to the running holder \
+             (pin {pin}): {why}. Workloads on engine networks may still open connections \
+             to private address space until it is applied"
+        ),
+    })?;
+    let _ = std::fs::write(&marker, stamp);
+    Ok(())
+}
+
+/// Records `g` as this node's private-egress guard and brings the running holder to
+/// it. The engine's caller derives `g` from its own node policy; this crate only
+/// enforces what it is given.
+///
+/// Validated BEFORE anything is written: the record is read by the holder, and a grant
+/// that is not a canonical prefix is refused here rather than failing closed there.
+/// Writing an unchanged record is skipped, and so is recording «off» on a node that
+/// never had a record — such a node keeps no file for a guard it never asked for.
+pub fn set_private_egress_guard(g: &PrivateEgressGuard) -> Result<()> {
+    private_egress_guard_script(g)?;
+    let path = private_egress_guard_path();
+    let json = serde_json::to_vec_pretty(g).map_err(|e| Error::Command {
+        context: "private egress guard",
+        message: e.to_string(),
+    })?;
+    let unchanged = match std::fs::read(&path) {
+        Ok(current) => current == json,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => *g == PrivateEgressGuard::default(),
+        Err(_) => false,
+    };
+    if !unchanged {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| Error::Command {
+                context: "private egress guard",
+                message: format!("{}: {e}", dir.display()),
+            })?;
+        }
+        delonix_state::write_atomic(&path, &json).map_err(|e| Error::Command {
+            context: "private egress guard",
+            message: format!("{}: {e}", path.display()),
+        })?;
+    }
+    ensure_private_egress_guard_current()
 }
 
 // ---- ref-count (lifecycle shared by the containers, Phase 3) ----------------
@@ -1312,8 +1609,10 @@ fn ensure_up_locked() -> Result<()> {
     if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
         if control_reachable() {
             // The control may predate the two-chain dispatch (an in-place upgrade):
-            // migrate it here, on the path every workload attach takes.
-            return ensure_fw_dispatch_current();
+            // migrate it here, on the path every workload attach takes. Same path,
+            // same reason, for the node's private-egress guard.
+            ensure_fw_dispatch_current()?;
+            return ensure_private_egress_guard_current();
         }
         // An in-place upgrade over a PRE-split build: that holder is a single
         // process serving the legacy socket path, and its presence on disk is the
@@ -8310,20 +8609,28 @@ fn link_exists(name: &str) -> bool {
 /// bridge legitimately needs one again — the default ingress plus each private
 /// network's own.
 ///
-/// The one piece of KERNEL state it does rewrite is the firewall dispatch, and only
+/// The KERNEL state it does rewrite is the firewall dispatch, and only
 /// because a table built by an older control can carry the single-chain dispatch
 /// whose `accept` skipped the source's egress (see [`fw_dispatch_chains`]). That
 /// rewrite is one atomic, idempotent transaction and leaves every per-container
 /// chain and `@fwmap` untouched. It is `?`: a control that cannot put the dispatch
 /// in its safe shape must not come up announcing a working firewall.
+///
+/// And the node's recorded private-egress guard ([`apply_recorded_private_egress`]),
+/// on both paths, for the same two reasons: an older table has no guard chain, and
+/// the chain is flushed and refilled in one transaction, so it is idempotent too.
 fn reattach_or_setup_infra_netns() -> Result<()> {
     if !infra_netns_already_built() {
         setup_infra_netns()?;
         mark_fw_dispatch_current();
+        apply_recorded_private_egress()?;
         return Ok(());
     }
     apply_nft_stdin(&fw_dispatch_migration_script())?;
     mark_fw_dispatch_current();
+    // Same `?` as the dispatch: a control that cannot enforce the guard the node
+    // recorded must not come up announcing a working firewall.
+    apply_recorded_private_egress()?;
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     for def in network_list() {
         if link_exists(&def.bridge) {
@@ -12555,5 +12862,354 @@ mod tests_control_tokens {
                 validate_control_tokens(&parts)
             );
         }
+    }
+}
+
+/// Acceptance for the private-egress guard: a workload behind the uplink
+/// cannot open a connection into private address space unless the node grants the
+/// destination, and its own network and the networks routed to it stay reachable.
+#[cfg(test)]
+mod tests_private_egress {
+    use super::*;
+
+    fn deny(allowed: &[&str]) -> PrivateEgressGuard {
+        PrivateEgressGuard {
+            mode: PrivateEgressMode::Deny,
+            allowed: allowed.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// The verdict the guard chain gives a NEW connection forwarded out of `oif` to
+    /// `daddr`, read from the rendered script: `Some("accept"|"drop")` for the first
+    /// rule that decides, `None` when the packet falls through the chain undecided.
+    ///
+    /// Understands only the grammar [`render_private_egress`] writes, which is the
+    /// point: it reads the TEXT that goes to `nft`, so a rule that stops being
+    /// anchored on the uplink, or a grant emitted after the drop, changes the answer.
+    fn verdict(script: &str, oif: &str, daddr: &str) -> Option<&'static str> {
+        let ip = u32::from(daddr.parse::<std::net::Ipv4Addr>().expect("an IPv4"));
+        let prefix = format!("add rule ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN} ");
+        for line in script.lines() {
+            let Some(rule) = line.strip_prefix(&prefix) else {
+                continue;
+            };
+            // Only NEW connections are asked about; the state rule never matches one.
+            if rule.starts_with("ct state ") {
+                continue;
+            }
+            let rest = rule
+                .strip_prefix("oifname \"")
+                .expect("every rule names the interface it filters");
+            let (iface, rest) = rest.split_once("\" ").expect("a quoted interface");
+            if iface != oif {
+                continue;
+            }
+            let rest = rest.strip_prefix("ip daddr ").expect("a destination");
+            let (targets, action): (Vec<&str>, &str) = match rest.strip_prefix("{ ") {
+                Some(set) => {
+                    let (inner, action) = set.split_once(" } ").expect("a closed set");
+                    (inner.split(", ").collect(), action)
+                }
+                None => {
+                    let (one, action) = rest.split_once(' ').expect("an action");
+                    (vec![one], action)
+                }
+            };
+            let hit = targets
+                .iter()
+                .any(|t| crate::Cidr::parse(t).expect("a prefix").contains(ip));
+            if !hit {
+                continue;
+            }
+            match action {
+                "accept" => return Some("accept"),
+                "counter drop" => return Some("drop"),
+                // A bare counter (warn) observes and lets the packet go on.
+                "counter" => continue,
+                other => panic!("unexpected action {other:?} in {line:?}"),
+            }
+        }
+        None
+    }
+
+    /// Acceptance, the refusal half: RFC 1918 and CGNAT behind the uplink are
+    /// dropped — the node's own LAN, a hypervisor API, the engine's node API or a
+    /// Kubernetes API on the host network all live there.
+    #[test]
+    fn a_denying_guard_drops_private_destinations_through_the_uplink() {
+        let script = private_egress_guard_script(&deny(&[])).unwrap();
+        for daddr in [
+            "192.168.200.10",
+            "192.168.0.1",
+            "10.0.0.1",
+            "10.255.255.254",
+            "172.16.0.1",
+            "172.31.255.254",
+            "100.64.0.1",
+            "100.127.255.254",
+            // The slirp's own gateway and resolver are the host too.
+            "10.0.2.2",
+            "10.0.2.3",
+        ] {
+            assert_eq!(
+                verdict(&script, "tap0", daddr),
+                Some("drop"),
+                "{daddr}: {script}"
+            );
+        }
+        // Public destinations are not this chain's business.
+        for daddr in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "172.32.0.1",
+            "192.169.0.1",
+            "100.128.0.1",
+        ] {
+            assert_eq!(verdict(&script, "tap0", daddr), None, "{daddr}: {script}");
+        }
+    }
+
+    /// Acceptance, the other half: the workload's OWN network and a network
+    /// routed to it (`kind: NetworkRoute`) are reached through a holder bridge, never
+    /// through the uplink, so the guard never matches them — whatever private prefix
+    /// they use. Isolation between networks stays the job of `fwdeny`'s `@netpair`.
+    #[test]
+    fn the_own_network_and_a_routed_network_are_never_matched() {
+        let script = private_egress_guard_script(&deny(&[])).unwrap();
+        // The default network, a custom network, and a peer routed to it.
+        for (oif, daddr) in [
+            (INFRA_BRIDGE, "10.200.0.7"),
+            ("dlxn1a2b3c4d", "10.88.0.5"),
+            ("dlxn9f8e7d6c", "192.168.77.20"),
+            ("dlxn5a5a5a5a", "172.20.4.9"),
+        ] {
+            assert_eq!(
+                verdict(&script, oif, daddr),
+                None,
+                "{oif} {daddr}: {script}"
+            );
+        }
+        // Structural, not a list of exceptions: every rule that can decide a new
+        // connection is anchored on the uplink.
+        for line in script.lines().filter(|l| l.starts_with("add rule ")) {
+            assert!(
+                line.contains("ct state established,related accept")
+                    || line.contains("oifname \"tap0\""),
+                "a rule not anchored on the uplink would also match bridge traffic: {line}"
+            );
+        }
+    }
+
+    /// A grant from the node policy (a resolver, a gateway, a registry) is accepted
+    /// BEFORE the drop, and only that destination.
+    #[test]
+    fn a_granted_destination_is_accepted_before_the_drop() {
+        let script =
+            private_egress_guard_script(&deny(&["192.168.50.10/32", "10.20.0.0/16"])).unwrap();
+        assert_eq!(verdict(&script, "tap0", "192.168.50.10"), Some("accept"));
+        assert_eq!(verdict(&script, "tap0", "10.20.3.4"), Some("accept"));
+        assert_eq!(verdict(&script, "tap0", "192.168.50.11"), Some("drop"));
+        assert_eq!(verdict(&script, "tap0", "10.21.0.1"), Some("drop"));
+        let drop_at = script.find("counter drop").unwrap();
+        assert!(
+            script.find("192.168.50.10/32 accept").unwrap() < drop_at,
+            "{script}"
+        );
+    }
+
+    /// Overlapping grants are legitimate (a /16 and a /24 inside it), and `nft`
+    /// refuses overlapping intervals inside ONE set — so each grant is its own rule,
+    /// sorted and de-duplicated for a stable script.
+    #[test]
+    fn grants_are_one_rule_each_sorted_and_deduplicated() {
+        let script =
+            private_egress_guard_script(&deny(&["10.20.0.0/16", "10.20.5.0/24", "10.20.0.0/16"]))
+                .unwrap();
+        let grants: Vec<&str> = script.lines().filter(|l| l.ends_with(" accept")).collect();
+        assert_eq!(grants.len(), 3, "established + two grants: {script}");
+        assert!(
+            grants[1].contains("ip daddr 10.20.0.0/16 accept"),
+            "{script}"
+        );
+        assert!(
+            grants[2].contains("ip daddr 10.20.5.0/24 accept"),
+            "{script}"
+        );
+    }
+
+    /// A reply is not a new connection: a LAN client that reached a published port gets
+    /// its answer through the uplink, to a private address. The state rule comes first.
+    #[test]
+    fn replies_to_private_clients_are_not_refused() {
+        let script = private_egress_guard_script(&deny(&[])).unwrap();
+        let rules: Vec<&str> = script
+            .lines()
+            .filter(|l| l.starts_with("add rule "))
+            .collect();
+        assert!(
+            rules[0].ends_with("ct state established,related accept"),
+            "{script}"
+        );
+    }
+
+    /// A grant that is not a canonical prefix is refused before anything reaches
+    /// `nft` — never widened, never passed through.
+    #[test]
+    fn a_grant_that_is_not_a_canonical_prefix_is_refused() {
+        for bad in [
+            "10.20.0.1/16",
+            "10.20",
+            "10.20.0.0",
+            "10.20.0.0/33",
+            "010.20.0.0/16",
+            "10.20.0.0/16 accept; flush ruleset",
+            "10.20.0.0/+16",
+            "",
+        ] {
+            assert!(
+                private_egress_guard_script(&deny(&[bad])).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        assert!(canonical_ipv4_prefix("192.168.50.10/32").is_some());
+        assert!(canonical_ipv4_prefix("0.0.0.0/0").is_some());
+    }
+
+    /// Off is the node that never asked: the chain exists and is empty.
+    #[test]
+    fn off_leaves_the_chain_empty() {
+        let script = private_egress_guard_script(&PrivateEgressGuard::default()).unwrap();
+        assert!(!script.contains("add rule"), "{script}");
+        assert!(script.contains(&format!(
+            "flush chain ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN}"
+        )));
+        assert_eq!(verdict(&script, "tap0", "192.168.200.10"), None);
+    }
+
+    /// `mode: warn` counts and lets through — never a drop.
+    #[test]
+    fn warn_counts_and_never_drops() {
+        let g = PrivateEgressGuard {
+            mode: PrivateEgressMode::Warn,
+            allowed: Vec::new(),
+        };
+        let script = private_egress_guard_script(&g).unwrap();
+        assert!(!script.contains("drop"), "{script}");
+        assert!(script.contains("192.168.0.0/16 } counter\n"), "{script}");
+        assert_eq!(verdict(&script, "tap0", "192.168.200.10"), None);
+    }
+
+    /// The script is one idempotent transaction: it creates the chain a table built
+    /// by an older holder lacks, at the right priority, and flushes before refilling.
+    #[test]
+    fn the_script_creates_flushes_then_refills_the_chain() {
+        let script = private_egress_guard_script(&deny(&["10.20.0.0/16"])).unwrap();
+        let add = format!(
+            "add chain ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward \
+             priority {PRIVATE_EGRESS_PRIORITY}; }}"
+        );
+        let flush = format!("flush chain ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN}");
+        let first_rule = script.find("add rule").unwrap();
+        assert!(
+            script.find(&add).unwrap() < script.find(&flush).unwrap(),
+            "{script}"
+        );
+        assert!(script.find(&flush).unwrap() < first_rule, "{script}");
+        assert!(!script.contains("delete"), "{script}");
+    }
+
+    /// No record is no guard; a record that cannot be read FAILS CLOSED — every range
+    /// refused, nothing granted, and the reason surfaced.
+    #[test]
+    fn a_record_that_cannot_be_read_fails_closed() {
+        let (script, problem) = private_egress_script_for_record(None);
+        assert!(problem.is_none());
+        assert_eq!(verdict(&script, "tap0", "192.168.200.10"), None);
+
+        let unreadable: [&[u8]; 4] = [
+            b"{ not json",
+            br#"{"mode":"deny","allowed":["10.20.0.1/16"]}"#,
+            br#"{"mode":"deny","alowed":[]}"#,
+            br#"{"mode":"block"}"#,
+        ];
+        for raw in unreadable {
+            let (script, problem) = private_egress_script_for_record(Some(raw));
+            assert!(problem.is_some(), "{}", String::from_utf8_lossy(raw));
+            assert_eq!(verdict(&script, "tap0", "192.168.200.10"), Some("drop"));
+            // Nothing granted: the only accept left is the one for replies.
+            assert_eq!(
+                script.lines().filter(|l| l.ends_with(" accept")).count(),
+                1,
+                "{script}"
+            );
+        }
+
+        let good = serde_json::to_vec(&deny(&["192.168.50.10/32"])).unwrap();
+        let (script, problem) = private_egress_script_for_record(Some(&good));
+        assert!(problem.is_none());
+        assert_eq!(verdict(&script, "tap0", "192.168.50.10"), Some("accept"));
+    }
+
+    /// The record's wire form: what the engine writes is what the holder reads.
+    #[test]
+    fn the_record_round_trips() {
+        let g = deny(&["192.168.50.10/32"]);
+        let raw = serde_json::to_string(&g).unwrap();
+        assert!(raw.contains("\"mode\":\"deny\""), "{raw}");
+        assert!(raw.contains("\"allowed\":[\"192.168.50.10/32\"]"), "{raw}");
+        assert_eq!(serde_json::from_str::<PrivateEgressGuard>(&raw).unwrap(), g);
+        assert_eq!(
+            serde_json::from_str::<PrivateEgressGuard>("{}").unwrap(),
+            PrivateEgressGuard::default()
+        );
+    }
+
+    /// RED on a ruleset without the guard chain. The PRIORITY is the requirement: after
+    /// `fwguard`, and before `fwdeny` (-10), where a network's own `allowlist:` lives —
+    /// a `drop` in an earlier base chain is final, so no network or per-workload accept
+    /// can reopen a range the node refuses.
+    #[test]
+    fn the_base_ruleset_places_the_private_egress_chain_before_the_network_policy() {
+        let rs = ingress_table_ruleset();
+        let prio = |chain: &str| -> i32 {
+            let at = rs
+                .find(&format!(
+                    "chain {chain} {{ type filter hook forward priority "
+                ))
+                .unwrap_or_else(|| panic!("no forward chain {chain}: {rs}"));
+            rs[at..]
+                .split_once("priority ")
+                .and_then(|(_, r)| r.split(';').next()?.trim().parse().ok())
+                .expect("a numeric priority")
+        };
+        let guard = prio("fwguard");
+        let private = prio("fwprivate");
+        let network = prio("fwdeny");
+        assert!(guard < private && private < network, "{rs}");
+        // Nothing shares its priority: equal priorities have no defined order.
+        assert_eq!(
+            rs.matches(&format!("priority {private};")).count(),
+            1,
+            "{rs}"
+        );
+    }
+
+    /// The chain the base ruleset declares is the one the script fills, at the same
+    /// priority — a script for another chain would leave the declared one empty.
+    #[test]
+    fn the_script_fills_the_chain_the_base_ruleset_declares() {
+        let rs = ingress_table_ruleset();
+        assert!(
+            rs.contains(&format!(
+                "chain {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward priority \
+                 {PRIVATE_EGRESS_PRIORITY};"
+            )),
+            "{rs}"
+        );
+        let script = private_egress_guard_script(&deny(&[])).unwrap();
+        assert!(script.contains(&format!(
+            "add chain ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward \
+             priority {PRIVATE_EGRESS_PRIORITY}; }}"
+        )));
     }
 }
