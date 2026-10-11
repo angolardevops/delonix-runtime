@@ -152,7 +152,11 @@ pub(crate) struct ClusterSpec {
     pod_subnet: String,
     #[serde(rename = "serviceSubnet", default = "default_service_subnet")]
     service_subnet: String,
-    /// `default` = the image's CNI (kindnet); `none` = install none.
+    /// The pod network. `default` = the engine's own: kindnet in `mode: kind`,
+    /// a node-local bridge in `mode: vm`/`ssh`, which only serves a ONE-node
+    /// cluster (more nodes are refused before anything is created); `none` =
+    /// install nothing, and every node stays `NotReady` until you apply your
+    /// own CNI.
     #[serde(default = "default_cni")]
     cni: String,
     #[serde(default)]
@@ -190,6 +194,101 @@ fn default_mode() -> String {
 }
 fn default_cni() -> String {
     "default".to_string()
+}
+
+/// Every value `spec.cni`/`--cni` may take, in every mode.
+const CNI_CHOICES: &[&str] = &["default", "none"];
+
+/// The pod-network question, answered before any machine exists (#799).
+///
+/// Pure, and shared by `validate()` (every manifest path) and the first line
+/// of `provision_and_apply` (`cluster kubeadm`, which creates its VMs BEFORE
+/// the spec it builds reaches `validate()`). Two refusals:
+///
+/// * a value that is not a CNI this engine knows (DX-1701). It used to be
+///   accepted and then installed nothing, with every node `NotReady`.
+/// * `default` on a kubeadm cluster of more than one node (DX-6701). On that
+///   path the default CNI is a node-local bridge with nothing that routes pod
+///   traffic BETWEEN nodes, so the cluster bootstrapped, reported success and
+///   stayed `NotReady` on every node. A cross-node CNI is not implemented
+///   here; until it is, the operator says `none` and brings their own.
+///
+/// `mode: kind` is not refused: there `default` is kindnet, which routes
+/// between nodes.
+fn check_cni(mode: &str, cni: &str, nodes: u32) -> Result<()> {
+    if !CNI_CHOICES.contains(&cni) {
+        return Err(Error::coded(
+            1701,
+            Error::Invalid(super::po::tf(
+                "spec.cni '{cni}' is not a CNI this engine installs — use `default` (the \
+                 engine's own) or `none` (install nothing, then apply your own CNI)",
+                &[("cni", cni)],
+            )),
+        ));
+    }
+    if mode != "kind" && cni == "default" && nodes > 1 {
+        return Err(Error::coded(
+            6701,
+            Error::Unavailable(super::po::tf(
+                "a kubeadm cluster of {n} nodes cannot use the default CNI: it is a node-local \
+                 bridge with nothing that routes pod traffic between nodes, so every node would \
+                 stay NotReady (a cross-node CNI is not implemented on this path yet). Nothing \
+                 was created. Pass `--cni none` (or `spec.cni: none`) and apply your own CNI \
+                 after the bootstrap, or create a one-node cluster (`--workers 0`)",
+                &[("n", &nodes.to_string())],
+            )),
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `apply_ssh` installs the default CNI itself: only for a cluster of
+/// exactly one node (`check_cni` refuses `default` above that). One function
+/// for the plan line and the step, so the two cannot disagree.
+fn installs_default_cni(spec: &ClusterSpec) -> bool {
+    spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1
+}
+
+/// Whether `apply_ssh` waits for every node to be `Ready`. Never with
+/// `cni: none`: the operator has not applied a CNI yet, so no node can be
+/// `Ready`, and waiting would only end in the «0 nodes Ready» error.
+fn waits_for_ready(spec: &ClusterSpec, wait_ready: bool) -> bool {
+    wait_ready && spec.cni != "none"
+}
+
+/// The steps `apply_ssh` announces before the first one runs. Built from the
+/// same conditions as the steps themselves: a plan that promises a step
+/// nobody runs is worse than no plan.
+fn bootstrap_plan(spec: &ClusterSpec, wait_ready: bool) -> Vec<String> {
+    let hosts = spec.control_plane.hosts.len() + spec.workers.hosts.len();
+    let mut plan = vec![super::po::tf(
+        "Preparing {n} host(s)",
+        &[("n", &hosts.to_string())],
+    )];
+    if spec.etcd.mode == "external" {
+        plan.push(super::po::t("Bootstrapping the etcd cluster").to_string());
+    }
+    plan.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
+    if installs_default_cni(spec) {
+        plan.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
+    }
+    if spec.control_plane.hosts.len() > 1 {
+        plan.push(super::po::tf(
+            "Joining {n} more control-plane(s)",
+            &[("n", &(spec.control_plane.hosts.len() - 1).to_string())],
+        ));
+    }
+    if !spec.workers.hosts.is_empty() {
+        plan.push(super::po::tf(
+            "Joining {n} worker(s)",
+            &[("n", &spec.workers.hosts.len().to_string())],
+        ));
+    }
+    if waits_for_ready(spec, wait_ready) {
+        plan.push(super::po::t("Waiting for all nodes to be Ready").to_string());
+    }
+    plan.push(super::po::t("Fetching kubeconfig").to_string());
+    plan
 }
 
 /// The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many
@@ -426,6 +525,13 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             )));
         }
     }
+    check_cni(
+        &spec.mode,
+        &spec.cni,
+        spec.control_plane
+            .count()
+            .saturating_add(spec.workers.count()),
+    )?;
     Ok(())
 }
 
@@ -550,7 +656,7 @@ pub enum ClusterCmd {
         service_subnet: String,
         /// `default` (kindnet, from the image itself) or `none` (node stays NotReady
         /// until you apply yours — plain kubeadm behavior).
-        #[arg(long, default_value = "default")]
+        #[arg(long, default_value = "default", value_parser = ["default", "none"])]
         cni: String,
     },
     /// Reclaim the state of clusters that have no nodes left.
@@ -635,6 +741,12 @@ pub enum ClusterCmd {
         pod_subnet: String,
         #[arg(long, default_value = "10.96.0.0/12")]
         service_subnet: String,
+        /// Pod network. `default` = the engine's node-local bridge, which only
+        /// serves a ONE-node cluster: with more nodes it is refused before any VM
+        /// is created. `none` = install nothing; every node stays NotReady until
+        /// you apply your own CNI (Cilium, Calico...).
+        #[arg(long, default_value = "default", value_parser = ["default", "none"])]
+        cni: String,
         /// Seconds to wait for each VM to become reachable over SSH.
         #[arg(long, default_value_t = 300)]
         boot_timeout: u64,
@@ -914,6 +1026,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             k8s_version,
             pod_subnet,
             service_subnet,
+            cni,
             boot_timeout,
             copy_kubeconfig,
             etcd_cluster,
@@ -935,6 +1048,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 k8s_version,
                 pod_subnet,
                 service_subnet,
+                cni,
                 boot_timeout,
                 copy_kubeconfig,
                 etcd_cluster,
@@ -1602,6 +1716,7 @@ fn apply_vm(
         k8s_version: spec.k8s_version.clone(),
         pod_subnet: spec.pod_subnet.clone(),
         service_subnet: spec.service_subnet.clone(),
+        cni: spec.cni.clone(),
         boot_timeout,
         copy_kubeconfig: wait_ready,
         // `mode: vm` (manifest-driven) doesn't auto-provision a dedicated etcd
@@ -1663,31 +1778,7 @@ fn apply_ssh(
     // `CONVERGING_KINDS`. Os passos condicionais entram só quando a condição que
     // os cria é verdadeira, senão o plano prometia trabalho que ninguém vai
     // fazer — pior do que não o anunciar.
-    let mut plano = vec![super::po::tf(
-        "Preparing {n} host(s)",
-        &[("n", &all_hosts.len().to_string())],
-    )];
-    if spec.etcd.mode == "external" {
-        plano.push(super::po::t("Bootstrapping the etcd cluster").to_string());
-    }
-    plano.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
-    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
-        plano.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
-    }
-    if spec.control_plane.hosts.len() > 1 {
-        plano.push(super::po::tf(
-            "Joining {n} more control-plane(s)",
-            &[("n", &(spec.control_plane.hosts.len() - 1).to_string())],
-        ));
-    }
-    if !spec.workers.hosts.is_empty() {
-        plano.push(super::po::tf(
-            "Joining {n} worker(s)",
-            &[("n", &spec.workers.hosts.len().to_string())],
-        ));
-    }
-    plano.push(super::po::t("Waiting for all nodes to be Ready").to_string());
-    plano.push(super::po::t("Fetching kubeconfig").to_string());
+    let plano = bootstrap_plan(spec, wait_ready);
     p.plan(&plano);
 
     p.step(
@@ -1787,20 +1878,16 @@ fn apply_ssh(
     // `spec.cni` used to be validated by round-trip and then never read again
     // anywhere in this function — every cluster bootstrapped through this
     // path stayed `NotReady` forever, with nothing but a manual
-    // `kubectl apply -f <cni>.yaml` able to fix it (exactly the step a past
-    // investigation session took by hand; see the KaaS capability audit,
-    // docs/discovery/kaas-matrix-2026-10-08.md, gap #1). Only the provably
-    // safe case is wired up here: EXACTLY one node total. A plain bridge CNI
-    // gives that one node working pod networking (it is the same conflist
-    // delonix-cri's own root-CNI path already uses for every pod sandbox —
-    // see ADR-0074 and the AGENTS.md section on the root-CNI bridge fix), but has no
-    // mechanism to route pod traffic BETWEEN nodes (no DaemonSet programs
-    // the routes), so a multi-node cluster is left exactly as before:
-    // `NotReady` until the operator applies their own CNI. `cluster kubeadm`
-    // has no `--cni` flag to opt out of `default` yet, so refusing the
-    // multi-node case outright here would break the HA example with no
-    // escape hatch — a scope decision, not an oversight.
-    if spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1 {
+    // `kubectl apply -f <cni>.yaml` able to fix it (see the KaaS capability
+    // audit, docs/discovery/kaas-matrix-2026-10-08.md, gap #1). Only the
+    // provably safe case is wired up here: EXACTLY one node total. A plain
+    // bridge CNI gives that one node working pod networking (the same
+    // conflist delonix-cri's own root-CNI path uses for every pod sandbox —
+    // ADR-0074), but has nothing that routes pod traffic BETWEEN nodes. A
+    // multi-node cluster with `cni: default` never gets here: `check_cni`
+    // refuses it before any machine is created (#799), and `cni: none` is
+    // the operator saying they bring their own.
+    if installs_default_cni(spec) {
         p.step(
             super::po::t("Installing the default CNI (bridge, single node)"),
             "🔌",
@@ -1846,7 +1933,7 @@ fn apply_ssh(
     // never checked (the historical `cluster apply -f` timing, which passes
     // `wait_ready: false` on purpose — see `apply()`'s own comment); `Some`
     // = checked, with the true/false from `wait_for_cluster_ready` itself.
-    let confirmed_ready = if wait_ready {
+    let confirmed_ready = if waits_for_ready(spec, wait_ready) {
         let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
         p.step(super::po::t("Waiting for all nodes to be Ready"), "⏳");
         let ready = wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
@@ -1868,6 +1955,13 @@ fn apply_ssh(
     // "relato desonesto" this repo's own doctrine rejects elsewhere — see
     // the KaaS capability audit's gap #1.
     match confirmed_ready {
+        // `cni: none` is never waited on (`waits_for_ready`), and it gets its own
+        // line: «readiness was not checked» would read as if checking could help.
+        None if spec.cni == "none" => output::info(&super::po::tf(
+            "cluster \"{name}\" bootstrapped with no CNI (`cni: none`) — every node stays \
+             NotReady until you apply one: `delonix cluster {name} apply -f <cni>.yaml`",
+            &[("name", name)],
+        )),
         Some(true) => output::info(&super::po::tf(
             "cluster \"{name}\" ready",
             &[("name", name)],
@@ -2016,6 +2110,8 @@ struct ProvisionArgs {
     k8s_version: Option<String>,
     pod_subnet: String,
     service_subnet: String,
+    /// `--cni`/`spec.cni`, checked by `check_cni` before any VM is created.
+    cni: String,
     boot_timeout: u64,
     copy_kubeconfig: bool,
     /// `None`/`Some(0)` = stacked etcd (default, unchanged). `Some(n >= 1)` =
@@ -2511,6 +2607,15 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
             super::po::t("--control-plane must be >= 1").into(),
         ));
     }
+    // Before the image is resolved (a pull), the SSH key is generated and the
+    // first VM is created: the spec this function builds reaches `validate()`
+    // only after all of that, and a refusal there would leave the VMs behind.
+    // The etcd and load-balancer VMs are not Kubernetes nodes.
+    check_cni(
+        "vm",
+        &args.cni,
+        args.control_plane.saturating_add(args.workers),
+    )?;
     let base = state_root();
     let vm_store = VmImageStore::open(&base)?;
     // The whole "resolve, and download the official one if nothing is local"
@@ -2677,7 +2782,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         k8s_version: args.k8s_version,
         pod_subnet: args.pod_subnet,
         service_subnet: args.service_subnet,
-        cni: default_cni(),
+        cni: args.cni,
         kind: KindModeSpec::default(),
         vm: VmModeSpec::default(),
     };
@@ -4501,5 +4606,128 @@ workers:
         let docs = vec![cluster_doc("only")];
         let (doc, _spec) = single_cluster_doc(&docs).unwrap();
         assert_eq!(doc.metadata.name, "only");
+    }
+
+    // --- #799: the pod network of a multi-node kubeadm cluster ---------------
+
+    fn host(ip: &str) -> HostSpec {
+        HostSpec {
+            ip: ip.into(),
+            hostname: None,
+        }
+    }
+
+    /// One control-plane and one worker over SSH, with the given `cni`.
+    fn spec_ssh_cp_and_worker(cni: &str) -> ClusterSpec {
+        ClusterSpec {
+            workers: NodesSpec {
+                replicas: None,
+                hosts: vec![host("10.0.0.2")],
+            },
+            cni: cni.into(),
+            ..spec_ssh_1cp()
+        }
+    }
+
+    /// The measured failure of #799: two nodes, `cni: default`, every node
+    /// `NotReady` after a bootstrap that said «ready». Refused now, with its
+    /// own number and the «unavailable» exit class (69), not a generic 1.
+    #[test]
+    fn a_multi_node_kubeadm_cluster_refuses_the_default_cni() {
+        let err = validate(&spec_ssh_cp_and_worker("default")).unwrap_err();
+        assert_eq!(err.number(), 6701, "{err}");
+        assert_eq!(super::super::exitcode::for_error(&err), 69, "{err}");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--cni none"),
+            "the refusal names the way out: {msg}"
+        );
+        assert!(msg.contains("2 nodes"), "{msg}");
+    }
+
+    /// `mode: vm` counts REPLICAS, not hosts: the manifest path of
+    /// `cluster apply -f cluster-vm.yaml` is refused before `apply_vm`
+    /// creates its first VM.
+    #[test]
+    fn a_vm_mode_cluster_counts_replicas_for_the_cni_refusal() {
+        let spec = ClusterSpec {
+            mode: "vm".into(),
+            control_plane: NodesSpec {
+                replicas: Some(1),
+                hosts: vec![],
+            },
+            workers: NodesSpec {
+                replicas: Some(2),
+                hosts: vec![],
+            },
+            ..Default::default()
+        };
+        assert_eq!(validate(&spec).unwrap_err().number(), 6701);
+        let one = ClusterSpec {
+            workers: NodesSpec::default(),
+            ..spec
+        };
+        assert!(validate(&one).is_ok(), "one node keeps the default bridge");
+    }
+
+    /// `none` is the operator saying they bring their own CNI: accepted at any
+    /// size, and the bootstrap neither installs one nor waits for `Ready`.
+    #[test]
+    fn cni_none_is_accepted_for_any_size_and_never_waited_on() {
+        let spec = spec_ssh_cp_and_worker("none");
+        assert!(validate(&spec).is_ok());
+        assert!(!installs_default_cni(&spec));
+        assert!(!waits_for_ready(&spec, true));
+        let plan = bootstrap_plan(&spec, true);
+        let waiting = super::super::po::t("Waiting for all nodes to be Ready");
+        let installing = super::super::po::t("Installing the default CNI (bridge, single node)");
+        assert!(!plan.iter().any(|l| l == waiting), "{plan:?}");
+        assert!(!plan.iter().any(|l| l == installing), "{plan:?}");
+    }
+
+    /// Kind mode is not refused: there `default` is kindnet, which routes
+    /// between nodes.
+    #[test]
+    fn kind_mode_keeps_the_default_cni_with_several_nodes() {
+        let spec = ClusterSpec {
+            mode: "kind".into(),
+            control_plane: NodesSpec {
+                replicas: Some(1),
+                hosts: vec![],
+            },
+            workers: NodesSpec {
+                replicas: Some(3),
+                hosts: vec![],
+            },
+            ..Default::default()
+        };
+        assert!(validate(&spec).is_ok());
+    }
+
+    /// A CNI the engine does not know used to install nothing and say nothing.
+    #[test]
+    fn an_unknown_cni_is_refused_by_name() {
+        let spec = ClusterSpec {
+            cni: "calico".into(),
+            ..spec_ssh_1cp()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(err.number(), 1701, "{err}");
+        assert!(err.to_string().contains("calico"), "{err}");
+    }
+
+    /// The plan of a one-node default-CNI cluster announces the CNI step, and
+    /// the wait only when it is asked for: the line the old plan printed
+    /// unconditionally, for a step that never ran without `--copy-kubeconfig`.
+    #[test]
+    fn the_plan_announces_only_the_steps_that_run() {
+        let spec = spec_ssh_1cp();
+        let waiting = super::super::po::t("Waiting for all nodes to be Ready");
+        let installing = super::super::po::t("Installing the default CNI (bridge, single node)");
+        let with_wait = bootstrap_plan(&spec, true);
+        assert!(with_wait.iter().any(|l| l == installing), "{with_wait:?}");
+        assert!(with_wait.iter().any(|l| l == waiting), "{with_wait:?}");
+        let without = bootstrap_plan(&spec, false);
+        assert!(!without.iter().any(|l| l == waiting), "{without:?}");
     }
 }

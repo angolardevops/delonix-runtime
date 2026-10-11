@@ -15594,3 +15594,37 @@ msgstr ""
 # #798 — a failed --net start keeps the network of a live process
 msgid "{name}: the start reported a failure, but its process {pid} is running — its network ({ip}) is kept instead of undone. Check it with `delonix container describe {name}`, and remove it with `delonix container rm -f {name}` if it should not be running"
 msgstr "{name}: o arranque reportou uma falha, mas o processo {pid} está a correr — a rede ({ip}) foi mantida em vez de desfeita. Verifica com `delonix container describe {name}`, e remove-o com `delonix container rm -f {name}` se não devia estar a correr"
+
+# cluster kubeadm/apply: a CNI de um cluster multi-nó (#799, DX-1701, DX-6701)
+msgid "Pod network. `default` = the engine's node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI (Cilium, Calico...)."
+msgstr "Rede dos pods. `default` = a bridge local ao nó do próprio motor, que só serve um cluster de UM nó: com mais nós é recusada antes de se criar qualquer VM. `none` = não instala nada; todos os nós ficam NotReady até aplicares a tua CNI (Cilium, Calico...)."
+
+msgid "spec.cni '{cni}' is not a CNI this engine installs — use `default` (the engine's own) or `none` (install nothing, then apply your own CNI)"
+msgstr "spec.cni '{cni}' não é uma CNI que este motor instale — usa `default` (a do próprio motor) ou `none` (não instala nada, e depois aplicas a tua CNI)"
+
+msgid "a kubeadm cluster of {n} nodes cannot use the default CNI: it is a node-local bridge with nothing that routes pod traffic between nodes, so every node would stay NotReady (a cross-node CNI is not implemented on this path yet). Nothing was created. Pass `--cni none` (or `spec.cni: none`) and apply your own CNI after the bootstrap, or create a one-node cluster (`--workers 0`)"
+msgstr "um cluster kubeadm de {n} nós não pode usar a CNI por omissão: é uma bridge local ao nó, sem nada que encaminhe o tráfego dos pods entre nós, por isso todos os nós ficariam NotReady (uma CNI entre nós ainda não está implementada neste caminho). Nada foi criado. Passa `--cni none` (ou `spec.cni: none`) e aplica a tua CNI depois do bootstrap, ou cria um cluster de um só nó (`--workers 0`)"
+
+msgid "cluster \"{name}\" bootstrapped with no CNI (`cni: none`) — every node stays NotReady until you apply one: `delonix cluster {name} apply -f <cni>.yaml`"
+msgstr "cluster \"{name}\" inicializado sem CNI (`cni: none`) — todos os nós ficam NotReady até aplicares uma: `delonix cluster {name} apply -f <cni>.yaml`"
+
+msgid "unknown cluster CNI"
+msgstr "CNI de cluster desconhecida"
+
+msgid "`spec.cni` (or `--cni`) names the pod network the engine installs on the cluster's nodes. Only `default` (the engine's own: kindnet in kind mode, a node-local bridge on a one-node kubeadm cluster) and `none` (install nothing; the operator applies their own) exist. Any other value used to install nothing and say nothing, which leaves every node `NotReady`."
+msgstr "O `spec.cni` (ou `--cni`) nomeia a rede dos pods que o motor instala nos nós do cluster. Só existem `default` (a do próprio motor: kindnet no modo kind, uma bridge local ao nó num cluster kubeadm de um só nó) e `none` (não instala nada; o operador aplica a sua). Qualquer outro valor não instalava nada nem o dizia, o que deixa todos os nós `NotReady`."
+
+msgid "Use `default` or `none`. To run Cilium, Calico or another CNI, use `none` and apply its manifest after the cluster is up."
+msgstr "Usa `default` ou `none`. Para correr Cilium, Calico ou outra CNI, usa `none` e aplica o manifesto dela depois de o cluster estar de pé."
+
+msgid "the default CNI of a kubeadm cluster only serves one node"
+msgstr "a CNI por omissão de um cluster kubeadm só serve um nó"
+
+msgid "A kubeadm cluster (`cluster kubeadm`, or `cluster apply` with `mode: vm`/`mode: ssh`) with more than one node asked for `cni: default`. On that path the default CNI is a node-local bridge: it gives pods an address on their own node and has nothing that routes pod traffic between nodes, so every node would stay `NotReady` after a bootstrap that reports success. A cross-node CNI is not implemented on this path yet; the refusal comes before any machine is created."
+msgstr "Um cluster kubeadm (`cluster kubeadm`, ou `cluster apply` com `mode: vm`/`mode: ssh`) com mais de um nó pediu `cni: default`. Nesse caminho a CNI por omissão é uma bridge local ao nó: dá aos pods um endereço no seu próprio nó e não tem nada que encaminhe o tráfego dos pods entre nós, por isso todos os nós ficariam `NotReady` depois de um bootstrap que reporta sucesso. Uma CNI entre nós ainda não está implementada neste caminho; a recusa vem antes de se criar qualquer máquina."
+
+msgid "Choose the pod network explicitly: `--cni none` (or `spec.cni: none`) and apply your own CNI after the bootstrap (Cilium, Calico, flannel...), or create a one-node cluster (`--workers 0` with one control-plane). Kind mode (`cluster create`) installs kindnet and serves several nodes."
+msgstr "Escolhe a rede dos pods explicitamente: `--cni none` (ou `spec.cni: none`) e aplica a tua CNI depois do bootstrap (Cilium, Calico, flannel...), ou cria um cluster de um só nó (`--workers 0` com um control-plane). O modo kind (`cluster create`) instala o kindnet e serve vários nós."
+
+msgid "more than one node: the default CNI only serves one, so bring your own and apply it after the bootstrap"
+msgstr "mais de um nó: a CNI por omissão só serve um, por isso trazes a tua e aplica-la depois do bootstrap"

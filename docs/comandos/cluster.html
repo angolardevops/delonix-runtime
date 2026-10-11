@@ -207,7 +207,7 @@ EXAMPLES:
 
   # from zero to VMs plus kubeadm — above one control-plane the load balancer
   # comes with it
-  delonix cluster kubeadm --name lab --network k8s --control-plane 3
+  delonix cluster kubeadm --name lab --network k8s --control-plane 3 --cni none
 
   # hand the kubeconfig to a teammate, or reload it in a fresh shell
   delonix cluster kubeconfig dev
@@ -318,6 +318,7 @@ Options:
           `default` (kindnet, from the image itself) or `none` (node stays NotReady until you apply yours — plain kubeadm behavior)
           
           [default: default]
+          [possible values: default, none]
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -500,6 +501,12 @@ Options:
       --service-subnet &lt;SERVICE_SUBNET&gt;
           [default: 10.96.0.0/12]
 
+      --cni &lt;CNI&gt;
+          Pod network. `default` = the engine&#x27;s node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI (Cilium, Calico...)
+          
+          [default: default]
+          [possible values: default, none]
+
       --boot-timeout &lt;BOOT_TIMEOUT&gt;
           Seconds to wait for each VM to become reachable over SSH
           
@@ -519,17 +526,21 @@ Options:
 
 EXAMPLES:
   # VMs from the golden image plus kubeadm, without writing a manifest by hand
-  delonix cluster kubeadm --name lab --network k8s
+  delonix cluster kubeadm --name lab --network k8s --workers 0
 
   # HA: above one control-plane a HAProxy load balancer is provisioned and
   # used as the endpoint
-  delonix cluster kubeadm --name lab --network k8s --control-plane 3 --workers 3
+  delonix cluster kubeadm --name lab --network k8s --control-plane 3 --workers 3 --cni none
+
+  # more than one node: the default CNI only serves one, so bring your own and
+  # apply it after the bootstrap
+  delonix cluster kubeadm --name lab --network k8s --workers 2 --cni none
 
   # merge the kubeconfig into your own only after every node reports Ready
-  delonix cluster kubeadm --name lab --network k8s --copy-kubeconfig
+  delonix cluster kubeadm --name lab --network k8s --workers 0 --copy-kubeconfig
 
   # etcd on VMs of its own instead of stacked on the control-planes
-  delonix cluster kubeadm --name lab --network k8s --etcd-cluster 3
+  delonix cluster kubeadm --name lab --network k8s --workers 0 --etcd-cluster 3
 
 SEE ALSO:
   delonix cluster apply · delonix get · delonix vm ls · delonix vm image pull
@@ -551,15 +562,15 @@ pattern as containers); without <code>--vm-image</code>, it resolves the single 
 image or downloads it from the official repository automatically. Step-by-step progress,
 <code>kind create cluster</code>-style (each step closes with ✓/✗), degrading to one line per step
 with no TTY (pipes/CI).</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Do zero: 1 control-plane + 2 workers</div><div class='cap lang-en'>From scratch: 1 control-plane + 2 workers</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2</code></pre></div><div class="ex"><div class='cap lang-pt'>HA: 2 control-planes + 3 workers (HAProxy automático)</div><div class='cap lang-en'>HA: 2 control-planes + 3 workers (automatic HAProxy)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --workers 3</code></pre></div><div class="ex"><div class='cap lang-pt'>Etcd externo dedicado (3 VMs extra, quórum ímpar)</div><div class='cap lang-en'>Dedicated external etcd (3 extra VMs, odd quorum)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Do zero: 1 control-plane + 2 workers, com a tua CNI (a por omissão só serve um nó)</div><div class='cap lang-en'>From scratch: 1 control-plane + 2 workers, with your own CNI (the default one serves a single node only)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2 --cni none</code></pre></div><div class="ex"><div class='cap lang-pt'>HA: 2 control-planes + 3 workers (HAProxy automático)</div><div class='cap lang-en'>HA: 2 control-planes + 3 workers (automatic HAProxy)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --workers 3 --cni none</code></pre></div><div class="ex"><div class='cap lang-pt'>Etcd externo dedicado (3 VMs extra, quórum ímpar)</div><div class='cap lang-en'>Dedicated external etcd (3 extra VMs, odd quorum)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3 --cni none</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um comando, do zero a um cluster Kubernetes real a correr —
 sem Docker, sem containerd, com <code>delonix-cri</code> como runtime.</p>
-<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 0
 export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
 kubectl get nodes</code></pre></div><div class='callout lang-en'><p>One command, from zero to a real Kubernetes cluster running — no
 Docker, no containerd, with <code>delonix-cri</code> as the runtime.</p>
-<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 0
 export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
 kubectl get nodes</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
