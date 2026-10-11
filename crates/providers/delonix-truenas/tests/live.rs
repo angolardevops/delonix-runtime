@@ -1,15 +1,17 @@
 //! Exercises the provisioner against a REAL TrueNAS appliance.
 //!
-//! Skipped unless `DELONIX_TRUENAS_TEST_URL` is set, because it needs one — and
-//! a test that quietly passes when its target is absent proves nothing. Run it
-//! against the appliance this repo builds (`scripts/appliances/build-truenas.sh`):
+//! `#[ignore]`d, because it needs one — `cargo test` lists it as `ignored`,
+//! never as `passed`, and run with `--ignored` without its variables it fails
+//! naming them: a test that quietly passes when its target is absent proves
+//! nothing. Run it against the appliance this repo builds
+//! (`scripts/appliances/build-truenas.sh`):
 //!
 //! ```text
 //! DELONIX_TRUENAS_TEST_URL=https://192.168.122.83 \
 //! DELONIX_TRUENAS_TEST_USER=truenas_admin \
 //! DELONIX_TRUENAS_TEST_PASS=delonix-admin \
 //! DELONIX_TRUENAS_TEST_POOL=tank \
-//!   cargo test -p delonix-truenas --test live -- --nocapture
+//!   cargo test -p delonix-truenas --test live -- --ignored --nocapture
 //! ```
 //!
 //! It creates and then destroys `<pool>/dlxlive-<pid>`, so it never touches a
@@ -38,11 +40,11 @@ fn target() -> Option<(Target, String)> {
     ))
 }
 
-#[ignore = "DELONIX_TRUENAS_TEST_URL (a real TrueNAS appliance) is not set -- run with --ignored"]
+#[ignore = "needs DELONIX_TRUENAS_TEST_URL, DELONIX_TRUENAS_TEST_KEY (or _USER + _PASS) and a reachable TrueNAS: cargo test -p delonix-truenas --test live -- --ignored"]
 #[test]
 fn provisiona_partilha_e_destroi_contra_uma_appliance_real() {
     let (t, pool) = target()
-        .expect("DELONIX_TRUENAS_TEST_URL must be set to run this --ignored test against a real TrueNAS appliance");
+        .expect("DELONIX_TRUENAS_TEST_URL and DELONIX_TRUENAS_TEST_KEY (or DELONIX_TRUENAS_TEST_USER + _PASS) must be set to run this --ignored test against a real TrueNAS appliance");
     let c = Client::connect(&t).expect("connect");
     eprintln!("connected to TrueNAS {}", c.version());
 

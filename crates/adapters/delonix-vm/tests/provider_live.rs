@@ -121,14 +121,14 @@ fn report(lines: &[String]) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs qemu-img and cloud-hypervisor or virsh on this host: cargo test -p delonix-vm --test provider_live -- --ignored"]
 fn the_same_vmspec_converges_cloud_hypervisor_and_libvirt() {
     let ch_missing = tool_missing("cloud-hypervisor", &["--version"]);
     let lv_missing = tool_missing("virsh", &["--version"]);
-    if ch_missing && lv_missing {
-        report(&["neither cloud-hypervisor nor virsh usable here — nothing to prove".into()]);
-        return;
-    }
+    assert!(
+        !(ch_missing && lv_missing),
+        "cloud-hypervisor or virsh must be usable to run this --ignored test — nothing to prove"
+    );
 
     // Removed on Drop, so an `expect` or `assert!` below does not leave it behind.
     // `tempdir()` makes it 0700; 0755 keeps it readable by QEMU when QEMU is

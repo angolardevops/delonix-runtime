@@ -5,11 +5,12 @@
 //! two containers of the same group land under ONE intermediate cgroup and that the
 //! group's ceiling is on it, applied before either of them could allocate anything.
 //!
-//! Skips itself (does not fail) where the environment cannot deliver a delegated
-//! cgroup v2 base, which is the normal CI container. A test that fails because of the
-//! environment teaches people to ignore the suite.
+//! `#[ignore]`d: the normal CI container cannot deliver a delegated cgroup v2 base,
+//! and a test that RETURNED there was reported as `passed` having started nothing.
+//! Run it with `--ignored` on a host that can; there, an environment that cannot
+//! deliver what the test needs FAILS naming it.
 //!
-//! `cargo test -p delonix-linux --test cgroup_parent -- --nocapture --test-threads=1`
+//! `cargo test -p delonix-linux --test cgroup_parent -- --ignored --nocapture --test-threads=1`
 
 use std::path::{Path, PathBuf};
 
@@ -62,18 +63,15 @@ fn tmp(tag: &str) -> PathBuf {
 }
 
 #[test]
+#[ignore = "needs /usr/bin/busybox and a host that delegates cgroup v2 (memory, cpu, pids) to this user: cargo test -p delonix-linux --test cgroup_parent -- --ignored --test-threads=1"]
 fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
     let root = tmp("group");
     let _ = std::fs::remove_dir_all(&root);
     let rootfs = root.join("rootfs");
-    if build_rootfs(&rootfs).is_none() {
-        eprintln!("SKIPPED: no /usr/bin/busybox to build a rootfs from.");
-        return;
-    }
-    let Ok(store) = Store::open(root.join("containers")) else {
-        eprintln!("SKIPPED: cannot open a store under {}.", root.display());
-        return;
-    };
+    build_rootfs(&rootfs)
+        .expect("a busybox rootfs (from /usr/bin/busybox) is needed to run this --ignored test");
+    let store = Store::open(root.join("containers"))
+        .unwrap_or_else(|e| panic!("cannot open a store under {}: {e}", root.display()));
 
     let mut guard = Cleanup {
         store_dir: root.join("containers"),
@@ -106,10 +104,10 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
                 guard.ids.push(c.clone());
                 assert_eq!(st, Status::Running, "container had to start");
             }
-            Err(e) => {
-                eprintln!("SKIPPED: this environment cannot start a container ({e}).");
-                return;
-            }
+            Err(e) => panic!(
+                "this host cannot start a rootless container ({e}) — the test needs a \
+                 delegated cgroup v2 base"
+            ),
         }
     }
 
@@ -141,13 +139,11 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
             .to_string()
     };
     let mem = read(&format!("{gdir}/memory.max"));
-    if mem.is_empty() {
-        eprintln!(
-            "NOT PROVEN: no `memory.max` on the group — this host does not delegate the \
-             memory controller down to it. The nesting is proven; the ceiling is not."
-        );
-        return;
-    }
+    assert!(
+        !mem.is_empty(),
+        "no `memory.max` on the group — this host does not delegate the memory controller \
+         down to it. The nesting is proven; the ceiling is not."
+    );
     assert_eq!(mem, GROUP_MEM, "the group's aggregate ceiling");
     assert_eq!(
         read(&format!("{gdir}/memory.swap.max")),
@@ -163,18 +159,15 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
 }
 
 #[test]
+#[ignore = "needs /usr/bin/busybox and a host that delegates cgroup v2 (memory, cpu, pids) to this user: cargo test -p delonix-linux --test cgroup_parent -- --ignored --test-threads=1"]
 fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
     let root = tmp("escape");
     let _ = std::fs::remove_dir_all(&root);
     let rootfs = root.join("rootfs");
-    if build_rootfs(&rootfs).is_none() {
-        eprintln!("SKIPPED: no /usr/bin/busybox to build a rootfs from.");
-        return;
-    }
-    let Ok(store) = Store::open(root.join("containers")) else {
-        eprintln!("SKIPPED: cannot open a store.");
-        return;
-    };
+    build_rootfs(&rootfs)
+        .expect("a busybox rootfs (from /usr/bin/busybox) is needed to run this --ignored test");
+    let store = Store::open(root.join("containers"))
+        .unwrap_or_else(|e| panic!("cannot open a store under {}: {e}", root.display()));
     let mut guard = Cleanup {
         store_dir: root.join("containers"),
         ids: Vec::new(),
@@ -200,10 +193,10 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
     });
     match delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
         Ok(_) => guard.ids.push(c.clone()),
-        Err(e) => {
-            eprintln!("SKIPPED: cannot start a container here ({e}).");
-            return;
-        }
+        Err(e) => panic!(
+            "this host cannot start a rootless container ({e}) — the test needs a \
+             delegated cgroup v2 base"
+        ),
     }
     let path = delonix_linux::live_cgroup(&c);
     eprintln!("cgroup with a rejected name: {path}");
