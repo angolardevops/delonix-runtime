@@ -198,6 +198,26 @@ impl CapCeiling {
         }
     }
 
+    /// The startup line and whether it is a WARNING. A node with no ceiling set is
+    /// the one case that warns: a `privileged: true` pod admitted here runs with
+    /// every capability the kernel has, and this node's only LOCAL barrier is off
+    /// — an admission controller that bounds it lives in another process, which
+    /// this socket does not see. An operator who never configured a ceiling should
+    /// be told at startup, not discover it after an escape. A ceiling in force is
+    /// the ordinary info line. See the `security:` issue on the CRI ceiling default.
+    pub fn startup_banner(&self) -> (String, bool) {
+        if self.is_unlimited() {
+            (
+                "no capability ceiling set — a privileged pod gets all capabilities; \
+                 set DELONIX_CRI_CAP_CEILING (e.g. 'default') or --cap-ceiling to bound it"
+                    .to_string(),
+                true,
+            )
+        } else {
+            (format!("capability ceiling: {}", self.describe()), false)
+        }
+    }
+
     /// The capabilities an EXPLICIT request asks for that the ceiling forbids, as
     /// names the operator can read. Empty when there is no ceiling, when the mode
     /// is `clamp`, or when the request fits.
@@ -428,6 +448,26 @@ mod tests {
             "got {:?} want {:?}",
             names_from_mask(got),
             names_from_mask(want)
+        );
+    }
+
+    /// No ceiling is the only startup line that warns; a ceiling in force is info.
+    #[test]
+    fn the_startup_banner_warns_only_when_there_is_no_ceiling() {
+        let (msg, warn) = CapCeiling::unlimited().startup_banner();
+        assert!(warn, "no ceiling must warn");
+        assert!(
+            msg.contains("no capability ceiling set") && msg.contains("DELONIX_CRI_CAP_CEILING"),
+            "the warning names the fix: {msg}"
+        );
+
+        let (msg, warn) = CapCeiling::parse("CHOWN", "reject")
+            .unwrap()
+            .startup_banner();
+        assert!(!warn, "a ceiling in force is not a warning");
+        assert!(
+            msg.starts_with("capability ceiling:") && msg.contains("CHOWN"),
+            "the info line carries the ceiling: {msg}"
         );
     }
 }

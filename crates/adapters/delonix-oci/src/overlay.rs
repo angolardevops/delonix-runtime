@@ -61,11 +61,15 @@ fn scan_layer_owners(reader: impl std::io::Read, unpacked: &Path) -> Result<Vec<
 
 type Buffered<R> = std::io::BufReader<R>;
 
-/// A layer's tar, behind whichever decompressor its magic bytes name.
+use crate::owners::LimitReader;
+
+/// A layer's tar, behind whichever decompressor its magic bytes name. Each is
+/// wrapped in a [`LimitReader`] so a bomb cannot drive the decompressor past
+/// the uncompressed ceiling (`owners::MAX_LAYER_UNCOMPRESSED_BYTES`).
 enum LayerArchive<'a, R: std::io::Read> {
-    Gzip(&'a mut tar::Archive<flate2::read::GzDecoder<Buffered<R>>>),
-    Zstd(&'a mut tar::Archive<zstd::stream::read::Decoder<'static, Buffered<R>>>),
-    Plain(&'a mut tar::Archive<Buffered<R>>),
+    Gzip(&'a mut tar::Archive<LimitReader<flate2::read::GzDecoder<Buffered<R>>>>),
+    Zstd(&'a mut tar::Archive<LimitReader<zstd::stream::read::Decoder<'static, Buffered<R>>>>),
+    Plain(&'a mut tar::Archive<LimitReader<Buffered<R>>>),
 }
 
 /// Opens a layer blob (gzip `1f 8b`, zstd `28 b5 2f fd`, or a plain tar) and
@@ -79,15 +83,22 @@ fn with_layer_archive<R: std::io::Read, T>(
     let head = reader.fill_buf()?;
     let is_gzip = head.starts_with(&[0x1f, 0x8b]);
     let is_zstd = head.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
+    let limit = crate::owners::MAX_LAYER_UNCOMPRESSED_BYTES;
     if is_gzip {
-        f(LayerArchive::Gzip(&mut tar::Archive::new(
-            flate2::read::GzDecoder::new(reader),
-        )))
+        let dec = LimitReader::new(flate2::read::GzDecoder::new(reader), limit);
+        f(LayerArchive::Gzip(&mut tar::Archive::new(dec)))
     } else if is_zstd {
         let zd = zstd::stream::read::Decoder::with_buffer(reader)?;
-        f(LayerArchive::Zstd(&mut tar::Archive::new(zd)))
+        f(LayerArchive::Zstd(&mut tar::Archive::new(
+            LimitReader::new(zd, limit),
+        )))
     } else {
-        f(LayerArchive::Plain(&mut tar::Archive::new(reader)))
+        // A plain (uncompressed) tar is no decompression bomb, but the same
+        // ceiling costs nothing and keeps the bound uniform; the entry cap in
+        // `unpack_recording`/`scan` still covers its many-entries variant.
+        f(LayerArchive::Plain(&mut tar::Archive::new(
+            LimitReader::new(reader, limit),
+        )))
     }
 }
 

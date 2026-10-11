@@ -23,6 +23,68 @@ use std::path::{Path, PathBuf};
 
 pub use delonix_compute::owners::{decode, encode, relative, Owner};
 
+/// Ceiling on the DECOMPRESSED size of one layer. The download side caps the
+/// COMPRESSED blob at 8 GiB (`registry::MAX_BLOB_BYTES`); that number says
+/// nothing about the decompressed side, where a few MB of zeros become
+/// terabytes. Applied by `overlay::with_layer_archive` through [`LimitReader`],
+/// so every real caller (pull, CRI, flat extract) inherits it. Generous for
+/// real layers (`kindest/node` runs to low single-digit GiB, AGENTS.md) and far
+/// below any bomb.
+pub(crate) const MAX_LAYER_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
+/// Ceiling on the NUMBER of entries in one layer, against the
+/// millions-of-tiny-files variant the byte ceiling alone misses: it exhausts
+/// inodes, not bytes, so a stream of zero-length entries slips under
+/// [`MAX_LAYER_UNCOMPRESSED_BYTES`]. A full distro image has well under a
+/// million files.
+pub(crate) const MAX_LAYER_ENTRIES: u64 = 4_000_000;
+
+/// A reader that refuses to yield more than `limit` bytes, so a decompressor
+/// behind it cannot be driven to produce an unbounded stream from a small blob.
+///
+/// Structural, not header-trusting: it counts the bytes the tar parser actually
+/// pulls, whatever the entry headers claim. Without it a crafted layer — a few
+/// MB of zeros that gzip/zstd expand to terabytes — fills the node's disk and
+/// the kubelet evicts every pod on it (a decompression bomb). The sibling cap
+/// on entry count lives in [`unpack_recording`]/[`scan`]; the two together are
+/// the layer-unpack half of the blob-size cap the download already had.
+pub(crate) struct LimitReader<R> {
+    inner: R,
+    remaining: u64,
+}
+
+impl<R> LimitReader<R> {
+    pub(crate) fn new(inner: R, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+        }
+    }
+}
+
+impl<R: Read> Read for LimitReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.remaining == 0 {
+            // We have already delivered the whole budget; one more byte would
+            // exceed it. Fail closed — a truncated extraction is a clear error,
+            // a filled disk is not.
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "layer exceeds the {} GiB uncompressed ceiling (possible decompression bomb)",
+                    MAX_LAYER_UNCOMPRESSED_BYTES / (1024 * 1024 * 1024)
+                ),
+            ));
+        }
+        let cap = buf
+            .len()
+            .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
+        let n = self.inner.read(&mut buf[..cap])?;
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
+
 /// The owner a header names, when it is worth recording: not root:root, not a
 /// whiteout (an instruction to the layer merge, not a file of the image).
 fn owner_of<R: Read>(entry: &tar::Entry<'_, R>) -> Option<Owner> {
@@ -52,27 +114,52 @@ pub fn unpack_recording<R: Read>(
     archive: &mut tar::Archive<R>,
     dst: &Path,
 ) -> io::Result<Vec<Owner>> {
+    unpack_recording_limited(archive, dst, MAX_LAYER_ENTRIES)
+}
+
+/// As [`unpack_recording`], with the entry ceiling as a parameter so a test can
+/// reach the limit cheaply instead of building four million entries.
+pub(crate) fn unpack_recording_limited<R: Read>(
+    archive: &mut tar::Archive<R>,
+    dst: &Path,
+    max_entries: u64,
+) -> io::Result<Vec<Owner>> {
     // The mode the image recorded, special bits included. `tar` drops setuid,
     // setgid and sticky unless told otherwise: measured, `/tmp` came out `777`
     // instead of `1777` (any user could delete another's files there) and
     // `/usr/bin/su` came out without setuid, so it could not switch user. The
-    // files are owned by whoever runs the engine, so on the host a setuid bit
-    // grants nothing that user lacks; inside the container that owner is root,
-    // which is what the image meant.
+    // files are owned by whoever runs the engine, so in rootless mode (the
+    // normal path) that owner is the unprivileged caller, and a setuid bit
+    // grants nothing it lacks; inside the container that owner is root, which is
+    // what the image meant.
+    //
+    // On a REAL-root node (the CRI path) the recorded uid is applied verbatim, so
+    // a setuid bit on a file owned by a NON-root uid would be setuid to a named
+    // host identity on the node filesystem — something no container needs. That
+    // one bit is dropped (`sanitize_special_bits`); setuid-root (the image's
+    // `su`/`mount`), setgid and sticky are kept, so nothing the container relies
+    // on regresses.
     archive.set_preserve_permissions(true);
+    let real_root = !delonix_node::is_rootless();
     if dst.symlink_metadata().is_err() {
         std::fs::create_dir_all(dst)?;
     }
     let dst = &dst.canonicalize().unwrap_or(dst.to_path_buf());
     let mut owners = Vec::new();
     let mut directories = Vec::new();
+    let mut count: u64 = 0;
     for entry in archive.entries()? {
+        count += 1;
+        if count > max_entries {
+            return Err(too_many_entries(max_entries));
+        }
         let mut file = entry?;
         owners.extend(owner_of(&file));
         if file.header().entry_type() == tar::EntryType::Directory {
             directories.push(file);
         } else {
             file.unpack_in(dst)?;
+            drop_foreign_setuid(&file, dst, real_root);
         }
     }
     directories.sort_by(|a, b| b.path_bytes().cmp(&a.path_bytes()));
@@ -93,27 +180,93 @@ pub fn scan<R: Read>(
     archive: &mut tar::Archive<R>,
     unpacked: Option<&Path>,
 ) -> io::Result<Vec<Owner>> {
+    let real_root = !delonix_node::is_rootless();
     let mut owners = Vec::new();
+    let mut count: u64 = 0;
     for entry in archive.entries()? {
+        count += 1;
+        if count > MAX_LAYER_ENTRIES {
+            return Err(too_many_entries(MAX_LAYER_ENTRIES));
+        }
         let entry = entry?;
         owners.extend(owner_of(&entry));
         if let Some(dir) = unpacked {
-            restore_special_mode(&entry, dir);
+            restore_special_mode(&entry, dir, real_root);
         }
     }
     Ok(owners)
 }
 
+/// The error both unpack paths raise when a layer has more entries than the
+/// ceiling — the inode-exhaustion half of the decompression-bomb defense.
+fn too_many_entries(max: u64) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("layer has more than {max} entries (possible tar bomb)"),
+    )
+}
+
+/// The special-bit mode to write on disk, given the entry's recorded `uid` and
+/// whether the engine is REAL root (euid 0 in the initial user namespace).
+///
+/// The only thing dropped is a setuid bit owned by a NON-root uid on a real-root
+/// node: that is setuid to a named host identity, which no container needs and
+/// which a planted layer uses to borrow a real user on the node. Everything else
+/// is returned unchanged — setuid-root (the image's `su`/`mount`), setgid (so
+/// `wall`/`crontab`, setgid to a group, keep working), and sticky. In rootless
+/// mode nothing is dropped at all, so the ADR-0062 path is byte-for-byte as it
+/// was. Pure, so the policy is tested without being root.
+pub(crate) fn sanitize_special_bits(mode: u32, uid: u64, real_root: bool) -> u32 {
+    if real_root && uid != 0 && mode & 0o4000 != 0 {
+        mode & !0o4000
+    } else {
+        mode
+    }
+}
+
+/// Drops a foreign setuid bit from a freshly unpacked regular file (the extraction
+/// already wrote the full mode under `set_preserve_permissions`). A no-op unless
+/// [`sanitize_special_bits`] changes the mode, so only the real-root, non-root-uid
+/// setuid case ever touches disk. Never through a symlink, which has no mode.
+fn drop_foreign_setuid<R: Read>(file: &tar::Entry<'_, R>, dst: &Path, real_root: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    if !real_root || !file.header().entry_type().is_file() {
+        return;
+    }
+    let Ok(mode) = file.header().mode() else {
+        return;
+    };
+    let uid = file.header().uid().unwrap_or(0);
+    let sanitized = sanitize_special_bits(mode, uid, real_root);
+    if sanitized == mode {
+        return;
+    }
+    let Some(rel) = file.path().ok().and_then(|p| relative(&p)) else {
+        return;
+    };
+    let path = dst.join(rel);
+    let real = std::fs::symlink_metadata(&path).is_ok_and(|m| !m.file_type().is_symlink());
+    if real {
+        let _ =
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(sanitized & 0o7777));
+    }
+}
+
 /// Gives an unpacked entry its setuid/setgid/sticky bits back. Best-effort, and
 /// never through a symlink: a link has no mode, and `chmod` would follow it out
-/// of the layer.
-fn restore_special_mode<R: Read>(entry: &tar::Entry<'_, R>, dir: &Path) {
+/// of the layer. On a real-root node a foreign setuid bit is not restored
+/// (`sanitize_special_bits`) — an older engine had already dropped it.
+fn restore_special_mode<R: Read>(entry: &tar::Entry<'_, R>, dir: &Path, real_root: bool) {
     use std::os::unix::fs::PermissionsExt;
     let Ok(mode) = entry.header().mode() else {
         return;
     };
     let kind = entry.header().entry_type();
     if mode & 0o7000 == 0 || !(kind.is_file() || kind.is_dir()) {
+        return;
+    }
+    let mode = sanitize_special_bits(mode, entry.header().uid().unwrap_or(0), real_root);
+    if mode & 0o7000 == 0 {
         return;
     }
     let Some(rel) = entry.path().ok().and_then(|p| relative(&p)) else {
@@ -186,6 +339,64 @@ mod tests {
             uid,
             gid,
         }
+    }
+
+    /// The structural cap: a reader never yields past its ceiling, and the
+    /// error names the bomb so the caller's "failed to extract layer" is
+    /// actionable.
+    #[test]
+    fn the_limit_reader_refuses_a_stream_past_its_ceiling() {
+        let data = vec![0u8; 10 * 1024];
+        let mut r = LimitReader::new(&data[..], 1024);
+        let mut sink = Vec::new();
+        let err = io::copy(&mut r, &mut sink).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            sink.len() <= 1024,
+            "delivered {} bytes past the 1 KiB ceiling",
+            sink.len()
+        );
+        assert!(err.to_string().contains("decompression bomb"));
+    }
+
+    /// The exact composition `overlay::with_layer_archive` builds — a gzip
+    /// decoder behind a `LimitReader` — stops a bomb: ~1 MiB of zeros gzip to a
+    /// few hundred bytes, and the ceiling (here 64 KiB) fires long before the
+    /// MiB is written. Without the `LimitReader` the copy succeeds and this
+    /// fails: that is the regression it guards.
+    #[test]
+    fn a_gzip_bomb_is_refused_by_the_uncompressed_ceiling() {
+        use std::io::Write;
+        let payload = vec![0u8; 1024 * 1024];
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        enc.write_all(&payload).unwrap();
+        let gz = enc.finish().unwrap();
+        assert!(
+            gz.len() < 64 * 1024,
+            "the compressed bomb should be tiny, was {}",
+            gz.len()
+        );
+        let dec = flate2::read::GzDecoder::new(&gz[..]);
+        let mut r = LimitReader::new(dec, 64 * 1024);
+        let mut sink = Vec::new();
+        let err = io::copy(&mut r, &mut sink).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(sink.len() <= 64 * 1024);
+    }
+
+    /// The entry cap: a layer with more entries than the ceiling is refused
+    /// before it can exhaust the node's inodes, and nothing past the limit is
+    /// written. Measured against the limit, not four million real entries.
+    #[test]
+    fn too_many_entries_are_refused() {
+        let data = tar_of(&[("a", 0, 0, false), ("b", 0, 0, false), ("c", 0, 0, false)]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err =
+            unpack_recording_limited(&mut tar::Archive::new(&data[..]), tmp.path(), 2).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("entries"));
+        // The third entry, past the ceiling, never reached the disk.
+        assert!(!tmp.path().join("c").exists());
     }
 
     /// Unpacking records every non-root owner and nothing else, and the files
@@ -296,5 +507,23 @@ mod tests {
             got,
             vec![owner("data/kept", 99, 99), owner("data/reowned", 7, 7)]
         );
+    }
+
+    /// Only a foreign setuid on a real-root node is dropped; setuid-root, setgid
+    /// (to any gid), sticky and the whole rootless path are left exactly alone.
+    #[test]
+    fn only_a_foreign_setuid_on_a_real_root_node_is_dropped() {
+        // setuid-root: the image's `su`/`mount` — kept, so pods keep working.
+        assert_eq!(sanitize_special_bits(0o4755, 0, true), 0o4755);
+        // setuid owned by a named host uid: dropped, nothing else touched.
+        assert_eq!(sanitize_special_bits(0o4755, 1000, true), 0o0755);
+        // setuid + setgid owned by a non-root uid: only setuid goes.
+        assert_eq!(sanitize_special_bits(0o6755, 1000, true), 0o2755);
+        // setgid to a group (wall/crontab) and sticky (/tmp): never dropped.
+        assert_eq!(sanitize_special_bits(0o2755, 1000, true), 0o2755);
+        assert_eq!(sanitize_special_bits(0o1777, 0, true), 0o1777);
+        // Rootless: the ADR-0062 path, byte-for-byte unchanged whatever the uid.
+        assert_eq!(sanitize_special_bits(0o4755, 1000, false), 0o4755);
+        assert_eq!(sanitize_special_bits(0o4755, 0, false), 0o4755);
     }
 }
