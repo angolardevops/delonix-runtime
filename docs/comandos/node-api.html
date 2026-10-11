@@ -191,6 +191,12 @@ Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
+      --idle-timeout &lt;DURATION&gt;
+          Exit after this long with no connection open and no operation running: `120`, `90s`, `5m`, `0` for never. Default: 300s when started by socket activation, never otherwise
+
+      --install-units
+          Write a systemd socket unit and its service (user units when rootless, system units as root), reload systemd and enable the socket, instead of serving. The node API then starts on the first connection and exits when idle (default `--idle-timeout` in the unit: 120s)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

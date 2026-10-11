@@ -1,0 +1,22 @@
+# delonix-node-api.service — started by delonix-node-api.socket, never enabled
+# on its own (no [Install] section). A TEMPLATE: `delonix serve node-api
+# --install-units` fills the @…@ fields.
+#
+# It exits 0 after --idle-timeout with no connection open and no operation of
+# its own RUNNING; systemd reads that as «stopped» and the socket starts it
+# again on the next connection. Every operation is persisted before it is
+# acknowledged, so a stop at any moment loses nothing (ADR-0041 D5).
+[Unit]
+Description=Delonix node API (delonix.node.v1), started on demand
+Documentation=https://github.com/angolardevops/delonix-runtime
+Requires=delonix-node-api.socket
+After=delonix-node-api.socket
+
+[Service]
+Type=simple
+Environment=DELONIX_ROOT=@ROOT@
+@EXTRA_ENV@ExecStart=@EXEC@ --idle-timeout=@IDLE@
+# A crash is restarted; the idle exit (status 0) is not — the socket is the
+# one that starts it again.
+Restart=on-failure
+RestartSec=2

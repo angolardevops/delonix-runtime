@@ -58,7 +58,11 @@ fn is_boot_unit(name: &str) -> bool {
     if !name.ends_with(".service") {
         return false;
     }
-    if name == "delonix-cri.service" {
+    // Neither is `delonix-node-api.service`, which `serve node-api
+    // --install-units` writes into the SAME user unit directory: the legacy
+    // prefix would match it, and a `system boot disable` would delete the
+    // service its socket unit starts.
+    if name == "delonix-cri.service" || name == "delonix-node-api.service" {
         return false;
     }
     name.starts_with(UNIT_PREFIX) || name.starts_with("delonix-")
@@ -398,6 +402,8 @@ mod tests {
     #[test]
     fn a_varredura_nunca_apanha_o_unit_do_cri() {
         assert!(!is_boot_unit("delonix-cri.service"));
+        // Written by `serve node-api --install-units` into the same directory.
+        assert!(!is_boot_unit("delonix-node-api.service"));
         // O que É nosso continua a ser reconhecido...
         assert!(is_boot_unit("delonix-boot-web.service"));
         // ...incluindo a forma legada, para um `disable` limpar o que uma versão
