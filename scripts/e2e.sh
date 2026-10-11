@@ -3648,7 +3648,11 @@ check "init repetido não sobrescreve" ok "$BIN" init "$INITDIR"
 # procurar a antiga — verificava uma grafia que já ninguém gerava, e falhava por
 # isso. Um check sobre drift do scaffold a fazer drift ele próprio.
 VMINIT="$OUT/vminit-$PFX"; mkdir -p "$VMINIT"
-if "$BIN" vm init "$VMINIT" --name "v$PFX" >/dev/null 2>&1; then
+# The scaffold itself is a judged invocation (a setup line that ends in a
+# silent `if` is invisible to the coverage ratchet); what it must have produced
+# is judged by the two checks below.
+check "vm init: gera o projecto" ok "$BIN" vm init "$VMINIT" --name "v$PFX"
+if [ -s "$VMINIT/delonix-manifest.yaml" ]; then
   check "vm init: o projecto que gera valida-se" ok \
     "$BIN" stack validate -f "$VMINIT/delonix-manifest.yaml"
   check "vm init: gera os três Kinds" ok bash -c "
@@ -5698,8 +5702,14 @@ check "o exec de um system container é declarado unsupported-by-provider" ok ba
   "'$BIN' provider describe proxmox | grep 'system-container.exec' | grep -q 'unsupported-by-provider'"
 # Fatia 5 (snapshots): o grupo `systemcontainer` lê o registo antes de ir ao nó,
 # por isso um nome não registado responde 4 sem provider nenhum configurado.
-check "systemcontainer snapshot ls de um nome não registado diz 4" 4 adr54_bare systemcontainer snapshot ls "sc-$PFX-nada"
-check "systemcontainer snapshot create de um nome não registado diz 4" 4 adr54_bare systemcontainer snapshot create "sc-$PFX-nada" s1
+#
+# These four go through `adr54_env … "$BIN"` and not `adr54_bare`: the CLI
+# coverage ratchet (`scripts/cli_exec_ratchet.py`) reads the recorded command
+# and does not look inside a shell function, so through `adr54_bare` these
+# judged invocations counted as never executed (measured 2026-10-11, S15/N11).
+# Same environment, same assertion — only the engine is now named in the argv.
+check "systemcontainer snapshot ls de um nome não registado diz 4" 4 adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer snapshot ls "sc-$PFX-nada"
+check "systemcontainer snapshot create de um nome não registado diz 4" 4 adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer snapshot create "sc-$PFX-nada" s1
 check "o snapshot de um system container é declarado supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.snapshot' | grep -q 'supported'"
 check "o resize de um system container é declarado supported no proxmox" ok bash -c \
@@ -5709,7 +5719,7 @@ check "o resize de um system container é declarado supported no proxmox" ok bas
 check "backup restore de um arquivo de container de sistema sem dono registado diz 4" 4 adr54_bare backup restore "local:backup/vzdump-lxc-999-2026_01_01-00_00_00.tar.zst" --force
 check "backup create systemcontainer de um nome não registado diz 4" 4 adr54_bare backup create systemcontainer "sc-$PFX-nada"
 check "backup create systemcontainer --quiesce é recusado (é só para VMs)" fail adr54_bare backup create systemcontainer "sc-$PFX-nada" --quiesce
-check "systemcontainer clone de um nome não registado diz 4" 4 adr54_bare systemcontainer clone "sc-$PFX-nada" "sc-$PFX-copia"
+check "systemcontainer clone de um nome não registado diz 4" 4 adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer clone "sc-$PFX-nada" "sc-$PFX-copia"
 check "o clone de um system container é declarado supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.clone' | grep -q 'supported'"
 # Fatia 5 (firewall): `kind: NetworkPolicy` com `scope: systemcontainer` põe a
@@ -5730,7 +5740,7 @@ check "um scope mal escrito é recusado e a mensagem lista os válidos" ok bash 
   "$adr54_fns; adr54_bare stack validate -f '$SCWORK/fw-typo.yaml' 2>&1 | grep -q 'container|network|vm|systemcontainer'"
 check "a firewall de um system container é declarada partial no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.firewall' | grep -q 'partial'"
-check "systemcontainer move de um nome não registado diz 4" 4 adr54_bare systemcontainer move "sc-$PFX-nada" --node pve2
+check "systemcontainer move de um nome não registado diz 4" 4 adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer move "sc-$PFX-nada" --node pve2
 check "systemcontainer move sem --node é recusado pelo parser" 2 adr54_bare systemcontainer move "sc-$PFX-nada"
 check "a migração de um system container é declarada supported no proxmox" ok bash -c \
   "'$BIN' provider describe proxmox | grep 'system-container.move' | grep -q 'supported'"
@@ -5994,7 +6004,7 @@ if "$BIN" network create "$DP" >/dev/null 2>&1 \
   # e deixa a omissão de pé. Sem este check, alinhar os dois verbos passaria
   # por correcção.
   "$BIN" net ingress policy "$DPS" deny >/dev/null 2>&1
-  "$BIN" net ingress clear "$DPS" >/dev/null 2>&1
+  check "net ingress clear" ok "$BIN" net ingress clear "$DPS"
   check "net ingress clear: a omissão da direcção FICA (deny)" ok bash -c \
     "'$BIN' get networkpolicies 2>&1 | grep -qE '^$DPS +ingress +deny'"
   "$BIN" delete networkpolicies "$DPS/ingress" >/dev/null 2>&1
@@ -6371,6 +6381,733 @@ check "vm default-backend --set <desconhecido>: recusa pelo nome, nomeia os acei
 
 # --- `cluster ls`: sem privilégio, sem cluster nenhum, rc 0 ------------------
 check "cluster ls: sem clusters, ainda assim rc 0" ok "$BIN" cluster ls
+
+########################################
+section "batch 3 (S15/N11): leaves that only ever had their --help checked"
+########################################
+# Third batch of the F0.2 coverage work, with the discipline of the two above:
+# every check asserts the invariant the leaf PROMISES (a field of its output,
+# an exit CLASS, an effect on a file or on the dataplane), never only that it
+# returned 0. A check that invokes a leaf and judges nothing raises the
+# numerator of `scripts/cli_exec_ratchet.py` and tests nothing.
+#
+# All of it runs on this host with the two isolated roots: no hypervisor, no
+# root, no remote node, no network beyond the image the battery already pulled.
+# Where a leaf can only be reached for real with one of those, what runs here is
+# the refusal it gives without them — judged by its class and by what it
+# names, because a refusal that names nothing is the same failure as an
+# acceptance that does nothing.
+# Isolated roots only: these checks attach netns, publish ports, write hosts
+# and snapshot files, and stand up a fake kind cluster — on the user's own state
+# they would be measuring and touching the machine, not a run of this battery.
+if [[ $E2E_ISOLATED -ne 1 || $E2E_HAVE_IMAGE -ne 1 ]]; then
+  skip "batch 3 (S15/N11)" "needs the isolated roots and $IMG (see the header and the image section)"
+else
+L3="$OUT/l3-$PFX"; L3H="$L3/home"; mkdir -p "$L3" "$L3H/.kube"
+
+# --- the top-level `plan`/`wait`/`diff`: the generic verbs over one manifest --
+# `stack plan`/`stack wait` have their own checks; the top-level spellings were
+# never run. The CYCLE is what proves them — each step alone returns 0 even over
+# a verb that plans nothing — so they share one manifest: plan says Create,
+# apply, wait returns once it is up, plan says nothing to do, and `diff` reads
+# back the three values of one field before and after a change made by hand.
+cat >"$L3/m.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: l3w-$PFX
+spec:
+  image: $IMG
+  network: none
+  memory: 64M
+  command: ["sleep", "600"]
+YAML
+check "plan: before the apply there is something to create (2)" 2 "$BIN" plan -f "$L3/m.yaml" --detailed-exitcode
+check "plan: names the Create and creates nothing" ok bash -c "
+  '$BIN' plan -f '$L3/m.yaml' 2>&1 | grep -qE '^ +\+ +Container/l3w-$PFX' || { echo 'the plan does not name the resource'; exit 1; }
+  '$BIN' container inspect 'l3w-$PFX' >/dev/null 2>&1 && { echo 'a plan created the container'; exit 1; }
+  true"
+check "stack apply of the plan/wait/diff manifest" ok "$BIN" stack apply -f "$L3/m.yaml"
+check "wait: returns once the manifest's container is Running" ok bash -c "
+  timeout 90 '$BIN' wait -f '$L3/m.yaml' --timeout 60 || exit 1
+  '$BIN' container inspect 'l3w-$PFX' | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[0][\"status\"]==\"Running\" else 1)'"
+check "plan: after the apply there is nothing to do (0)" 0 "$BIN" plan -f "$L3/m.yaml" --detailed-exitcode
+check "diff: the three columns, memory 64M on all of them" ok bash -c "
+  out=\$('$BIN' diff containers 'l3w-$PFX' -f '$L3/m.yaml' 2>&1) || exit 1
+  grep -q 'LAST-APPLIED' <<<\"\$out\" || { echo 'no LAST-APPLIED column'; exit 1; }
+  grep -qE '^memory +64M +64M +64M' <<<\"\$out\" || { echo 'memory is not 64M on the three sides'; printf '%s\n' \"\$out\"; exit 1; }"
+check "diff --detailed-exitcode: unchanged is 0" 0 "$BIN" diff containers "l3w-$PFX" -f "$L3/m.yaml" --detailed-exitcode
+"$BIN" container update --memory 128M "l3w-$PFX" >/dev/null 2>&1
+check "diff --detailed-exitcode: a change made by hand is 2" 2 "$BIN" diff containers "l3w-$PFX" -f "$L3/m.yaml" --detailed-exitcode
+check "diff: OBSERVED shows the hand-made value, DESIRED the manifest's" ok bash -c "
+  '$BIN' diff containers 'l3w-$PFX' -f '$L3/m.yaml' 2>&1 | grep -qE '^memory +64M +64M +128M'"
+check "diff: a name the manifest does not declare is refused (1), naming the file" ok bash -c "
+  out=\$('$BIN' diff containers nao-declarado-$PFX -f '$L3/m.yaml' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -qF '$L3/m.yaml' <<<\"\$out\""
+# A manifest whose resource never comes up: `wait` gives up with 124 at its own
+# timeout, never 0 and never a hang.
+sed "s/l3w-$PFX/l3never-$PFX/" "$L3/m.yaml" >"$L3/never.yaml"
+check "wait: a resource that never appears times out with 124" 124 timeout -s KILL 60 "$BIN" wait -f "$L3/never.yaml" --timeout 3
+
+# --- `cluster kube generate`: a `kind: Pod` out of the container above --------
+check "cluster kube generate: a kind: Pod with the container's image and command" ok bash -c "
+  out=\$('$BIN' cluster kube generate 'l3w-$PFX' 2>&1) || exit 1
+  grep -qx 'kind: Pod' <<<\"\$out\" || { echo 'not a kind: Pod'; exit 1; }
+  grep -qF 'image: $IMG' <<<\"\$out\" || { echo 'the image is missing'; exit 1; }
+  grep -q 'sleep' <<<\"\$out\" || { echo 'the command is missing'; exit 1; }"
+check "cluster kube generate: a name that is neither container nor pod is 4" 4 "$BIN" cluster kube generate "nao-existe-$PFX"
+
+# --- image: export, sbom, scan --sbom, remove ---------------------------------
+check "image export: an OCI runtime bundle — config.json with the process, and the rootfs" ok bash -c "
+  d='$L3/bundle'; rm -rf \"\$d\"
+  '$BIN' image export '$IMG' \"\$d\" >/dev/null || exit 1
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); sys.exit(0 if c.get(\"ociVersion\") and c[\"process\"][\"args\"] else 1)' \"\$d/config.json\" || { echo 'config.json without ociVersion/process.args'; exit 1; }
+  [ -s \"\$d/rootfs/etc/alpine-release\" ] || { echo 'the rootfs is not the image'; exit 1; }"
+rm -rf "$L3/bundle"
+check "image sbom: an SPDX 2.3 document that lists the image's packages" ok bash -c "
+  '$BIN' image sbom '$IMG' | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d[\"spdxVersion\"] == \"SPDX-2.3\", d.get(\"spdxVersion\")
+names = {p[\"name\"] for p in d[\"packages\"]}
+assert \"busybox\" in names, sorted(names)[:10]'"
+check "image scan --sbom: the package table names busybox, from the CAS, without running anything" ok bash -c "
+  '$BIN' image scan --sbom '$IMG' 2>&1 | grep -qw busybox"
+# `image remove` of one of two names UNTAGS (the image and the other name stay);
+# of the last name it deletes the record. A committed image is the subject:
+# nothing runs from it, so the in-use guard does not get in the way, and the
+# base image of the battery is never at stake.
+check "image remove: of one of two names untags, the image keeps the other" ok bash -c "
+  '$BIN' container commit 'l3w-$PFX' 'l3rm-$PFX:v1' >/dev/null || exit 1
+  '$BIN' image tag 'l3rm-$PFX:v1' 'l3rm-$PFX:v2' >/dev/null || exit 1
+  out=\$('$BIN' image remove 'l3rm-$PFX:v1' 2>&1) || { printf '%s\\n' \"\$out\"; exit 1; }
+  grep -q 'untagged' <<<\"\$out\" || { echo \"not an untag: \$out\"; exit 1; }
+  ls=\$('$BIN' image ls)
+  grep -qF 'l3rm-$PFX:v1' <<<\"\$ls\" && { echo 'the removed name is still listed'; exit 1; }
+  grep -qF 'l3rm-$PFX:v2' <<<\"\$ls\" || { echo 'removing one name took the other with it'; exit 1; }"
+check "image remove: of the last name deletes the image" ok bash -c "
+  '$BIN' image remove 'l3rm-$PFX:v2' 2>&1 | grep -q 'deleted' || exit 1
+  '$BIN' image describe 'l3rm-$PFX:v2' >/dev/null 2>&1; [ \$? -eq 4 ]"
+check "image remove: an image that is not in the store is 4" 4 "$BIN" image remove "nao-existe-$PFX:v1"
+
+# --- image login/logout: the credential file, and nothing else ---------------
+# `.invalid` never resolves (RFC 6761): login only writes `auth.json`, so
+# nothing is contacted, and the value is a throwaway made up for this run.
+L3REG="l3-$PFX.invalid"
+check "image login without --password-stdin is refused (1) and names the flag" ok bash -c "
+  out=\$('$BIN' image login '$L3REG' -u e2e </dev/null 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q -- '--password-stdin' <<<\"\$out\""
+check "image login: stored in auth.json at 0600, and the secret is never echoed" ok bash -c "
+  out=\$(printf 'tok-$PFX' | '$BIN' image login '$L3REG' -u e2e --password-stdin 2>&1) || exit 1
+  grep -q 'tok-$PFX' <<<\"\$out\" && { echo 'the secret was echoed'; exit 1; }
+  f=\"\$DELONIX_ROOT/auth.json\"
+  [ \"\$(stat -c %a \"\$f\")\" = 600 ] || { echo \"auth.json is \$(stat -c %a \"\$f\")\"; exit 1; }
+  python3 -c 'import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1]))[\"auths\"] else 1)' \"\$f\" '$L3REG'"
+check "image logout: the registry's entry leaves auth.json" ok bash -c "
+  '$BIN' image logout '$L3REG' >/dev/null || exit 1
+  python3 -c 'import json,sys; sys.exit(1 if sys.argv[2] in json.load(open(sys.argv[1])).get(\"auths\",{}) else 0)' \"\$DELONIX_ROOT/auth.json\" '$L3REG'"
+
+# --- image verify: the key is parsed before any registry is asked ------------
+# A key that is not a PEM public key is the caller's mistake, and it is refused
+# as such (1) — not reported as "image not signed" after a trip to the registry.
+check "image verify: a key that is not a PEM public key is refused (1) before the registry" ok bash -c "
+  printf 'not a pem\\n' >'$L3/bad.pem'
+  out=\$('$BIN' image verify '$IMG' '$L3/bad.pem' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q 'invalid PEM public key' <<<\"\$out\""
+
+# --- net tunnel: a token that would be an OPTION of the provider's binary -----
+# The CRITICAL of the second audit round: pinggy's token is the LAST positional
+# argument of `ssh`, and `-oProxyCommand=<cmd>` there is parsed as an option —
+# local code execution before any connection. The proof is not the refusal
+# message, it is that the file the payload would create does NOT exist, and
+# that no tunnel record was written. Nothing is contacted: the refusal comes
+# before any process is spawned.
+L3PWN="$L3/pwned"
+check "net tunnel expose: a token starting with '-' is refused (1), and the payload never ran" ok bash -c "
+  out=\$('$BIN' net tunnel expose 9 --name l3t-$PFX --token='-oProxyCommand=touch $L3PWN' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q \"cannot start with '-'\" <<<\"\$out\" || { echo 'refused without saying why'; exit 1; }
+  [ ! -e '$L3PWN' ] || { echo 'THE PAYLOAD RAN'; exit 1; }
+  '$BIN' get gateways 2>&1 | grep -q 'l3t-$PFX' && { echo 'a tunnel record was left behind'; exit 1; }
+  true"
+cat >"$L3/tunnel.yaml" <<YAML
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata:
+  name: l3ta-$PFX
+spec:
+  provider: pinggy
+  localPort: 9
+  token: "-oProxyCommand=touch $L3PWN"
+YAML
+check "net tunnel apply: the same token in a manifest is refused, and the payload never ran" ok bash -c "
+  out=\$('$BIN' net tunnel apply -f '$L3/tunnel.yaml' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q \"cannot start with '-'\" <<<\"\$out\" || { echo 'refused without saying why'; exit 1; }
+  [ ! -e '$L3PWN' ] || { echo 'THE PAYLOAD RAN'; exit 1; }"
+
+# --- network vlan: a DRY-RUN by default, and `--apply` without root refused --
+# The one command of `network` that needs root. A NIC that does not exist on
+# this host keeps every branch harmless even if a regression ever made the
+# dry-run apply something.
+L3NIC="l3nic$$"
+check "network vlan: the dry-run prints the two ip(8) steps and says it changed nothing" ok bash -c "
+  out=\$('$BIN' network vlan '$L3NIC' 100 2>&1) || exit 1
+  grep -q 'DRY-RUN' <<<\"\$out\" || { echo 'not announced as a dry-run'; exit 1; }
+  grep -qF 'ip link add link $L3NIC name $L3NIC.100 type vlan id 100' <<<\"\$out\" || { echo 'no create step'; exit 1; }
+  grep -qF 'ip link set $L3NIC.100 up' <<<\"\$out\" || { echo 'no up step'; exit 1; }"
+check "network vlan: an id outside 1-4094 is refused (1) by name" ok bash -c "
+  out=\$('$BIN' network vlan '$L3NIC' 4095 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q '1-4094' <<<\"\$out\""
+if [ "$(id -u)" -ne 0 ]; then
+  check "network vlan --apply without root is refused (1) before touching the host" ok bash -c "
+    out=\$('$BIN' network vlan '$L3NIC' 100 --apply 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+    grep -q 'needs root' <<<\"\$out\""
+else
+  skip "network vlan --apply without root" "this run IS root"
+fi
+
+# --- system: thermal, regulate, snapshot ---------------------------------------
+# `system thermal` writes `cpu.max` on the DELEGATED BASE, which is the user's
+# and not this run's (a cgroup is not per state root) — so the governor itself
+# is not run here. What runs is the refusal that has to come before it writes
+# anything: a `--high` at or below `--low` would never cool and never restore.
+check "system thermal: --high at or below --low is refused (1) before any write" ok bash -c "
+  out=\$('$BIN' system thermal --high 70 --low 80 --once 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q -- '--high must be greater than --low' <<<\"\$out\""
+# Without `--apply`, `regulate` is a REPORT: whatever it plans, it writes no
+# `cpu.weight`. Measured with a running container of this run, before and
+# after; on a host under load the plan may well propose throttling it.
+check "system regulate (no --apply): a report — applied false, cpu.weight untouched" ok bash -c "
+  pid=\$('$BIN' container inspect 'l3w-$PFX' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"pid\"])')
+  cg=\$(sed -n 's#^0::##p' /proc/\$pid/cgroup)
+  w0=\$(cat /sys/fs/cgroup\$cg/cpu.weight 2>/dev/null)
+  '$BIN' system regulate --once -o json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d[\"applied\"] is False, d[\"applied\"]
+assert all(a[\"applied\"] is False for a in d[\"actions\"]), d[\"actions\"]
+assert any(w[\"name\"] == sys.argv[1] for w in d[\"workloads\"]), [w[\"name\"] for w in d[\"workloads\"]]' 'l3w-$PFX' || exit 1
+  [ \"\$(cat /sys/fs/cgroup\$cg/cpu.weight 2>/dev/null)\" = \"\$w0\" ] || { echo \"cpu.weight moved: \$w0 -> \$(cat /sys/fs/cgroup\$cg/cpu.weight)\"; exit 1; }"
+# `system snapshot create` packs what cannot be rebuilt and NEVER the live
+# plumbing of a running node: a resurrected `holder.pid` makes the engine report
+# a holder that does not exist. The archive is created 0600 (it carries the
+# secrets). `system snapshot restore` until now was counted as executed only
+# through a TAB-completion probe, which never runs the leaf.
+check "system snapshot create: a 0600 archive with the registries and without the live plumbing" ok bash -c "
+  a='$L3/node.tar.gz'; rm -f \"\$a\"
+  '$BIN' system snapshot create -o \"\$a\" >/dev/null || exit 1
+  [ \"\$(stat -c %a \"\$a\")\" = 600 ] || { echo \"the archive is \$(stat -c %a \"\$a\")\"; exit 1; }
+  ls=\$(tar -tzf \"\$a\") || exit 1
+  grep -q 'state/containers/' <<<\"\$ls\" || { echo 'the container registry is not in it'; exit 1; }
+  grep -q 'holder.pid' <<<\"\$ls\" && { echo 'the live holder.pid travelled'; exit 1; }
+  true"
+# A secret written AFTER the snapshot is what a restore would take away. With a
+# workload of this run still up, the restore refuses and names it; with
+# `--force --dry-run` it names the secret as an entry to remove — and the secret
+# is still there afterwards, because a dry-run changes nothing.
+"$BIN" secret set "l3snap-$PFX" k=v >/dev/null 2>&1
+check "system snapshot restore: refused (1) while a workload runs, naming it" ok bash -c "
+  out=\$('$BIN' system snapshot restore '$L3/node.tar.gz' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q 'l3w-$PFX' <<<\"\$out\" || { echo 'refused without naming the running workload'; exit 1; }
+  '$BIN' secret inspect 'l3snap-$PFX' >/dev/null"
+check "system snapshot restore --dry-run: names what it would remove, and removes nothing" ok bash -c "
+  out=\$('$BIN' system snapshot restore '$L3/node.tar.gz' --dry-run --force 2>&1) || exit 1
+  grep -q 'secrets/l3snap-$PFX.json' <<<\"\$out\" || { echo 'the secret written after the snapshot is not in the plan'; printf '%s\\n' \"\$out\"; exit 1; }
+  grep -q 'nothing was changed' <<<\"\$out\" || { echo 'not announced as a dry-run'; exit 1; }
+  '$BIN' secret inspect 'l3snap-$PFX' >/dev/null || { echo 'the dry-run removed the secret'; exit 1; }"
+"$BIN" secret rm "l3snap-$PFX" >/dev/null 2>&1
+
+# --- network node init/key: the overlay node key ------------------------------
+# Idempotent, the private half at 0600, and the public key printed is the one
+# `wg` derives from the private key on disk — not a second key.
+if command -v wg >/dev/null 2>&1; then
+  check "network node init: prints the public key and keeps the private one at 0600" ok bash -c "
+    out=\$('$BIN' network node init 2>&1) || exit 1
+    k=\"\$DELONIX_ROOT/wg/node.key\"
+    [ \"\$(stat -c %a \"\$k\")\" = 600 ] || { echo \"node.key is \$(stat -c %a \"\$k\")\"; exit 1; }
+    grep -qF \"\$(wg pubkey <\"\$k\")\" <<<\"\$out\" || { echo 'the printed key is not the one on disk'; exit 1; }"
+  check "network node key: the same public key, and init again does not rotate it" ok bash -c "
+    a=\$('$BIN' network node key) || exit 1
+    '$BIN' network node init >/dev/null || exit 1
+    b=\$('$BIN' network node key) || exit 1
+    [ \"\$a\" = \"\$b\" ] && [ \"\$a\" = \"\$(wg pubkey <\"\$DELONIX_ROOT/wg/node.key\")\" ]"
+else
+  skip "network node init/key" "wg is not installed — the refusal path is checked in the network section"
+fi
+
+# --- vm day-2 verbs on a VM that does not exist: class 4, before any backend --
+# The class is the part a reconciler reads, and these verbs resolve the record
+# before they ask a hypervisor anything — so the answer is the same on a host
+# with none installed.
+check "vm destroy: a VM that does not exist is 4" 4 "$BIN" vm destroy "l3vm-$PFX"
+check "vm restart: a VM that does not exist is 4" 4 "$BIN" vm restart "l3vm-$PFX"
+check "vm update: a VM that does not exist is 4" 4 "$BIN" vm update "l3vm-$PFX" --vcpus 2
+check "vm vnc: a VM that does not exist is 4" 4 "$BIN" vm vnc "l3vm-$PFX"
+check "vm console: a VM that does not exist is 4" 4 "$BIN" vm console "l3vm-$PFX"
+check "vm ssh: a name that is not a VM is 4" 4 "$BIN" vm ssh "l3vm-$PFX" -- true
+check "vm migrate: a VM that does not exist is 4, before any SSH" 4 "$BIN" vm migrate "l3vm-$PFX" --host e2e@l3.invalid --network l3
+
+# --- mcp serve: one stdio session, and it ENDS with its client ---------------
+# The server is a child process of the AI client for one session, not a daemon:
+# it answers `initialize` and `tools/list` and exits when stdin closes. A
+# `timeout` that fires (124) would be the server outliving its client.
+check "mcp serve: answers initialize and tools/list over stdio, and exits at EOF" ok bash -c "
+  out=\$(printf '%s\n' \
+    '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"e2e\",\"version\":\"0\"}}}' \
+    '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' \
+    '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' \
+    | timeout 30 '$BIN' mcp serve 2>/dev/null); rc=\$?
+  [ \$rc -eq 0 ] || { echo \"the server did not end cleanly with its client (rc=\$rc)\"; exit 1; }
+  python3 -c '
+import json, sys
+resp = {m[\"id\"]: m for m in map(json.loads, filter(None, sys.stdin.read().splitlines())) if \"id\" in m}
+assert \"serverInfo\" in resp[1][\"result\"], resp.get(1)
+names = [t[\"name\"] for t in resp[2][\"result\"][\"tools\"]]
+assert \"logs.query\" in names, names' <<<\"\$out\""
+
+# --- cluster apply/upgrade: shell injection refused before any SSH ------------
+# The CRITICAL of the first audit: `controlPlaneEndpoint`/`k8sVersion` were
+# interpolated into the body of a remote `sudo bash -c`. The host below is a
+# TEST-NET-1 address (RFC 5737, never routed), so a regression would show as an
+# SSH timeout and not as a command on anybody's machine — and the payload's
+# marker file is the proof that nothing ran here either.
+cat >"$L3/cluster-ssh.yaml" <<YAML
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: l3k-$PFX
+spec:
+  mode: ssh
+  controlPlaneEndpoint: "192.0.2.10; touch $L3PWN; #"
+  controlPlane:
+    hosts:
+      - address: 192.0.2.10
+YAML
+check "cluster apply: a shell payload in controlPlaneEndpoint is refused (1) and names the field" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' timeout -s KILL 60 '$BIN' cluster apply -f '$L3/cluster-ssh.yaml' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; printf '%s\n' \"\$out\"; exit 1; }
+  grep -q 'controlPlaneEndpoint' <<<\"\$out\" || { echo 'refused without naming the field'; exit 1; }
+  [ ! -e '$L3PWN' ] || { echo 'THE PAYLOAD RAN'; exit 1; }"
+check "cluster upgrade: a shell payload in --to is refused (1) before the manifest is read" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster upgrade --to '1.32; touch $L3PWN' -f '$L3/nao-existe.yaml' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+  grep -q 'invalid Kubernetes version' <<<\"\$out\" || { echo 'refused for another reason'; printf '%s\n' \"\$out\"; exit 1; }
+  [ ! -e '$L3PWN' ]"
+
+# --- cluster init, and the verbs that need a cluster this engine knows -------
+# `init` writes one manifest per mode, each valid on its own. drain/uncordon go
+# to the apiserver through a CACHED kubeconfig and backup/restore through SSH to
+# a `cluster kubeadm` control-plane: with none of those here, what is judged is
+# that each refuses BEFORE reaching kubectl or ssh, and says what is missing.
+check "cluster init: one manifest per mode (kind, vm, ssh), each one valid" ok bash -c "
+  d='$L3/cinit'; rm -rf \"\$d\"
+  HOME='$L3H' '$BIN' cluster init \"\$d\" >/dev/null || exit 1
+  for m in kind vm ssh; do
+    f=\"\$d/cluster-\$m.yaml\"
+    grep -qE \"^ *mode: \$m\\\$\" \"\$f\" || { echo \"cluster-\$m.yaml does not say mode: \$m\"; exit 1; }
+    '$BIN' manifest validate -f \"\$f\" >/dev/null 2>&1 || { echo \"cluster-\$m.yaml does not validate\"; exit 1; }
+  done"
+check "cluster drain: no cached cluster is refused (1) before kubectl, naming how to get one" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster drain l3node 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q 'no cluster kubeconfig cached' <<<\"\$out\""
+check "cluster uncordon: a cluster name with no kubeconfig is refused (1), naming where it looked" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster uncordon l3node --name 'nao-existe-$PFX' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -qF 'nao-existe-$PFX-kubeconfig.yaml' <<<\"\$out\""
+check "cluster backup: a cluster with no kubeadm control-plane is refused (1) before any SSH" ok bash -c "
+  out=\$(HOME='$L3H' '$BIN' cluster backup 'nao-existe-$PFX' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q 'only support clusters created by .cluster kubeadm.' <<<\"\$out\""
+check "cluster restore: the same refusal, before the snapshot file is even read" ok bash -c "
+  out=\$(HOME='$L3H' '$BIN' cluster restore 'nao-existe-$PFX' --from '$L3/nao-existe.db' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q 'no VM-provisioned nodes' <<<\"\$out\""
+
+# --- cluster stop/start/load/health/destroy over a stand-in kind cluster -------
+# A kind-mode cluster IS its labelled containers (`cluster ls` derives it from
+# `io.x-k8s.kind.cluster`, there is no other record). Two plain, unprivileged
+# containers carrying the two labels are therefore a cluster to these verbs,
+# with no kindest/node and no Kubernetes inside — enough to prove what each verb
+# does to the NODES, which is the part it owns. HOME and KUBECONFIG point inside
+# this run: `destroy` edits `~/.kube/config`, and a cluster name that misses the
+# engine's cache falls back to `~/.kube/config-<name>`.
+L3K="l3kc-$PFX"
+for _r in control-plane worker; do
+  "$BIN" container run -d --name "$L3K-$_r" --net none \
+    --label "io.x-k8s.kind.cluster=$L3K" --label "io.x-k8s.kind.role=$_r" \
+    "$IMG" sleep 600 >/dev/null 2>&1
+done
+# The status of both nodes, one line: `<control-plane> <worker>`.
+L3KST="for r in control-plane worker; do '$BIN' container inspect '$L3K-'\$r | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"status\"])'; done | xargs"
+# A node whose exit waits on the host's disk writeback makes `stop` give up with
+# DX-8101 and keep it recorded as running (ADR-0056 D4); the error says to run
+# it again once the process is gone, and that is what the loop does. What is
+# judged is the state of both nodes at the end.
+check "cluster stop: every node of the cluster stops" ok bash -c "
+  for _ in \$(seq 1 10); do
+    HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster stop '$L3K' >/dev/null 2>&1 && break
+    sleep 2
+  done
+  s=\$($L3KST); case \"\$s\" in *Running*) echo \"a node still runs: \$s\"; exit 1;; esac"
+check "cluster load: a cluster with no running node is refused (1), naming it" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster load '$IMG' --name '$L3K' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q \"cluster '$L3K' has no running node\" <<<\"\$out\""
+check "cluster start: every node of the cluster runs again" ok bash -c "
+  HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster start '$L3K' >/dev/null || exit 1
+  s=\$($L3KST); [ \"\$s\" = 'Running Running' ] || { echo \"nodes are: \$s\"; exit 1; }"
+# No apiserver behind these nodes: `health` must say so with a non-zero exit.
+# A `health` returning 0 here is the dishonest report its own help says it
+# never gives.
+check "cluster health: a control-plane that does not answer /readyz is not healthy" ok bash -c "
+  out=\$(HOME='$L3H' KUBECONFIG='$L3H/.kube/config' timeout -s KILL 90 '$BIN' cluster health '$L3K' 2>&1); rc=\$?
+  [ \$rc -ne 0 ] || { echo 'health returned 0 over a cluster with no apiserver'; exit 1; }
+  grep -q 'readyz' <<<\"\$out\" || { echo 'failed without naming the probe'; printf '%s\\n' \"\$out\"; exit 1; }"
+check "cluster health: a cluster that does not exist is 4" 4 \
+  env HOME="$L3H" KUBECONFIG="$L3H/.kube/config" "$BIN" cluster health "nao-existe-$PFX"
+check "cluster destroy: the nodes go, and cluster ls no longer lists it" ok bash -c "
+  for _ in \$(seq 1 10); do
+    HOME='$L3H' KUBECONFIG='$L3H/.kube/config' '$BIN' cluster destroy '$L3K' --force >/dev/null 2>&1 && break
+    sleep 2
+  done
+  '$BIN' container inspect '$L3K-control-plane' >/dev/null 2>&1 && { echo 'a node survived'; exit 1; }
+  '$BIN' cluster ls 2>&1 | grep -q '$L3K' && { echo 'cluster ls still lists it'; exit 1; }
+  true"
+check "cluster destroy: a cluster that does not exist is 4" 4 \
+  env HOME="$L3H" KUBECONFIG="$L3H/.kube/config" "$BIN" cluster destroy "nao-existe-$PFX" --force
+for _r in control-plane worker; do "$BIN" container rm -f "$L3K-$_r" >/dev/null 2>&1; done
+
+# --- systemcontainer snapshot restore/rm: the record is read before the node --
+check "systemcontainer snapshot restore of a name not registered is 4" 4 \
+  env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer snapshot restore "l3sc-$PFX" s1
+check "systemcontainer snapshot rm of a name not registered is 4" 4 \
+  env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" systemcontainer snapshot rm "l3sc-$PFX" s1
+
+# --- net: the per-network egress policy, and the per-container clear -----------
+L3N="l3n-$PFX"; L3C="l3c-$PFX"
+if "$BIN" network create "$L3N" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$L3C" --net "$L3N" "$IMG" sleep 600 >/dev/null 2>&1; then
+  check "net egress show: a fresh network has no restriction and no FQDN allowlist" ok bash -c "
+    out=\$('$BIN' net egress show '$L3N' 2>&1) || exit 1
+    grep -q 'policy: allow' <<<\"\$out\" && grep -q 'FQDN allowlist: (none)' <<<\"\$out\""
+  check "net egress host: the hostname enters the network's FQDN allowlist" ok bash -c "
+    '$BIN' net egress host '$L3N' example.org >/dev/null || exit 1
+    '$BIN' net egress show '$L3N' 2>&1 | grep -q 'example.org  (and \*.example.org)'"
+  check "net egress net deny: the network's policy reads deny" ok bash -c "
+    '$BIN' net egress net '$L3N' deny >/dev/null || exit 1
+    '$BIN' net egress show '$L3N' 2>&1 | grep -qi 'policy: deny'"
+  check "net egress net allowlist without --to is refused (1)" 1 "$BIN" net egress net "$L3N" allowlist
+  check "net egress net allow: the policy is back to allow" ok bash -c "
+    '$BIN' net egress net '$L3N' allow >/dev/null || exit 1
+    '$BIN' net egress show '$L3N' 2>&1 | grep -qi 'policy: allow'"
+  check "net egress show: a network that does not exist is 4" 4 "$BIN" net egress show "nao-existe-$PFX"
+  # Per-container: policy + clear. `clear` takes the RULES and leaves the
+  # direction's default standing — the same contract the `net ingress clear`
+  # check of the delete-networkpolicies section holds for the other direction.
+  check "net egress policy deny: the container's outbound default reads deny" ok bash -c "
+    '$BIN' net egress policy '$L3C' deny >/dev/null || exit 1
+    '$BIN' get networkpolicies 2>&1 | grep -qE '^$L3C +egress +deny'"
+  check "net egress clear: the rules go and the default stays deny" ok bash -c "
+    '$BIN' net egress deny '$L3C' 443 >/dev/null || exit 1
+    '$BIN' net egress clear '$L3C' >/dev/null || exit 1
+    '$BIN' net egress ls '$L3C' 2>&1 | grep -qE '443' && { echo 'a rule survived the clear'; exit 1; }
+    '$BIN' get networkpolicies 2>&1 | grep -qE '^$L3C +egress +deny'"
+else
+  skip "net egress show/host/net/policy/clear" "could not prepare the network and its container"
+fi
+
+# --- net httproute apply/rm, and `hosts sync` over the names a route asks for --
+# The L7 proxy end to end: a backend on the network above, a route with a Host
+# rule and `hosts: [host]`, a request through the published entrypoint, then
+# the teardown. `DELONIX_HOSTS_FILE` points every write at a file of this run:
+# a route that asks for names makes the apply itself write the hosts file, and
+# /etc/hosts is the user's. The backend is busybox `nc` in a loop — alpine's
+# busybox has no `httpd`.
+L3HR="hr-$PFX.e2e.test"; L3HP=$(( 29500 + RANDOM % 150 )); L3HF="$L3/hosts"
+printf '127.0.0.1 localhost\n' >"$L3HF"
+if "$BIN" container run -d --name "$L3C-web" --net "$L3N" "$IMG" sh -c \
+     "while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: 10\r\n\r\npong-$PFX' | nc -l -p 80; done" >/dev/null 2>&1; then
+  cat >"$L3/route.yaml" <<YAML
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata:
+  name: l3hr-$PFX
+spec:
+  entrypoints:
+    - { port: $L3HP }
+  hosts: [host]
+  rules:
+    - host: $L3HR
+      paths:
+        - path: /
+          backend: { service: $L3C-web, port: 80 }
+YAML
+  check "net httproute apply: the proxy serves the backend by the Host header" ok bash -c "
+    DELONIX_HOSTS_FILE='$L3HF' '$BIN' net httproute apply -f '$L3/route.yaml' >/dev/null || exit 1
+    for _ in \$(seq 1 40); do
+      r=\$(curl -fsS --max-time 3 -H 'Host: $L3HR' http://127.0.0.1:$L3HP/ 2>/dev/null)
+      [ \"\$r\" = pong-$PFX ] && exit 0
+      sleep 0.5
+    done
+    echo \"the route never answered (last: '\$r')\"; exit 1"
+  check "net httproute apply: a request for another Host is not routed to the backend" ok bash -c "
+    r=\$(curl -sS --max-time 3 -H 'Host: other-$PFX.e2e.test' http://127.0.0.1:$L3HP/ 2>/dev/null)
+    [ \"\$r\" != pong-$PFX ]"
+  check "hosts sync --print: the route's name, pointed at 127.0.0.1" ok bash -c "
+    out=\$(DELONIX_HOSTS_FILE='$L3HF' '$BIN' hosts sync --print) || exit 1
+    grep -qE '^127\\.0\\.0\\.1[[:space:]]+$L3HR\$' <<<\"\$out\" || { echo 'the block does not carry the name'; printf '%s\\n' \"\$out\"; exit 1; }"
+  # The block deleted by hand (an edited /etc/hosts): `sync` puts it back and
+  # keeps every line that was not its own.
+  check "hosts sync: rewrites a block that was edited away, keeping the other lines" ok bash -c "
+    printf '127.0.0.1 localhost\\n10.9.9.9 keep-me\\n' >'$L3HF'
+    DELONIX_HOSTS_FILE='$L3HF' '$BIN' hosts sync >/dev/null || exit 1
+    grep -qx '127.0.0.1 localhost' '$L3HF' && grep -qx '10.9.9.9 keep-me' '$L3HF' || { echo 'a line that was there is gone'; exit 1; }
+    grep -q '^# BEGIN delonix' '$L3HF' && grep -qE '[[:space:]]$L3HR\$' '$L3HF'"
+  check "net httproute rm: the proxy stops, the entrypoint closes, the name leaves the file" ok bash -c "
+    DELONIX_HOSTS_FILE='$L3HF' '$BIN' net httproute rm >/dev/null || exit 1
+    grep -q '$L3HR' '$L3HF' && { echo 'the route is gone but its name is still in the hosts file'; exit 1; }
+    for _ in \$(seq 1 20); do
+      curl -fsS --max-time 2 -H 'Host: $L3HR' http://127.0.0.1:$L3HP/ >/dev/null 2>&1 || exit 0
+      sleep 0.5
+    done
+    echo 'the entrypoint still answers after rm'; exit 1"
+else
+  skip "net httproute apply/rm and hosts sync" "could not start the backend container"
+fi
+"$BIN" container rm -f "$L3C-web" >/dev/null 2>&1
+
+# --- net netns: the holder's plumbing, judged on the wire --------------------
+# attach gives a netns an address on delonix0, exec runs a HOST binary inside
+# it, firewall and publish act on traffic, detach takes the netns away. Two
+# netns and the host's own `socat`/`nc` are the whole fixture: A answers a
+# token, B connects. The token and not the TCP handshake is the proof: a
+# published port's slirp listener accepts a connection whether or not anything
+# answers behind it.
+L3A="l3a$PFX"; L3B="l3b$PFX"
+check "net netns attach: each netns gets its own address on delonix0" ok bash -c "
+  a=\$('$BIN' net netns attach '$L3A' 2>&1 | sed -n 's/.*→ \\([0-9.]*\\) on delonix0.*/\\1/p')
+  b=\$('$BIN' net netns attach '$L3B' 2>&1 | sed -n 's/.*→ \\([0-9.]*\\) on delonix0.*/\\1/p')
+  [ -n \"\$a\" ] && [ -n \"\$b\" ] && [ \"\$a\" != \"\$b\" ] || { echo \"addresses: '\$a' '\$b'\"; exit 1; }
+  echo \"\$a\" >'$L3/a.ip'"
+L3AIP=$(cat "$L3/a.ip" 2>/dev/null)
+if [[ -n "$L3AIP" ]] && command -v socat >/dev/null 2>&1; then
+  check "net netns exec: the address attach printed is the one inside the netns" ok bash -c "
+    '$BIN' net netns exec '$L3A' ip -4 -o addr show 2>&1 | grep -qF ' $L3AIP/'"
+  # A server in A that ends on its own (`timeout`), so nothing outlives the run.
+  "$BIN" net netns exec "$L3A" timeout 180 socat TCP-LISTEN:7171,fork,reuseaddr "SYSTEM:echo pong-$PFX" >/dev/null 2>&1 &
+  L3LPID=$!
+  L3REACH="[ \"\$('$BIN' net netns exec '$L3B' nc -w 2 '$L3AIP' 7171 </dev/null 2>/dev/null)\" = pong-$PFX ]"
+  check "net netns exec: B reaches A's listener (the baseline)" ok bash -c "
+    for _ in \$(seq 1 30); do $L3REACH && exit 0; sleep 0.3; done; exit 1"
+  check "net netns firewall: an inbound deny on A cuts B off" ok bash -c "
+    '$BIN' net netns firewall '$L3A' --spec '{\"enabled\":true,\"policyIn\":\"deny\",\"policyOut\":\"allow\",\"rules\":[]}' >/dev/null || exit 1
+    ! $L3REACH"
+  check "net netns firewall --clear: B reaches A again" ok bash -c "
+    '$BIN' net netns firewall '$L3A' --clear >/dev/null || exit 1
+    for _ in \$(seq 1 10); do $L3REACH && exit 0; sleep 0.3; done; exit 1"
+  L3PP=$(( 29700 + RANDOM % 150 ))
+  check "net netns publish: the host port forwards to A's listener" ok bash -c "
+    '$BIN' net netns publish '$L3A' '$L3PP:7171' >/dev/null || exit 1
+    for _ in \$(seq 1 20); do [ \"\$(nc -w 2 127.0.0.1 $L3PP </dev/null 2>/dev/null)\" = pong-$PFX ] && exit 0; sleep 0.3; done; exit 1"
+  check "net netns unpublish: the host port stops answering" ok bash -c "
+    '$BIN' net netns unpublish '$L3PP' >/dev/null || exit 1
+    for _ in \$(seq 1 20); do [ \"\$(nc -w 1 127.0.0.1 $L3PP </dev/null 2>/dev/null)\" = pong-$PFX ] || exit 0; sleep 0.3; done; exit 1"
+  kill "$L3LPID" 2>/dev/null; wait "$L3LPID" 2>/dev/null
+  check "net netns detach: the netns is gone, exec into it fails" ok bash -c "
+    '$BIN' net netns detach '$L3B' >/dev/null || exit 1
+    ! '$BIN' net netns exec '$L3B' true >/dev/null 2>&1"
+else
+  skip "net netns exec/firewall/publish/unpublish/detach" "attach printed no address, or socat is not installed"
+fi
+"$BIN" net netns detach "$L3A" >/dev/null 2>&1
+"$BIN" net netns detach "$L3B" >/dev/null 2>&1
+rm -f "$L3/a.ip"
+
+# --- net l4guard status / net flow: what the holder reports, read back ------
+# The infra installs the L4 guard at boot (50 new connections/s and 200
+# concurrent per source, `ensure_up`), so `status` has something real to read:
+# the two meter rules with their drop counters.
+check "net l4guard status: the boot guard is live, both meter rules with counters" ok bash -c "
+  out=\$('$BIN' net l4guard status 2>&1) || exit 1
+  grep -q '^l4guard: active' <<<\"\$out\" || { echo 'the guard is not reported active'; exit 1; }
+  grep -q 'dlx_conn_rate' <<<\"\$out\" && grep -q 'dlx_conn_count' <<<\"\$out\" || { echo 'a meter rule is missing'; exit 1; }
+  grep -qE 'packets, [0-9]+ bytes dropped' <<<\"\$out\" || { echo 'no drop counters'; exit 1; }"
+# Rootless has no CAP_BPF, so `flow` says the eBPF datapath is off and falls
+# back to the veth counters — a row per container on the SDN, with its address.
+check "net flow: the veth fallback lists the container with its SDN address" ok bash -c "
+  ip=\$('$BIN' container inspect '$L3C' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"ip\"])')
+  '$BIN' net flow 2>&1 | grep -E \"^$L3C +\$ip \" >/dev/null || { '$BIN' net flow 2>&1 | tail -5; exit 1; }"
+
+# --- net capture: tcpdump inside the container's netns ------------------------
+# Two packets of the container's own ICMP to its gateway, to stdout: a pcap
+# whose records carry the container's address as the IPv4 source.
+if command -v tcpdump >/dev/null 2>&1; then
+  check "net capture: a pcap of the container's own traffic, to stdout" ok bash -c "
+    ip=\$('$BIN' container inspect '$L3C' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"ip\"])')
+    gw=\$(echo \"\$ip\" | awk -F. '{print \$1\".\"\$2\".0.1\"}')
+    ( for _ in 1 2 3 4 5 6 7 8 9 10; do '$BIN' container exec '$L3C' ping -c1 -W1 \"\$gw\" >/dev/null 2>&1; sleep 0.3; done ) &
+    timeout -s KILL 60 '$BIN' net capture '$L3C' -w - -c 2 >'$L3/cap.pcap' 2>/dev/null; wait
+    python3 - '$L3/cap.pcap' \"\$ip\" <<'PY'
+import socket, struct, sys
+b = open(sys.argv[1], 'rb').read()
+assert b[:4] in (b'\\xd4\\xc3\\xb2\\xa1', b'\\xa1\\xb2\\xc3\\xd4'), b[:4]
+le = b[:4] == b'\\xd4\\xc3\\xb2\\xa1'
+off, n, srcs = 24, 0, set()
+while off + 16 <= len(b):
+    incl = struct.unpack('<I' if le else '>I', b[off+8:off+12])[0]
+    pkt = b[off+16:off+16+incl]
+    if len(pkt) >= 34 and pkt[12:14] == b'\\x08\\x00':
+        srcs.add(socket.inet_ntoa(pkt[26:30]))
+    off += 16 + incl
+    n += 1
+assert n == 2, n
+assert sys.argv[2] in srcs, (sys.argv[2], srcs)
+PY"
+else
+  skip "net capture" "tcpdump is not installed"
+fi
+check "net capture: a container with no netns of its own is refused (1)" ok bash -c "
+  out=\$('$BIN' net capture 'l3w-$PFX' -w - 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q 'no netns of its own' <<<\"\$out\""
+
+# --- container attach: output only, and its refusal ---------------------------
+# `attach` follows the output (it is `logs -f`), so the check cuts it after a
+# few seconds and judges what it showed. `-i` is refused by design: no live
+# stdin conduit to a detached container exists.
+check "container attach -i is refused (1) and points at exec -it" ok bash -c "
+  out=\$('$BIN' container attach -i '$L3C' 2>&1); rc=\$?
+  [ \$rc -eq 1 ] && grep -q 'exec -it' <<<\"\$out\""
+check "container attach: shows the output of a running container" ok bash -c "
+  '$BIN' container run -d --name '$L3C-say' --net none '$IMG' sh -c 'echo hello-$PFX; exec sleep 600' >/dev/null || exit 1
+  out=\$(timeout -s KILL 8 '$BIN' container attach '$L3C-say' 2>&1)
+  grep -q 'hello-$PFX' <<<\"\$out\" || { echo \"attach did not show the output: \$out\"; exit 1; }"
+"$BIN" container rm -f "$L3C-say" >/dev/null 2>&1
+check "container attach: a container that does not exist is 4" 4 "$BIN" container attach "nao-existe-$PFX"
+
+# --- system monitor --no-stream: one sample, and the count it is built on -----
+check "system monitor --no-stream: one sample, counting the running containers on a network" ok bash -c "
+  ids=\$('$BIN' container ls -q); [ -n \"\$ids\" ] || { echo 'no running container to count'; exit 1; }
+  want=\$('$BIN' container inspect \$ids | python3 -c 'import json,sys; print(sum(1 for c in json.load(sys.stdin) if c.get(\"ip\") and c.get(\"status\")==\"Running\"))')
+  out=\$(timeout -s KILL 30 '$BIN' system monitor --no-stream 2>&1) || exit 1
+  grep -qE \"^delonix monitor — \$want containers, [0-9]+ active connections\" <<<\"\$out\" || { echo \"expected \$want containers in: \$(head -1 <<<\"\$out\")\"; exit 1; }"
+
+# --- pod port-forward: a host port into the pod's own loopback ----------------
+# busybox `nc -e` answers on connect; a `printf | nc -l` server only answers
+# after the client half-closes, which a forwarded connection never does here.
+cat >"$L3/pfpod.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: l3pf$PFX
+spec:
+  containers:
+    - name: srv
+      image: $IMG
+      command: ["nc", "-lk", "-p", "7070", "-e", "echo", "pong-$PFX"]
+YAML
+check "pod port-forward: a pod that does not exist is 4" 4 "$BIN" pod port-forward "nao-existe-$PFX" 7070
+if "$BIN" stack apply -f "$L3/pfpod.yaml" >/dev/null 2>&1; then
+  check "pod port-forward: a port spec that is not a port is refused (1)" 1 "$BIN" pod port-forward "l3pf$PFX" abc
+  L3FP=$(( 29900 + RANDOM % 90 ))
+  check "pod port-forward: 127.0.0.1:<hostPort> reaches the pod's port" ok bash -c "
+    timeout -s KILL 60 '$BIN' pod port-forward 'l3pf$PFX' '$L3FP:7070' >/dev/null 2>&1 & pf=\$!
+    r=
+    for _ in \$(seq 1 40); do
+      r=\$(timeout 8 nc -w 3 127.0.0.1 $L3FP </dev/null 2>/dev/null)
+      [ \"\$r\" = pong-$PFX ] && break
+      sleep 0.3
+    done
+    kill \$pf 2>/dev/null; wait \$pf 2>/dev/null
+    [ \"\$r\" = pong-$PFX ] || { echo \"got '\$r'\"; exit 1; }"
+  "$BIN" delete pod "l3pf$PFX" -f >/dev/null 2>&1
+else
+  skip "pod port-forward to a live pod" "could not apply the pod"
+fi
+
+# --- vm image: import, describe, convert, rm — a disk this engine did not build
+# A 16 MiB empty qcow2 is enough: none of these four boots anything. `--appliance`
+# is what decides whether `vm create` seeds cloud-init, and `describe` is where
+# an operator reads it, so the flag is asserted back from `describe`.
+if command -v qemu-img >/dev/null 2>&1; then
+  L3VI="l3vi-$PFX"
+  qemu-img create -f qcow2 "$L3/blank.qcow2" 16M >/dev/null 2>&1
+  check "vm image import: registers the disk with the defaults it was given" ok bash -c "
+    '$BIN' vm image import '$L3/blank.qcow2' -t '$L3VI:1' --appliance --default-vcpus 2 --default-memory 512M --no-compress >/dev/null 2>&1 || exit 1
+    '$BIN' vm image ls 2>&1 | grep -q '$L3VI'"
+  check "vm image describe: an appliance, with the vCPU/memory defaults" ok bash -c "
+    out=\$('$BIN' vm image describe '$L3VI:1' 2>&1) || exit 1
+    grep -qiE 'cloud-init: *no' <<<\"\$out\" || { echo 'the appliance flag is not reported'; printf '%s\n' \"\$out\"; exit 1; }
+    grep -q '512M' <<<\"\$out\" || { echo 'the memory default is not reported'; exit 1; }"
+  check "vm image convert --to vhd: qemu-img reads a vpc file (vhd is vpc to qemu-img)" ok bash -c "
+    '$BIN' vm image convert '$L3VI:1' --to vhd -o '$L3/blank.vhd' >/dev/null || exit 1
+    qemu-img info '$L3/blank.vhd' 2>/dev/null | grep -q 'file format: vpc'"
+  check "vm image convert --compress to raw is refused (1): only qcow2 and vmdk compress" 1 \
+    "$BIN" vm image convert "$L3VI:1" --to raw --compress -o "$L3/blank.raw"
+  check "vm image rm: the image leaves the store, and describe answers 4" ok bash -c "
+    '$BIN' vm image rm '$L3VI:1' >/dev/null || exit 1
+    '$BIN' vm image describe '$L3VI:1' >/dev/null 2>&1; [ \$? -eq 4 ]"
+else
+  skip "vm image import/describe/convert/rm" "qemu-img is not installed"
+fi
+check "vm image init: a VMfile and a cloud-init file, filled in with the name" ok bash -c "
+  d='$L3/vmfile'; rm -rf \"\$d\"
+  '$BIN' vm image init 'l3img-$PFX' --dir \"\$d\" >/dev/null || exit 1
+  grep -q '^FROM ' \"\$d/VMfile\" || { echo 'the VMfile has no FROM'; exit 1; }
+  grep -q 'l3img-$PFX' \"\$d/VMfile\" || { echo 'the name is not in the VMfile'; exit 1; }
+  [ -s \"\$d/cloud-init/user-data.yaml\" ] || { echo 'no cloud-init user-data'; exit 1; }"
+check "vm image init: an existing VMfile is not overwritten without --force (1)" 1 \
+  "$BIN" vm image init "l3img-$PFX" --dir "$L3/vmfile"
+
+# --- vm apply: a disk that is neither a VM image nor a file -------------------
+check "vm apply: a disk that is neither a VM image nor a file is 4, and no VM is left" ok bash -c "
+  printf 'apiVersion: compute.delonix.io/v1alpha1\\nkind: VirtualMachine\\nmetadata:\\n  name: l3va-$PFX\\nspec:\\n  disk: /nao/existe-$PFX.qcow2\\n  memory: 64M\\n  vcpus: 1\\n' >'$L3/vm.yaml'
+  '$BIN' vm apply -f '$L3/vm.yaml' >/dev/null 2>&1; rc=\$?
+  [ \$rc -eq 4 ] || { echo \"expected 4, got \$rc\"; exit 1; }
+  '$BIN' describe virtualmachines 'l3va-$PFX' >/dev/null 2>&1; [ \$? -eq 4 ] || { echo 'a VM record was left behind'; exit 1; }"
+
+# --- vm reach / bridge / unbridge: read-only, and dry-run by default ----------
+# `vm reach` lists the ports a VM could NOT reach: one published on the default
+# 127.0.0.1 shows up as host-only. `vm bridge` and `unbridge` print a plan that
+# needs root and change nothing without `--apply` — and `--apply` without root
+# is refused before the first command runs. 192.0.2.0/24 (TEST-NET-1) stands in
+# for a VM subnet.
+L3RP=$(( 29850 + RANDOM % 100 ))
+if "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" sleep 600 >/dev/null 2>&1; then
+  check "vm reach: a port published on the default 127.0.0.1 is reported host-only" ok bash -c "
+    '$BIN' vm reach 2>&1 | grep '$L3C-pub' | grep -q '127.0.0.1 (host only)'"
+else
+  skip "vm reach: host-only port" "could not start the publishing container"
+fi
+"$BIN" container rm -f "$L3C-pub" >/dev/null 2>&1
+check "vm bridge: a DRY-RUN plan that changes nothing on the host" ok bash -c "
+  before=\$(ip -o link | wc -l)
+  out=\$('$BIN' vm bridge '$L3N' --vm-subnet 192.0.2.0/24 2>&1) || { printf '%s\n' \"\$out\"; exit 1; }
+  grep -q 'DRY-RUN' <<<\"\$out\" || { echo 'not announced as a dry-run'; exit 1; }
+  grep -q 'FORWARD' <<<\"\$out\" || { echo 'the plan has no FORWARD rule'; exit 1; }
+  [ \"\$(ip -o link | wc -l)\" = \"\$before\" ] || { echo 'a link appeared on the host'; exit 1; }"
+check "vm bridge: a subnet that is not a CIDR is refused (1)" 1 "$BIN" vm bridge "$L3N" --vm-subnet default
+check "vm unbridge: a DRY-RUN teardown plan" ok bash -c "
+  '$BIN' vm unbridge '$L3N' --vm-subnet 192.0.2.0/24 2>&1 | grep -q 'DRY-RUN'"
+if [ "$(id -u)" -ne 0 ]; then
+  check "vm bridge --apply without root is refused (1) before any command runs" ok bash -c "
+    before=\$(ip -o link | wc -l)
+    out=\$('$BIN' vm bridge '$L3N' --vm-subnet 192.0.2.0/24 --apply 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"expected 1, got \$rc\"; exit 1; }
+    [ \"\$(ip -o link | wc -l)\" = \"\$before\" ]"
+else
+  skip "vm bridge --apply without root" "this run IS root"
+fi
+
+# This batch's own resources, by name — never a prune: the sweeps section after
+# the cleanup judges what each prune takes, and a leftover here would be
+# counted there.
+"$BIN" container rm -f "l3w-$PFX" "$L3C" >/dev/null 2>&1
+"$BIN" network rm "$L3N" >/dev/null 2>&1
+rm -rf "$L3"
+fi
 
 section "limpeza"
 ########################################
