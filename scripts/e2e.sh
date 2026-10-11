@@ -1931,10 +1931,15 @@ CR="cr-$PFX"
 if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
   CR_ROUNDS=0 CR_LOST=0
   for _r in 1 2 3 4 5 6; do
-    "$BIN" container stop -t 0 "$CR" >/dev/null 2>&1
-    for _i in $(seq 50); do
-      "$BIN" container ps 2>/dev/null | grep -qE " $CR\$" || break; sleep 0.2
+    # Com o disco do host ocupado, o PID 1 fica em D à espera do writeback e o
+    # `stop` desiste aos 30 s (DX-8101) com o container ainda registado a correr
+    # (ADR-0056 D4). Repete-se até ele sair; uma ronda que não chega lá não conta.
+    _gone=0
+    for _i in 1 2 3 4 5 6; do
+      "$BIN" container stop -t 0 "$CR" >/dev/null 2>&1
+      "$BIN" container ps 2>/dev/null | grep -qE " $CR\$" || { _gone=1; break; }
     done
+    [[ $_gone -eq 1 ]] || continue
     "$BIN" container start "$CR" >/dev/null 2>&1 & _p1=$!
     "$BIN" container start "$CR" >/dev/null 2>&1 & _p2=$!
     wait $_p1; _r1=$?; wait $_p2; _r2=$?
