@@ -629,8 +629,9 @@ mod tests {
         let unlock = Unlock(locked.clone());
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         // Root reads anything: the test only means something unprivileged.
+        // A library test does not print (the `library_prints` ratchet); the skip
+        // is this branch, and only a root run takes it.
         if std::fs::read_dir(&locked).is_ok() {
-            eprintln!("skipped: this process reads a 0000 directory");
             return;
         }
         let refused = delete_in(root, &delete_req("data")).unwrap_err();

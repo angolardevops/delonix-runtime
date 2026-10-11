@@ -182,6 +182,11 @@ pub fn image_defaults(
     vm_registry::image_defaults(root, reference)
 }
 
+/// See [`local_ports::store_image_disk`].
+pub fn store_image_disk(root: &Path, reference: &str) -> String {
+    local_ports::store_image_disk(root, reference)
+}
+
 pub fn provider_reports() -> Vec<delonix_compute::capability::ProviderReport> {
     seeded();
     vm_registry::provider_reports()
