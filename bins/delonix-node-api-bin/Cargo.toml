@@ -11,9 +11,14 @@ name = "delonix-node-api"
 path = "src/main.rs"
 
 [dependencies]
+delonix-model = { workspace = true }
 delonix-node = { workspace = true }
 delonix-node-api = { workspace = true }
 delonix-telemetry = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+libc = { workspace = true }
 
 [lints]
 workspace = true
