@@ -29,6 +29,66 @@
 
 ---
 
+## 0. Re-measured on 2026-10-11 — what closed, what is new, and how the rest runs
+
+Measured against `origin/main` `cfdd0f22` (engine **5.0.2** published from the
+`release/5.0.x` line; `main` carries the same fixes plus later work). This section
+is the current state; §1–§5 below keep the 2026-10-10 baseline they were written
+against, and an item marked closed here is closed there too.
+
+**Open pull requests: 0.** All local branches are contained in `main` (0 patches
+outside it). One other session was registered on this repository («pre-v1.0.0
+release cleanup»), with its PR (#786) merged and no worktree.
+
+### 0.1 Closed since 2026-10-10
+
+| Item | Closed by |
+|---|---|
+| 10.1 `vm image` migration | #772 |
+| 10.3 lab budget preflight | #774 |
+| N1 `install.sh` end to end | #775 (and the userns check fixed in the same PR) |
+| 12.2 / N5 state-upgrade test | #777 |
+| N29 live-suite ordering note | `crates/providers/delonix-proxmox/tests/live.rs` header |
+| releases v5.0.1, v5.0.2 | #784, #797; v5.0.2 carries the multi-homed route fix (`9e43cb0e`), so #785 is resolved (closed 2026-10-11) |
+| #753 golden `delonix-vm-k8s:1.36` boots and forms a kubeadm cluster | validated live with the v5.0.2 assets; issue closed |
+| #792 CRI start failure names the error line, not the last progress step | #795 |
+| #798 a failed start no longer undoes the network of a running container | #801 (per-container start lock + live-owner guard; A/B: 5/5 → 0/5) |
+| security series | #788 (layer unpack ceilings), #794 (CRI warns without a capability ceiling), #796 (opt-in SSH host-key pinning), #800 (foreign setuid dropped on the real-root path; narrows #791) |
+| a live test never passes without running | #802 |
+| CRI hugetlb zero cap, VMfile COPY, volume shrink, Proxmox serial0 | #787, #783, #782, #781 |
+
+### 0.2 New or re-scoped since 2026-10-10
+
+| ID | Source | Item | Sprint |
+|---|---|---|---|
+| N31 | #793 | a container that misses the 60 s mount ceiling under I/O saturation is reported as started | 16 |
+| N32 | #799 (= N15) | multi-node kubeadm: refuse by name before creating anything unless a cross-node CNI is chosen | 19 (code half pulled forward) |
+| N33 | #801 | the e2e gate «dois starts concorrentes» has not yet been seen red on v5.0.2 and green on the tip: on 2026-10-11 the host's writeback (~3 GB dirty) held every `stop` past 3 min and both runs skipped | 10 (with N30) |
+| N34 | #791 | the remaining setuid-root bits on the real-root path are kept on purpose (ADR-0062) | **decided 2026-10-11**: residual accepted, issue closed as not planned |
+| N35 | #736, #737 | pod-to-pod loss and the first cross-namespace connection do not reproduce on v5.0.2 (0 % loss; 6/6) | **decided 2026-10-11**: kept open; not covered yet are the single-node «days later» case and the reporter's exact shapes |
+| N36 | #438 | arm64: build, test and run on aarch64 | blocked (§6): an aarch64 runner or host |
+
+### 0.3 How the remaining sprints run: code in parallel, live validation in series
+
+§4 rule 2 (one guest at a time) bounds the live validations, not the code. So
+each wave runs its code items as parallel agents, each in its own worktree and
+target, none of them booting a guest; the integrator (this session) merges them
+and then runs the live validations one at a time, each behind `scripts/lab_budget.sh`.
+
+| Wave | In parallel (code, no guest) | Then, in series on the host |
+|---|---|---|
+| A (started 2026-10-11) | Sprint 13 part 1 (N3, `WatchOperation`/`CancelOperation`, `Create/DeleteVolume`, then `WatchEvents` and ADR-0003); Sprint 16 starting with N31; N32; Sprint 15 N11 checks runnable without a guest | N30 + N33 (full battery and chaos on a quiet host, the trace re-recorded); Sprint 13's live validation on Cloud Hypervisor |
+| B | Sprint 14 (P5 socket activation, N9); Sprint 17 (ADR-0065, ADR-0066, ADR-0047 spike); Sprint 20 (Compose, Docker API, N24) | N4 test image; Sprint 11 (N2, ADR-0057 on `proxmox-ve`); Sprint 14 in a golden guest |
+| C | Sprint 18 (ADR-0068 + ADR-0012); Sprint 21 (ADR-0067); Sprint 23 (N27, N10) | Sprint 19 live (critest, kubelet, two nodes); Sprint 15/16 live cells |
+| D | Sprint 22 (Proxmox depth); Sprint 24 spikes | Sprint 18, 21, 22 live, each alone |
+
+Two waves never touch the same crate in parallel unless one of them only adds
+tests. A wave's agents never edit `AGENTS.md` or a baseline (`lang_baseline.json`,
+`cli_exec_trace.tsv`, ratchets): the integrator re-measures those once, on the
+merged tree.
+
+---
+
 ## 1. Review: what the other sessions closed, and what they left
 
 Every session that touched this repo is stopped, and its work is in `main`. The
@@ -220,7 +280,7 @@ on the same guest. Teardown: the owner's 15 libvirt domains unchanged, 578.7 MiB
 |---|---|
 | 11.1 | **Done 2026-10-10**: the owner decided §3; statuses and index updated with the plan |
 | 11.2 | X2 renumbering — **done 2026-10-10**: the sensor ADR is ADR-0077, the old file a stub, the spike directory moved with it |
-| 11.3 | N2: revoke `dlxs6` |
+| 11.3 | N2: revoke `dlxs6` (still open on 2026-10-11) |
 
 **Live validation**: ADR-0057's path re-measured on a `proxmox-ve:9.2-r2`
 appliance (2 vCPU / 4 GiB): a VM boots from an image of the engine's store,

@@ -3618,6 +3618,12 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
         return format!("{} (OOMKilled)", fmt_status(&c.status, uptime));
     }
     let base = fmt_status(&c.status, uptime);
+    // A running process whose mounts were never seen finished is not the same
+    // as «Up»: entering it is refused until they are (`require_mounted`), and
+    // the column is where an operator looks first.
+    if matches!(c.status, Status::Running) && c.mount_pending && c.is_live() {
+        return format!("{base} (mounting)");
+    }
     // Health only qualifies a RUNNING container. Appending "(healthy)" to
     // `Exited (0)` would be reporting the last thing we saw as if it were still
     // true — the exact silent-staleness this column exists to prevent.
@@ -5496,6 +5502,10 @@ impl FsRoot {
 
 fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
     if let Some(pid) = c.pid.filter(|_| c.is_live()) {
+        // `/proc/<pid>/root` of an init that has not finished mounting may still
+        // be the HOST's root: a `cp` from it would copy host files, a `commit`
+        // would package them. Same refusal as `exec`.
+        runtime::require_mounted(c)?;
         return Ok(FsRoot {
             path: std::path::PathBuf::from(format!("/proc/{pid}/root")),
             _hold: None,
@@ -8729,6 +8739,32 @@ containers:
         // presente uma observação que já não se está a fazer.
         c.status = Status::Stopped;
         assert_eq!(fmt_status_of(&c, None), "Exited (0)");
+    }
+
+    /// A running process whose mounts were never seen finished does not read as
+    /// a plain «Up» (issue #793): the column says so for as long as entering it
+    /// is refused, and not a moment after the incarnation ends.
+    #[test]
+    fn a_container_still_mounting_is_not_shown_as_plain_up() {
+        let me = std::process::id() as i32;
+        let mut c = Container::new(
+            "id".into(),
+            "t".into(),
+            "img".into(),
+            v(&["sh"]),
+            "max".into(),
+        );
+        c.status = Status::Running;
+        c.pid = Some(me);
+        c.pid_starttime = delonix_node::proc_starttime(me);
+        c.mount_pending = true;
+        assert_eq!(fmt_status_of(&c, Some(90)), "Up About a minute (mounting)");
+        c.mount_pending = false;
+        assert_eq!(fmt_status_of(&c, Some(90)), "Up About a minute");
+        // A dead record that kept the mark is not «mounting».
+        c.mount_pending = true;
+        c.pid = None;
+        assert!(!fmt_status_of(&c, None).contains("mounting"));
     }
 
     /// The off-by-one this column shipped with, found live: `cmd_run`'s

@@ -123,6 +123,15 @@ pub enum Error {
     #[error("container is not running: {0}")]
     NotRunning(String),
 
+    /// The container's process runs, but its init was never seen to finish
+    /// shaping its mount namespace (the start passed its ceiling first), so `/`
+    /// in there may still be the host's. Entering it would run on the host, so
+    /// the operation is refused until the proof arrives. Class «unavailable»
+    /// and not «not running»: the process IS running, and the caller's next step
+    /// is to wait and retry, not to start it.
+    #[error("{0}")]
+    MountPending(String),
+
     // ---- not found ----------------------------------------------------
     /// A CDI device name is not declared by any discovered CDI spec.
     #[error("{0}")]
@@ -221,6 +230,7 @@ impl Error {
             Error::CdiDeviceNotFound(_) => 4102,
             Error::AlreadyRunning(_) => 5101,
             Error::StillExiting(_) => 8101,
+            Error::MountPending(_) => 6101,
             Error::ApparmorUnavailable(_) => 1901,
             Error::NoCdiSpec(_) => 1902,
             Error::Syscall { .. } => 9901,
@@ -268,6 +278,7 @@ impl From<Error> for Dx {
             Error::CdiDeviceNotFound(t) => Dx::NotFound(t),
             Error::AlreadyRunning(t) => Dx::Conflict(t),
             Error::StillExiting(t) => Dx::Timeout(t),
+            Error::MountPending(t) => Dx::Unavailable(t),
             Error::Syscall { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
         };
@@ -307,6 +318,7 @@ mod tests {
                     .into(),
             ),
             Error::NotRunning("web".into()),
+            Error::MountPending("container web has not finished mounting".into()),
             Error::CdiDeviceNotFound(
                 "'nvidia.com/gpu=7': not found in any discovered CDI spec".into(),
             ),
