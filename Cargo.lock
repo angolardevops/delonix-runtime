@@ -737,7 +737,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "delonix-compute"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "delonix-net-rules",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-cri"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "axum",
  "delonix-compute",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-linux"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-mcp"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-linux",
@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-mcp-bin"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-mcp",
  "delonix-node",
@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-mgmt"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "axum",
  "delonix-compute",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-mgmt-bin"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-mgmt",
  "delonix-node",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-model"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -881,11 +881,11 @@ dependencies = [
 
 [[package]]
 name = "delonix-net-rules"
-version = "5.0.1"
+version = "5.0.2"
 
 [[package]]
 name = "delonix-networking"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-node"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "libc",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-node-api"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "axum",
  "delonix-compute",
@@ -945,7 +945,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-node-api-bin"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-node",
  "delonix-node-api",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-oci"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "base64 0.22.1",
  "criterion",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-opnsense"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-powerdns"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "reqwest 0.12.28",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-provider-cloud-hypervisor"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -1019,7 +1019,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-provider-libvirt"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -1032,7 +1032,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-proxmox"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -1052,7 +1052,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-runtime-bin"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-scanner"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "delonix-oci",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-sdn"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-security-runtime"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "delonix-node",
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-stack"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "serde",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-state"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "chacha20poly1305",
  "delonix-compute",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-storage"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "libc",
@@ -1186,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-telemetry"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-truenas"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "reqwest 0.12.28",
@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-vm"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-volume"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-compute",
  "delonix-model",
