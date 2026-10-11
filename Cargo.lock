@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-powerdns"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "reqwest 0.12.28",
