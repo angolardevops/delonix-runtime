@@ -7137,11 +7137,16 @@ section "container ps sem -a: só os que estão a correr, na CLI e na API Docker
 # ignorava o `all` e devolvia tudo, e perdia as portas publicadas: o parser dela
 # esperava `hostPort:contPort` e o registo guarda `addr:hostPort:contPort/proto`
 # desde 2026-10-07. Medido a 2026-10-11 nos três.
-PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"
-if [ "$E2E_HAVE_IMAGE" = 1 ] \
-   && "$BIN" container run -d --name "$PSR" --net none -p 127.0.0.1:51889:80 "$IMG" sleep 600 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$PSS" --net none "$IMG" sleep 600 >/dev/null 2>&1 \
-   && "$BIN" container run -d --name "$PSF" --net none "$IMG" sh -c 'exit 3' >/dev/null 2>&1; then
+PSR="psrun-$PFX"; PSS="psstop-$PFX"; PSF="psfail-$PFX"; PSPORT=$(( 51800 + RANDOM % 150 ))
+# Creating the three is a CHECK, not a condition: a first version folded it into
+# the `if` and skipped the whole section when one refused to start — which it
+# did, because `-p` with `--net none` is refused (correctly). A gate that skips
+# when its own setup fails proves nothing.
+if [ "$E2E_HAVE_IMAGE" = 1 ]; then
+  check "container ps: os três containers de prova arrancam" ok bash -c \
+    "'$BIN' container run -d --name '$PSR' -p 127.0.0.1:$PSPORT:80 '$IMG' sleep 600 >/dev/null \
+     && '$BIN' container run -d --name '$PSS' --net none '$IMG' sleep 600 >/dev/null \
+     && '$BIN' container run -d --name '$PSF' --net none '$IMG' sh -c 'exit 3' >/dev/null"
   "$BIN" container stop -t 0 "$PSS" >/dev/null 2>&1
   for _ in $(seq 1 50); do
     "$BIN" container inspect "$PSF" 2>/dev/null | grep -qE '"status": *"Running"' || break; sleep 0.2
@@ -7163,12 +7168,12 @@ if [ "$E2E_HAVE_IMAGE" = 1 ] \
   check "docker-api: all=1 devolve também os parados" ok bash -c \
     "n=\"\$(curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json?all=1' | python3 -c \"import json,sys; print(' '.join(c['Names'][0][1:] for c in json.load(sys.stdin)))\")\"; [[ \" \$n \" == *' $PSS '* && \" \$n \" == *' $PSF '* ]]"
   check "docker-api: a porta publicada vem nos Ports, com o IP" ok bash -c \
-    "curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json' | python3 -c \"import json,sys; p=[c['Ports'] for c in json.load(sys.stdin) if c['Names'][0]=='/$PSR']; sys.exit(0 if p and {'PrivatePort':80,'PublicPort':51889,'Type':'tcp','IP':'127.0.0.1'} in p[0] else 1)\""
+    "curl -s --unix-socket '$PSSOCK' --max-time 30 'http://localhost/containers/json' | python3 -c \"import json,sys; p=[c['Ports'] for c in json.load(sys.stdin) if c['Names'][0]=='/$PSR']; sys.exit(0 if p and {'PrivatePort':80,'PublicPort':$PSPORT,'Type':'tcp','IP':'127.0.0.1'} in p[0] else 1)\""
   [ -n "$PSPID" ] && kill "$PSPID" 2>/dev/null
   for _ in $(seq 1 40); do kill -0 "$PSPID" 2>/dev/null || break; sleep 0.2; done
   rm -f "$PSSOCK"
 else
-  skip "container ps sem -a" "sem imagem, ou um dos três containers não arrancou"
+  skip "container ps sem -a" "sem imagem de teste"
 fi
 "$BIN" container rm -f "$PSR" "$PSS" "$PSF" >/dev/null 2>&1
 
