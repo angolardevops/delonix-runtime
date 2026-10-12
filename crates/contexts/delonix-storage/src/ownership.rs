@@ -24,8 +24,55 @@ impl Owner {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
+
+    /// The owner for `uid` and the engine state root `root`: `"<uid>:<root>"`,
+    /// the one spelling the engine and the privileged helper both build, so a
+    /// stamp written by either is recognised by the other.
+    pub fn of(uid: u32, root: &str) -> Self {
+        Self(format!("{uid}:{root}"))
+    }
+
     pub fn id(&self) -> &str {
         &self.0
+    }
+
+    /// `(uid, root)`, for an owner built by [`Owner::of`].
+    pub fn parts(&self) -> Option<(u32, &str)> {
+        let (uid, root) = self.0.split_once(':')?;
+        Some((uid.parse().ok()?, root))
+    }
+}
+
+/// A short, stable digest of a state root (FNV-1a, 64 bits, hex) — for the
+/// backends whose stamp cannot hold the path itself (an LVM tag allows only a
+/// few characters). It is NOT a security boundary: the uid is stamped beside
+/// it in clear, and only the uid separates one user from another. Two roots of
+/// the same user that collided would be that user confusing their own volumes.
+pub fn root_digest(root: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in root.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// The primary group of `uid`, from the password database; `uid` itself when
+/// the user has no entry (a uid with no name is still a uid).
+pub fn primary_gid(uid: u32) -> u32 {
+    let mut buf = vec![0u8; 16 * 1024];
+    // SAFETY: `passwd` is a C struct of pointers and integers; all-zero is a
+    // valid value for an out-parameter.
+    let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut out: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: every pointer is valid for the duration of the call and `buf`
+    // is as long as the length passed.
+    let rc =
+        unsafe { libc::getpwuid_r(uid, &mut pw, buf.as_mut_ptr().cast(), buf.len(), &mut out) };
+    if rc == 0 && !out.is_null() {
+        pw.pw_gid
+    } else {
+        uid
     }
 }
 
@@ -83,6 +130,30 @@ mod tests {
         assert!(!back.is_for("media", "db", &Owner::new("1000:/tmp/other")));
         assert!(!back.is_for("media", "web", &me));
         assert!(!back.is_for("fast", "db", &me));
+    }
+
+    #[test]
+    fn an_owner_of_a_uid_and_a_root_gives_both_back() {
+        let o = Owner::of(1000, "/home/u/.local/share/delonix");
+        assert_eq!(o.id(), "1000:/home/u/.local/share/delonix");
+        assert_eq!(o.parts(), Some((1000, "/home/u/.local/share/delonix")));
+        assert_eq!(Owner::new("nonsense").parts(), None);
+        assert_eq!(Owner::new("x:/r").parts(), None);
+    }
+
+    #[test]
+    fn the_root_digest_is_stable_and_distinguishes_roots() {
+        // FNV-1a 64 of the empty string is the offset basis.
+        assert_eq!(root_digest(""), "cbf29ce484222325");
+        assert_eq!(root_digest("/a"), root_digest("/a"));
+        assert_ne!(root_digest("/a"), root_digest("/b"));
+        assert_eq!(root_digest("/home/u").len(), 16);
+    }
+
+    #[test]
+    fn root_has_group_zero_and_an_unknown_uid_falls_back_to_itself() {
+        assert_eq!(primary_gid(0), 0);
+        assert_eq!(primary_gid(3_999_999_999), 3_999_999_999);
     }
 
     #[test]
