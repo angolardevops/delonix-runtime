@@ -103,7 +103,14 @@ const ACTUAL_SOURCES: &[(&str, &str)] = &[
 /// Only keys the stamp carries are compared. A field present in the observed
 /// state and absent from the stamp is a default the apply never set, and
 /// reporting it would bury the real drift under engine defaults.
+#[cfg(test)]
 fn rows_for(a: &Actual) -> Vec<DriftRow> {
+    rows_for_with(a, None)
+}
+
+/// [`rows_for`] with the resource's plan facts: a field the plan compares by
+/// VALUE (memory, ceilings) is compared the same way here.
+fn rows_for_with(a: &Actual, facts: Option<&super::reconcile::Facts>) -> Vec<DriftRow> {
     let stack = a.owner.clone().unwrap_or_default();
     let Some(stamp) = a.last_applied.as_ref() else {
         return Vec::new();
@@ -112,7 +119,9 @@ fn rows_for(a: &Actual) -> Vec<DriftRow> {
         .iter()
         .filter_map(|(field, applied)| {
             let observed = a.fields.get(field).map(String::as_str).unwrap_or("-");
-            (observed != applied).then(|| DriftRow {
+            let same = a.fields.contains_key(field)
+                && super::reconcile::same_value(field, observed, applied, facts);
+            (!same).then(|| DriftRow {
                 stack: stack.clone(),
                 kind: a.kind.clone(),
                 name: a.name.clone(),
@@ -139,7 +148,17 @@ fn rows_for(a: &Actual) -> Vec<DriftRow> {
 }
 
 /// Pure: the whole report, given what the stores answered.
+#[cfg(test)]
 fn report_of(actual: &[Actual], stack: Option<&str>, saw_manifest: bool) -> Report {
+    report_of_with(actual, stack, saw_manifest, &Default::default())
+}
+
+fn report_of_with(
+    actual: &[Actual],
+    stack: Option<&str>,
+    saw_manifest: bool,
+    facts: &std::collections::BTreeMap<(String, String), super::reconcile::Facts>,
+) -> Report {
     let mut r = Report::default();
     for a in actual {
         let Some(owner) = a.owner.as_deref() else {
@@ -156,7 +175,10 @@ fn report_of(actual: &[Actual], stack: Option<&str>, saw_manifest: bool) -> Repo
             });
             continue;
         }
-        r.drift.extend(rows_for(a));
+        r.drift.extend(rows_for_with(
+            a,
+            facts.get(&(a.kind.clone(), a.name.clone())),
+        ));
     }
     if !saw_manifest {
         r.not_checked = DOC_SCOPED.iter().map(|(_, kind)| *kind).collect();
@@ -188,7 +210,14 @@ pub(crate) fn cmd_drift(
     };
 
     let actual = super::stack::actual_of(&docs)?;
-    let r = report_of(&actual, stack.as_deref(), saw_manifest);
+    // The plan's facts, so a value compared numerically there (a VM's
+    // memory and ceilings) is compared numerically here too.
+    let facts = if actual.iter().any(|a| a.kind == super::kinds::VM) {
+        super::vm::facts()?
+    } else {
+        Default::default()
+    };
+    let r = report_of_with(&actual, stack.as_deref(), saw_manifest, &facts);
 
     match output {
         OutputFormat::Json => {
@@ -295,6 +324,46 @@ mod tests {
         assert_eq!(rows[0].field, "memory");
         assert_eq!(rows[0].last_applied, "64M");
         assert_eq!(rows[0].observed, "128M");
+    }
+
+    /// `memoryMax: 1G` stamped, `1024M` on the record: one memory, as the
+    /// plan already says — drift was red forever on it.
+    #[test]
+    fn a_value_the_plan_reads_as_equal_is_not_drift() {
+        let mut v = delonix_compute::Vm::new(
+            "db".into(),
+            String::new(),
+            String::new(),
+            2,
+            "2048M".into(),
+            "default".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        v.memory_max_mib = Some(1024);
+        let facts = super::super::vm::facts_of_vm(&v);
+        let a = actual(
+            "VirtualMachine",
+            "db",
+            Some("shop"),
+            &[
+                ("memoryMax", "1024M"),
+                ("memory", "2048M"),
+                ("vcpusMax", "4"),
+            ],
+            Some(&[("memoryMax", "1G"), ("memory", "2G"), ("vcpusMax", "04")]),
+        );
+        assert!(rows_for_with(&a, Some(&facts)).is_empty());
+        // A real change still is.
+        let moved = actual(
+            "VirtualMachine",
+            "db",
+            Some("shop"),
+            &[("memoryMax", "2048M")],
+            Some(&[("memoryMax", "1G")]),
+        );
+        assert_eq!(rows_for_with(&moved, Some(&facts)).len(), 1);
     }
 
     /// A device `vm update` added and the manifest never declared is kept by

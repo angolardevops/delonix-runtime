@@ -491,8 +491,10 @@ pub fn classify(
 }
 
 /// Whether two values of one field are the same thing. Strings, unless the
-/// facts name a parser for the field.
-fn same_value(field: &str, a: &str, b: &str, facts: Option<&Facts>) -> bool {
+/// facts name a parser for the field. Public so `drift` compares with the
+/// SAME rule the plan uses: `1G` and `1024M` are one memory in both, or the
+/// plan says «nothing to do» while drift stays red forever.
+pub fn same_value(field: &str, a: &str, b: &str, facts: Option<&Facts>) -> bool {
     if a == b {
         return true;
     }
