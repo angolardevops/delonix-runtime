@@ -118,9 +118,11 @@ impl std::fmt::Debug for Auth {
 /// Where the appliance is, and how to get in.
 #[derive(Debug, Clone)]
 pub struct Target {
-    /// `https://<host>` (no path). The scheme is part of it: `http://`
-    /// sends the key/secret in the clear, and that is the caller's
-    /// explicit choice to make, not a default this code picks.
+    /// `https://<host>` (no path). `http://` is refused by
+    /// [`Client::connect`]: the key/secret travels in every request's
+    /// `Authorization` header, so plain HTTP would hand it to anything on
+    /// the path. A self-signed appliance is served by `insecure_tls` or
+    /// `ca_cert_pem`, never by dropping TLS.
     pub base_url: String,
     pub auth: Auth,
     /// Accept a certificate this host cannot verify. A stock OPNsense
@@ -224,6 +226,40 @@ pub struct Client {
     auth: Auth,
 }
 
+/// The appliance URL, checked before the credential can go anywhere — the
+/// same two refusals the Proxmox and TrueNAS clients make, for the same
+/// reasons: plain HTTP sends the key/secret in the clear (there is no opt-in
+/// here, unlike PowerDNS, because OPNsense always serves HTTPS), and
+/// userinfo is a password in the configuration under another name, and the
+/// classic way to make a URL read as one host and reach another.
+pub fn validate_target_url(url: &str) -> Result<()> {
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| {
+        Error::InsecureTarget(format!("invalid OPNsense url '{url}': it needs a scheme"))
+    })?;
+    if !scheme.eq_ignore_ascii_case("https") {
+        return Err(Error::InsecureTarget(format!(
+            "invalid OPNsense url '{url}': only https:// is accepted — the API key/secret \
+             would go over the wire in the clear otherwise (use `insecure_tls` or a CA \
+             certificate for the appliance's self-signed one)"
+        )));
+    }
+    let hostport = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if hostport.is_empty() {
+        return Err(Error::InsecureTarget(format!(
+            "invalid OPNsense url '{url}': it names no host"
+        )));
+    }
+    if hostport.contains('@') {
+        // The URL is not echoed: what precedes the `@` is a credential.
+        let host = hostport.rsplit('@').next().unwrap_or_default();
+        return Err(Error::InsecureTarget(format!(
+            "invalid OPNsense url for '{host}': credentials in the URL are not accepted — \
+             keep the key/secret in `auth`"
+        )));
+    }
+    Ok(())
+}
+
 impl Client {
     /// Builds the client and proves the credential works — the same
     /// "authenticate at construction, not at first real use" contract
@@ -231,6 +267,7 @@ impl Client {
     /// what ADR-0051's Phase 0 spike did by hand (`GET core/firmware/
     /// status`) before anything else.
     pub fn connect(target: &Target) -> Result<Self> {
+        validate_target_url(&target.base_url)?;
         let mut builder = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(30))
@@ -1620,5 +1657,55 @@ mod base64_tests {
         ] {
             assert_eq!(super::base64_std(i.as_bytes()), o, "{i}");
         }
+    }
+}
+
+#[cfg(test)]
+mod target_url_tests {
+    use super::{validate_target_url, Error};
+
+    #[test]
+    fn only_an_https_url_with_a_host_and_no_userinfo_is_accepted() {
+        assert!(validate_target_url("https://fw.example").is_ok());
+        assert!(validate_target_url("HTTPS://fw.example:8443/").is_ok());
+        for bad in [
+            "http://fw.example",
+            "fw.example",
+            "ftp://fw.example",
+            "https://",
+            "https:///api",
+            "https://key:secret@fw.example",
+        ] {
+            match validate_target_url(bad) {
+                Err(e @ Error::InsecureTarget(_)) => assert_eq!(e.number(), 1349, "{bad}"),
+                other => panic!("{bad}: expected InsecureTarget, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_refused_userinfo_is_never_echoed() {
+        let e = validate_target_url("https://key:hunter2@fw.example").unwrap_err();
+        let text = e.to_string();
+        assert!(!text.contains("hunter2"), "{text}");
+        assert!(text.contains("fw.example"), "{text}");
+    }
+
+    /// The refusal happens before a client exists: nothing can be sent.
+    #[test]
+    fn connect_refuses_plain_http_before_any_request() {
+        let t = super::Target {
+            base_url: "http://127.0.0.1:9".into(),
+            auth: super::Auth {
+                key: "k".into(),
+                secret: "s".into(),
+            },
+            insecure_tls: false,
+            ca_cert_pem: None,
+        };
+        assert!(matches!(
+            super::Client::connect(&t),
+            Err(Error::InsecureTarget(_))
+        ));
     }
 }
