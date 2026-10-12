@@ -492,6 +492,13 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <td>Doit désigner un fichier existant — ne se rabat jamais sur un autre. Le premier fichier trouvé est la configuration ; les fichiers ne sont jamais fusionnés. Un fichier illisible fait échouer une requête de VM sans <code>--backend</code> au lieu de deviner un provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_HELPER_SOCKET</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
+<td>Le socket de l’assistant privilégié de stockage que le MOTEUR contacte (ADR-0067 D3), à la place de <code>/<wbr>run/<wbr>delonix-storage-helper.<wbr>sock</code>.</td>
+<td>Un chemin.</td>
+<td>Lue par le moteur seulement ; l’assistant ne la lit jamais. Si le chemin n’existe pas, un pool dont le pilote exige un privilège est refusé avec DX-6206.</td>
+</tr>
+<tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>Chemin de la liste des pools de stockage autorisés par l’administrateur (ADR-0067 D3), à la place de <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>

@@ -58,6 +58,7 @@
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
 │   ├── delonix-node-api-bin/     the `delonix-node-api` binary
+│   ├── delonix-storage-helper/   the `delonix-storage-helper` binary (root, per connection)
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -125,6 +126,7 @@ crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生�
 | `bins/delonix-mgmt-bin/` | `delonix-mgmt` 二进制程序：一个覆盖在 `delonix-mgmt` 之上的很薄的 `main.rs`。 | 很少改动；逻辑活在接口层的那个 crate 里。 | [各个 crate](crates.md) |
 | `bins/delonix-node-api-bin/` | `delonix-node-api` 二进制程序：一个覆盖在 `delonix-node-api` 之上的很薄的 `main.rs`（在一个 unix 套接字上的节点契约，ADR-0040 P5）。 | 很少改动；逻辑活在接口层的那个 crate 里。 | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `bins/delonix-mcp-bin/` | `delonix-mcp` 二进制程序：一个覆盖在 `delonix-mcp` 之上的很薄的 `main.rs`。 | 很少改动；逻辑活在接口层的那个 crate 里。 | `docs/adr/0025-mcp-local-ai-control-surface.md` |
+| `bins/delonix-storage-helper/` | `delonix-storage-helper` 二进制程序：存储池的特权辅助程序（ADR-0067 D3，P1）。systemd 在 `delonix-storage-helper.socket` 上每个连接启动一次；它在 `/etc/delonix/storage-pools.yaml` 的范围内处理一个请求，同时也是管理员的 `create-pool`/`destroy-pool`。unit 文件在 `dist/`。 | 当辅助程序的协议或其 unit 改变时；请求的语法位于 `delonix-storage::helper`。 | `docs/adr/0067-storage-pools.md` |
 | `proto/` | 节点契约 `delonix.node.v1`（`proto/delonix/node/v1/*.proto`），标记为 draft；是 gRPC 和 HTTP/JSON 以及 `docs/api/openapi.yaml` 的唯一真相来源。由 `scripts/contract_gate.py` 检查（格式、lint、破坏性变更、HTTP 映射、OpenAPI）。 | 契约变更，需要仔细评审——相对于上一个 tag 的破坏性变更会失败。 | `proto/README.md`、ADR-0040 |
 | `tests/` | 树外的兼容性检查，不是 cargo 测试：`tests/compat/cri-conformance.sh`（`critest` 套件）和 `tests/compat/docker_api_smoke.py`。Cargo 的集成测试活在每个 crate 自己的 `tests/` 里。 | 从事 CRI 或 Docker API 兼容性工作的人。 | `docs/cri-conformance.md`、[克隆、构建与测试](build-and-test.md) |
 | `fuzz/` | `cargo-fuzz` 的目标，针对喂入不受信输入（一个被克隆仓库的 `Dockerfile`、一个镜像引用字符串）的手写解析器。它有自己独立的 `[workspace]`，这样 sanitizer 的构建 flag 就永远不会碰到主 workspace；CI 的 `fuzz` 作业每次 push/PR 对每个目标跑 60 秒。 | 任何为外部可控输入新增手写解析器的人。 | `docs/roadmap/13-improvements-traceability.md` 的 M04 |

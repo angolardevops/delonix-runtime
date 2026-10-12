@@ -1153,8 +1153,11 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   subgraph provider[&quot;Providers&quot;]
     delonix_opnsense[&quot;delonix-opnsense&quot;]
     delonix_powerdns[&quot;delonix-powerdns&quot;]
+    delonix_provider_btrfs[&quot;delonix-provider-btrfs&quot;]
     delonix_provider_cloud_hypervisor[&quot;delonix-provider-cloud-hypervisor&quot;]
     delonix_provider_libvirt[&quot;delonix-provider-libvirt&quot;]
+    delonix_provider_lvm[&quot;delonix-provider-lvm&quot;]
+    delonix_provider_zfs[&quot;delonix-provider-zfs&quot;]
     delonix_proxmox[&quot;delonix-proxmox&quot;]
     delonix_truenas[&quot;delonix-truenas&quot;]
   end
@@ -1169,6 +1172,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
     delonix_mgmt_bin[&quot;delonix-mgmt-bin&quot;]
     delonix_node_api_bin[&quot;delonix-node-api-bin&quot;]
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
+    delonix_storage_helper[&quot;delonix-storage-helper&quot;]
   end
   delonix_compute --&gt; delonix_model
   delonix_compute --&gt; delonix_net_rules
@@ -1238,12 +1242,15 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_opnsense --&gt; delonix_model
   delonix_opnsense --&gt; delonix_networking
   delonix_powerdns --&gt; delonix_model
+  delonix_provider_btrfs --&gt; delonix_storage
   delonix_provider_cloud_hypervisor --&gt; delonix_compute
   delonix_provider_cloud_hypervisor --&gt; delonix_model
   delonix_provider_cloud_hypervisor --&gt; delonix_node
   delonix_provider_libvirt --&gt; delonix_compute
   delonix_provider_libvirt --&gt; delonix_model
   delonix_provider_libvirt --&gt; delonix_node
+  delonix_provider_lvm --&gt; delonix_storage
+  delonix_provider_zfs --&gt; delonix_storage
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
   delonix_proxmox --&gt; delonix_networking
@@ -1257,6 +1264,9 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_runtime_bin --&gt; delonix_oci
   delonix_runtime_bin --&gt; delonix_opnsense
   delonix_runtime_bin --&gt; delonix_powerdns
+  delonix_runtime_bin --&gt; delonix_provider_btrfs
+  delonix_runtime_bin --&gt; delonix_provider_lvm
+  delonix_runtime_bin --&gt; delonix_provider_zfs
   delonix_runtime_bin --&gt; delonix_proxmox
   delonix_runtime_bin --&gt; delonix_scanner
   delonix_runtime_bin --&gt; delonix_sdn
@@ -1283,6 +1293,12 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   delonix_state --&gt; delonix_model
   delonix_state --&gt; delonix_node
   delonix_storage --&gt; delonix_model
+  delonix_storage_helper --&gt; delonix_model
+  delonix_storage_helper --&gt; delonix_provider_btrfs
+  delonix_storage_helper --&gt; delonix_provider_lvm
+  delonix_storage_helper --&gt; delonix_provider_zfs
+  delonix_storage_helper --&gt; delonix_storage
+  delonix_storage_helper --&gt; delonix_volume
   delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
   delonix_vm --&gt; delonix_model
@@ -1311,8 +1327,11 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   class delonix_oci block
   class delonix_opnsense external
   class delonix_powerdns external
+  class delonix_provider_btrfs external
   class delonix_provider_cloud_hypervisor external
   class delonix_provider_libvirt external
+  class delonix_provider_lvm external
+  class delonix_provider_zfs external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block
@@ -1321,6 +1340,7 @@ B」这样的问题，而要理解「为什么」，请阅读上文按层划分�
   class delonix_stack block
   class delonix_state block
   class delonix_storage block
+  class delonix_storage_helper engine
   class delonix_telemetry block
   class delonix_truenas external
   class delonix_vm block

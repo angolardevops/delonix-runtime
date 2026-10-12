@@ -710,8 +710,11 @@ flowchart TB
   subgraph provider["Providers"]
     delonix_opnsense["delonix-opnsense"]
     delonix_powerdns["delonix-powerdns"]
+    delonix_provider_btrfs["delonix-provider-btrfs"]
     delonix_provider_cloud_hypervisor["delonix-provider-cloud-hypervisor"]
     delonix_provider_libvirt["delonix-provider-libvirt"]
+    delonix_provider_lvm["delonix-provider-lvm"]
+    delonix_provider_zfs["delonix-provider-zfs"]
     delonix_proxmox["delonix-proxmox"]
     delonix_truenas["delonix-truenas"]
   end
@@ -726,6 +729,7 @@ flowchart TB
     delonix_mgmt_bin["delonix-mgmt-bin"]
     delonix_node_api_bin["delonix-node-api-bin"]
     delonix_runtime_bin["delonix-runtime-bin"]
+    delonix_storage_helper["delonix-storage-helper"]
   end
   delonix_compute --> delonix_model
   delonix_compute --> delonix_net_rules
@@ -795,12 +799,15 @@ flowchart TB
   delonix_opnsense --> delonix_model
   delonix_opnsense --> delonix_networking
   delonix_powerdns --> delonix_model
+  delonix_provider_btrfs --> delonix_storage
   delonix_provider_cloud_hypervisor --> delonix_compute
   delonix_provider_cloud_hypervisor --> delonix_model
   delonix_provider_cloud_hypervisor --> delonix_node
   delonix_provider_libvirt --> delonix_compute
   delonix_provider_libvirt --> delonix_model
   delonix_provider_libvirt --> delonix_node
+  delonix_provider_lvm --> delonix_storage
+  delonix_provider_zfs --> delonix_storage
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
   delonix_proxmox --> delonix_networking
@@ -814,6 +821,9 @@ flowchart TB
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_opnsense
   delonix_runtime_bin --> delonix_powerdns
+  delonix_runtime_bin --> delonix_provider_btrfs
+  delonix_runtime_bin --> delonix_provider_lvm
+  delonix_runtime_bin --> delonix_provider_zfs
   delonix_runtime_bin --> delonix_proxmox
   delonix_runtime_bin --> delonix_scanner
   delonix_runtime_bin --> delonix_sdn
@@ -840,6 +850,12 @@ flowchart TB
   delonix_state --> delonix_model
   delonix_state --> delonix_node
   delonix_storage --> delonix_model
+  delonix_storage_helper --> delonix_model
+  delonix_storage_helper --> delonix_provider_btrfs
+  delonix_storage_helper --> delonix_provider_lvm
+  delonix_storage_helper --> delonix_provider_zfs
+  delonix_storage_helper --> delonix_storage
+  delonix_storage_helper --> delonix_volume
   delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_model
@@ -868,8 +884,11 @@ flowchart TB
   class delonix_oci block
   class delonix_opnsense external
   class delonix_powerdns external
+  class delonix_provider_btrfs external
   class delonix_provider_cloud_hypervisor external
   class delonix_provider_libvirt external
+  class delonix_provider_lvm external
+  class delonix_provider_zfs external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block
@@ -878,6 +897,7 @@ flowchart TB
   class delonix_stack block
   class delonix_state block
   class delonix_storage block
+  class delonix_storage_helper engine
   class delonix_telemetry block
   class delonix_truenas external
   class delonix_vm block

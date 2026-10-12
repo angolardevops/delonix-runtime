@@ -469,6 +469,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>必须指向已存在的文件——绝不退回到其他文件。找到的第一个文件就是配置；文件从不合并。无法读取的文件会让不带 <code>--backend</code> 的 VM 请求失败，而不是猜测一个 provider。</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_HELPER_SOCKET</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
+<td>引擎连接的存储特权辅助程序的套接字（ADR-0067 D3），取代 <code>/<wbr>run/<wbr>delonix-storage-helper.<wbr>sock</code>。</td>
+<td>一个路径。</td>
+<td>只由引擎读取；辅助程序从不读取它。路径不存在时，驱动需要特权的存储池会以 DX-6206 被拒绝。</td>
+</tr>
+<tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>管理员的存储池许可清单的路径（ADR-0067 D3），取代 <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>。</td>

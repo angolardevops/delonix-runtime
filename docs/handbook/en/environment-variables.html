@@ -507,6 +507,13 @@ and how to tear the isolated infra down, is in
 <td>Below <code>DELONIX_SSH_KNOWN_HOSTS</code>. The default stays <code>accept-new</code> so a greenfield bootstrap of a host never seen before still connects.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_HELPER_SOCKET</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
+<td>The privileged storage helper's socket the ENGINE dials (ADR-0067 D3), instead of <code>/<wbr>run/<wbr>delonix-storage-helper.<wbr>sock</code>.</td>
+<td>A path.</td>
+<td>Read by the engine only; the helper never reads it. When the path does not exist, a pool whose driver needs privilege is refused with DX-6206.</td>
+</tr>
+<tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>Path to the administrator's storage pool allowlist (ADR-0067 D3), instead of <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
