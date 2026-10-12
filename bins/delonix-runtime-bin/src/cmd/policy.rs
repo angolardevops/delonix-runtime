@@ -70,7 +70,7 @@ use super::output::OutputFormat;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 
-pub(crate) use srt::admission::Request;
+pub(crate) use srt::admission::{ContainerHardening, Request};
 
 /// `<root>/policy.json`.
 pub(crate) fn path(root: &Path) -> PathBuf {
@@ -149,6 +149,31 @@ fn render(v: &Violation) -> String {
                 ("host", host),
                 ("allowed", &allowed.join(", ")),
             ],
+        ),
+        Violation::BaselineCapabilities { caps } => super::po::tf(
+            "--cap-add {caps}: beyond the capabilities this node's runtime policy allows \
+             (workloadSecurity: baseline)",
+            &[("caps", &caps.join(", "))],
+        ),
+        Violation::BaselineHostNamespace { namespaces } => super::po::tf(
+            "the host's {namespaces} namespace is refused by this node's runtime policy \
+             (workloadSecurity: baseline)",
+            &[("namespaces", &namespaces.join(", "))],
+        ),
+        Violation::BaselineUnconfined { profiles } => super::po::tf(
+            "{profiles}=unconfined is refused by this node's runtime policy \
+             (workloadSecurity: baseline)",
+            &[("profiles", &profiles.join(", "))],
+        ),
+        Violation::BaselineHostPath { paths } => super::po::tf(
+            "bind mount of the host path {paths} is refused by this node's runtime policy \
+             (workloadSecurity: baseline) — use a named volume",
+            &[("paths", &paths.join(", "))],
+        ),
+        Violation::BaselineDevice { devices } => super::po::tf(
+            "host device {devices} is refused by this node's runtime policy \
+             (workloadSecurity: baseline)",
+            &[("devices", &devices.join(", "))],
         ),
     }
 }
@@ -402,6 +427,12 @@ pub struct RuntimePolicySpec {
     /// Only these registries may be pulled from. Empty = no opinion.
     #[serde(default)]
     pub allowed_registries: Vec<String>,
+    /// `baseline`: refuse what `--privileged` is made of — capabilities beyond
+    /// the Pod Security baseline set, the host's PID/IPC namespace,
+    /// `seccomp`/`apparmor=unconfined`, host-path bind mounts and host
+    /// devices. Omitted = no opinion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_security: Option<String>,
     /// Refuse `vm create --device` (VFIO PCI passthrough).
     #[serde(default)]
     pub deny_device_passthrough: bool,
@@ -439,6 +470,7 @@ pub const RUNTIME_POLICY_SPEC_FIELDS: &[&str] = &[
     "denyHostNetwork",
     "denyLatestTag",
     "allowedRegistries",
+    "workloadSecurity",
     "denyDevicePassthrough",
     "denyLatestVmImage",
     "allowedImageUrlHosts",
@@ -462,8 +494,20 @@ pub(crate) fn to_security_policy(spec: &RuntimePolicySpec) -> Result<SecurityPol
             )))
         }
     };
+    let workload_security = match spec.workload_security.as_deref() {
+        None => None,
+        Some("baseline") => Some(srt::policy::WorkloadSecurity::Baseline),
+        Some(other) => {
+            return Err(Error::Invalid(super::po::tf(
+                "RuntimePolicy: workloadSecurity '{value}' is not a profile this engine \
+                 enforces (baseline)",
+                &[("value", other)],
+            )))
+        }
+    };
     Ok(SecurityPolicy {
         mode,
+        workload_security,
         deny_privileged: spec.deny_privileged,
         deny_host_network: spec.deny_host_network,
         deny_latest_tag: spec.deny_latest_tag,
@@ -476,6 +520,14 @@ pub(crate) fn to_security_policy(spec: &RuntimePolicySpec) -> Result<SecurityPol
         deny_private_egress: spec.deny_private_egress,
         allowed_egress_prefixes: spec.allowed_egress_prefixes.clone(),
     })
+}
+
+/// The profile name as the manifest spells it, `-` for none.
+fn workload_security_label(w: Option<srt::policy::WorkloadSecurity>) -> &'static str {
+    match w {
+        Some(srt::policy::WorkloadSecurity::Baseline) => "baseline",
+        None => "-",
+    }
 }
 
 fn mode_label(m: srt::policy::Mode) -> &'static str {
@@ -522,6 +574,10 @@ fn fields_of(p: &SecurityPolicy) -> BTreeMap<String, String> {
     f.insert(
         "allowedRegistries".into(),
         sorted_joined(&p.allowed_registries),
+    );
+    f.insert(
+        "workloadSecurity".into(),
+        workload_security_label(p.workload_security).into(),
     );
     f.insert(
         "denyDevicePassthrough".into(),
@@ -671,6 +727,8 @@ struct LsRow {
     deny_latest_tag: bool,
     #[serde(rename = "allowedRegistries")]
     allowed_registries: Vec<String>,
+    #[serde(rename = "workloadSecurity", skip_serializing_if = "Option::is_none")]
+    workload_security: Option<&'static str>,
     #[serde(rename = "denyDevicePassthrough")]
     deny_device_passthrough: bool,
     #[serde(rename = "denyLatestVmImage")]
@@ -695,6 +753,9 @@ fn ls_row(root: &Path, p: &SecurityPolicy) -> LsRow {
         deny_host_network: p.deny_host_network,
         deny_latest_tag: p.deny_latest_tag,
         allowed_registries: p.allowed_registries.clone(),
+        workload_security: p
+            .workload_security
+            .map(|w| workload_security_label(Some(w))),
         deny_device_passthrough: p.deny_device_passthrough,
         deny_latest_vm_image: p.deny_latest_vm_image,
         allowed_image_url_hosts: p.allowed_image_url_hosts.clone(),
@@ -721,6 +782,7 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
         "HOST-NET",
         "LATEST-TAG",
         "REGISTRIES",
+        "WORKLOAD-SEC",
         "PASSTHROUGH",
         "LATEST-VM",
         "URL-HOSTS",
@@ -736,6 +798,7 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
             deny_flag(p.deny_host_network).to_string(),
             deny_flag(p.deny_latest_tag).to_string(),
             list_or_dash(&p.allowed_registries),
+            workload_security_label(p.workload_security).to_string(),
             deny_flag(p.deny_device_passthrough).to_string(),
             deny_flag(p.deny_latest_vm_image).to_string(),
             list_or_dash(&p.allowed_image_url_hosts),
@@ -790,6 +853,7 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 d.field("Host network", deny_flag(p.deny_host_network));
                 d.field("Latest tag", deny_flag(p.deny_latest_tag));
                 d.list("Registries", &p.allowed_registries);
+                d.field("Workload sec", workload_security_label(p.workload_security));
                 d.field("Passthrough", deny_flag(p.deny_device_passthrough));
                 d.field("Latest VM tag", deny_flag(p.deny_latest_vm_image));
                 d.list("URL hosts", &p.allowed_image_url_hosts);
@@ -839,7 +903,8 @@ pub fn run(cmd: PolicyCmd) -> Result<()> {
 fn summarize(p: &SecurityPolicy) -> String {
     super::po::tf(
         "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} \
-         allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} \
+         allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} \
+         denyLatestVmImage={vmtag} \
          allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] \
          allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} \
          allowedEgressPrefixes=[{egressp}]",
@@ -849,6 +914,7 @@ fn summarize(p: &SecurityPolicy) -> String {
             ("net", &p.deny_host_network.to_string()),
             ("tag", &p.deny_latest_tag.to_string()),
             ("regs", &p.allowed_registries.join(", ")),
+            ("wsec", workload_security_label(p.workload_security)),
             ("pass", &p.deny_device_passthrough.to_string()),
             ("vmtag", &p.deny_latest_vm_image.to_string()),
             ("hosts", &p.allowed_image_url_hosts.join(", ")),
@@ -1104,6 +1170,35 @@ mod tests {
         assert!(format!("{e}").contains("sometimes"), "{e}");
     }
 
+    #[test]
+    fn workload_security_converts_and_an_unknown_profile_is_refused_by_name() {
+        let d = doc("workloadSecurity: baseline");
+        let p = to_security_policy(&manifest::spec_of(&d).unwrap()).unwrap();
+        assert_eq!(
+            p.workload_security,
+            Some(srt::policy::WorkloadSecurity::Baseline)
+        );
+        let d = doc("workloadSecurity: restricted");
+        let spec: RuntimePolicySpec = manifest::spec_of(&d).unwrap();
+        let e = to_security_policy(&spec).unwrap_err();
+        assert!(format!("{e}").contains("restricted"), "{e}");
+    }
+
+    /// `policy.json` is a singleton with no teardown, so EVERY compared field
+    /// must converge in place: a cold one plans a `Replace` nothing can carry
+    /// out. Four were missing until this test (`denyPrivateEgress` among
+    /// them), and turning the egress guard on in an applied manifest was
+    /// refused.
+    #[test]
+    fn every_compared_runtime_policy_field_is_hot() {
+        let hot = delonix_stack::reconcile::hot_fields_for(k::RUNTIME_POLICY);
+        let mut compared = RECONCILED_RUNTIME_POLICY_FIELDS.to_vec();
+        let mut hot = hot.to_vec();
+        compared.sort_unstable();
+        hot.sort_unstable();
+        assert_eq!(compared, hot);
+    }
+
     /// `desired`/`actual` build the field map from the SAME function
     /// (`fields_of`), so a manifest applied once and read back produces zero
     /// diff — the round-trip `stack plan` depends on.
@@ -1133,6 +1228,7 @@ mod tests {
             deny_host_network: true,
             deny_latest_tag: true,
             allowed_registries: vec!["ghcr.io".into()],
+            workload_security: Some("baseline".into()),
             deny_device_passthrough: true,
             deny_latest_vm_image: true,
             allowed_image_url_hosts: vec!["x".into()],
