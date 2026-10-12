@@ -211,8 +211,10 @@ fn entry(mode: &str, kind: &str, size: Option<u64>, path: &str) -> TreeEntry {
 
 #[test]
 fn ls_tree_output_is_parsed_with_its_padded_size() {
+    // `ls-tree -l` right-aligns the size in a padded column.
+    let pad = " ".repeat(5);
     let raw = format!(
-        "100644 blob {}     123\tapp.yaml\0160000 commit {}       -\tsub\0",
+        "100644 blob {}{pad}123\tapp.yaml\0160000 commit {}{pad}  -\tsub\0",
         "a".repeat(40),
         "b".repeat(40)
     );

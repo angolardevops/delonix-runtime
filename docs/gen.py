@@ -218,6 +218,7 @@ SOURCE_FILES = {
     "completion": "complete.rs",
     "explain": "schema.rs",
     "init": "init.rs",
+    "gitops": "gitops.rs",
     "backup": "rbackup.rs",
 }
 SOURCE_BASE_URL = (
@@ -1228,6 +1229,29 @@ quiser que uma discordância seja recusada.""",
             ('Apagar um arquivo (recusa o que não foi este comando a escrever)', 'delonix backup remove container-db-20260811-205312.tar.gz --from /srv/backups'),
         ],
     },
+    "gitops": {
+        "title": "delonix gitops",
+        "tagline": "Fontes pull (ADR-0021): uma passagem, o estado, suspender e retomar.",
+        "intro": """Uma fonte declara-se com <code>kind: GitOpsSource</code> e <code>stack apply</code>:
+um repositório git, uma ref e um caminho. Com <code>sync.automated: true</code> o apply escreve um
+<b>temporizador de utilizador do systemd</b> (<code>delonix-gitops-&lt;namespace&gt;.&lt;nome&gt;</code>)
+que corre UMA passagem e sai — o motor continua daemonless. Uma passagem obtém a ref para um espelho
+privado, resolve-a para um commit, verifica a assinatura SSH quando pedida, lê o YAML do caminho
+directamente da árvore do commit (nada é feito checkout), passa pela guarda das fontes pull, valida
+o grafo, planeia, pesa o plano contra o <code>spec.safety</code> e aplica-o com os seus digests. Um
+commit recusado em qualquer passo antes do apply deixa a stack em execução <b>intacta</b> e fica
+registado com o commit que nomeia (<code>gitops status</code>). A guarda recusa, venha o que vier do
+repositório, os Kinds RuntimePolicy, Secret e App, uma Image com <code>build:</code>, um container
+que pede o host, um Volume além de um local simples, a credencial da própria fonte, outra fonte e
+um namespace que não é o da fonte.""",
+        "subs": {},
+        "examples": [
+            ('Correr já uma passagem, sem esperar pelo temporizador', 'delonix gitops reconcile production -n production'),
+            ('O commit que cada fonte viu, o aplicado, e porquê', 'delonix gitops status'),
+            ('Parar as passagens durante um incidente, sem um commit', 'delonix gitops suspend production -n production'),
+            ('Deixar o próximo disparo obter outra vez', 'delonix gitops resume production -n production'),
+        ],
+    },
     "system": {
         "title": "delonix system",
         "tagline": "O motor em si: events, info, df, prune, monitor, thermal.",
@@ -2109,6 +2133,21 @@ answer costs one file read. It exists because <code>compose up</code> is deliber
 (it stops at the first key it does not understand rather than ignoring it), which is right for
 RUNNING and wrong for DECIDING: a migration needs the whole list at once.""",
     },
+    "gitops": {
+        "tagline": "Pull sources (ADR-0021): one pass, status, suspend and resume.",
+        "intro": """A source is declared with <code>kind: GitOpsSource</code> and <code>stack apply</code>:
+a git repository, a ref and a path. With <code>sync.automated: true</code> the apply writes a
+<b>systemd user timer</b> (<code>delonix-gitops-&lt;namespace&gt;.&lt;name&gt;</code>) that runs ONE
+pass and exits — the engine stays daemonless. A pass fetches the ref into a private mirror, resolves
+it to a commit, verifies its SSH signature when asked, reads the YAML under the path straight from
+the commit's tree (nothing is checked out), runs the pull-source guard, validates the graph, plans,
+weighs the plan against <code>spec.safety</code> and applies it with its digests. A commit refused
+at any step before the apply leaves the running stack <b>untouched</b> and is recorded with the
+commit it names (<code>gitops status</code>). Whatever the repository says, the guard refuses the
+Kinds RuntimePolicy, Secret and App, an Image with <code>build:</code>, a container asking for the
+host, a Volume beyond a plain local one, the source's own credential, another source, and a
+namespace other than the source's.""",
+    },
     "api-resources": {
         "tagline": "Every Kind this engine serves: plural, shortnames, apiVersion and form.",
         "intro": """Read from the SAME registry the parser, the schema and the reconciler read —
@@ -2763,6 +2802,12 @@ internet reached a local server through the tunnel (HTTP 200) using exactly this
 # `GROUPS[grupo]["examples"]` ou `GROUPS[grupo]["subs"][sub]["examples"]` —
 # uma legenda vazia ("") fica vazia nas duas línguas (sem legenda nenhuma).
 EXAMPLES_EN = {
+    ("gitops", None): [
+        "Run one pass now, without waiting for the timer",
+        "The commit each source saw, the one applied, and why",
+        "Stop the passes during an incident, without a commit",
+        "Let the next fire fetch again",
+    ],
     ("httproute", None): [
         "Proxy state + active routes — `httproute ls` moved to the generic verb",
     ],
