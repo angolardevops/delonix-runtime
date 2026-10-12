@@ -1009,6 +1009,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-btrfs"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "delonix-provider-cloud-hypervisor"
 version = "5.0.2"
 dependencies = [
