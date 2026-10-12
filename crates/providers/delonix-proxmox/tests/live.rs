@@ -30,14 +30,34 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 //!
-//! Order matters in one run. The firewall tests (`the_vms_own_firewall_*`,
+//! # Run order: two invocations, never one (N29)
+//!
+//! The firewall cases (`the_vms_own_firewall_*`,
 //! `a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back`,
 //! `a_system_containers_firewall_is_applied_and_reads_back`) need the
 //! datacenter firewall ON and leave it on. A SDN zone created AFTER that is not
 //! exempted by the node's default forward policy, so a DHCP-backed guest in it
 //! gets no address — measured on the first attempt (report of 2026-10-09,
-//! §5.4/§6.2). Run the SDN/DHCP cases before the firewall ones, or in a
-//! separate run, and read a DHCP timeout after a firewall test as this first.
+//! §5.4/§6.2). And one invocation cannot order them: libtest runs the cases by
+//! NAME, so `a_scope_vm_policy_…` and `a_system_containers_firewall_…` come
+//! before `the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp`
+//! whatever the file's order. The order is therefore two runs, split by the
+//! word every firewall case carries in its name:
+//!
+//! ```text
+//! # 1. everything that does not touch a guest firewall — the SDN zones and
+//! #    their DHCP guests among them — with the datacenter firewall as found:
+//! cargo test -p delonix-proxmox --test live -- --ignored --skip firewall --test-threads=1
+//! # 2. the firewall cases (turn the datacenter firewall on first, with the
+//! #    `management` IPSet the lab needs — see the trace header):
+//! cargo test -p delonix-proxmox --test live -- --ignored firewall --test-threads=1
+//! ```
+//!
+//! The split holds only while every case that touches a guest's or the
+//! datacenter's firewall has `firewall` in its name;
+//! `every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name`
+//! (not ignored, it reads this file) fails the build when one does not. A DHCP
+//! timeout in a run that already had the firewall on is read as this first.
 
 use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};
@@ -6955,5 +6975,50 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
         left_a && left_ptr,
         "the node now removes a deleted subnet's gateway records (A left: {left_a}, PTR left: \
          {left_ptr}) — drop the teardown's warning (ADR-0064)"
+    );
+}
+
+/// N29: the two-run order of the header splits on the word `firewall` in a
+/// case's NAME, so every case that calls a guest's or the datacenter's
+/// firewall must carry it — otherwise run 1 turns the firewall on and the
+/// DHCP cases after it time out for a reason that is not theirs. Reads this
+/// file; not ignored, so a new firewall case without the word fails here.
+#[test]
+fn every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name() {
+    // The calls that need (or turn on) a guest's or the datacenter's own
+    // firewall. A vnet's firewall (`…sdn_vnet_firewall…`) does not.
+    const NEEDS_IT: &[&str] = &[
+        ".apply_firewall(",
+        ".read_firewall(",
+        ".cluster_firewall_options(",
+        ".set_firewall_enabled(",
+        ".add_firewall_",
+        ".firewall_options(",
+        ".lxc_firewall_",
+    ];
+    let src = include_str!("live.rs");
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for case in src.split("\n#[test]\nfn ").skip(1) {
+        let name = case.split('(').next().unwrap_or_default();
+        if name == "every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name" {
+            continue;
+        }
+        let body = case.split("\n#[ignore").next().unwrap_or_default();
+        if NEEDS_IT.iter().any(|call| body.contains(call)) {
+            checked += 1;
+            if !name.contains("firewall") {
+                wrong.push(name.to_string());
+            }
+        }
+    }
+    assert!(
+        checked == 4,
+        "the scan found {checked} firewall case(s), the header names four — update both together"
+    );
+    assert!(
+        wrong.is_empty(),
+        "these cases call a guest's or the datacenter's firewall without `firewall` in their \
+         name, so `--skip firewall` runs them before the DHCP cases: {wrong:?}"
     );
 }
