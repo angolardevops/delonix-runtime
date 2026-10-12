@@ -1444,6 +1444,8 @@ EOF2
       "'$BIN' container ls --credentials --reveal | grep '$CRC' | grep -q 'v-$PFX' && ! grep -rqs 'v-$PFX' '$DELONIX_ROOT/containers'"
   fi
   "$BIN" stack destroy -f "$CRW/m.yaml" >/dev/null 2>&1 || true
+  # `stack destroy` never removes a Secret (its teardown is off by design).
+  "$BIN" secret rm "$CRC" >/dev/null 2>&1 || true
   rm -rf "$CRW"
 fi
 
