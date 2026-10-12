@@ -123,6 +123,12 @@ pub enum StackCmd {
         /// no change for it (a field the plan does not compare, like `env`).
         #[arg(long = "replace", value_name = "KIND/NAME")]
         replace: Vec<String>,
+        /// Authorize STOPPING and starting a resource whose change converges
+        /// only across a reboot, keeping its disk (ADR-0012): `--reboot
+        /// <Kind>/<name>` (repeatable), or `--reboot all`. Without it, `apply`
+        /// refuses and changes nothing. A stopped VM needs no authorisation.
+        #[arg(long = "reboot", value_name = "KIND/NAME")]
+        reboot: Vec<String>,
         /// Also REMOVE what this stack owns and the manifest no longer declares.
         /// Never happens without this flag.
         #[arg(long = "prune")]
@@ -274,6 +280,9 @@ pub enum StackCmd {
         /// Authorize destroying and recreating a resource whose change does not converge live — same meaning as in `apply`.
         #[arg(long, value_name = "KIND/NAME")]
         replace: Vec<String>,
+        /// Authorize stopping and starting a resource whose change converges only across a reboot — same meaning as in `apply`.
+        #[arg(long, value_name = "KIND/NAME")]
+        reboot: Vec<String>,
         /// Also REMOVE what this stack owns and the replayed revision does not declare — this is what makes a rollback actually undo a creation.
         #[arg(long)]
         prune: bool,
@@ -334,6 +343,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             file,
             dry_run,
             replace,
+            reboot,
             prune,
             plan_digest,
         } => {
@@ -343,7 +353,7 @@ pub fn run(action: StackCmd) -> Result<()> {
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file, name, replace, prune, plan_digest)
+                apply(file, name, replace, reboot, prune, plan_digest)
             }
         }
         StackCmd::Plan {
@@ -379,8 +389,9 @@ pub fn run(action: StackCmd) -> Result<()> {
             file,
             dry_run,
             replace,
+            reboot,
             prune,
-        } => rollback(to, name, file, dry_run, replace, prune),
+        } => rollback(to, name, file, dry_run, replace, reboot, prune),
     }
 }
 
@@ -480,10 +491,45 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     Ok(out)
 }
 
+/// What the plan knows about each resource that is not a field (see
+/// [`reconcile::Facts`]): today only the VMs have any — their power state,
+/// the fields their backend redefines across a reboot, and their hotplug
+/// ceilings. A manifest without a VM opens no VM store.
+fn facts_of(
+    docs: &[manifest::ManifestDoc],
+) -> Result<std::collections::BTreeMap<(String, String), reconcile::Facts>> {
+    if !docs.iter().any(|d| d.kind == k::VM) {
+        return Ok(Default::default());
+    }
+    super::vm::facts()
+}
+
+/// Applies, BEFORE the creation layers, every VM change whose fields converge
+/// across a reboot (ADR-0012): a `Reboot` (running VM) or an `Update` on a
+/// stopped one. Called after `refuse_unallowed`, so a reboot nobody
+/// authorised never reaches here.
+fn reboot_for_converge(changes: &[Change]) -> Result<()> {
+    for c in changes {
+        if c.kind != k::VM || !matches!(c.action, Action::Reboot | Action::Update) {
+            continue;
+        }
+        if !c.diffs.iter().any(|d| d.reboot) {
+            continue;
+        }
+        super::vm::converge_across_reboot(&c.name, &c.diffs, c.action == Action::Reboot)?;
+    }
+    Ok(())
+}
+
 /// Reads both sides and decides. The decision itself is
 /// [`reconcile::plan`] — pure, and tested as data.
 pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<Vec<Change>> {
-    let mut changes = reconcile::plan(&desired_of(docs)?, &actual_of(docs)?, stack);
+    let mut changes = reconcile::plan_with_facts(
+        &desired_of(docs)?,
+        &actual_of(docs)?,
+        stack,
+        &facts_of(docs)?,
+    );
     // Attach the prerequisites the host does not meet — the difference between
     // «will exist» and «will work». They were already computed before this, but
     // only the END of an `apply` printed them: a user learned that their NFS
@@ -636,6 +682,17 @@ fn print_compared_fields() {
         ]);
     }
     t.print();
+    println!();
+    println!(
+        "{}",
+        super::po::t(
+            "On a VirtualMachine (ADR-0012): `labels` and `credentials` converge in place; \
+             `vcpus` and `memory` grow live up to `vcpusMax`/`memoryMax` on a backend that \
+             hotplugs; any other change to those four (and `network` on Cloud Hypervisor) is a \
+             reboot — stop and start, the disk kept, authorised by `--reboot`; `disk`, \
+             `backend` (and `network` elsewhere) recreate the VM, authorised by `--replace`."
+        )
+    );
     println!();
     print_not_converged();
     println!();
@@ -862,6 +919,10 @@ fn explain(c: &Change) -> Option<String> {
             "does not converge live: {fields}",
             &[("fields", &c.cold_fields.join(", "))],
         )),
+        Action::Reboot => Some(super::po::tf(
+            "converges by a stop and a start, the disk kept: {fields}",
+            &[("fields", &c.reboot_fields.join(", "))],
+        )),
         // No owner: the conflict is a VM only the provider holds, and the
         // reason says so (English, as the JSON payload has it).
         Action::Conflict if c.owner.is_none() && c.reason.is_some() => c.reason.clone(),
@@ -926,7 +987,15 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
             // same sends the reader looking for a change that is not there.
             let from = d.from.as_deref().unwrap_or("∅");
             let to = d.to.as_deref().unwrap_or("∅");
-            println!("        {}: {from} → {to}", d.field);
+            if d.reboot {
+                println!(
+                    "        {}: {from} → {to}  ({})",
+                    d.field,
+                    super::po::t("reboot")
+                );
+            } else {
+                println!("        {}: {from} → {to}", d.field);
+            }
         }
     }
     println!();
@@ -942,6 +1011,7 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
                 "adopt" => super::po::t("to adopt"),
                 "update" => super::po::t("to update"),
                 "replace" => super::po::t("to replace"),
+                "reboot" => super::po::t("to reboot"),
                 "unchanged" => super::po::t("unchanged"),
                 "delete" => super::po::t("to remove"),
                 "conflict" => super::po::t("in conflict"),
@@ -958,6 +1028,16 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
             super::po::t(
                 "a replace destroys and recreates the resource — `stack apply` refuses it \
                  unless you pass `--replace`"
+            )
+        );
+    }
+    if changes.iter().any(|c| c.action == Action::Reboot) {
+        println!();
+        println!(
+            "{}",
+            super::po::t(
+                "a reboot stops and starts the resource and keeps its disk — `stack apply` \
+                 refuses it unless you pass `--reboot`"
             )
         );
     }
@@ -1526,7 +1606,9 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
             continue;
         }
         match c.action {
-            Action::NoOp | Action::Update | Action::Adopt => {}
+            // A Reboot named by `--replace` is the operator asking for MORE
+            // than the plan proposes (the disk too): the explicit recreate wins.
+            Action::NoOp | Action::Update | Action::Adopt | Action::Reboot => {}
             Action::NotConverged => {
                 return Err(delonix_model::Error::Invalid(super::po::tf(
                     "--replace {kind}/{name}: this Kind is ensure-present in this version and \
@@ -1546,6 +1628,7 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
             )));
         }
         c.action = Action::Replace;
+        c.reboot_fields.clear();
         // English, like every `reason`: it is part of the `-o json` payload.
         c.reason = Some("recreate requested by --replace".to_string());
         // The recreate applies the whole spec: «not applied to the existing
@@ -1556,8 +1639,24 @@ fn promote_named_replaces(mut changes: Vec<Change>, replace: &[String]) -> Resul
     Ok(changes)
 }
 
-fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
+fn refuse_unallowed(changes: &[Change], replace: &[String], reboot: &[String]) -> Result<()> {
+    let blocked = blocked_changes(changes, replace, reboot);
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    for b in &blocked {
+        eprintln!("  ✗ {b}");
+    }
+    Err(delonix_model::Error::Invalid(super::po::tf(
+        "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
+        &[("n", &blocked.len().to_string())],
+    )))
+}
+
+/// One line per change the flags do not authorise. Pure.
+fn blocked_changes(changes: &[Change], replace: &[String], reboot: &[String]) -> Vec<String> {
     let allow_all = replace.iter().any(|r| r == "all");
+    let reboot_all = reboot.iter().any(|r| r == "all");
     let mut blocked = Vec::new();
     for c in changes {
         match c.action {
@@ -1577,19 +1676,22 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
                     ));
                 }
             }
+            // Downtime is authorised as explicitly as data loss (ADR-0012
+            // question 1): `--reboot`, by name or `all`.
+            Action::Reboot if !reboot_all => {
+                let key = format!("{}/{}", c.kind, c.name);
+                if !reboot.iter().any(|r| replace_matches(r, c)) {
+                    blocked.push(super::po::tf(
+                        "{key}: {reason} — pass `--reboot {key}` (or `--reboot all`) to stop and \
+                         start it (its disk is kept)",
+                        &[("key", &key), ("reason", &explain(c).unwrap_or_default())],
+                    ));
+                }
+            }
             _ => {}
         }
     }
-    if blocked.is_empty() {
-        return Ok(());
-    }
-    for b in &blocked {
-        eprintln!("  ✗ {b}");
-    }
-    Err(delonix_model::Error::Invalid(super::po::tf(
-        "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
-        &[("n", &blocked.len().to_string())],
-    )))
+    blocked
 }
 
 /// How many documents of each Kind the manifest carries — a layer with none is
@@ -1606,6 +1708,7 @@ fn apply(
     file: Option<PathBuf>,
     name: Option<String>,
     replace: Vec<String>,
+    reboot: Vec<String>,
     do_prune: bool,
     plan_digests: Vec<String>,
 ) -> Result<()> {
@@ -1629,10 +1732,37 @@ fn apply(
             )));
         }
     }
+    // Same rule for the flag that authorises DOWNTIME: a value it cannot
+    // possibly match is refused, never read as an authorisation.
+    for r in &reboot {
+        if !reboot_token_shape_ok(r) {
+            return Err(delonix_model::Error::Invalid(super::po::tf(
+                "--reboot '{value}': expected `<Kind>/<name>` (e.g. `VirtualMachine/db`), \
+                 a bare resource name, or `all`",
+                &[("value", r)],
+            )));
+        }
+    }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     refuse_stale_plan(&docs, &stack_name(&path, name.as_deref()), &plan_digests)?;
-    apply_docs(&docs, &path, name.as_deref(), replace, do_prune, None)
+    apply_docs(
+        &docs,
+        &path,
+        name.as_deref(),
+        replace,
+        reboot,
+        do_prune,
+        None,
+    )
+}
+
+/// The shapes an authorisation token can take: `all`, `<Kind>/<name>`, or a
+/// bare name. Pure.
+fn reboot_token_shape_ok(r: &str) -> bool {
+    r == "all"
+        || (r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty()))
+        || (!r.contains('/') && !r.is_empty())
 }
 
 /// The plan with a digest on every change: the provider-derived one for the
@@ -1766,6 +1896,7 @@ fn apply_docs(
     path: &Path,
     stack_override: Option<&str>,
     replace: Vec<String>,
+    reboot: Vec<String>,
     do_prune: bool,
     rollback_of: Option<u32>,
 ) -> Result<()> {
@@ -1809,13 +1940,31 @@ fn apply_docs(
             }
         }
     }
+    // Same for `--reboot`: a value naming nothing here is a typo, loudly.
+    if !reboot.iter().any(|r| r == "all") {
+        for r in &reboot {
+            if !changes.iter().any(|c| replace_matches(r, c)) {
+                return Err(delonix_model::Error::Invalid(super::po::tf(
+                    "--reboot '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
     let changes = promote_named_replaces(changes, &replace)?;
-    refuse_unallowed(&changes, &replace)?;
+    refuse_unallowed(&changes, &replace, &reboot)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
     // exactly one creation path (the one that has always existed), instead of a
     // second "recreate" path that would drift away from it.
     destroy_for_replace(&changes)?;
+    // A change that converges across a reboot (ADR-0012) is applied BEFORE the
+    // creation layers: the VM is stopped, its new shape is written where the
+    // next boot reads it (the record, and a remote node's own config), and the
+    // VM layer below starts it again with the manifest's shape — the same
+    // creation path every VM already takes, never a second one.
+    reboot_for_converge(&changes)?;
 
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference them.
     // `base` = the manifest folder, so `fromEnvFile` resolves next to it.
@@ -2412,6 +2561,12 @@ fn converge_and_stamp(
         if !super::kinds::converges(&c.kind) {
             continue;
         }
+        // A VM brought back across a reboot by `reboot_for_converge` still has
+        // its other changed fields (labels, credentials) to write — the hot
+        // path, which skips the reboot-class fields already applied.
+        if c.action == Action::Reboot && c.kind == k::VM {
+            super::vm::converge(&c.name, &c.diffs)?;
+        }
         if c.action == Action::Update {
             println!(
                 "{}",
@@ -2733,6 +2888,7 @@ fn rollback(
     file: Option<PathBuf>,
     dry_run: bool,
     replace: Vec<String>,
+    reboot: Vec<String>,
     do_prune: bool,
 ) -> Result<()> {
     // The manifest is resolved for its DIRECTORY and its name, not its contents:
@@ -2813,7 +2969,15 @@ fn rollback(
     if dry_run {
         return Ok(());
     }
-    apply_docs(&docs, &path, Some(&stack), replace, do_prune, Some(to))
+    apply_docs(
+        &docs,
+        &path,
+        Some(&stack),
+        replace,
+        reboot,
+        do_prune,
+        Some(to),
+    )
 }
 
 /// `stack history` — what this stack applied, and when.
@@ -3782,6 +3946,57 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         c
     }
 
+    /// ADR-0012: downtime is authorised as explicitly as data loss. A Reboot
+    /// is refused without `--reboot`, named or `all`, and `--replace` does
+    /// NOT authorise it (that flag is about the disk).
+    #[test]
+    fn a_reboot_is_refused_without_its_own_flag() {
+        let mut c = with_action(a_change("VirtualMachine", "db"), Action::Reboot);
+        c.reboot_fields = vec!["vcpus".into()];
+        let plan = vec![c];
+        assert!(refuse_unallowed(&plan, &[], &[]).is_err());
+        let lines = blocked_changes(&plan, &[], &[]).join("\n");
+        assert!(lines.contains("--reboot VirtualMachine/db"), "{lines}");
+        assert!(lines.contains("vcpus"), "names what reboots: {lines}");
+        assert!(refuse_unallowed(&plan, &["all".into()], &[]).is_err());
+        refuse_unallowed(&plan, &[], &["VirtualMachine/db".into()]).unwrap();
+        refuse_unallowed(&plan, &[], &["all".into()]).unwrap();
+        refuse_unallowed(&plan, &[], &["db".into()]).unwrap();
+        assert!(refuse_unallowed(&plan, &[], &["VirtualMachine/other".into()]).is_err());
+    }
+
+    /// `--replace` naming a resource the plan reboots asks for MORE (the disk
+    /// too): the explicit recreate wins, and nothing claims it still reboots.
+    #[test]
+    fn a_named_replace_promotes_a_reboot_to_a_recreate() {
+        let mut c = with_action(a_change("VirtualMachine", "db"), Action::Reboot);
+        c.reboot_fields = vec!["vcpus".into()];
+        let out = promote_named_replaces(vec![c], &["VirtualMachine/db".into()]).unwrap();
+        assert_eq!(out[0].action, Action::Replace);
+        assert!(out[0].reboot_fields.is_empty());
+    }
+
+    #[test]
+    fn a_reboot_token_has_the_replace_shapes() {
+        for ok in ["all", "VirtualMachine/db", "db"] {
+            assert!(reboot_token_shape_ok(ok), "{ok}");
+        }
+        for bad in ["", "a/b/c", "/db", "vm/"] {
+            assert!(!reboot_token_shape_ok(bad), "{bad}");
+        }
+    }
+
+    /// The plan says what a reboot is, in words, never a bare symbol.
+    #[test]
+    fn explain_names_the_reboot_fields() {
+        let mut c = with_action(a_change("VirtualMachine", "db"), Action::Reboot);
+        c.reboot_fields = vec!["vcpus".into(), "memory".into()];
+        assert_eq!(
+            explain(&c).as_deref(),
+            Some("converges by a stop and a start, the disk kept: vcpus, memory")
+        );
+    }
+
     /// 2026-10-02: `env` changed on a running container, the plan said `=` and
     /// told the operator to `--replace Container/<name>`, and that apply
     /// recreated nothing — the flag only authorised a `Replace` the plan had
@@ -3805,7 +4020,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         );
         // And the gate that follows lets it through: the same flag that asked
         // for the recreate is what authorises it.
-        refuse_unallowed(&out, &replace).unwrap();
+        refuse_unallowed(&out, &replace, &[]).unwrap();
         assert_eq!(
             explain(&out[0]).as_deref(),
             Some("recreate requested with `--replace`")
@@ -3874,7 +4089,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
             &r,
         )
         .unwrap();
-        assert!(refuse_unallowed(&out, &r).is_err());
+        assert!(refuse_unallowed(&out, &r, &[]).is_err());
     }
 
     /// A flag that reads as obeyed and changes nothing is the defect itself —

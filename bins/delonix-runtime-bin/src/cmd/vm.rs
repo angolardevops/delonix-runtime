@@ -90,6 +90,15 @@ pub(crate) struct VmSpec {
     /// image says anything is `1G`.
     #[serde(default)]
     memory: Option<String>,
+    /// The vCPU hotplug CEILING, fixed at boot (ADR-0068 D3): the most this
+    /// VM can be grown to LIVE. Never below `vcpus`. Omitted = no headroom, so
+    /// any growth converges across a reboot (`stack apply --reboot`).
+    #[serde(default, rename = "vcpusMax", alias = "vcpus_max")]
+    vcpus_max: Option<u32>,
+    /// The memory hotplug ceiling, same rule as [`vcpus_max`](Self::vcpus_max)
+    /// (`4G`, `4096M`, `4Gi`). Never below `memory`.
+    #[serde(default, rename = "memoryMax", alias = "memory_max")]
+    memory_max: Option<String>,
     #[serde(default = "default_network")]
     network: String,
     kernel: Option<String>,
@@ -263,6 +272,10 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "build",
     "vcpus",
     "memory",
+    "vcpusMax",
+    "vcpus_max",
+    "memoryMax",
+    "memory_max",
     "network",
     "kernel",
     "initrd",
@@ -355,6 +368,8 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("vcpus", "vcpus"),
             ("memory", "memory"),
+            ("vcpusMax", "vcpusMax"),
+            ("memoryMax", "memoryMax"),
             ("hugepages", "hugepages"),
             ("cpuAffinity", "cpuAffinity"),
         ],
@@ -1306,6 +1321,15 @@ pub enum VmCmd {
         /// New boot disk size, in whole GiB — grows only, never shrinks.
         #[arg(long = "disk-size")]
         disk_size_gib: Option<u32>,
+        /// New vCPU hotplug ceiling (never below the vCPUs it boots with).
+        #[arg(long = "vcpus-max", conflicts_with = "no_hotplug")]
+        vcpus_max: Option<u32>,
+        /// New memory hotplug ceiling (`8G`, `8192M`; never below the boot memory).
+        #[arg(long = "memory-max", conflicts_with = "no_hotplug")]
+        memory_max: Option<String>,
+        /// Clear both hotplug ceilings: the VM boots with no headroom.
+        #[arg(long = "no-hotplug")]
+        no_hotplug: bool,
     },
     /// Add vCPUs and/or memory to a RUNNING VM, live; on a STOPPED VM it is `vm resize`.
     ///
@@ -1548,15 +1572,20 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 /// Fields the reconciler compares for a `kind: VirtualMachine`.
 ///
-/// **None of them converge hot, and that is not a gap.** This engine does not
-/// hotplug: changing a VM's vCPUs, memory or disk means booting a different
-/// machine, so every one of these is a `Replace` that `apply` refuses without
-/// `--replace`. Refusing is the point — recreating a VM throws away its overlay
-/// disk, which is everything the guest wrote since it was created.
+/// **Three costs, and the plan names which (ADR-0012).** `labels` and
+/// `credentials` converge in place. vCPUs and memory grow LIVE up to the
+/// declared ceiling (`vcpusMax`/`memoryMax`, ADR-0068) on a backend that
+/// hotplugs; any other change to them, and to the ceilings themselves,
+/// converges by a stop and a start with the disk kept (`Reboot`, gated by
+/// `--reboot`). Only `disk` and `backend` — the machine's identity — are a
+/// `Replace`, refused without `--replace`, because recreating a VM throws away
+/// its overlay disk. Which fields reboot is decided per backend, by [`facts`].
 pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &[
     "disk",
     "vcpus",
     "memory",
+    "vcpusMax",
+    "memoryMax",
     "network",
     "backend",
     "labels",
@@ -1679,6 +1708,15 @@ fn desired_vm_fields(
     f.insert("disk".into(), disk);
     f.insert("vcpus".into(), vcpus.to_string());
     f.insert("memory".into(), memory);
+    // Only when declared: the machine side always reports a ceiling (its boot
+    // size when none was set), and an undeclared one must never read as a
+    // difference nobody asked for.
+    if let Some(n) = spec.vcpus_max {
+        f.insert("vcpusMax".into(), n.to_string());
+    }
+    if let Some(m) = &spec.memory_max {
+        f.insert("memoryMax".into(), m.clone());
+    }
     f.insert("network".into(), spec.network.clone());
     if let Some(b) = backend {
         f.insert("backend".into(), b);
@@ -1747,6 +1785,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("disk".into(), vm.disk.clone());
             f.insert("vcpus".into(), vm.vcpus.to_string());
             f.insert("memory".into(), vm.memory.clone());
+            let (vmax, mmax) = effective_ceilings(&vm);
+            f.insert("vcpusMax".into(), vmax);
+            f.insert("memoryMax".into(), mmax);
             f.insert("network".into(), vm.network.clone());
             f.insert("backend".into(), vm.backend.clone());
             if let Some(labels) = super::reconcile::user_labels_field(&vm.labels) {
@@ -1767,6 +1808,259 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             }
         })
         .collect())
+}
+
+/// The hotplug ceilings a VM HAS, as the plan compares them: the declared one,
+/// or its boot size when none was declared (no headroom). Pure.
+fn effective_ceilings(vm: &delonix_compute::Vm) -> (String, String) {
+    let vcpus = vm.vcpus_max.unwrap_or(vm.vcpus).to_string();
+    let memory = match vm.memory_max_mib {
+        Some(m) => format!("{m}M"),
+        None => vm.memory.clone(),
+    };
+    (vcpus, memory)
+}
+
+/// The fields a VM of `backend` redefines from its record across a stop and a
+/// start, so a change to them costs a reboot and never the disk (ADR-0012).
+/// Cloud Hypervisor rebuilds the whole VM from the record, its NIC included;
+/// libvirt and a Proxmox node keep the NIC in their own definition, so there
+/// `network` stays a recreate. Pure.
+pub(crate) fn reboot_fields_of(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "cloud-hypervisor" => &["vcpus", "memory", "vcpusMax", "memoryMax", "network"],
+        _ => &["vcpus", "memory", "vcpusMax", "memoryMax"],
+    }
+}
+
+/// Whether a VM of `backend` grows vCPUs and memory LIVE (ADR-0068). A backend
+/// that does not is never planned a live growth — the change reboots instead.
+pub(crate) fn hotplugs(backend: &str) -> bool {
+    matches!(backend, "cloud-hypervisor")
+}
+
+fn parse_count(s: &str) -> Option<u64> {
+    s.trim().parse().ok()
+}
+
+/// What the plan knows about one VM besides its fields. Pure, so the cost
+/// model is a table a test can read.
+pub(crate) fn facts_of_vm(vm: &delonix_compute::Vm) -> super::reconcile::Facts {
+    use delonix_model::records::Status;
+    let running = match vm.status {
+        Status::Running => Some(true),
+        Status::Stopped | Status::Created | Status::Failed(_) | Status::Crashed => Some(false),
+        // A paused guest still holds its definition: planned as running.
+        Status::Paused => None,
+    };
+    let mut f = super::reconcile::Facts {
+        running,
+        ..Default::default()
+    };
+    f.reboot = reboot_fields_of(&vm.backend)
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    f.numeric.insert("vcpus".into(), parse_count);
+    f.numeric.insert("vcpusMax".into(), parse_count);
+    f.numeric.insert("memory".into(), delonix_vm::parse_mem_mib);
+    f.numeric
+        .insert("memoryMax".into(), delonix_vm::parse_mem_mib);
+    if hotplugs(&vm.backend) {
+        f.live_growth.insert(
+            "vcpus".into(),
+            super::reconcile::LiveGrowth {
+                ceiling: u64::from(vm.vcpus_max.unwrap_or(vm.vcpus)),
+                parse: parse_count,
+            },
+        );
+        f.live_growth.insert(
+            "memory".into(),
+            super::reconcile::LiveGrowth {
+                ceiling: vm
+                    .memory_max_mib
+                    .unwrap_or_else(|| delonix_vm::mem_mib(&vm.memory)),
+                parse: delonix_vm::parse_mem_mib,
+            },
+        );
+    }
+    f
+}
+
+/// The plan's facts for every VM in the store. An unreadable store is an
+/// error, as in [`actual`].
+pub(crate) fn facts(
+) -> Result<std::collections::BTreeMap<(String, String), super::reconcile::Facts>> {
+    Ok(delonix_vm::list(&state_root())?
+        .iter()
+        .map(|vm| ((k::VM.to_string(), vm.name.clone()), facts_of_vm(vm)))
+        .collect())
+}
+
+/// The ceilings a manifest declares, validated like `vm create --vcpus-max/
+/// --memory-max`: never below the boot size. Pure.
+fn manifest_ceilings(
+    name: &str,
+    vcpus: u32,
+    memory: &str,
+    vcpus_max: Option<u32>,
+    memory_max: Option<&str>,
+) -> Result<(Option<u32>, Option<u64>)> {
+    if let Some(max) = vcpus_max {
+        if max < vcpus {
+            return Err(Error::Invalid(super::po::tf(
+                "vm/{name}: vcpusMax ({max}) cannot be smaller than vcpus ({vcpus})",
+                &[
+                    ("name", name),
+                    ("max", &max.to_string()),
+                    ("vcpus", &vcpus.to_string()),
+                ],
+            )));
+        }
+    }
+    let memory_max_mib = match memory_max {
+        Some(s) => {
+            let max = delonix_vm::parse_mem_mib(s).ok_or_else(|| {
+                Error::Invalid(super::po::tf(
+                    "vm/{name}: memoryMax '{value}' is not a size this engine understands \
+                     (e.g. 2G, 1024M, 2Gi)",
+                    &[("name", name), ("value", s)],
+                ))
+            })?;
+            let boot = delonix_vm::mem_mib(memory);
+            if max < boot {
+                return Err(Error::Invalid(super::po::tf(
+                    "vm/{name}: memoryMax ({max} MiB) cannot be smaller than memory ({boot} MiB)",
+                    &[
+                        ("name", name),
+                        ("max", &max.to_string()),
+                        ("boot", &boot.to_string()),
+                    ],
+                )));
+            }
+            Some(max)
+        }
+        None => None,
+    };
+    Ok((vcpus_max, memory_max_mib))
+}
+
+/// `vm resize`'s flags as the engine's request. Pure.
+fn resize_request_from_flags(
+    vcpus: Option<u32>,
+    memory: Option<String>,
+    disk_size_gib: Option<u32>,
+    vcpus_max: Option<u32>,
+    memory_max: Option<&str>,
+    no_hotplug: bool,
+) -> Result<delonix_vm::ResizeRequest> {
+    let memory_max_mib = match memory_max {
+        Some(s) => Some(delonix_vm::parse_mem_mib(s).ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "--memory-max: '{value}' is not a size this engine understands (e.g. \
+                 2G, 1024M, 2Gi)",
+                &[("value", s)],
+            ))
+        })?),
+        None => None,
+    };
+    Ok(delonix_vm::ResizeRequest {
+        vcpus,
+        memory,
+        disk_size_gib,
+        vcpus_max: if no_hotplug {
+            Some(None)
+        } else {
+            vcpus_max.map(Some)
+        },
+        memory_max_mib: if no_hotplug {
+            Some(None)
+        } else {
+            memory_max_mib.map(Some)
+        },
+    })
+}
+
+/// The cold reshape a reboot-class diff asks for, as the engine takes it.
+/// `None` when no diff touches the shape (a CH `network` change only needs
+/// the stop: the next start rebuilds the NIC from the manifest). Pure.
+pub(crate) fn resize_request_of(
+    diffs: &[super::reconcile::FieldDiff],
+) -> Result<Option<delonix_vm::ResizeRequest>> {
+    let mut req = delonix_vm::ResizeRequest::default();
+    let mut any = false;
+    for d in diffs.iter().filter(|d| d.reboot) {
+        let to = d.to.as_deref();
+        match d.field.as_str() {
+            "vcpus" => {
+                if let Some(v) = to {
+                    req.vcpus =
+                        Some(v.trim().parse().map_err(|_| {
+                            Error::Invalid(format!("vm: vcpus '{v}' is not a number"))
+                        })?);
+                    any = true;
+                }
+            }
+            "memory" => {
+                if let Some(v) = to {
+                    req.memory = Some(v.to_string());
+                    any = true;
+                }
+            }
+            "vcpusMax" => {
+                req.vcpus_max = Some(match to {
+                    Some(v) => Some(v.trim().parse().map_err(|_| {
+                        Error::Invalid(format!("vm: vcpusMax '{v}' is not a number"))
+                    })?),
+                    None => None,
+                });
+                any = true;
+            }
+            "memoryMax" => {
+                req.memory_max_mib = Some(match to {
+                    Some(v) => Some(delonix_vm::parse_mem_mib(v).ok_or_else(|| {
+                        Error::Invalid(format!("vm: memoryMax '{v}' is not a size"))
+                    })?),
+                    None => None,
+                });
+                any = true;
+            }
+            _ => {}
+        }
+    }
+    Ok(any.then_some(req))
+}
+
+/// Applies a VM's reboot-class changes (ADR-0012), before the creation layer
+/// starts it again: stops it if `running`, writes the new shape where the next
+/// boot reads it ([`delonix_vm::resize_shape`] — the record, and a remote
+/// node's own config), and leaves the start to the VM layer, the one path that
+/// starts every VM. The overlay disk is never touched.
+pub(crate) fn converge_across_reboot(
+    name: &str,
+    diffs: &[super::reconcile::FieldDiff],
+    running: bool,
+) -> Result<()> {
+    let fields: Vec<&str> = diffs
+        .iter()
+        .filter(|d| d.reboot)
+        .map(|d| d.field.as_str())
+        .collect();
+    let base = state_root();
+    if running {
+        println!(
+            "{}",
+            super::po::tf(
+                "vm/{name}: stopping to apply {fields} (the disk is kept)",
+                &[("name", name), ("fields", &fields.join(", "))],
+            )
+        );
+        delonix_vm::stop(&base, name)?;
+    }
+    if let Some(req) = resize_request_of(diffs)? {
+        delonix_vm::resize_shape(&base, name, &req)?;
+    }
+    Ok(())
 }
 
 /// `vm prune` — the VM half of the reclaim family, with the one semantic
@@ -2211,15 +2505,26 @@ fn set_labels(
     }
 }
 
-/// Applies the hot part of a plan. A VM's labels are the only field that
-/// converges in place: they are bookkeeping on the record, and the guest is
-/// not touched. Anything else reaching here is a bug in
-/// `reconcile::hot_fields`, and is refused instead of half-applied.
+/// Applies the hot part of a plan: labels and credentials (bookkeeping on the
+/// record), and a vCPU/memory growth inside the hotplug ceiling, added live
+/// (ADR-0068). Reboot-class diffs were applied before the creation layer
+/// ([`converge_across_reboot`]) and are skipped here. Anything else reaching
+/// here is a bug in the plan's classification, and is refused instead of
+/// half-applied.
 pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
     let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(state_root().join("vms"))?;
+    let mut grow_vcpus: Option<u32> = None;
+    let mut grow_memory: Option<String> = None;
     for d in diffs {
+        if d.reboot {
+            continue;
+        }
         match d.field.as_str() {
+            "vcpus" if d.hot => {
+                grow_vcpus = d.to.as_deref().and_then(|v| v.trim().parse().ok());
+            }
+            "memory" if d.hot => grow_memory = d.to.clone(),
             "labels" => {
                 let delta = super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref());
                 st.update(name, |vm| {
@@ -2235,6 +2540,49 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                      `reconcile::hot_fields`"
                 )))
             }
+        }
+    }
+    if grow_vcpus.is_some() || grow_memory.is_some() {
+        grow_live(name, grow_vcpus, grow_memory.as_deref())?;
+    }
+    Ok(())
+}
+
+/// A live growth the plan classified hot. A `partial` outcome (the guest has
+/// not onlined it yet, ADR-0068 D4) is reported and does NOT fail the apply:
+/// the record already holds the new size, so a restart keeps it, and the next
+/// plan is clean.
+fn grow_live(name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<()> {
+    let (vm, outcomes) = delonix_vm::update(
+        &state_root(),
+        name,
+        vcpus,
+        memory,
+        std::time::Duration::from_secs(60),
+    )?;
+    for (field, outcome) in outcomes {
+        let value = match field {
+            "vcpus" => vm.vcpus.to_string(),
+            _ => vm.memory.clone(),
+        };
+        match outcome {
+            delonix_vm::HotplugOutcome::Complete => println!(
+                "{}",
+                super::po::tf(
+                    "vm/{name}: {field} -> {value} live (complete)",
+                    &[("name", name), ("field", field), ("value", &value)],
+                )
+            ),
+            delonix_vm::HotplugOutcome::Partial { reason } => output::warn(&super::po::tf(
+                "vm/{name}: {field} -> {value} live, but the guest has not taken it yet \
+                 (partial): {reason}",
+                &[
+                    ("name", name),
+                    ("field", field),
+                    ("value", &value),
+                    ("reason", &reason),
+                ],
+            )),
         }
     }
     Ok(())
@@ -2487,6 +2835,14 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             image_meta.as_ref(),
         );
 
+        let (vcpus_max, memory_max_mib) = manifest_ceilings(
+            name,
+            vcpus,
+            &memory,
+            spec.vcpus_max,
+            spec.memory_max.as_deref(),
+        )?;
+
         // Resolve each volume (Volume/Storage name → host directory) and
         // ensure a network Storage is mounted before sharing it.
         let vm_volumes = resolve_vm_volumes(&base, &spec.volumes)?;
@@ -2556,12 +2912,9 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // `kind: VM` herda o tamanho da imagem. Acrescentá-lo é o passo
             // seguinte, e é o que liga a quota do inquilino ao manifesto.
             disk_size_gib: None,
-            // Same gap as `disk_size_gib` just above, same reason: `VmSpec`
-            // (the manifest's typed spec) has no `vcpusMax`/`memoryMax` yet
-            // (ADR-0068 D3). `vm create --vcpus-max/--memory-max` has them;
-            // extending the manifest is a named follow-up, not a silent one.
-            vcpus_max: None,
-            memory_max_mib: None,
+            // ADR-0068 D3: the hotplug ceilings, validated like the CLI's.
+            vcpus_max,
+            memory_max_mib,
             // A VM someone creates from the CLI is one they mean to WATCH, so it
             // keeps the interactive console. Capture-to-file serves an unattended
             // reader (the DKS) that builds the `VmConfig` as a library; leaving it
@@ -3424,8 +3777,19 @@ pub fn run(action: VmCmd) -> Result<()> {
             vcpus,
             memory,
             disk_size_gib,
+            vcpus_max,
+            memory_max,
+            no_hotplug,
         } => {
-            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref(), disk_size_gib)?;
+            let req = resize_request_from_flags(
+                vcpus,
+                memory,
+                disk_size_gib,
+                vcpus_max,
+                memory_max.as_deref(),
+                no_hotplug,
+            )?;
+            let vm = delonix_vm::resize_shape(&base, &name, &req)?;
             print!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
             if let Some(gib) = disk_size_gib {
                 print!(", disk >= {gib}G");
@@ -6315,5 +6679,218 @@ mod ephemeral_tests {
         assert_eq!(fmt_grace(600), "10m");
         assert_eq!(fmt_grace(7200), "2h");
         assert_eq!(fmt_grace(90), "90s");
+    }
+}
+
+/// Sprint 18: the reboot class (ADR-0012) and the hotplug ceilings (ADR-0068)
+/// on the declarative path.
+#[cfg(test)]
+mod reboot_class_tests {
+    use super::super::reconcile::{self, Action, Actual, Desired, FieldDiff};
+    use std::collections::BTreeMap;
+
+    fn vm(backend: &str, running: bool) -> delonix_compute::Vm {
+        let mut v = delonix_compute::Vm::new(
+            "db".into(),
+            "/d.qcow2".into(),
+            "/o.qcow2".into(),
+            2,
+            "2G".into(),
+            "default".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        v.backend = backend.into();
+        v.status = if running {
+            delonix_model::records::Status::Running
+        } else {
+            delonix_model::records::Status::Stopped
+        };
+        v
+    }
+
+    fn plan_one(v: &delonix_compute::Vm, desired: &[(&str, &str)]) -> reconcile::Change {
+        let mut actual = BTreeMap::new();
+        actual.insert("vcpus".to_string(), v.vcpus.to_string());
+        actual.insert("memory".to_string(), v.memory.clone());
+        let (vmax, mmax) = super::effective_ceilings(v);
+        actual.insert("vcpusMax".to_string(), vmax);
+        actual.insert("memoryMax".to_string(), mmax);
+        actual.insert("network".to_string(), v.network.clone());
+        actual.insert("disk".to_string(), v.disk.clone());
+        let mut want = actual.clone();
+        want.remove("vcpusMax");
+        want.remove("memoryMax");
+        for (k, val) in desired {
+            want.insert(k.to_string(), val.to_string());
+        }
+        let d = Desired {
+            kind: "VirtualMachine".into(),
+            name: "db".into(),
+            fields: want,
+            converges: true,
+            ownable: true,
+        };
+        let a = Actual {
+            kind: "VirtualMachine".into(),
+            name: "db".into(),
+            fields: actual,
+            owner: Some("s".into()),
+            last_applied: None,
+        };
+        let mut facts = BTreeMap::new();
+        facts.insert(
+            ("VirtualMachine".into(), "db".into()),
+            super::facts_of_vm(v),
+        );
+        reconcile::plan_with_facts(&[d], &[a], "s", &facts)
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// The cost model, end to end through the same facts `stack plan` reads:
+    /// a growth inside the ceiling is live, past it reboots, the disk recreates.
+    #[test]
+    fn a_running_vm_grows_live_inside_its_ceiling_and_reboots_past_it() {
+        let mut v = vm("cloud-hypervisor", true);
+        v.vcpus_max = Some(4);
+        v.memory_max_mib = Some(4096);
+        let c = plan_one(&v, &[("vcpus", "4"), ("memory", "4096M")]);
+        assert_eq!(c.action, Action::Update, "{c:?}");
+        assert!(c.diffs.iter().all(|d| d.hot && !d.reboot));
+
+        let c = plan_one(&v, &[("vcpus", "6")]);
+        assert_eq!(c.action, Action::Reboot);
+        assert_eq!(c.reboot_fields, ["vcpus"]);
+
+        let c = plan_one(&v, &[("disk", "/other.qcow2")]);
+        assert_eq!(c.action, Action::Replace);
+    }
+
+    /// The same memory spelled two ways is no difference at all.
+    #[test]
+    fn the_same_memory_in_another_spelling_plans_nothing() {
+        let v = vm("libvirt", true);
+        let c = plan_one(&v, &[("memory", "2048M")]);
+        assert_eq!(c.action, Action::NoOp, "{c:?}");
+    }
+
+    /// Per backend: a CH VM rebuilds its NIC from the record, libvirt and
+    /// Proxmox keep it in their own definition — there it stays a recreate.
+    /// And a backend that does not hotplug never plans a live growth.
+    #[test]
+    fn which_fields_reboot_is_the_backends_answer() {
+        let ch = vm("cloud-hypervisor", true);
+        assert_eq!(
+            plan_one(&ch, &[("network", "other")]).action,
+            Action::Reboot
+        );
+        let lv = vm("libvirt", true);
+        assert_eq!(
+            plan_one(&lv, &[("network", "other")]).action,
+            Action::Replace
+        );
+        let mut lv = vm("libvirt", true);
+        lv.vcpus_max = Some(4);
+        assert_eq!(
+            plan_one(&lv, &[("vcpus", "3")]).action,
+            if super::hotplugs("libvirt") {
+                Action::Update
+            } else {
+                Action::Reboot
+            }
+        );
+    }
+
+    /// A stopped VM pays nothing for a reboot-class change: a plain update,
+    /// no `--reboot` asked for (ADR-0012 question 4).
+    #[test]
+    fn a_stopped_vm_plans_an_update_for_a_reboot_field() {
+        let v = vm("proxmox", false);
+        let c = plan_one(&v, &[("vcpus", "8"), ("vcpusMax", "16")]);
+        assert_eq!(c.action, Action::Update);
+        assert!(c.diffs.iter().all(|d| d.reboot));
+    }
+
+    fn rd(field: &str, to: Option<&str>) -> FieldDiff {
+        FieldDiff {
+            field: field.into(),
+            from: Some("x".into()),
+            to: to.map(Into::into),
+            hot: false,
+            reboot: true,
+        }
+    }
+
+    #[test]
+    fn the_reboot_diffs_become_one_cold_reshape() {
+        let req = super::resize_request_of(&[
+            rd("vcpus", Some("4")),
+            rd("memory", Some("4G")),
+            rd("vcpusMax", Some("8")),
+            rd("memoryMax", None),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(req.vcpus, Some(4));
+        assert_eq!(req.memory.as_deref(), Some("4G"));
+        assert_eq!(req.vcpus_max, Some(Some(8)));
+        assert_eq!(
+            req.memory_max_mib,
+            Some(None),
+            "a dropped ceiling is cleared"
+        );
+        // A hot diff is not part of the reshape; a network-only reboot is a stop.
+        let mut hot = rd("vcpus", Some("4"));
+        hot.reboot = false;
+        assert!(super::resize_request_of(&[hot]).unwrap().is_none());
+        assert!(super::resize_request_of(&[rd("network", Some("n"))])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_manifest_ceiling_below_the_boot_size_is_refused() {
+        assert!(super::manifest_ceilings("db", 4, "2G", Some(2), None).is_err());
+        assert!(super::manifest_ceilings("db", 2, "2G", None, Some("1G")).is_err());
+        assert!(super::manifest_ceilings("db", 2, "2G", None, Some("2GB")).is_err());
+        assert_eq!(
+            super::manifest_ceilings("db", 2, "2G", Some(8), Some("8Gi")).unwrap(),
+            (Some(8), Some(8192))
+        );
+    }
+
+    /// The ceilings are compared only when DECLARED: the machine side always
+    /// reports one, and an undeclared ceiling must not read as drift.
+    #[test]
+    fn a_ceiling_is_planned_only_when_declared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = super::super::vmimage::VmImageStore::open(tmp.path()).unwrap();
+        let spec: super::VmSpec = serde_yaml::from_str("disk: /x.qcow2\nvcpus: 2").unwrap();
+        let f = super::desired_vm_fields(&store, "db", &spec);
+        assert!(!f.contains_key("vcpusMax") && !f.contains_key("memoryMax"));
+        let spec: super::VmSpec =
+            serde_yaml::from_str("disk: /x.qcow2\nvcpus: 2\nvcpusMax: 8\nmemoryMax: 8G").unwrap();
+        let f = super::desired_vm_fields(&store, "db", &spec);
+        assert_eq!(f["vcpusMax"], "8");
+        assert_eq!(f["memoryMax"], "8G");
+    }
+
+    #[test]
+    fn vm_resize_flags_set_or_clear_the_ceilings() {
+        let r =
+            super::resize_request_from_flags(None, None, None, Some(8), Some("8G"), false).unwrap();
+        assert_eq!(r.vcpus_max, Some(Some(8)));
+        assert_eq!(r.memory_max_mib, Some(Some(8192)));
+        let r = super::resize_request_from_flags(None, None, None, None, None, true).unwrap();
+        assert_eq!(r.vcpus_max, Some(None));
+        assert_eq!(r.memory_max_mib, Some(None));
+        let r = super::resize_request_from_flags(Some(2), None, None, None, None, false).unwrap();
+        assert_eq!(r.vcpus_max, None, "untouched when not given");
+        assert!(
+            super::resize_request_from_flags(None, None, None, None, Some("8GB"), false).is_err()
+        );
     }
 }
