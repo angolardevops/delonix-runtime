@@ -208,6 +208,24 @@ pub trait ImageDefaultsReader: Send + Sync {
     fn defaults(&self, root: &std::path::Path, reference: &str) -> Option<ImageDefaults>;
 }
 
+/// Where a process tree that is not a container gets its cgroup leaf (the Cloud
+/// Hypervisor VMM is the first user). The adapter that owns the host's cgroup
+/// knowledge implements it — which base is delegable, the root slice, the
+/// controllers to hand down — and the composition root registers it
+/// (`vm_registry::set_process_leaves`), like [`VmNetwork`].
+pub trait ProcessLeaves: Send + Sync {
+    /// Creates (or reuses) the leaf `name` with `limits` already written, BEFORE
+    /// anything enters it. `Ok(None)`: no leaf can exist on this host for this
+    /// process (rootless without a delegated base, or a user namespace with no
+    /// cgroup of its own). `Err`: the name is refused, or a requested ceiling did
+    /// not land — the leaf is not left behind half-limited.
+    fn create(
+        &self,
+        name: &str,
+        limits: &crate::cgroup_leaf::LeafLimits,
+    ) -> Result<Option<crate::cgroup_leaf::ProcessLeaf>>;
+}
+
 /// The cloud-init seed a local VM boots with: the realized form of `cfg`'s
 /// hostname, user, keys and volumes, as a file under `root`.
 pub trait SeedBuilder {
