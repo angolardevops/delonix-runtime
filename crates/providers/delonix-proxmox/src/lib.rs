@@ -75,7 +75,8 @@ pub use lxc::ProxmoxSystemContainerProvider;
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
 use delonix_compute::vm_backend::{
-    mem_mib, Boot, CreateStage, GuestFilesystem, GuestInfo, VmBackend, VmConfig,
+    guest_cpu_outcome, guest_memory_outcome, guest_memory_state, guest_online_vcpus, mem_mib, Boot,
+    CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome, VmBackend, VmConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -1703,14 +1704,16 @@ impl Client {
     /// and overriding would contradict a choice somebody made about it.
     pub fn configure_clone(&self, ledger: &Ledger, vmid: u32, cfg: &VmConfig) -> Result<()> {
         let mem = mem_mib(&cfg.memory).to_string();
-        let cores = cfg.vcpus.max(1).to_string();
+        let shape = hotplug_shape(
+            cfg.vcpus,
+            mem_mib(&cfg.memory),
+            cfg.vcpus_max,
+            cfg.memory_max_mib,
+        );
         let net0 = self.net0_arg(cfg);
         let ci = cloud_init_form(cfg);
-        let mut form: Vec<(&str, &str)> = vec![
-            ("memory", mem.as_str()),
-            ("cores", cores.as_str()),
-            ("net0", net0.as_str()),
-        ];
+        let mut form: Vec<(&str, &str)> = vec![("memory", mem.as_str()), ("net0", net0.as_str())];
+        form.extend(shape.iter().map(|(k, v)| (*k, v.as_str())));
         form.extend(ci.iter().map(|(k, v)| (*k, v.as_str())));
         // No `ide2` here: a cloud-init drive cannot be added to a VM that has
         // one, and a template meant for cloud-init carries it already. Saying
@@ -1840,14 +1843,22 @@ impl Client {
         vmid: u32,
         vcpus: u32,
         memory_mib: u64,
+        ceilings: (Option<u32>, Option<u64>),
     ) -> Result<()> {
-        let cores = vcpus.max(1).to_string();
+        let (vcpus_max, memory_max) = ceilings;
+        let shape = hotplug_shape(vcpus, memory_mib, vcpus_max, memory_max);
+        // A ceiling taken AWAY: the keys that opened it go too, or the next
+        // boot keeps headroom nobody declares any more.
+        let deletes = shape_deletes(&self.config(vmid)?, &shape).join(",");
         let mem = memory_mib.to_string();
-        let form: Vec<(&str, &str)> = vec![
-            ("cores", cores.as_str()),
-            ("sockets", "1"),
-            ("memory", mem.as_str()),
-        ];
+        // `cores` first, then `sockets` and `memory`, then the headroom keys.
+        let mut form: Vec<(&str, &str)> = vec![("cores", shape[0].1.as_str())];
+        form.push(("sockets", "1"));
+        form.push(("memory", mem.as_str()));
+        form.extend(shape[1..].iter().map(|(k, v)| (*k, v.as_str())));
+        if !deletes.is_empty() {
+            form.push(("delete", deletes.as_str()));
+        }
         self.task_or_done(
             ledger,
             vmid,
@@ -1862,24 +1873,21 @@ impl Client {
             None,
         )?;
         let cfg = self.config(vmid)?;
+        let cores = shape_value(&shape, "cores");
+        let want_vcpus = shape_value(&shape, "vcpus");
         let got = (
             config_u64(&cfg, "cores"),
             config_u64(&cfg, "sockets").or(Some(1)),
             config_u64(&cfg, "memory"),
+            config_u64(&cfg, "vcpus"),
         );
-        if got != (Some(u64::from(vcpus.max(1))), Some(1), Some(memory_mib)) {
+        if got != (cores, Some(1), Some(memory_mib), want_vcpus) {
             return Err(Error::UnexpectedAnswer(format!(
-                "proxmox: VM {vmid} config after resize has cores/sockets/memory {got:?}, \
-                 expected ({}, 1, {memory_mib})",
-                vcpus.max(1)
+                "proxmox: VM {vmid} config after resize has cores/sockets/memory/vcpus {got:?}, \
+                 expected ({cores:?}, 1, {memory_mib}, {want_vcpus:?})"
             )));
         }
-        let left: Vec<String> = self
-            .pending(vmid)?
-            .iter()
-            .filter(|e| e.get("pending").is_some() || e.get("delete").is_some())
-            .filter_map(|e| e.get("key").and_then(|k| k.as_str()).map(str::to_string))
-            .collect();
+        let left = pending_keys(&self.pending(vmid)?);
         if !left.is_empty() {
             return Err(Error::UnexpectedAnswer(format!(
                 "proxmox: VM {vmid} holds the resize as PENDING ({}) — the node applies it \
@@ -1888,6 +1896,132 @@ impl Client {
             )));
         }
         Ok(())
+    }
+
+    /// Sets the live vCPU count of a RUNNING VM (ADR-0068 Phase 2): `vcpus`
+    /// through the same async config call as a cold resize. The truth is the
+    /// node's `status/current` `cpus` (D5). A change the node could only
+    /// PARK in `pending` was not applied: it is reverted — so the next boot
+    /// does not apply it behind the record's back — and refused.
+    pub fn hotplug_vcpus(&self, ledger: &Ledger, vmid: u32, target: u32) -> Result<u32> {
+        let n = target.to_string();
+        let form: Vec<(&str, &str)> = vec![("vcpus", n.as_str())];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.refuse_pending(ledger, vmid, "vcpus")?;
+        let cur = self.current(vmid)?;
+        cur.get("cpus")
+            .and_then(|c| c.as_u64())
+            .map(|c| c as u32)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: status/current of VM {vmid} carries no `cpus` after a vCPU hotplug"
+                ))
+            })
+    }
+
+    /// Sets the live memory of a RUNNING VM (ADR-0068 Phase 3): the node
+    /// plugs DIMMs to reach it. The truth is `config?current=1` with nothing
+    /// pending for `memory` (D5).
+    pub fn hotplug_memory(&self, ledger: &Ledger, vmid: u32, target_mib: u64) -> Result<u64> {
+        let m = target_mib.to_string();
+        let form: Vec<(&str, &str)> = vec![("memory", m.as_str())];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.refuse_pending(ledger, vmid, "memory")?;
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/config?current=1",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "config")?;
+        config_u64(&w.data, "memory").ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} current config carries no `memory` after a memory hotplug"
+            ))
+        })
+    }
+
+    /// A hot change the node put in `pending` instead of applying: reverted,
+    /// then refused by name.
+    fn refuse_pending(&self, ledger: &Ledger, vmid: u32, key: &str) -> Result<()> {
+        if !pending_keys(&self.pending(vmid)?).iter().any(|k| k == key) {
+            return Ok(());
+        }
+        let form: Vec<(&str, &str)> = vec![("revert", key)];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        Err(Error::UnexpectedAnswer(format!(
+            "proxmox: VM {vmid} could not take `{key}` live — the node parked it as PENDING \
+             (reverted): the VM was booted without `{key}` in its hotplug list or without \
+             `numa: 1` (ADR-0068 D3); stop it and `vm resize` its ceiling"
+        )))
+    }
+
+    /// The guest agent's `get-vcpus`, `Ok(None)` without an agent.
+    pub fn guest_vcpus(&self, vmid: u32) -> Result<Option<serde_json::Value>> {
+        let node = &self.node;
+        self.agent_answer(
+            self.get(&format!("/nodes/{node}/qemu/{vmid}/agent/get-vcpus")),
+            "get-vcpus",
+        )
+    }
+
+    /// The guest agent's memory blocks and block size, `Ok(None)` without an
+    /// agent.
+    pub fn guest_memory_blocks(
+        &self,
+        vmid: u32,
+    ) -> Result<Option<(serde_json::Value, serde_json::Value)>> {
+        let node = &self.node;
+        let Some(blocks) = self.agent_answer(
+            self.get(&format!(
+                "/nodes/{node}/qemu/{vmid}/agent/get-memory-blocks"
+            )),
+            "get-memory-blocks",
+        )?
+        else {
+            return Ok(None);
+        };
+        let info = self.agent_answer(
+            self.get(&format!(
+                "/nodes/{node}/qemu/{vmid}/agent/get-memory-block-info"
+            )),
+            "get-memory-block-info",
+        )?;
+        Ok(info.map(|i| (blocks, i)))
     }
 
     /// The VM's boot disk as the node has it: `(key, bytes)` — `scsi0` and
@@ -5366,6 +5500,79 @@ fn extra_devices_form(cfg: &VmConfig, default_bridge: &str) -> Result<Vec<(&'sta
 /// the key was *present*, which a duplicate satisfies. The network config now
 /// lives only in `cloud_init_form`, next to the drive that carries it: an
 /// appliance (`cloud_init: false`) gets neither.
+/// The CPU shape of a VM, and with a hotplug CEILING above the boot size the
+/// keys that open headroom (ADR-0068 D3): `cores` = the ceiling, `vcpus` = the
+/// boot count, the guest node flag (a hot-added DIMM needs a node) and `cpu,memory` in
+/// the node's `hotplug` list. Without headroom, `cores` alone — the VM it
+/// always was. Pure.
+fn hotplug_shape(
+    vcpus: u32,
+    memory_mib: u64,
+    vcpus_max: Option<u32>,
+    memory_max: Option<u64>,
+) -> Vec<(&'static str, String)> {
+    let vcpus = vcpus.max(1);
+    let cpu_room = vcpus_max.filter(|m| *m > vcpus);
+    let mem_room = memory_max.filter(|m| *m > memory_mib);
+    let mut f = vec![("cores", cpu_room.unwrap_or(vcpus).to_string())];
+    if cpu_room.is_some() {
+        f.push(("vcpus", vcpus.to_string()));
+    }
+    if cpu_room.is_some() || mem_room.is_some() {
+        f.push(("numa", "1".into()));
+        f.push(("hotplug", HOTPLUG_LIST.into()));
+    }
+    f
+}
+
+/// The node's `hotplug` list with CPU and memory added to its default.
+const HOTPLUG_LIST: &str = "network,disk,usb,cpu,memory";
+
+/// The keys a shape WITHOUT them has to delete from the node's config: a
+/// `vcpus` with no CPU headroom left, and the node flag/a CPU-or-memory `hotplug`
+/// with no headroom at all. A key the config does not carry is never sent —
+/// deleting nothing is a request with no reason to exist. Pure.
+fn shape_deletes(
+    config: &serde_json::Value,
+    shape: &[(&'static str, String)],
+) -> Vec<&'static str> {
+    let has = |k: &str| config.get(k).is_some();
+    let sets = |k: &str| shape.iter().any(|(x, _)| *x == k);
+    let mut d = Vec::new();
+    if has("vcpus") && !sets("vcpus") {
+        d.push("vcpus");
+    }
+    if !sets("hotplug") {
+        if has("numa") {
+            d.push("numa");
+        }
+        let hot = config
+            .get("hotplug")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| v.split(',').any(|p| p == "cpu" || p == "memory"));
+        if hot {
+            d.push("hotplug");
+        }
+    }
+    d
+}
+
+fn shape_value(shape: &[(&'static str, String)], key: &str) -> Option<u64> {
+    shape
+        .iter()
+        .find(|(k, _)| *k == key)
+        .and_then(|(_, v)| v.parse().ok())
+}
+
+/// The keys of `GET …/pending` that are NOT applied yet. Pure.
+fn pending_keys(pending: &[serde_json::Value]) -> Vec<String> {
+    pending
+        .iter()
+        .filter(|e| e.get("pending").is_some() || e.get("delete").is_some())
+        .filter_map(|e| e.get("key").and_then(|k| k.as_str()).map(str::to_string))
+        .collect()
+}
+
 fn create_form(
     vmid: u32,
     name: &str,
@@ -5374,11 +5581,16 @@ fn create_form(
     net0: &str,
 ) -> Vec<(&'static str, String)> {
     let ci = cloud_init_form(cfg);
+    let shape = hotplug_shape(
+        cfg.vcpus,
+        mem_mib(&cfg.memory),
+        cfg.vcpus_max,
+        cfg.memory_max_mib,
+    );
     let mut form: Vec<(&'static str, String)> = vec![
         ("vmid", vmid.to_string()),
         ("name", name.to_string()),
         ("memory", mem_mib(&cfg.memory).to_string()),
-        ("cores", cfg.vcpus.max(1).to_string()),
         ("ostype", "l26".into()),
         ("scsihw", "virtio-scsi-single".into()),
         ("scsi0", scsi0.to_string()),
@@ -5398,6 +5610,8 @@ fn create_form(
         // error (see `parse_agent_ip`).
         ("agent", "1".into()),
     ];
+    // `cores` (and, with a hotplug ceiling, `vcpus`, the node flag and `hotplug`).
+    form.extend(shape);
     // The cloud-init drive, and only when there is something to put in it: an
     // empty one on an image with no cloud-init is a CD-ROM the guest ignores,
     // but it also silently costs a disk on the node's storage.
@@ -6473,6 +6687,77 @@ impl VmBackend for ProxmoxBackend {
         Ok(format!("proxmox:{target}:{vmid}"))
     }
 
+    /// `vm update --vcpus` on a running VM (ADR-0068 Phase 2): `vcpus` up to
+    /// the `cores` ceiling fixed at create, read back from `status/current`,
+    /// and the guest agent decides complete or partial (D4/D8).
+    fn hotplug_add_cpu(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        target_vcpus: u32,
+        wait: Duration,
+    ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+        let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+        if target_vcpus > ceiling {
+            return Err(delonix_compute::vm_error::Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_vcpus} vCPUs — the declared maximum is \
+                 {ceiling} (see `vm resize --vcpus-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let ledger = Ledger::at(vmdir);
+        let assigned = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.hotplug_vcpus(&ledger, vmid, target_vcpus)
+        })?;
+        let deadline = Instant::now() + wait;
+        loop {
+            let online = self.on_vm(vm, |c, vmid| c.guest_vcpus(vmid))?;
+            match guest_cpu_outcome(assigned, online.as_ref().map(guest_online_vcpus)) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --memory` on a running VM (ADR-0068 Phase 3): the node
+    /// plugs DIMMs up to `memory`, read back from `config?current=1`; the
+    /// guest agent's memory blocks decide complete or partial (D4/D8).
+    fn hotplug_add_memory(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        target_mib: u64,
+        wait: Duration,
+    ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+        let ceiling = vm.memory_max_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib > ceiling {
+            return Err(delonix_compute::vm_error::Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_mib} MiB — the declared maximum is \
+                 {ceiling} MiB (see `vm resize --memory-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let ledger = Ledger::at(vmdir);
+        let assigned = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.hotplug_memory(&ledger, vmid, target_mib)
+        })?;
+        let deadline = Instant::now() + wait;
+        loop {
+            let blocks = self.on_vm(vm, |c, vmid| c.guest_memory_blocks(vmid))?;
+            let state = blocks.and_then(|(b, i)| guest_memory_state(&b, &i));
+            match guest_memory_outcome(assigned, state) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(Duration::from_millis(500)),
+            }
+        }
+    }
+
     /// `vm resize` (`vm.resize.cold`): the engine has checked its record, and
     /// this asks the node too — a record can say `Stopped` about a VM somebody
     /// started from the node's own UI, and a config change on a running VM
@@ -6501,7 +6786,13 @@ impl VmBackend for ProxmoxBackend {
             );
         }
         Ok(self.on_vm(vm, |c, _| {
-            c.resize_hardware(&ledger, vmid, vcpus, memory_mib)
+            c.resize_hardware(
+                &ledger,
+                vmid,
+                vcpus,
+                memory_mib,
+                (vm.vcpus_max, vm.memory_max_mib),
+            )
         })?)
     }
 
@@ -7135,9 +7426,13 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
             C::VmResizeCold => S::Supported {
                 evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size",
             },
-            C::VmHotplugCpuAdd => S::NotImplemented,
+            C::VmHotplugCpuAdd => S::Partial {
+                detail: "`vm update --vcpus` sets `vcpus` up to the `cores` ceiling fixed at create (`numa: 1`, `cpu` in `hotplug`, ADR-0068 D3), read back from `status/current`; a change the node parks in `pending` is reverted and refused; the guest agent's `get-vcpus` decides complete or partial (D4/D8); mock-tested, never run against a guest",
+            },
             C::VmHotplugCpuRemove => S::NotImplemented,
-            C::VmHotplugMemoryAdd => S::NotImplemented,
+            C::VmHotplugMemoryAdd => S::Partial {
+                detail: "`vm update --memory` sets `memory` live (the node plugs DIMMs; `memory` in `hotplug`, `numa: 1`, ADR-0068 D3), read back from `config?current=1`; pending is reverted and refused; the agent's memory blocks decide complete or partial (D4/D8). The memory CEILING is the engine's record: the node has no maximum to set. Mock-tested, never run against a guest",
+            },
             C::VmHotplugMemoryRemove => S::NotImplemented,
             C::VmHotplugDiskAdd => S::NotImplemented,
             C::VmHotplugDiskRemove => S::NotImplemented,
@@ -9425,6 +9720,73 @@ mod tests {
                 ..Default::default()
             })),
             1534
+        );
+    }
+}
+
+/// ADR-0068 D3 on Proxmox: the shape a ceiling gives the node. Pure.
+#[cfg(test)]
+mod hotplug_shape_tests {
+    use super::*;
+
+    #[test]
+    fn a_ceiling_above_the_boot_size_opens_headroom_and_none_does_not() {
+        let f = hotplug_shape(2, 2048, Some(8), Some(8192));
+        let get = |k: &str| f.iter().find(|(x, _)| *x == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("cores"), Some("8"));
+        assert_eq!(get("vcpus"), Some("2"));
+        assert_eq!(get("numa"), Some("1"));
+        assert_eq!(get("hotplug"), Some("network,disk,usb,cpu,memory"));
+        assert_eq!(
+            hotplug_shape(2, 2048, None, None),
+            [("cores", "2".to_string())]
+        );
+        assert_eq!(
+            hotplug_shape(2, 2048, Some(2), Some(2048)),
+            [("cores", "2".to_string())]
+        );
+        // Memory headroom alone: the node flag and the list, no vcpus.
+        let f = hotplug_shape(2, 2048, None, Some(4096));
+        assert!(f.iter().any(|(k, _)| *k == "numa"));
+        assert!(!f.iter().any(|(k, _)| *k == "vcpus"));
+    }
+
+    /// The create form carries the ceiling too: a VM created with
+    /// `--vcpus-max` used to be booted with `cores` = the boot count.
+    #[test]
+    fn the_create_form_carries_the_ceiling() {
+        let cfg = VmConfig {
+            name: "hp".into(),
+            vcpus: 2,
+            memory: "2G".into(),
+            vcpus_max: Some(8),
+            memory_max_mib: Some(8192),
+            ..Default::default()
+        };
+        let f = create_form(100, "hp", &cfg, "local-lvm:8", "virtio,bridge=vmbr0");
+        let get = |k: &str| f.iter().find(|(x, _)| *x == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("cores"), Some("8"));
+        assert_eq!(get("vcpus"), Some("2"));
+        assert_eq!(get("memory"), Some("2048"));
+        assert_eq!(f.iter().filter(|(k, _)| *k == "cores").count(), 1);
+    }
+
+    #[test]
+    fn only_keys_the_config_carries_are_deleted() {
+        let shape = hotplug_shape(2, 2048, None, None);
+        assert!(shape_deletes(&serde_json::json!({"cores": 2}), &shape).is_empty());
+        assert_eq!(
+            shape_deletes(
+                &serde_json::json!({"vcpus": 2, "numa": 1, "hotplug": "network,disk,usb"}),
+                &shape
+            ),
+            ["vcpus", "numa"],
+            "a default hotplug list is not deleted"
+        );
+        let shape = hotplug_shape(2, 2048, None, Some(4096));
+        assert_eq!(
+            shape_deletes(&serde_json::json!({"vcpus": 2, "numa": 1}), &shape),
+            ["vcpus"]
         );
     }
 }

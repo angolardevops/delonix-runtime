@@ -238,6 +238,9 @@ enum Cmd {
         /// Authorize the recreate of a resource whose cold field changed.
         #[arg(long, value_name = "Kind/name")]
         replace: Vec<String>,
+        /// Allow stopping and starting a resource whose change converges only across a reboot, keeping its disk (`Kind/name`, or `all`).
+        #[arg(long, value_name = "Kind/name")]
+        reboot: Vec<String>,
         /// Remove what this stack owns and the manifest no longer declares.
         #[arg(long)]
         prune: bool,
@@ -622,6 +625,7 @@ fn run() -> Result<()> {
             name,
             dry_run,
             replace,
+            reboot,
             prune,
             plan_digest,
         } => cmd::stack::run(cmd::stack::StackCmd::Apply {
@@ -629,6 +633,7 @@ fn run() -> Result<()> {
             file,
             dry_run,
             replace,
+            reboot,
             prune,
             plan_digest,
         }),

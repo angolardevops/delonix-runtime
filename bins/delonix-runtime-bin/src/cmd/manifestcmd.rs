@@ -53,6 +53,7 @@ pub fn run(action: ManifestCmd) -> Result<()> {
             file,
             dry_run: true,
             replace: Vec::new(),
+            reboot: Vec::new(),
             prune: false,
             plan_digest: Vec::new(),
         }),

@@ -256,6 +256,17 @@ where
         vm.ip = boot.ip;
         vm.dhcp_lease_floor = boot.lease_floor;
         vm.backend = backend.id().to_string();
+        // A restart rebuilds the record from `cfg`, which describes the boot
+        // shape and nothing else: the labels and annotations the record
+        // carried (the stack's ownership stamp, the last-applied spec, the
+        // declared login, a policy hold) are not in it. Dropping them made a
+        // `vm stop` + `vm start` — and the reconciler's own reboot class
+        // (ADR-0012) — leave a stack's VM unowned, so the next plan proposed
+        // adopting it and a `--prune` no longer saw it.
+        if let Some(ex) = &restarting {
+            vm.labels = ex.labels.clone();
+            vm.annotations = ex.annotations.clone();
+        }
         if cfg.policy_hold && restarting.is_none() {
             vm.annotations
                 .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
@@ -681,32 +692,35 @@ where
         memory: Option<&str>,
         disk_size_gib: Option<u32>,
     ) -> Result<Vm> {
-        if vcpus.is_none() && memory.is_none() && disk_size_gib.is_none() {
-            return Err(Error::InvalidResize(format!(
-                "nothing to resize on VM '{name}': give --vcpus, --memory and/or --disk-size"
-            )));
-        }
-        if vcpus == Some(0) {
-            return Err(Error::InvalidResize(format!(
-                "VM '{name}' cannot have 0 vCPUs"
-            )));
-        }
-        if disk_size_gib == Some(0) {
-            return Err(Error::InvalidResize(format!(
-                "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
-            )));
-        }
-        let new_mib = match memory {
-            Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
-                Error::InvalidResize(format!(
-                    "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
-                ))
-            })?),
-            None => None,
-        };
+        self.resize_shape(
+            name,
+            &ResizeRequest {
+                vcpus,
+                memory: memory.map(str::to_string),
+                disk_size_gib,
+                ..ResizeRequest::default()
+            },
+        )
+    }
+
+    /// The cold resize with the hotplug ceilings too (ADR-0068 open question
+    /// 2: the ceiling changes only with the VM stopped, and holds from the
+    /// next boot). One path for `vm resize` and for the reconciler's reboot
+    /// class (ADR-0012), so the two cannot disagree about what a stopped VM
+    /// may become.
+    ///
+    /// The backend is handed the record AS IT WILL BE (new ceilings included)
+    /// and the record is written only after it answers — the order every
+    /// resize here already uses.
+    pub fn resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<Vm> {
+        // An empty request is the CALLER's mistake, whatever the VM: refused
+        // before the lookup, so `vm resize <unknown>` with no flag answers
+        // "nothing to resize" (class 1), as it always did, not "no such VM".
+        refuse_empty(name, req)?;
         let vmdir = self.vmdir();
         let st = &self.repo;
         let mut vm = self.load_vm(name)?;
+        let (target_vcpus, target_mib, vcpus_max, memory_max_mib) = check_shape(name, &vm, req)?;
         if matches!(vm.status, Status::Running | Status::Paused) {
             return Err(Error::ResizeNeedsStopped(format!(
                 "VM '{name}' is {:?}: `vm resize` is a cold resize — stop it first (`delonix vm stop {name}`)",
@@ -714,19 +728,32 @@ where
             )));
         }
         let backend = self.backends.for_vm(&vm)?;
-        if let Some(gib) = disk_size_gib {
+        if let Some(gib) = req.disk_size_gib {
             backend.resize_disk(&vmdir, &vm, u64::from(gib) * GIB_BYTES)?;
         }
-        let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
-        let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
-        backend.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
-        vm.vcpus = target_vcpus;
-        if let Some(m) = memory {
-            vm.memory = m.trim().to_string();
+        let mut shaped = vm.clone();
+        shaped.vcpus = target_vcpus;
+        if let Some(m) = &req.memory {
+            shaped.memory = m.trim().to_string();
         }
+        shaped.vcpus_max = vcpus_max;
+        shaped.memory_max_mib = memory_max_mib;
+        backend.resize_cold(&vmdir, &shaped, target_vcpus, target_mib)?;
+        vm = shaped;
         st.set(name, &vm).map_err(Error::from)?;
         Ok(vm)
     }
+
+    /// Whether [`Self::resize_shape`] would take `req` — every rule it
+    /// applies except the power state, and nothing changed. A caller that
+    /// has to STOP the VM first asks this before the stop, so a shape that
+    /// would be refused never costs the downtime.
+    pub fn check_resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<()> {
+        refuse_empty(name, req)?;
+        let vm = self.load_vm(name)?;
+        check_shape(name, &vm, req).map(|_| ())
+    }
+
     /// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1) — ONE verb
     /// for both states: on a RUNNING VM it hot-adds, live, up to the
     /// declared ceiling (D3); on a STOPPED one it is exactly [`Self::resize`]
@@ -735,8 +762,7 @@ where
     /// Only ADD (D10): a target at or below what the VM already has is
     /// refused, naming `vm resize` (stopped) as the way to decrease — hot
     /// removal is a separate, later capability, not a silent downgrade to
-    /// the cold path. Disk and NIC hotplug are later phases (3/4/5); this is
-    /// CPU/memory only.
+    /// the cold path. Disks and NICs go through [`Self::change_device`].
     ///
     /// Each field that changes is written to the record as soon as the
     /// backend confirms it (D6, "hypervisor first, read-back, record last,
@@ -757,7 +783,8 @@ where
     ) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
         if vcpus.is_none() && memory.is_none() {
             return Err(Error::InvalidResize(format!(
-                "nothing to update on VM '{name}': give --vcpus and/or --memory"
+                "nothing to update on VM '{name}': give --vcpus, --memory, --disk-add, \
+                 --nic-add, --disk-rm and/or --nic-rm"
             )));
         }
         let target_mib = match memory {
@@ -786,6 +813,16 @@ where
                     vm.vcpus
                 )));
             }
+            let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+            if target > ceiling {
+                return Err(above_ceiling(
+                    name,
+                    "vCPUs",
+                    &target.to_string(),
+                    &ceiling.to_string(),
+                    "--vcpus-max",
+                ));
+            }
             let (assigned, outcome) = backend.hotplug_add_cpu(&vmdir, &vm, target, wait)?;
             vm.vcpus = assigned;
             st.set(name, &vm).map_err(Error::from)?;
@@ -799,6 +836,16 @@ where
                      `vm resize` on a stopped VM for a decrease"
                 )));
             }
+            let ceiling = vm.memory_max_mib.unwrap_or(current_mib);
+            if target_mib > ceiling {
+                return Err(above_ceiling(
+                    name,
+                    "MiB of memory",
+                    &target_mib.to_string(),
+                    &ceiling.to_string(),
+                    "--memory-max",
+                ));
+            }
             let (assigned_mib, outcome) =
                 backend.hotplug_add_memory(&vmdir, &vm, target_mib, wait)?;
             vm.memory = format!("{assigned_mib}M");
@@ -807,6 +854,90 @@ where
         }
         Ok((vm, outcomes))
     }
+    /// `vm update --disk-add/--nic-add/--disk-rm/--nic-rm` (ADR-0068 D7/D10):
+    /// one device change. On a RUNNING VM an ADD is hot-plugged — hypervisor
+    /// first, read back, record last (D6), with the target/MAC the hypervisor
+    /// gave pinned in the record so a restart keeps it where the guest saw it;
+    /// a REMOVAL is refused by name (D10: hot removal needs the guest to
+    /// release the device first, and a lost answer would leave a disk the
+    /// guest still writes to detached). On a STOPPED VM both change the
+    /// record, and the backend is told ([`VmBackend::change_devices_cold`]).
+    /// A paused VM is refused: unpause or stop it first.
+    pub fn change_device(
+        &self,
+        name: &str,
+        change: DeviceChange,
+        wait: Duration,
+    ) -> Result<(Vm, Option<HotplugOutcome>)> {
+        let mut vm = self.load_vm(name)?;
+        let vmdir = self.vmdir();
+        let backend = self.backends.for_vm(&vm)?;
+        match vm.status {
+            Status::Paused => Err(Error::ResizeNeedsStopped(format!(
+                "VM '{name}' is paused: unpause it (`delonix vm unpause {name}`) or stop it \
+                 before changing its devices"
+            ))),
+            Status::Running => {
+                let outcome = match change {
+                    DeviceChange::AddDisk(d) => {
+                        check_new_disk(&vm, &d)?;
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let (d, o) =
+                            backend.hotplug_add_disk(&vmdir, &base, &d, wait, &mut |att| {
+                                let mut next = base.clone();
+                                next.boot.extra_disks.push(att.clone());
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or_else(|| {
+                            let mut next = base.clone();
+                            next.boot.extra_disks.push(d);
+                            next
+                        });
+                        o
+                    }
+                    DeviceChange::AddNic(n) => {
+                        check_new_nic(&vm, &n)?;
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let (n, o) =
+                            backend.hotplug_add_nic(&vmdir, &base, &n, wait, &mut |att| {
+                                let mut next = base.clone();
+                                next.boot.extra_nics.push(att.clone());
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or_else(|| {
+                            let mut next = base.clone();
+                            next.boot.extra_nics.push(n);
+                            next
+                        });
+                        o
+                    }
+                    DeviceChange::RemoveDisk(_) | DeviceChange::RemoveNic(_) => {
+                        return Err(Error::ResizeNeedsStopped(format!(
+                            "VM '{name}' is running: a disk or NIC is not removed live \
+                             (ADR-0068 D10) — `delonix vm stop {name}`, remove it, and start it"
+                        )))
+                    }
+                };
+                self.repo.set(name, &vm).map_err(Error::from)?;
+                Ok((vm, Some(outcome)))
+            }
+            _ => {
+                let mut next = vm.clone();
+                apply_device_change(&mut next, change)?;
+                backend.change_devices_cold(&vmdir, &vm, &mut next)?;
+                vm = next;
+                self.repo.set(name, &vm).map_err(Error::from)?;
+                Ok((vm, None))
+            }
+        }
+    }
+
     /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
     /// ADR-0053 decision 1; see [`VmBackend::move_to_node`]).
     ///
@@ -1118,6 +1249,111 @@ pub struct Destroyed {
     pub kept: Vec<String>,
 }
 
+/// What a cold resize asks for (`vm resize`, and the reconciler's reboot
+/// class). `None` leaves a field as it is; for a ceiling, `Some(None)` clears
+/// it back to «the maximum is the boot size» and `Some(Some(n))` sets it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResizeRequest {
+    pub vcpus: Option<u32>,
+    pub memory: Option<String>,
+    pub disk_size_gib: Option<u32>,
+    pub vcpus_max: Option<Option<u32>>,
+    pub memory_max_mib: Option<Option<u64>>,
+}
+
+/// Every rule a cold reshape applies, on the record as it is: nothing to do,
+/// zero vCPUs, a zero disk size, a memory that is not a size, and the
+/// ceilings below the boot size. Returns the target shape `(vcpus, MiB,
+/// vcpus_max, memory_max_mib)`. Pure — [`VmEngine::resize_shape`] and
+/// [`VmEngine::check_resize_shape`] share it, so the check before a stop and
+/// the reshape after it can never disagree.
+/// A request that changes nothing. Pure, and checked before the VM is even
+/// looked up.
+fn refuse_empty(name: &str, req: &ResizeRequest) -> Result<()> {
+    if req.vcpus.is_none()
+        && req.memory.is_none()
+        && req.disk_size_gib.is_none()
+        && req.vcpus_max.is_none()
+        && req.memory_max_mib.is_none()
+    {
+        return Err(Error::InvalidResize(format!(
+            "nothing to resize on VM '{name}': give --vcpus, --memory, --disk-size, \
+             --vcpus-max and/or --memory-max"
+        )));
+    }
+    Ok(())
+}
+
+fn check_shape(
+    name: &str,
+    vm: &Vm,
+    req: &ResizeRequest,
+) -> Result<(u32, u64, Option<u32>, Option<u64>)> {
+    refuse_empty(name, req)?;
+    if req.vcpus == Some(0) || req.vcpus_max == Some(Some(0)) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}' cannot have 0 vCPUs"
+        )));
+    }
+    if req.disk_size_gib == Some(0) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
+        )));
+    }
+    let new_mib = match &req.memory {
+        Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+            Error::InvalidResize(format!(
+                "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+            ))
+        })?),
+        None => None,
+    };
+    let target_vcpus = req.vcpus.unwrap_or(vm.vcpus.max(1));
+    let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+    let vcpus_max = req.vcpus_max.unwrap_or(vm.vcpus_max);
+    let memory_max_mib = req.memory_max_mib.unwrap_or(vm.memory_max_mib);
+    check_ceilings(name, target_vcpus, target_mib, vcpus_max, memory_max_mib)?;
+    Ok((target_vcpus, target_mib, vcpus_max, memory_max_mib))
+}
+
+/// A ceiling below what the VM boots with is not a ceiling (ADR-0068 D3):
+/// refused, naming both numbers, never clamped.
+fn check_ceilings(
+    name: &str,
+    vcpus: u32,
+    memory_mib: u64,
+    vcpus_max: Option<u32>,
+    memory_max_mib: Option<u64>,
+) -> Result<()> {
+    if let Some(max) = vcpus_max {
+        if max < vcpus {
+            return Err(Error::InvalidResize(format!(
+                "VM '{name}': the vCPU ceiling ({max}) cannot be below the vCPUs it boots with \
+                 ({vcpus}) — raise --vcpus-max, or lower --vcpus"
+            )));
+        }
+    }
+    if let Some(max) = memory_max_mib {
+        if max < memory_mib {
+            return Err(Error::InvalidResize(format!(
+                "VM '{name}': the memory ceiling ({max} MiB) cannot be below the memory it boots \
+                 with ({memory_mib} MiB) — raise --memory-max, or lower --memory"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// A live add above the ceiling declared at create is refused, naming the
+/// ceiling and the command that changes it (ADR-0068 D3) — never clamped.
+fn above_ceiling(name: &str, what: &str, target: &str, ceiling: &str, flag: &str) -> Error {
+    Error::InvalidResize(format!(
+        "VM '{name}' can take at most {ceiling} {what} live (asked for {target}): the hotplug \
+         ceiling is fixed at boot — `delonix vm stop {name}`, then `delonix vm resize {name} \
+         {flag} <n>`, and start it"
+    ))
+}
+
 /// Ensures the microVM (idempotent): if it already exists and is alive, does nothing; if
 /// it exists but died, re-boots reusing the overlay (auto-heal) with the SAME
 /// backend; otherwise, chooses the backend (explicit/auto), creates the overlay and boots.
@@ -1302,6 +1538,98 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
 /// destructures: the fallback was how twenty-one fields quietly became
 /// defaults on every restart. Spelling every field out means a new one cannot
 /// be silently dropped here either.
+/// One device change of `vm update` (ADR-0068 D7/D10). A disk is removed
+/// by its pinned target (`vdc`) or its source path; a NIC by its MAC.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeviceChange {
+    AddDisk(crate::ExtraDisk),
+    AddNic(crate::ExtraNic),
+    RemoveDisk(String),
+    RemoveNic(String),
+}
+
+/// A disk the VM already has (same source, or same pinned target) is not
+/// added twice. Pure.
+fn check_new_disk(vm: &Vm, d: &crate::ExtraDisk) -> Result<()> {
+    if d.source.trim().is_empty() {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}': a disk to add needs a source",
+            vm.name
+        )));
+    }
+    let dup = vm.boot.extra_disks.iter().any(|x| {
+        x.source == d.source || (d.target.is_some() && x.target.is_some() && x.target == d.target)
+    });
+    if dup {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}' already has the disk '{}'",
+            vm.name,
+            d.target.as_deref().unwrap_or(&d.source)
+        )));
+    }
+    Ok(())
+}
+
+/// A NIC whose MAC the VM already carries is not added twice. Pure.
+fn check_new_nic(vm: &Vm, n: &crate::ExtraNic) -> Result<()> {
+    let same = |m: &str| n.mac.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(m));
+    if same(&vm.mac)
+        || vm
+            .boot
+            .extra_nics
+            .iter()
+            .any(|x| x.mac.as_deref().is_some_and(same))
+    {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}' already has a NIC with MAC {}",
+            vm.name,
+            n.mac.as_deref().unwrap_or("")
+        )));
+    }
+    Ok(())
+}
+
+/// The record as a device change on a STOPPED VM leaves it. Pure.
+pub fn apply_device_change(vm: &mut Vm, change: DeviceChange) -> Result<()> {
+    match change {
+        DeviceChange::AddDisk(d) => {
+            check_new_disk(vm, &d)?;
+            vm.boot.extra_disks.push(d);
+        }
+        DeviceChange::AddNic(n) => {
+            check_new_nic(vm, &n)?;
+            vm.boot.extra_nics.push(n);
+        }
+        DeviceChange::RemoveDisk(key) => {
+            let before = vm.boot.extra_disks.len();
+            vm.boot
+                .extra_disks
+                .retain(|d| d.source != key && d.target.as_deref() != Some(key.as_str()));
+            if vm.boot.extra_disks.len() == before {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' has no extra disk '{key}' (name its target, e.g. vdc, or its source)",
+                    vm.name
+                )));
+            }
+        }
+        DeviceChange::RemoveNic(mac) => {
+            let before = vm.boot.extra_nics.len();
+            vm.boot.extra_nics.retain(|n| {
+                !n.mac
+                    .as_deref()
+                    .is_some_and(|m| m.eq_ignore_ascii_case(&mac))
+            });
+            if vm.boot.extra_nics.len() == before {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' has no extra NIC with MAC {mac} (the primary NIC is not removable)",
+                    vm.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn config_from(vm: &Vm) -> VmConfig {
     let b = &vm.boot;
     VmConfig {
@@ -1533,6 +1861,11 @@ mod tests {
         /// keeps them refusing, the same shape as the trait's own
         /// fail-closed default, to exercise the refusal path too.
         hotplug_outcome: RefCell<Option<HotplugOutcome>>,
+        /// The record `resize_cold` was handed — the ceilings it must apply
+        /// travel in it (ADR-0068 open question 2).
+        resized: RefCell<Option<Vm>>,
+        /// Makes `hotplug_add_disk` fail after it reported the attachment.
+        fail_after_attach: RefCell<bool>,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1593,6 +1926,67 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("resize_cold {} {vcpus} {memory_mib}", vm.name));
+            *self.0.resized.borrow_mut() = Some(vm.clone());
+            Ok(())
+        }
+        fn hotplug_add_disk(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            disk: &crate::ExtraDisk,
+            _wait: Duration,
+            attached: &mut dyn FnMut(&crate::ExtraDisk) -> delonix_model::Result<()>,
+        ) -> delonix_model::Result<(crate::ExtraDisk, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_disk {} {}", vm.name, disk.source));
+            let mut d = disk.clone();
+            d.target = Some("vdz".into());
+            attached(&d)?;
+            // A guest wait the command is killed in: `fail_after_attach`
+            // makes the call fail AFTER the read-back confirmed the disk.
+            if *self.0.fail_after_attach.borrow() {
+                return Err(delonix_model::Error::Invalid(
+                    "killed during the wait".into(),
+                ));
+            }
+            Ok((d, HotplugOutcome::Complete))
+        }
+        fn hotplug_add_nic(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            nic: &crate::ExtraNic,
+            _wait: Duration,
+            attached: &mut dyn FnMut(&crate::ExtraNic) -> delonix_model::Result<()>,
+        ) -> delonix_model::Result<(crate::ExtraNic, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_nic {}", vm.name));
+            let mut n = nic.clone();
+            n.mac = Some("52:54:00:aa:bb:cc".into());
+            attached(&n)?;
+            Ok((
+                n,
+                HotplugOutcome::Partial {
+                    reason: "no agent".into(),
+                },
+            ))
+        }
+        fn change_devices_cold(
+            &self,
+            _vmdir: &Path,
+            _old: &Vm,
+            vm: &mut Vm,
+        ) -> delonix_model::Result<()> {
+            self.0.calls.borrow_mut().push(format!(
+                "change_devices_cold {} disks={} nics={}",
+                vm.name,
+                vm.boot.extra_disks.len(),
+                vm.boot.extra_nics.len()
+            ));
             Ok(())
         }
         fn hotplug_add_cpu(
@@ -1929,7 +2323,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
         let e = engine(root.path(), seen.clone());
-        e.create(&cfg("app")).expect("create"); // vcpus=1, memory=64M, Running.
+        // vcpus=1, memory=64M, Running — with the headroom a live add needs.
+        let mut c = cfg("app");
+        c.vcpus_max = Some(4);
+        c.memory_max_mib = Some(256);
+        e.create(&c).expect("create");
         *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Complete);
         let (vm, outcomes) = e
             .update("app", Some(3), Some("128M"), Duration::from_millis(1))
@@ -1966,7 +2364,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
         let e = engine(root.path(), seen.clone());
-        e.create(&cfg("app")).expect("create");
+        let mut c = cfg("app");
+        c.vcpus_max = Some(2);
+        e.create(&c).expect("create");
         *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Partial {
             reason: "guest activation not observable".into(),
         });
@@ -2005,5 +2405,307 @@ mod tests {
         );
         // Neither refusal reached the backend.
         assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+    }
+
+    // ---- ceilings and restarts (ADR-0068 Q2, ADR-0012) -----------------------
+
+    /// A restart rebuilds the record from the boot shape — and used to drop
+    /// the labels and annotations with it, so a stack's VM came back unowned.
+    #[test]
+    fn a_restart_keeps_the_records_labels_and_annotations() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.repo
+            .update("app", |vm| {
+                vm.labels.insert("delonix.io/stack".into(), "shop".into());
+                vm.annotations
+                    .insert("delonix.io/last-applied".into(), "{}".into());
+                true
+            })
+            .unwrap();
+        e.stop("app").expect("stop");
+        let vm = e.start("app").expect("start");
+        assert_eq!(vm.status, Status::Running);
+        let rec = e.repo.get("app").unwrap();
+        assert_eq!(
+            rec.labels.get("delonix.io/stack").map(String::as_str),
+            Some("shop")
+        );
+        assert!(rec.annotations.contains_key("delonix.io/last-applied"));
+    }
+
+    /// The cold resize sets and clears the ceilings, and the backend is
+    /// handed the record as it will be — the ceilings included.
+    #[test]
+    fn resize_shape_sets_and_clears_the_ceilings_and_hands_them_to_the_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.stop("app").expect("stop");
+        let vm = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus: Some(2),
+                    vcpus_max: Some(Some(4)),
+                    memory_max_mib: Some(Some(256)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .expect("resize");
+        assert_eq!(
+            (vm.vcpus, vm.vcpus_max, vm.memory_max_mib),
+            (2, Some(4), Some(256))
+        );
+        let handed = seen.resized.borrow().clone().expect("backend asked");
+        assert_eq!(
+            (handed.vcpus_max, handed.memory_max_mib),
+            (Some(4), Some(256))
+        );
+        assert_eq!(e.repo.get("app").unwrap().vcpus_max, Some(4));
+        let vm = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus_max: Some(None),
+                    memory_max_mib: Some(None),
+                    ..ResizeRequest::default()
+                },
+            )
+            .expect("clear");
+        assert_eq!((vm.vcpus_max, vm.memory_max_mib), (None, None));
+    }
+
+    /// A ceiling below the boot size is refused before the backend is asked.
+    #[test]
+    fn a_ceiling_below_the_boot_size_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.stop("app").expect("stop");
+        let before = calls(&seen).len();
+        let err = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus: Some(4),
+                    vcpus_max: Some(Some(2)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("ceiling (2)"), "{err}");
+        let err = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    memory_max_mib: Some(Some(32)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("32 MiB"), "{err}");
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+    }
+
+    /// A live add above the declared ceiling is refused by the engine, naming
+    /// the ceiling and the command that changes it — the backend is never
+    /// asked to clamp.
+    #[test]
+    fn a_live_add_above_the_ceiling_is_refused_before_the_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        let mut c = cfg("app");
+        c.vcpus_max = Some(2);
+        c.memory_max_mib = Some(128);
+        e.create(&c).expect("create");
+        *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Complete);
+        let before = calls(&seen).len();
+        let err = e
+            .update("app", Some(3), None, Duration::from_millis(1))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("at most 2 vCPUs") && err.to_string().contains("--vcpus-max"),
+            "{err}"
+        );
+        let err = e
+            .update("app", None, Some("256M"), Duration::from_millis(1))
+            .unwrap_err();
+        assert!(err.to_string().contains("--memory-max"), "{err}");
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+        // Inside the ceiling it goes through.
+        let (vm, _) = e
+            .update("app", Some(2), Some("128M"), Duration::from_millis(1))
+            .expect("inside the ceiling");
+        assert_eq!(vm.vcpus, 2);
+    }
+
+    /// An empty resize is refused before the lookup: `vm resize <unknown>`
+    /// with no flag is "nothing to resize" (class 1), never "no such VM".
+    #[test]
+    fn an_empty_resize_is_refused_before_the_vm_is_looked_up() {
+        let root = tempfile::tempdir().unwrap();
+        let e = engine(root.path(), Rc::new(Seen::default()));
+        let err = e
+            .resize_shape("vm-nada", &ResizeRequest::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidResize(_)), "{err:?}");
+        let err = e
+            .check_resize_shape("vm-nada", &ResizeRequest::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidResize(_)), "{err:?}");
+    }
+
+    /// The check a reboot runs BEFORE its stop: every reshape rule, on a
+    /// RUNNING VM, and nothing changed.
+    #[test]
+    fn the_shape_check_refuses_on_a_running_vm_and_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let bad = ResizeRequest {
+            vcpus_max: Some(Some(0)),
+            ..Default::default()
+        };
+        assert!(e.check_resize_shape("app", &bad).is_err());
+        let below = ResizeRequest {
+            vcpus: Some(4),
+            vcpus_max: Some(Some(2)),
+            ..Default::default()
+        };
+        assert!(e.check_resize_shape("app", &below).is_err());
+        let fine = ResizeRequest {
+            vcpus: Some(4),
+            vcpus_max: Some(Some(8)),
+            ..Default::default()
+        };
+        e.check_resize_shape("app", &fine)
+            .expect("the power state is not the check's business");
+        assert!(seen.resized.borrow().is_none(), "nothing was reshaped");
+    }
+
+    /// ADR-0068 D6/D7: a hot-added disk lands in the record with the target
+    /// the hypervisor gave it PINNED, so the next boot keeps it where the
+    /// guest saw it; a NIC with its MAC pinned and its partial outcome.
+    #[test]
+    fn a_hot_added_device_reaches_the_record_pinned() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        let (vm, o) = e
+            .change_device("app", DeviceChange::AddDisk(disk.clone()), Duration::ZERO)
+            .unwrap();
+        assert_eq!(o, Some(HotplugOutcome::Complete));
+        assert_eq!(vm.boot.extra_disks[0].target.as_deref(), Some("vdz"));
+        assert_eq!(e.load_vm("app").unwrap().boot.extra_disks.len(), 1);
+        let (vm, o) = e
+            .change_device(
+                "app",
+                DeviceChange::AddNic(crate::ExtraNic {
+                    kind: "network".into(),
+                    source: Some("default".into()),
+                    ..Default::default()
+                }),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert!(matches!(o, Some(HotplugOutcome::Partial { .. })));
+        assert_eq!(
+            vm.boot.extra_nics[0].mac.as_deref(),
+            Some("52:54:00:aa:bb:cc")
+        );
+        // The same disk twice is refused before the backend.
+        let before = calls(&seen).len();
+        assert!(e
+            .change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .is_err());
+        assert_eq!(calls(&seen).len(), before);
+    }
+
+    /// D6: the record names the disk as soon as the hypervisor's read-back
+    /// confirms it — a command killed during the guest wait must not leave
+    /// the domain with a disk the record does not know.
+    #[test]
+    fn a_disk_is_recorded_before_the_guest_wait() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        *seen.fail_after_attach.borrow_mut() = true;
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        assert!(e
+            .change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .is_err());
+        let rec = e.load_vm("app").unwrap();
+        assert_eq!(rec.boot.extra_disks.len(), 1, "recorded before the wait");
+        assert_eq!(rec.boot.extra_disks[0].target.as_deref(), Some("vdz"));
+    }
+
+    /// D10: nothing is removed live; the refusal names `vm stop`, and the
+    /// record keeps the disk.
+    #[test]
+    fn a_device_is_not_removed_live_and_is_removed_cold() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        e.change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .unwrap();
+        let err = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveDisk("vdz".into()),
+                Duration::ZERO,
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("D10") && err.to_string().contains("vm stop"),
+            "{err}"
+        );
+        assert_eq!(e.load_vm("app").unwrap().boot.extra_disks.len(), 1);
+        e.stop("app").unwrap();
+        let (vm, o) = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveDisk("vdz".into()),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert_eq!(o, None, "cold: nothing live to report");
+        assert!(vm.boot.extra_disks.is_empty());
+        assert!(
+            calls(&seen)
+                .iter()
+                .any(|c| c == "change_devices_cold app disks=0 nics=0"),
+            "{:?}",
+            calls(&seen)
+        );
+        // A key the VM does not have is refused, by name.
+        let err = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveNic("52:54:00:00:00:09".into()),
+                Duration::ZERO,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("52:54:00:00:00:09"), "{err}");
     }
 }

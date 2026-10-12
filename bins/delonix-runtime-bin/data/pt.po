@@ -15823,3 +15823,133 @@ msgstr "pool de armazenamento '{name}': a allowlist diz `mode: in-process`, que 
 
 msgid "storage pool '{pool}': its metadata is {pct}% full — no new volume is allocated above {limit}%"
 msgstr "pool de armazenamento '{pool}': os metadados estão {pct}% cheios — nenhum volume novo é alocado acima de {limit}%"
+
+# ---- Sprint 18 ----
+msgid "--reboot '{value}': expected `<Kind>/<name>` (e.g. `VirtualMachine/db`), a bare resource name, or `all`"
+msgstr "--reboot '{value}': esperava `<Kind>/<nome>` (ex.: `VirtualMachine/db`), um nome de recurso simples, ou `all`"
+
+msgid "--reboot '{value}': no resource with that name in this manifest (`stack plan` lists them)"
+msgstr "--reboot '{value}': nenhum recurso com esse nome neste manifesto (o `stack plan` lista-os)"
+
+msgid "{key}: {reason} — pass `--reboot {key}` (or `--reboot all`) to stop and start it (its disk is kept)"
+msgstr "{key}: {reason} — passa `--reboot {key}` (ou `--reboot all`) para o parar e arrancar (o disco é mantido)"
+
+msgid "converges by a stop and a start, the disk kept: {fields}"
+msgstr "converge com uma paragem e um arranque, mantendo o disco: {fields}"
+
+msgid "to reboot"
+msgstr "a reiniciar"
+
+msgid "reboot"
+msgstr "reinício"
+
+msgid "a reboot stops and starts the resource and keeps its disk — `stack apply` refuses it unless you pass `--reboot`"
+msgstr "um reinício pára e arranca o recurso e mantém o disco — o `stack apply` recusa-o a não ser que passes `--reboot`"
+
+msgid "On a VirtualMachine (ADR-0012): `labels` and `credentials` converge in place; `vcpus` and `memory` grow live up to `vcpusMax`/`memoryMax` on a backend that hotplugs; any other change to those four (and `network` on Cloud Hypervisor) is a reboot — stop and start, the disk kept, authorised by `--reboot`; `disk`, `backend` (and `network` elsewhere) recreate the VM, authorised by `--replace`."
+msgstr "Numa VirtualMachine (ADR-0012): `labels` e `credentials` convergem no lugar; `vcpus` e `memory` crescem a quente até `vcpusMax`/`memoryMax` num backend com hotplug; qualquer outra mudança a esses quatro (e a `network` no Cloud Hypervisor) é um reinício — paragem e arranque, com o disco mantido, autorizado por `--reboot`; `disk`, `backend` (e `network` nos outros) recriam a VM, autorizado por `--replace`."
+
+msgid "vm/{name}: vcpusMax ({max}) cannot be smaller than vcpus ({vcpus})"
+msgstr "vm/{name}: o vcpusMax ({max}) não pode ser menor que os vcpus ({vcpus})"
+
+msgid "vm/{name}: memoryMax '{value}' is not a size this engine understands (e.g. 2G, 1024M, 2Gi)"
+msgstr "vm/{name}: o memoryMax '{value}' não é um tamanho que este motor entenda (ex.: 2G, 1024M, 2Gi)"
+
+msgid "vm/{name}: memoryMax ({max} MiB) cannot be smaller than memory ({boot} MiB)"
+msgstr "vm/{name}: o memoryMax ({max} MiB) não pode ser menor que a memory ({boot} MiB)"
+
+msgid "vm/{name}: stopping to apply {fields} (the disk is kept)"
+msgstr "vm/{name}: a parar para aplicar {fields} (o disco é mantido)"
+
+msgid "vm/{name}: {field} -> {value} live (complete)"
+msgstr "vm/{name}: {field} -> {value} a quente (completo)"
+
+msgid "vm/{name}: {field} -> {value} live, but the guest has not taken it yet (partial): {reason}"
+msgstr "vm/{name}: {field} -> {value} a quente, mas o convidado ainda não o tomou (parcial): {reason}"
+
+msgid "New vCPU hotplug ceiling (never below the vCPUs it boots with)"
+msgstr "Novo tecto de hotplug de vCPUs (nunca abaixo dos vCPUs com que arranca)"
+
+msgid "New memory hotplug ceiling (`8G`, `8192M`; never below the boot memory)"
+msgstr "Novo tecto de hotplug de memória (`8G`, `8192M`; nunca abaixo da memória de arranque)"
+
+msgid "Clear both hotplug ceilings: the VM boots with no headroom"
+msgstr "Limpa os dois tectos de hotplug: a VM arranca sem margem"
+
+msgid "Allow stopping and starting a resource whose change converges only across a reboot, keeping its disk (`Kind/name`, or `all`)"
+msgstr "Permite parar e arrancar um recurso cuja mudança só converge com um reinício, mantendo o disco (`Kind/nome`, ou `all`)"
+
+msgid "Authorize STOPPING and starting a resource whose change converges only across a reboot, keeping its disk (ADR-0012): `--reboot <Kind>/<name>` (repeatable), or `--reboot all`. Without it, `apply` refuses and changes nothing. A stopped VM needs no authorisation"
+msgstr "Autoriza PARAR e arrancar um recurso cuja mudança só converge com um reinício, mantendo o disco (ADR-0012): `--reboot <Kind>/<nome>` (repetível), ou `--reboot all`. Sem ela, o `apply` recusa e não muda nada. Uma VM parada não precisa de autorização"
+
+msgid "Authorize stopping and starting a resource whose change converges only across a reboot — same meaning as in `apply`"
+msgstr "Autoriza parar e arrancar um recurso cuja mudança só converge com um reinício — o mesmo significado que no `apply`"
+
+msgid "Attach a disk image (`<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repeatable"
+msgstr "Liga uma imagem de disco (`<caminho>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repetível"
+
+msgid "Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable"
+msgstr "Liga uma NIC (`network:<nome>`, `bridge:<nome>` ou `user`, e depois `[,model=…][,mac=…]`), repetível"
+
+msgid "Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10)"
+msgstr "Remove um disco extra pelo seu alvo (`vdc`) ou caminho de origem — só em VMs paradas (ADR-0068 D10)"
+
+msgid "Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10)"
+msgstr "Remove uma NIC extra pelo seu MAC — só em VMs paradas (ADR-0068 D10)"
+
+msgid "--disk-add '{value}': expected `<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
+msgstr "--disk-add '{value}': esperava `<caminho>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
+
+msgid "--disk-add '{value}': '{part}' is not one of bus=virtio|sata|scsi, format=qcow2|raw, ro"
+msgstr "--disk-add '{value}': '{part}' não é um de bus=virtio|sata|scsi, format=qcow2|raw, ro"
+
+msgid "--nic-add '{value}': expected `network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`"
+msgstr "--nic-add '{value}': esperava `network:<nome>`, `bridge:<nome>` ou `user`, e depois `[,model=…][,mac=…]`"
+
+msgid "disk {disk} attached"
+msgstr "disco {disk} ligado"
+
+msgid "NIC on {source} attached"
+msgstr "NIC em {source} ligada"
+
+msgid "disk {disk} removed"
+msgstr "disco {disk} removido"
+
+msgid "NIC {mac} removed"
+msgstr "NIC {mac} removida"
+
+msgid "vm/{name}: vcpusMax must be at least 1"
+msgstr "vm/{name}: o vcpusMax tem de ser pelo menos 1"
+
+msgid "vm/{name}: the new shape was refused after the stop — nothing was changed, and the VM was started again on its previous shape"
+msgstr "vm/{name}: a nova forma foi recusada depois da paragem — nada foi mudado, e a VM voltou a arrancar com a forma anterior"
+
+msgid "vm/{name}: the new shape was refused after the stop, and the VM could not be started again ({again}): it is STOPPED — bring it back with `delonix vm start {name}`"
+msgstr "vm/{name}: a nova forma foi recusada depois da paragem, e a VM não voltou a arrancar ({again}): está PARADA — traz-a de volta com `delonix vm start {name}`"
+
+msgid "disk {disk} recorded for the next boot"
+msgstr "disco {disk} registado para o próximo arranque"
+
+msgid "NIC on {source} recorded for the next boot"
+msgstr "NIC em {source} registada para o próximo arranque"
+
+msgid "disk {disk} removed from the next boot"
+msgstr "disco {disk} removido do próximo arranque"
+
+msgid "NIC {mac} removed from the next boot"
+msgstr "NIC {mac} removida do próximo arranque"
+
+msgid "{kind}/{name}: {n} field(s) written for its next boot (it is stopped)"
+msgstr "{kind}/{name}: {n} campo(s) escrito(s) para o próximo arranque (está parada)"
+
+msgid "Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED"
+msgstr "Acrescenta vCPUs, memória, discos ou NICs a uma VM: a quente quando CORRE, para o próximo arranque quando está PARADA"
+
+msgid "Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED.\n\nAdds up to the ceiling declared at create (`--vcpus-max`/`--memory-max`, ADR-0068 D1).\n\n**Add only** — a target at or below what the VM already has is refused; use `vm resize` on a stopped VM to decrease. Without a declared ceiling above the boot size there is no headroom to add into, and the refusal names `vm resize --vcpus-max/--memory-max`.\n\nThe hypervisor accepting the request is not the guest using it (ADR-0068 D4): this waits up to `--wait` for the guest side to confirm, and on a backend or resource with no channel to see that at all (Cloud Hypervisor's CPU add, today) settles for `partial` immediately — the record still takes the hypervisor-assigned value either way, so a restart never drops it. A `partial` outcome exits 124 (`DX-8504`), printed after the record is already updated."
+msgstr "Acrescenta vCPUs, memória, discos ou NICs a uma VM: a quente quando CORRE, para o próximo arranque quando está PARADA.\n\nAcrescenta até ao tecto declarado na criação (`--vcpus-max`/`--memory-max`, ADR-0068 D1).\n\n**Só acrescenta** — um valor igual ou menor ao que a VM já tem é recusado; usa `vm resize` numa VM parada para diminuir. Sem um tecto declarado acima do tamanho de arranque não há margem para acrescentar, e a recusa nomeia `vm resize --vcpus-max/--memory-max`.\n\nO hipervisor aceitar o pedido não é o convidado a usá-lo (ADR-0068 D4): isto espera até `--wait` pela confirmação do lado do convidado, e num backend ou recurso sem canal para ver isso (o acrescento de CPU do Cloud Hypervisor, hoje) estabiliza em `partial` de imediato — o registo fica com o valor atribuído pelo hipervisor de qualquer forma, por isso um restart nunca o perde. Um resultado `partial` sai com 124 (`DX-8504`), impresso depois de o registo já estar actualizado."
+
+msgid "stack apply aborted: {what} (fix the manifest or use `stack validate`)"
+msgstr "stack apply abortado: {what} (corrige o manifesto ou usa `stack validate`)"
+
+msgid "{n} invalid VM shape(s)"
+msgstr "{n} forma(s) de VM inválida(s)"

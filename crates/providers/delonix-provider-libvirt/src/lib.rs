@@ -17,12 +17,13 @@ use delonix_compute::capability::{
 };
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem, GuestInfo, VmBackend,
-    VmConfig,
+    guest_cpu_outcome as cpu_outcome, guest_memory_outcome as memory_outcome, guest_memory_state,
+    guest_online_vcpus, mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem,
+    GuestInfo, HotplugOutcome, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
-use delonix_compute::Vm;
+use delonix_compute::{ExtraDisk, ExtraNic, Vm};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -358,13 +359,21 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:o domínio arranca com 2 vCPU",
             }),
-            C::VmHotplugCpuAdd => S::NotImplemented,
+            C::VmHotplugCpuAdd => bin(S::Partial {
+                detail: "`vm update --vcpus` via `virsh setvcpus --live` into the `<vcpu current=…>` maximum fixed at create (ADR-0068 D3), read back with `vcpucount`; the guest agent's `guest-get-vcpus` decides complete or partial (D4/D8); unit-tested, never run against a guest",
+            }),
             C::VmHotplugCpuRemove => S::NotImplemented,
-            C::VmHotplugMemoryAdd => S::NotImplemented,
+            C::VmHotplugMemoryAdd => bin(S::Partial {
+                detail: "`vm update --memory` plugs a DIMM (`attach-device --live`) into the `<maxMemory>` slots fixed at create (ADR-0068 D3), read back with `dominfo`; the agent's memory blocks decide complete or partial (D4/D8); unit-tested, never run against a guest",
+            }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskAdd => bin(S::Partial {
+                detail: "`vm update --disk-add` attaches the same `<disk>` the boot XML writes at a target free in the live domain, pinned in the record (ADR-0068 D6/D7), through a spare PCIe port reserved with a hotplug ceiling (D3); read back with `domblklist`, complete when the guest agent lists one more disk; unit-tested, never run against a guest",
+            }),
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicAdd => bin(S::Partial {
+                detail: "`vm update --nic-add` attaches the same `<interface>` the boot XML writes, MAC pinned in the record; read back with `domiflist`, complete when the guest agent lists the MAC; unit-tested, never run against a guest",
+            }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => bin(S::Partial {
                 detail: "`extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery",
@@ -920,6 +929,243 @@ fn parse_virtual_size(json: &str) -> Option<u64> {
         .as_u64()
 }
 
+// ---- hotplug (ADR-0068 Phases 2–5) -------------------------------------
+
+/// Writes `xml` to the VM's state directory and attaches it live; the file is
+/// removed whatever the answer.
+fn attach_xml(
+    vmdir: &Path,
+    vm: &Vm,
+    uri: &str,
+    xml: &str,
+    what: &str,
+) -> delonix_model::Result<()> {
+    let path = vmdir.join(format!("{}.{what}.xml", vm.name));
+    std::fs::write(&path, xml).map_err(|e| {
+        delonix_model::Error::from(Error::Command {
+            context: "vm hotplug",
+            message: format!("{}: {e}", path.display()),
+        })
+    })?;
+    let file = path.to_string_lossy().into_owned();
+    let out = virsh_hotplug(
+        &attach_device_argv(uri, &vm.name, &file),
+        "virsh attach-device",
+    );
+    let _ = std::fs::remove_file(&path);
+    out.map(|_| ())
+}
+
+/// The targets `virsh domblklist` lists. Pure.
+fn parse_domblklist(out: &str) -> Vec<String> {
+    out.lines()
+        .skip_while(|l| !l.trim_start().starts_with('-'))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect()
+}
+
+/// The MACs `virsh domiflist` lists (its last column). Pure.
+fn parse_domiflist_macs(out: &str) -> Vec<String> {
+    out.lines()
+        .skip_while(|l| !l.trim_start().starts_with('-'))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().last().map(str::to_string))
+        .filter(|m| m.contains(':'))
+        .collect()
+}
+
+/// The first target letter of `bus` (`vd` for virtio, `sd` otherwise) the
+/// live domain does not use; `a` is the boot disk's. Pure.
+fn next_free_target(bus: &str, live: &[String]) -> Option<String> {
+    let prefix = if bus == "virtio" { "vd" } else { "sd" };
+    (b'b'..=b'z')
+        .map(|c| format!("{prefix}{}", c as char))
+        .find(|t| !live.contains(t))
+}
+
+/// The MAC of the VM's next extra NIC: derived from its name and the slot,
+/// like the primary's, and never one it already carries. Pure.
+fn extra_nic_mac(vm: &Vm) -> String {
+    let taken = |m: &str| {
+        m.eq_ignore_ascii_case(&vm.mac)
+            || vm
+                .boot
+                .extra_nics
+                .iter()
+                .any(|n| n.mac.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(m)))
+    };
+    (1..)
+        .map(|i| mac_for(&format!("{}#nic{i}", vm.name)))
+        .find(|m| !taken(m))
+        .unwrap_or_default()
+}
+
+/// How many disks the guest's agent lists — `None` without an agent.
+fn guest_disk_count(uri: &str, domain: &str) -> delonix_model::Result<Option<usize>> {
+    Ok(
+        qemu_agent_query(uri, domain, r#"{"execute":"guest-get-disks"}"#)?
+            .and_then(|v| v.as_array().map(Vec::len)),
+    )
+}
+
+/// D4 for a disk: complete when the guest lists one more disk than before
+/// the attach. Pure.
+fn disk_outcome(before: Option<usize>, after: Option<usize>) -> HotplugOutcome {
+    match (before, after) {
+        (Some(b), Some(a)) if a > b => HotplugOutcome::Complete,
+        (Some(b), Some(a)) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has the disk but the guest still lists {a} disk(s), as before ({b})"
+            ),
+        },
+        _ => HotplugOutcome::Partial {
+            reason: "the domain took the disk, but no guest agent answers to say the guest \
+                     sees it (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
+/// D4 for a NIC: complete when the guest's agent lists an interface with
+/// that MAC. Pure.
+fn nic_outcome(mac: &str, interfaces: Option<&serde_json::Value>) -> HotplugOutcome {
+    let Some(list) = interfaces.and_then(|v| v.as_array()) else {
+        return HotplugOutcome::Partial {
+            reason: "the domain took the NIC, but no guest agent answers to say the guest \
+                     sees it (ADR-0068 D4)"
+                .into(),
+        };
+    };
+    let seen = list.iter().any(|i| {
+        i.get("hardware-address")
+            .and_then(|m| m.as_str())
+            .is_some_and(|m| m.eq_ignore_ascii_case(mac))
+    });
+    if seen {
+        HotplugOutcome::Complete
+    } else {
+        HotplugOutcome::Partial {
+            reason: format!("the domain has the NIC {mac} but the guest does not list it yet"),
+        }
+    }
+}
+
+/// The connection a RUNNING domain lives on, or an error naming it.
+fn live_domain_uri(vm: &Vm) -> delonix_model::Result<&'static str> {
+    libvirt_domain_uri(&vm.name).ok_or_else(|| {
+        delonix_model::Error::from(Error::Command {
+            context: "vm hotplug",
+            message: format!("libvirt does not know a domain named '{}'", vm.name),
+        })
+    })
+}
+
+/// `virsh`, with EVERY line of its stderr in the error: an `attach-device`
+/// says «Failed to attach device from …» first and the reason («No more
+/// available PCI slots») on the next line, which [`quiet`] drops.
+fn virsh_hotplug<S: AsRef<str>>(
+    args: &[S],
+    context: &'static str,
+) -> delonix_model::Result<String> {
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    match stable_cmd("virsh").args(&args).output() {
+        Ok(out) if out.status.success() => {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        }
+        Ok(out) => Err(Error::Command {
+            context,
+            message: virsh_reason(&String::from_utf8_lossy(&out.stderr)),
+        }
+        .into()),
+        Err(e) => Err(Error::Command {
+            context,
+            message: format!("virsh: {e}"),
+        }
+        .into()),
+    }
+}
+
+/// Every non-empty stderr line of `virsh`, without its `error: ` prefix,
+/// joined. Pure.
+fn virsh_reason(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .map(|l| l.strip_prefix("error: ").unwrap_or(l))
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        "unknown error".into()
+    } else {
+        lines.join(": ")
+    }
+}
+
+/// `virsh setvcpus`, named options only (a positional after a flag is the
+/// ordering bug this file already paid for). `--live`: the next boot rebuilds
+/// the domain from the record, which the engine updates (D6). Pure.
+fn setvcpus_argv(uri: &str, name: &str, count: u32) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "setvcpus".into(),
+        "--domain".into(),
+        name.into(),
+        "--count".into(),
+        count.to_string(),
+        "--live".into(),
+    ]
+}
+
+/// `virsh vcpucount --live --active`: the vCPUs the domain HAS now. Pure.
+fn vcpucount_argv(uri: &str, name: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "vcpucount".into(),
+        "--domain".into(),
+        name.into(),
+        "--live".into(),
+        "--active".into(),
+    ]
+}
+
+fn attach_device_argv(uri: &str, name: &str, file: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "attach-device".into(),
+        "--domain".into(),
+        name.into(),
+        "--file".into(),
+        file.into(),
+        "--live".into(),
+    ]
+}
+
+/// One hot-added DIMM of `kib`, in guest node 0 (the only cell the domain is
+/// booted with). Pure.
+fn dimm_xml(kib: u64) -> String {
+    format!(
+        "<memory model='dimm'>\n  <target>\n    <size unit='KiB'>{kib}</size>\n    \
+         <node>0</node>\n  </target>\n</memory>\n"
+    )
+}
+
+fn parse_vcpucount(out: &str) -> Option<u32> {
+    out.trim().parse().ok()
+}
+
+/// `virsh dominfo`'s `Max memory:` — the domain's memory INCLUDING plugged
+/// DIMMs (`Used memory:` is the balloon target, not what is plugged). Pure.
+fn parse_dominfo_memory_kib(out: &str) -> Option<u64> {
+    out.lines().find_map(|l| {
+        let rest = l.trim().strip_prefix("Max memory:")?;
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
 /// `true` when a `virsh qemu-agent-command` failure MEANS "nothing is
 /// listening", not "something else broke". Pure, extracted out of the match
 /// guard above so it is testable without a real `virsh`. `virsh` phrases
@@ -1178,6 +1424,226 @@ fn serial_capture_path(cfg: &VmConfig, overlay: &str) -> Option<String> {
     )
 }
 
+/// DIMM slots reserved for memory hotplug (ADR-0068 D3): each hot-add plugs
+/// one DIMM, so this is how many separate memory additions a boot allows.
+const MEMORY_HOTPLUG_SLOTS: u32 = 16;
+
+/// Spare PCIe root ports reserved at boot for hot-added disks and NICs
+/// (ADR-0068 D3/D7).
+const SPARE_PCIE_ROOT_PORTS: u32 = 4;
+
+/// The spare PCIe root ports a q35 domain with hotplug headroom reserves
+/// (ADR-0068 D3/D7). **The `pcie-root` at index 0 is written explicitly**:
+/// a port with no index takes the first free one, and with no root declared
+/// that is index 0 — which libvirt refuses on q35 («The PCI controller with
+/// index='0' must be model='pcie-root' for this machine type»), measured on
+/// libvirt 10.0.0, so the domain could never be defined. Any other machine
+/// type (i440fx `pc`) gets nothing: its PCI bus is hot-pluggable as it is,
+/// and a PCIe port is not valid there. Pure.
+///
+/// **libvirt puts the boot devices on the declared ports FIRST** (measured:
+/// with four bare ports declared, all of them carried a boot device and a
+/// live attach answered «No more available PCI slots»). So the count is the
+/// devices the domain places on root ports, plus the spare ones —
+/// [`pcie_devices_at_boot`] errs on the side of one port too many, which
+/// costs a free slot on bus 0; one too few costs the hotplug.
+fn spare_pcie_ports_xml(cfg: &VmConfig, machine: &str, headroom: bool) -> String {
+    if !headroom || !(machine.starts_with("q35") || machine.contains("-q35")) {
+        return String::new();
+    }
+    let mut s = String::from("    <controller type='pci' index='0' model='pcie-root'/>\n");
+    for _ in 0..pcie_devices_at_boot(cfg) + SPARE_PCIE_ROOT_PORTS {
+        s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
+    }
+    s
+}
+
+/// The devices a q35 domain from `cfg` places on PCIe root ports at boot:
+/// every virtio disk (the boot disk, virtio extras, the seed), a SCSI
+/// controller when an extra uses it, every 9p share, every NIC, every
+/// passed-through PCI device, a virtio video, and the three libvirt always
+/// adds (virtio-serial for the agent channel, the memory balloon, the USB
+/// controller). SATA hangs off the integrated ICH9 controller and a `vga`
+/// video is integrated on bus 0: neither takes a port. Pure.
+fn pcie_devices_at_boot(cfg: &VmConfig) -> u32 {
+    let virtio_disks = cfg
+        .extra_disks
+        .iter()
+        .filter(|d| matches!(d.bus.as_str(), "" | "virtio"))
+        .count();
+    let scsi = cfg.extra_disks.iter().any(|d| d.bus == "scsi") as usize;
+    let video =
+        matches!(cfg.video.as_deref(), Some("virtio" | "qxl")) || (cfg.video.is_none() && cfg.vnc);
+    let n = 1 // boot disk
+        + virtio_disks
+        + scsi
+        + cfg.seed.is_some() as usize
+        + cfg.volumes.len()
+        + 1 // primary NIC
+        + cfg.extra_nics.len()
+        + cfg.devices.len()
+        + video as usize
+        + 3; // virtio-serial, memballoon, USB
+    n as u32
+}
+
+/// The hotplug ceilings that open headroom: `(Some(max vCPUs), Some(max KiB))`
+/// only where the ceiling is ABOVE the boot size — a ceiling equal to it is no
+/// headroom and changes nothing in the domain. Pure.
+fn hotplug_ceilings(cfg: &VmConfig, vcpus: u32, mib: u64) -> (Option<u32>, Option<u64>) {
+    let max_vcpus = cfg.vcpus_max.filter(|m| *m > vcpus);
+    let max_kib = cfg.memory_max_mib.filter(|m| *m > mib).map(|m| m * 1024);
+    (max_vcpus, max_kib)
+}
+
+/// `<vcpu>`, and with headroom the per-vCPU `<vcpus>` table libvirt needs to
+/// hot-add them (`virsh setvcpus --live`). vCPU 0 is never hot-pluggable: the
+/// guest cannot run without it. Pure.
+fn libvirt_vcpu_xml(vcpus: u32, max: Option<u32>) -> String {
+    let Some(max) = max else {
+        return format!("  <vcpu placement='static'>{vcpus}</vcpu>\n");
+    };
+    let mut s = format!("  <vcpu placement='static' current='{vcpus}'>{max}</vcpu>\n");
+    s.push_str("  <vcpus>\n");
+    for i in 0..max {
+        let enabled = if i < vcpus { "yes" } else { "no" };
+        let hotpluggable = if i == 0 { "no" } else { "yes" };
+        s.push_str(&format!(
+            "    <vcpu id='{i}' enabled='{enabled}' hotpluggable='{hotpluggable}'/>\n"
+        ));
+    }
+    s.push_str("  </vcpus>\n");
+    s
+}
+
+/// The target of every extra disk at boot: a pinned one keeps its own; the
+/// others take, in order, the next letter of their bus (`vd` for virtio,
+/// `sd` otherwise) that no other disk holds. `vda` is the boot disk. Pure.
+fn extra_disk_targets(disks: &[ExtraDisk]) -> Vec<String> {
+    let pinned: Vec<&str> = disks.iter().filter_map(|d| d.target.as_deref()).collect();
+    let mut taken: Vec<String> = vec!["vda".into()];
+    taken.extend(pinned.iter().map(|t| t.to_string()));
+    disks
+        .iter()
+        .map(|d| match &d.target {
+            Some(t) => t.clone(),
+            None => {
+                let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
+                let t = next_free_target(bus, &taken).unwrap_or_default();
+                taken.push(t.clone());
+                t
+            }
+        })
+        .collect()
+}
+
+/// The cloud-init seed's target: the first virtio letter after `vda` that no
+/// extra disk holds. Before, it was "the letter after the unpinned extras",
+/// which a PINNED extra could already hold. Pure.
+fn seed_target(extra_targets: &[String]) -> String {
+    let mut taken = vec!["vda".to_string()];
+    taken.extend(extra_targets.iter().cloned());
+    next_free_target("virtio", &taken).unwrap_or_else(|| "vdz".into())
+}
+
+/// Pins every disk `new` adds over `old` to a letter the OLD layout leaves
+/// free — its extras and its seed included — so adding a disk to a stopped VM
+/// never moves the seed or a disk the guest already knows. Pure.
+fn pin_added_disks(old: &[ExtraDisk], new: &mut [ExtraDisk]) {
+    let old_targets = extra_disk_targets(old);
+    let mut taken = vec!["vda".to_string(), seed_target(&old_targets)];
+    taken.extend(old_targets);
+    taken.extend(new.iter().filter_map(|d| d.target.clone()));
+    for d in new.iter_mut() {
+        if d.target.is_some() || old.iter().any(|o| o.source == d.source) {
+            continue;
+        }
+        let bus = if d.bus.is_empty() {
+            "virtio"
+        } else {
+            d.bus.as_str()
+        };
+        if let Some(t) = next_free_target(bus, &taken) {
+            taken.push(t.clone());
+            d.target = Some(t);
+        }
+    }
+}
+
+/// One extra disk's `<disk>` element at `target` — the SAME text the boot XML
+/// and a live `attach-device` use, so a hot-added disk boots next time as the
+/// guest saw it. Pure.
+fn libvirt_extra_disk_xml(d: &ExtraDisk, target: &str) -> String {
+    let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
+    let device = if d.device.is_empty() {
+        "disk"
+    } else {
+        &d.device
+    };
+    let fmt = if d.format.is_empty() {
+        "qcow2"
+    } else {
+        &d.format
+    };
+    let mut s = format!("    <disk type='file' device='{}'>\n", xml_escape(device));
+    s.push_str(&format!(
+        "      <driver name='qemu' type='{}'/>\n",
+        xml_escape(fmt)
+    ));
+    s.push_str(&format!(
+        "      <source file='{}'/>\n",
+        xml_escape(&d.source)
+    ));
+    s.push_str(&format!(
+        "      <target dev='{}' bus='{}'/>\n",
+        xml_escape(target),
+        xml_escape(bus)
+    ));
+    if d.read_only {
+        s.push_str("      <readonly/>\n");
+    }
+    s.push_str("    </disk>\n");
+    s
+}
+
+/// One extra NIC's `<interface>` — the same text for the boot XML and a live
+/// `attach-device`. Pure.
+fn libvirt_extra_nic_xml(n: &ExtraNic) -> String {
+    let model = if n.model.is_empty() {
+        "virtio"
+    } else {
+        &n.model
+    };
+    let (itype, src) = match n.kind.as_str() {
+        "bridge" => (
+            "bridge",
+            n.source
+                .as_deref()
+                .map(|b| format!("      <source bridge='{}'/>\n", xml_escape(b))),
+        ),
+        "user" => ("user", None),
+        _ => (
+            "network",
+            Some(format!(
+                "      <source network='{}'/>\n",
+                xml_escape(n.source.as_deref().unwrap_or("default"))
+            )),
+        ),
+    };
+    let mut s = format!("    <interface type='{itype}'>\n");
+    if let Some(src) = src {
+        s.push_str(&src);
+    }
+    if let Some(m) = &n.mac {
+        s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(m)));
+    }
+    s.push_str(&format!(
+        "      <model type='{}'/>\n    </interface>\n",
+        xml_escape(model)
+    ));
+    s
+}
+
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Full-domain escape hatch: the manifest author owns the entire XML. The
     // rootless seclabel is still injected at boot (`create`, via the </domain>
@@ -1189,10 +1655,21 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     let kib = mib * 1024;
     let vcpus = cfg.vcpus.max(1);
     let name = xml_escape(&cfg.name);
+    // ADR-0068 D3: the hotplug CEILINGS are fixed here, at boot. Without them
+    // there is no headroom, and every limit below is sized from the boot size
+    // exactly as before; with them, the CONTAINMENT limits are sized from the
+    // ceiling — a hard_limit computed from the boot memory would OOM-kill the
+    // domain the moment the guest used the memory it was hot-added.
+    let (max_vcpus, max_kib) = hotplug_ceilings(cfg, vcpus, mib);
 
     let mut s = String::new();
     s.push_str("<domain type='kvm'>\n");
     s.push_str(&format!("  <name>{name}</name>\n"));
+    if let Some(max_kib) = max_kib {
+        s.push_str(&format!(
+            "  <maxMemory slots='{MEMORY_HOTPLUG_SLOTS}' unit='KiB'>{max_kib}</maxMemory>\n"
+        ));
+    }
     s.push_str(&format!("  <memory unit='KiB'>{kib}</memory>\n"));
     s.push_str(&format!(
         "  <currentMemory unit='KiB'>{kib}</currentMemory>\n"
@@ -1219,12 +1696,12 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // for legitimate overhead. `DELONIX_VM_MEM_OVERHEAD_PCT` tunes the
     // percentage; `DELONIX_VM_MEM_HARD_LIMIT=off` disables the element entirely
     // for anyone who measured their workload and wants the old behaviour.
-    if let Some(limit_kib) = mem_hard_limit_kib(kib) {
+    if let Some(limit_kib) = mem_hard_limit_kib(max_kib.unwrap_or(kib)) {
         s.push_str(&format!(
             "  <memtune>\n    <hard_limit unit='KiB'>{limit_kib}</hard_limit>\n  </memtune>\n"
         ));
     }
-    s.push_str(&format!("  <vcpu placement='static'>{vcpus}</vcpu>\n"));
+    s.push_str(&libvirt_vcpu_xml(vcpus, max_vcpus));
     // CPU pinning (NUMA/determinism) and CONTAINMENT (2/2).
     //
     // `<vcpu>N` bounds the vCPU THREADS to N cores, but a domain is more than
@@ -1239,7 +1716,8 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // while still bounding a runaway. `DELONIX_VM_CPU_QUOTA_CORES` overrides the
     // ceiling outright (fractional allowed — this is how you give a tenant 8
     // vCPUs for parallelism but only 2 cores of throughput); `off` disables it.
-    let cputune_quota = cpu_quota_micros(vcpus);
+    let all_vcpus = max_vcpus.unwrap_or(vcpus);
+    let cputune_quota = cpu_quota_micros(all_vcpus);
     if cfg.cpu_affinity.is_some() || cputune_quota.is_some() {
         s.push_str("  <cputune>\n");
         if let Some(q) = cputune_quota {
@@ -1248,7 +1726,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         }
         if let Some(list) = &cfg.cpu_affinity {
             let list = xml_escape(list);
-            for v in 0..vcpus {
+            for v in 0..all_vcpus {
                 s.push_str(&format!("    <vcpupin vcpu='{v}' cpuset='{list}'/>\n"));
             }
         }
@@ -1292,7 +1770,15 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     }
     s.push_str("  </os>\n");
     s.push_str("  <features>\n    <acpi/>\n    <apic/>\n  </features>\n");
-    s.push_str(&libvirt_cpu_xml(cfg));
+    // Memory hotplug needs a guest node topology: a DIMM is plugged into a
+    // node. One cell, every vCPU, the boot memory.
+    let node_cell = max_kib.map(|_| {
+        format!(
+            "    <numa>\n      <cell id='0' cpus='0-{}' memory='{kib}' unit='KiB'/>\n    </numa>\n",
+            all_vcpus - 1
+        )
+    });
+    s.push_str(&libvirt_cpu_xml(cfg, node_cell.as_deref()));
     s.push_str("  <clock offset='utc'/>\n");
     s.push_str("  <on_poweroff>destroy</on_poweroff>\n");
     // restart policy: 'always'/'on-failure' → restart on crash.
@@ -1346,54 +1832,9 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // unless the user pinned one — `vda` stays reserved above, and the cloud-init
     // seed takes the virtio letter AFTER the extras, so adding a seed never
     // renames a disk the guest already knows.
-    let mut vd = b'b'; // next virtio letter (vda taken by the main disk)
-    let mut sd = b'b'; // next sata/scsi letter (kept from when the seed sat on sda)
-    for d in &cfg.extra_disks {
-        let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
-        let device = if d.device.is_empty() {
-            "disk"
-        } else {
-            &d.device
-        };
-        let fmt = if d.format.is_empty() {
-            "qcow2"
-        } else {
-            &d.format
-        };
-        let target = match &d.target {
-            Some(t) => t.clone(),
-            None if bus == "virtio" => {
-                let t = format!("vd{}", vd as char);
-                vd += 1;
-                t
-            }
-            None => {
-                let t = format!("sd{}", sd as char);
-                sd += 1;
-                t
-            }
-        };
-        s.push_str(&format!(
-            "    <disk type='file' device='{}'>\n",
-            xml_escape(device)
-        ));
-        s.push_str(&format!(
-            "      <driver name='qemu' type='{}'/>\n",
-            xml_escape(fmt)
-        ));
-        s.push_str(&format!(
-            "      <source file='{}'/>\n",
-            xml_escape(&d.source)
-        ));
-        s.push_str(&format!(
-            "      <target dev='{}' bus='{}'/>\n",
-            xml_escape(&target),
-            xml_escape(bus)
-        ));
-        if d.read_only {
-            s.push_str("      <readonly/>\n");
-        }
-        s.push_str("    </disk>\n");
+    let targets = extra_disk_targets(&cfg.extra_disks);
+    for (d, target) in cfg.extra_disks.iter().zip(&targets) {
+        s.push_str(&libvirt_extra_disk_xml(d, target));
     }
     // cloud-init seed (NoCloud), as a read-only VIRTIO disk.
     //
@@ -1408,7 +1849,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // seed by its `cidata` label on any block device. `snapshot='no'` keeps it
     // out of libvirt's disk snapshots and blockcommit, as the cdrom was.
     if let Some(seed) = &cfg.seed {
-        let target = format!("vd{}", vd as char);
+        let target = seed_target(&targets);
         s.push_str("    <disk type='file' device='disk' snapshot='no'>\n");
         s.push_str("      <driver name='qemu' type='raw'/>\n");
         s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
@@ -1434,38 +1875,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str(&libvirt_interface_xml(cfg, mac));
     // Extra NICs (typed): additional interfaces beyond the primary one.
     for n in &cfg.extra_nics {
-        let model = if n.model.is_empty() {
-            "virtio"
-        } else {
-            &n.model
-        };
-        let (itype, src) = match n.kind.as_str() {
-            "bridge" => (
-                "bridge",
-                n.source
-                    .as_deref()
-                    .map(|b| format!("      <source bridge='{}'/>\n", xml_escape(b))),
-            ),
-            "user" => ("user", None),
-            _ => (
-                "network",
-                Some(format!(
-                    "      <source network='{}'/>\n",
-                    xml_escape(n.source.as_deref().unwrap_or("default"))
-                )),
-            ),
-        };
-        s.push_str(&format!("    <interface type='{itype}'>\n"));
-        if let Some(src) = src {
-            s.push_str(&src);
-        }
-        if let Some(m) = &n.mac {
-            s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(m)));
-        }
-        s.push_str(&format!(
-            "      <model type='{}'/>\n    </interface>\n",
-            xml_escape(model)
-        ));
+        s.push_str(&libvirt_extra_nic_xml(n));
     }
     // serial console (boot logs) — a capture FILE or an interactive pty, never
     // both: one guest `/dev/console` maps to one serial port. See
@@ -1552,6 +1962,13 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("    <channel type='unix'>\n");
     s.push_str("      <target type='virtio' name='org.qemu.guest_agent.0'/>\n");
     s.push_str("    </channel>\n");
+    // ADR-0068 D3/D7: on q35 a hot-added disk or NIC needs a FREE PCIe root
+    // port, and libvirt only creates the ports the boot devices use. Spare
+    // ports are reserved here, at boot — they cannot be added live.
+    // Only with declared headroom (ADR-0068 D3): spare ports change the
+    // domain's shape, which someone who did not ask for hotplug never gets.
+    let headroom = max_vcpus.is_some() || max_kib.is_some();
+    s.push_str(&spare_pcie_ports_xml(cfg, machine, headroom));
     // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
     // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
     // manifests only (a fragment can name arbitrary host paths/devices).
@@ -1569,7 +1986,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
 /// The domain's `<cpu>` element from `cpu_model` + `cpu_topology`. **Pure**.
 /// `host-passthrough` (default) exposes the host CPU exactly; `host-model`
 /// asks libvirt for the closest named model; anything else is a custom model.
-fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
+fn libvirt_cpu_xml(cfg: &VmConfig, node_cell: Option<&str>) -> String {
     let topo = cfg.cpu_topology.as_ref().map(|t| {
         format!(
             "    <topology sockets='{}' cores='{}' threads='{}'/>\n",
@@ -1578,6 +1995,11 @@ fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
             t.threads.max(1)
         )
     });
+    // The node cell rides inside `<cpu>`, after the topology.
+    let topo = match (topo, node_cell) {
+        (None, None) => None,
+        (t, n) => Some(format!("{}{}", t.unwrap_or_default(), n.unwrap_or(""))),
+    };
     match cfg.cpu_model.as_deref().unwrap_or("host-passthrough") {
         "host-passthrough" => match topo {
             Some(t) => format!("  <cpu mode='host-passthrough' check='none'>\n{t}  </cpu>\n"),
@@ -2367,6 +2789,287 @@ impl VmBackend for LibvirtBackend {
             agent_version,
             filesystems,
         }))
+    }
+
+    /// `virsh setvcpus --live` (ADR-0068 Phase 2), up to the `<vcpu>` maximum
+    /// the domain was booted with (D3). The count read back is the domain's
+    /// live `vcpucount` (D5); whether the GUEST onlined them is asked of its
+    /// agent (`guest-get-vcpus`), polled for `wait` (D4). No agent, or vCPUs
+    /// the guest leaves offline (an image without the udev rule, D8), is
+    /// `Partial` — never success.
+    fn hotplug_add_cpu(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        target_vcpus: u32,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+        let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+        if target_vcpus > ceiling {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_vcpus} vCPUs — the declared maximum is \
+                 {ceiling} (see `vm resize --vcpus-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        virsh_hotplug(
+            &setvcpus_argv(uri, &vm.name, target_vcpus),
+            "virsh setvcpus",
+        )?;
+        let out = virsh_hotplug(&vcpucount_argv(uri, &vm.name), "virsh vcpucount")?;
+        let assigned = parse_vcpucount(&out).ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "virsh vcpucount",
+                message: format!("not a count: {out}"),
+            })
+        })?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let guest = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-vcpus"}"#)?;
+            let online = guest.as_ref().map(guest_online_vcpus);
+            match cpu_outcome(assigned, online) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if std::time::Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// A DIMM through `virsh attach-device --live` (ADR-0068 Phase 3), into
+    /// the `<maxMemory>` slots reserved at boot (D3). The size read back is
+    /// the domain's live memory from `dominfo` (D5); the guest side is its
+    /// agent's memory blocks — an image that does not online hot-added
+    /// memory (D8: no `memhp_default_state=online` nor udev rule) leaves them
+    /// offline, which is `Partial`.
+    fn hotplug_add_memory(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        target_mib: u64,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+        let ceiling = vm.memory_max_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib > ceiling {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_mib} MiB — the declared maximum is \
+                 {ceiling} MiB (see `vm resize --memory-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        let current_mib = parse_dominfo_memory_kib(&virsh_hotplug(
+            &["-c", uri, "dominfo", "--domain", &vm.name],
+            "virsh dominfo",
+        )?)
+        .map(|k| k / 1024)
+        .unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib <= current_mib {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' already has {current_mib} MiB live (asked for {target_mib} MiB)",
+                vm.name
+            ))
+            .into());
+        }
+        let xml_path = vmdir.join(format!("{}.dimm.xml", vm.name));
+        std::fs::write(&xml_path, dimm_xml((target_mib - current_mib) * 1024)).map_err(|e| {
+            delonix_model::Error::from(Error::Command {
+                context: "vm hotplug memory",
+                message: format!("{}: {e}", xml_path.display()),
+            })
+        })?;
+        let xml = xml_path.to_string_lossy().into_owned();
+        let attached = virsh_hotplug(
+            &attach_device_argv(uri, &vm.name, &xml),
+            "virsh attach-device",
+        );
+        let _ = std::fs::remove_file(&xml_path);
+        attached?;
+        let assigned = parse_dominfo_memory_kib(&virsh_hotplug(
+            &["-c", uri, "dominfo", "--domain", &vm.name],
+            "virsh dominfo",
+        )?)
+        .map(|k| k / 1024)
+        .ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "virsh dominfo",
+                message: "no 'Max memory' line — the live memory size is unknown".into(),
+            })
+        })?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let blocks =
+                qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-memory-blocks"}"#)?;
+            let info = qemu_agent_query(
+                uri,
+                &vm.name,
+                r#"{"execute":"guest-get-memory-block-info"}"#,
+            )?;
+            let state = match (blocks, info) {
+                (Some(b), Some(i)) => guest_memory_state(&b, &i),
+                _ => None,
+            };
+            match memory_outcome(assigned, state) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if std::time::Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --disk-add` on a running domain (ADR-0068 Phase 4): the
+    /// SAME `<disk>` the boot XML writes, at the next target letter free in
+    /// the LIVE domain (pinned, so the next boot keeps it), through
+    /// `attach-device --live` — which needs a spare PCIe port on q35 (D3).
+    /// Read back with `domblklist`; the guest agent's disk list growing is
+    /// what makes it complete (D4).
+    fn hotplug_add_disk(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        disk: &ExtraDisk,
+        wait: std::time::Duration,
+        attached: &mut dyn FnMut(&ExtraDisk) -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
+        if disk.device == "cdrom" {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}': a cdrom is not hot-plugged — stop the VM and add it",
+                vm.name
+            ))
+            .into());
+        }
+        if !Path::new(&disk.source).is_file() {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}': the disk to add '{}' is not a file on this host",
+                vm.name, disk.source
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        let live = parse_domblklist(&virsh_hotplug(
+            &["-c", uri, "domblklist", "--domain", &vm.name],
+            "virsh domblklist",
+        )?);
+        let bus = if disk.bus.is_empty() {
+            "virtio"
+        } else {
+            &disk.bus
+        };
+        let target = match &disk.target {
+            Some(t) if live.contains(t) => {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' already has a disk at '{t}'",
+                    vm.name
+                ))
+                .into())
+            }
+            Some(t) => t.clone(),
+            None => next_free_target(bus, &live).ok_or_else(|| {
+                delonix_model::Error::from(Error::InvalidResize(format!(
+                    "VM '{}' has no free {bus} target letter left",
+                    vm.name
+                )))
+            })?,
+        };
+        let mut pinned = disk.clone();
+        pinned.target = Some(target.clone());
+        let before = guest_disk_count(uri, &vm.name)?;
+        attach_xml(
+            vmdir,
+            vm,
+            uri,
+            &libvirt_extra_disk_xml(&pinned, &target),
+            "disk",
+        )?;
+        let after_live = parse_domblklist(&virsh_hotplug(
+            &["-c", uri, "domblklist", "--domain", &vm.name],
+            "virsh domblklist",
+        )?);
+        if !after_live.contains(&target) {
+            return Err(Error::Command {
+                context: "virsh attach-device",
+                message: format!(
+                    "libvirt accepted the disk but '{target}' is not in the domain's disk list"
+                ),
+            }
+            .into());
+        }
+        // Recorded now (D6), before the guest wait a kill could interrupt.
+        attached(&pinned)?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let after = guest_disk_count(uri, &vm.name)?;
+            let outcome = disk_outcome(before, after);
+            match outcome {
+                HotplugOutcome::Complete => return Ok((pinned, outcome)),
+                partial if std::time::Instant::now() >= deadline => return Ok((pinned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --nic-add` on a running domain (ADR-0068 Phase 5): the
+    /// SAME `<interface>` the boot XML writes, with a MAC derived from the VM
+    /// and pinned, through `attach-device --live`. Read back with
+    /// `domiflist`; the guest agent listing that MAC makes it complete (D4).
+    fn hotplug_add_nic(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        nic: &ExtraNic,
+        wait: std::time::Duration,
+        attached: &mut dyn FnMut(&ExtraNic) -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
+        let uri = live_domain_uri(vm)?;
+        let mut pinned = nic.clone();
+        let mac = match &nic.mac {
+            Some(m) => m.clone(),
+            None => extra_nic_mac(vm),
+        };
+        pinned.mac = Some(mac.clone());
+        attach_xml(vmdir, vm, uri, &libvirt_extra_nic_xml(&pinned), "nic")?;
+        let macs = parse_domiflist_macs(&virsh_hotplug(
+            &["-c", uri, "domiflist", "--domain", &vm.name],
+            "virsh domiflist",
+        )?);
+        if !macs.iter().any(|m| m.eq_ignore_ascii_case(&mac)) {
+            return Err(Error::Command {
+                context: "virsh attach-device",
+                message: format!(
+                    "libvirt accepted the NIC but {mac} is not in the domain's interface list"
+                ),
+            }
+            .into());
+        }
+        attached(&pinned)?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let guest = qemu_agent_query(
+                uri,
+                &vm.name,
+                r#"{"execute":"guest-network-get-interfaces"}"#,
+            )?;
+            let outcome = nic_outcome(&mac, guest.as_ref());
+            match outcome {
+                HotplugOutcome::Complete => return Ok((pinned, outcome)),
+                partial if std::time::Instant::now() >= deadline => return Ok((pinned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// Extra disks/NICs of a STOPPED VM: the record is the whole definition
+    /// and the next boot rebuilds the domain from it, so nothing else changes.
+    fn change_devices_cold(
+        &self,
+        _vmdir: &Path,
+        old: &Vm,
+        new: &mut Vm,
+    ) -> delonix_model::Result<()> {
+        pin_added_disks(&old.boot.extra_disks, &mut new.boot.extra_disks);
+        Ok(())
     }
 
     /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
@@ -3850,5 +4553,490 @@ mod tests {
         c.bridge = Some("br0".into());
         let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");
         assert!(br.contains("type='bridge'") && br.contains("source bridge='br0'"));
+    }
+}
+
+/// ADR-0068 Phases 2–3 on libvirt: the ceilings fixed at boot (D3), the argv
+/// that adds live, and the outcome the guest's agent decides (D4, D8).
+#[cfg(test)]
+mod hotplug_tests {
+    use super::*;
+
+    fn cfg(vcpus: u32, memory: &str, vmax: Option<u32>, mmax: Option<u64>) -> VmConfig {
+        VmConfig {
+            name: "hp".into(),
+            disk: String::new(),
+            vcpus,
+            memory: memory.into(),
+            vcpus_max: vmax,
+            memory_max_mib: mmax,
+            ..Default::default()
+        }
+    }
+
+    /// The defect this closes: `vm create --vcpus-max/--memory-max` recorded
+    /// a ceiling the domain never had — no `current=`, no `<maxMemory>` — so
+    /// every live add failed in libvirt after the engine had accepted it.
+    #[test]
+    fn a_declared_ceiling_opens_headroom_in_the_domain() {
+        let xml = libvirt_domain_xml(
+            &cfg(2, "2048M", Some(8), Some(8192)),
+            "/o.qcow2",
+            "52:54:00:00:00:01",
+        );
+        assert!(
+            xml.contains("<vcpu placement='static' current='2'>8</vcpu>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='0' enabled='yes' hotpluggable='no'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='1' enabled='yes' hotpluggable='yes'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='7' enabled='no' hotpluggable='yes'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<maxMemory slots='16' unit='KiB'>8388608</maxMemory>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<memory unit='KiB'>2097152</memory>"), "{xml}");
+        assert!(
+            xml.contains("<cell id='0' cpus='0-7' memory='2097152' unit='KiB'/>"),
+            "a DIMM needs a NUMA node to plug into: {xml}"
+        );
+        // The boot devices take ports first: boot disk, NIC, virtio-serial,
+        // balloon and USB here — five — and four stay spare.
+        assert_eq!(
+            xml.matches("model='pcie-root-port'").count(),
+            5 + 4,
+            "{xml}"
+        );
+        // libvirt refuses a q35 domain whose index 0 is a port: the root has
+        // to be declared, at index 0, BEFORE any port takes that index.
+        let root = xml
+            .find("<controller type='pci' index='0' model='pcie-root'/>")
+            .expect("no pcie-root at index 0");
+        assert!(root < xml.find("pcie-root-port").unwrap(), "{xml}");
+    }
+
+    /// The containment limits follow the ceiling: a hard_limit sized from the
+    /// boot memory OOM-kills the domain once the guest uses a hot-added DIMM.
+    #[test]
+    fn the_containment_limits_are_sized_from_the_ceiling() {
+        let with = libvirt_domain_xml(&cfg(2, "2048M", Some(8), Some(8192)), "/o", "m");
+        let without = libvirt_domain_xml(&cfg(2, "2048M", None, None), "/o", "m");
+        if let Some(limit) = mem_hard_limit_kib(8192 * 1024) {
+            assert!(with.contains(&format!("<hard_limit unit='KiB'>{limit}</hard_limit>")));
+        }
+        if let Some(q) = cpu_quota_micros(8) {
+            assert!(with.contains(&format!("<quota>{q}</quota>")), "{with}");
+        }
+        assert!(without.contains("<vcpu placement='static'>2</vcpu>"));
+        assert!(!without.contains("maxMemory") && !without.contains("<numa>"));
+        assert!(
+            !without.contains("pcie-root-port"),
+            "no headroom, no spare ports"
+        );
+    }
+
+    /// i440fx (`pc`) has a hot-pluggable PCI bus of its own and no PCIe:
+    /// a ceiling there emits no port, and no `pcie-root` either.
+    #[test]
+    fn a_pc_machine_gets_no_pcie_controller() {
+        let mut c = cfg(2, "2048M", Some(8), Some(8192));
+        c.machine = Some("pc".into());
+        let xml = libvirt_domain_xml(&c, "/o.qcow2", "m");
+        assert!(!xml.contains("pcie-root"), "{xml}");
+        assert!(
+            xml.contains("<maxMemory"),
+            "the memory headroom stays: {xml}"
+        );
+    }
+
+    /// The domain is DEFINED by the real libvirt, never booted: `virsh define`
+    /// on `qemu:///session`, then `undefine`. Run with `--ignored` on a host
+    /// with libvirt; this is what caught the missing `pcie-root`.
+    #[test]
+    #[ignore = "needs virsh and qemu:///session; defines and undefines a domain, boots nothing"]
+    fn libvirt_accepts_the_headroom_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = dir.path().join("d.qcow2");
+        std::fs::write(&disk, b"").unwrap();
+        let mut c = cfg(2, "2048M", Some(4), Some(4096));
+        c.name = format!("dlx18-define-{}", std::process::id());
+        let xml = libvirt_domain_xml(&c, &disk.to_string_lossy(), "52:54:00:00:18:01");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let def = quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()]);
+        let _ = quiet("virsh", &["-c", uri, "undefine", "--", &c.name]);
+        def.unwrap_or_else(|e| panic!("libvirt refused the domain: {e}\n{xml}"));
+    }
+
+    /// How many `pcie-root-port` controllers of a DEFINED domain's XML carry
+    /// no device: a port's `index` is the PCI bus a device behind it names.
+    fn free_root_ports(xml: &str) -> usize {
+        let attr = |l: &str, k: &str| -> Option<String> {
+            let i = l.find(&format!("{k}='"))? + k.len() + 2;
+            Some(l[i..].split('\'').next()?.to_string())
+        };
+        let ports: Vec<u32> = xml
+            .lines()
+            .filter(|l| l.contains("model='pcie-root-port'") && l.contains("<controller"))
+            .filter_map(|l| attr(l, "index")?.parse().ok())
+            .collect();
+        let busy: Vec<u32> = xml
+            .lines()
+            .filter(|l| l.contains("<address type='pci'"))
+            .filter_map(|l| u32::from_str_radix(attr(l, "bus")?.trim_start_matches("0x"), 16).ok())
+            .collect();
+        ports.iter().filter(|p| !busy.contains(p)).count()
+    }
+
+    /// Every device that takes a root port is counted; SATA and a plain
+    /// `vga` (integrated on bus 0) are not.
+    #[test]
+    fn the_port_count_follows_the_devices() {
+        let base = cfg(2, "2048M", Some(4), None);
+        assert_eq!(pcie_devices_at_boot(&base), 5);
+        let mut more = base.clone();
+        more.seed = Some("/s.iso".into());
+        more.extra_disks = vec![
+            ExtraDisk {
+                source: "/a".into(),
+                ..Default::default()
+            },
+            ExtraDisk {
+                source: "/b".into(),
+                bus: "sata".into(),
+                ..Default::default()
+            },
+        ];
+        more.extra_nics = vec![ExtraNic::default()];
+        more.vnc = true;
+        assert_eq!(pcie_devices_at_boot(&more), 5 + 1 + 1 + 1 + 1);
+    }
+
+    #[test]
+    fn free_root_ports_reads_a_defined_domain() {
+        let xml = "<controller type='pci' index='1' model='pcie-root-port'>\n                   <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>\n                   <controller type='pci' index='2' model='pcie-root-port'>\n                   <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>\n";
+        assert_eq!(free_root_ports(xml), 1);
+    }
+
+    /// A headroom domain as libvirt DEFINES it (addresses assigned): at least
+    /// four root ports must carry nothing, or a live disk/NIC add has no slot
+    /// — the review measured all six taken by the boot devices.
+    #[test]
+    #[ignore = "needs virsh and qemu:///session; defines and undefines a domain, boots nothing"]
+    fn the_spare_ports_are_still_free_once_libvirt_places_the_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = dir.path().join("d.qcow2");
+        std::fs::write(&disk, b"").unwrap();
+        let seed = dir.path().join("seed.iso");
+        std::fs::write(&seed, b"").unwrap();
+        let mut c = cfg(2, "2048M", Some(4), Some(4096));
+        c.name = format!("dlx18-ports-{}", std::process::id());
+        c.seed = Some(seed.to_string_lossy().into_owned());
+        c.extra_disks = vec![ExtraDisk {
+            source: disk.to_string_lossy().into_owned(),
+            ..Default::default()
+        }];
+        let xml = libvirt_domain_xml(&c, &disk.to_string_lossy(), "52:54:00:00:18:02");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let def = quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()]);
+        let dumped = quiet("virsh", &["-c", uri, "dumpxml", "--", &c.name]);
+        let _ = quiet("virsh", &["-c", uri, "undefine", "--", &c.name]);
+        def.unwrap_or_else(|e| panic!("libvirt refused the domain: {e}\n{xml}"));
+        let dumped = dumped.expect("dumpxml");
+        let free = free_root_ports(&dumped);
+        assert!(free >= 4, "only {free} free root port(s):\n{dumped}");
+    }
+
+    /// A real `attach-device --live` of a disk into a RUNNING headroom domain.
+    /// The domain has an empty disk, so the VMM runs with no OS; it is
+    /// destroyed and undefined at the end.
+    #[test]
+    #[ignore = "needs virsh, qemu:///session and /dev/kvm; runs a VMM with no OS"]
+    fn a_disk_attaches_live_to_a_running_headroom_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let mk = |n: &str| {
+            let p = dir.path().join(n);
+            let out = std::process::Command::new("qemu-img")
+                .args(["create", "-q", "-f", "qcow2"])
+                .arg(&p)
+                .arg("64M")
+                .status()
+                .unwrap();
+            assert!(out.success());
+            p.to_string_lossy().into_owned()
+        };
+        let root = mk("root.qcow2");
+        let extra = mk("extra.qcow2");
+        let mut c = cfg(1, "256M", Some(2), Some(512));
+        c.name = format!("dlx18-attach-{}", std::process::id());
+        // A session libvirt cannot apply cgroup tuning: the containment
+        // blocks go, the rest of the domain is the one this code writes.
+        let strip = |x: String, tag: &str| -> String {
+            match (x.find(&format!("<{tag}>")), x.find(&format!("</{tag}>"))) {
+                (Some(a), Some(b)) => format!("{}{}", &x[..a], &x[b + tag.len() + 3..]),
+                _ => x,
+            }
+        };
+        let xml = libvirt_domain_xml(&c, &root, "52:54:00:00:18:03");
+        let xml = strip(strip(xml, "memtune"), "cputune");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let cleanup = |name: &str| {
+            let _ = quiet("virsh", &["-c", uri, "destroy", "--", name]);
+            let _ = quiet("virsh", &["-c", uri, "undefine", "--", name]);
+        };
+        let result = (|| -> std::result::Result<String, String> {
+            quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()])?;
+            virsh_hotplug(&["-c", uri, "start", "--", &c.name], "virsh start")
+                .map_err(|e| e.to_string())?;
+            let d = ExtraDisk {
+                source: extra.clone(),
+                ..Default::default()
+            };
+            let dx = dir.path().join("disk.xml");
+            std::fs::write(&dx, libvirt_extra_disk_xml(&d, "vdc")).unwrap();
+            let out = virsh_hotplug(
+                &attach_device_argv(uri, &c.name, &dx.to_string_lossy()),
+                "virsh attach-device",
+            )
+            .map_err(|e| e.to_string())?;
+            let blk = quiet("virsh", &["-c", uri, "domblklist", "--domain", &c.name])?;
+            Ok(format!("{out}\n{blk}"))
+        })();
+        cleanup(&c.name);
+        let out = result.unwrap_or_else(|e| panic!("live attach failed: {e}\n{xml}"));
+        assert!(parse_domblklist(&out).contains(&"vdc".to_string()), "{out}");
+    }
+
+    /// A ceiling equal to the boot size is no headroom: the domain is the
+    /// one it always was.
+    #[test]
+    fn a_ceiling_equal_to_the_boot_size_changes_nothing() {
+        let a = libvirt_domain_xml(&cfg(2, "2048M", Some(2), Some(2048)), "/o", "m");
+        let b = libvirt_domain_xml(&cfg(2, "2048M", None, None), "/o", "m");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_live_add_argv_uses_named_options_and_live_only() {
+        assert_eq!(
+            setvcpus_argv("qemu:///system", "hp", 4).join(" "),
+            "-c qemu:///system setvcpus --domain hp --count 4 --live"
+        );
+        assert_eq!(
+            vcpucount_argv("qemu:///system", "hp").join(" "),
+            "-c qemu:///system vcpucount --domain hp --live --active"
+        );
+        assert_eq!(
+            attach_device_argv("qemu:///system", "-hp", "/f.xml").join(" "),
+            "-c qemu:///system attach-device --domain -hp --file /f.xml --live"
+        );
+        let x = dimm_xml(1048576);
+        assert!(
+            x.contains("<memory model='dimm'>") && x.contains("<size unit='KiB'>1048576</size>")
+        );
+        assert!(x.contains("<node>0</node>"));
+    }
+
+    /// Phases 4–5: what a live disk/NIC add reads, and how it picks a target
+    /// the live domain does not use (pinned, so the next boot agrees).
+    #[test]
+    fn a_hot_disk_takes_a_free_target_and_the_reads_parse_virsh() {
+        let blk = " Target   Source\n------------------------------------\n vda      /o.qcow2\n vdb      /seed.iso\n";
+        let live = parse_domblklist(blk);
+        assert_eq!(live, ["vda", "vdb"]);
+        assert_eq!(next_free_target("virtio", &live).as_deref(), Some("vdc"));
+        assert_eq!(next_free_target("sata", &live).as_deref(), Some("sdb"));
+        let ifl = " Interface   Type      Source    Model    MAC\n-------------------------------------------------------\n vnet0       network   default   virtio   52:54:00:12:34:56\n";
+        assert_eq!(parse_domiflist_macs(ifl), ["52:54:00:12:34:56"]);
+    }
+
+    /// The boot XML and the live attach use the SAME text — a hot-added disk
+    /// boots next time as the guest saw it.
+    #[test]
+    fn the_attach_xml_is_the_boot_xml() {
+        let d = ExtraDisk {
+            source: "/d.qcow2".into(),
+            target: Some("vdc".into()),
+            ..Default::default()
+        };
+        let mut c = cfg(1, "512M", None, None);
+        c.extra_disks = vec![d.clone()];
+        let boot = libvirt_domain_xml(&c, "/o", "m");
+        assert!(boot.contains(&libvirt_extra_disk_xml(&d, "vdc")), "{boot}");
+        let n = ExtraNic {
+            kind: "bridge".into(),
+            source: Some("br0".into()),
+            mac: Some("52:54:00:00:00:02".into()),
+            ..Default::default()
+        };
+        c.extra_nics = vec![n.clone()];
+        let boot = libvirt_domain_xml(&c, "/o", "m");
+        assert!(boot.contains(&libvirt_extra_nic_xml(&n)), "{boot}");
+    }
+
+    /// A disk added to a STOPPED VM is pinned to a letter the old layout
+    /// leaves free, so the seed (vdb with no extras) does not move to vdc at
+    /// the next boot — measured by the review: it did.
+    #[test]
+    fn a_cold_added_disk_does_not_move_the_seed() {
+        let old: Vec<ExtraDisk> = vec![];
+        assert_eq!(seed_target(&extra_disk_targets(&old)), "vdb");
+        let mut new = vec![ExtraDisk {
+            source: "/d.qcow2".into(),
+            ..Default::default()
+        }];
+        pin_added_disks(&old, &mut new);
+        assert_eq!(new[0].target.as_deref(), Some("vdc"));
+        assert_eq!(
+            seed_target(&extra_disk_targets(&new)),
+            "vdb",
+            "the seed stays"
+        );
+        // A pinned extra never shares a letter with the seed.
+        let pinned = vec![ExtraDisk {
+            source: "/p".into(),
+            target: Some("vdb".into()),
+            ..Default::default()
+        }];
+        assert_eq!(seed_target(&extra_disk_targets(&pinned)), "vdc");
+        // Unpinned extras keep the letters they always had.
+        let two = vec![
+            ExtraDisk {
+                source: "/a".into(),
+                ..Default::default()
+            },
+            ExtraDisk {
+                source: "/b".into(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(extra_disk_targets(&two), ["vdb", "vdc"]);
+        assert_eq!(seed_target(&extra_disk_targets(&two)), "vdd");
+    }
+
+    /// The reason libvirt gives on its SECOND line reaches the error.
+    #[test]
+    fn the_whole_virsh_reason_is_kept() {
+        let e = virsh_reason(
+            "error: Failed to attach device from /x.xml\nerror: internal error: No more available PCI slots\n",
+        );
+        assert!(e.contains("No more available PCI slots"), "{e}");
+        assert!(e.starts_with("Failed to attach device"), "{e}");
+    }
+
+    #[test]
+    fn a_hot_nic_gets_a_mac_the_vm_does_not_carry() {
+        let mut vm = Vm::new(
+            "hp".into(),
+            String::new(),
+            String::new(),
+            1,
+            "512M".into(),
+            "default".into(),
+            String::new(),
+            mac_for("hp"),
+            String::new(),
+        );
+        let first = extra_nic_mac(&vm);
+        assert_ne!(first, vm.mac);
+        vm.boot.extra_nics.push(ExtraNic {
+            mac: Some(first.clone()),
+            ..Default::default()
+        });
+        assert_ne!(extra_nic_mac(&vm), first);
+    }
+
+    #[test]
+    fn a_disk_or_nic_is_complete_only_when_the_guest_sees_it() {
+        assert_eq!(disk_outcome(Some(2), Some(3)), HotplugOutcome::Complete);
+        assert!(matches!(
+            disk_outcome(Some(2), Some(2)),
+            HotplugOutcome::Partial { .. }
+        ));
+        assert!(matches!(
+            disk_outcome(None, None),
+            HotplugOutcome::Partial { .. }
+        ));
+        let ifs = serde_json::json!([{"name": "eth1", "hardware-address": "52:54:00:AA:00:01"}]);
+        assert_eq!(
+            nic_outcome("52:54:00:aa:00:01", Some(&ifs)),
+            HotplugOutcome::Complete
+        );
+        assert!(matches!(
+            nic_outcome("52:54:00:aa:00:02", Some(&ifs)),
+            HotplugOutcome::Partial { .. }
+        ));
+        assert!(matches!(
+            nic_outcome("x", None),
+            HotplugOutcome::Partial { .. }
+        ));
+    }
+
+    #[test]
+    fn the_read_backs_parse_what_virsh_prints() {
+        assert_eq!(parse_vcpucount("4\n"), Some(4));
+        let dominfo = "Id:             3\nName:           hp\nMax memory:     3145728 KiB\nUsed memory:    2097152 KiB\n";
+        assert_eq!(parse_dominfo_memory_kib(dominfo), Some(3145728));
+        assert_eq!(parse_dominfo_memory_kib("nothing"), None);
+    }
+
+    /// D4/D8: success only when the GUEST is using it. No agent, or vCPUs
+    /// and memory the image leaves offline, is `Partial`, and says why.
+    #[test]
+    fn the_guest_agent_decides_complete_or_partial() {
+        let vcpus = serde_json::json!([
+            {"logical-id": 0, "online": true}, {"logical-id": 1, "online": true},
+            {"logical-id": 2, "online": false}, {"logical-id": 3, "online": false}
+        ]);
+        assert_eq!(guest_online_vcpus(&vcpus), 2);
+        assert_eq!(cpu_outcome(2, Some(2)), HotplugOutcome::Complete);
+        match cpu_outcome(4, Some(2)) {
+            HotplugOutcome::Partial { reason } => assert!(reason.contains("D8"), "{reason}"),
+            o => panic!("{o:?}"),
+        }
+        assert!(matches!(
+            cpu_outcome(4, None),
+            HotplugOutcome::Partial { .. }
+        ));
+
+        let info = serde_json::json!({"size": 134217728u64});
+        let blocks = |online: usize, offline: usize| {
+            let mut v: Vec<serde_json::Value> = (0..online)
+                .map(|_| serde_json::json!({"online": true}))
+                .collect();
+            v.extend((0..offline).map(|_| serde_json::json!({"online": false})));
+            serde_json::Value::Array(v)
+        };
+        let st = guest_memory_state(&blocks(24, 0), &info).unwrap();
+        assert_eq!(st, (3072, 0));
+        assert_eq!(memory_outcome(3072, Some(st)), HotplugOutcome::Complete);
+        let st = guest_memory_state(&blocks(16, 8), &info).unwrap();
+        match memory_outcome(3072, Some(st)) {
+            HotplugOutcome::Partial { reason } => {
+                assert!(
+                    reason.contains("8 block(s) offline") && reason.contains("D8"),
+                    "{reason}"
+                )
+            }
+            o => panic!("{o:?}"),
+        }
+        assert!(matches!(
+            memory_outcome(3072, None),
+            HotplugOutcome::Partial { .. }
+        ));
     }
 }

@@ -90,6 +90,15 @@ pub(crate) struct VmSpec {
     /// image says anything is `1G`.
     #[serde(default)]
     memory: Option<String>,
+    /// The vCPU hotplug CEILING, fixed at boot (ADR-0068 D3): the most this
+    /// VM can be grown to LIVE. Never below `vcpus`. Omitted = no headroom, so
+    /// any growth converges across a reboot (`stack apply --reboot`).
+    #[serde(default, rename = "vcpusMax", alias = "vcpus_max")]
+    vcpus_max: Option<u32>,
+    /// The memory hotplug ceiling, same rule as `vcpusMax`
+    /// (`4G`, `4096M`, `4Gi`). Never below `memory`.
+    #[serde(default, rename = "memoryMax", alias = "memory_max")]
+    memory_max: Option<String>,
     #[serde(default = "default_network")]
     network: String,
     kernel: Option<String>,
@@ -263,6 +272,10 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "build",
     "vcpus",
     "memory",
+    "vcpusMax",
+    "vcpus_max",
+    "memoryMax",
+    "memory_max",
     "network",
     "kernel",
     "initrd",
@@ -355,6 +368,8 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("vcpus", "vcpus"),
             ("memory", "memory"),
+            ("vcpusMax", "vcpusMax"),
+            ("memoryMax", "memoryMax"),
             ("hugepages", "hugepages"),
             ("cpuAffinity", "cpuAffinity"),
         ],
@@ -1306,8 +1321,17 @@ pub enum VmCmd {
         /// New boot disk size, in whole GiB — grows only, never shrinks.
         #[arg(long = "disk-size")]
         disk_size_gib: Option<u32>,
+        /// New vCPU hotplug ceiling (never below the vCPUs it boots with).
+        #[arg(long = "vcpus-max", conflicts_with = "no_hotplug")]
+        vcpus_max: Option<u32>,
+        /// New memory hotplug ceiling (`8G`, `8192M`; never below the boot memory).
+        #[arg(long = "memory-max", conflicts_with = "no_hotplug")]
+        memory_max: Option<String>,
+        /// Clear both hotplug ceilings: the VM boots with no headroom.
+        #[arg(long = "no-hotplug")]
+        no_hotplug: bool,
     },
-    /// Add vCPUs and/or memory to a RUNNING VM, live; on a STOPPED VM it is `vm resize`.
+    /// Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED.
     ///
     /// Adds up to the ceiling declared at create (`--vcpus-max`/`--memory-max`,
     /// ADR-0068 D1).
@@ -1338,6 +1362,18 @@ pub enum VmCmd {
         /// hot-added resource before reporting `partial` (ADR-0068 D4).
         #[arg(long, default_value = "60")]
         wait_secs: u64,
+        /// Attach a disk image (`<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repeatable.
+        #[arg(long = "disk-add", value_name = "SPEC")]
+        disk_add: Vec<String>,
+        /// Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable.
+        #[arg(long = "nic-add", value_name = "SPEC")]
+        nic_add: Vec<String>,
+        /// Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10).
+        #[arg(long = "disk-rm", value_name = "TARGET|PATH")]
+        disk_rm: Vec<String>,
+        /// Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10).
+        #[arg(long = "nic-rm", value_name = "MAC")]
+        nic_rm: Vec<String>,
     },
     /// Move a VM to another node of its cluster — same VM, same record.
     ///
@@ -1548,15 +1584,20 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 /// Fields the reconciler compares for a `kind: VirtualMachine`.
 ///
-/// **None of them converge hot, and that is not a gap.** This engine does not
-/// hotplug: changing a VM's vCPUs, memory or disk means booting a different
-/// machine, so every one of these is a `Replace` that `apply` refuses without
-/// `--replace`. Refusing is the point — recreating a VM throws away its overlay
-/// disk, which is everything the guest wrote since it was created.
+/// **Three costs, and the plan names which (ADR-0012).** `labels` and
+/// `credentials` converge in place. vCPUs and memory grow LIVE up to the
+/// declared ceiling (`vcpusMax`/`memoryMax`, ADR-0068) on a backend that
+/// hotplugs; any other change to them, and to the ceilings themselves,
+/// converges by a stop and a start with the disk kept (`Reboot`, gated by
+/// `--reboot`). Only `disk` and `backend` — the machine's identity — are a
+/// `Replace`, refused without `--replace`, because recreating a VM throws away
+/// its overlay disk. Which fields reboot is decided per backend, by [`facts`].
 pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &[
     "disk",
     "vcpus",
     "memory",
+    "vcpusMax",
+    "memoryMax",
     "network",
     "backend",
     "labels",
@@ -1679,6 +1720,15 @@ fn desired_vm_fields(
     f.insert("disk".into(), disk);
     f.insert("vcpus".into(), vcpus.to_string());
     f.insert("memory".into(), memory);
+    // Only when declared: the machine side always reports a ceiling (its boot
+    // size when none was set), and an undeclared one must never read as a
+    // difference nobody asked for.
+    if let Some(n) = spec.vcpus_max {
+        f.insert("vcpusMax".into(), n.to_string());
+    }
+    if let Some(m) = &spec.memory_max {
+        f.insert("memoryMax".into(), m.clone());
+    }
     f.insert("network".into(), spec.network.clone());
     if let Some(b) = backend {
         f.insert("backend".into(), b);
@@ -1701,6 +1751,18 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         &doc.metadata.name,
         &spec,
     );
+    // The shape, checked with the RESOLVED boot size (an image's own VCPUS/
+    // MEMORY included): a plan never proposes what the reshape would refuse.
+    manifest_ceilings(
+        &doc.metadata.name,
+        fields
+            .get("vcpus")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+        fields.get("memory").map(String::as_str).unwrap_or("1G"),
+        spec.vcpus_max,
+        spec.memory_max.as_deref(),
+    )?;
     // `metadata.labels` of the document — see `network::desired`. Measured
     // before this: a VM applied with labels carried the ownership stamp and
     // nothing the manifest had declared.
@@ -1728,6 +1790,73 @@ pub(crate) fn provider_holds(doc: &ManifestDoc) -> Result<Option<bool>> {
     backend.holds_vm(&doc.metadata.name)
 }
 
+/// The record annotation naming the extra devices the manifest declared at
+/// the last apply (`disk:<source>`/`nic:<mac>`, comma-separated).
+pub(crate) const DECLARED_DEVICES_ANNOTATION: &str = "delonix.io/declared-devices";
+
+/// The observed-only field naming the extra devices a VM has and its manifest
+/// did not declare — added by hand, and kept by every apply. Never desired,
+/// so the plan never acts on it; `drift` reports it.
+pub(crate) const HAND_ADDED_FIELD: &str = "handAddedDevices";
+
+fn disk_id(d: &delonix_vm::ExtraDisk) -> String {
+    format!("disk:{}", d.source)
+}
+
+fn nic_id(n: &delonix_vm::ExtraNic) -> String {
+    match &n.mac {
+        Some(m) => format!("nic:{}", m.to_ascii_lowercase()),
+        None => format!("nic:{}:{}", n.kind, n.source.as_deref().unwrap_or("")),
+    }
+}
+
+/// The identities of a device list. Pure.
+fn device_ids(disks: &[delonix_vm::ExtraDisk], nics: &[delonix_vm::ExtraNic]) -> Vec<String> {
+    disks
+        .iter()
+        .map(disk_id)
+        .chain(nics.iter().map(nic_id))
+        .collect()
+}
+
+/// Appends to the manifest's devices every device the RECORD has that the
+/// manifest does not declare (by source for a disk, MAC for a NIC), in the
+/// record's order and with its pinned target — so an apply or a reboot never
+/// drops a device the plan did not name. Pure.
+fn keep_undeclared_devices(
+    disks: &mut Vec<delonix_vm::ExtraDisk>,
+    nics: &mut Vec<delonix_vm::ExtraNic>,
+    record: &delonix_compute::Vm,
+) {
+    let declared = device_ids(disks, nics);
+    for d in &record.boot.extra_disks {
+        if !declared.contains(&disk_id(d)) {
+            disks.push(d.clone());
+        }
+    }
+    for n in &record.boot.extra_nics {
+        if !declared.contains(&nic_id(n)) {
+            nics.push(n.clone());
+        }
+    }
+}
+
+/// The record's devices its last apply did not declare. `None` when no apply
+/// recorded what it declared (nothing to compare against). Pure.
+fn hand_added_devices(vm: &delonix_compute::Vm) -> Option<String> {
+    let declared: Vec<&str> = vm
+        .annotations
+        .get(DECLARED_DEVICES_ANNOTATION)?
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let extra: Vec<String> = device_ids(&vm.boot.extra_disks, &vm.boot.extra_nics)
+        .into_iter()
+        .filter(|id| !declared.contains(&id.as_str()))
+        .collect();
+    (!extra.is_empty()).then(|| extra.join(","))
+}
+
 /// What is on the machine, for the reconciler.
 ///
 /// Reads the STORE and not `delonix_vm::status`: `status` asks the backend
@@ -1747,6 +1876,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("disk".into(), vm.disk.clone());
             f.insert("vcpus".into(), vm.vcpus.to_string());
             f.insert("memory".into(), vm.memory.clone());
+            let (vmax, mmax) = effective_ceilings(&vm);
+            f.insert("vcpusMax".into(), vmax);
+            f.insert("memoryMax".into(), mmax);
             f.insert("network".into(), vm.network.clone());
             f.insert("backend".into(), vm.backend.clone());
             if let Some(labels) = super::reconcile::user_labels_field(&vm.labels) {
@@ -1754,6 +1886,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             }
             if let Some(raw) = vm.annotations.get(super::credentials::ANNOTATION) {
                 f.insert(super::credentials::FIELD.into(), raw.clone());
+            }
+            if let Some(ids) = hand_added_devices(&vm) {
+                f.insert(HAND_ADDED_FIELD.into(), ids);
             }
             super::reconcile::Actual {
                 kind: k::VM.into(),
@@ -1767,6 +1902,468 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             }
         })
         .collect())
+}
+
+/// The hotplug ceilings a VM HAS, as the plan compares them: the declared one,
+/// or its boot size when none was declared (no headroom). Pure.
+fn effective_ceilings(vm: &delonix_compute::Vm) -> (String, String) {
+    let vcpus = vm.vcpus_max.unwrap_or(vm.vcpus).to_string();
+    let memory = match vm.memory_max_mib {
+        Some(m) => format!("{m}M"),
+        None => vm.memory.clone(),
+    };
+    (vcpus, memory)
+}
+
+/// The fields a VM of `backend` redefines from its record across a stop and a
+/// start, so a change to them costs a reboot and never the disk (ADR-0012).
+/// Cloud Hypervisor rebuilds the whole VM from the record, its NIC included;
+/// libvirt and a Proxmox node keep the NIC in their own definition, so there
+/// `network` stays a recreate. Pure.
+pub(crate) fn reboot_fields_of(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "cloud-hypervisor" => &["vcpus", "memory", "vcpusMax", "memoryMax", "network"],
+        _ => &["vcpus", "memory", "vcpusMax", "memoryMax"],
+    }
+}
+
+/// Whether a VM of `backend` grows vCPUs and memory LIVE (ADR-0068). A backend
+/// that does not is never planned a live growth — the change reboots instead.
+pub(crate) fn hotplugs(backend: &str) -> bool {
+    matches!(backend, "cloud-hypervisor" | "libvirt" | "proxmox")
+}
+
+fn parse_count(s: &str) -> Option<u64> {
+    s.trim().parse().ok()
+}
+
+/// What the plan knows about one VM besides its fields. Pure, so the cost
+/// model is a table a test can read.
+pub(crate) fn facts_of_vm(vm: &delonix_compute::Vm) -> super::reconcile::Facts {
+    use delonix_model::records::Status;
+    let running = match vm.status {
+        Status::Running => Some(true),
+        Status::Stopped | Status::Created | Status::Failed(_) | Status::Crashed => Some(false),
+        // A paused guest still holds its definition: planned as running.
+        Status::Paused => None,
+    };
+    let mut f = super::reconcile::Facts {
+        running,
+        ..Default::default()
+    };
+    f.reboot = reboot_fields_of(&vm.backend)
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    f.numeric.insert("vcpus".into(), parse_count);
+    f.numeric.insert("vcpusMax".into(), parse_count);
+    f.numeric.insert("memory".into(), delonix_vm::parse_mem_mib);
+    f.numeric
+        .insert("memoryMax".into(), delonix_vm::parse_mem_mib);
+    if hotplugs(&vm.backend) {
+        f.live_growth.insert(
+            "vcpus".into(),
+            super::reconcile::LiveGrowth {
+                ceiling: u64::from(vm.vcpus_max.unwrap_or(vm.vcpus)),
+                parse: parse_count,
+            },
+        );
+        f.live_growth.insert(
+            "memory".into(),
+            super::reconcile::LiveGrowth {
+                ceiling: vm
+                    .memory_max_mib
+                    .unwrap_or_else(|| delonix_vm::mem_mib(&vm.memory)),
+                parse: delonix_vm::parse_mem_mib,
+            },
+        );
+    }
+    f
+}
+
+/// The plan's facts for every VM in the store. An unreadable store is an
+/// error, as in [`actual`].
+pub(crate) fn facts(
+) -> Result<std::collections::BTreeMap<(String, String), super::reconcile::Facts>> {
+    Ok(delonix_vm::list(&state_root())?
+        .iter()
+        .map(|vm| ((k::VM.to_string(), vm.name.clone()), facts_of_vm(vm)))
+        .collect())
+}
+
+/// The ceilings a manifest declares, validated like `vm create --vcpus-max/
+/// --memory-max`: never below the boot size. Pure.
+fn manifest_ceilings(
+    name: &str,
+    vcpus: u32,
+    memory: &str,
+    vcpus_max: Option<u32>,
+    memory_max: Option<&str>,
+) -> Result<(Option<u32>, Option<u64>)> {
+    if vcpus_max == Some(0) {
+        return Err(Error::Invalid(super::po::tf(
+            "vm/{name}: vcpusMax must be at least 1",
+            &[("name", name)],
+        )));
+    }
+    if let Some(max) = vcpus_max {
+        if max < vcpus {
+            return Err(Error::Invalid(super::po::tf(
+                "vm/{name}: vcpusMax ({max}) cannot be smaller than vcpus ({vcpus})",
+                &[
+                    ("name", name),
+                    ("max", &max.to_string()),
+                    ("vcpus", &vcpus.to_string()),
+                ],
+            )));
+        }
+    }
+    let memory_max_mib = match memory_max {
+        Some(s) => {
+            let max = delonix_vm::parse_mem_mib(s).ok_or_else(|| {
+                Error::Invalid(super::po::tf(
+                    "vm/{name}: memoryMax '{value}' is not a size this engine understands \
+                     (e.g. 2G, 1024M, 2Gi)",
+                    &[("name", name), ("value", s)],
+                ))
+            })?;
+            let boot = delonix_vm::mem_mib(memory);
+            if max < boot {
+                return Err(Error::Invalid(super::po::tf(
+                    "vm/{name}: memoryMax ({max} MiB) cannot be smaller than memory ({boot} MiB)",
+                    &[
+                        ("name", name),
+                        ("max", &max.to_string()),
+                        ("boot", &boot.to_string()),
+                    ],
+                )));
+            }
+            Some(max)
+        }
+        None => None,
+    };
+    Ok((vcpus_max, memory_max_mib))
+}
+
+/// `vm update`'s device flags as engine changes, removals first — so a disk
+/// replaced in one command is released before its successor is attached
+/// (the order `container update` uses). Pure.
+fn device_changes(
+    disk_add: &[String],
+    nic_add: &[String],
+    disk_rm: &[String],
+    nic_rm: &[String],
+) -> Result<Vec<delonix_vm::DeviceChange>> {
+    let mut out = Vec::new();
+    for d in disk_rm {
+        out.push(delonix_vm::DeviceChange::RemoveDisk(d.trim().to_string()));
+    }
+    for m in nic_rm {
+        out.push(delonix_vm::DeviceChange::RemoveNic(m.trim().to_string()));
+    }
+    for d in disk_add {
+        out.push(delonix_vm::DeviceChange::AddDisk(parse_disk_add(d)?));
+    }
+    for n in nic_add {
+        out.push(delonix_vm::DeviceChange::AddNic(parse_nic_add(n)?));
+    }
+    Ok(out)
+}
+
+fn device_change_label(c: &delonix_vm::DeviceChange, live: bool) -> String {
+    use delonix_vm::DeviceChange as D;
+    match (c, live) {
+        (D::AddDisk(d), true) => super::po::tf("disk {disk} attached", &[("disk", &d.source)]),
+        (D::AddDisk(d), false) => super::po::tf(
+            "disk {disk} recorded for the next boot",
+            &[("disk", &d.source)],
+        ),
+        (D::AddNic(n), true) => super::po::tf(
+            "NIC on {source} attached",
+            &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
+        ),
+        (D::AddNic(n), false) => super::po::tf(
+            "NIC on {source} recorded for the next boot",
+            &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
+        ),
+        (D::RemoveDisk(k), _) => {
+            super::po::tf("disk {disk} removed from the next boot", &[("disk", k)])
+        }
+        (D::RemoveNic(m), _) => {
+            super::po::tf("NIC {mac} removed from the next boot", &[("mac", m)])
+        }
+    }
+}
+
+/// `<path>[,bus=…][,format=…][,ro]`. The path is made absolute: the record
+/// outlives the directory the command ran in. Pure but for that.
+fn parse_disk_add(spec: &str) -> Result<delonix_vm::ExtraDisk> {
+    let mut parts = spec.split(',');
+    let path = parts.next().unwrap_or("").trim();
+    if path.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "--disk-add '{value}': expected `<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`",
+            &[("value", spec)],
+        )));
+    }
+    let source = std::path::absolute(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    let mut d = delonix_vm::ExtraDisk {
+        source,
+        ..Default::default()
+    };
+    for p in parts {
+        match p.trim().split_once('=') {
+            Some(("bus", v)) if matches!(v, "virtio" | "sata" | "scsi") => d.bus = v.into(),
+            Some(("format", v)) if matches!(v, "qcow2" | "raw") => d.format = v.into(),
+            None if p.trim() == "ro" => d.read_only = true,
+            _ => {
+                return Err(Error::Invalid(super::po::tf(
+                    "--disk-add '{value}': '{part}' is not one of bus=virtio|sata|scsi, \
+                     format=qcow2|raw, ro",
+                    &[("value", spec), ("part", p.trim())],
+                )))
+            }
+        }
+    }
+    Ok(d)
+}
+
+/// `network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`. Pure.
+fn parse_nic_add(spec: &str) -> Result<delonix_vm::ExtraNic> {
+    let bad = || {
+        Error::Invalid(super::po::tf(
+            "--nic-add '{value}': expected `network:<name>`, `bridge:<name>` or `user`, then \
+             `[,model=…][,mac=…]`",
+            &[("value", spec)],
+        ))
+    };
+    let mut parts = spec.split(',');
+    let head = parts.next().unwrap_or("").trim();
+    let mut n = delonix_vm::ExtraNic::default();
+    match head.split_once(':') {
+        Some((kind @ ("network" | "bridge"), src)) if !src.trim().is_empty() => {
+            n.kind = kind.into();
+            n.source = Some(src.trim().into());
+        }
+        None if head == "user" => n.kind = "user".into(),
+        _ => return Err(bad()),
+    }
+    for p in parts {
+        match p.trim().split_once('=') {
+            Some(("model", v)) if !v.is_empty() => n.model = v.into(),
+            Some(("mac", v)) if v.split(':').count() == 6 => n.mac = Some(v.into()),
+            _ => return Err(bad()),
+        }
+    }
+    Ok(n)
+}
+
+/// `vm resize`'s flags as the engine's request. Pure.
+fn resize_request_from_flags(
+    vcpus: Option<u32>,
+    memory: Option<String>,
+    disk_size_gib: Option<u32>,
+    vcpus_max: Option<u32>,
+    memory_max: Option<&str>,
+    no_hotplug: bool,
+) -> Result<delonix_vm::ResizeRequest> {
+    let memory_max_mib = match memory_max {
+        Some(s) => Some(delonix_vm::parse_mem_mib(s).ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "--memory-max: '{value}' is not a size this engine understands (e.g. \
+                 2G, 1024M, 2Gi)",
+                &[("value", s)],
+            ))
+        })?),
+        None => None,
+    };
+    Ok(delonix_vm::ResizeRequest {
+        vcpus,
+        memory,
+        disk_size_gib,
+        vcpus_max: if no_hotplug {
+            Some(None)
+        } else {
+            vcpus_max.map(Some)
+        },
+        memory_max_mib: if no_hotplug {
+            Some(None)
+        } else {
+            memory_max_mib.map(Some)
+        },
+    })
+}
+
+/// What is wrong with a VM document's shape, as the manifest declares it —
+/// for `stack validate` and the apply gate. The boot size an image would
+/// supply is not known here (that needs the image store), so an undeclared
+/// one reads as the engine's own fallback (1 vCPU, 1G); [`desired`] checks
+/// again with the resolved values. `None` when nothing is wrong, or when the
+/// spec does not parse (that is reported elsewhere).
+pub(crate) fn shape_problem(doc: &ManifestDoc) -> Option<String> {
+    let spec: VmSpec = vm_spec_of(doc).ok()?;
+    manifest_ceilings(
+        &doc.metadata.name,
+        spec.vcpus.unwrap_or(1),
+        spec.memory.as_deref().unwrap_or("1G"),
+        spec.vcpus_max,
+        spec.memory_max.as_deref(),
+    )
+    .err()
+    .map(|e| match e {
+        Error::Invalid(m) => m,
+        other => other.to_string(),
+    })
+}
+
+/// The cold reshape a reboot-class diff asks for, as the engine takes it.
+/// `None` when no diff touches the shape (a CH `network` change only needs
+/// the stop: the next start rebuilds the NIC from the manifest). Pure.
+pub(crate) fn resize_request_of(
+    diffs: &[super::reconcile::FieldDiff],
+) -> Result<Option<delonix_vm::ResizeRequest>> {
+    let mut req = delonix_vm::ResizeRequest::default();
+    let mut any = false;
+    for d in diffs.iter().filter(|d| d.reboot) {
+        let to = d.to.as_deref();
+        match d.field.as_str() {
+            "vcpus" => {
+                if let Some(v) = to {
+                    req.vcpus =
+                        Some(v.trim().parse().map_err(|_| {
+                            Error::Invalid(format!("vm: vcpus '{v}' is not a number"))
+                        })?);
+                    any = true;
+                }
+            }
+            "memory" => {
+                if let Some(v) = to {
+                    req.memory = Some(v.to_string());
+                    any = true;
+                }
+            }
+            "vcpusMax" => {
+                req.vcpus_max = Some(match to {
+                    Some(v) => Some(v.trim().parse().map_err(|_| {
+                        Error::Invalid(format!("vm: vcpusMax '{v}' is not a number"))
+                    })?),
+                    None => None,
+                });
+                any = true;
+            }
+            "memoryMax" => {
+                req.memory_max_mib = Some(match to {
+                    Some(v) => Some(delonix_vm::parse_mem_mib(v).ok_or_else(|| {
+                        Error::Invalid(format!("vm: memoryMax '{v}' is not a size"))
+                    })?),
+                    None => None,
+                });
+                any = true;
+            }
+            _ => {}
+        }
+    }
+    Ok(any.then_some(req))
+}
+
+/// Applies a VM's reboot-class changes (ADR-0012), before the creation layer
+/// starts it again: stops it if `running`, writes the new shape where the next
+/// boot reads it ([`delonix_vm::resize_shape`] — the record, and a remote
+/// node's own config), and leaves the start to the VM layer, the one path that
+/// starts every VM. The overlay disk is never touched.
+pub(crate) fn converge_across_reboot(
+    name: &str,
+    diffs: &[super::reconcile::FieldDiff],
+    running: bool,
+) -> Result<()> {
+    let base = state_root();
+    converge_across_reboot_with(
+        name,
+        diffs,
+        running,
+        &RebootSteps {
+            check: &|n, r| delonix_vm::check_resize_shape(&base, n, r).map_err(Error::from),
+            stop: &|n| delonix_vm::stop(&base, n).map_err(Error::from),
+            reshape: &|n, r| {
+                delonix_vm::resize_shape(&base, n, r)
+                    .map(|_| ())
+                    .map_err(Error::from)
+            },
+            start: &|n| delonix_vm::start(&base, n).map(|_| ()).map_err(Error::from),
+        },
+    )
+}
+
+/// The four engine calls a reboot makes, injected so the ORDER is testable
+/// without a VM: the check comes before the stop, always.
+struct RebootSteps<'a> {
+    check: &'a dyn Fn(&str, &delonix_vm::ResizeRequest) -> Result<()>,
+    stop: &'a dyn Fn(&str) -> Result<()>,
+    reshape: &'a dyn Fn(&str, &delonix_vm::ResizeRequest) -> Result<()>,
+    start: &'a dyn Fn(&str) -> Result<()>,
+}
+
+fn converge_across_reboot_with(
+    name: &str,
+    diffs: &[super::reconcile::FieldDiff],
+    running: bool,
+    steps: &RebootSteps<'_>,
+) -> Result<()> {
+    let fields: Vec<&str> = diffs
+        .iter()
+        .filter(|d| d.reboot)
+        .map(|d| d.field.as_str())
+        .collect();
+    let req = resize_request_of(diffs)?;
+    // Every rule the reshape applies, BEFORE the stop: a shape it would
+    // refuse must never cost the downtime.
+    if let Some(req) = &req {
+        (steps.check)(name, req)?;
+    }
+    if running {
+        println!(
+            "{}",
+            super::po::tf(
+                "vm/{name}: stopping to apply {fields} (the disk is kept)",
+                &[("name", name), ("fields", &fields.join(", "))],
+            )
+        );
+        (steps.stop)(name)?;
+    }
+    let Some(req) = req else {
+        return Ok(());
+    };
+    match (steps.reshape)(name, &req) {
+        Ok(()) => Ok(()),
+        Err(e) if running => Err(restart_after_failed_reshape(name, e, steps.start)),
+        Err(e) => Err(e),
+    }
+}
+
+/// A reshape that failed AFTER the stop: the VM is started again on the shape
+/// it had, and that is said; if the start fails too, it is said loudly that
+/// the VM was left STOPPED and how to bring it back. The reshape's own error
+/// is returned unchanged, so its class (and exit code) survives.
+fn restart_after_failed_reshape(
+    name: &str,
+    err: Error,
+    start: &dyn Fn(&str) -> Result<()>,
+) -> Error {
+    match start(name) {
+        Ok(()) => output::warn(&super::po::tf(
+            "vm/{name}: the new shape was refused after the stop — nothing was changed, and \
+             the VM was started again on its previous shape",
+            &[("name", name)],
+        )),
+        Err(again) => output::warn(&super::po::tf(
+            "vm/{name}: the new shape was refused after the stop, and the VM could not be \
+             started again ({again}): it is STOPPED — bring it back with `delonix vm start {name}`",
+            &[("name", name), ("again", &again.to_string())],
+        )),
+    }
+    err
 }
 
 /// `vm prune` — the VM half of the reclaim family, with the one semantic
@@ -2211,15 +2808,26 @@ fn set_labels(
     }
 }
 
-/// Applies the hot part of a plan. A VM's labels are the only field that
-/// converges in place: they are bookkeeping on the record, and the guest is
-/// not touched. Anything else reaching here is a bug in
-/// `reconcile::hot_fields`, and is refused instead of half-applied.
+/// Applies the hot part of a plan: labels and credentials (bookkeeping on the
+/// record), and a vCPU/memory growth inside the hotplug ceiling, added live
+/// (ADR-0068). Reboot-class diffs were applied before the creation layer
+/// ([`converge_across_reboot`]) and are skipped here. Anything else reaching
+/// here is a bug in the plan's classification, and is refused instead of
+/// half-applied.
 pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
     let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(state_root().join("vms"))?;
+    let mut grow_vcpus: Option<u32> = None;
+    let mut grow_memory: Option<String> = None;
     for d in diffs {
+        if d.reboot {
+            continue;
+        }
         match d.field.as_str() {
+            "vcpus" if d.hot => {
+                grow_vcpus = d.to.as_deref().and_then(|v| v.trim().parse().ok());
+            }
+            "memory" if d.hot => grow_memory = d.to.clone(),
             "labels" => {
                 let delta = super::reconcile::labels_delta(d.from.as_deref(), d.to.as_deref());
                 st.update(name, |vm| {
@@ -2235,6 +2843,49 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                      `reconcile::hot_fields`"
                 )))
             }
+        }
+    }
+    if grow_vcpus.is_some() || grow_memory.is_some() {
+        grow_live(name, grow_vcpus, grow_memory.as_deref())?;
+    }
+    Ok(())
+}
+
+/// A live growth the plan classified hot. A `partial` outcome (the guest has
+/// not onlined it yet, ADR-0068 D4) is reported and does NOT fail the apply:
+/// the record already holds the new size, so a restart keeps it, and the next
+/// plan is clean.
+fn grow_live(name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<()> {
+    let (vm, outcomes) = delonix_vm::update(
+        &state_root(),
+        name,
+        vcpus,
+        memory,
+        std::time::Duration::from_secs(60),
+    )?;
+    for (field, outcome) in outcomes {
+        let value = match field {
+            "vcpus" => vm.vcpus.to_string(),
+            _ => vm.memory.clone(),
+        };
+        match outcome {
+            delonix_vm::HotplugOutcome::Complete => println!(
+                "{}",
+                super::po::tf(
+                    "vm/{name}: {field} -> {value} live (complete)",
+                    &[("name", name), ("field", field), ("value", &value)],
+                )
+            ),
+            delonix_vm::HotplugOutcome::Partial { reason } => output::warn(&super::po::tf(
+                "vm/{name}: {field} -> {value} live, but the guest has not taken it yet \
+                 (partial): {reason}",
+                &[
+                    ("name", name),
+                    ("field", field),
+                    ("value", &value),
+                    ("reason", &reason),
+                ],
+            )),
         }
     }
     Ok(())
@@ -2487,6 +3138,14 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             image_meta.as_ref(),
         );
 
+        let (vcpus_max, memory_max_mib) = manifest_ceilings(
+            name,
+            vcpus,
+            &memory,
+            spec.vcpus_max,
+            spec.memory_max.as_deref(),
+        )?;
+
         // Resolve each volume (Volume/Storage name → host directory) and
         // ensure a network Storage is mounted before sharing it.
         let vm_volumes = resolve_vm_volumes(&base, &spec.volumes)?;
@@ -2556,12 +3215,9 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // `kind: VM` herda o tamanho da imagem. Acrescentá-lo é o passo
             // seguinte, e é o que liga a quota do inquilino ao manifesto.
             disk_size_gib: None,
-            // Same gap as `disk_size_gib` just above, same reason: `VmSpec`
-            // (the manifest's typed spec) has no `vcpusMax`/`memoryMax` yet
-            // (ADR-0068 D3). `vm create --vcpus-max/--memory-max` has them;
-            // extending the manifest is a named follow-up, not a silent one.
-            vcpus_max: None,
-            memory_max_mib: None,
+            // ADR-0068 D3: the hotplug ceilings, validated like the CLI's.
+            vcpus_max,
+            memory_max_mib,
             // A VM someone creates from the CLI is one they mean to WATCH, so it
             // keeps the interactive console. Capture-to-file serves an unattended
             // reader (the DKS) that builds the `VmConfig` as a library; leaving it
@@ -2642,6 +3298,16 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             libvirt_xml_overlay: spec.libvirt_xml_overlay,
             libvirt_xml: spec.libvirt_xml,
         };
+        // What the manifest declares, before the record's own devices join it.
+        let declared = device_ids(&cfg.extra_disks, &cfg.extra_nics);
+        // A device the manifest does not declare was added out of band
+        // (`vm update --disk-add/--nic-add`): KEEP it, the way `vm start`
+        // rebuilds from the record. Rebuilding from the manifest alone dropped
+        // it at the next start or reboot while the plan said nothing changes.
+        let mut cfg = cfg;
+        if let Some(existing) = on_node.iter().find(|v| &v.name == name) {
+            keep_undeclared_devices(&mut cfg.extra_disks, &mut cfg.extra_nics, existing);
+        }
         refuse_inert_vm_isolation(cfg.namespace.as_deref())?;
         let vm = delonix_vm::create(&base, &cfg)?;
         warn_if_mac_spoofing_allowed(&vm);
@@ -2650,14 +3316,17 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         // apply` outside a stack). Additive — removal is the plan's.
         let own = super::reconcile::user_labels_field(&doc.metadata.labels);
         let delta = super::reconcile::labels_delta(None, own.as_deref());
-        if !delta.is_empty() {
-            let st: delonix_state::JsonStore<delonix_compute::Vm> =
-                delonix_state::JsonStore::open(base.join("vms"))?;
-            st.update(name, |vm| {
-                set_labels(&mut vm.labels, &delta);
-                true
-            })?;
-        }
+        let st: delonix_state::JsonStore<delonix_compute::Vm> =
+            delonix_state::JsonStore::open(base.join("vms"))?;
+        let declared = declared.join(",");
+        st.update(name, |vm| {
+            set_labels(&mut vm.labels, &delta);
+            // Which devices the MANIFEST declares, so `drift` can name the
+            // ones that were added by hand and are being kept.
+            vm.annotations
+                .insert(DECLARED_DEVICES_ANNOTATION.into(), declared.clone());
+            true
+        })?;
     }
     Ok(())
 }
@@ -3424,8 +4093,19 @@ pub fn run(action: VmCmd) -> Result<()> {
             vcpus,
             memory,
             disk_size_gib,
+            vcpus_max,
+            memory_max,
+            no_hotplug,
         } => {
-            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref(), disk_size_gib)?;
+            let req = resize_request_from_flags(
+                vcpus,
+                memory,
+                disk_size_gib,
+                vcpus_max,
+                memory_max.as_deref(),
+                no_hotplug,
+            )?;
+            let vm = delonix_vm::resize_shape(&base, &name, &req)?;
             print!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
             if let Some(gib) = disk_size_gib {
                 print!(", disk >= {gib}G");
@@ -3438,15 +4118,47 @@ pub fn run(action: VmCmd) -> Result<()> {
             vcpus,
             memory,
             wait_secs,
+            disk_add,
+            nic_add,
+            disk_rm,
+            nic_rm,
         } => {
             let wait = std::time::Duration::from_secs(wait_secs);
+            let changes = device_changes(&disk_add, &nic_add, &disk_rm, &nic_rm)?;
+            let mut partial_reason: Option<String> = None;
+            for change in changes {
+                let (_, outcome) = delonix_vm::change_device(&base, &name, change.clone(), wait)?;
+                match outcome {
+                    None => println!("{name}: {}", device_change_label(&change, false)),
+                    Some(delonix_vm::HotplugOutcome::Complete) => {
+                        println!("{name}: {} (complete)", device_change_label(&change, true))
+                    }
+                    Some(delonix_vm::HotplugOutcome::Partial { reason }) => {
+                        println!("{name}: {} (partial)", device_change_label(&change, true));
+                        partial_reason.get_or_insert(reason);
+                    }
+                }
+            }
+            if vcpus.is_none() && memory.is_none() {
+                if let Some(reason) = partial_reason {
+                    return Err(Error::coded(8504, Error::Timeout(reason)));
+                }
+                if disk_add.is_empty()
+                    && nic_add.is_empty()
+                    && disk_rm.is_empty()
+                    && nic_rm.is_empty()
+                {
+                    // The engine's own refusal names what to give.
+                    delonix_vm::update(&base, &name, None, None, wait)?;
+                }
+                return Ok(());
+            }
             let (vm, outcomes) = delonix_vm::update(&base, &name, vcpus, memory.as_deref(), wait)?;
             if outcomes.is_empty() {
                 // Cold path: the VM was stopped, so `vm update` IS `vm resize` there.
                 println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
                 return Ok(());
             }
-            let mut partial_reason: Option<String> = None;
             for (field, outcome) in outcomes {
                 let value = match field {
                     "vcpus" => vm.vcpus.to_string(),
@@ -6315,5 +7027,473 @@ mod ephemeral_tests {
         assert_eq!(fmt_grace(600), "10m");
         assert_eq!(fmt_grace(7200), "2h");
         assert_eq!(fmt_grace(90), "90s");
+    }
+}
+
+/// Sprint 18: the reboot class (ADR-0012) and the hotplug ceilings (ADR-0068)
+/// on the declarative path.
+#[cfg(test)]
+mod reboot_class_tests {
+    use super::super::reconcile::{self, Action, Actual, Desired, FieldDiff};
+    use std::collections::BTreeMap;
+
+    fn vm(backend: &str, running: bool) -> delonix_compute::Vm {
+        let mut v = delonix_compute::Vm::new(
+            "db".into(),
+            "/d.qcow2".into(),
+            "/o.qcow2".into(),
+            2,
+            "2G".into(),
+            "default".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        v.backend = backend.into();
+        v.status = if running {
+            delonix_model::records::Status::Running
+        } else {
+            delonix_model::records::Status::Stopped
+        };
+        v
+    }
+
+    fn plan_one(v: &delonix_compute::Vm, desired: &[(&str, &str)]) -> reconcile::Change {
+        let mut actual = BTreeMap::new();
+        actual.insert("vcpus".to_string(), v.vcpus.to_string());
+        actual.insert("memory".to_string(), v.memory.clone());
+        let (vmax, mmax) = super::effective_ceilings(v);
+        actual.insert("vcpusMax".to_string(), vmax);
+        actual.insert("memoryMax".to_string(), mmax);
+        actual.insert("network".to_string(), v.network.clone());
+        actual.insert("disk".to_string(), v.disk.clone());
+        let mut want = actual.clone();
+        want.remove("vcpusMax");
+        want.remove("memoryMax");
+        for (k, val) in desired {
+            want.insert(k.to_string(), val.to_string());
+        }
+        let d = Desired {
+            kind: "VirtualMachine".into(),
+            name: "db".into(),
+            fields: want,
+            converges: true,
+            ownable: true,
+        };
+        let a = Actual {
+            kind: "VirtualMachine".into(),
+            name: "db".into(),
+            fields: actual,
+            owner: Some("s".into()),
+            last_applied: None,
+        };
+        let mut facts = BTreeMap::new();
+        facts.insert(
+            ("VirtualMachine".into(), "db".into()),
+            super::facts_of_vm(v),
+        );
+        reconcile::plan_with_facts(&[d], &[a], "s", &facts)
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    /// The cost model, end to end through the same facts `stack plan` reads:
+    /// a growth inside the ceiling is live, past it reboots, the disk recreates.
+    #[test]
+    fn a_running_vm_grows_live_inside_its_ceiling_and_reboots_past_it() {
+        let mut v = vm("cloud-hypervisor", true);
+        v.vcpus_max = Some(4);
+        v.memory_max_mib = Some(4096);
+        let c = plan_one(&v, &[("vcpus", "4"), ("memory", "4096M")]);
+        assert_eq!(c.action, Action::Update, "{c:?}");
+        assert!(c.diffs.iter().all(|d| d.hot && !d.reboot));
+
+        let c = plan_one(&v, &[("vcpus", "6")]);
+        assert_eq!(c.action, Action::Reboot);
+        assert_eq!(c.reboot_fields, ["vcpus"]);
+
+        let c = plan_one(&v, &[("disk", "/other.qcow2")]);
+        assert_eq!(c.action, Action::Replace);
+    }
+
+    /// The same memory spelled two ways is no difference at all.
+    #[test]
+    fn the_same_memory_in_another_spelling_plans_nothing() {
+        let v = vm("libvirt", true);
+        let c = plan_one(&v, &[("memory", "2048M")]);
+        assert_eq!(c.action, Action::NoOp, "{c:?}");
+    }
+
+    /// Per backend: a CH VM rebuilds its NIC from the record, libvirt and
+    /// Proxmox keep it in their own definition — there it stays a recreate.
+    /// And a backend that does not hotplug never plans a live growth.
+    #[test]
+    fn which_fields_reboot_is_the_backends_answer() {
+        let ch = vm("cloud-hypervisor", true);
+        assert_eq!(
+            plan_one(&ch, &[("network", "other")]).action,
+            Action::Reboot
+        );
+        let lv = vm("libvirt", true);
+        assert_eq!(
+            plan_one(&lv, &[("network", "other")]).action,
+            Action::Replace
+        );
+        let mut lv = vm("libvirt", true);
+        lv.vcpus_max = Some(4);
+        assert_eq!(
+            plan_one(&lv, &[("vcpus", "3")]).action,
+            if super::hotplugs("libvirt") {
+                Action::Update
+            } else {
+                Action::Reboot
+            }
+        );
+    }
+
+    /// A stopped VM pays nothing for a reboot-class change: a plain update,
+    /// no `--reboot` asked for (ADR-0012 question 4).
+    #[test]
+    fn a_stopped_vm_plans_an_update_for_a_reboot_field() {
+        let v = vm("proxmox", false);
+        let c = plan_one(&v, &[("vcpus", "8"), ("vcpusMax", "16")]);
+        assert_eq!(c.action, Action::Update);
+        assert!(c.diffs.iter().all(|d| d.reboot));
+    }
+
+    fn rd(field: &str, to: Option<&str>) -> FieldDiff {
+        FieldDiff {
+            field: field.into(),
+            from: Some("x".into()),
+            to: to.map(Into::into),
+            hot: false,
+            reboot: true,
+        }
+    }
+
+    #[test]
+    fn the_reboot_diffs_become_one_cold_reshape() {
+        let req = super::resize_request_of(&[
+            rd("vcpus", Some("4")),
+            rd("memory", Some("4G")),
+            rd("vcpusMax", Some("8")),
+            rd("memoryMax", None),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(req.vcpus, Some(4));
+        assert_eq!(req.memory.as_deref(), Some("4G"));
+        assert_eq!(req.vcpus_max, Some(Some(8)));
+        assert_eq!(
+            req.memory_max_mib,
+            Some(None),
+            "a dropped ceiling is cleared"
+        );
+        // A hot diff is not part of the reshape; a network-only reboot is a stop.
+        let mut hot = rd("vcpus", Some("4"));
+        hot.reboot = false;
+        assert!(super::resize_request_of(&[hot]).unwrap().is_none());
+        assert!(super::resize_request_of(&[rd("network", Some("n"))])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_manifest_ceiling_below_the_boot_size_is_refused() {
+        assert!(super::manifest_ceilings("db", 4, "2G", Some(2), None).is_err());
+        assert!(super::manifest_ceilings("db", 2, "2G", None, Some("1G")).is_err());
+        assert!(super::manifest_ceilings("db", 2, "2G", None, Some("2GB")).is_err());
+        assert_eq!(
+            super::manifest_ceilings("db", 2, "2G", Some(8), Some("8Gi")).unwrap(),
+            (Some(8), Some(8192))
+        );
+    }
+
+    /// The ceilings are compared only when DECLARED: the machine side always
+    /// reports one, and an undeclared ceiling must not read as drift.
+    #[test]
+    fn a_ceiling_is_planned_only_when_declared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = super::super::vmimage::VmImageStore::open(tmp.path()).unwrap();
+        let spec: super::VmSpec = serde_yaml::from_str("disk: /x.qcow2\nvcpus: 2").unwrap();
+        let f = super::desired_vm_fields(&store, "db", &spec);
+        assert!(!f.contains_key("vcpusMax") && !f.contains_key("memoryMax"));
+        let spec: super::VmSpec =
+            serde_yaml::from_str("disk: /x.qcow2\nvcpus: 2\nvcpusMax: 8\nmemoryMax: 8G").unwrap();
+        let f = super::desired_vm_fields(&store, "db", &spec);
+        assert_eq!(f["vcpusMax"], "8");
+        assert_eq!(f["memoryMax"], "8G");
+    }
+
+    #[test]
+    fn vm_resize_flags_set_or_clear_the_ceilings() {
+        let r =
+            super::resize_request_from_flags(None, None, None, Some(8), Some("8G"), false).unwrap();
+        assert_eq!(r.vcpus_max, Some(Some(8)));
+        assert_eq!(r.memory_max_mib, Some(Some(8192)));
+        let r = super::resize_request_from_flags(None, None, None, None, None, true).unwrap();
+        assert_eq!(r.vcpus_max, Some(None));
+        assert_eq!(r.memory_max_mib, Some(None));
+        let r = super::resize_request_from_flags(Some(2), None, None, None, None, false).unwrap();
+        assert_eq!(r.vcpus_max, None, "untouched when not given");
+        assert!(
+            super::resize_request_from_flags(None, None, None, None, Some("8GB"), false).is_err()
+        );
+    }
+}
+
+/// Sprint 18: `vm update --disk-add/--nic-add/--disk-rm/--nic-rm` (ADR-0068 D7/D10).
+#[cfg(test)]
+mod device_flag_tests {
+    #[test]
+    fn a_disk_spec_parses_and_a_bad_one_is_refused_by_name() {
+        let d = super::parse_disk_add("/d/x.qcow2,bus=sata,format=raw,ro").unwrap();
+        assert_eq!(d.source, "/d/x.qcow2");
+        assert_eq!(
+            (d.bus.as_str(), d.format.as_str(), d.read_only),
+            ("sata", "raw", true)
+        );
+        let rel = super::parse_disk_add("x.qcow2").unwrap();
+        assert!(
+            std::path::Path::new(&rel.source).is_absolute(),
+            "{}",
+            rel.source
+        );
+        for bad in ["", ",ro", "/x,bus=nvme", "/x,format=vmdk", "/x,rw"] {
+            assert!(super::parse_disk_add(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_nic_spec_parses_and_a_bad_one_is_refused() {
+        let n = super::parse_nic_add("bridge:br0,model=e1000,mac=52:54:00:00:00:09").unwrap();
+        assert_eq!(
+            (
+                n.kind.as_str(),
+                n.source.as_deref(),
+                n.model.as_str(),
+                n.mac.as_deref()
+            ),
+            ("bridge", Some("br0"), "e1000", Some("52:54:00:00:00:09"))
+        );
+        assert_eq!(super::parse_nic_add("user").unwrap().kind, "user");
+        for bad in [
+            "",
+            "bridge:",
+            "vlan:3",
+            "network:default,mac=xx",
+            "user,speed=1",
+        ] {
+            assert!(super::parse_nic_add(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// Removals first: a disk replaced in one command is released before its
+    /// successor is attached.
+    /// A change to a STOPPED VM is not said to be attached: it is recorded
+    /// for the next boot, and the text says so.
+    #[test]
+    fn a_cold_device_change_does_not_claim_an_attach() {
+        let d = delonix_vm::DeviceChange::AddDisk(super::parse_disk_add("/d.qcow2").unwrap());
+        assert!(super::device_change_label(&d, true).contains("attached"));
+        let cold = super::device_change_label(&d, false);
+        assert!(
+            !cold.contains("attached") && cold.contains("next boot"),
+            "{cold}"
+        );
+        let n = delonix_vm::DeviceChange::AddNic(super::parse_nic_add("user").unwrap());
+        assert!(!super::device_change_label(&n, false).contains("attached"));
+    }
+
+    #[test]
+    fn removals_run_before_additions() {
+        let c = super::device_changes(
+            &["/new.qcow2".into()],
+            &["user".into()],
+            &["vdc".into()],
+            &["52:54:00:00:00:09".into()],
+        )
+        .unwrap();
+        assert!(matches!(c[0], delonix_vm::DeviceChange::RemoveDisk(_)));
+        assert!(matches!(c[1], delonix_vm::DeviceChange::RemoveNic(_)));
+        assert!(matches!(c[2], delonix_vm::DeviceChange::AddDisk(_)));
+        assert!(matches!(c[3], delonix_vm::DeviceChange::AddNic(_)));
+    }
+}
+
+/// Coordinator review of Sprint 18 (blocking 2): an authorised reboot never
+/// stops a VM for a shape that would be refused, and a refusal after the stop
+/// brings the VM back.
+#[cfg(test)]
+mod reboot_order_tests {
+    use super::super::reconcile::FieldDiff;
+    use std::cell::RefCell;
+
+    fn rd(field: &str, to: &str) -> FieldDiff {
+        FieldDiff {
+            field: field.into(),
+            from: Some("2".into()),
+            to: Some(to.into()),
+            hot: false,
+            reboot: true,
+        }
+    }
+
+    fn run(check_ok: bool, reshape_ok: bool) -> (super::Result<()>, Vec<String>) {
+        let log = RefCell::new(Vec::<String>::new());
+        let res = super::converge_across_reboot_with(
+            "db",
+            &[rd("vcpus", "8")],
+            true,
+            &super::RebootSteps {
+                check: &|_, _| {
+                    log.borrow_mut().push("check".into());
+                    if check_ok {
+                        Ok(())
+                    } else {
+                        Err(delonix_model::Error::Invalid("refused".into()))
+                    }
+                },
+                stop: &|_| {
+                    log.borrow_mut().push("stop".into());
+                    Ok(())
+                },
+                reshape: &|_, _| {
+                    log.borrow_mut().push("reshape".into());
+                    if reshape_ok {
+                        Ok(())
+                    } else {
+                        Err(delonix_model::Error::Invalid("late".into()))
+                    }
+                },
+                start: &|_| {
+                    log.borrow_mut().push("start".into());
+                    Ok(())
+                },
+            },
+        );
+        (res, log.into_inner())
+    }
+
+    #[test]
+    fn a_shape_that_would_be_refused_never_stops_the_vm() {
+        let (res, log) = run(false, true);
+        assert!(res.is_err());
+        assert_eq!(log, ["check"], "nothing after the refusal");
+    }
+
+    #[test]
+    fn a_refusal_after_the_stop_starts_the_vm_again_and_keeps_its_error() {
+        let (res, log) = run(true, false);
+        assert_eq!(res.unwrap_err().to_string(), "invalid argument: late");
+        assert_eq!(log, ["check", "stop", "reshape", "start"]);
+        let (res, log) = run(true, true);
+        assert!(res.is_ok());
+        assert_eq!(log, ["check", "stop", "reshape"]);
+    }
+
+    #[test]
+    fn a_bad_ceiling_is_a_shape_problem_before_any_apply() {
+        let doc = |spec: &str| {
+            super::super::manifest::load_str(&format!(
+                "apiVersion: compute.delonix.io/v1alpha1\nkind: VirtualMachine\nmetadata:\n  name: db\nspec:\n{spec}"
+            ), "test")
+            .unwrap()
+            .remove(0)
+        };
+        for bad in [
+            "  disk: /x.qcow2\n  vcpusMax: 0\n",
+            "  disk: /x.qcow2\n  memory: 2G\n  memoryMax: 1G\n",
+            "  disk: /x.qcow2\n  vcpus: 6\n  vcpusMax: 4\n",
+        ] {
+            assert!(super::shape_problem(&doc(bad)).is_some(), "{bad}");
+        }
+        assert!(
+            super::shape_problem(&doc("  disk: /x.qcow2\n  vcpus: 2\n  vcpusMax: 4\n")).is_none()
+        );
+    }
+}
+
+/// Coordinator review of Sprint 18 (blocking 1, round 3): a declarative
+/// apply or reboot keeps the devices `vm update` added; `drift` names them.
+#[cfg(test)]
+mod hand_added_device_tests {
+    fn vm_with(disks: &[&str]) -> delonix_compute::Vm {
+        let mut v = delonix_compute::Vm::new(
+            "db".into(),
+            "/d.qcow2".into(),
+            "/o.qcow2".into(),
+            2,
+            "2G".into(),
+            "default".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        v.boot.extra_disks = disks
+            .iter()
+            .map(|s| delonix_vm::ExtraDisk {
+                source: s.to_string(),
+                target: Some("vdc".into()),
+                ..Default::default()
+            })
+            .collect();
+        v.boot.extra_nics = vec![delonix_vm::ExtraNic {
+            kind: "network".into(),
+            source: Some("default".into()),
+            mac: Some("52:54:00:aa:bb:cc".into()),
+            ..Default::default()
+        }];
+        v
+    }
+
+    /// `vm update --disk-add` (stopped or live), then a stack apply or an
+    /// `apply --reboot` for an unrelated field: both rebuild the VM from the
+    /// manifest, and the disk and NIC the manifest never declared stay.
+    #[test]
+    fn an_apply_keeps_the_devices_added_by_hand() {
+        let record = vm_with(&["/data/hand.qcow2"]);
+        let mut disks = vec![delonix_vm::ExtraDisk {
+            source: "/data/declared.qcow2".into(),
+            ..Default::default()
+        }];
+        let mut nics = vec![];
+        super::keep_undeclared_devices(&mut disks, &mut nics, &record);
+        let sources: Vec<&str> = disks.iter().map(|d| d.source.as_str()).collect();
+        assert_eq!(sources, ["/data/declared.qcow2", "/data/hand.qcow2"]);
+        assert_eq!(
+            disks[1].target.as_deref(),
+            Some("vdc"),
+            "pinned target kept"
+        );
+        assert_eq!(nics.len(), 1, "the hand-added NIC stays");
+        // A device the manifest declares is not duplicated.
+        let mut disks = vec![delonix_vm::ExtraDisk {
+            source: "/data/hand.qcow2".into(),
+            ..Default::default()
+        }];
+        let mut nics = record.boot.extra_nics.clone();
+        super::keep_undeclared_devices(&mut disks, &mut nics, &record);
+        assert_eq!((disks.len(), nics.len()), (1, 1));
+    }
+
+    #[test]
+    fn the_hand_added_devices_are_named_against_the_declared_ones() {
+        let mut v = vm_with(&["/data/a.qcow2", "/data/b.qcow2"]);
+        assert_eq!(super::hand_added_devices(&v), None, "no apply recorded");
+        v.annotations.insert(
+            super::DECLARED_DEVICES_ANNOTATION.into(),
+            "disk:/data/a.qcow2".into(),
+        );
+        assert_eq!(
+            super::hand_added_devices(&v).as_deref(),
+            Some("disk:/data/b.qcow2,nic:52:54:00:aa:bb:cc")
+        );
+        v.annotations.insert(
+            super::DECLARED_DEVICES_ANNOTATION.into(),
+            "disk:/data/a.qcow2,disk:/data/b.qcow2,nic:52:54:00:aa:bb:cc".into(),
+        );
+        assert_eq!(super::hand_added_devices(&v), None);
     }
 }

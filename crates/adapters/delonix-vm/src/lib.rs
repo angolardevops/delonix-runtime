@@ -53,7 +53,7 @@ pub mod provider;
 use delonix_compute::ports::VmBackends;
 use delonix_compute::vm::VmEngine;
 pub use delonix_compute::vm::{console_socket, serial_log_path};
-pub use delonix_compute::vm::{valid_vm_name, Destroyed};
+pub use delonix_compute::vm::{valid_vm_name, Destroyed, DeviceChange, ResizeRequest};
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
 pub use delonix_compute::vm_registry::set_network;
@@ -688,6 +688,20 @@ pub fn resize(
     engine(base)?.resize(name, vcpus, memory, disk_size_gib)
 }
 
+/// Whether [`resize_shape`] would take `req`, without changing anything and
+/// whatever the power state; see `VmEngine::check_resize_shape`.
+pub fn check_resize_shape(base: &Path, name: &str, req: &ResizeRequest) -> Result<()> {
+    engine(base)?.check_resize_shape(name, req)
+}
+
+/// [`resize`] with the hotplug ceilings (ADR-0068 open question 2): the cold
+/// path the reconciler's reboot class (ADR-0012) and `vm resize
+/// --vcpus-max/--memory-max` share. See
+/// [`delonix_compute::vm::VmEngine::resize_shape`].
+pub fn resize_shape(base: &Path, name: &str, req: &ResizeRequest) -> Result<Vm> {
+    engine(base)?.resize_shape(name, req)
+}
+
 /// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1): adds vCPUs
 /// and/or memory to a RUNNING VM, live, up to its declared ceiling (D3); on
 /// a STOPPED VM it is [`resize`]'s cold path. See [`delonix_compute::vm::VmEngine::update`].
@@ -704,6 +718,17 @@ pub fn update(
     wait: std::time::Duration,
 ) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
     engine(base)?.update(name, vcpus, memory, wait)
+}
+
+/// One extra disk/NIC change (`vm update --disk-add/--nic-add/--disk-rm/
+/// --nic-rm`, ADR-0068 D7/D10); see `VmEngine::change_device`.
+pub fn change_device(
+    base: &Path,
+    name: &str,
+    change: DeviceChange,
+    wait: std::time::Duration,
+) -> Result<(Vm, Option<HotplugOutcome>)> {
+    engine(base)?.change_device(name, change, wait)
 }
 
 /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,

@@ -107,3 +107,40 @@ limits hot — the pressure that produced this ADR does not exist there yet.
 days out. Persistence and honesty are safe to ship now; a new action class that
 can reboot a production VM during an `apply` is not something to introduce days
 before a launch, and the fallback above is a defensible steady state.
+
+## Implementation (Sprint 18, 2026-10-12) — the four questions, answered pending the owner
+
+Built on branch `plan/s18-vm-hotplug`. Each answer below is what the code does;
+each is reversible in one place if the owner decides otherwise.
+
+1. **`--reboot <Kind>/<name>` (repeatable) or `--reboot all`**, alongside
+   `--replace`, on `stack apply`, `stack rollback` and the top-level `apply`.
+   A `Reboot` without it is refused before anything changes, by name, the same
+   way an unauthorised `Replace` is (`stack.rs::blocked_changes`). `--replace`
+   does NOT authorise a reboot — it is about the disk, not the downtime — and
+   `--replace` naming a resource the plan reboots promotes it to a recreate.
+2. **`--detailed-exitcode` returns `2`** for a `Reboot`: it is a change
+   (`Action::is_change`). A drift gate that must ignore a reboot nobody intends
+   is a reading of `-o json` (`"action": "reboot"`), not a different exit code.
+3. **`-o json` is additive**: a new `action` value `reboot`, a new
+   `reboot_fields` list on the change, and a `reboot: true` flag on each field
+   diff that costs one (omitted when false). A reader that matches the action
+   exhaustively must take the new value; the summary gains the key `reboot`.
+4. **A stopped VM plans an `Update`, with no gate**: its reboot-class fields
+   land where the next boot reads them (`vm::resize_shape`) and the VM layer
+   starts it, exactly as before. The plan shows the cost per field: each diff
+   line carries `(reboot)`. A paused VM, or one whose power state the record
+   does not know, plans as running — a gate asked for in vain is cheaper than
+   downtime nobody authorised.
+
+Which fields reboot is the BACKEND's answer, never the Kind's
+(`vm.rs::reboot_fields_of`): `vcpus`, `memory`, `vcpusMax`, `memoryMax` on every
+backend, plus `network` on Cloud Hypervisor (it rebuilds the NIC from the
+record; libvirt and Proxmox keep it in their own definition, so there it stays
+a recreate). `disk` and `backend` always recreate. A growth of `vcpus`/`memory`
+inside the declared ceiling on a backend that hotplugs (ADR-0068) converges
+live instead — a `partial` outcome is reported and does not fail the apply.
+
+**Not validated against a guest.** The decision is unit-tested end to end
+through the same facts `stack plan` reads; the stop/reshape/start path has run
+against no libvirt domain, Cloud Hypervisor VM or Proxmox guest.

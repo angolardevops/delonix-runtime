@@ -1425,6 +1425,8 @@ const RPENDING: &str = "/nodes/pve/qemu/100/pending";
 #[test]
 fn a_resize_is_done_only_when_config_and_pending_agree() {
     let node = MockNode::start(script(&[
+        // Read first: a ceiling taken away deletes the keys that opened it.
+        ("GET", RCONFIG, ok_data(r#"{"cores":1}"#)),
         ("POST", RCONFIG, ok_data("null")),
         (
             "GET",
@@ -1436,7 +1438,7 @@ fn a_resize_is_done_only_when_config_and_pending_agree() {
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     client
-        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768, (None, None))
         .expect("config and pending agree");
     let sent = node
         .log()
@@ -1451,6 +1453,8 @@ fn a_resize_is_done_only_when_config_and_pending_agree() {
 #[test]
 fn a_resize_whose_config_does_not_read_back_is_an_error() {
     let node = MockNode::start(script(&[
+        // Read first: a ceiling taken away deletes the keys that opened it.
+        ("GET", RCONFIG, ok_data(r#"{"cores":1}"#)),
         ("POST", RCONFIG, ok_data("null")),
         (
             "GET",
@@ -1462,7 +1466,7 @@ fn a_resize_whose_config_does_not_read_back_is_an_error() {
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let err = client
-        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768, (None, None))
         .expect_err("the node did not record the new size");
     assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
 }
@@ -1472,6 +1476,8 @@ fn a_resize_whose_config_does_not_read_back_is_an_error() {
 #[test]
 fn a_resize_left_pending_is_an_error_that_names_the_key() {
     let node = MockNode::start(script(&[
+        // Read first: a ceiling taken away deletes the keys that opened it.
+        ("GET", RCONFIG, ok_data(r#"{"cores":1}"#)),
         ("POST", RCONFIG, ok_data("null")),
         (
             "GET",
@@ -1487,7 +1493,7 @@ fn a_resize_left_pending_is_an_error_that_names_the_key() {
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let err = client
-        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768, (None, None))
         .expect_err("a pending change is not applied");
     assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
     assert!(err.to_string().contains("memory"), "{err}");
@@ -3426,4 +3432,151 @@ fn a_system_container_whose_dhcp_failed_runs_with_the_network_not_ready() {
         "{:?}",
         ledger.records()
     );
+}
+
+// ===========================================================================
+// Hotplug (ADR-0068 phases 2–3, Sprint 18): the ceiling fixed at boot, the
+// live add, and a change the node parks in `pending` refused.
+// ===========================================================================
+
+const PENDING: &str = "/nodes/pve/qemu/100/pending";
+const CURRENT: &str = "/nodes/pve/qemu/100/status/current";
+
+fn posts_to_config(node: &MockNode) -> Vec<String> {
+    node.log()
+        .into_iter()
+        .filter(|s| s.method == "POST" && s.path == CONFIG)
+        .map(|s| s.body)
+        .collect()
+}
+
+#[test]
+fn a_live_vcpu_add_sets_vcpus_and_reads_cpus_back_from_status_current() {
+    let node = MockNode::start(script(&[
+        ("POST", CONFIG, ok_data("null")),
+        ("GET", PENDING, ok_data("[]")),
+        ("GET", CURRENT, ok_data(r#"{"status":"running","cpus":4}"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let got = client
+        .hotplug_vcpus(&Ledger::at(dir.path()), 100, 4)
+        .unwrap();
+    assert_eq!(got, 4, "the node's live count, not the request's");
+    assert_eq!(posts_to_config(&node), ["vcpus=4"]);
+}
+
+/// ADR-0068 D6: a change the node parks in `pending` is NOT applied. It is
+/// reverted — or the next boot applies it behind the record's back — and
+/// refused.
+#[test]
+fn a_hot_change_the_node_parks_as_pending_is_reverted_and_refused() {
+    let node = MockNode::start(script(&[
+        ("POST", CONFIG, ok_data("null")),
+        (
+            "GET",
+            PENDING,
+            ok_data(r#"[{"key":"vcpus","value":2,"pending":4}]"#),
+        ),
+        ("POST", CONFIG, ok_data("null")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .hotplug_vcpus(&Ledger::at(dir.path()), 100, 4)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("PENDING") && err.contains("vcpus"), "{err}");
+    assert_eq!(posts_to_config(&node), ["vcpus=4", "revert=vcpus"]);
+    assert_eq!(node.count("GET", CURRENT), 0, "nothing read as applied");
+}
+
+#[test]
+fn a_live_memory_add_reads_the_current_config_back() {
+    let node = MockNode::start(script(&[
+        ("POST", CONFIG, ok_data("null")),
+        ("GET", PENDING, ok_data("[]")),
+        ("GET", CONFIG, ok_data(r#"{"memory":"4096","cores":4}"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let got = client
+        .hotplug_memory(&Ledger::at(dir.path()), 100, 4096)
+        .unwrap();
+    assert_eq!(got, 4096);
+    assert_eq!(posts_to_config(&node), ["memory=4096"]);
+    let read = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "GET" && s.path == CONFIG)
+        .unwrap();
+    assert_eq!(
+        read.query, "current=1",
+        "the CURRENT config, not the pending one"
+    );
+}
+
+/// The defect this closes: `vm resize --vcpus-max` recorded a ceiling the
+/// node never had. Now the cold reshape writes it (`cores` = ceiling,
+/// `vcpus` = boot, the node flag, `hotplug`) and reads it back.
+#[test]
+fn a_cold_reshape_writes_the_ceiling_and_reads_it_back() {
+    let node = MockNode::start(script(&[
+        ("GET", CONFIG, ok_data(r#"{"cores":2,"memory":"2048"}"#)),
+        ("POST", CONFIG, ok_data("null")),
+        (
+            "GET",
+            CONFIG,
+            ok_data(r#"{"cores":8,"vcpus":2,"sockets":1,"memory":"2048","numa":1}"#),
+        ),
+        ("GET", PENDING, ok_data("[]")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 2048, (Some(8), Some(8192)))
+        .unwrap();
+    let body = &posts_to_config(&node)[0];
+    for kv in [
+        "cores=8",
+        "vcpus=2",
+        "numa=1",
+        "hotplug=network,disk,usb,cpu,memory",
+        "sockets=1",
+        "memory=2048",
+    ] {
+        assert!(body.contains(kv), "{kv} missing from {body}");
+    }
+    assert!(!body.contains("delete"), "{body}");
+}
+
+/// A ceiling taken away: the keys that opened it are deleted, or the next
+/// boot keeps headroom nobody declares.
+#[test]
+fn a_cold_reshape_without_a_ceiling_deletes_the_keys_that_opened_one() {
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            CONFIG,
+            ok_data(
+                r#"{"cores":8,"vcpus":2,"numa":1,"hotplug":"network,disk,usb,cpu,memory","memory":"2048"}"#,
+            ),
+        ),
+        ("POST", CONFIG, ok_data("null")),
+        (
+            "GET",
+            CONFIG,
+            ok_data(r#"{"cores":4,"sockets":1,"memory":"2048"}"#),
+        ),
+        ("GET", PENDING, ok_data("[]")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 4, 2048, (None, None))
+        .unwrap();
+    let body = &posts_to_config(&node)[0];
+    assert!(body.contains("cores=4"), "{body}");
+    assert!(body.contains("delete=vcpus,numa,hotplug"), "{body}");
+    assert!(!body.contains("vcpus="), "{body}");
 }

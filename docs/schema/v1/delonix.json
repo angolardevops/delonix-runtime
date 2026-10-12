@@ -4111,6 +4111,15 @@
             "null"
           ]
         },
+        "memoryMax": {
+          "default": null,
+          "description": "The memory hotplug ceiling, same rule as `vcpusMax`\n(`4G`, `4096M`, `4Gi`). Never below `memory`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory_max": {},
         "netMode": {
           "description": "Canonical `netMode`; `net_mode` stays accepted (back-compat).",
           "type": [
@@ -4188,6 +4197,17 @@
             "null"
           ]
         },
+        "vcpusMax": {
+          "default": null,
+          "description": "The vCPU hotplug CEILING, fixed at boot (ADR-0068 D3): the most this\nVM can be grown to LIVE. Never below `vcpus`. Omitted = no headroom, so\nany growth converges across a reboot (`stack apply --reboot`).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "vcpus_max": {},
         "video": {
           "description": "Video model (`virtio`|`qxl`|`vga`|`none`).",
           "type": [
