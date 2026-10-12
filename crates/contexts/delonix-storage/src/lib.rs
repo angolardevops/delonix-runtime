@@ -16,6 +16,7 @@ pub mod allowlist;
 mod error;
 pub mod exec;
 pub mod helper;
+pub mod mounts;
 pub mod ownership;
 pub mod pool;
 pub mod registry;
