@@ -90,13 +90,28 @@ pub struct IpamEntry {
     pub vmid: Option<u32>,
 }
 
+/// An IPAM entry the provider flags as a subnet's GATEWAY. It is also one of
+/// [`IpamObserved::entries`] (an address it holds, without a MAC); this is the
+/// flag, which an address alone does not carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpamGatewayEntry {
+    pub vnet: String,
+    pub ip: String,
+}
+
 /// What an IPAM provider holds for one zone, restricted to the vnets the
 /// caller owns (ADR-0059 D4, observe): the RUNNING subnets, every IPAM entry
-/// in those vnets, and the zone's own IPAM/DHCP options as running.
+/// in those vnets, the entries flagged as a gateway, and the zone's own
+/// IPAM/DHCP options as running.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IpamObserved {
     pub subnets: Vec<IpamSubnet>,
     pub entries: Vec<IpamEntry>,
+    /// The entries the provider flags as a subnet's gateway (ADR-0063 D2.3):
+    /// a running subnet has exactly one, on its running gateway, or none when
+    /// it runs without one. Read so a plan sees an entry a rolled-back change
+    /// or a hand edit left elsewhere ([`gateway_entry_drift`]).
+    pub gateway_entries: Vec<IpamGatewayEntry>,
     /// The zone allocates from an IPAM at all. Without one, measured, a
     /// reservation call answers success and stores nothing.
     pub zone_ipam: bool,
@@ -212,6 +227,99 @@ pub fn gateway_held_by<'a>(
     entries: &'a [IpamEntry],
 ) -> Option<&'a IpamEntry> {
     entries.iter().find(|e| e.vnet == vnet && e.ip == gateway)
+}
+
+/// One running subnet whose IPAM gateway entries are not exactly one, on its
+/// running gateway (ADR-0063 D2.3). What a plan reports and what a provider's
+/// gateway repair acts on are both read from this, so the two never disagree
+/// about which subnet is wrong.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GatewayEntryMismatch {
+    pub vnet: String,
+    pub cidr: String,
+    /// The running subnet's gateway, where the one entry belongs; `None`
+    /// when the subnet runs without one, so no entry belongs.
+    pub gateway: Option<String>,
+    /// The gateway entries on any other address of the subnet, sorted.
+    pub stale: Vec<String>,
+    /// The running gateway has no entry of its own.
+    pub missing: bool,
+}
+
+impl GatewayEntryMismatch {
+    /// The difference, in one line.
+    pub fn line(&self) -> String {
+        let at = format!("subnet {} in vnet '{}'", self.cidr, self.vnet);
+        let stale = self.stale.join(", ");
+        match (&self.gateway, self.missing, self.stale.is_empty()) {
+            (Some(g), true, true) => {
+                format!("{at}: the IPAM holds no gateway entry for its gateway {g}")
+            }
+            (Some(g), true, false) => {
+                format!("{at}: the IPAM gateway entry is on {stale}, the subnet runs on {g}")
+            }
+            (Some(g), false, _) => {
+                format!("{at}: the IPAM holds extra gateway entries on {stale} besides {g}")
+            }
+            (None, _, _) => {
+                format!("{at} runs without a gateway and the IPAM holds gateway entries on {stale}")
+            }
+        }
+    }
+}
+
+/// The running subnets whose IPAM gateway entries are not exactly one on the
+/// running gateway (or none, for a subnet without a gateway). An entry counts
+/// for a subnet when it is in the subnet's vnet and inside its CIDR. Pure.
+pub fn gateway_entry_mismatches(
+    running: &[IpamSubnet],
+    gateway_entries: &[IpamGatewayEntry],
+) -> Vec<GatewayEntryMismatch> {
+    let mut out = Vec::new();
+    for s in running {
+        let mine: Vec<&str> = gateway_entries
+            .iter()
+            .filter(|e| e.vnet == s.vnet && s.holds(&e.ip))
+            .map(|e| e.ip.as_str())
+            .collect();
+        let gateway = s.gateway.as_deref();
+        let mut stale: Vec<String> = mine
+            .iter()
+            .filter(|ip| Some(**ip) != gateway)
+            .map(|ip| (*ip).to_string())
+            .collect();
+        stale.sort();
+        stale.dedup();
+        let missing = gateway.is_some_and(|g| !mine.contains(&g));
+        if stale.is_empty() && !missing {
+            continue;
+        }
+        out.push(GatewayEntryMismatch {
+            vnet: s.vnet.clone(),
+            cidr: s.cidr.clone(),
+            gateway: gateway.map(str::to_string),
+            stale,
+            missing,
+        });
+    }
+    out
+}
+
+/// What a plan reports about the IPAM's gateway entries of the `running`
+/// subnets: one line per subnet whose entry is not where its running gateway
+/// is, sorted. Empty = in sync. Compared with the RUNNING gateway, not the
+/// declared one — a declared gateway that differs is the subnet's own
+/// in-place change ([`subnet_settings_drift`]), named once there. Pure.
+pub fn gateway_entry_drift(
+    running: &[IpamSubnet],
+    gateway_entries: &[IpamGatewayEntry],
+) -> Vec<String> {
+    let mut out: Vec<String> = gateway_entry_mismatches(running, gateway_entries)
+        .iter()
+        .map(GatewayEntryMismatch::line)
+        .collect();
+    out.sort();
+    out
 }
 
 /// The line that says the running zone allocates from another controller
@@ -737,10 +845,74 @@ mod tests {
                     vmid: None,
                 },
             ],
+            gateway_entries: vec![IpamGatewayEntry {
+                vnet: "v1".into(),
+                ip: "10.78.0.1".into(),
+            }],
             zone_ipam: true,
             zone_dhcp: true,
             controller: Some(DEFAULT_CONTROLLER.into()),
         }
+    }
+
+    fn gw_entry(ip: &str) -> IpamGatewayEntry {
+        IpamGatewayEntry {
+            vnet: "v1".into(),
+            ip: ip.into(),
+        }
+    }
+
+    /// ADR-0063 D2.3 as a plan reads it (N18): an untouched subnet has its
+    /// one gateway entry on its running gateway and is in sync; an entry
+    /// moved by hand, a missing one, an extra one, and one on a subnet that
+    /// runs without a gateway are each one line naming the subnet.
+    #[test]
+    fn a_gateway_entry_away_from_the_running_gateway_is_one_line_and_an_untouched_one_none() {
+        let o = in_sync();
+        assert!(gateway_entry_drift(&o.subnets, &o.gateway_entries).is_empty());
+
+        // Moved by hand (or left by a rolled-back change) to .254.
+        let moved = gateway_entry_drift(&o.subnets, &[gw_entry("10.78.0.254")]);
+        assert_eq!(
+            moved,
+            vec![
+                "subnet 10.78.0.0/24 in vnet 'v1': the IPAM gateway entry is on 10.78.0.254, \
+                  the subnet runs on 10.78.0.1"
+                    .to_string()
+            ]
+        );
+        // Released by hand: no entry on the running gateway.
+        let missing = gateway_entry_drift(&o.subnets, &[]);
+        assert_eq!(missing.len(), 1);
+        assert!(
+            missing[0].contains("holds no gateway entry for its gateway 10.78.0.1"),
+            "{missing:?}"
+        );
+        // A repair cut short: the right one and a stale one.
+        let extra = gateway_entry_drift(
+            &o.subnets,
+            &[gw_entry("10.78.0.1"), gw_entry("10.78.0.200")],
+        );
+        assert_eq!(extra.len(), 1);
+        assert!(extra[0].contains("extra gateway entries on 10.78.0.200 besides 10.78.0.1"));
+        // A subnet that runs without a gateway holds none.
+        let mut no_gw = o.subnets.clone();
+        no_gw[0].gateway = None;
+        assert!(gateway_entry_drift(&no_gw, &[]).is_empty());
+        let added = gateway_entry_drift(&no_gw, &[gw_entry("10.78.0.1")]);
+        assert!(added[0].contains("runs without a gateway"), "{added:?}");
+        // An entry of another vnet, or outside the subnet, is not this subnet's.
+        let elsewhere = [
+            IpamGatewayEntry {
+                vnet: "v2".into(),
+                ip: "10.78.0.1".into(),
+            },
+            gw_entry("10.79.0.1"),
+        ];
+        assert_eq!(
+            gateway_entry_drift(&o.subnets, &elsewhere),
+            gateway_entry_drift(&o.subnets, &[])
+        );
     }
 
     #[test]

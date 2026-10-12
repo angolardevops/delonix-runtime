@@ -3580,3 +3580,199 @@ fn a_cold_reshape_without_a_ceiling_deletes_the_keys_that_opened_one() {
     assert!(body.contains("delete=vcpus,numa,hotplug"), "{body}");
     assert!(!body.contains("vcpus="), "{body}");
 }
+
+// ===========================================================================
+// IPAM gateway entries as a plan reads them (N18, ADR-0063 D2.3)
+// ===========================================================================
+
+const IPAM_STATUS: &str = "/cluster/sdn/ipams/pve/status";
+const GW_SUBNET: &str = "/cluster/sdn/vnets/n18v/subnets/n18z-10.82.0.0-24";
+
+/// `n` copies of a reply: the mock pops one per request and falls back to its
+/// stock 500 when the queue runs out, so a route read more than once is
+/// queued as many times as the scenario reads it.
+fn times(
+    method: &'static str,
+    path: &'static str,
+    n: usize,
+    r: Reply,
+) -> Vec<(&'static str, &'static str, Reply)> {
+    (0..n).map(|_| (method, path, r.clone())).collect()
+}
+
+/// The IPAM status rows of zone `n18z` with the gateway flag on `gateways`
+/// and one guest's allocation beside them.
+fn status_with_gateways(gateways: &[&str]) -> Reply {
+    let mut rows: Vec<String> = gateways
+        .iter()
+        .map(|ip| {
+            format!(
+                r#"{{"ip":"{ip}","vnet":"n18v","zone":"n18z","gateway":1,"subnet":"10.82.0.0/24"}}"#
+            )
+        })
+        .collect();
+    rows.push(
+        r#"{"ip":"10.82.0.20","mac":"bc:24:11:00:00:20","vnet":"n18v","zone":"n18z","subnet":"10.82.0.0/24"}"#
+            .into(),
+    );
+    ok_data(&format!("[{}]", rows.join(",")))
+}
+
+/// The zone, its vnet (carrying `owner`'s mark) and its subnet, running with
+/// gateway `.1`, each queued `n` times.
+fn gateway_node(
+    owner: &delonix_networking::ownership::OwnerMark,
+    n: usize,
+    status: Vec<Reply>,
+) -> MockNode {
+    let zone = ok_data(r#"[{"zone":"n18z","type":"simple","ipam":"pve","dhcp":"dnsmasq"}]"#);
+    let vnets = ok_data(&format!(
+        r#"[{{"vnet":"n18v","zone":"n18z","alias":"{}"}}]"#,
+        owner.stamp("")
+    ));
+    let subnet = ok_data(
+        r#"[{"cidr":"10.82.0.0/24","gateway":"10.82.0.1","vnet":"n18v","zone":"n18z","type":"subnet","dhcp-range":[{"start-address":"10.82.0.100","end-address":"10.82.0.150"}]}]"#,
+    );
+    let mut entries = Vec::new();
+    entries.extend(times("GET", "/cluster/sdn/zones", n, zone));
+    entries.extend(times("GET", "/cluster/sdn/vnets", n, vnets));
+    entries.extend(times("GET", "/cluster/sdn/vnets/n18v/subnets", n, subnet));
+    for r in status {
+        entries.push(("GET", IPAM_STATUS, r));
+    }
+    entries.extend([
+        ("POST", SDN_LOCK, ok_data(r#""tok-n18""#)),
+        ("PUT", GW_SUBNET, ok_data("null")),
+        ("PUT", GW_SUBNET, ok_data("null")),
+        ("DELETE", "/cluster/sdn/vnets/n18v/ips", ok_data("null")),
+        ("POST", SDN_ROLLBACK, ok_data("null")),
+    ]);
+    MockNode::start(script(&entries))
+}
+
+fn ipam_on(node: &MockNode, dir: &std::path::Path) -> delonix_proxmox::ProxmoxIpamProvider {
+    delonix_proxmox::ProxmoxIpamProvider::new(Arc::new(sdn_client(node)), Ledger::at(dir))
+}
+
+fn plan_lines(p: &delonix_proxmox::ProxmoxIpamProvider) -> Vec<String> {
+    use delonix_networking::ipam::IpamProvider;
+    let o = p.observe("n18z", &["n18v".to_string()]).expect("observe");
+    delonix_networking::ipam::gateway_entry_drift(&o.subnets, &o.gateway_entries)
+}
+
+/// An untouched subnet — its one gateway entry on its running gateway —
+/// plans nothing, and nothing is written.
+#[test]
+fn an_untouched_gateway_entry_plans_nothing() {
+    let owner = delonix_networking::ownership::OwnerMark::new("dlx-n18-owner").unwrap();
+    let node = gateway_node(&owner, 4, vec![status_with_gateways(&["10.82.0.1"]); 4]);
+    let dir = tempfile::tempdir().unwrap();
+    let p = ipam_on(&node, dir.path());
+    assert!(plan_lines(&p).is_empty(), "an untouched entry is in sync");
+    let o = {
+        use delonix_networking::ipam::IpamProvider;
+        p.observe("n18z", &["n18v".to_string()]).unwrap()
+    };
+    assert_eq!(o.gateway_entries.len(), 1, "the flag is read: {o:?}");
+    assert_eq!(o.entries.len(), 2, "the gateway row and the guest's");
+    // And the repair, run on the same node, has nothing to do.
+    use delonix_networking::ipam::IpamProvider;
+    assert!(p
+        .repair_gateways("n18z", &["n18v".to_string()], &owner)
+        .unwrap()
+        .is_empty());
+    let writes = node.log().iter().filter(|s| s.method != "GET").count();
+    assert_eq!(
+        writes,
+        0,
+        "an in-sync subnet writes nothing: {:?}",
+        node.log()
+    );
+}
+
+/// A gateway entry moved by hand to `.254`: the plan names the subnet, and
+/// the repair the apply runs (the same reading, `gateway_entry_mismatches`)
+/// moves it back through a free address, releases `.254`, rolls back — and
+/// the next observation is in sync.
+#[test]
+fn a_gateway_entry_moved_by_hand_plans_a_repair_that_puts_it_back() {
+    let owner = delonix_networking::ownership::OwnerMark::new("dlx-n18-owner").unwrap();
+    let node = gateway_node(
+        &owner,
+        4,
+        vec![
+            // the plan's observe
+            status_with_gateways(&["10.82.0.254"]),
+            // the repair's first read
+            status_with_gateways(&["10.82.0.254"]),
+            // after the move and back: the right one, and the stale one
+            status_with_gateways(&["10.82.0.1", "10.82.0.254"]),
+            // after the release
+            status_with_gateways(&["10.82.0.1"]),
+            // the next plan's observe
+            status_with_gateways(&["10.82.0.1"]),
+        ],
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let p = ipam_on(&node, dir.path());
+
+    let plan = plan_lines(&p);
+    assert_eq!(
+        plan,
+        vec![
+            "subnet 10.82.0.0/24 in vnet 'n18v': the IPAM gateway entry is on 10.82.0.254, \
+              the subnet runs on 10.82.0.1"
+                .to_string()
+        ],
+        "the plan names the subnet whose entry moved"
+    );
+
+    use delonix_networking::ipam::IpamProvider;
+    let repaired = p
+        .repair_gateways("n18z", &["n18v".to_string()], &owner)
+        .expect("repair");
+    assert_eq!(repaired.len(), 1, "{repaired:?}");
+    assert!(
+        repaired[0].contains("was on 10.82.0.254, put back on 10.82.0.1"),
+        "{repaired:?}"
+    );
+
+    let puts: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method == "PUT" && s.path == GW_SUBNET)
+        .collect();
+    assert_eq!(
+        puts.len(),
+        2,
+        "moved through a free address and back: {puts:?}"
+    );
+    assert!(
+        puts[0].body.contains("gateway=10.82.0.253"),
+        "{:?}",
+        puts[0]
+    );
+    assert!(puts[1].body.contains("gateway=10.82.0.1"), "{:?}", puts[1]);
+    let deletes: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method == "DELETE")
+        .collect();
+    assert_eq!(deletes.len(), 1, "{deletes:?}");
+    assert!(
+        deletes[0].query.contains("ip=10.82.0.254"),
+        "the stale entry released: {:?}",
+        deletes[0]
+    );
+    assert_eq!(
+        node.count("POST", SDN_ROLLBACK),
+        1,
+        "nothing staged survives"
+    );
+    assert_eq!(node.count("PUT", SDN_APPLY), 0, "a repair never applies");
+
+    assert!(
+        plan_lines(&p).is_empty(),
+        "after the repair the plan is in sync"
+    );
+}

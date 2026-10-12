@@ -6091,6 +6091,138 @@ fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
     );
 }
 
+/// N18 (ADR-0063 D2.3) against a real node: the plan READS the IPAM's
+/// gateway entries. A subnet with its entry on its running gateway plans
+/// nothing; an entry released by hand (`DELETE …/ips` on the gateway's
+/// address), and one moved by a gateway change staged and discarded, each
+/// plan one line naming the subnet — the reading `kind: NetworkZone`'s
+/// `gatewayEntries` field makes — and after the repair the apply runs, the
+/// plan is in sync again. Until N18 the plan said `=` for all three.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_plan_reads_a_gateway_entry_released_or_moved_by_hand_and_the_repair_clears_it() {
+    use delonix_networking::ipam::{gateway_entry_drift, DhcpRange, IpamProvider, IpamSubnet};
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let t = target().expect(NEEDS_TARGET);
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let owner = OwnerMark::from_random(
+        &(std::process::id() ^ 0x0018_0018)
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("n{suffix}");
+    let vnet = format!("p{suffix}");
+    let octet = suffix % 200 + 20;
+    let at = |last: u8| format!("10.84.{octet}.{last}");
+    let subnet = IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.84.{octet}.0/24"),
+        gateway: Some(at(1)),
+        dhcp_ranges: vec![DhcpRange {
+            start: at(100),
+            end: at(150),
+        }],
+    };
+    let plan = || {
+        let o = ipam
+            .observe(&zone, std::slice::from_ref(&vnet))
+            .expect("observe");
+        gateway_entry_drift(&o.subnets, &o.gateway_entries)
+    };
+    let repair = || {
+        ipam.repair_gateways(&zone, std::slice::from_ref(&vnet), &owner)
+            .expect("repair")
+    };
+
+    segment
+        .transaction(&mut || {
+            segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?;
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("n18".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, "pve", true)?;
+            ipam.ensure_subnet(&zone, &subnet, &owner)?;
+            Ok(())
+        })
+        .expect("zone, vnet and subnet");
+    assert!(
+        plan().is_empty(),
+        "an untouched subnet plans nothing: {:?}",
+        plan()
+    );
+
+    // Released by hand: the router's address is free in the IPAM.
+    client
+        .sdn_vnet_ip_delete(&ledger, &vnet, &zone, &at(1), None)
+        .expect("release the gateway entry by hand");
+    let released = plan();
+    assert_eq!(released.len(), 1, "{released:?}");
+    assert!(
+        released[0].contains(&format!("no gateway entry for its gateway {}", at(1))),
+        "{released:?}"
+    );
+    assert_eq!(repair().len(), 1, "the repair puts it back");
+    assert!(plan().is_empty(), "after the repair: {:?}", plan());
+
+    // Moved: a gateway change staged and discarded (the shape ADR-0063
+    // measured after a failed transaction).
+    client
+        .sdn_discarded_change(&ledger, || {
+            client.update_sdn_subnet_with(
+                &ledger,
+                &vnet,
+                &zone,
+                &subnet.cidr,
+                &delonix_proxmox::SubnetOptions {
+                    gateway: Some(&at(200)),
+                    ..Default::default()
+                },
+            )
+        })
+        .expect("a gateway change staged and discarded");
+    let moved = plan();
+    assert_eq!(moved.len(), 1, "the plan names the subnet: {moved:?}");
+    assert_eq!(repair().len(), 1, "the repair acts on what the plan named");
+    assert!(plan().is_empty(), "after the repair: {:?}", plan());
+    assert!(repair().is_empty(), "a second repair found something to do");
+
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &subnet, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
+    assert!(
+        !client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .any(|e| e["zone"] == zone.as_str()),
+        "an IPAM entry of the zone was left behind"
+    );
+}
+
 /// ADR-0063 D1.2/D1.3 against a real node: a NetBox and a phpIPAM controller
 /// registered on the cluster — real entries of `GET /cluster/sdn/ipams`, the
 /// node having verified each URL against a stub — are listed by the IPAM port
