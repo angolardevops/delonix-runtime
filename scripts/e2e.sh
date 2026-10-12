@@ -7615,6 +7615,12 @@ else
       "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900 >/dev/null 2>&1
       "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
       "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      # D5 before any VIP exists: once one does, the holder puts the sysctl
+      # back to 1 on its next round.
+      nsenter -t "$(vpin)" -U -n --preserve-credentials sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null
+      check "VirtualIP: sem bridge-nf-call-iptables no holder é recusado com a classe 69 (DX-6361)" ok bash -c \
+        "out=\$('$BIN' apply -f '$(vsvc vbr "$VNS" vbr)' 2>&1); rc=\$?; echo \"\$out\"; [ \$rc -eq 69 ] && grep -q DX-6361 <<<\"\$out\""
+      nsenter -t "$(vpin)" -U -n --preserve-credentials sh -c 'echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null
       VHP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
       check "VirtualIP: o apply atribui um VIP do conjunto" ok "$BIN" apply -f "$(vsvc vweb "$VNS" vweb "" "$VHP")"
       VIP=$("$BIN" get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r["vip"] for r in json.load(sys.stdin) if r["name"]=="vweb"))' 2>/dev/null)
@@ -7692,7 +7698,7 @@ else
     skip "VirtualIP: o resto da secção" "não foi possível puxar $VIMG ou criar a rede"
   fi
   for c in v1 v2 vh vc vx vs; do "$BIN" container rm -f "$c-$PFX" >/dev/null 2>&1; done
-  "$BIN" delete services $VNS/vweb >/dev/null 2>&1
+  "$BIN" delete services $VNS/vweb $VNS/vbr >/dev/null 2>&1
   "$BIN" network rm "$VN" >/dev/null 2>&1
   "$BIN" network vip-pool clear >/dev/null 2>&1
 fi
