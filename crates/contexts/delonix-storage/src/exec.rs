@@ -6,8 +6,6 @@
 //! recorder instead of [`System`], so every command a driver would run is
 //! checked as data — which is how the drivers are proven without a disk.
 
-use std::process::{Command, Stdio};
-
 /// What a command left behind. `code` is `None` when a signal ended it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Output {
@@ -45,31 +43,6 @@ pub trait Run: Send + Sync {
 /// The search path the tools are taken from. Fixed: the privileged helper
 /// never takes a program from a directory its caller could write.
 pub const TOOL_PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
-
-/// Runs the real programs: a cleared environment, [`TOOL_PATH`] and the C
-/// locale (the drivers parse the tools' English output), no stdin.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct System;
-
-impl Run for System {
-    fn run(&self, argv: &[String]) -> std::io::Result<Output> {
-        let (prog, args) = argv
-            .split_first()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty argv"))?;
-        let out = Command::new(prog)
-            .args(args)
-            .env_clear()
-            .env("PATH", TOOL_PATH)
-            .env("LC_ALL", "C")
-            .stdin(Stdio::null())
-            .output()?;
-        Ok(Output {
-            code: out.status.code(),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
-    }
-}
 
 /// An argv from string slices.
 pub fn argv(parts: &[&str]) -> Vec<String> {
@@ -161,31 +134,6 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_system_runner_clears_the_environment_and_fixes_the_path() {
-        // The test process has a HOME; the child must not inherit it.
-        assert!(std::env::var_os("HOME").is_some());
-        let out = System.run(&argv(&["env"])).unwrap();
-        assert!(out.success());
-        assert!(
-            out.stdout.contains(&format!("PATH={TOOL_PATH}")),
-            "{}",
-            out.stdout
-        );
-        assert!(out.stdout.contains("LC_ALL=C"));
-        assert!(!out.stdout.contains("HOME="), "{}", out.stdout);
-    }
-
-    #[test]
-    fn a_program_that_is_not_installed_is_an_err_and_a_failure_is_an_ok() {
-        let e = System
-            .run(&argv(&["dlx-no-such-program-anywhere"]))
-            .unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
-        let out = System.run(&argv(&["false"])).unwrap();
-        assert_eq!(out.code, Some(1));
-    }
 
     #[test]
     fn why_quotes_the_first_line_that_says_something() {

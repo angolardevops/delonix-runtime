@@ -1034,6 +1034,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-lvm"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "delonix-proxmox"
 version = "5.0.2"
 dependencies = [

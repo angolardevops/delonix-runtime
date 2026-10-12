@@ -19,6 +19,7 @@ members = [
     "crates/providers/delonix-powerdns",
     "crates/providers/delonix-provider-libvirt",
     "crates/providers/delonix-provider-cloud-hypervisor",
+    "crates/providers/delonix-provider-lvm",
     "crates/interfaces/delonix-mcp",
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
@@ -64,6 +65,7 @@ delonix-opnsense = { path = "crates/providers/delonix-opnsense" }
 delonix-powerdns = { path = "crates/providers/delonix-powerdns" }
 delonix-provider-libvirt = { path = "crates/providers/delonix-provider-libvirt" }
 delonix-provider-cloud-hypervisor = { path = "crates/providers/delonix-provider-cloud-hypervisor" }
+delonix-provider-lvm = { path = "crates/providers/delonix-provider-lvm" }
 delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }
