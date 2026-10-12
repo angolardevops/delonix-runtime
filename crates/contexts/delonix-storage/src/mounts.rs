@@ -65,6 +65,34 @@ pub fn prepare_data_dir(volume_root: &Path, uid: u32) -> Result<PathBuf> {
     Ok(data)
 }
 
+/// Writes `bytes` to `path` all-or-nothing: a temporary file beside it,
+/// synced, then renamed over. A stamp half-written by a crash would read as
+/// «not this engine's» and strand the volume.
+pub fn write_file_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    };
+    write().map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        io("cannot write", path, e)
+    })
+}
+
 /// Capacity and use of the filesystem holding `path`, as `df` shows them:
 /// used over used-plus-available-to-this-user. `None` fields when it cannot be
 /// read — never zero.
@@ -149,6 +177,17 @@ mod tests {
             PoolUsage::default()
         );
         assert!(fs_magic(tmp.path()).is_some());
+    }
+
+    #[test]
+    fn an_atomic_write_replaces_the_file_and_leaves_no_temporary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("stamp.json");
+        write_file_atomic(&f, b"one", 0o600).unwrap();
+        write_file_atomic(&f, b"two", 0o600).unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"two");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
+        assert!(write_file_atomic(&tmp.path().join("no/such/dir"), b"x", 0o600).is_err());
     }
 
     #[test]
