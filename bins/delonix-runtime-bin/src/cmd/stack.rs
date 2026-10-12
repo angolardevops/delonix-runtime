@@ -1957,7 +1957,11 @@ pub(crate) fn apply_docs(
             "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
             &[(
                 "what",
-                &issues_summary(issues.len(), shape_issue_count(docs)),
+                &issues_summary(
+                    issues.len(),
+                    shape_issue_count(docs),
+                    spec_issue_count(docs),
+                ),
             )],
         )));
     }
@@ -3184,6 +3188,7 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
         Err(delonix_model::Error::Invalid(issues_summary(
             issues.len(),
             shape_issue_count(&docs),
+            spec_issue_count(&docs),
         )))
     }
 }
@@ -3197,10 +3202,19 @@ pub(crate) fn shape_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
         .count()
 }
 
+/// How many of the validation issues are pull-source specs the apply would
+/// refuse.
+pub(crate) fn spec_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
+    docs.iter()
+        .filter(|d| d.kind == k::GITOPS_SOURCE)
+        .filter(|d| super::gitops::spec_problem(d).is_some())
+        .count()
+}
+
 /// The count line under a failed validation, naming each kind of problem by
-/// what it is: a shape problem is not an «unresolved reference». Pure.
-pub(crate) fn issues_summary(total: usize, shapes: usize) -> String {
-    let refs = total.saturating_sub(shapes);
+/// what it is: a shape or a spec problem is not an «unresolved reference». Pure.
+pub(crate) fn issues_summary(total: usize, shapes: usize, specs: usize) -> String {
+    let refs = total.saturating_sub(shapes + specs);
     let mut parts = Vec::new();
     if refs > 0 {
         parts.push(super::po::tf(
@@ -3212,6 +3226,12 @@ pub(crate) fn issues_summary(total: usize, shapes: usize) -> String {
         parts.push(super::po::tf(
             "{n} invalid VM shape(s)",
             &[("n", &shapes.to_string())],
+        ));
+    }
+    if specs > 0 {
+        parts.push(super::po::tf(
+            "{n} invalid GitOpsSource spec(s)",
+            &[("n", &specs.to_string())],
         ));
     }
     parts.join("; ")
@@ -3852,6 +3872,14 @@ fn validate_graph_full(
             issues.push(problem);
         }
     }
+    // A pull source the apply would refuse (its URL, ref, path, interval or
+    // an unknown field) is refused here too, so `validate` never says OK to a
+    // source the apply turns down.
+    for d in docs.iter().filter(|d| d.kind == k::GITOPS_SOURCE) {
+        if let Some(problem) = super::gitops::spec_problem(d) {
+            issues.push(problem);
+        }
+    }
 
     issues
 }
@@ -4067,10 +4095,11 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
 
     #[test]
     fn a_shape_problem_is_not_counted_as_a_reference() {
-        assert_eq!(issues_summary(1, 1), "1 invalid VM shape(s)");
-        assert_eq!(issues_summary(2, 0), "2 unresolved reference(s)");
+        assert_eq!(issues_summary(1, 1, 0), "1 invalid VM shape(s)");
+        assert_eq!(issues_summary(2, 0, 0), "2 unresolved reference(s)");
+        assert_eq!(issues_summary(1, 0, 1), "1 invalid GitOpsSource spec(s)");
         assert_eq!(
-            issues_summary(3, 1),
+            issues_summary(3, 1, 0),
             "2 unresolved reference(s); 1 invalid VM shape(s)"
         );
     }
@@ -4086,6 +4115,26 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         .unwrap();
         let issues = validate_graph_with(&d, &[], &[], &[], &[]);
         assert!(issues.iter().any(|i| i.contains("vcpusMax")), "{issues:?}");
+    }
+
+    /// A pull source the apply would refuse is refused by validation too,
+    /// with the apply's own code — `validate` never says OK to it.
+    #[test]
+    fn a_gitops_source_the_apply_refuses_fails_validation() {
+        let doc = |url: &str| {
+            manifest::load_str(
+                &format!(
+                    "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: gs\nspec:\n  source:\n    url: {url}\n    path: env/prod\n"
+                ),
+                "test",
+            )
+            .unwrap()
+        };
+        let issues = validate_graph_with(&doc("ext::sh -c id"), &[], &[], &[], &[]);
+        assert!(issues.iter().any(|i| i.contains("DX-1601")), "{issues:?}");
+        assert_eq!(spec_issue_count(&doc("ext::sh -c id")), 1);
+        let ok = validate_graph_with(&doc("file:///srv/repo.git"), &[], &[], &[], &[]);
+        assert!(ok.is_empty(), "{ok:?}");
     }
 
     /// ADR-0012: downtime is authorised as explicitly as data loss. A Reboot

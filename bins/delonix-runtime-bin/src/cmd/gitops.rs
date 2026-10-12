@@ -550,6 +550,20 @@ fn spec_of(doc: &ManifestDoc) -> Result<GitOpsSourceSpec> {
     Ok(spec)
 }
 
+/// Why this source document would be refused, as a validation issue line —
+/// the same parse and checks the apply runs, so `stack validate` and
+/// `manifest validate` refuse what the apply would refuse, with its code.
+pub(crate) fn spec_problem(doc: &ManifestDoc) -> Option<String> {
+    spec_of(doc).err().map(|e| {
+        format!(
+            "GitOpsSource '{}': DX-{:04} {}",
+            doc.metadata.name,
+            e.number(),
+            super::po::t_dyn(&e.to_string())
+        )
+    })
+}
+
 // ---------------------------------------------------------------------------
 // The record
 // ---------------------------------------------------------------------------
@@ -620,8 +634,9 @@ pub(crate) fn load_record(root: &Path, namespace: &str, name: &str) -> Result<So
 fn not_found(namespace: &str, name: &str) -> Error {
     Error::coded(
         4601,
-        Error::NotFound(format!(
-            "gitopssource {namespace}/{name} (see `delonix get gitopssources`)"
+        Error::NotFound(super::po::tf(
+            "gitopssource {namespace}/{name} (see `delonix get gitopssources`)",
+            &[("namespace", namespace), ("name", name)],
         )),
     )
 }

@@ -7447,6 +7447,10 @@ else
   goapplied() { gox gitops status "$GS" -o json \
     | python3 -c 'import json,sys;r=json.load(sys.stdin)[0];print(r["result"],r["commit"],r["applied"])'; }
   export -f gox gogit gopush gostate goapplied
+  # The checks that exercise a gitops leaf call the binary DIRECTLY (not through
+  # `gox`): cli_exec_ratchet.py counts a leaf only when the engine binary is a
+  # word of the asserted command, and a shell function hides it.
+  GOX="env HOME='$GO/home' XDG_CONFIG_HOME='$GO/home/.config' PATH='$GO/bin:$PATH' '$BIN'"
   export GO GS BIN PFX IMG
 
   git init -q --bare "$GO/repo.git"; gogit init -q -b main
@@ -7494,28 +7498,33 @@ YAML
     sed 's/name: $GS/name: Bad_Name/' '$GO/source.yaml' >'$GO/bad.yaml'
     out=\$(gox stack apply -f '$GO/bad.yaml' --name x 2>&1) && { echo 'aceitou'; exit 1; }
     grep -q 'DX-1601' <<<\"\$out\" || { echo 'recusou sem o código DX-1601'; exit 1; }"
+  check "gitops: manifest validate recusa a fonte que o apply recusa (url ext::, DX-1601)" ok bash -c "
+    sed 's|url: file://.*|url: ext::sh -c id|' '$GO/source.yaml' >'$GO/badurl.yaml'
+    out=\$('$BIN' manifest validate -f '$GO/badurl.yaml' 2>&1) && { echo 'validate disse OK'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }"
 
   check "gitops: a primeira passagem converge a stack do commit" ok bash -c "
-    gox gitops reconcile '$GS' >/dev/null || exit 1
+    $GOX gitops reconcile '$GS' >/dev/null || exit 1
+    $GOX gitops status '$GS' | grep -q '$GS' || { echo 'o status não nomeia a fonte'; exit 1; }
     s=\$(goapplied); [ \"\$s\" = 'synced $GOC1 $GOC1' ] || { echo \"status: \$s\"; exit 1; }
     gostate | grep -q ' 64M\$' || { echo \"container: \$(gostate)\"; exit 1; }"
   GOPID=$(gostate | cut -d' ' -f1)
 
   goapp 96M ""; GOC2=$(gopush 'v2: memory')
   check "gitops: um campo quente (memory) converge na passagem seguinte com o MESMO PID" ok bash -c "
-    gox gitops reconcile '$GS' >/dev/null || exit 1
+    $GOX gitops reconcile '$GS' >/dev/null || exit 1
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"esperava '$GOPID 96M', está \$(gostate)\"; exit 1; }
     [ \"\$(goapplied)\" = 'synced $GOC2 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
   check "gitops: uma passagem sem mudanças não escreve revisão nova" ok bash -c "
     a=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
     [ \"\$a\" -gt 0 ] || { echo 'as passagens anteriores não deixaram revisão nenhuma'; exit 1; }
-    gox gitops reconcile '$GS' | grep -q 'in sync' || exit 1
+    $GOX gitops reconcile '$GS' | grep -q 'in sync' || exit 1
     b=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
     [ \"\$a\" = \"\$b\" ] || { echo \"revisões \$a -> \$b\"; exit 1; }"
 
   goapp 128M "  privileged: true"; GOC3=$(gopush 'broken: privileged')
   check "gitops: um commit que pede o host é recusado (DX-1602) e a stack fica intacta" ok bash -c "
-    out=\$(gox gitops reconcile '$GS' 2>&1); rc=\$?
+    out=\$($GOX gitops reconcile '$GS' 2>&1); rc=\$?
     [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
     grep -q 'DX-1602' <<<\"\$out\" || { echo 'sem DX-1602'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
@@ -7524,31 +7533,32 @@ YAML
   goapp 128M ""; sed -i "s/network: ${PFX}-gnet/network: ${PFX}-nosuch/" "$GO/work/env/prod/app.yaml"
   GOC4=$(gopush 'broken: graph')
   check "gitops: um commit cujo grafo falha é recusado e a stack fica intacta" ok bash -c "
-    gox gitops reconcile '$GS' >/dev/null 2>&1 && { echo 'aceitou'; exit 1; }
+    $GOX gitops reconcile '$GS' >/dev/null 2>&1 && { echo 'aceitou'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
     [ \"\$(goapplied)\" = 'rejected $GOC4 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
 
   goapp 96M ""; sed -i "s|image: $IMG|image: ${IMG%%:*}:gitops-nao-existe|" "$GO/work/env/prod/app.yaml"
   GOC5=$(gopush 'blocked: replace')
   check "gitops: um commit que planeia um Replace é bloqueado (DX-1604) e a stack fica intacta" ok bash -c "
-    out=\$(gox gitops reconcile '$GS' 2>&1); rc=\$?
+    out=\$($GOX gitops reconcile '$GS' 2>&1); rc=\$?
     [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
     grep -q 'DX-1604' <<<\"\$out\" || { echo 'sem DX-1604'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
     [ \"\$(goapplied)\" = 'blocked $GOC5 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
 
   check "gitops: suspensa, uma passagem não obtém nada" ok bash -c "
-    gox gitops suspend '$GS' >/dev/null || exit 1
-    gox gitops reconcile '$GS' | grep -q 'suspended' || exit 1
-    gox gitops resume '$GS' >/dev/null"
-  check "gitops: uma fonte inexistente diz 4 (DX-4601)" 4 gox gitops reconcile "${PFX}-nao-existe"
+    $GOX gitops suspend '$GS' >/dev/null || exit 1
+    $GOX gitops reconcile '$GS' | grep -q 'suspended' || exit 1
+    $GOX gitops resume '$GS' >/dev/null"
+  check "gitops: uma fonte inexistente diz 4 (DX-4601)" 4 \
+    env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" gitops reconcile "${PFX}-nao-existe"
 
   check "gitops: delete gitopssources desactiva o temporizador e apaga a fonte" ok bash -c "
     : >'$GO/systemctl.log'
     gox delete gitopssources '$GS' >/dev/null || exit 1
     grep -q 'disable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'timer não desactivado'; exit 1; }
     test ! -e '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'unit ficou'; exit 1; }
-    gox gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
+    $GOX gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
   cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
   sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
   gox stack destroy -f "$GO/app-destroy.yaml" --name "$GS" >/dev/null 2>&1 || true

@@ -16369,3 +16369,9 @@ msgstr "gitops: `git {what}` respondeu com mais de {cap} bytes — recusado"
 
 msgid "gitopssource {name}: removed"
 msgstr "gitopssource {name}: removida"
+
+msgid "gitopssource {namespace}/{name} (see `delonix get gitopssources`)"
+msgstr "gitopssource {namespace}/{name} (ver `delonix get gitopssources`)"
+
+msgid "{n} invalid GitOpsSource spec(s)"
+msgstr "{n} spec(s) de GitOpsSource inválida(s)"
