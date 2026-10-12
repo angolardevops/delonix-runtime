@@ -15,6 +15,12 @@ ignore = [
     # paste (macro) não mantido — TRANSITIVO via `ratatui` (TUI do `delonix dash`);
     # sem acção do nosso lado até o ratatui o largar. Sai quando o upstream sair.
     "RUSTSEC-2024-0436",
+    # unsafe-libyaml não mantido (publicado 2026-10-12) — TRANSITIVO via
+    # `serde_yaml` 0.9.34+deprecated, que é dep DIRECTA (os manifestos, o compose,
+    # o kubeadm config, o schema). Unmaintained, não CVE. Sai quando o `serde_yaml`
+    # sair: a migração (o advisory sugere `serde-saphyr`) toca todos os parsers de
+    # manifesto e é trabalho próprio, não um bump. Nossa a fechar.
+    "RUSTSEC-2024-0449",
 ]
 
 [licenses]
