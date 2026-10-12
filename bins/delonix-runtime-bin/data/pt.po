@@ -15979,3 +15979,14 @@ msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`-
 
 msgid "token cannot be empty or contain whitespace or control characters"
 msgstr "o token não pode estar vazio nem conter espaços ou caracteres de controlo"
+
+# DX-1349 network.opnsense_insecure_target
+msgid "the OPNsense URL would send the API key in the clear"
+msgstr "o URL do OPNsense mandaria a chave da API em claro"
+
+msgid "The OPNsense target URL is not https://, names no host, or carries userinfo (`user:pass@`). The key/secret pair goes in every request's Authorization header, so plain HTTP hands it to anything on the path, and userinfo is a password in the configuration under another name."
+msgstr "O URL do OPNsense não é https://, não nomeia um host, ou traz userinfo (`user:pass@`). O par key/secret vai no cabeçalho Authorization de cada pedido, por isso HTTP simples entrega-o a qualquer coisa no caminho, e userinfo é uma palavra-passe na configuração com outro nome."
+
+msgid "Use https://<host> (with `tls.insecureSkipVerify: true` or a `caFile` for the appliance's self-signed certificate) and keep the credential in `auth`."
+msgstr "Usa https://<host> (com `tls.insecureSkipVerify: true` ou um `caFile` para o certificado auto-assinado da appliance) e mantém a credencial em `auth`."
+
