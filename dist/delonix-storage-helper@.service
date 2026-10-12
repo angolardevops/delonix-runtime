@@ -1,0 +1,42 @@
+# delonix-storage-helper@.service — one instance per connection, started by
+# delonix-storage-helper.socket (Accept=yes) with the connection on standard
+# input; never enabled on its own (no [Install] section).
+#
+# What it may do is bounded by the request grammar and the administrator's
+# /etc/delonix/storage-pools.yaml, not by this unit. This unit bounds what a
+# bug in it could do.
+#
+# NO mount namespace on purpose — no ProtectSystem=, ProtectHome=, PrivateTmp=
+# or any option that implies one: the helper's job is a mount the HOST and the
+# engine see (a thin volume, a ZFS dataset under
+# /var/lib/delonix-storage/mounts). A mount made inside a private namespace
+# would be invisible to them. Whether a sandbox with MountFlags=shared keeps
+# the mount visible is to be measured on a node before it is added.
+[Unit]
+Description=Delonix storage pool helper (one request)
+Documentation=https://github.com/angolardevops/delonix-runtime
+Requires=delonix-storage-helper.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/delonix-storage-helper
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+User=root
+# The allowlist path is the only one the helper reads; nothing from the
+# environment chooses a pool, a device or a tool.
+Environment=LC_ALL=C
+UMask=0022
+# A mkfs on a large volume included; a stuck tool is killed, never kept.
+RuntimeMaxSec=900
+NoNewPrivileges=yes
+# lvm, zfs, mount and the chown of _data. CAP_IPC_LOCK: lvm locks its memory.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_MKNOD CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_IPC_LOCK CAP_SYS_RESOURCE
+# The connection is AF_UNIX; udev synchronisation and zfs use netlink.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes

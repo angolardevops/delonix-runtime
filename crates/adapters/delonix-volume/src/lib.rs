@@ -14,6 +14,7 @@ use delonix_state::write_atomic;
 
 mod error;
 pub mod pool_dir;
+pub mod pool_exec;
 pub mod provider_report;
 pub use error::{Error, Result};
 use serde::{Deserialize, Serialize};

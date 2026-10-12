@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 30 crates.
+[README.md](README.md) para a arquitectura dos 34 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -8064,7 +8064,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (30 crates)
+## Arquitetura (34 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -8088,6 +8088,9 @@ antes de qualquer commit:
 | `delonix-powerdns` | cliente mínimo da API de UM servidor PowerDNS, com a credencial que o operador dá ao MOTOR no `providers.yaml` (`type: powerdns`, ADR-0064 D6): remove UM registo `(nome, tipo, conteúdo)` mantendo o resto do rrset. Usado pelo `-bin` (`cmd::dns_cleanup`) para limpar os registos de gateway que o nó Proxmox escreve e nunca remove |
 | `delonix-opnsense` | `GatewayProvider` remoto contra a API REST de UMA appliance OPNsense (ADR-0051). Fora do `delonix-sdn` pela mesma razão que o `delonix-proxmox` está fora do `delonix-vm` — um cliente HTTP não entra num crate de motor; registado pelo `-bin` (`cmd::gatewayproviders`), que é quem conhece o alvo |
 | `delonix-volume` | volumes nomeados e bind mounts |
+| `delonix-provider-btrfs` | driver de pool `btrfs` (ADR-0067 P2): um volume é um subvolume com a marca de posse; as quotas por qgroup e o `create-pool`/`destroy-pool` passam pelo helper |
+| `delonix-provider-zfs` | driver de pool `zfs` (ADR-0067 P3): datasets com a posse numa propriedade `delonix.io:owner`; as operações privilegiadas passam pelo helper |
+| `delonix-provider-lvm` | driver de pool `lvm-thin` (ADR-0067 P4): volumes finos com etiquetas de posse, recusa a 95% de dados ou metadados; tudo pelo helper |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
 | `delonix-scanner` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
@@ -8096,6 +8099,7 @@ antes de qualquer commit:
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
 | `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Serve o `NetworkService` — as leituras (`GetNetwork`, `ListNetworks`: `etag`/`ETag` e 304, `label_selector`, paginação com `Link rel=next`) e, desde a fatia E2, `CreateNetwork`/`DeleteNetwork` —, as leituras do `VolumeService` (`GetVolume`, `ListVolumes`, fatia E3) e o `OperationService` (`GetOperation`, `ListOperations`): cada mutação responde com uma `Operation` persistida em `<root>/operations/` antes do trabalho (ADR-0042 passo E) e o `NodeService` — a entrada `GetApiRoot` (`GET /v1`, com `links` para tudo o que é servido), `GetNodeInfo`, `GetHealth`, `GetCapacity` (ADR-0042 C1) e `ListProviders` (ADR-0050 D5) — o `GET /openapi.json` e as páginas `GET /docs` (Swagger UI) e `GET /redoc` (assets embebidos, `third_party/node-api-docs`); o `WatchEvents` responde UNIMPLEMENTED a nomear o passo que o traz. As rotas REST são GERADAS no `build.rs` das anotações `google.api.http` (`transcode`): uma rota do contrato ainda não servida responde 501 (DX-6001), um caminho fora do contrato 404. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
 | `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
+| `delonix-storage-helper` | o executável `delonix-storage-helper` (ADR-0067 P1): helper root activado por socket (`Accept=yes`, um pedido por processo), que serve `probe`/`usage`/`allocate`/`release` aos pools da allowlist do administrador, com o uid do `SO_PEERCRED`; `create-pool`/`destroy-pool` só num terminal como root |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
 ## Histórico

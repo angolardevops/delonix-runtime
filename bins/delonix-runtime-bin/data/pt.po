@@ -15758,3 +15758,68 @@ msgstr "Tira o `--addr` do `ExecStart=` da unit: com activação de socket o end
 
 msgid "node API socket enabled at {sock}: the first connection starts delonix-node-api, which then stays up (`--idle-timeout 0`). Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
 msgstr "socket da API de nó activado em {sock}: a primeira ligação arranca o delonix-node-api, que depois fica de pé (`--idle-timeout 0`). Para remover: systemctl {scope}disable --now delonix-node-api.socket, e depois apaga os dois ficheiros acima."
+
+# ---- Sprint 21 ----
+
+msgid "the storage helper refused the request"
+msgstr "o helper de armazenamento recusou o pedido"
+
+msgid "The privileged storage helper read a request it does not serve: it does not parse, names a field the protocol does not have, names an operation the socket does not take (pool creation and destruction are administrator commands, never socket requests), or carries a pool, volume, size or state root outside what the protocol accepts (ADR-0067 D3). Nothing was done."
+msgstr "O helper privilegiado de armazenamento leu um pedido que não serve: não se interpreta, nomeia um campo que o protocolo não tem, nomeia uma operação que o socket não aceita (criar e destruir pools são comandos do administrador, nunca pedidos pelo socket), ou traz um pool, volume, tamanho ou state root fora do que o protocolo aceita (ADR-0067 D3). Nada foi feito."
+
+msgid "Use the engine's own commands (`delonix volume create --pool`) rather than writing to the helper's socket; an administrator creates or destroys a pool at a terminal with `delonix-storage-helper create-pool|destroy-pool <name>`."
+msgstr "Usa os comandos do próprio motor (`delonix volume create --pool`) em vez de escrever no socket do helper; um administrador cria ou destrói um pool num terminal com `delonix-storage-helper create-pool|destroy-pool <nome>`."
+
+msgid "the storage pool was not created by this helper"
+msgstr "o pool de armazenamento não foi criado por este helper"
+
+msgid "`destroy-pool` destroys only a pool the administrator's allowlist marks with a `create:` block and that carries the helper's own creation mark. A pool that existed before the engine, or one whose mark is missing, is never destroyed (ADR-0067 D5)."
+msgstr "O `destroy-pool` só destrói um pool que a allowlist do administrador marca com um bloco `create:` e que traz a marca de criação do próprio helper. Um pool que já existia antes do motor, ou um sem a marca, nunca é destruído (ADR-0067 D5)."
+
+msgid "Remove the pool's entry from `/etc/delonix/storage-pools.yaml` to stop using it; destroying what backs it is the administrator's own decision, outside this engine."
+msgstr "Tira a entrada do pool de `/etc/delonix/storage-pools.yaml` para deixar de o usar; destruir o que o suporta é decisão do próprio administrador, fora deste motor."
+
+msgid "a device named for the pool cannot be used"
+msgstr "um dispositivo indicado para o pool não pode ser usado"
+
+msgid "`create-pool` was refused before it wrote anything: a device in the pool's `create.devices` carries a filesystem or volume signature, does not resolve to a block device, or the volume group, zpool or mount point it would create already exists."
+msgstr "O `create-pool` foi recusado antes de escrever o que fosse: um dispositivo em `create.devices` do pool traz uma assinatura de sistema de ficheiros ou de volume, não resolve para um dispositivo de bloco, ou o volume group, zpool ou ponto de montagem que criaria já existe."
+
+msgid "Check the device the message names. To overwrite a signature, pass `--wipe-devices` at the terminal, knowing it destroys what is on the device."
+msgstr "Verifica o dispositivo que a mensagem nomeia. Para escrever por cima de uma assinatura, passa `--wipe-devices` no terminal, sabendo que isso destrói o que está no dispositivo."
+
+msgid "the privileged storage helper cannot be reached"
+msgstr "o helper privilegiado de armazenamento não está alcançável"
+
+msgid "The pool's driver needs an operation only root can do (LVM-thin, a ZFS mount), and neither the socket-activated helper nor an in-process root engine is configured on this node. Nothing was created (ADR-0067 D3)."
+msgstr "O driver do pool precisa de uma operação que só o root faz (LVM-thin, uma montagem ZFS), e neste nó não está configurado nem o helper activado por socket nem um motor root em `in-process`. Nada foi criado (ADR-0067 D3)."
+
+msgid "Install the helper units and enable `delonix-storage-helper.socket`, and add this user to the pool's `allowUsers`; or run the engine as root with `mode: in-process` in the allowlist."
+msgstr "Instala as units do helper e activa o `delonix-storage-helper.socket`, e acrescenta este utilizador ao `allowUsers` do pool; ou corre o motor como root com `mode: in-process` na allowlist."
+
+msgid "the storage helper does not serve this user for this pool"
+msgstr "o helper de armazenamento não serve este utilizador neste pool"
+
+msgid "The helper reads the caller's uid from the socket itself (`SO_PEERCRED`) and serves only a uid the pool's `allowUsers` names. An empty `allowUsers` serves nobody."
+msgstr "O helper lê o uid de quem chama no próprio socket (`SO_PEERCRED`) e só serve um uid que o `allowUsers` do pool nomeie. Um `allowUsers` vazio não serve ninguém."
+
+msgid "Ask the administrator to add this user to `allowUsers` of the pool in `/etc/delonix/storage-pools.yaml`."
+msgstr "Pede ao administrador para acrescentar este utilizador ao `allowUsers` do pool em `/etc/delonix/storage-pools.yaml`."
+
+msgid "a pool administration command needs root"
+msgstr "um comando de administração de pools precisa de root"
+
+msgid "`delonix-storage-helper create-pool` and `destroy-pool` write to raw devices, volume groups and pools: they run only as root, at a terminal, never on a manifest's word."
+msgstr "O `delonix-storage-helper create-pool` e o `destroy-pool` escrevem em dispositivos crus, volume groups e pools: só correm como root, num terminal, nunca por ordem de um manifesto."
+
+msgid "Run it with `sudo` at a terminal."
+msgstr "Corre-o com `sudo` num terminal."
+
+msgid "storage pool '{name}': driver '{driver}' is not built into this engine"
+msgstr "pool de armazenamento '{name}': o driver '{driver}' não está incluído neste motor"
+
+msgid "storage pool '{name}': the allowlist says `mode: in-process`, which is for an engine running as root, and this engine is not — enable the storage helper (`mode: helper`) or run the engine as root"
+msgstr "pool de armazenamento '{name}': a allowlist diz `mode: in-process`, que é para um motor a correr como root, e este motor não o é — activa o helper de armazenamento (`mode: helper`) ou corre o motor como root"
+
+msgid "storage pool '{pool}': its metadata is {pct}% full — no new volume is allocated above {limit}%"
+msgstr "pool de armazenamento '{pool}': os metadados estão {pct}% cheios — nenhum volume novo é alocado acima de {limit}%"

@@ -71,6 +71,9 @@ LAYERS = {
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
     "delonix-provider-libvirt": PROVIDER,
     "delonix-provider-cloud-hypervisor": PROVIDER,
+    "delonix-provider-lvm": PROVIDER,  # ADR-0067 P4: the lvm-thin storage pool driver
+    "delonix-provider-zfs": PROVIDER,  # ADR-0067 P3: the zfs storage pool driver
+    "delonix-provider-btrfs": PROVIDER,  # ADR-0067 P2: the btrfs storage pool driver
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
     "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
     "delonix-powerdns": PROVIDER,  # ADR-0064 D6: the engine's own PowerDNS credential, record cleanup
@@ -82,6 +85,7 @@ LAYERS = {
     "delonix-mgmt-bin": BIN,  # `delonix-mgmt`, run by `delonix serve api`
     "delonix-node-api": INTERFACE,  # the node contract on the socket (ADR-0040 P5); replaces delonix-mgmt
     "delonix-node-api-bin": BIN,  # `delonix-node-api`, run by `delonix serve node-api`
+    "delonix-storage-helper": BIN,  # the privileged storage pool helper (ADR-0067 D3, P1)
 }
 
 # Which layers each layer may depend on. The direction, in one place.

@@ -22,7 +22,7 @@ use delonix_model::{Error, Result};
 use delonix_storage::allowlist::{self, Entry};
 use delonix_storage::ownership::Owner;
 use delonix_storage::pool::{
-    PoolProbe, PoolRef, PoolUsage, StoragePoolDriver, VolumeRequest, VolumeShape,
+    PoolOp, PoolProbe, PoolRef, PoolUsage, StoragePoolDriver, VolumeRequest, VolumeShape,
 };
 use delonix_storage::Error as PoolError;
 use delonix_volume::VolumeStore;
@@ -113,9 +113,42 @@ pub fn register_drivers() {
         // container wrote as, which this process cannot unlink directly.
         let dir =
             delonix_volume::pool_dir::DirPoolDriver::new(Some(delonix_linux::remove_tree_mapped));
-        // An id that is a literal cannot be empty; the only refusal there is.
-        let _ = delonix_storage::registry::register(Arc::new(dir));
+        let run: Arc<dyn delonix_storage::exec::Run> =
+            Arc::new(delonix_volume::pool_exec::SystemRun);
+        let mounts = std::path::PathBuf::from(delonix_storage::helper::MOUNT_ROOT);
+        // SAFETY: `geteuid` has no preconditions and cannot fail.
+        let root = unsafe { libc::geteuid() } == 0;
+        let drivers: [Arc<dyn StoragePoolDriver>; 4] = [
+            Arc::new(dir),
+            // A btrfs volume is made by this process; its hard quota (a
+            // qgroup limit) is an administrative ioctl, set only as root.
+            Arc::new(delonix_provider_btrfs::BtrfsDriver::new(
+                run.clone(),
+                Some(delonix_linux::remove_tree_mapped),
+                root,
+            )),
+            Arc::new(delonix_provider_zfs::ZfsDriver::new(
+                run.clone(),
+                mounts.clone(),
+            )),
+            Arc::new(delonix_provider_lvm::LvmThinDriver::new(run, mounts)),
+        ];
+        for d in drivers {
+            // An id that is a literal cannot be empty, and the four differ;
+            // the only refusals there are.
+            let _ = delonix_storage::registry::register(d);
+        }
     });
+}
+
+/// The privileged helper's client, when its socket is on this node. Nothing
+/// is dialled here: the first operation that needs it connects.
+fn helper_client() -> Option<Arc<dyn delonix_storage::helper::HelperCall>> {
+    let path = delonix_storage::helper::socket_path();
+    path.exists().then(|| {
+        Arc::new(delonix_storage::helper::SocketClient::new(path))
+            as Arc<dyn delonix_storage::helper::HelperCall>
+    })
 }
 
 /// Who this engine is to a pool: this user, this state root.
@@ -178,20 +211,43 @@ fn resolve(name: &str) -> Result<Resolved> {
     })?;
     let driver = delonix_storage::registry::driver(&entry.driver).ok_or_else(|| {
         pool_err(PoolError::PoolUnavailable(super::po::tf(
-            "storage pool '{name}': driver '{driver}' is not built in this version (ADR-0067 \
-             phase {phase}) — only `dir` pools can be used today",
-            &[
-                ("name", name),
-                ("driver", &entry.driver),
-                ("phase", allowlist::phase_of(&entry.driver).unwrap_or("?")),
-            ],
+            "storage pool '{name}': driver '{driver}' is not built into this engine",
+            &[("name", name), ("driver", &entry.driver)],
         )))
     })?;
+    // `mode: in-process` is the administrator saying THIS engine runs the
+    // privileged operations itself — which only a root engine can.
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    if in_process_without_root(
+        list.mode.as_deref(),
+        euid,
+        driver.required(PoolOp::Allocate(VolumeShape::Filesystem)),
+    ) {
+        return Err(pool_err(PoolError::HelperUnavailable(super::po::tf(
+            "storage pool '{name}': the allowlist says `mode: in-process`, which is for an \
+             engine running as root, and this engine is not — enable the storage helper \
+             (`mode: helper`) or run the engine as root",
+            &[("name", name)],
+        ))));
+    }
+    let driver = delonix_storage::helper::route(driver, &list, helper_client());
     Ok(Resolved {
         name: name.to_string(),
         entry,
         driver,
     })
+}
+
+/// `mode: in-process` asks this engine to run a privileged operation itself,
+/// which only a root engine can; a driver that needs no privilege is served
+/// either way.
+fn in_process_without_root(
+    mode: Option<&str>,
+    euid: u32,
+    needs: delonix_storage::pool::Privilege,
+) -> bool {
+    mode == Some("in-process") && euid != 0 && needs == delonix_storage::pool::Privilege::Helper
 }
 
 /// [`resolve`], and the pool answers its probe. An unusable pool is class 69
@@ -529,6 +585,21 @@ fn check_capacity(
     max_ratio: f64,
 ) -> std::result::Result<(), PoolError> {
     if new {
+        // A thin pool's metadata fills on its own, and a full metadata area
+        // fails every thin volume in it as surely as full data does.
+        if let Some(pct) = usage.metadata_pct {
+            if pct >= REFUSE_ABOVE_PCT {
+                return Err(PoolError::PoolExhausted(super::po::tf(
+                    "storage pool '{pool}': its metadata is {pct}% full — no new volume is \
+                     allocated above {limit}%",
+                    &[
+                        ("pool", pool),
+                        ("pct", &pct.to_string()),
+                        ("limit", &REFUSE_ABOVE_PCT.to_string()),
+                    ],
+                )));
+            }
+        }
         if let Some(pct) = usage.used_pct() {
             if pct >= REFUSE_ABOVE_PCT {
                 return Err(PoolError::PoolExhausted(super::po::tf(
@@ -768,13 +839,10 @@ fn rows() -> Result<Vec<LsRow>> {
         let rec = records.iter().find(|r| r.name == name);
         let entry = declared.get(&name);
         let (state, detail) = state_of(&name);
-        let usage = match (
-            entry,
-            entry.and_then(|e| delonix_storage::registry::driver(&e.driver)),
-        ) {
-            (Some(entry), Some(d)) if state == "AVAILABLE" => {
-                d.usage(&PoolRef { name: &name, entry })
-            }
+        // The same routed driver every other operation uses: a pool whose
+        // usage needs the helper is measured through it, never read as empty.
+        let usage = match resolve(&name) {
+            Ok(r) if entry.is_some() && state == "AVAILABLE" => r.driver.usage(&r.pool()),
             _ => PoolUsage::default(),
         };
         let held = volumes_in(&name)?;
@@ -979,6 +1047,54 @@ mod tests {
         // 94.x% rounds up to 95 and is refused; the limit is not a rounding accident.
         assert!(check_capacity("p", "v", GIB, 0, true, &usage(1000, 941), 100.0).is_err());
         assert!(check_capacity("p", "v", 1, 0, true, &usage(1000, 940), 100.0).is_ok());
+    }
+
+    #[test]
+    fn a_thin_pool_whose_metadata_is_full_takes_no_new_volume() {
+        let mut u = usage(100 * GIB, 10 * GIB);
+        u.metadata_pct = Some(95);
+        let e = check_capacity("p", "v", GIB, 0, true, &u, 1.0).unwrap_err();
+        assert!(e.to_string().contains("metadata is 95% full"), "{e}");
+        assert!(check_capacity("p", "v", GIB, 0, false, &u, 1.0).is_ok());
+        u.metadata_pct = Some(94);
+        assert!(check_capacity("p", "v", GIB, 0, true, &u, 1.0).is_ok());
+    }
+
+    #[test]
+    fn in_process_mode_is_refused_to_a_non_root_engine_for_a_privileged_driver() {
+        use delonix_storage::pool::Privilege;
+        assert!(in_process_without_root(
+            Some("in-process"),
+            1000,
+            Privilege::Helper
+        ));
+        assert!(!in_process_without_root(
+            Some("in-process"),
+            0,
+            Privilege::Helper
+        ));
+        assert!(!in_process_without_root(
+            Some("in-process"),
+            1000,
+            Privilege::Unprivileged
+        ));
+        assert!(!in_process_without_root(
+            Some("helper"),
+            1000,
+            Privilege::Helper
+        ));
+        assert!(!in_process_without_root(None, 1000, Privilege::Helper));
+    }
+
+    #[test]
+    fn every_pool_driver_the_allowlist_accepts_is_registered() {
+        register_drivers();
+        for (id, _) in delonix_storage::allowlist::DRIVERS {
+            assert!(
+                delonix_storage::registry::driver(id).is_some(),
+                "driver '{id}' is accepted by the allowlist and not registered"
+            );
+        }
     }
 
     #[test]

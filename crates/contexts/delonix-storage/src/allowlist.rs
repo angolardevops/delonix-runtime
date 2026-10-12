@@ -120,6 +120,34 @@ pub fn valid_pool_name(name: &str) -> bool {
         && !name.contains("..")
 }
 
+/// An LVM volume group or logical volume name, as `lvm(8)` accepts it, minus
+/// a leading `-`.
+pub fn valid_lvm_name(n: &str) -> bool {
+    !n.is_empty()
+        && n.len() <= 127
+        && !n.starts_with('-')
+        && n != "."
+        && n != ".."
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '_' | '.' | '-'))
+}
+
+/// A ZFS dataset name: `/`-separated components of the characters
+/// `zfs(8)` accepts, none empty, none starting with `-`, no snapshot (`@`) or
+/// bookmark (`#`) part.
+pub fn valid_dataset(d: &str) -> bool {
+    !d.is_empty()
+        && d.len() <= 200
+        && d.split('/').all(|c| {
+            !c.is_empty()
+                && !c.starts_with('-')
+                && c != "."
+                && c != ".."
+                && c.chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | ':' | '-'))
+        })
+}
+
 /// Reads the allowlist the engine uses. `Ok(None)` when the file does not
 /// exist: no pool was ever declared on this node, which is a different answer
 /// from a file that is there and cannot be used.
@@ -258,6 +286,27 @@ impl Entry {
                 ));
             }
         }
+        // The block drivers' names reach a tool's argv: a leading '-' would be
+        // read as an option, and anything else outside what LVM and ZFS name
+        // things with is refused here rather than by the tool, half-way.
+        for (field, v) in [("vg", &self.vg), ("thinPool", &self.thin_pool)] {
+            if let Some(v) = v {
+                if !valid_lvm_name(v) {
+                    return Err(format!(
+                        "`{field}` '{v}' is not an LVM name (letters, digits, '+', '_', '.', \
+                         '-', not starting with '-', at most 127)"
+                    ));
+                }
+            }
+        }
+        if let Some(d) = &self.dataset {
+            if !valid_dataset(d) {
+                return Err(format!(
+                    "`dataset` '{d}' is not a ZFS dataset (<pool>/<name>…, each component \
+                     letters, digits, '_', '.', ':', '-', not starting with '-')"
+                ));
+            }
+        }
         if let Some(c) = &self.create {
             for d in &c.devices {
                 if !d.starts_with("/dev/disk/by-id") && !d.starts_with("/dev/disk/by-path") {
@@ -358,6 +407,35 @@ mod tests {
             let text = format!("pools:\n  m:\n    driver: dir\n    path: {bad}\n");
             assert!(parse_err(&text).contains("absolute path"), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_vg_thin_pool_or_dataset_that_a_tool_would_read_as_an_option_is_refused() {
+        for (vg, tp) in [
+            ("-vg", "dlx"),
+            ("vg0", "--force"),
+            ("vg 0", "dlx"),
+            ("vg/0", "dlx"),
+        ] {
+            let text = format!(
+                "pools:\n  f:\n    driver: lvm-thin\n    vg: '{vg}'\n    thinPool: '{tp}'\n"
+            );
+            assert!(parse_err(&text).contains("not an LVM name"), "{vg} {tp}");
+        }
+        for ds in [
+            "-o",
+            "tank/-x",
+            "tank//x",
+            "tank@snap",
+            "tank/x#b",
+            "/tank",
+            "tank/../x",
+        ] {
+            let text = format!("pools:\n  t:\n    driver: zfs\n    dataset: '{ds}'\n");
+            assert!(parse_err(&text).contains("not a ZFS dataset"), "{ds}");
+        }
+        assert!(valid_dataset("tank/dlx-1:a"));
+        assert!(valid_lvm_name("vg0+x_1.a-b"));
     }
 
     #[test]

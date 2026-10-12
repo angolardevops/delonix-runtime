@@ -1,0 +1,19 @@
+[package]
+name = "delonix-provider-zfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The `zfs` storage pool driver (ADR-0067 P3). Reading the pool is delegated;
+# making and destroying a volume goes through `delonix-storage-helper`.
+[dependencies]
+delonix-storage = { workspace = true }
+
+[dev-dependencies]
+delonix-storage = { workspace = true, features = ["test-support"] }
+tempfile = { workspace = true }
+libc = { workspace = true }
+
+[lints]
+workspace = true

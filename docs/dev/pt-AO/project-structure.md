@@ -57,6 +57,7 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
 │   ├── delonix-node-api-bin/     the `delonix-node-api` binary
+│   ├── delonix-storage-helper/   the `delonix-storage-helper` binary (root, per connection)
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -124,6 +125,7 @@ A lista de crates, a camada de cada um e quem depende de quem são factos gerado
 | `bins/delonix-mgmt-bin/` | O binário `delonix-mgmt`: um `main.rs` fino sobre o `delonix-mgmt`. | Raramente; a lógica vive no crate de interface. | [Os crates](crates.md) |
 | `bins/delonix-node-api-bin/` | O binário `delonix-node-api`: um `main.rs` fino sobre o `delonix-node-api` (o contrato de nó num socket unix, ADR-0040 P5). | Raramente; a lógica vive no crate de interface. | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `bins/delonix-mcp-bin/` | O binário `delonix-mcp`: um `main.rs` fino sobre o `delonix-mcp`. | Raramente; a lógica vive no crate de interface. | `docs/adr/0025-mcp-local-ai-control-surface.md` |
+| `bins/delonix-storage-helper/` | O binário `delonix-storage-helper`: o helper privilegiado dos pools de armazenamento (ADR-0067 D3, P1). O systemd arranca-o uma vez por ligação no `delonix-storage-helper.socket`; serve um pedido dentro de `/etc/delonix/storage-pools.yaml`, e é também o `create-pool`/`destroy-pool` do administrador. Units em `dist/`. | Quando o protocolo do helper ou as suas units mudam; a gramática do pedido vive em `delonix-storage::helper`. | `docs/adr/0067-storage-pools.md` |
 | `proto/` | O contrato de nó `delonix.node.v1` (`proto/delonix/node/v1/*.proto`), marcado como rascunho; fonte de verdade para o gRPC e HTTP/JSON e para o `docs/api/openapi.yaml`. Verificado por `scripts/contract_gate.py` (formato, lint, mudanças que quebram, mapeamentos HTTP, OpenAPI). | Mudanças ao contrato, revistas com cuidado — mudanças que quebram contra a última tag falham. | `proto/README.md`, ADR-0040 |
 | `tests/` | Verificações de compatibilidade fora da árvore cargo, não testes cargo: `tests/compat/cri-conformance.sh` (a suite `critest`) e `tests/compat/docker_api_smoke.py`. Os testes de integração cargo vivem no próprio `tests/` de cada crate. | Quem trabalha em compatibilidade com o CRI ou a API Docker. | `docs/cri-conformance.md`, [Clonar, compilar e testar](build-and-test.md) |
 | `fuzz/` | Alvos `cargo-fuzz` sobre parsers escritos à mão alimentados com input não confiável (um `Dockerfile` de um repo clonado, uma string de referência de imagem). Tem o seu próprio `[workspace]`, para as flags de build do sanitizer nunca tocarem no principal; o job de CI `fuzz` corre cada alvo por 60s a cada push/PR. | Quem acrescentar um parser escrito à mão para input controlado externamente. | M04 de `docs/roadmap/13-improvements-traceability.md` |

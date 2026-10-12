@@ -1009,6 +1009,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-btrfs"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "delonix-provider-cloud-hypervisor"
 version = "5.0.2"
 dependencies = [
@@ -1031,6 +1042,25 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+]
+
+[[package]]
+name = "delonix-provider-lvm"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "delonix-provider-zfs"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
@@ -1071,6 +1101,9 @@ dependencies = [
  "delonix-oci",
  "delonix-opnsense",
  "delonix-powerdns",
+ "delonix-provider-btrfs",
+ "delonix-provider-lvm",
+ "delonix-provider-zfs",
  "delonix-proxmox",
  "delonix-scanner",
  "delonix-sdn",
@@ -1185,6 +1218,22 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "delonix-storage-helper"
+version = "5.0.2"
+dependencies = [
+ "delonix-model",
+ "delonix-provider-btrfs",
+ "delonix-provider-lvm",
+ "delonix-provider-zfs",
+ "delonix-storage",
+ "delonix-volume",
+ "libc",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

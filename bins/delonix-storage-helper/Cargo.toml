@@ -1,0 +1,30 @@
+[package]
+name = "delonix-storage-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `delonix-storage-helper` — the privileged storage pool helper (ADR-0067 D3,
+# phase P1). Started per connection by delonix-storage-helper.socket; also the
+# administrator's `create-pool`/`destroy-pool`, at a terminal, as root.
+[[bin]]
+name = "delonix-storage-helper"
+path = "src/main.rs"
+
+[dependencies]
+delonix-model = { workspace = true }
+delonix-storage = { workspace = true }
+delonix-volume = { workspace = true }
+delonix-provider-btrfs = { workspace = true }
+delonix-provider-lvm = { workspace = true }
+delonix-provider-zfs = { workspace = true }
+libc = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+delonix-storage = { workspace = true, features = ["test-support"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

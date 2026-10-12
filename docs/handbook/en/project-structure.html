@@ -259,6 +259,7 @@ below, or when a table names a path that no longer exists.</p>
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
 │   ├── delonix-node-api-bin/     the `delonix-node-api` binary
+│   ├── delonix-storage-helper/   the `delonix-storage-helper` binary (root, per connection)
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -498,6 +499,12 @@ below, or when a table names a path that no longer exists.</p>
 <td>The <code>delonix-mcp</code> binary: a thin <code>main.rs</code> over <code>delonix-mcp</code>.</td>
 <td>Rarely; the logic lives in the interface crate.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0025-mcp-local-ai-control-surface.<wbr>md</code></a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-storage-helper" target="_blank" rel="noopener"><code>bins/<wbr>delonix-storage-helper/<wbr></code></a></td>
+<td>The <code>delonix-storage-helper</code> binary: the privileged storage pool helper (ADR-0067 D3, P1). systemd starts it once per connection on <code>delonix-storage-helper.<wbr>socket</code>; it serves one request within <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>, and is also the administrator's <code>create-pool</code>/<code>destroy-pool</code>. Units in <code>dist/</code>.</td>
+<td>When the helper's protocol or its units change; the request grammar lives in <code>delonix-storage::helper</code>.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0067-storage-pools.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0067-storage-pools.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><code>proto/</code></td>

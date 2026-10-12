@@ -495,6 +495,13 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 <td>Tem de nomear um ficheiro existente — nunca recua para outro. O primeiro ficheiro encontrado é a configuração; nunca se fundem. Um ficheiro ilegível faz falhar um pedido de VM sem <code>--backend</code>, em vez de adivinhar um provider.</td>
 </tr>
 <tr>
+<td><code>DELONIX_STORAGE_HELPER_SOCKET</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/helper.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>helper.<wbr>rs:socket_path</code></a></td>
+<td>O socket do helper privilegiado de armazenamento a que o MOTOR liga (ADR-0067 D3), em vez de <code>/<wbr>run/<wbr>delonix-storage-helper.<wbr>sock</code>.</td>
+<td>Um caminho.</td>
+<td>Lida só pelo motor; o helper nunca a lê. Quando o caminho não existe, um pool cujo driver precisa de privilégio é recusado com DX-6206.</td>
+</tr>
+<tr>
 <td><code>DELONIX_STORAGE_POOLS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-storage/src/allowlist.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-storage/<wbr>src/<wbr>allowlist.<wbr>rs:path</code></a></td>
 <td>Caminho da allowlist de pools de armazenamento do administrador (ADR-0067 D3), em vez de <code>/<wbr>etc/<wbr>delonix/<wbr>storage-pools.<wbr>yaml</code>.</td>
