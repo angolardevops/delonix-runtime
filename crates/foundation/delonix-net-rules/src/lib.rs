@@ -327,7 +327,17 @@ pub fn in_vm_dhcp_pool(prefix: &str, ip: &str) -> bool {
 /// paradox at ~300 containers (32 bits of the id → 16 bits of host). Real uniqueness comes from
 /// the lease registry + probing in [`ipam::allocate`]; see [`alloc_ip_in`].
 pub fn derive_ip_in(prefix: &str, id: &str) -> String {
-    let hex = &id[..id.len().min(8)];
+    // The first 8 BYTES of the id, cut back to a character boundary. A byte
+    // slice at 8 panicked on an id whose 8th byte falls inside a multi-byte
+    // character (found by the `net_cidr` fuzz target, 2026-10-12) — and an id
+    // here is not always a hex container id: `net netns attach <name>` passes
+    // the name the operator typed. For every ASCII id the cut is the same 8
+    // bytes as before, so no installed lease moves.
+    let end = (0..=id.len().min(8))
+        .rev()
+        .find(|&i| id.is_char_boundary(i))
+        .unwrap_or(0);
+    let hex = &id[..end];
     let n = u32::from_str_radix(hex, 16).unwrap_or(2);
     // O caminho do /16 fica BYTE A BYTE como estava, e isso é deliberado: toda a
     // rede que existe hoje tem leases derivados desta fórmula exacta, e a
@@ -719,5 +729,27 @@ COMMIT
         assert!(!in_vm_dhcp_pool("10.210", "10.210.254.250"));
         assert!(!in_vm_dhcp_pool("10.210", "10.210.253.100"));
         assert!(!in_vm_dhcp_pool("10.210", "10.211.254.100"));
+    }
+
+    /// Found by the `net_cidr` fuzz target: an id whose 8th byte falls inside
+    /// a multi-byte character used to panic the byte slice. The operator names
+    /// the id in `net netns attach <name>`, so this was a crash on user input.
+    #[test]
+    fn an_id_with_a_multibyte_character_does_not_panic() {
+        for id in [
+            "1z/\u{13c}x",
+            "abcdefg\u{e9}",
+            "\u{1f600}\u{1f600}x",
+            "\u{e9}",
+        ] {
+            let ip = derive_ip_in("10.88", id);
+            assert!(valid_ip_in_subnet("10.88", &ip), "{id:?} -> {ip}");
+            let ip = derive_ip_in("172.20.4.0/22", id);
+            assert!(Cidr::parse("172.20.4.0/22")
+                .unwrap()
+                .contains(Cidr::parse_addr(&ip).unwrap()));
+        }
+        // An ASCII id keeps the address it always had.
+        assert_eq!(derive_ip_in("10.88", "deadbeef1234"), "10.88.190.239");
     }
 }
