@@ -366,6 +366,23 @@ pub fn serve(bytes: &[u8], peer_uid: u32, ctx: &ServeContext) -> Result<Outcome>
             req.pool, entry.driver
         ))
     })?;
+    // The helper never does as root what the caller's own process does: an
+    // operation the driver runs unprivileged (a btrfs subvolume, a `dir`
+    // directory) made by root would be root's, under a path the caller could
+    // not have written.
+    let pool_op = match &req.op {
+        Op::Probe => PoolOp::Probe,
+        Op::Usage => PoolOp::Usage,
+        Op::Allocate { shape, .. } => PoolOp::Allocate(*shape),
+        Op::Release { .. } => PoolOp::Release,
+    };
+    if driver.required(pool_op) == Privilege::Unprivileged {
+        return Err(Error::HelperRequestInvalid(format!(
+            "storage pool '{}': driver '{}' does this without privilege — the engine does it \
+             itself, never through the helper",
+            req.pool, entry.driver
+        )));
+    }
     let pool = PoolRef {
         name: &req.pool,
         entry,

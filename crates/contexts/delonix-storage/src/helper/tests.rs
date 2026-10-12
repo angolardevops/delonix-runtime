@@ -474,3 +474,25 @@ fn the_socket_client_speaks_the_protocol_and_says_when_nobody_listens() {
         }
     );
 }
+
+#[test]
+fn the_helper_never_does_as_root_what_the_driver_does_unprivileged() {
+    let fake = Fake::new(Privilege::Unprivileged);
+    let f2 = fake.clone();
+    let drivers =
+        move |_: &str| -> Option<Arc<dyn StoragePoolDriver>> { Some(f2.clone() as Arc<_>) };
+    let list = list_with(entry(&["walter"], None));
+    let ctx = ctx_for(&list, &fake, &drivers);
+    let req = alloc_req("db", 1 << 30, "/home/w/.local/share/delonix").encode();
+    let e = serve(&req, 1000, &ctx).unwrap_err();
+    assert_eq!(e.number(), 1221, "{e}");
+    assert!(fake.calls().is_empty());
+    // A delegated read still crosses: the helper is the fallback when the
+    // delegation is missing.
+    let fake = Fake::new(Privilege::Delegated("a readable /dev/zfs"));
+    let f3 = fake.clone();
+    let drivers =
+        move |_: &str| -> Option<Arc<dyn StoragePoolDriver>> { Some(f3.clone() as Arc<_>) };
+    let ctx = ctx_for(&list, &fake, &drivers);
+    assert!(serve(&Request::new("probe", "fast").encode(), 1000, &ctx).is_ok());
+}
