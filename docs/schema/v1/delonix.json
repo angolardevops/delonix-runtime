@@ -2380,6 +2380,13 @@
             "string",
             "null"
           ]
+        },
+        "workloadSecurity": {
+          "description": "`baseline`: refuse what `--privileged` is made of — capabilities beyond\nthe Pod Security baseline set, the host's PID/IPC namespace,\n`seccomp`/`apparmor=unconfined`, host-path bind mounts and host\ndevices. Omitted = no opinion.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"

@@ -13734,8 +13734,8 @@ msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continua
 msgid "could not remove {path}: {err}"
 msgstr "não consegui remover {path}: {err}"
 
-msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
-msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
 
 msgid "about to remove {path} — {summary}"
 msgstr "prestes a remover {path} — {summary}"
@@ -15953,3 +15953,26 @@ msgstr "stack apply abortado: {what} (corrige o manifesto ou usa `stack validate
 
 msgid "{n} invalid VM shape(s)"
 msgstr "{n} forma(s) de VM inválida(s)"
+
+# RuntimePolicy workloadSecurity: baseline (OWASP K01)
+msgid "--cap-add {caps}: beyond the capabilities this node's runtime policy allows (workloadSecurity: baseline)"
+msgstr "--cap-add {caps}: para além das capacidades que a política de runtime deste nó permite (workloadSecurity: baseline)"
+
+msgid "the host's {namespaces} namespace is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o namespace {namespaces} do host é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "{profiles}=unconfined is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "{profiles}=unconfined é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "bind mount of the host path {paths} is refused by this node's runtime policy (workloadSecurity: baseline) — use a named volume"
+msgstr "o bind mount do caminho do host {paths} é recusado pela política de runtime deste nó (workloadSecurity: baseline) — usa um volume nomeado"
+
+msgid "host device {devices} is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o dispositivo do host {devices} é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "RuntimePolicy: workloadSecurity '{value}' is not a profile this engine enforces (baseline)"
+msgstr "RuntimePolicy: workloadSecurity '{value}' não é um perfil que este motor imponha (baseline)"
+
+msgid "this node refuses `--privileged` but admits what it is made of (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — set `workloadSecurity: baseline` to refuse those too"
+msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — define `workloadSecurity: baseline` para recusar também esses"
+

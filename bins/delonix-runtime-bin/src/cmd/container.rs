@@ -2817,6 +2817,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // No policy file = no ceiling, byte for byte the old behaviour. A file that
     // exists and does not parse is an ERROR: somebody's intent is unknown, and
     // running anyway is the silent degradation this engine refuses elsewhere.
+    //
+    // The hardening the request asks to relax goes in too, read from the same
+    // fields the run will honour: a policy that judged `--privileged` alone
+    // admitted the same container as `--cap-add ALL -v /:/host`.
+    let security = delonix_compute::run::parse_security_opts(&opts.security_opt)?;
+    let apparmor_unconfined = security.apparmor.as_deref() == Some("unconfined")
+        || opts.apparmor.as_deref() == Some("unconfined");
     super::policy::enforce(
         &super::util::state_root(),
         opts.name.as_deref().unwrap_or(&opts.image),
@@ -2824,7 +2831,16 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &opts.image,
             opts.privileged,
             opts.net.is_empty() || opts.net == "host",
-        ),
+        )
+        .with_hardening(super::policy::ContainerHardening {
+            cap_add: &opts.cap_add,
+            host_pid: opts.host_pid,
+            host_ipc: opts.host_ipc,
+            seccomp_unconfined: security.seccomp_unconfined,
+            apparmor_unconfined,
+            volumes: &opts.volumes,
+            devices: &opts.devices,
+        }),
     )?;
     // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
     // the ceiling above, absent from the policy means NOT granted.

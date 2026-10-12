@@ -21,7 +21,7 @@
 //! dishonesty the engine refuses everywhere else. The layer that HAS approvers
 //! wraps this one.
 
-use crate::policy::{Mode, SecurityPolicy};
+use crate::policy::{Mode, SecurityPolicy, WorkloadSecurity};
 use crate::severity::{ActionRisk, Severity};
 
 /// What is being admitted. The enum exists so a rule can say «container only»
@@ -44,6 +44,71 @@ impl Workload {
 
 const NO_DEVICES: &[String] = &[];
 
+/// The capabilities a container may ADD under `workloadSecurity: baseline` —
+/// the Kubernetes Pod Security Standards baseline list, verbatim. Anything
+/// else (`ALL`, `SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`, `BPF`, …) is a way out
+/// of the container or into its neighbours.
+pub const BASELINE_ADDABLE_CAPS: &[&str] = &[
+    "AUDIT_WRITE",
+    "CHOWN",
+    "DAC_OVERRIDE",
+    "FOWNER",
+    "FSETID",
+    "KILL",
+    "MKNOD",
+    "NET_BIND_SERVICE",
+    "SETFCAP",
+    "SETGID",
+    "SETPCAP",
+    "SETUID",
+    "SYS_CHROOT",
+];
+
+/// What a container asks for beyond `--privileged` that can take it out of
+/// its own isolation. Read only by `workloadSecurity` rules; every field
+/// defaults to «asks for nothing», so a caller that does not fill it in
+/// cannot make a request look worse than it is — only a caller that does can
+/// be refused for it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ContainerHardening<'a> {
+    /// `--cap-add`, as written.
+    pub cap_add: &'a [String],
+    pub host_pid: bool,
+    pub host_ipc: bool,
+    pub seccomp_unconfined: bool,
+    pub apparmor_unconfined: bool,
+    /// `-v` specifications, as written; the ones whose source is a host path
+    /// (`/…` or `./…`, the engine's own rule) are the ones that count.
+    pub volumes: &'a [String],
+    /// `--device`, as written.
+    pub devices: &'a [String],
+}
+
+/// The capability names in `cap_add` the baseline does not allow, normalised
+/// (`cap_sys_admin` → `SYS_ADMIN`), in the order given and without repeats.
+pub fn caps_beyond_baseline(cap_add: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in cap_add {
+        let up = c.trim().to_ascii_uppercase();
+        let name = up.strip_prefix("CAP_").unwrap_or(&up).to_string();
+        if !BASELINE_ADDABLE_CAPS.contains(&name.as_str()) && !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// The source of each `-v` spec that is a host path rather than a named
+/// volume — the same `/…`-or-`.…` rule `delonix-volume` uses to decide.
+pub fn host_path_sources(volumes: &[String]) -> Vec<String> {
+    volumes
+        .iter()
+        .filter_map(|v| v.split(':').next())
+        .filter(|src| src.starts_with('/') || src.starts_with('.'))
+        .map(str::to_string)
+        .collect()
+}
+
 /// What is being asked of the node.
 #[derive(Debug)]
 pub struct Request<'a> {
@@ -58,6 +123,8 @@ pub struct Request<'a> {
     pub devices: &'a [String],
     /// VM only — `vm create --url-img`, a qcow2 fetched over the network.
     pub image_url: Option<&'a str>,
+    /// Container only — what `workloadSecurity` judges.
+    pub hardening: ContainerHardening<'a>,
 }
 
 impl<'a> Request<'a> {
@@ -70,7 +137,14 @@ impl<'a> Request<'a> {
             host_network,
             devices: NO_DEVICES,
             image_url: None,
+            hardening: ContainerHardening::default(),
         }
+    }
+
+    /// The same request, carrying what `workloadSecurity` judges.
+    pub fn with_hardening(mut self, h: ContainerHardening<'a>) -> Self {
+        self.hardening = h;
+        self
     }
 
     /// A VM create. `image` is the local disk image when one is named; a VM
@@ -88,6 +162,7 @@ impl<'a> Request<'a> {
             host_network: false,
             devices,
             image_url,
+            hardening: ContainerHardening::default(),
         }
     }
 }
@@ -103,6 +178,11 @@ pub enum Rule {
     DevicePassthrough,
     LatestVmImage,
     ImageUrlHost,
+    BaselineCapabilities,
+    BaselineHostNamespace,
+    BaselineUnconfined,
+    BaselineHostPath,
+    BaselineDevice,
 }
 
 impl Rule {
@@ -115,6 +195,11 @@ impl Rule {
             Rule::DevicePassthrough => "ADM-DEVICE-PASSTHROUGH",
             Rule::LatestVmImage => "ADM-LATEST-VM-IMAGE",
             Rule::ImageUrlHost => "ADM-IMAGE-URL-HOST",
+            Rule::BaselineCapabilities => "ADM-BASELINE-CAPABILITIES",
+            Rule::BaselineHostNamespace => "ADM-BASELINE-HOST-NAMESPACE",
+            Rule::BaselineUnconfined => "ADM-BASELINE-UNCONFINED",
+            Rule::BaselineHostPath => "ADM-BASELINE-HOST-PATH",
+            Rule::BaselineDevice => "ADM-BASELINE-DEVICE",
         }
     }
 }
@@ -147,6 +232,26 @@ pub enum Violation {
         host: String,
         allowed: Vec<String>,
     },
+    /// Capabilities beyond the baseline's addable set.
+    BaselineCapabilities {
+        caps: Vec<String>,
+    },
+    /// `pid`/`ipc` — the host namespaces asked for.
+    BaselineHostNamespace {
+        namespaces: Vec<String>,
+    },
+    /// `seccomp`/`apparmor` — the confinement switched off.
+    BaselineUnconfined {
+        profiles: Vec<String>,
+    },
+    /// Host paths bind-mounted into the container.
+    BaselineHostPath {
+        paths: Vec<String>,
+    },
+    /// Host devices handed to the container.
+    BaselineDevice {
+        devices: Vec<String>,
+    },
 }
 
 impl Violation {
@@ -159,6 +264,11 @@ impl Violation {
             Violation::DevicePassthrough { .. } => Rule::DevicePassthrough,
             Violation::LatestVmImage { .. } => Rule::LatestVmImage,
             Violation::ImageUrlHost { .. } => Rule::ImageUrlHost,
+            Violation::BaselineCapabilities { .. } => Rule::BaselineCapabilities,
+            Violation::BaselineHostNamespace { .. } => Rule::BaselineHostNamespace,
+            Violation::BaselineUnconfined { .. } => Rule::BaselineUnconfined,
+            Violation::BaselineHostPath { .. } => Rule::BaselineHostPath,
+            Violation::BaselineDevice { .. } => Rule::BaselineDevice,
         }
     }
 
@@ -169,6 +279,16 @@ impl Violation {
         match self {
             // Both hand the workload a way out of its own isolation.
             Violation::Privileged | Violation::DevicePassthrough { .. } => Severity::Critical,
+            // Each one alone is enough: `-v /:/host` as root is the host's
+            // filesystem, `SYS_ADMIN` mounts it, a raw block device is the disk.
+            Violation::BaselineCapabilities { .. }
+            | Violation::BaselineHostPath { .. }
+            | Violation::BaselineDevice { .. } => Severity::Critical,
+            // Weaken the boundary rather than cross it: another process's
+            // memory and signals, or the syscall surface the filter removes.
+            Violation::BaselineHostNamespace { .. } | Violation::BaselineUnconfined { .. } => {
+                Severity::High
+            }
             // Reaching an unvetted host to fetch something you will then BOOT.
             Violation::ImageUrlHost { .. } => Severity::High,
             Violation::HostNetwork | Violation::Registry { .. } => Severity::High,
@@ -182,7 +302,12 @@ impl Violation {
         match self {
             Violation::Privileged
             | Violation::DevicePassthrough { .. }
-            | Violation::HostNetwork => ActionRisk::Privileged,
+            | Violation::HostNetwork
+            | Violation::BaselineCapabilities { .. }
+            | Violation::BaselineHostNamespace { .. }
+            | Violation::BaselineUnconfined { .. }
+            | Violation::BaselineHostPath { .. }
+            | Violation::BaselineDevice { .. } => ActionRisk::Privileged,
             _ => ActionRisk::SafeWrite,
         }
     }
@@ -225,6 +350,9 @@ pub fn evaluate(policy: &SecurityPolicy, r: &Request<'_>) -> Decision {
         }
         if policy.deny_host_network && r.host_network {
             v.push(Violation::HostNetwork);
+        }
+        if policy.workload_security == Some(WorkloadSecurity::Baseline) {
+            baseline(r, policy.deny_privileged, &mut v);
         }
         if let Some(image) = r.image {
             if policy.deny_latest_tag && is_latest(image) {
@@ -286,6 +414,49 @@ pub fn evaluate(policy: &SecurityPolicy, r: &Request<'_>) -> Decision {
         Decision::AllowWithWarnings(v)
     } else {
         Decision::Deny(v)
+    }
+}
+
+/// The `workloadSecurity: baseline` rules, appended to `v` in a fixed order.
+/// `privileged_already` keeps a `--privileged` from being reported twice when
+/// `denyPrivileged` refused it already.
+fn baseline(r: &Request<'_>, privileged_already: bool, v: &mut Vec<Violation>) {
+    let h = &r.hardening;
+    if r.privileged && !privileged_already {
+        v.push(Violation::Privileged);
+    }
+    let caps = caps_beyond_baseline(h.cap_add);
+    if !caps.is_empty() {
+        v.push(Violation::BaselineCapabilities { caps });
+    }
+    let mut namespaces = Vec::new();
+    if h.host_pid {
+        namespaces.push("pid".to_string());
+    }
+    if h.host_ipc {
+        namespaces.push("ipc".to_string());
+    }
+    if !namespaces.is_empty() {
+        v.push(Violation::BaselineHostNamespace { namespaces });
+    }
+    let mut profiles = Vec::new();
+    if h.seccomp_unconfined {
+        profiles.push("seccomp".to_string());
+    }
+    if h.apparmor_unconfined {
+        profiles.push("apparmor".to_string());
+    }
+    if !profiles.is_empty() {
+        v.push(Violation::BaselineUnconfined { profiles });
+    }
+    let paths = host_path_sources(h.volumes);
+    if !paths.is_empty() {
+        v.push(Violation::BaselineHostPath { paths });
+    }
+    if !h.devices.is_empty() {
+        v.push(Violation::BaselineDevice {
+            devices: h.devices.to_vec(),
+        });
     }
 }
 
@@ -644,11 +815,130 @@ mod tests {
             Rule::DevicePassthrough,
             Rule::LatestVmImage,
             Rule::ImageUrlHost,
+            Rule::BaselineCapabilities,
+            Rule::BaselineHostNamespace,
+            Rule::BaselineUnconfined,
+            Rule::BaselineHostPath,
+            Rule::BaselineDevice,
         ];
         let mut ids: Vec<_> = all.iter().map(|r| r.id()).collect();
         ids.sort_unstable();
         let n = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), n, "duplicate rule ids");
+    }
+
+    // ---- workloadSecurity: baseline ----------------------------------------
+
+    fn baseline_only() -> SecurityPolicy {
+        SecurityPolicy {
+            workload_security: Some(WorkloadSecurity::Baseline),
+            ..Default::default()
+        }
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// The bypass this rule exists for, measured before it did: a node with
+    /// `denyPrivileged: true` admitted the same container under other names.
+    #[test]
+    fn deny_privileged_alone_admits_the_privilege_equivalents_and_baseline_refuses_them() {
+        let caps = s(&["ALL"]);
+        let vols = s(&["/:/host"]);
+        let devs = s(&["/dev/sda"]);
+        let h = ContainerHardening {
+            cap_add: &caps,
+            host_pid: true,
+            host_ipc: true,
+            seccomp_unconfined: true,
+            apparmor_unconfined: true,
+            volumes: &vols,
+            devices: &devs,
+        };
+        let r = Request::container("alpine:3.20", false, false).with_hardening(h);
+
+        let only_privileged = SecurityPolicy {
+            deny_privileged: true,
+            ..Default::default()
+        };
+        assert_eq!(evaluate(&only_privileged, &r), Decision::Allow);
+
+        let d = evaluate(&baseline_only(), &r);
+        let rules: Vec<Rule> = d.violations().iter().map(Violation::rule).collect();
+        assert_eq!(
+            rules,
+            [
+                Rule::BaselineCapabilities,
+                Rule::BaselineHostNamespace,
+                Rule::BaselineUnconfined,
+                Rule::BaselineHostPath,
+                Rule::BaselineDevice,
+            ]
+        );
+        assert!(d.is_denied());
+    }
+
+    #[test]
+    fn baseline_admits_an_ordinary_container_and_its_allowed_capabilities() {
+        let caps = s(&["NET_BIND_SERVICE", "cap_chown", "Setuid"]);
+        let vols = s(&["data:/var/lib/app", "cache:/cache:ro"]);
+        let h = ContainerHardening {
+            cap_add: &caps,
+            volumes: &vols,
+            ..Default::default()
+        };
+        let r = Request::container("alpine:3.20", false, false).with_hardening(h);
+        assert_eq!(evaluate(&baseline_only(), &r), Decision::Allow);
+    }
+
+    #[test]
+    fn baseline_names_each_capability_beyond_its_set_once() {
+        let caps = s(&["SYS_ADMIN", "cap_sys_admin", "NET_ADMIN", "CHOWN"]);
+        assert_eq!(caps_beyond_baseline(&caps), ["SYS_ADMIN", "NET_ADMIN"]);
+    }
+
+    #[test]
+    fn a_relative_bind_is_a_host_path_and_a_named_volume_is_not() {
+        let vols = s(&["./src:/app", "/etc:/etc:ro", "pgdata:/var/lib/postgresql"]);
+        assert_eq!(host_path_sources(&vols), ["./src", "/etc"]);
+    }
+
+    #[test]
+    fn baseline_refuses_privileged_once_whether_or_not_deny_privileged_is_set() {
+        let r = Request::container("alpine:3.20", true, false);
+        let d = evaluate(&baseline_only(), &r);
+        assert_eq!(d.violations(), [Violation::Privileged]);
+        let both = SecurityPolicy {
+            deny_privileged: true,
+            ..baseline_only()
+        };
+        assert_eq!(evaluate(&both, &r).violations(), [Violation::Privileged]);
+    }
+
+    #[test]
+    fn baseline_never_judges_a_vm() {
+        let p = baseline_only();
+        let r = Request::virtual_machine(Some("golden:1.0"), NO_DEVICES, None);
+        assert_eq!(evaluate(&p, &r), Decision::Allow);
+    }
+
+    #[test]
+    fn baseline_under_warn_lets_the_request_through_and_says_why() {
+        let p = SecurityPolicy {
+            mode: Mode::Warn,
+            ..baseline_only()
+        };
+        let caps = s(&["SYS_PTRACE"]);
+        let h = ContainerHardening {
+            cap_add: &caps,
+            ..Default::default()
+        };
+        let d = evaluate(
+            &p,
+            &Request::container("a:1", false, false).with_hardening(h),
+        );
+        assert!(matches!(d, Decision::AllowWithWarnings(ref v) if v.len() == 1));
     }
 }
