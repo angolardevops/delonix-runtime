@@ -3675,6 +3675,54 @@ fn agent_guest(t: &Target) -> (u32, delonix_compute::Vm) {
     (vmid, vm)
 }
 
+/// N28: the three agent reads a hot add is judged by (ADR-0068 D4) —
+/// `agent/get-vcpus`, `agent/get-memory-blocks`, `agent/get-memory-block-info`
+/// — are called by `vm update` and were never in a live trace. Against the
+/// prepared agent guest: the vCPUs the agent reports online are the number
+/// the guest's own `nproc` prints (read through `agent/exec`), and the memory
+/// blocks parse into a non-zero online size with a power-of-two block size.
+/// Read-only: nothing is plugged.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL, DELONIX_PROXMOX_TEST_AGENT_VMID and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_guest_agent_reports_its_online_vcpus_and_memory_blocks() {
+    let t = target().expect(NEEDS_TARGET);
+    let (vmid, _vm) = agent_guest(&t);
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let vcpus = client
+        .guest_vcpus(vmid)
+        .expect("get-vcpus")
+        .expect("the prepared guest runs an agent");
+    let online = delonix_compute::vm_backend::guest_online_vcpus(&vcpus);
+    let AgentExecStatus::Finished {
+        exit_code, stdout, ..
+    } = client
+        .agent_exec_wait(
+            vmid,
+            &["/usr/bin/nproc"],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("nproc in the guest")
+    else {
+        panic!("nproc did not finish");
+    };
+    assert_eq!(exit_code, 0);
+    assert_eq!(
+        stdout.trim().parse::<u32>().expect("nproc prints a number"),
+        online,
+        "the agent's online vCPUs are the guest's own count: {vcpus}"
+    );
+    let (blocks, info) = client
+        .guest_memory_blocks(vmid)
+        .expect("get-memory-blocks")
+        .expect("the prepared guest runs an agent");
+    let size = info["size"].as_u64().expect("a block size");
+    assert!(size > 0 && size.is_power_of_two(), "{info}");
+    let (online_mib, _offline) =
+        delonix_compute::vm_backend::guest_memory_state(&blocks, &info).expect("the blocks parse");
+    assert!(online_mib > 0, "no memory online: {blocks}");
+}
+
 /// `vm describe`'s guest block (`vm.guest-agent`), from a real agent: the OS
 /// and kernel, the hostname, the agent's version and the mounted filesystems
 /// come back, and the hostname is the SAME one the guest's own

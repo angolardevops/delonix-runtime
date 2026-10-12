@@ -3847,3 +3847,68 @@ fn a_refused_version_read_fails_the_probe() {
     let e = sdn_client(&node).cluster_facts().expect_err("refused");
     assert!(matches!(e, Error::Forbidden(_)), "{e:?}");
 }
+
+// ===========================================================================
+// The agent reads a hot add is judged by (N28: called, untested live)
+// ===========================================================================
+
+const GET_VCPUS: &str = "/nodes/pve/qemu/100/agent/get-vcpus";
+const GET_BLOCKS: &str = "/nodes/pve/qemu/100/agent/get-memory-blocks";
+const GET_BLOCK_INFO: &str = "/nodes/pve/qemu/100/agent/get-memory-block-info";
+
+/// `vm update --vcpus/--memory` on a running VM decides complete or partial
+/// from three agent reads (ADR-0068 D4). Their answers, in the shape the node
+/// relays the agent's, come out as what the shared decision functions parse;
+/// a guest with no agent is `None` for both — and the block size is never
+/// asked for when the blocks were not answered.
+#[test]
+fn the_agents_vcpu_and_memory_reads_are_what_the_hotplug_decision_parses() {
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            GET_VCPUS,
+            ok_data(
+                r#"{"result":[{"logical-id":0,"online":true},{"logical-id":1,"online":true},{"logical-id":2,"online":false}]}"#,
+            ),
+        ),
+        (
+            "GET",
+            GET_BLOCKS,
+            ok_data(
+                r#"{"result":[{"phys-index":0,"online":true},{"phys-index":1,"online":true},{"phys-index":2,"online":false}]}"#,
+            ),
+        ),
+        (
+            "GET",
+            GET_BLOCK_INFO,
+            ok_data(r#"{"result":{"size":134217728}}"#),
+        ),
+        ("GET", GET_VCPUS, Reply::Json(500, AGENT_NOT_RUNNING.into())),
+        (
+            "GET",
+            GET_BLOCKS,
+            Reply::Json(500, AGENT_NOT_RUNNING.into()),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+
+    let vcpus = client.guest_vcpus(100).unwrap().expect("an agent answered");
+    assert_eq!(delonix_compute::vm_backend::guest_online_vcpus(&vcpus), 2);
+    let (blocks, info) = client
+        .guest_memory_blocks(100)
+        .unwrap()
+        .expect("an agent answered");
+    assert_eq!(
+        delonix_compute::vm_backend::guest_memory_state(&blocks, &info),
+        Some((256, 1)),
+        "two online 128 MiB blocks, one offline"
+    );
+
+    assert_eq!(client.guest_vcpus(100).unwrap(), None, "no agent is None");
+    assert_eq!(client.guest_memory_blocks(100).unwrap(), None);
+    assert_eq!(
+        node.count("GET", GET_BLOCK_INFO),
+        1,
+        "the block size is not asked for when the blocks were not answered"
+    );
+}
