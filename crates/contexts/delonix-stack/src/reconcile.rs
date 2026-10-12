@@ -117,6 +117,11 @@ pub enum Action {
     Update,
     /// Needs to be destroyed and recreated. Refused unless explicitly asked for.
     Replace,
+    /// Converges by a STOP and a START of the same resource, with nothing
+    /// destroyed (ADR-0012): the PID changes, so it is not an [`Action::Update`],
+    /// and the disk survives, so it is not an [`Action::Replace`]. Disruptive,
+    /// not destructive — refused unless the operator authorises the downtime.
+    Reboot,
     /// Already matches.
     NoOp,
     /// Owned by this stack, gone from the manifest.
@@ -133,7 +138,12 @@ impl Action {
     pub fn is_change(self) -> bool {
         matches!(
             self,
-            Action::Create | Action::Adopt | Action::Update | Action::Replace | Action::Delete
+            Action::Create
+                | Action::Adopt
+                | Action::Update
+                | Action::Replace
+                | Action::Reboot
+                | Action::Delete
         )
     }
 
@@ -144,6 +154,7 @@ impl Action {
             Action::Adopt => "+~",
             Action::Update => "~",
             Action::Replace => "-/+",
+            Action::Reboot => "~↻",
             Action::NoOp => "=",
             Action::Delete => "-",
             Action::Conflict => "✗",
@@ -162,6 +173,12 @@ pub struct FieldDiff {
     pub to: Option<String>,
     /// Whether this field converges without recreating the resource.
     pub hot: bool,
+    /// Whether this field converges by a stop and a start of the resource,
+    /// keeping its disk (ADR-0012). Never `true` together with `hot`.
+    /// Omitted from the JSON when `false`, so a reader of an older payload
+    /// sees exactly what it saw before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reboot: bool,
 }
 
 /// The decision for one resource.
@@ -187,6 +204,10 @@ pub struct Change {
     /// drip-feed that makes people stop reading output.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cold_fields: Vec<String>,
+    /// On `Reboot`: every field that needs the stop and the start. Same
+    /// «all of them, not just the first» rule as `cold_fields`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reboot_fields: Vec<String>,
     /// On `Conflict`: the stack that already owns this resource.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
@@ -221,6 +242,7 @@ impl Change {
             action,
             reason: None,
             cold_fields: Vec::new(),
+            reboot_fields: Vec::new(),
             owner: None,
             conditions: Vec::new(),
             diffs: Vec::new(),
@@ -386,8 +408,130 @@ pub fn hot_fields_for(kind: &str) -> &'static [&'static str] {
     hot_fields(kind)
 }
 
+/// What the plan knows about a resource that is NOT one of its fields — read
+/// off the machine by the module that owns the Kind, and handed in as data so
+/// [`plan_with_facts`] stays a pure function.
+///
+/// It exists for the VM (ADR-0012, ADR-0068): whether a vCPU change is free, a
+/// reboot or a recreate depends on whether the VM runs, on the ceiling it was
+/// created with and on what its backend can redefine across a reboot — none of
+/// which is something a manifest declares, so none of it can be a compared
+/// field without becoming a permanent difference.
+///
+/// An empty `Facts` (the [`Default`]) changes nothing: every Kind without facts
+/// plans exactly as [`plan`] always did.
+#[derive(Debug, Clone, Default)]
+pub struct Facts {
+    /// `Some(true)` = running, `Some(false)` = stopped (a reboot costs nothing:
+    /// the change lands in the record and the next start uses it — ADR-0012
+    /// question 4), `None` = unknown or paused, which is planned as running: a
+    /// gate asked for in vain is cheaper than downtime nobody authorised.
+    pub running: Option<bool>,
+    /// Fields that converge by a stop and a start without losing the disk. Per
+    /// RESOURCE and not per Kind, because it is the backend that decides: a
+    /// Cloud Hypervisor VM's `network` is rebuilt from its record at boot,
+    /// while a Proxmox node keeps its own NIC config and would boot the old one.
+    pub reboot: BTreeSet<String>,
+    /// Fields that converge LIVE when they grow up to a ceiling (ADR-0068 D9) —
+    /// vCPUs and memory with hotplug headroom. Only honoured while running.
+    pub live_growth: BTreeMap<String, LiveGrowth>,
+    /// Fields compared by VALUE through a parser rather than as strings, so
+    /// `2G` and `2048M` are the same memory and never a difference.
+    pub numeric: BTreeMap<String, fn(&str) -> Option<u64>>,
+}
+
+/// A field that grows live up to `ceiling`, in the units `parse` returns.
+#[derive(Debug, Clone, Copy)]
+pub struct LiveGrowth {
+    pub ceiling: u64,
+    pub parse: fn(&str) -> Option<u64>,
+}
+
+/// How one field change converges — the cost model ADR-0012 adds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Convergence {
+    /// In place, same PID.
+    Hot,
+    /// Stop + start, disk kept.
+    Reboot,
+    /// Destroy + recreate.
+    Cold,
+}
+
+/// Classifies one field change. The SAME function decides in `plan` and in
+/// `apply`, so the two can never disagree about what costs downtime.
+pub fn classify(
+    kind: &str,
+    field: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    facts: Option<&Facts>,
+) -> Convergence {
+    if is_hot_change(kind, field, from, to) {
+        return Convergence::Hot;
+    }
+    if let Some(f) = facts {
+        if f.running == Some(true) {
+            if let Some(g) = f.live_growth.get(field) {
+                if let (Some(a), Some(b)) = (
+                    from.and_then(|v| (g.parse)(v)),
+                    to.and_then(|v| (g.parse)(v)),
+                ) {
+                    if b > a && b <= g.ceiling {
+                        return Convergence::Hot;
+                    }
+                }
+            }
+        }
+        if f.reboot.contains(field) {
+            return Convergence::Reboot;
+        }
+    }
+    Convergence::Cold
+}
+
+/// Whether two values of one field are the same thing. Strings, unless the
+/// facts name a parser for the field.
+fn same_value(field: &str, a: &str, b: &str, facts: Option<&Facts>) -> bool {
+    if a == b {
+        return true;
+    }
+    match facts.and_then(|f| f.numeric.get(field)) {
+        Some(parse) => matches!((parse(a), parse(b)), (Some(x), Some(y)) if x == y),
+        None => false,
+    }
+}
+
+fn field_diff(
+    kind: &str,
+    field: &str,
+    from: Option<&String>,
+    to: Option<&String>,
+    facts: Option<&Facts>,
+) -> FieldDiff {
+    let class = classify(
+        kind,
+        field,
+        from.map(String::as_str),
+        to.map(String::as_str),
+        facts,
+    );
+    FieldDiff {
+        field: field.to_string(),
+        from: from.cloned(),
+        to: to.cloned(),
+        hot: class == Convergence::Hot,
+        reboot: class == Convergence::Reboot,
+    }
+}
+
 /// Computes the three-way diff of one resource.
-fn diff_fields(kind: &str, desired: &Desired, actual: &Actual) -> Vec<FieldDiff> {
+fn diff_fields(
+    kind: &str,
+    desired: &Desired,
+    actual: &Actual,
+    facts: Option<&Facts>,
+) -> Vec<FieldDiff> {
     let empty = BTreeMap::new();
     let last = actual.last_applied.as_ref().unwrap_or(&empty);
     let keys: BTreeSet<&String> = desired
@@ -402,27 +546,17 @@ fn diff_fields(kind: &str, desired: &Desired, actual: &Actual) -> Vec<FieldDiff>
         let a = actual.fields.get(key);
         match (d, a) {
             // Present in the manifest and equal on the machine.
-            (Some(d), Some(a)) if d == a => {}
+            (Some(d), Some(a)) if same_value(key, d, a, facts) => {}
             // Present in the manifest — converge to it (whether or not the
             // machine has it today).
-            (Some(d), a) => out.push(FieldDiff {
-                field: key.clone(),
-                from: a.cloned(),
-                to: Some(d.clone()),
-                hot: is_hot_change(kind, key, a.map(String::as_str), Some(d)),
-            }),
+            (Some(d), a) => out.push(field_diff(kind, key, a, Some(d), facts)),
             // Gone from the manifest. Revert it ONLY if we were the ones who
             // set it — otherwise it belongs to a human's `container update` or
             // to a default, and reverting it would be this tool fighting its
             // own user.
             (None, Some(a)) => {
                 if last.contains_key(key) {
-                    out.push(FieldDiff {
-                        field: key.clone(),
-                        from: Some(a.clone()),
-                        to: None,
-                        hot: is_hot(kind, key),
-                    });
+                    out.push(field_diff(kind, key, Some(a), None, facts));
                 }
             }
             (None, None) => {}
@@ -436,6 +570,17 @@ fn diff_fields(kind: &str, desired: &Desired, actual: &Actual) -> Vec<FieldDiff>
 /// `stack` is the name that owns this apply; it is what separates «mine, gone
 /// from the file, so remove it» from «someone else's, never touch it».
 pub fn plan(desired: &[Desired], actual: &[Actual], stack: &str) -> Vec<Change> {
+    plan_with_facts(desired, actual, stack, &BTreeMap::new())
+}
+
+/// [`plan`], with what the owning modules read off the machine about each
+/// resource, keyed by `(kind, name)` (see [`Facts`]). Still pure.
+pub fn plan_with_facts(
+    desired: &[Desired],
+    actual: &[Actual],
+    stack: &str,
+    facts: &BTreeMap<(String, String), Facts>,
+) -> Vec<Change> {
     let mut out = Vec::new();
     for d in desired {
         let found = actual.iter().find(|a| a.kind == d.kind && a.name == d.name);
@@ -462,13 +607,30 @@ pub fn plan(desired: &[Desired], actual: &[Actual], stack: &str) -> Vec<Change> 
             );
             continue;
         }
-        let diffs = diff_fields(&d.kind, d, a);
+        let f = facts.get(&(d.kind.clone(), d.name.clone()));
+        let diffs = diff_fields(&d.kind, d, a, f);
         // A non-ownable resource is never «unowned and therefore to adopt»:
         // having no owner is its normal state, not something to fix.
         let unmanaged = d.ownable && a.owner.is_none();
-        let action = if let Some(cold) = diffs.iter().find(|x| !x.hot) {
-            let _ = cold;
+        let cold: Vec<String> = diffs
+            .iter()
+            .filter(|x| !x.hot && !x.reboot)
+            .map(|x| x.field.clone())
+            .collect();
+        let reboot: Vec<String> = diffs
+            .iter()
+            .filter(|x| x.reboot)
+            .map(|x| x.field.clone())
+            .collect();
+        // A reboot of something that is not running costs nothing: the change
+        // lands where the next start reads it, so it converges as an `Update`
+        // (ADR-0012 question 4). The plan shows the difference, because the
+        // action itself is what tells the operator the cost.
+        let stopped = f.and_then(|f| f.running) == Some(false);
+        let action = if !cold.is_empty() {
             Action::Replace
+        } else if !reboot.is_empty() && !stopped {
+            Action::Reboot
         } else if !diffs.is_empty() {
             Action::Update
         } else if unmanaged {
@@ -482,13 +644,14 @@ pub fn plan(desired: &[Desired], actual: &[Actual], stack: &str) -> Vec<Change> 
             // manifest to avoid a replace needs the whole list, and finding out
             // one field at a time across several runs is the kind of drip-feed
             // that makes people stop reading output.
-            let cold: Vec<String> = diffs
-                .iter()
-                .filter(|x| !x.hot)
-                .map(|x| x.field.clone())
-                .collect();
             change = change.with_reason(format!("does not converge hot: {}", cold.join(", ")));
             change.cold_fields = cold;
+        } else if action == Action::Reboot {
+            change = change.with_reason(format!(
+                "converges by a stop and a start, the disk kept: {}",
+                reboot.join(", ")
+            ));
+            change.reboot_fields = reboot;
         } else if action == Action::Adopt {
             change = change.with_reason("exists and belongs to no stack — will be taken over");
         }
@@ -524,6 +687,7 @@ pub fn summary(changes: &[Change]) -> BTreeMap<&'static str, usize> {
             Action::Adopt => "adopt",
             Action::Update => "update",
             Action::Replace => "replace",
+            Action::Reboot => "reboot",
             Action::NoOp => "unchanged",
             Action::Delete => "delete",
             Action::Conflict => "conflict",
@@ -914,13 +1078,11 @@ mod tests {
         );
     }
 
-    /// **Numa VM nada converge a quente, e isso não é uma lacuna.** Este motor
-    /// não faz hotplug: mudar vCPUs, memória ou disco é arrancar outra máquina.
-    /// Por isso qualquer alteração é `Replace` — e recriar uma VM deita fora o
-    /// overlay, ou seja, tudo o que o convidado escreveu desde que existe.
-    /// Recusar sem `--replace` é o comportamento certo, não um obstáculo.
+    /// Without facts about the machine, a VM change is still a `Replace`: the
+    /// reboot and hotplug classes depend on the backend and on whether the VM
+    /// runs, and a plan that cannot see them must not guess the cheaper one.
     #[test]
-    fn qualquer_alteracao_numa_vm_e_uma_recriacao() {
+    fn without_facts_a_vm_change_is_still_a_recreate() {
         assert!(
             hot_fields("Vm").is_empty(),
             "um campo quente numa VM prometeria um update que o motor não sabe fazer"
@@ -1005,5 +1167,171 @@ mod tests {
             vec![("app".to_string(), None), ("tier".to_string(), None)]
         );
         assert!(labels_delta(None, None).is_empty());
+    }
+
+    // ---- the reboot class (ADR-0012) and live growth (ADR-0068 D9) ---------
+
+    fn mib(s: &str) -> Option<u64> {
+        let t = s.trim();
+        if let Some(n) = t.strip_suffix('G') {
+            return n.parse::<u64>().ok().map(|v| v * 1024);
+        }
+        t.strip_suffix('M').unwrap_or(t).parse().ok()
+    }
+
+    fn count(s: &str) -> Option<u64> {
+        s.parse().ok()
+    }
+
+    fn vm_plan(
+        desired_fields: &[(&str, &str)],
+        actual_fields: &[(&str, &str)],
+        facts: Facts,
+    ) -> Change {
+        let d = Desired {
+            kind: k::VM.into(),
+            name: "db".into(),
+            fields: map(desired_fields),
+            converges: true,
+            ownable: true,
+        };
+        let a = Actual {
+            kind: k::VM.into(),
+            name: "db".into(),
+            fields: map(actual_fields),
+            owner: Some("s".into()),
+            last_applied: None,
+        };
+        let mut all = BTreeMap::new();
+        all.insert((k::VM.to_string(), "db".to_string()), facts);
+        plan_with_facts(&[d], &[a], "s", &all).remove(0)
+    }
+
+    fn vm_facts(running: Option<bool>) -> Facts {
+        let mut f = Facts {
+            running,
+            ..Facts::default()
+        };
+        for x in ["vcpus", "memory", "network"] {
+            f.reboot.insert(x.into());
+        }
+        f.numeric.insert("memory".into(), mib);
+        f.numeric.insert("vcpus".into(), count);
+        f
+    }
+
+    /// The point of ADR-0012: a field that is neither hot nor hot-pluggable
+    /// plans a REBOOT on a running VM, never a `Replace` that throws the disk
+    /// away — and the change names every field that needs it.
+    #[test]
+    fn a_reboot_field_on_a_running_vm_plans_a_reboot_not_a_replace() {
+        let c = vm_plan(
+            &[("vcpus", "4"), ("memory", "4G"), ("disk", "/i.qcow2")],
+            &[("vcpus", "2"), ("memory", "2G"), ("disk", "/i.qcow2")],
+            vm_facts(Some(true)),
+        );
+        assert_eq!(c.action, Action::Reboot);
+        assert!(c.changed);
+        assert!(c.cold_fields.is_empty(), "{:?}", c.cold_fields);
+        assert_eq!(c.reboot_fields, vec!["memory".to_string(), "vcpus".into()]);
+        assert!(c.diffs.iter().all(|d| d.reboot && !d.hot), "{:?}", c.diffs);
+        assert!(c.reason.as_deref().unwrap().contains("stop and a start"));
+    }
+
+    /// Unknown (or paused) is planned as running: the gate is asked for.
+    #[test]
+    fn an_unknown_power_state_plans_the_reboot_too() {
+        let c = vm_plan(&[("vcpus", "4")], &[("vcpus", "2")], vm_facts(None));
+        assert_eq!(c.action, Action::Reboot);
+    }
+
+    /// On a STOPPED VM the same change costs nothing: it is an `Update`, and
+    /// the diff still says which class it is, for the executor.
+    #[test]
+    fn a_reboot_field_on_a_stopped_vm_is_a_plain_update() {
+        let c = vm_plan(&[("vcpus", "4")], &[("vcpus", "2")], vm_facts(Some(false)));
+        assert_eq!(c.action, Action::Update);
+        assert!(c.reboot_fields.is_empty());
+        assert!(c.diffs[0].reboot);
+    }
+
+    /// The disk image is identity: it stays a `Replace`, and only it is named
+    /// cold — the reboot field that came with it is not.
+    #[test]
+    fn a_disk_change_still_recreates_and_names_only_the_cold_field() {
+        let c = vm_plan(
+            &[("vcpus", "4"), ("disk", "/b.qcow2")],
+            &[("vcpus", "2"), ("disk", "/a.qcow2")],
+            vm_facts(Some(true)),
+        );
+        assert_eq!(c.action, Action::Replace);
+        assert_eq!(c.cold_fields, vec!["disk".to_string()]);
+    }
+
+    /// Growth inside the hotplug ceiling on a running VM is live; beyond the
+    /// ceiling, or a decrease, is a reboot.
+    #[test]
+    fn growth_inside_the_ceiling_is_live_and_everything_else_reboots() {
+        let mut f = vm_facts(Some(true));
+        f.live_growth.insert(
+            "vcpus".into(),
+            LiveGrowth {
+                ceiling: 4,
+                parse: count,
+            },
+        );
+        f.live_growth.insert(
+            "memory".into(),
+            LiveGrowth {
+                ceiling: 4096,
+                parse: mib,
+            },
+        );
+        let c = vm_plan(
+            &[("vcpus", "4"), ("memory", "4G")],
+            &[("vcpus", "2"), ("memory", "2048M")],
+            f.clone(),
+        );
+        assert_eq!(c.action, Action::Update, "{c:?}");
+        assert!(c.diffs.iter().all(|d| d.hot && !d.reboot), "{:?}", c.diffs);
+        let over = vm_plan(&[("vcpus", "5")], &[("vcpus", "2")], f.clone());
+        assert_eq!(over.action, Action::Reboot);
+        let down = vm_plan(&[("vcpus", "1")], &[("vcpus", "2")], f.clone());
+        assert_eq!(down.action, Action::Reboot);
+        // Not running: no live growth, and a reboot of a stopped VM is free.
+        let mut stopped = f;
+        stopped.running = Some(false);
+        let c = vm_plan(&[("vcpus", "3")], &[("vcpus", "2")], stopped);
+        assert_eq!(c.action, Action::Update);
+        assert!(c.diffs[0].reboot);
+    }
+
+    /// `2G` and `2048M` are the same memory: no difference, ever.
+    #[test]
+    fn a_numeric_field_is_compared_by_value() {
+        let c = vm_plan(
+            &[("memory", "2G")],
+            &[("memory", "2048M")],
+            vm_facts(Some(true)),
+        );
+        assert_eq!(c.action, Action::NoOp, "{c:?}");
+        assert!(c.diffs.is_empty());
+    }
+
+    /// The new action is a change for `--detailed-exitcode`, has its own
+    /// marker and its own summary key, and the reboot flag is absent from the
+    /// JSON of a diff that does not reboot (an older reader sees what it saw).
+    #[test]
+    fn the_reboot_action_is_a_change_with_its_own_marker_and_key() {
+        assert!(Action::Reboot.is_change());
+        assert_eq!(Action::Reboot.marker(), "~↻");
+        let c = vm_plan(&[("vcpus", "4")], &[("vcpus", "2")], vm_facts(Some(true)));
+        assert_eq!(summary(&[c.clone()]).get("reboot"), Some(&1));
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""action":"reboot""#), "{json}");
+        assert!(json.contains(r#""reboot_fields":["vcpus"]"#), "{json}");
+        let plain = vm_plan(&[("labels", "x")], &[("labels", "y")], vm_facts(Some(true)));
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("reboot"), "{json}");
     }
 }

@@ -3636,6 +3636,7 @@ mod tests {
             from: Some("64M".into()),
             to: Some("128M".into()),
             hot: true,
+            reboot: false,
         });
         let before = change_digest(&a);
         assert_eq!(
@@ -3730,6 +3731,7 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
             action: Action::Replace,
             reason: None,
             cold_fields: vec![],
+            reboot_fields: vec![],
             owner: None,
             changed: Default::default(),
             conditions: Default::default(),
@@ -4434,6 +4436,7 @@ spec: {}
             action: super::reconcile::Action::Delete,
             reason: None,
             cold_fields: vec![],
+            reboot_fields: vec![],
             owner: None,
             conditions: vec![],
             diffs: vec![],
