@@ -3129,7 +3129,7 @@ fn check_vm_namespace(name: &str, want: &str, have: &str) -> Result<()> {
 pub(crate) fn manifest_passthrough(spec: &VmSpec) -> Vec<String> {
     let mut out = spec.devices.clone();
     for d in &spec.extra_disks {
-        if d.source.starts_with("/dev/") {
+        if names_a_host_device(&d.source) {
             out.push(format!("extraDisks: {}", d.source));
         }
     }
@@ -3140,6 +3140,22 @@ pub(crate) fn manifest_passthrough(spec: &VmSpec) -> Vec<String> {
         out.push("libvirtXmlOverlay (raw XML is not validated)".to_string());
     }
     out
+}
+
+/// Does a disk source name a host device rather than an image file? A path
+/// under `/dev/`, or anything that resolves to a block or character device —
+/// `metadata` follows symlinks, so `/tmp/disk -> /dev/sda` counts too.
+fn names_a_host_device(path: &str) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    if path.starts_with("/dev/") {
+        return true;
+    }
+    std::fs::metadata(path)
+        .map(|m| {
+            let t = m.file_type();
+            t.is_block_device() || t.is_char_device()
+        })
+        .unwrap_or(false)
 }
 
 pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
@@ -4172,6 +4188,26 @@ pub fn run(action: VmCmd) -> Result<()> {
         } => {
             let wait = std::time::Duration::from_secs(wait_secs);
             let changes = device_changes(&disk_add, &nic_add, &disk_rm, &nic_rm)?;
+            // A hot-added host block device is passthrough into a RUNNING
+            // guest — the same hole `vm create --device` and a manifest's
+            // `extraDisks: /dev/…` are judged for. Asked only when one is
+            // named, so an ordinary image disk logs no admission event.
+            let host_devices: Vec<String> = changes
+                .iter()
+                .filter_map(|c| match c {
+                    delonix_vm::DeviceChange::AddDisk(d) => {
+                        names_a_host_device(&d.source).then(|| format!("--disk-add {}", d.source))
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !host_devices.is_empty() {
+                super::policy::enforce(
+                    &base,
+                    &name,
+                    &super::policy::Request::virtual_machine(None, &host_devices, None),
+                )?;
+            }
             let mut partial_reason: Option<String> = None;
             for change in changes {
                 let (_, outcome) = delonix_vm::change_device(&base, &name, change.clone(), wait)?;
@@ -6878,6 +6914,19 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         );
         let plain: VmSpec = serde_yaml::from_str("disk: golden:1.0\n").unwrap();
         assert!(manifest_passthrough(&plain).is_empty());
+    }
+
+    /// A symlink to a device is the device: the check follows it.
+    #[test]
+    fn a_symlink_to_a_device_names_a_host_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("disk");
+        std::os::unix::fs::symlink("/dev/null", &link).unwrap();
+        assert!(super::names_a_host_device(link.to_str().unwrap()));
+        let img = dir.path().join("disk.qcow2");
+        std::fs::write(&img, b"").unwrap();
+        assert!(!super::names_a_host_device(img.to_str().unwrap()));
+        assert!(super::names_a_host_device("/dev/sdz-that-does-not-exist"));
     }
 
     /// The VFIO list survives normalisation: it used to be removed by the
