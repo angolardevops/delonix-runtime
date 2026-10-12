@@ -11,6 +11,7 @@
 //! allocate, release and usage. Resize, snapshot, rollback and clone enter
 //! with the first driver that serves them, not before.
 
+pub mod admin;
 pub mod allowlist;
 mod error;
 pub mod exec;
