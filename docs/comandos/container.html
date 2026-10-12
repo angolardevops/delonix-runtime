@@ -522,6 +522,12 @@ Options:
   -s, --size
           Show the SIZE column — each container&#x27;s own writable-layer usage (never the shared read-only image layers). Off by default: it walks a directory tree per container, the same cost `volumes inspect` already opts into rather than pays on every listing
 
+      --credentials
+          Add USER and PASSWORD: each container&#x27;s login (ADR-0048) — declared with `credentials:`, the documented default of a known image, or `-`. The password shows where it lives (`(secret NAME)`), not its value
+
+      --reveal
+          With `--credentials`: print the password itself
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

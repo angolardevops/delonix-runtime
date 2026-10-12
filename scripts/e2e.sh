@@ -664,6 +664,18 @@ check "migrate assess -o json" ok bash -c \
   "'$BIN' migrate assess -f '$COMPW/limpo.yml' -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['served']>0 and d['missing']==0\""
 check "migrate assess de um ficheiro inexistente diz 4" 4 \
   "$BIN" migrate assess -f "$COMPW/naoexiste.yml"
+# The repository's own sample stack (web + Postgres + Redis + worker, shared
+# settings through `<<: *anchor`, two networks on one service, `name:`). Every
+# key it uses is served, so the assessment is clean; and `compose config`
+# names the project from `name:` and keeps the second network. Three defects
+# this sample found (2026-10-11) are the three greps: `<<` refused,
+# `name:` ignored, the second network dropped with a warning.
+SAMPLE="$REPO/examples/compose-webapp/compose.yaml"
+check "migrate assess: the compose-webapp sample is fully served" 0 \
+  "$BIN" migrate assess -f "$SAMPLE" --detailed-exitcode
+check "compose config: the sample's project is its name: and web keeps both networks" ok bash -c \
+  "out=\$('$BIN' compose config -f '$SAMPLE' 2>&1) && grep -q '^# compose project: shop' <<<\"\$out\" \
+   && grep -A4 '^service web:' <<<\"\$out\" | grep -q 'extra networks: \\[\"shop_backend\"\\]'"
 rm -rf "$COMPW"
 
 ########################################
@@ -1389,6 +1401,54 @@ else
   skip "tudo o que precisa de $IMG" "a imagem não pôde ser obtida — ver o skip acima"
 fi
 
+# `--ulimit` is fail-closed (2026-10-11): an unknown name, or a hard limit the
+# user cannot raise from a user namespace, used to leave the DEFAULT limit in
+# place with rc=0 (measured: `nofile=2000000:2000000` ran with 1048576). The
+# init now refuses to start the process, and says which limit and why.
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  check "container run --ulimit applies a limit inside the userns" ok bash -c \
+    "'$BIN' container run --rm --net none --ulimit nofile=1234:1234 '$IMG' cat /proc/self/limits | grep -Eq 'open files +1234 +1234'"
+  check "container run --ulimit with an unknown name refuses to start" ok bash -c \
+    "out=\$('$BIN' container run --rm --net none --ulimit bogus=5 '$IMG' true 2>&1); rc=\$?; [ \$rc -ne 0 ] && grep -q \"'bogus' is not a limit\" <<<\"\$out\""
+  _hard=$(ulimit -Hn)
+  if [[ "$_hard" =~ ^[0-9]+$ && $(id -u) -ne 0 ]]; then
+    check "container run --ulimit above the user's hard limit refuses instead of running without it" ok bash -c \
+      "out=\$('$BIN' container run --rm --net none --ulimit nofile=$((_hard + 1)):$((_hard + 1)) '$IMG' true 2>&1); rc=\$?; [ \$rc -ne 0 ] && grep -q 'cannot be raised from a user namespace' <<<\"\$out\""
+  fi
+fi
+
+# ADR-0048 D4: a declared login is shown by reference, its value only under
+# `--reveal`, and the record holds the reference and never the value.
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  CRW="$OUT/cred-$PFX"; mkdir -p "$CRW"; CRC="cred-$PFX"
+  cat > "$CRW/m.yaml" <<EOF2
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: {name: $CRC}
+spec:
+  stringData: {password: v-$PFX}
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: {name: $CRC}
+spec:
+  image: $IMG
+  network: none
+  command: [sleep, "600"]
+  credentials: {user: admin, password: {secret: $CRC, key: password}}
+EOF2
+  if "$BIN" stack apply -f "$CRW/m.yaml" >/dev/null 2>&1; then
+    check "credentials: container ls --credentials shows the user and where the password lives" ok bash -c \
+      "'$BIN' container ls --credentials | grep '$CRC' | grep -q 'admin .*(secret $CRC)'"
+    check "credentials: --reveal prints the value, and the record does not hold it" ok bash -c \
+      "'$BIN' container ls --credentials --reveal | grep '$CRC' | grep -q 'v-$PFX' && ! grep -rqs 'v-$PFX' '$DELONIX_ROOT/containers'"
+  fi
+  "$BIN" stack destroy -f "$CRW/m.yaml" >/dev/null 2>&1 || true
+  # `stack destroy` never removes a Secret (its teardown is off by design).
+  "$BIN" secret rm "$CRC" >/dev/null 2>&1 || true
+  rm -rf "$CRW"
+fi
+
 # ADR-0042 passo E: uma rede com um container ligado não se remove pelo socket
 # (409 DX-5307, a nomear o container), e remove-se depois de ele sair. Aqui e
 # não na secção do node API porque precisa da imagem.
@@ -1938,9 +1998,11 @@ if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null
     # Com o disco do host ocupado, o PID 1 fica em D à espera do writeback e o
     # `stop` desiste aos 30 s (DX-8101) com o container ainda registado a correr
     # (ADR-0056 D4). Repete-se até ele sair; uma ronda que não chega lá não conta.
-    # `container ps` lists stopped containers too (unlike `docker ps`), so
-    # «gone from ps» was never true and every round was skipped. The state is
-    # read from the record instead.
+    # The state is read from the record. This used to say `container ps` lists
+    # stopped containers too; true when written, stale since #816 (without -a it
+    # lists only Running and Paused, as `docker ps` does). The record stays the
+    # better question: it names the status, where absence from `ps` would not
+    # tell a finished stop from a vanished record.
     _gone=0
     for _i in 1 2 3 4 5 6; do
       "$BIN" container stop -t 0 "$CR" >/dev/null 2>&1

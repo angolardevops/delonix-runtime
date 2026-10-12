@@ -4,7 +4,11 @@
 
 Accepted (2026-10-10, by the owner); phase 3 is completion plan Sprint 20. Proposed 2026-09-20; scope decided with the owner the same day (table below). Phases 1 (names, the shared
 view, the `SVC` column in `container ls`, `vm ls` and `stack ls`, `describe` and JSON) and 2 (`delonix hosts
-sync`) are built; phase 3 (credentials) is not.
+sync`) are built. Phase 3 (credentials) is built for `Container` and `VirtualMachine` (2026-10-12):
+the field, the reference stored as the `delonix.io/credentials` annotation, `container ls` and
+`vm ls --credentials [--reveal]`, the block in `describe`, and the catalogue. Not yet: `Pod`
+and `HTTPRoute` (the field is refused there as unknown, never accepted and ignored), and a
+`stack ls` column.
 
 ## Context
 

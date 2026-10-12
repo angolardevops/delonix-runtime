@@ -234,6 +234,17 @@
             "null"
           ]
         },
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CredentialsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The service's login (ADR-0048 D4): a user and a REFERENCE to a\n`kind: Secret` key, never the value. Shown by `container ls\n--credentials`; the value only under `--reveal`."
+        },
         "detach": {
           "default": true,
           "type": "boolean"
@@ -495,6 +506,38 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CredentialsSpec": {
+      "additionalProperties": false,
+      "description": "The `credentials:` block of a `Container` or a `VirtualMachine`.",
+      "properties": {
+        "note": {
+          "description": "Free text shown next to the login (`created at first login`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecretKeyRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the password lives: a key of a `kind: Secret`. Never the value."
+        },
+        "user": {
+          "description": "The login name. Not a secret: it is printed as is.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -2341,6 +2384,25 @@
       },
       "type": "object"
     },
+    "SecretKeyRef": {
+      "additionalProperties": false,
+      "description": "A key of a `kind: Secret`.",
+      "properties": {
+        "key": {
+          "description": "The key inside it.",
+          "type": "string"
+        },
+        "secret": {
+          "description": "The secret's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "key"
+      ],
+      "type": "object"
+    },
     "SecretSpec": {
       "additionalProperties": false,
       "description": "`spec` of `kind: Secret` — a bag of key/value pairs encrypted at-rest,\nconsumed by `Container.secret` (env/files) and `Storage.passwordSecret`\n(`password` key). Closes the \"no CLI\" gap: the secret is declared in YAML\ninstead of `delonix secret create`.",
@@ -3931,6 +3993,17 @@
         "cpu_affinity": {},
         "cpu_model": {},
         "cpu_topology": {},
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CredentialsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The guest's login (ADR-0048 D4): a user and a REFERENCE to a\n`kind: Secret` key, never the value. Shown by `vm ls --credentials`."
+        },
         "devices": {
           "default": [],
           "items": {

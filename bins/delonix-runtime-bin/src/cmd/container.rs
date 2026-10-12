@@ -162,6 +162,11 @@ pub(crate) struct ContainerSpec {
     net_burst: Option<String>,
     #[serde(default, rename = "logDriver")]
     log_driver: Option<String>,
+    /// The service's login (ADR-0048 D4): a user and a REFERENCE to a
+    /// `kind: Secret` key, never the value. Shown by `container ls
+    /// --credentials`; the value only under `--reveal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) credentials: Option<delonix_compute::credentials::CredentialsSpec>,
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +217,9 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
     // now makes the three lists impossible to leave disagreeing.
     "netBps",
     "netBurst",
+    // The declared login reference (ADR-0048 D4). Bookkeeping on the record,
+    // so it converges hot: changing it never touches the process.
+    "credentials",
 ];
 
 /// Os campos que o manifesto declara e o reconciliador NÃO compara — nomeados,
@@ -462,6 +470,13 @@ pub(crate) fn desired_container_fields(
     if let Some(b) = &spec.net_burst {
         f.insert("netBurst".into(), b.clone());
     }
+    // Validated when the spec was read (`container_spec_of`), so only encoded here.
+    if let Some(c) = &spec.credentials {
+        f.insert(
+            super::credentials::FIELD.into(),
+            super::credentials::encode(c),
+        );
+    }
     f
 }
 
@@ -544,6 +559,10 @@ pub(crate) fn actual_container_fields(
     if let Some(b) = &c.net_burst {
         f.insert("netBurst".into(), b.clone());
     }
+    // The raw annotation, so the two sides compare the same encoding.
+    if let Some(raw) = c.annotations.get(super::credentials::ANNOTATION) {
+        f.insert(super::credentials::FIELD.into(), raw.clone());
+    }
     f
 }
 
@@ -614,6 +633,9 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                 None => o.net_rate_clear = true,
             },
             "netBurst" => o.net_burst = d.to.clone(),
+            // Bookkeeping on the record, written by `stamp` with the rest of
+            // what this apply declared — nothing to do to the process.
+            "credentials" => {}
             other => {
                 return Err(Error::Invalid(format!(
                     "container/{name}: '{other}' does not converge hot — this is a bug in \
@@ -621,6 +643,11 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                 )))
             }
         }
+    }
+    // Only bookkeeping changed: there is nothing to apply to the process, and
+    // `cmd_update` with nothing in it is not a no-op to rely on.
+    if diffs.iter().all(|d| d.field == super::credentials::FIELD) {
+        return Ok(());
     }
     cmd_update(&store, name, o)
 }
@@ -648,6 +675,7 @@ pub(crate) fn stamp(
             cur.annotations
                 .insert(super::conditions::CREATED_SPEC.into(), created.clone());
         }
+        super::credentials::record(&mut cur.annotations, fields);
         true
     })?;
     Ok(())
@@ -748,6 +776,7 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "logDriver",
     "expose",
     "addHost",
+    "credentials",
     // Grouped-form-only keys (see `normalize_container_spec`) — `network`
     // and `env` need no entry of their own: they're ALREADY above, reused
     // for both shapes (a scalar/array in the old flat form, a mapping in
@@ -770,7 +799,7 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
 /// (`resources.limits`/`securityContext`/...), nothing to improve there.
 fn container_spec_of(doc: &ManifestDoc) -> Result<ContainerSpec> {
     let normalized = normalize_container_spec(doc.spec.clone());
-    serde_yaml::from_value(normalized).map_err(|e| {
+    let spec: ContainerSpec = serde_yaml::from_value(normalized).map_err(|e| {
         Error::Invalid(format!(
             "{}: {e}",
             super::po::tf(
@@ -778,7 +807,14 @@ fn container_spec_of(doc: &ManifestDoc) -> Result<ContainerSpec> {
                 &[("kind", &doc.kind), ("name", &doc.metadata.name)],
             )
         ))
-    })
+    })?;
+    // Refused here, where both the plan and the apply read the spec, so a
+    // block that names no login never reaches a record.
+    if let Some(c) = &spec.credentials {
+        c.validate()
+            .map_err(|e| Error::Invalid(format!("Container '{}': {e}", doc.metadata.name)))?;
+    }
+    Ok(spec)
 }
 
 /// The grouped form's tables: group name -> (sub-key, flat field it becomes).
@@ -1456,6 +1492,14 @@ pub enum ContainerCmd {
         /// inspect` already opts into rather than pays on every listing.
         #[arg(short = 's', long)]
         size: bool,
+        /// Add USER and PASSWORD: each container's login (ADR-0048) — declared
+        /// with `credentials:`, the documented default of a known image, or `-`.
+        /// The password shows where it lives (`(secret NAME)`), not its value.
+        #[arg(long)]
+        credentials: bool,
+        /// With `--credentials`: print the password itself.
+        #[arg(long, requires = "credentials")]
+        reveal: bool,
     },
     /// (Re)start stopped/crashed containers. Always detached.
     ///
@@ -1929,6 +1973,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             output,
             namespace,
             size,
+            credentials,
+            reveal,
         } => cmd_ps(
             &images,
             &store,
@@ -1936,7 +1982,10 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             quiet,
             output,
             namespace.as_deref(),
-            size,
+            PsColumns {
+                size,
+                credentials: credentials.then_some(reveal),
+            },
         ),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
@@ -3708,6 +3757,9 @@ struct ContainerLsRow {
     /// What a browser can open for this container (ADR-0048); absent when nothing is.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     services: Vec<super::svc::SvcRow>,
+    /// Only with `--credentials` (ADR-0048 D4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credentials: Option<super::credentials::View>,
 }
 
 /// How many times a container has been restarted, counted from the event log.
@@ -3742,6 +3794,14 @@ pub(crate) fn listed_without_all(status: &Status) -> bool {
     matches!(status, Status::Running | Status::Paused)
 }
 
+/// The optional columns of `container ps`.
+struct PsColumns {
+    /// `-s`: the writable layer's size.
+    size: bool,
+    /// `--credentials`, holding whether `--reveal` was given too.
+    credentials: Option<bool>,
+}
+
 fn cmd_ps(
     images: &ImageStore,
     store: &Store,
@@ -3749,8 +3809,9 @@ fn cmd_ps(
     quiet: bool,
     format: super::output::OutputFormat,
     namespace: Option<&str>,
-    size: bool,
+    columns: PsColumns,
 ) -> Result<()> {
+    let PsColumns { size, credentials } = columns;
     let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut cs = store.list()?;
     // The filter runs BEFORE anything else reads the list — `--namespace` that
@@ -3804,6 +3865,7 @@ fn cmd_ps(
                     .map(|dir| super::volume::measured_usage(&dir))
                     .and_then(|u| u.is_complete().then_some(u.bytes)),
                 services: svc_index.rows(&c.name, &c.namespace, c.ip.as_deref()),
+                credentials: credentials.map(|reveal| super::credentials::of_container(c, reveal)),
             })
             .collect();
         return output::print_json(&rows);
@@ -3826,6 +3888,10 @@ fn cmd_ps(
     ];
     if size {
         headers.push("SIZE");
+    }
+    if credentials.is_some() {
+        headers.push("USER");
+        headers.push("PASSWORD");
     }
     // Last, and it hides itself on a host that uses no namespaces — see
     // `output::namespace_cell`. Until it existed, the boundary the engine
@@ -3855,6 +3921,11 @@ fn cmd_ps(
                 .unwrap_or_else(|| "-".to_string());
             row.push(cell);
         }
+        if let Some(reveal) = credentials {
+            let (user, password) = super::credentials::of_container(c, reveal).cells();
+            row.push(user);
+            row.push(password);
+        }
         row.push(super::svc::cell(&svc_index.rows(
             &c.name,
             &c.namespace,
@@ -3862,6 +3933,21 @@ fn cmd_ps(
         )));
         row.push(output::namespace_cell(&c.namespace, namespace.is_some()));
         t.row(row);
+    }
+    // `drop_uninformative` below removes a column of dashes, and USER/PASSWORD
+    // are one when nothing listed has a known login. Asked for and absent
+    // would read as the flag not working, so it is said.
+    if credentials.is_some()
+        && included
+            .iter()
+            .all(|c| super::credentials::of_container(c, false).source == "none")
+    {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "note: no container listed has a known login (none declares `credentials:` and no image is in the catalogue)"
+            )
+        );
     }
     // Drops NAMESPACE on a host where every row would say `default` — the
     // column exists to show a boundary, and a column of dashes shows none.
@@ -5697,6 +5783,18 @@ fn describe_one(c: &Container) {
     }
     d.field_opt(k::POD, c.pod.as_deref());
 
+    // ADR-0048 D4: where the login comes from. Never the value here — that is
+    // `container ls --credentials --reveal`, so a pasted `describe` leaks nothing.
+    let cred = super::credentials::of_container(c, false);
+    if cred.source != "none" {
+        let (user, password) = cred.cells();
+        d.section("Credentials");
+        d.sub("User", user);
+        d.sub("Password", password);
+        d.sub("Source", cred.source);
+        d.sub_opt("Note", cred.note.as_deref());
+    }
+
     d.section("Resources");
     d.sub("CPUs", &c.cpus);
     d.sub("Memory", &c.memory_max);
@@ -7456,6 +7554,44 @@ mod tests {
                 "{k} is compared but undocumented"
             );
         }
+    }
+
+    /// ADR-0048 D4: a declared login is compared, stamped on the record by the
+    /// same encoding, and converges hot. A block on one side only would be a
+    /// change the reconciler never makes, or drift on every plan.
+    #[test]
+    fn a_declared_login_is_compared_stamped_and_hot() {
+        let spec: super::ContainerSpec = serde_yaml::from_str(
+            "image: grafana/grafana:11\ncredentials:\n  user: admin\n  password: { secret: grafana-admin, key: password }\n",
+        )
+        .unwrap();
+        let desired = super::desired_container_fields(&spec);
+        let raw = desired
+            .get(super::super::credentials::FIELD)
+            .expect("a declared login is part of the plan")
+            .clone();
+        let mut c = delonix_compute::Container::new(
+            "id".into(),
+            "g".into(),
+            "grafana/grafana:11".into(),
+            vec![],
+            "512M".into(),
+        );
+        super::super::credentials::record(&mut c.annotations, &desired);
+        let root = std::path::Path::new("/var/lib/delonix/volumes");
+        let actual = super::actual_container_fields(&c, root);
+        assert_eq!(actual.get(super::super::credentials::FIELD), Some(&raw));
+        assert!(super::RECONCILED_CONTAINER_FIELDS.contains(&"credentials"));
+        assert!(
+            delonix_stack::reconcile::hot_fields_for(super::k::CONTAINER).contains(&"credentials"),
+            "a login change must not plan a Replace"
+        );
+        // A block that names no login is refused where the spec is read.
+        let doc: super::ManifestDoc = serde_yaml::from_str(
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: Container\nmetadata: {name: g}\nspec:\n  image: alpine\n  credentials: { note: hi }\n",
+        )
+        .unwrap();
+        assert!(super::container_spec_of(&doc).is_err());
     }
 
     /// A named volume must render back to the NAME the manifest used, never to

@@ -15671,3 +15671,35 @@ msgstr "Escolhe a rede dos pods explicitamente: `--cni none` (ou `spec.cni: none
 
 msgid "more than one node: the default CNI only serves one, so bring your own and apply it after the bootstrap"
 msgstr "mais de um nó: a CNI por omissão só serve um, por isso trazes a tua e aplica-la depois do bootstrap"
+
+# ---- Sprint 20: compose sample keys, service credentials (ADR-0048 D4) ----
+
+msgid "{name}: graceful stop failed ({err}); removing it anyway"
+msgstr "{name}: a paragem ordenada falhou ({err}); a remover na mesma"
+
+msgid "Add USER and PASSWORD: each container's login (ADR-0048) — declared with `credentials:`, the documented default of a known image, or `-`. The password shows where it lives (`(secret NAME)`), not its value"
+msgstr "Acrescenta USER e PASSWORD: o login de cada container (ADR-0048) — declarado com `credentials:`, o valor de fábrica documentado de uma imagem conhecida, ou `-`. A password mostra onde vive (`(secret NOME)`), não o valor"
+
+msgid "Add USER and PASSWORD: each VM's login (ADR-0048) — declared with `credentials:`, the documented default of an appliance image this repository builds, or `-`. The password shows where it lives (`(secret NAME)`), not its value"
+msgstr "Acrescenta USER e PASSWORD: o login de cada VM (ADR-0048) — declarado com `credentials:`, o valor de fábrica documentado de uma imagem de appliance que este repositório constrói, ou `-`. A password mostra onde vive (`(secret NOME)`), não o valor"
+
+msgid "With `--credentials`: print the password itself"
+msgstr "Com `--credentials`: imprime a própria password"
+
+msgid "(vendor default — change it)"
+msgstr "(valor de fábrica — muda-o)"
+
+msgid "(secret {name})"
+msgstr "(segredo {name})"
+
+msgid "(secret {name}: not readable — {err})"
+msgstr "(segredo {name}: ilegível — {err})"
+
+msgid "(changed — see the env: {var})"
+msgstr "(mudada — ver o env: {var})"
+
+msgid "(no login)"
+msgstr "(sem login)"
+
+msgid "note: no container listed has a known login (none declares `credentials:` and no image is in the catalogue)"
+msgstr "nota: nenhum container listado tem um login conhecido (nenhum declara `credentials:` e nenhuma imagem está no catálogo)"

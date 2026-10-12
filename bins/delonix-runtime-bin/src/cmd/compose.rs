@@ -97,7 +97,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
-use delonix_compute::Container;
+use delonix_compute::{Container, HealthConfig};
 use delonix_linux::{self as runtime};
 use delonix_model::records::Status;
 use delonix_model::{Error, Result};
@@ -179,6 +179,12 @@ const SUPPORTED_SERVICE: &[&str] = &[
     "profiles",
     "secrets",
     "configs",
+    "shm_size",
+    "stop_grace_period",
+    "expose",
+    "mem_limit",
+    "cpus",
+    "ulimits",
 ];
 
 /// Keys of a top-level `networks:`/`volumes:` entry that are read.
@@ -372,8 +378,13 @@ pub(crate) fn top_matrix() -> Vec<(&'static str, KeyState)> {
         .collect()
 }
 
-const SUPPORTED_NETWORK: &[&str] = &["external", "name"];
-const SUPPORTED_VOLUME: &[&str] = &["external", "name"];
+/// `driver:` is read and held to the one value each section can honour
+/// (`bridge` for a network, `local` for a volume) — every real compose file
+/// that names a driver names one of these two, and refusing the key outright
+/// would refuse them for a word that changes nothing here. Any OTHER driver is
+/// refused by name in `translate` (see `check_drivers`), never dropped.
+const SUPPORTED_NETWORK: &[&str] = &["external", "name", "driver"];
+const SUPPORTED_VOLUME: &[&str] = &["external", "name", "driver"];
 /// Keys of a top-level `secrets:`/`configs:` entry that are read — `configs:`
 /// has no `environment` (real Compose Spec never gives it that source).
 const SUPPORTED_SECRET: &[&str] = &["file", "environment", "external", "name"];
@@ -403,7 +414,6 @@ const ENGINE_HAS_IT_SERVICE: &[(&str, &str)] = &[
     // instead of where to go. Each flag was checked against the real `--help`,
     // and `every_note_names_a_flag_that_exists` keeps checking.
     ("sysctls", "container run --sysctl"),
-    ("ulimits", "container run --ulimit"),
     ("gpus", "container run --gpus"),
     ("userns_mode", "container run --userns"),
 ];
@@ -521,6 +531,12 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
 
 #[derive(Debug, Deserialize, Default)]
 struct ComposeFile {
+    /// Top-level `name:` — the project name. It was in `SUPPORTED_TOP` (so
+    /// the matrix and `migrate assess` called it served) and no field read it:
+    /// every project was named after its directory, whatever the file said.
+    /// Found by running the `examples/compose-webapp` sample. Precedence is
+    /// the specification's: `-p` > `name:` > the directory.
+    name: Option<String>,
     #[serde(default)]
     services: BTreeMap<String, ComposeService>,
     #[serde(default)]
@@ -652,6 +668,47 @@ struct ComposeService {
     /// without it).
     #[serde(default)]
     profiles: Vec<String>,
+    /// `shm_size:` — the size of `/dev/shm`. The engine's `/dev` is a small
+    /// tmpfs with no `shm` in it at all, so this is honoured by mounting a
+    /// tmpfs of exactly that size at `/dev/shm` through the same `--tmpfs`
+    /// path a user would type (see `shm_tmpfs_spec`). Postgres is the reason
+    /// real files carry it: parallel queries allocate POSIX shared memory.
+    shm_size: Option<StringOrNum>,
+    /// `stop_grace_period:` — read by `compose down`, which stops each
+    /// container with this grace (SIGTERM, then SIGKILL when it runs out)
+    /// before removing it. Without it `down` removes at once, as it always
+    /// did. Parsed at `up` too, so a malformed value fails before anything is
+    /// created rather than at the `down` that needed it.
+    stop_grace_period: Option<String>,
+    /// `expose:` — the ports a service offers to the other services. In the
+    /// specification it publishes nothing and opens nothing (Docker's own
+    /// network is open between members); on this engine's SDN containers of
+    /// one project share a network and a namespace and reach each other on
+    /// any port, so the reachability `expose` documents is already what
+    /// happens. Validated (a port, a range, an optional `/tcp|/udp`) so a
+    /// typo is not accepted as documentation. NOT `container run --expose`,
+    /// which registers an L7 route — a different thing that shares a word.
+    #[serde(default)]
+    expose: Vec<StringOrNum>,
+    /// `mem_limit:`/`cpus:` — the short (pre-`deploy:`) spelling of the
+    /// limits. Same engine fields as `deploy.resources.limits`; declaring both
+    /// with different values is refused (`resolve_limits`), because one of
+    /// the two would have to be dropped.
+    mem_limit: Option<StringOrNum>,
+    cpus: Option<StringOrNum>,
+    /// `ulimits:` — `name: <n>` or `name: {soft, hard}`, to `--ulimit
+    /// name=soft:hard`, validated here (`ulimit_specs`) against the names the
+    /// engine applies.
+    #[serde(default)]
+    ulimits: BTreeMap<String, ComposeUlimit>,
+}
+
+/// One `ulimits:` entry: a single number sets soft and hard alike.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+enum ComposeUlimit {
+    Single(i64),
+    Pair { soft: i64, hard: i64 },
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -745,12 +802,17 @@ impl ComposeEnv {
 enum StringOrNum {
     Str(String),
     Num(i64),
+    /// `cpus: 0.5` — YAML reads it as a float, and without this variant the
+    /// whole file failed to parse over the most common way to write a CPU
+    /// limit.
+    Float(f64),
 }
 impl StringOrNum {
     fn as_string(&self) -> String {
         match self {
             StringOrNum::Str(s) => s.clone(),
             StringOrNum::Num(n) => n.to_string(),
+            StringOrNum::Float(f) => f.to_string(),
         }
     }
 }
@@ -908,8 +970,8 @@ struct ComposeResources {
 
 #[derive(Debug, Deserialize, Clone)]
 struct ComposeResourceLimits {
-    cpus: Option<String>,
-    memory: Option<String>,
+    cpus: Option<StringOrNum>,
+    memory: Option<StringOrNum>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -930,6 +992,8 @@ struct ComposeNetwork {
     #[serde(default)]
     external: bool,
     name: Option<String>,
+    /// Only `bridge` is served — see `SUPPORTED_NETWORK` and `check_drivers`.
+    driver: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -937,6 +1001,8 @@ struct ComposeVolume {
     #[serde(default)]
     external: bool,
     name: Option<String>,
+    /// Only `local` is served — see `SUPPORTED_VOLUME` and `check_drivers`.
+    driver: Option<String>,
 }
 
 // ============================================================================
@@ -958,6 +1024,8 @@ fn merge_compose_files(files: Vec<ComposeFile>) -> ComposeFile {
         // struct for a field-by-field merge to earn its complexity).
         merged.networks.extend(next.networks);
         merged.volumes.extend(next.volumes);
+        // A scalar: the later file wins when it declares one.
+        merged.name = next.name.or(merged.name);
     }
     merged
 }
@@ -1034,6 +1102,16 @@ fn merge_service_overlay(base: ComposeService, overlay: ComposeService) -> Compo
         secrets: concat_secret_refs(base.secrets, overlay.secrets),
         configs: concat_secret_refs(base.configs, overlay.configs),
         profiles: concat_dedup(base.profiles, overlay.profiles),
+        shm_size: overlay.shm_size.or(base.shm_size),
+        stop_grace_period: overlay.stop_grace_period.or(base.stop_grace_period),
+        expose: concat(base.expose, overlay.expose),
+        mem_limit: overlay.mem_limit.or(base.mem_limit),
+        cpus: overlay.cpus.or(base.cpus),
+        ulimits: {
+            let mut m = base.ulimits;
+            m.extend(overlay.ulimits);
+            m
+        },
     }
 }
 
@@ -1775,10 +1853,39 @@ fn resolve_compose_secrets(
 ///    what IS read so the fix is one line away.
 ///
 /// PURE (`&str` in, `Result` out), so every one of those paths is a data test.
+#[cfg(test)]
 fn check_unsupported_fields(text: &str) -> Result<()> {
-    let raw: serde_yaml::Value = serde_yaml::from_str(text)
+    check_unsupported_value(&parse_compose_value(text)?)
+}
+
+/// A compose document as raw YAML, with the YAML merge key (`<<: *anchor`)
+/// already applied.
+///
+/// **Almost every real compose file shares settings this way** — an `x-`
+/// extension field holding an anchor, merged into each service with
+/// `<<: *app`. `serde_yaml` resolves the anchor but not the merge, so without
+/// this step `<<` reached the allowlist as a key of its own and the whole file
+/// was refused, and `migrate assess` scored `<<` as a missing key while never
+/// seeing the keys it carried. One function for both readers, so the two can
+/// never disagree about what a service declares.
+pub(crate) fn parse_compose_value(text: &str) -> Result<serde_yaml::Value> {
+    let mut v: serde_yaml::Value = serde_yaml::from_str(text)
         .map_err(|e| Error::Invalid(format!("parsing compose file: {e}")))?;
-    let serde_yaml::Value::Mapping(top) = &raw else {
+    v.apply_merge()
+        .map_err(|e| Error::Invalid(format!("compose: resolving `<<` merge keys: {e}")))?;
+    Ok(v)
+}
+
+/// `x-` extension fields: the specification reserves the prefix for the
+/// author's own use and says an implementation ignores them — which is the
+/// one case where ignoring a key IS honouring it. They hold the anchors real
+/// files merge with `<<`; refusing them refused those files.
+fn is_extension(key: &str) -> bool {
+    key.starts_with("x-")
+}
+
+fn check_unsupported_value(raw: &serde_yaml::Value) -> Result<()> {
+    let serde_yaml::Value::Mapping(top) = raw else {
         return Ok(());
     };
     for (key, reason) in KNOWN_UNSUPPORTED_TOP {
@@ -1789,7 +1896,7 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
         }
     }
     for key in mapping_keys(top) {
-        if !SUPPORTED_TOP.contains(&key.as_str()) {
+        if !SUPPORTED_TOP.contains(&key.as_str()) && !is_extension(&key) {
             return Err(Error::Invalid(format!(
                 "compose: top-level `{key}:` is not understood and was refused rather \
                  than ignored — this implementation reads {}",
@@ -1811,7 +1918,7 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
                 continue; // `mynet:` with no body is legal and means "defaults"
             };
             for key in mapping_keys(entry_map) {
-                if !allowed.contains(&key.as_str()) {
+                if !allowed.contains(&key.as_str()) && !is_extension(&key) {
                     return Err(Error::Invalid(format!(
                         "compose: {section} '{}': `{key}:` is not understood and was \
                          refused rather than ignored — this implementation reads {}",
@@ -1861,7 +1968,7 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
                 }
             }
             for key in mapping_keys(svc_map) {
-                if !SUPPORTED_SERVICE.contains(&key.as_str()) {
+                if !SUPPORTED_SERVICE.contains(&key.as_str()) && !is_extension(&key) {
                     return Err(Error::Invalid(format!(
                         "compose: service '{svc}': `{key}:` is not understood and was \
                          refused rather than ignored — this implementation reads {}",
@@ -1922,6 +2029,9 @@ struct Translated {
     /// daemon" posture as `kind: Service`'s DNS round-robin, which this v1
     /// does not wire replicas into).
     containers: BTreeMap<String, Vec<(super::container::RunOpts, String)>>,
+    /// Per container (its final name): the networks beyond the first, which
+    /// `cmd_up` connects once it runs — see `extra_networks`.
+    extra_networks: BTreeMap<String, Vec<String>>,
     order: Vec<String>,
     waits: BTreeMap<String, Vec<DependsOnWait>>,
 }
@@ -1950,8 +2060,12 @@ fn translate(
             "compose: invalid project name '{project}' (only lowercase letters, digits, '_'/'-', must start with a letter or digit)"
         )));
     }
+    check_drivers(compose)?;
     let active = active_services(compose, requested_profiles);
     for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
+        // Parsed here so a malformed grace fails `up`, not the `down` that
+        // needs it.
+        stop_grace(svc, name)?;
         if svc.image.is_none() && svc.build.is_none() {
             return Err(Error::Invalid(format!(
                 "compose: service '{name}' has neither `image` nor `build`"
@@ -2008,8 +2122,9 @@ fn translate(
     let (secret_docs, secret_names, config_names) =
         resolve_compose_secrets(project, compose, &active, base_dir)?;
 
-    let mut image_docs = Vec::new();
+    let mut image_docs: Vec<ManifestDoc> = Vec::new();
     let mut containers = BTreeMap::new();
+    let mut extras: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut waits: BTreeMap<String, Vec<DependsOnWait>> = BTreeMap::new();
 
     for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
@@ -2028,12 +2143,33 @@ fn translate(
                 .image
                 .clone()
                 .unwrap_or_else(|| compose_scoped_name(project, name));
-            image_docs.push(service_build_to_image_doc(name, build, base_dir, &tag)?);
+            let doc = service_build_to_image_doc(name, build, base_dir, &tag)?;
+            // Services that share one build (the `<<: *app` pattern: a web, a
+            // worker and a scheduler from one image) declare the SAME doc
+            // under the same tag. Build it once. The same tag from two
+            // DIFFERENT builds is refused: one would overwrite the other and
+            // every service would run whichever finished last.
+            // Compared by the TAG the spec builds, not the doc name, which
+            // carries the service (`<service>-image`).
+            match image_docs.iter().find(|d| {
+                d.spec.get("build").and_then(|b| b.get("tag"))
+                    == doc.spec.get("build").and_then(|b| b.get("tag"))
+            }) {
+                Some(prev) if prev.spec == doc.spec => {}
+                Some(_) => {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{name}': image '{tag}' is also built by another \
+                         service from a different build — give each build its own `image:`"
+                    )))
+                }
+                None => image_docs.push(doc),
+            }
             tag
         } else {
             svc.image.clone().unwrap()
         };
         let replicas = svc.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1);
+        let svc_extras = extra_networks(svc, name, &network_names)?;
         let mut instances = Vec::with_capacity(replicas as usize);
         for idx in 1..=replicas {
             instances.push(service_to_run_opts(
@@ -2049,6 +2185,11 @@ fn translate(
                 &image_ref,
                 idx,
             )?);
+        }
+        if !svc_extras.is_empty() {
+            for (_, final_name) in &instances {
+                extras.insert(final_name.clone(), svc_extras.clone());
+            }
         }
         containers.insert(name.clone(), instances);
 
@@ -2070,6 +2211,7 @@ fn translate(
         volume_docs,
         secret_docs,
         containers,
+        extra_networks: extras,
         order,
         waits,
     })
@@ -2315,19 +2457,16 @@ fn service_to_run_opts(
     image_ref: &str,
     replica_index: u32,
 ) -> Result<(super::container::RunOpts, String)> {
+    // The FIRST network is the one the container is created on; the others
+    // are connected right after it starts (`extra_networks`, wired in
+    // `cmd_up`). This used to print a warning and drop them — a service on
+    // `[frontend, backend]` came up with no `backend` and the warning was the
+    // only trace of it.
     let net_keys = svc.networks.keys();
-    let net_key = if net_keys.is_empty() {
-        "default".to_string()
-    } else {
-        if net_keys.len() > 1 {
-            output::warn(&format!(
-                "compose: service '{service}' declares {} networks; only '{}' is used (this engine attaches one network per container)",
-                net_keys.len(),
-                net_keys[0]
-            ));
-        }
-        net_keys[0].clone()
-    };
+    let net_key = net_keys
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "default".to_string());
     // `networks.*.ipv4_address` wires straight into the same `--ip` path
     // `container run` now has: `infra::attach_container_on_ip` reserves the
     // address in the IPAM registry before the attach, so nothing here
@@ -2347,6 +2486,21 @@ fn service_to_run_opts(
         resolve_volume_mounts(base_dir, &svc.volumes, volume_names, anon_names, service)?;
     let mut tmpfs = tmpfs_from_mounts;
     tmpfs.extend(svc.tmpfs.clone().into_vec());
+    if let Some(size) = &svc.shm_size {
+        if tmpfs
+            .iter()
+            .any(|t| t.split(':').next() == Some("/dev/shm"))
+        {
+            return Err(Error::Invalid(format!(
+                "compose: service '{service}': `shm_size:` and a `tmpfs:` at /dev/shm both \
+                 declare /dev/shm — keep one"
+            )));
+        }
+        tmpfs.push(shm_tmpfs_spec(size, service)?);
+    }
+    validate_expose(&svc.expose, service)?;
+    let ulimit = ulimit_specs(&svc.ulimits, service)?;
+    let health = compose_health_config(&svc.healthcheck)?;
 
     let ports = resolve_ports(&svc.ports, service)?;
     let env = svc.environment.to_kv_pairs();
@@ -2377,13 +2531,7 @@ fn service_to_run_opts(
     };
 
     let restart = svc.restart.clone().unwrap_or_else(|| "no".to_string());
-    let (memory, cpus) = svc
-        .deploy
-        .as_ref()
-        .and_then(|d| d.resources.as_ref())
-        .and_then(|r| r.limits.as_ref())
-        .map(|l| (l.memory.clone(), l.cpus.clone()))
-        .unwrap_or((None, None));
+    let (memory, cpus) = resolve_limits(svc, service)?;
 
     // `container_name:` is refused alongside `deploy.replicas>1` (in
     // `translate`, before this ever runs) precisely so `replica_index == 1`
@@ -2440,6 +2588,8 @@ fn service_to_run_opts(
         cap_drop: svc.cap_drop.clone(),
         read_only: svc.read_only,
         tmpfs,
+        ulimit,
+        health,
         // Validado AQUI, com o mesmo parser do `container run` — um
         // `extra_hosts:` malformado falha o `compose up` com a razão, em vez
         // de ser descartado em silêncio (a regra explícita deste módulo).
@@ -2455,6 +2605,324 @@ fn service_to_run_opts(
         ..Default::default()
     };
     Ok((opts, final_name))
+}
+
+// ============================================================================
+// Resource and runtime keys (`mem_limit`, `cpus`, `shm_size`, `ulimits`,
+// `expose`, `stop_grace_period`, the healthcheck as a monitor)
+// ============================================================================
+
+/// `mem_limit`/`cpus` and `deploy.resources.limits.{memory,cpus}` set the SAME
+/// two engine limits. One value each, or a refusal naming both spellings:
+/// picking one would drop the other in silence.
+fn resolve_limits(svc: &ComposeService, service: &str) -> Result<(Option<String>, Option<String>)> {
+    let limits = svc
+        .deploy
+        .as_ref()
+        .and_then(|d| d.resources.as_ref())
+        .and_then(|r| r.limits.as_ref());
+    let pick = |short: Option<String>,
+                long: Option<String>,
+                same: &dyn Fn(&str, &str) -> bool,
+                short_key: &str,
+                long_key: &str|
+     -> Result<Option<String>> {
+        match (short, long) {
+            (Some(a), Some(b)) if !same(&a, &b) => Err(Error::Invalid(format!(
+                "compose: service '{service}': `{short_key}: {a}` and `{long_key}: {b}` set \
+                 the same limit to two different values — keep one"
+            ))),
+            (a, b) => Ok(a.or(b)),
+        }
+    };
+    let same_bytes = |a: &str, b: &str| {
+        a == b
+            || matches!(
+                (delonix_volume::parse_size_bytes(a), delonix_volume::parse_size_bytes(b)),
+                (Some(x), Some(y)) if x == y
+            )
+    };
+    let same_cpus = |a: &str, b: &str| {
+        a == b
+            || matches!(
+                (a.trim().parse::<f64>(), b.trim().parse::<f64>()),
+                (Ok(x), Ok(y)) if x == y
+            )
+    };
+    let memory = pick(
+        svc.mem_limit.as_ref().map(StringOrNum::as_string),
+        limits
+            .and_then(|l| l.memory.as_ref())
+            .map(StringOrNum::as_string),
+        &same_bytes,
+        "mem_limit",
+        "deploy.resources.limits.memory",
+    )?;
+    let cpus = pick(
+        svc.cpus.as_ref().map(StringOrNum::as_string),
+        limits
+            .and_then(|l| l.cpus.as_ref())
+            .map(StringOrNum::as_string),
+        &same_cpus,
+        "cpus",
+        "deploy.resources.limits.cpus",
+    )?;
+    Ok((memory, cpus))
+}
+
+/// `shm_size:` as the `--tmpfs` that delivers it: a tmpfs of exactly that size
+/// at `/dev/shm`, world-writable with the sticky bit like Docker's. The size is
+/// handed to the kernel in BYTES, so `128mb`, `128m` and `134217728` all mean
+/// the same mount; a size that does not parse is refused here, before anything
+/// is created, rather than by the container's init after it was.
+fn shm_tmpfs_spec(size: &StringOrNum, service: &str) -> Result<String> {
+    let s = size.as_string();
+    let bytes = delonix_volume::parse_size_bytes(&s).ok_or_else(|| {
+        Error::Invalid(format!(
+            "compose: service '{service}': `shm_size: {s}` is not a size (e.g. 64m, 1g, 67108864)"
+        ))
+    })?;
+    Ok(format!("/dev/shm:size={bytes},mode=1777"))
+}
+
+/// The `ulimits:` names the engine applies — the same list
+/// `delonix_linux::ulimit_name_known` holds, asked rather than copied.
+fn ulimit_specs(ulimits: &BTreeMap<String, ComposeUlimit>, service: &str) -> Result<Vec<String>> {
+    let value = |n: i64, name: &str| -> Result<String> {
+        match n {
+            -1 => Ok("unlimited".to_string()),
+            n if n >= 0 => Ok(n.to_string()),
+            n => Err(Error::Invalid(format!(
+                "compose: service '{service}': ulimits.{name}: {n} is not a limit (a number, or -1 for unlimited)"
+            ))),
+        }
+    };
+    let mut out = Vec::with_capacity(ulimits.len());
+    for (name, u) in ulimits {
+        if !delonix_linux::ulimit_name_known(name) {
+            return Err(Error::Invalid(format!(
+                "compose: service '{service}': ulimits.{name} is not a limit this engine applies \
+                 ({})",
+                delonix_linux::ULIMIT_NAMES.join(", ")
+            )));
+        }
+        let (soft, hard) = match u {
+            ComposeUlimit::Single(n) => (*n, *n),
+            ComposeUlimit::Pair { soft, hard } => (*soft, *hard),
+        };
+        let above = match (soft, hard) {
+            (_, -1) => false,
+            (-1, _) => true,
+            (s, h) => s > h,
+        };
+        if above {
+            return Err(Error::Invalid(format!(
+                "compose: service '{service}': ulimits.{name}: soft {soft} is above hard {hard}"
+            )));
+        }
+        out.push(format!(
+            "{name}={}:{}",
+            value(soft, name)?,
+            value(hard, name)?
+        ));
+    }
+    Ok(out)
+}
+
+/// `expose:` entries are checked, not acted on: see the field's doc-comment
+/// for why reachability is already what the SDN gives. A port, a `lo-hi`
+/// range, each optionally `/tcp` or `/udp`.
+fn validate_expose(expose: &[StringOrNum], service: &str) -> Result<()> {
+    for e in expose {
+        let s = e.as_string();
+        let bad = || {
+            Error::Invalid(format!(
+                "compose: service '{service}': `expose: {s}` is not a port, a range or \
+                 either with /tcp or /udp"
+            ))
+        };
+        let (ports, proto) = s.split_once('/').unwrap_or((s.as_str(), "tcp"));
+        if proto != "tcp" && proto != "udp" {
+            return Err(bad());
+        }
+        let port = |p: &str| p.trim().parse::<u16>().ok().filter(|n| *n > 0);
+        match ports.split_once('-') {
+            Some((lo, hi)) => match (port(lo), port(hi)) {
+                (Some(l), Some(h)) if l <= h => {}
+                _ => return Err(bad()),
+            },
+            None => {
+                port(ports).ok_or_else(bad)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A duration the engine's `stop -t` can take: whole seconds, rounded UP so a
+/// `1500ms` grace is never cut to one second.
+fn ceil_secs(d: Duration) -> u64 {
+    d.as_secs() + u64::from(d.subsec_nanos() > 0)
+}
+
+/// `stop_grace_period:`, parsed. `None` when the service does not declare one.
+fn stop_grace(svc: &ComposeService, service: &str) -> Result<Option<u64>> {
+    svc.stop_grace_period
+        .as_deref()
+        .map(|g| {
+            parse_go_duration(g).map(ceil_secs).map_err(|e| {
+                Error::Invalid(format!(
+                    "compose: service '{service}': stop_grace_period: {e}"
+                ))
+            })
+        })
+        .transpose()
+}
+
+/// The service's `healthcheck:` as the engine's CONTINUOUS monitor
+/// (`HealthConfig`, the same one `container run --health-*` persists).
+///
+/// Until this, a compose healthcheck only gated `depends_on` and was never run
+/// again: `container ls` showed no health at all for a service whose file
+/// declares one, and a database that went bad after the start read as `Up`.
+/// In Docker the same block is a monitor, and so it is here now.
+///
+/// The test becomes the shell line the monitor runs with `/bin/sh -c`: a
+/// `CMD` argv is shell-quoted word by word, so it runs as written and no word
+/// is re-split; `CMD-SHELL` and the plain-string form are already a shell
+/// line; `NONE` turns monitoring off. No `test:` means the image's own
+/// `HEALTHCHECK`, which an empty `cmd` already says.
+fn compose_health_config(hc: &Option<ComposeHealthcheck>) -> Result<Option<HealthConfig>> {
+    let Some(h) = hc else {
+        return Ok(None);
+    };
+    let quote = |v: &[String]| {
+        v.iter()
+            .map(|w| super::remote::shell_quote(w))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let cmd = match &h.test {
+        None => String::new(),
+        Some(ComposeHealthTest::Shell(s)) => s.clone(),
+        Some(ComposeHealthTest::List(v)) => match v.first().map(String::as_str) {
+            None | Some("NONE") => return Ok(None),
+            Some("CMD-SHELL") => v.get(1).cloned().unwrap_or_default(),
+            Some("CMD") => quote(&v[1..]),
+            Some(_) => quote(v),
+        },
+    };
+    let (interval, timeout, retries, start_period) = health_params(hc)?;
+    Ok(Some(HealthConfig {
+        cmd,
+        interval_secs: ceil_secs(interval).max(1),
+        timeout_secs: ceil_secs(timeout).max(1),
+        retries: retries.max(1),
+        start_period_secs: ceil_secs(start_period),
+    }))
+}
+
+/// The networks a service declares beyond its first, as real network names.
+/// The container is created on the first; these are connected after it
+/// starts (`network connect`'s own path), and `container start` re-attaches
+/// them like any other extra network.
+fn extra_networks(
+    svc: &ComposeService,
+    service: &str,
+    network_names: &BTreeMap<String, String>,
+) -> Result<Vec<String>> {
+    let keys = svc.networks.keys();
+    let mut out = Vec::new();
+    for key in keys.iter().skip(1) {
+        if svc
+            .networks
+            .entry(key)
+            .and_then(|e| e.ipv4_address.as_ref())
+            .is_some()
+        {
+            return Err(Error::Invalid(format!(
+                "compose: service '{service}': `ipv4_address` on '{key}', which is not its first \
+                 network — a fixed address is only set on the network a container is created on"
+            )));
+        }
+        let real = network_names.get(key).cloned().ok_or_else(|| {
+            Error::Invalid(format!(
+                "compose: service '{service}' references undefined network '{key}' (declare it \
+                 under top-level `networks:`)"
+            ))
+        })?;
+        out.push(real);
+    }
+    Ok(out)
+}
+
+/// The `/etc/hosts` lines that let a service reach the other services of its
+/// project by SERVICE name — `db`, not the container name `shop-db`.
+///
+/// **Without this no service could.** The containers are named
+/// `<project>-<service>` and the internal DNS answers container names, so
+/// `DATABASE_HOST: db` — the way every compose file in the world addresses a
+/// dependency — did not resolve. Measured on `examples/compose-webapp`: the web
+/// service reported Postgres and Redis unreachable and the worker crashed on
+/// `getaddrinfo`, with every container `Up`.
+///
+/// Why `/etc/hosts` and not a DNS alias: the engine's DNS has no per-network
+/// scope, so an alias `db` would be the same name for every project on the
+/// node, and two stacks that both have a `db` would resolve each other's.
+/// `/etc/hosts` is per container, so a project only ever sees its own
+/// services. The cost is direction: a container is given the services that
+/// already exist when it is created — its `depends_on`, which `up` starts
+/// first, and anything earlier in the order. A service that needs one created
+/// AFTER it gets no entry and its lookup fails, loudly.
+///
+/// Only services sharing a network with this one are listed, at the address
+/// they have ON that network — the same reachability Docker's per-network DNS
+/// gives. A record's addresses do not change across a restart (the lease is
+/// keyed by the container).
+fn service_host_entries(my_nets: &[String], others: &[(String, Container)]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (service, c) in others {
+        let primary = c
+            .network
+            .as_ref()
+            .filter(|n| my_nets.contains(n))
+            .and(c.ip.clone());
+        let ip = primary.or_else(|| {
+            c.extra_networks
+                .iter()
+                .find(|e| my_nets.contains(&e.network))
+                .map(|e| e.ip.clone())
+        });
+        if let Some(ip) = ip {
+            // An address recorded with its prefix length is the host part only.
+            let ip = ip.split('/').next().unwrap_or(&ip).to_string();
+            out.push(format!("{service}:{ip}"));
+        }
+    }
+    out
+}
+
+/// Top-level `driver:` values. `bridge` and `local` are what this engine
+/// creates; any other driver is refused by name, never replaced by the
+/// default in silence.
+fn check_drivers(compose: &ComposeFile) -> Result<()> {
+    for (key, net) in &compose.networks {
+        if let Some(d) = net.driver.as_deref().filter(|d| *d != "bridge") {
+            return Err(Error::Invalid(format!(
+                "compose: network '{key}': driver '{d}' — compose creates `bridge` networks only \
+                 (an overlay is `delonix network create --driver overlay`)"
+            )));
+        }
+    }
+    for (key, vol) in &compose.volumes {
+        if let Some(d) = vol.driver.as_deref().filter(|d| *d != "local") {
+            return Err(Error::Invalid(format!(
+                "compose: volume '{key}': driver '{d}' — compose creates `local` volumes only \
+                 (a network share is `delonix volume create --driver nfs|cifs|webdav`)"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -2766,6 +3234,20 @@ fn merge_service(base: ComposeService, child: ComposeService) -> ComposeService 
             v.extend(child.configs);
             v
         },
+        shm_size: child.shm_size.or(base.shm_size),
+        stop_grace_period: child.stop_grace_period.or(base.stop_grace_period),
+        expose: {
+            let mut v = base.expose;
+            v.extend(child.expose);
+            v
+        },
+        mem_limit: child.mem_limit.or(base.mem_limit),
+        cpus: child.cpus.or(base.cpus),
+        ulimits: {
+            let mut m = base.ulimits;
+            m.extend(child.ulimits);
+            m
+        },
     }
 }
 
@@ -2834,11 +3316,14 @@ fn load_compose(files: Vec<PathBuf>) -> Result<(ComposeFile, String, PathBuf, St
     for path in &paths {
         let text = std::fs::read_to_string(path)
             .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
-        // Runs on the RAW text of EACH file, before any merge — the typed
+        // Runs on the RAW document of EACH file, before any merge — the typed
         // `ComposeFile` a merge produces has already dropped unrecognized
-        // keys, so this is the only point that can still catch them.
-        check_unsupported_fields(&text)?;
-        let compose: ComposeFile = serde_yaml::from_str(&text)
+        // keys, so this is the only point that can still catch them. The YAML
+        // `<<` merge keys are applied first (`parse_compose_value`), so the
+        // check sees the keys a service really ends up with.
+        let raw = parse_compose_value(&text)?;
+        check_unsupported_value(&raw)?;
+        let compose: ComposeFile = serde_yaml::from_value(raw)
             .map_err(|e| Error::Invalid(format!("parsing {}: {e}", path.display())))?;
         parsed.push(compose);
     }
@@ -2850,17 +3335,38 @@ fn load_compose(files: Vec<PathBuf>) -> Result<(ComposeFile, String, PathBuf, St
     // that with "undefined service", which reads as a typo and is not one.
     resolve_extends(&mut compose.services)?;
     let first = &paths[0];
-    let base_dir = first
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let default_project = default_project_name(first);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let base_dir = absolute_base_dir(first, &cwd);
+    let default_project = compose
+        .name
+        .clone()
+        .unwrap_or_else(|| default_project_name(first));
     Ok((
         compose,
         default_project,
         base_dir,
         first.to_string_lossy().into_owned(),
     ))
+}
+
+/// The directory every relative path of the file resolves against, made
+/// ABSOLUTE.
+///
+/// It was `first.parent()`, which for `-f compose.yaml` (or the default file
+/// search) is the EMPTY path, so `env_file: .env` reached the engine as the
+/// relative `.env`. A container on a project network starts in a second pass
+/// re-executed inside the network namespace, from another working directory,
+/// and that pass answered `--env-file .env: No such file or directory` — every
+/// service with an `env_file:` failed to start, measured on the
+/// `examples/compose-webapp` sample. The same class as the relative bind
+/// sources `anchor_relative_binds` already anchors.
+fn absolute_base_dir(first: &Path, cwd: &Path) -> PathBuf {
+    let parent = first.parent().unwrap_or(Path::new(""));
+    if parent.is_absolute() {
+        parent.to_path_buf()
+    } else {
+        cwd.join(parent)
+    }
 }
 
 fn cmd_up(
@@ -2889,8 +3395,13 @@ fn cmd_up(
         }
         for name in &translated.order {
             for (opts, final_name) in &translated.containers[name] {
+                let extra = translated
+                    .extra_networks
+                    .get(final_name)
+                    .map(|v| format!(" +{}", v.join(",+")))
+                    .unwrap_or_default();
                 println!(
-                    "service {name} -> container {final_name} (image={}, net={})",
+                    "service {name} -> container {final_name} (image={}, net={}{extra})",
                     opts.image, opts.net
                 );
             }
@@ -2922,13 +3433,64 @@ fn cmd_up(
                 wait_for_condition(&store, &images, dep_final_name, w)?;
             }
         }
-        for (opts, final_name) in translated.containers[name].clone() {
-            if store.list()?.iter().any(|c| c.name == final_name) {
-                println!("compose: {name} ({final_name}): already exists, nothing to do");
-                continue;
+        for (mut opts, final_name) in translated.containers[name].clone() {
+            let records = store.list()?;
+            let created = !records.iter().any(|c| c.name == final_name);
+            if created {
+                let mut nets = vec![opts.net.clone()];
+                nets.extend(
+                    translated
+                        .extra_networks
+                        .get(&final_name)
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                let others: Vec<(String, Container)> = translated
+                    .containers
+                    .iter()
+                    .filter(|(svc, _)| *svc != name)
+                    .filter_map(|(svc, inst)| {
+                        let first = &inst.first()?.1;
+                        let rec = records.iter().find(|c| &c.name == first)?;
+                        Some((svc.clone(), rec.clone()))
+                    })
+                    .collect();
+                // The user's own `extra_hosts:` first: in `/etc/hosts` the first
+                // line that names a host wins, and a declared address is the
+                // author's decision.
+                opts.add_host.extend(service_host_entries(&nets, &others));
+                super::container::cmd_run(&images, &store, opts)?;
             }
-            super::container::cmd_run(&images, &store, opts)?;
-            println!("compose: {name} ({final_name}): created");
+            // Connected on every `up`, not only the one that created the
+            // container, so a re-run completes a container an interrupted run
+            // left on fewer networks. `network connect` refuses a network the
+            // container is already on, so the ones present are skipped here.
+            let mut connected = Vec::new();
+            for net in translated
+                .extra_networks
+                .get(&final_name)
+                .into_iter()
+                .flatten()
+            {
+                let c = find(&store, &final_name)?;
+                if c.network.as_deref() == Some(net.as_str())
+                    || c.extra_networks.iter().any(|e| &e.network == net)
+                {
+                    continue;
+                }
+                super::container::cmd_network_connect(&store, &final_name, net)?;
+                connected.push(net.clone());
+            }
+            match (created, connected.is_empty()) {
+                (true, _) => println!("compose: {name} ({final_name}): created"),
+                (false, true) => {
+                    println!("compose: {name} ({final_name}): already exists, nothing to do")
+                }
+                (false, false) => println!(
+                    "compose: {name} ({final_name}): already exists, connected to {}",
+                    connected.join(", ")
+                ),
+            }
         }
     }
     Ok(())
@@ -2951,6 +3513,27 @@ fn cmd_down(file: Vec<PathBuf>, project: Option<String>, remove_volumes: bool) -
         .collect();
     let mut failed = Vec::new();
     for c in &members {
+        // `stop_grace_period:` is honoured HERE: the container is stopped with
+        // that grace (SIGTERM, then SIGKILL when it runs out) before the
+        // forced removal, so a database gets its checkpoint. A service with
+        // no grace declared is removed at once, as `down` always did. The
+        // service comes from the container's own label, so a container whose
+        // service left the file is removed like before.
+        let grace = c
+            .labels
+            .get(COMPOSE_SERVICE_LABEL)
+            .and_then(|s| compose.services.get(s).map(|svc| (s, svc)))
+            .map(|(s, svc)| stop_grace(svc, s))
+            .transpose()?
+            .flatten();
+        if let Some(secs) = grace {
+            if let Err(e) = super::container::cmd_stop(&store, &c.name, secs) {
+                super::output::warn(&super::po::tf(
+                    "{name}: graceful stop failed ({err}); removing it anyway",
+                    &[("name", &c.name), ("err", &e.to_string())],
+                ));
+            }
+        }
         if let Err(e) = super::container::cmd_rm(&images, &store, &c.name, true) {
             failed.push(format!("{}: {e}", c.name));
         }
@@ -3110,8 +3693,16 @@ fn cmd_config(file: Vec<PathBuf>, project: Option<String>, profile: Vec<String>)
     for name in &translated.order {
         for (opts, final_name) in &translated.containers[name] {
             println!(
-                "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  ports: {:?}\n  volumes: {:?}",
-                opts.image, opts.net, opts.ports, opts.volumes
+                "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  extra networks: {:?}\n  ports: {:?}\n  volumes: {:?}",
+                opts.image,
+                opts.net,
+                translated
+                    .extra_networks
+                    .get(final_name)
+                    .cloned()
+                    .unwrap_or_default(),
+                opts.ports,
+                opts.volumes
             );
         }
     }
@@ -4074,7 +4665,10 @@ mod tests_unknown_keys {
         // instead of the generic one. Still refused either way — which is what
         // this test is about — but asserting the generic wording for a key that
         // has earned a specific one would pin the worse message in place.
-        for key in ["shm_size", "mem_limit", "expose", "init"] {
+        // `shm_size`/`mem_limit`/`expose` were here and are SERVED since
+        // 2026-10-11 (the `examples/compose-webapp` sample); four keys that
+        // are still not read take their place.
+        for key in ["init", "stop_signal", "pids_limit", "platform"] {
             let e = err_of(&format!(
                 "services:\n  web:\n    image: nginx\n    {key}: x\n"
             ));
@@ -4133,8 +4727,78 @@ mod tests_unknown_keys {
 
     #[test]
     fn a_top_level_key_outside_the_list_is_refused() {
-        let e = err_of("x-custom: 1\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("x-custom"), "{e}");
+        // This used `x-custom`, i.e. it asserted the refusal of an extension
+        // field — which the specification says an implementation ignores, and
+        // which every file that shares settings with `<<: *anchor` carries.
+        let e = err_of("custom: 1\nservices:\n  web:\n    image: nginx\n");
+        assert!(e.contains("custom"), "{e}");
+    }
+
+    /// `x-` extension fields are the author's, at every level the
+    /// specification allows them: accepted, and they carry no meaning here.
+    #[test]
+    fn extension_fields_are_accepted_at_every_level() {
+        check_unsupported_fields(
+            "x-app: &app\n  restart: always\nservices:\n  web:\n    image: nginx\n    \
+             x-note: hi\nnetworks:\n  n:\n    x-owner: me\nvolumes:\n  v:\n    x-owner: me\n",
+        )
+        .expect("x- fields are accepted");
+    }
+
+    /// The `<<: *anchor` merge is applied before the check, so the keys a
+    /// service gets through it are checked (a refused key cannot hide in an
+    /// anchor) and `<<` itself is never read as a key.
+    #[test]
+    fn merge_keys_are_applied_before_the_check() {
+        let yaml = "x-app: &app\n  restart: always\n  environment:\n    A: '1'\n\
+                    services:\n  web:\n    <<: *app\n    image: nginx\n";
+        check_unsupported_fields(yaml).expect("`<<` is resolved, not refused");
+        let c: ComposeFile = serde_yaml::from_value(parse_compose_value(yaml).unwrap()).unwrap();
+        let web = &c.services["web"];
+        assert_eq!(web.restart.as_deref(), Some("always"));
+        assert_eq!(web.environment.to_kv_pairs(), vec!["A=1".to_string()]);
+        let hidden =
+            "x-app: &app\n  init: true\nservices:\n  web:\n    <<: *app\n    image: nginx\n";
+        assert!(
+            err_of(hidden).contains("init"),
+            "a key behind an anchor is still checked"
+        );
+    }
+
+    /// The test that keeps `compatibility compose` truthful, in Rust: every key
+    /// of the specification, fed to the same check `compose up` runs, is
+    /// refused if and only if the table does not call it served. The bateria
+    /// asks the binary the same question (`compose config`); this one fails
+    /// in `cargo test`, before a release.
+    #[test]
+    fn the_matrix_describes_what_the_check_does() {
+        let mut bad = Vec::new();
+        for (key, state) in service_matrix() {
+            if key == "image" {
+                continue;
+            }
+            let res = check_unsupported_fields(&format!(
+                "services:\n  web:\n    image: alpine\n    {key}: x\n"
+            ));
+            let refused = res.as_ref().is_err_and(|e| e.to_string().contains(key));
+            if refused == (state == KeyState::Served) {
+                bad.push((key, state, res.err().map(|e| e.to_string())));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "the table disagrees with the check: {bad:?}"
+        );
+        for key in [
+            "shm_size",
+            "stop_grace_period",
+            "expose",
+            "mem_limit",
+            "cpus",
+            "ulimits",
+        ] {
+            assert_eq!(service_key_state(key), KeyState::Served, "{key}");
+        }
     }
 
     /// `version:` is dead in the specification and alive in the real world.
@@ -4203,8 +4867,10 @@ volumes:
 
     #[test]
     fn a_network_key_outside_the_list_is_refused() {
-        let e = err_of("services:\n  w:\n    image: n\nnetworks:\n  front:\n    driver: bridge\n");
-        assert!(e.contains("driver"), "{e}");
+        // `driver:` was the example here and is read since 2026-10-11 (only
+        // `bridge`, see `check_drivers`); `ipam:` is still not.
+        let e = err_of("services:\n  w:\n    image: n\nnetworks:\n  front:\n    ipam: {}\n");
+        assert!(e.contains("ipam"), "{e}");
         assert!(e.contains("front"), "{e}");
     }
 
@@ -4264,5 +4930,251 @@ volumes:
             missing.is_empty(),
             "fields of ComposeService missing from SUPPORTED_SERVICE: {missing:?}"
         );
+    }
+}
+
+/// The keys the `examples/compose-webapp` sample uses that were missing on
+/// 2026-10-11, and the two defects running it found (`name:` read by nobody,
+/// a second network dropped with a warning).
+#[cfg(test)]
+mod tests_sample_keys {
+    use super::*;
+
+    fn load(yaml: &str) -> ComposeFile {
+        serde_yaml::from_value(parse_compose_value(yaml).unwrap()).unwrap()
+    }
+
+    fn err(r: Result<impl Sized>) -> String {
+        match r {
+            Ok(_) => panic!("expected a refusal"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    fn run_opts(yaml: &str, service: &str) -> Result<super::super::container::RunOpts> {
+        let c = load(yaml);
+        let t = translate(&c, "p", Path::new("/tmp"), &[])?;
+        Ok(t.containers[service][0].0.clone())
+    }
+
+    const BASE: &str = "services:\n  db:\n    image: postgres\n";
+
+    #[test]
+    fn shm_size_becomes_a_dev_shm_tmpfs_of_that_size() {
+        let o = run_opts(&format!("{BASE}    shm_size: 128mb\n"), "db").unwrap();
+        assert_eq!(
+            o.tmpfs,
+            vec!["/dev/shm:size=134217728,mode=1777".to_string()]
+        );
+        let o = run_opts(&format!("{BASE}    shm_size: 67108864\n"), "db").unwrap();
+        assert_eq!(
+            o.tmpfs,
+            vec!["/dev/shm:size=67108864,mode=1777".to_string()]
+        );
+        assert!(run_opts(&format!("{BASE}    shm_size: lots\n"), "db").is_err());
+        let both = format!("{BASE}    shm_size: 64m\n    tmpfs: ['/dev/shm:size=1m']\n");
+        assert!(run_opts(&both, "db").is_err(), "two answers for /dev/shm");
+    }
+
+    #[test]
+    fn mem_limit_and_cpus_reach_the_limits_and_never_disagree_with_deploy() {
+        let o = run_opts(&format!("{BASE}    mem_limit: 256m\n    cpus: 0.5\n"), "db").unwrap();
+        assert_eq!(o.memory.as_deref(), Some("256m"));
+        assert_eq!(o.cpus.as_deref(), Some("0.5"));
+        let deploy = "    deploy:\n      resources:\n        limits:\n          memory: 256M\n          cpus: '0.50'\n";
+        let same = format!("{BASE}    mem_limit: 256m\n    cpus: 0.5\n{deploy}");
+        assert!(
+            run_opts(&same, "db").is_ok(),
+            "the same value twice is one value"
+        );
+        let differ = format!("{BASE}    mem_limit: 512m\n{deploy}");
+        let e = err(run_opts(&differ, "db"));
+        assert!(
+            e.contains("mem_limit") && e.contains("deploy.resources.limits.memory"),
+            "{e}"
+        );
+        // `cpus: 1.5` under `deploy:` used to fail the whole parse: a float.
+        let o = run_opts(
+            &format!("{BASE}    deploy:\n      resources:\n        limits:\n          cpus: 1.5\n"),
+            "db",
+        )
+        .unwrap();
+        assert_eq!(o.cpus.as_deref(), Some("1.5"));
+    }
+
+    #[test]
+    fn ulimits_are_validated_and_passed_as_soft_hard() {
+        let y = format!(
+            "{BASE}    ulimits:\n      nofile:\n        soft: 10032\n        hard: 10032\n      core: -1\n      nproc: 512\n"
+        );
+        let o = run_opts(&y, "db").unwrap();
+        assert_eq!(
+            o.ulimit,
+            vec![
+                "core=unlimited:unlimited".to_string(),
+                "nofile=10032:10032".to_string(),
+                "nproc=512:512".to_string(),
+            ]
+        );
+        let bogus = format!("{BASE}    ulimits:\n      bogus: 5\n");
+        assert!(err(run_opts(&bogus, "db")).contains("bogus"));
+        let inverted =
+            format!("{BASE}    ulimits:\n      nofile:\n        soft: 9\n        hard: 5\n");
+        assert!(err(run_opts(&inverted, "db")).contains("above"));
+    }
+
+    #[test]
+    fn expose_is_checked_not_published() {
+        let o = run_opts(
+            &format!("{BASE}    expose: ['5432', 8000, '9000-9010/udp']\n"),
+            "db",
+        )
+        .unwrap();
+        assert!(o.ports.is_empty(), "expose publishes nothing");
+        assert_eq!(o.expose, None, "and it is not the L7 `--expose`");
+        for bad in ["x", "0", "80/sctp", "90-80"] {
+            assert!(
+                run_opts(&format!("{BASE}    expose: ['{bad}']\n"), "db").is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_healthcheck_is_persisted_as_a_monitor() {
+        let y = format!(
+            "{BASE}    healthcheck:\n      test: [CMD, pg_isready, -U, \"o'neil\"]\n      interval: 1500ms\n      retries: 7\n      start_period: 5s\n"
+        );
+        let h = run_opts(&y, "db").unwrap().health.expect("monitored");
+        assert_eq!(h.cmd, "'pg_isready' '-U' 'o'\\''neil'");
+        assert_eq!((h.interval_secs, h.retries, h.start_period_secs), (2, 7, 5));
+        let shell =
+            format!("{BASE}    healthcheck:\n      test: [CMD-SHELL, 'pg_isready || exit 1']\n");
+        assert_eq!(
+            run_opts(&shell, "db").unwrap().health.unwrap().cmd,
+            "pg_isready || exit 1"
+        );
+        let none = format!("{BASE}    healthcheck:\n      test: [NONE]\n");
+        assert!(run_opts(&none, "db").unwrap().health.is_none());
+        assert!(
+            run_opts(BASE, "db").unwrap().health.is_none(),
+            "nothing declared, nothing monitored"
+        );
+    }
+
+    #[test]
+    fn a_second_network_is_connected_not_dropped() {
+        let y = "services:\n  web:\n    image: x\n    networks: [front, back]\nnetworks:\n  front:\n  back:\n";
+        let t = translate(&load(y), "p", Path::new("/tmp"), &[]).unwrap();
+        assert_eq!(t.containers["web"][0].0.net, "p_front");
+        assert_eq!(t.extra_networks["p-web"], vec!["p_back".to_string()]);
+        // Map form: the first network is the first BY NAME (the map is
+        // sorted), so `zback` is the extra one here.
+        let fixed = "services:\n  web:\n    image: x\n    networks:\n      front: {}\n      zback:\n        ipv4_address: 10.0.0.5\nnetworks:\n  front:\n  zback:\n";
+        assert!(translate(&load(fixed), "p", Path::new("/tmp"), &[]).is_err());
+    }
+
+    #[test]
+    fn only_the_drivers_this_engine_creates_are_accepted() {
+        let ok = "services:\n  w:\n    image: x\nnetworks:\n  n:\n    driver: bridge\nvolumes:\n  v:\n    driver: local\n";
+        assert!(translate(&load(ok), "p", Path::new("/tmp"), &[]).is_ok());
+        let overlay = "services:\n  w:\n    image: x\nnetworks:\n  n:\n    driver: overlay\n";
+        assert!(err(translate(&load(overlay), "p", Path::new("/tmp"), &[])).contains("overlay"));
+        let nfs = "services:\n  w:\n    image: x\nvolumes:\n  v:\n    driver: nfs\n";
+        assert!(translate(&load(nfs), "p", Path::new("/tmp"), &[]).is_err());
+    }
+
+    #[test]
+    fn one_build_shared_by_several_services_is_built_once() {
+        let y = "x-app: &app\n  build: ./app\n  image: app:1\nservices:\n  web:\n    <<: *app\n  worker:\n    <<: *app\n";
+        let t = translate(&load(y), "p", Path::new("/tmp"), &[]).unwrap();
+        assert_eq!(t.image_docs.len(), 1);
+        let clash = "services:\n  web:\n    build: ./a\n    image: app:1\n  worker:\n    build: ./b\n    image: app:1\n";
+        assert!(translate(&load(clash), "p", Path::new("/tmp"), &[]).is_err());
+    }
+
+    #[test]
+    fn stop_grace_period_is_parsed_and_rounded_up() {
+        let svc =
+            |g: &str| load(&format!("{BASE}    stop_grace_period: {g}\n")).services["db"].clone();
+        assert_eq!(stop_grace(&svc("30s"), "db").unwrap(), Some(30));
+        assert_eq!(stop_grace(&svc("1m30s"), "db").unwrap(), Some(90));
+        assert_eq!(stop_grace(&svc("1500ms"), "db").unwrap(), Some(2));
+        assert!(translate(
+            &load(&format!("{BASE}    stop_grace_period: soon\n")),
+            "p",
+            Path::new("/tmp"),
+            &[]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_service_reaches_the_others_by_name_on_a_shared_network_only() {
+        let rec = |name: &str, net: &str, ip: &str, extra: Option<(&str, &str)>| {
+            let mut c = Container::new(
+                format!("id-{name}"),
+                name.into(),
+                "img".into(),
+                vec![],
+                "64M".into(),
+            );
+            c.network = Some(net.into());
+            c.ip = Some(ip.into());
+            if let Some((n, i)) = extra {
+                c.extra_networks.push(delonix_compute::ExtraNet {
+                    network: n.into(),
+                    ip: i.into(),
+                    idx: 1,
+                });
+            }
+            c
+        };
+        let others = vec![
+            ("db".to_string(), rec("p-db", "p_back", "10.1.0.2", None)),
+            (
+                "web".to_string(),
+                rec("p-web", "p_front", "10.2.0.2", Some(("p_back", "10.1.0.9"))),
+            ),
+            (
+                "lone".to_string(),
+                rec("p-lone", "p_other", "10.3.0.2", None),
+            ),
+        ];
+        let got = service_host_entries(&["p_back".to_string()], &others);
+        assert_eq!(
+            got,
+            vec!["db:10.1.0.2".to_string(), "web:10.1.0.9".to_string()]
+        );
+        // Each one is what `--add-host` accepts.
+        for e in &got {
+            super::super::container::parse_add_host(e).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_base_dir_is_absolute_whatever_the_file_path() {
+        let cwd = Path::new("/srv/app");
+        assert_eq!(absolute_base_dir(Path::new("compose.yaml"), cwd), cwd);
+        assert_eq!(
+            absolute_base_dir(Path::new("deploy/compose.yaml"), cwd),
+            Path::new("/srv/app/deploy")
+        );
+        assert_eq!(
+            absolute_base_dir(Path::new("/etc/x/compose.yaml"), cwd),
+            Path::new("/etc/x")
+        );
+    }
+
+    #[test]
+    fn the_top_level_name_names_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("compose.yaml");
+        std::fs::write(&f, "name: shop\nservices:\n  web:\n    image: x\n").unwrap();
+        let (_, project, _, _) = load_compose(vec![f.clone()]).unwrap();
+        assert_eq!(project, "shop");
+        std::fs::write(&f, "services:\n  web:\n    image: x\n").unwrap();
+        let (_, project, _, _) = load_compose(vec![f]).unwrap();
+        assert_ne!(project, "shop", "without `name:` the directory names it");
     }
 }

@@ -2874,6 +2874,18 @@ type RlimitResource = libc::c_int;
 #[cfg(not(target_env = "musl"))]
 type RlimitResource = libc::__rlimit_resource_t;
 
+/// The `--ulimit` names this engine applies, for a caller that validates
+/// before it gets here (`compose`'s `ulimits:`). `nofile_hard` is accepted by
+/// `rlimit_resource` as a historical alias and deliberately not advertised.
+pub const ULIMIT_NAMES: &[&str] = &[
+    "nofile", "nproc", "core", "fsize", "cpu", "memlock", "stack", "as",
+];
+
+/// Whether `--ulimit <name>=…` names a limit this engine applies.
+pub fn ulimit_name_known(name: &str) -> bool {
+    rlimit_resource(name).is_some()
+}
+
 /// Maps a `--ulimit` name to the `RLIMIT_*` resource.
 fn rlimit_resource(name: &str) -> Option<RlimitResource> {
     Some(match name {
@@ -2890,9 +2902,11 @@ fn rlimit_resource(name: &str) -> Option<RlimitResource> {
     })
 }
 
-/// Applies `--ulimit name=soft[:hard]` via `setrlimit` (before dropping caps, so it can
-/// raise hard limits with `CAP_SYS_RESOURCE`).
-fn apply_ulimits(specs: &[String]) {
+/// One `--ulimit name=soft[:hard]`, parsed: the resource and the two values.
+///
+/// PURE, so every refusal is a data test. An `Err` names what is wrong in the
+/// words the user typed.
+fn parse_ulimit(spec: &str) -> std::result::Result<(RlimitResource, libc::rlimit), String> {
     let parse = |s: &str| -> Option<u64> {
         if s == "unlimited" || s == "-1" {
             Some(libc::RLIM_INFINITY)
@@ -2900,26 +2914,69 @@ fn apply_ulimits(specs: &[String]) {
             s.parse().ok()
         }
     };
-    for spec in specs {
-        let Some((name, vals)) = spec.split_once('=') else {
-            continue;
-        };
-        let Some(res) = rlimit_resource(name.trim()) else {
-            continue;
-        };
-        let (soft, hard) = match vals.split_once(':') {
-            Some((s, h)) => (s, h),
-            None => (vals, vals),
-        };
-        if let (Some(rc), Some(rm)) = (parse(soft.trim()), parse(hard.trim())) {
-            let rl = libc::rlimit {
+    let (name, vals) = spec
+        .split_once('=')
+        .ok_or_else(|| format!("--ulimit {spec}: expected name=soft[:hard]"))?;
+    let res = rlimit_resource(name.trim()).ok_or_else(|| {
+        format!(
+            "--ulimit {spec}: '{}' is not a limit this engine applies ({})",
+            name.trim(),
+            ULIMIT_NAMES.join(", ")
+        )
+    })?;
+    let (soft, hard) = vals.split_once(':').unwrap_or((vals, vals));
+    match (parse(soft.trim()), parse(hard.trim())) {
+        (Some(rc), Some(rm)) if rc <= rm => Ok((
+            res,
+            libc::rlimit {
                 rlim_cur: rc,
                 rlim_max: rm,
-            };
-            // SAFETY: `res` is a valid RLIMIT_* and `rl` is initialized.
-            unsafe { libc::setrlimit(res, &rl) };
+            },
+        )),
+        (Some(_), Some(_)) => Err(format!(
+            "--ulimit {spec}: the soft limit is above the hard one"
+        )),
+        _ => Err(format!(
+            "--ulimit {spec}: a limit is a number, `unlimited` or -1"
+        )),
+    }
+}
+
+/// Applies `--ulimit name=soft[:hard]` via `setrlimit` (before dropping caps, so it can
+/// raise hard limits with `CAP_SYS_RESOURCE`).
+///
+/// **Fail-closed, and it used to be the opposite.** Every path here was a
+/// `continue` or an ignored `setrlimit` return: an unknown name, a value that
+/// did not parse, and — the case that matters in rootless — a hard limit
+/// above what the invoking user may raise (a user namespace's
+/// `CAP_SYS_RESOURCE` does not reach past the host's own hard limit) all left
+/// the container running with the DEFAULT limit and nothing said. A
+/// `nofile` a database was configured for, silently not there. Same
+/// posture as `--tmpfs`/seccomp/`--device` next door: the user's process has
+/// not run yet, so aborting loses no work and starting would lose the limit.
+/// The error is printed by `setup_abort`.
+fn apply_ulimits(specs: &[String]) -> std::result::Result<(), String> {
+    for spec in specs {
+        let (res, rl) = parse_ulimit(spec)?;
+        // SAFETY: `res` is a valid RLIMIT_* and `rl` is initialized.
+        if unsafe { libc::setrlimit(res, &rl) } != 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(format!(
+                "--ulimit {spec}: {err} (a hard limit above the one this user holds cannot be \
+                 raised from a user namespace — lower it, or run as root)"
+            ));
         }
     }
+    Ok(())
+}
+
+/// The one place the container's init (and an `exec`'s child) reports a setup
+/// step it cannot complete, and the exit status that says so (126, «could not
+/// run», as the shells use). The user's process has not run yet, so aborting
+/// loses no work.
+fn setup_abort(msg: &str) -> isize {
+    eprintln!("delonix: {msg}; aborting");
+    126
 }
 
 /// Writes `/proc/self/oom_score_adj` for the init process — the CRI
@@ -3434,8 +3491,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         // see `write_secret_files`'s doc comment for why a secret must never
         // fall through to the container's persistent rootfs.
         if let Err(e) = write_secret_files(secret_files) {
-            eprintln!("delonix: failed to confine secret files to tmpfs: {e}");
-            return 126;
+            return setup_abort(&format!("failed to confine secret files to tmpfs: {e}"));
         }
     }
     // `--read-only`: remounts the rootfs (`/`) read-only. Volumes/dev/proc are
@@ -3449,7 +3505,10 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
             None::<&str>,
         );
     }
-    apply_ulimits(ulimits); // --ulimit (before dropping CAP_SYS_RESOURCE)
+    // --ulimit (before dropping CAP_SYS_RESOURCE). Fail-closed: see `apply_ulimits`.
+    if let Err(e) = apply_ulimits(ulimits) {
+        return setup_abort(&e);
+    }
     apply_oom_score_adj(oom_score_adj); // CRI oom_score_adj, same reason/timing as --ulimit
                                         // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
                                         // container's own) and before `drop_capabilities` (they are mounts, and need
@@ -7833,7 +7892,13 @@ pub fn exec_with(
             // The container's `--ulimit`s, for the same reason: they are
             // per-PROCESS (not per-cgroup), so a fresh process starts with the
             // caller's. Measured: init had `nofile 1234`, the exec `1048576`.
-            apply_ulimits(&container.ulimits);
+            // Fail-closed like the init: an exec running without a limit the
+            // container has is the same silent gap the init no longer allows.
+            if let Err(e) = apply_ulimits(&container.ulimits) {
+                let code = setup_abort(&e);
+                // SAFETY: `_exit` in the forked child, as the `setns` failure below.
+                unsafe { libc::_exit(code as i32) };
+            }
             for (ns, fd) in &fds {
                 // SAFETY: valid inherited fd; `OwnedFd` closes it after the `setns`.
                 let owned = unsafe { OwnedFd::from_raw_fd(*fd) };
@@ -12630,5 +12695,28 @@ mod late_mount_tests {
         let ours = record_exit(&mut c, 4242, Some(7), &Status::Failed(1), false);
         assert!(ours);
         assert!(!c.mount_pending);
+    }
+}
+
+#[cfg(test)]
+mod ulimit_tests {
+    use super::*;
+
+    /// Every refusal `apply_ulimits` now makes instead of `continue`.
+    #[test]
+    fn a_ulimit_the_engine_cannot_apply_is_an_error() {
+        let (res, rl) = parse_ulimit("nofile=1024:4096").unwrap();
+        assert_eq!(res, libc::RLIMIT_NOFILE);
+        assert_eq!((rl.rlim_cur, rl.rlim_max), (1024, 4096));
+        let (_, rl) = parse_ulimit("core=unlimited").unwrap();
+        assert_eq!(
+            (rl.rlim_cur, rl.rlim_max),
+            (libc::RLIM_INFINITY, libc::RLIM_INFINITY)
+        );
+        assert!(parse_ulimit("bogus=1").unwrap_err().contains("bogus"));
+        assert!(parse_ulimit("nofile").is_err());
+        assert!(parse_ulimit("nofile=lots").is_err());
+        assert!(parse_ulimit("nofile=9:5").unwrap_err().contains("above"));
+        assert!(ULIMIT_NAMES.iter().all(|n| ulimit_name_known(n)));
     }
 }

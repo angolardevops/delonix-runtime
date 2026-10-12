@@ -252,7 +252,17 @@ impl Change {
 /// - `Network`: `NetworkStore::add_overlay_peer`.
 fn hot_fields(kind: &str) -> &'static [&'static str] {
     match kind {
-        k::CONTAINER => &["ports", "volumes", "memory", "cpus", "netBps", "netBurst"],
+        // `credentials` is the declared login REFERENCE (ADR-0048 D4), bookkeeping
+        // on the record: changing it never touches the process.
+        k::CONTAINER => &[
+            "ports",
+            "volumes",
+            "memory",
+            "cpus",
+            "netBps",
+            "netBurst",
+            "credentials",
+        ],
         // `alertPct` joins `quota` as bookkeeping on the record. `parent` does
         // NOT: a share is a subdirectory of the volume it names, so repointing
         // it means a different directory and the bytes already written stay in
@@ -265,11 +275,12 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // `entrypoint`, `env` and `network` stay cold (ADR-0058, plan 63
         // slice 4). `rootfs` is grow-only, see `grow_only_fields`.
         k::SYSTEM_CONTAINER => &["memory", "swap", "cores"],
-        // The only thing about a VM that changes without recreating it: its
-        // labels are bookkeeping on the record. Every other compared field
+        // The only things about a VM that change without recreating it: its
+        // labels and its declared login reference, both bookkeeping on the
+        // record. Every other compared field
         // defines the machine, and stays a refused `Replace` — which discards
         // the disk.
-        k::VM => &["labels"],
+        k::VM => &["labels", "credentials"],
         k::NETWORK => &["peers", "labels"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
@@ -933,11 +944,12 @@ mod tests {
         assert_eq!(p[0].cold_fields, vec!["memory".to_string()]);
     }
 
-    /// `labels` is a VM's ONLY hot field: a label change is an update in place,
-    /// and everything else about a VM stays a refused `Replace`.
+    /// A VM's hot fields are bookkeeping on its record — `labels` and the
+    /// declared login reference (ADR-0048 D4) — and nothing that defines the
+    /// machine: everything else stays a refused `Replace`.
     #[test]
-    fn labels_are_the_only_thing_a_vm_changes_without_being_recreated() {
-        assert_eq!(hot_fields(k::VM), ["labels"]);
+    fn only_bookkeeping_changes_a_vm_without_recreating_it() {
+        assert_eq!(hot_fields(k::VM), ["labels", "credentials"]);
         assert!(hot_fields(k::NETWORK).contains(&"labels"));
         assert!(hot_fields(k::VOLUME).contains(&"labels"));
     }
