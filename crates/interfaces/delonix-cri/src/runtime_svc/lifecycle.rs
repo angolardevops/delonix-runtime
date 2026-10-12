@@ -1507,7 +1507,7 @@ pub fn create_container(
             crate::cap_ceiling::CEILING_ENV,
         )));
     }
-    // The node has no capability ceiling at all: nothing stands between this
+    // The operator lifted the ceiling (`all`): nothing stands between this
     // elevated request and the full capability set the engine would
     // otherwise grant. `policy::enforce` (the CLI's own admission point)
     // cannot reach this path — it lives in the `-bin` crate, which this
@@ -3245,7 +3245,13 @@ mod tests {
             resources: r,
             ..Default::default()
         };
-        let o = start_run_opts(&rec, None, crate::CapCeiling::default(), "abc", Vec::new());
+        let o = start_run_opts(
+            &rec,
+            None,
+            crate::CapCeiling::unlimited(),
+            "abc",
+            Vec::new(),
+        );
         assert_eq!(
             o.memory.as_deref(),
             Some("50331648"),
@@ -3575,7 +3581,7 @@ mod tests {
         let o = start_run_opts(
             &rec,
             Some(&sb),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "x",
             Vec::new(),
         );
@@ -3587,7 +3593,7 @@ mod tests {
         let bare = start_run_opts(
             &rec,
             Some(&SandboxRec::default()),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "x",
             Vec::new(),
         );
@@ -3690,7 +3696,7 @@ mod tests {
         let o = start_run_opts(
             &unprivileged,
             None,
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "a",
             Vec::new(),
         );
@@ -3712,7 +3718,7 @@ mod tests {
         let o = start_run_opts(
             &with_privilege,
             None,
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "a",
             Vec::new(),
         );
@@ -3893,7 +3899,7 @@ mod tests {
         let o = start_run_opts(
             &rec,
             Some(&sb),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "abc",
             Vec::new(),
         );
@@ -3926,7 +3932,7 @@ mod tests {
         let o = start_run_opts(
             &rec,
             Some(&sb),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "xyz",
             Vec::new(),
         );
@@ -3960,7 +3966,7 @@ mod tests {
         let o = start_run_opts(
             &rec,
             Some(&sb),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "c3",
             Vec::new(),
         );
@@ -4009,7 +4015,7 @@ mod tests {
         let o = start_run_opts(
             &rec,
             Some(&sb),
-            crate::CapCeiling::default(),
+            crate::CapCeiling::unlimited(),
             "c",
             Vec::new(),
         );
@@ -4053,7 +4059,7 @@ mod tests {
             env_file0: path.clone(),
             ..Default::default()
         };
-        let o = start_run_opts(&rec, None, crate::CapCeiling::default(), "abc", env);
+        let o = start_run_opts(&rec, None, crate::CapCeiling::unlimited(), "abc", env);
         assert!(o
             .env
             .iter()
@@ -4103,6 +4109,45 @@ mod tests {
         let clamp = crate::CapCeiling::parse("default", "clamp").unwrap();
         create_container(base, req_with_caps(&["SYS_ADMIN"], true), clamp)
             .expect("clamp corta, não recusa");
+    }
+
+    /// A node nobody configured (no `DELONIX_CRI_CAP_CEILING`) still bounds what a
+    /// pod may ask for: `capabilities.add: [SYS_ADMIN]` and `privileged: true` are
+    /// refused at create, an ordinary pod is admitted, and an explicit wider
+    /// ceiling lets the same request through. Red if an empty ceiling goes back to
+    /// meaning "none".
+    #[test]
+    fn create_container_with_no_configuration_refuses_elevated_requests() {
+        let base_dir = tmp_base();
+        let base = base_dir.path();
+        // Exactly what the server builds when the variable and the flag are absent.
+        let unset = crate::CapCeiling::parse("", "").unwrap();
+
+        let err = create_container(base, req_with_caps(&["SYS_ADMIN"], false), unset)
+            .expect_err("SYS_ADMIN is above the default ceiling");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+        assert!(err.message().contains("SYS_ADMIN"), "{}", err.message());
+
+        let err = create_container(base, req_with_caps(&[], true), unset)
+            .expect_err("privileged asks for everything");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+
+        // The default kept set, and nothing at all, are still admitted.
+        create_container(base, req_with_caps(&[], false), unset)
+            .expect("an ordinary pod is unaffected");
+        create_container(base, req_with_caps(&["NET_BIND_SERVICE"], false), unset)
+            .expect("a capability the default set holds is not an escalation");
+
+        // Widening is explicit.
+        let wider = crate::CapCeiling::parse("default,SYS_ADMIN", "").unwrap();
+        create_container(base, req_with_caps(&["SYS_ADMIN"], false), wider)
+            .expect("an explicit ceiling that names it allows it");
+        create_container(
+            base,
+            req_with_caps(&["SYS_ADMIN"], false),
+            crate::CapCeiling::parse("all", "").unwrap(),
+        )
+        .expect("an explicit `all` lifts the ceiling");
     }
 
     /// Counts of `delonix_security_runtime::event::unconstrained::NO_CAP_CEILING`

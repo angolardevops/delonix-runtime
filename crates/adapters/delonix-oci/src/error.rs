@@ -23,6 +23,11 @@ pub enum Error {
     #[error("{0}")]
     Layer(String),
 
+    /// A layer that expands beyond the unpack limits (bytes or entries): refused
+    /// while it is streamed, before it can fill the disk.
+    #[error("{0}")]
+    LayerLimit(String),
+
     /// An image with no layers to mount.
     #[error("image has no layers")]
     NoLayers,
@@ -120,6 +125,7 @@ impl Error {
             Error::SignatureUnknown(_) => 1415,
             Error::AlreadySigned(_) => 1416,
             Error::Signing(_) => 1417,
+            Error::LayerLimit(_) => 1418,
             Error::NoSuchImage(_) => 4401,
             Error::NotVisible(_) => 4402,
             Error::Registry(_) => 9401,
@@ -176,6 +182,7 @@ mod tests {
             Error::SignatureUnknown("could not determine".into()),
             Error::AlreadySigned("already signed".into()),
             Error::Signing("could not sign".into()),
+            Error::LayerLimit("failed to extract layer: layer has more than 4 entries".into()),
             Error::NoSuchImage("alpine:9".into()),
             Error::NotVisible("repository x — it does not exist".into()),
             Error::Registry("HTTP 500 at u".into()),

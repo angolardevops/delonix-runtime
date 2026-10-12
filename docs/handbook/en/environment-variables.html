@@ -252,7 +252,7 @@ script and in <a href="build-and-test.html">Clone, build and test</a>, not here.
 <tbody>
 <tr>
 <td>CRI socket, capability ceiling and mode</td>
-<td><code>--addr</code> / <code>--cap-ceiling</code> / <code>--cap-ceiling-mode</code> &gt; <code>DELONIX_CRI_ADDR</code> / <code>DELONIX_CRI_CAP_CEILING</code> / <code>DELONIX_CRI_CAP_CEILING_MODE</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-cri.<wbr>sock</code> / no ceiling / <code>reject</code></td>
+<td><code>--addr</code> / <code>--cap-ceiling</code> / <code>--cap-ceiling-mode</code> &gt; <code>DELONIX_CRI_ADDR</code> / <code>DELONIX_CRI_CAP_CEILING</code> / <code>DELONIX_CRI_CAP_CEILING_MODE</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-cri.<wbr>sock</code> / the engine's default capability set / <code>reject</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a></td>
 </tr>
 <tr>
@@ -426,7 +426,7 @@ and how to tear the isolated infra down, is in
 <td><code>DELONIX_CRI_CAP_CEILING</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a> (<code>cap_ceiling::<wbr>CEILING_ENV</code>, parsed by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>cap_ceiling.<wbr>rs:CapCeiling::<wbr>parse</code></a>); forwarded by <code>cmd/serve.rs:run</code></td>
 <td>Node-level upper bound on the capabilities of any container created through the CRI, <code>privileged: true</code> included.</td>
-<td>Empty/unset or <code>all</code> → no ceiling (unchanged behaviour). <code>none</code> → no capabilities. <code>default</code> → the engine's default set. <code>default,NET_ADMIN,…</code> → the default plus the named ones. A list of names (<code>CAP_</code> prefix optional, case-insensitive; separated by commas, spaces or <code>;</code>) → exactly those. <code>all</code> anywhere in the list wins. An unknown name, or a value made only of separators, <strong>refuses to start the server</strong>.</td>
+<td>Empty/unset → <code>default</code>: the engine's default capability set, so a pod asking for more (<code>privileged: true</code>, <code>capabilities.<wbr>add: [SYS_ADMIN]</code>) is refused. <code>all</code> → no ceiling, by explicit choice. <code>none</code> → no capabilities. <code>default</code> → the engine's default set. <code>default,NET_ADMIN,…</code> → the default plus the named ones. A list of names (<code>CAP_</code> prefix optional, case-insensitive; separated by commas, spaces or <code>;</code>) → exactly those. <code>all</code> anywhere in the list wins. An unknown name, or a value made only of separators, <strong>refuses to start the server</strong>.</td>
 <td><code>--cap-ceiling</code> wins. Bounds capabilities only: a privileged pod still gets unconfined seccomp and a writable <code>/sys</code>. The ceiling in force is visible in <code>crictl info</code> (<code>capabilityCeiling</code>).</td>
 </tr>
 <tr>
@@ -669,6 +669,20 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <td>Registries that are contacted over plain HTTP instead of HTTPS.</td>
 <td>Comma-separated <code>host</code> or <code>host:port</code> entries (case-insensitive). Unset → HTTPS everywhere except loopback registries, which already use HTTP.</td>
 <td><strong>Traffic and credentials for those hosts travel without TLS.</strong> An explicit opt-in per host, never a range. When an HTTPS connection to a registry fails, the error suggests this variable with the host filled in.</td>
+</tr>
+<tr>
+<td><code>DELONIX_LAYER_MAX_BYTES</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/owners.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>owners.<wbr>rs:LayerLimits::<wbr>from_env</code></a> (<code>BYTES_ENV</code>)</td>
+<td>Ceiling on the uncompressed bytes of ONE image layer, enforced while it streams out of the decompressor (a small blob can expand to terabytes).</td>
+<td>A positive size: plain bytes or with a binary suffix <code>k</code>/<code>m</code>/<code>g</code>/<code>t</code> (<code>512m</code>, <code>100g</code>). Unset → 64 GiB.</td>
+<td>A layer past it is refused with <code>DX-1418</code> before the disk fills. A zero, blank or unparsable value is ignored with a warning and the default stays: it never means "no limit". Lower it on a node with a small disk; raise it only for a trusted image that really is larger.</td>
+</tr>
+<tr>
+<td><code>DELONIX_LAYER_MAX_ENTRIES</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/owners.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>owners.<wbr>rs:LayerLimits::<wbr>from_env</code></a> (<code>ENTRIES_ENV</code>)</td>
+<td>Ceiling on the number of entries in ONE image layer (the many-empty-files variant exhausts inodes, not bytes).</td>
+<td>A positive integer, with the same suffixes. Unset → 4,000,000.</td>
+<td>Same refusal (<code>DX-1418</code>) and the same rule for a bad value.</td>
 </tr>
 <tr>
 <td><code>DELONIX_SCAN_ON_PULL</code></td>

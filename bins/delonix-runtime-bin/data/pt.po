@@ -3955,8 +3955,8 @@ msgstr "`convert` é só para imagens VM — usa `delonix image --vm convert`"
 
 # tecto de capabilities do CRI (`serve cri --cap-ceiling`)
 
-msgid "Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), or `all` (no bound, the default), `none`, `default` (the engine's default set), or `default,<extra>...`. Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp."
-msgstr "TECTO, ao nível do nó, das capabilities de um container, seja o que for que o kubelet pedir: uma lista de nomes separada por vírgulas (`NET_ADMIN`, `CAP_CHOWN`), ou `all` (sem tecto, a omissão), `none`, `default` (o conjunto por omissão do motor), ou `default,<extra>...`. Prevalece sobre `$DELONIX_CRI_CAP_CEILING`. Limita SÓ capabilities — um pod privilegiado continua a ficar com seccomp unconfined."
+msgid "Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), `none`, `default` (the engine's default set, and what an unset value means), `default,<extra>...`, or `all` (no bound, only when asked for). Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp."
+msgstr "TECTO, ao nível do nó, das capabilities de um container, seja o que for que o kubelet pedir: uma lista de nomes separada por vírgulas (`NET_ADMIN`, `CAP_CHOWN`), `none`, `default` (o conjunto por omissão do motor, e o que um valor ausente significa), `default,<extra>...`, ou `all` (sem tecto, só quando pedido). Prevalece sobre `$DELONIX_CRI_CAP_CEILING`. Limita SÓ capabilities — um pod privilegiado continua a ficar com seccomp unconfined."
 
 msgid "What to do with a pod that asks for more than `--cap-ceiling`: `reject` (default, fails CreateContainer so the kubelet reports it) or `clamp` (reduce to the ceiling and log a warning). Overrides `$DELONIX_CRI_CAP_CEILING_MODE`."
 msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (omissão, faz o CreateContainer falhar para o kubelet o reportar) ou `clamp` (corta ao tecto e regista um aviso). Prevalece sobre `$DELONIX_CRI_CAP_CEILING_MODE`."
@@ -11880,6 +11880,15 @@ msgstr "A produção ou o envio da assinatura falhou."
 
 msgid "Read the error in the message and check the registry login (`delonix image login`)."
 msgstr "Lê o erro na mensagem e verifica o login no registo (`delonix image login`)."
+
+msgid "layer expands beyond the unpack limit"
+msgstr "uma layer expande para além do limite de extracção"
+
+msgid "A layer holds more uncompressed bytes or more entries than the unpack limits allow, so it was refused while being streamed, before it could fill the disk. A small blob can expand to terabytes; the limits are what stops that."
+msgstr "Uma layer tem mais bytes descomprimidos ou mais entradas do que os limites de extracção permitem, por isso foi recusada enquanto era lida, antes de poder encher o disco. Um blob pequeno pode expandir para terabytes; são os limites que o impedem."
+
+msgid "Use a smaller image. If the image is trusted and really that large, raise DELONIX_LAYER_MAX_BYTES or DELONIX_LAYER_MAX_ENTRIES."
+msgstr "Usa uma imagem mais pequena. Se a imagem é de confiança e é mesmo tão grande, aumenta DELONIX_LAYER_MAX_BYTES ou DELONIX_LAYER_MAX_ENTRIES."
 
 msgid "no such image"
 msgstr "essa imagem não existe"

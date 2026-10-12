@@ -82,8 +82,8 @@ pub enum Outcome {
     /// the absence of any rule that could have fired at all.
     ///
     /// ADR-0026 calls the gap this closes "deliberate for the engine's
-    /// documented single-tenant use": a node with no `RuntimePolicy` and no
-    /// `DELONIX_CRI_CAP_CEILING` refuses nothing by design, and until this
+    /// documented single-tenant use": a node with no `RuntimePolicy` and the CRI
+    /// ceiling lifted (`DELONIX_CRI_CAP_CEILING=all`) refuses nothing by design, and until this
     /// variant existed it also *recorded* nothing — a caller admitting many
     /// resources through one node had no structural way to see that posture
     /// without reading `policy.json` by hand. [`Outcome::Warned`] still means
@@ -121,8 +121,8 @@ pub mod unconstrained {
     /// log carries too.
     pub const WORKLOAD_POLICY_SILENT: &str = "ADM-WORKLOAD-POLICY-SILENT";
     /// The CRI admitted a `privileged: true` or explicit `capabilities.add`
-    /// request with no node capability ceiling configured
-    /// (`DELONIX_CRI_CAP_CEILING`) — the half of this gap a `RuntimePolicy`
+    /// request on a node whose capability ceiling was lifted
+    /// (`DELONIX_CRI_CAP_CEILING=all`) — the half of this gap a `RuntimePolicy`
     /// file cannot reach, because `policy::enforce` has no caller on the CRI
     /// path (see `delonix-cri::cap_ceiling`).
     pub const NO_CAP_CEILING: &str = "ADM-NO-CAP-CEILING";
