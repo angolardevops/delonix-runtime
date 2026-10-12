@@ -83,6 +83,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::NETWORK => cmd::network::spec_with_defaults(doc),
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
         k::SERVICE => cmd::service::spec_with_defaults(doc),
+        k::GITOPS_SOURCE => cmd::gitops::spec_with_defaults(doc),
         k::IPPOOL => cmd::ippool::spec_with_defaults(doc),
         k::STORAGE_POOL => cmd::storage_pool::spec_with_defaults(doc),
         k::VOLUME => cmd::volume::spec_with_defaults(doc),
@@ -409,6 +410,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
         k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
+        k::GITOPS_SOURCE => Some(crate::cmd::gitops::GITOPS_SOURCE_SPEC_FIELDS),
         k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
         k::STORAGE_POOL => Some(crate::cmd::storage_pool::STORAGE_POOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
@@ -511,7 +513,7 @@ fn check_unknown_fields(doc: &ManifestDoc) {
 /// cannot disagree.
 pub fn plan_name(doc: &ManifestDoc) -> String {
     match doc.kind.as_str() {
-        k::CONTAINER | k::SERVICE => scoped_plan_name(
+        k::CONTAINER | k::SERVICE | k::GITOPS_SOURCE => scoped_plan_name(
             doc.metadata.namespace.as_deref().unwrap_or_default(),
             &doc.metadata.name,
         ),
@@ -1716,6 +1718,10 @@ spec: { image: nginx }
             "networkGateways" => ("{ provider: opnsense }", "NetworkGateway"),
             "httpRoutes" => ("{ rules: [] }", "HTTPRoute"),
             "gateways" => ("{ provider: pinggy, localPort: 80 }", "Gateway"),
+            "gitopsSources" => (
+                "{ source: { url: 'file:///srv/infra.git' } }",
+                "GitOpsSource",
+            ),
             // Lowered on the way out: a Workload into the Kind its `type` names,
             // a Dependency into the NetworkPolicy that carries its allow.
             "workloads" => (

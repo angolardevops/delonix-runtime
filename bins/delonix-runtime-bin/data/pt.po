@@ -16238,3 +16238,412 @@ msgstr "repositório git criado em `main` e tudo preparado, mas o commit precisa
 
 msgid "git repository created on `main` and everything staged, but the commit failed: {why}"
 msgstr "repositório git criado em `main` e tudo preparado, mas o commit falhou: {why}"
+
+# ---- Sprint 24 GitOps ----
+msgid "Pull sources: one reconcile pass, status, suspend and resume (ADR-0021)"
+msgstr "Fontes pull: uma passagem de reconciliação, estado, suspender e retomar (ADR-0021)"
+
+msgid "Pull sources: one reconcile pass, status, suspend and resume (ADR-0021).\n\nA source is declared with `kind: GitOpsSource` and `stack apply`; this group acts on one that already exists. Nothing here runs in the background: a pass fetches, verifies, plans and applies, and exits."
+msgstr "Fontes pull: uma passagem de reconciliação, estado, suspender e retomar (ADR-0021).\n\nUma fonte declara-se com `kind: GitOpsSource` e `stack apply`; este grupo age sobre uma que já existe. Nada aqui corre em segundo plano: uma passagem obtém, verifica, planeia e aplica, e sai."
+
+msgid "Run one pass of a source now: fetch, verify, plan, apply, then exit"
+msgstr "Corre já uma passagem de uma fonte: obtém, verifica, planeia, aplica e sai"
+
+msgid "Run one pass of a source now: fetch, verify, plan, apply, then exit.\n\nA commit that does not load, fails the guard or the graph, or plans an action the safety policy blocks leaves the running stack untouched and is recorded with the commit it names (`gitops status`)."
+msgstr "Corre já uma passagem de uma fonte: obtém, verifica, planeia, aplica e sai.\n\nUm commit que não carrega, que falha a guarda ou o grafo, ou que planeia uma acção que a política de segurança bloqueia deixa a stack em execução intacta e fica registado com o commit que nomeia (`gitops status`)."
+
+msgid "Show each source's last pass: the commit it looked at, the commit applied, and why"
+msgstr "Mostra a última passagem de cada fonte: o commit que viu, o commit aplicado, e porquê"
+
+msgid "Stop a source's passes without a commit (a local marker outside the spec)"
+msgstr "Pára as passagens de uma fonte sem um commit (uma marca local fora do spec)"
+
+msgid "Lift a suspend: the next fire fetches again"
+msgstr "Levanta uma suspensão: o próximo disparo volta a obter"
+
+msgid "The source's name"
+msgstr "O nome da fonte"
+
+msgid "The source's namespace"
+msgstr "O namespace da fonte"
+
+msgid "One source; omitted, every source"
+msgstr "Uma fonte; omitida, todas as fontes"
+
+msgid "Only this namespace"
+msgstr "Só este namespace"
+
+msgid "stop the passes of a source while you act by hand"
+msgstr "pára as passagens de uma fonte enquanto ages à mão"
+
+msgid "run one pass now, without waiting for the timer"
+msgstr "corre já uma passagem, sem esperar pelo temporizador"
+
+msgid "what each source last saw, and what is running"
+msgstr "o que cada fonte viu por último, e o que está a correr"
+
+msgid "fetch, verify, plan and apply the source's ref once, then exit"
+msgstr "obtém, verifica, planeia e aplica uma vez a ref da fonte, e sai"
+
+msgid "a source in the default namespace"
+msgstr "uma fonte no namespace default"
+
+msgid "every source: the commit it looked at, the commit applied, and why"
+msgstr "todas as fontes: o commit que viu, o commit aplicado, e porquê"
+
+msgid "one source, for a script"
+msgstr "uma fonte, para um script"
+
+msgid "stop the passes during an incident, without a commit"
+msgstr "pára as passagens durante um incidente, sem um commit"
+
+msgid "let the next fire fetch again"
+msgstr "deixa o próximo disparo voltar a obter"
+
+msgid "invalid GitOps source"
+msgstr "fonte GitOps inválida"
+
+msgid "A `kind: GitOpsSource` was refused before anything was fetched (ADR-0021): a URL that is not file:///, https:// or ssh:// (or carries credentials, or reads as an option), a ref that is not refs/heads/<n> or refs/tags/<n>, a path that leaves the repository, an interval outside 15s–24h, an ssh:// source without a key and pinned host keys, signed commits without trusted keys, a safety policy naming an action or Kind it cannot, or a referenced secret that does not exist on the node."
+msgstr "Uma `kind: GitOpsSource` foi recusada antes de se obter seja o que for (ADR-0021): um URL que não é file:///, https:// nem ssh:// (ou que leva credenciais, ou que se lê como opção), uma ref que não é refs/heads/<n> nem refs/tags/<n>, um caminho que sai do repositório, um intervalo fora de 15s–24h, uma fonte ssh:// sem chave e sem chaves de host fixadas, commits assinados sem chaves de confiança, uma política de segurança que nomeia uma acção ou um Kind que não pode, ou um segredo referido que não existe no nó."
+
+msgid "Fix the field the message names. Credentials are named (`secretRef`, `knownHostsRef`, `trustedKeysRef`) and created on the node first, never carried in the URL or the repository."
+msgstr "Corrige o campo que a mensagem nomeia. As credenciais nomeiam-se (`secretRef`, `knownHostsRef`, `trustedKeysRef`) e criam-se primeiro no nó, nunca vêm no URL nem no repositório."
+
+msgid "the commit was refused — nothing was applied"
+msgstr "o commit foi recusado — nada foi aplicado"
+
+msgid "A pass of a GitOps source read the commit and refused it before applying anything: the path is empty or missing, a symlink, a submodule, an LFS pointer or private key material is under it, the YAML does not load, a document is refused by the pull-source guard (a Kind a source never applies, host access, the source's own credential, another source, a namespace other than the source's), or the graph or the plan fails. The running stack is untouched."
+msgstr "Uma passagem de uma fonte GitOps leu o commit e recusou-o antes de aplicar seja o que for: o caminho está vazio ou não existe, há debaixo dele um symlink, um submódulo, um ponteiro LFS ou material de chave privada, o YAML não carrega, um documento é recusado pela guarda das fontes pull (um Kind que uma fonte nunca aplica, acesso ao host, a credencial da própria fonte, outra fonte, um namespace que não é o da fonte), ou o grafo ou o plano falham. A stack em execução fica intacta."
+
+msgid "Read the lines the pass printed above the error, or `delonix gitops status`, fix the repository and push a new commit — the next pass picks it up."
+msgstr "Lê as linhas que a passagem imprimiu acima do erro, ou `delonix gitops status`, corrige o repositório e empurra um commit novo — a próxima passagem apanha-o."
+
+msgid "the source exceeds a bound a pass reads"
+msgstr "a fonte passa um limite do que uma passagem lê"
+
+msgid "A pass refuses what it would not bound: more than 4096 entries under the path, more than 256 manifest files, a manifest file over 1 MiB or 8 MiB in all, a git answer larger than its cap, or a fetched repository over 256 MiB (the mirror is then removed)."
+msgstr "Uma passagem recusa o que não limitaria: mais de 4096 entradas debaixo do caminho, mais de 256 ficheiros de manifesto, um ficheiro de manifesto acima de 1 MiB ou 8 MiB ao todo, uma resposta do git maior que o seu tecto, ou um repositório obtido acima de 256 MiB (o espelho é então removido)."
+
+msgid "Point `spec.source.path` at the directory that holds the manifests, and keep large files out of it."
+msgstr "Aponta `spec.source.path` para o directório que tem os manifestos, e mantém os ficheiros grandes fora dele."
+
+msgid "the plan carries an action the safety policy blocks — nothing was applied"
+msgstr "o plano traz uma acção que a política de segurança bloqueia — nada foi aplicado"
+
+msgid "The commit planned an action the source's `spec.safety` does not allow: `Adopt`, `Replace` or `Reboot` not in `allow`, a `Conflict` with another stack, or more prunes than `maximumDeletes`. A pass applies the whole plan or none of it."
+msgstr "O commit planeou uma acção que o `spec.safety` da fonte não permite: `Adopt`, `Replace` ou `Reboot` fora de `allow`, um `Conflict` com outra stack, ou mais remoções do que `maximumDeletes`. Uma passagem aplica o plano inteiro ou nada dele."
+
+msgid "If the action is wanted, allow it on the node (`spec.safety.allow`, `prune`, `maximumDeletes`) and apply the source; otherwise revert the commit."
+msgstr "Se a acção é desejada, permite-a no nó (`spec.safety.allow`, `prune`, `maximumDeletes`) e aplica a fonte; senão, reverte o commit."
+
+msgid "no such GitOps source"
+msgstr "fonte GitOps inexistente"
+
+msgid "There is no `kind: GitOpsSource` with that name in that namespace on this node."
+msgstr "Não há nenhuma `kind: GitOpsSource` com esse nome nesse namespace neste nó."
+
+msgid "List them with `delonix get gitopssources`; a source is registered with `delonix stack apply`."
+msgstr "Lista-as com `delonix get gitopssources`; uma fonte regista-se com `delonix stack apply`."
+
+msgid "git is not installed"
+msgstr "o git não está instalado"
+
+msgid "A GitOps pass fetches with the system's `git(1)` (ADR-0021 decision 2: a subprocess, not a library), and this node has none on `PATH`."
+msgstr "Uma passagem GitOps obtém com o `git(1)` do sistema (ADR-0021 decisão 2: um subprocesso, não uma biblioteca), e este nó não tem nenhum no `PATH`."
+
+msgid "Install the `git` package (`apt install git`, `dnf install git`)."
+msgstr "Instala o pacote `git` (`apt install git`, `dnf install git`)."
+
+msgid "the source could not be fetched"
+msgstr "não foi possível obter a fonte"
+
+msgid "`git fetch` of the source's ref failed: the remote is unreachable, the ref does not exist, the key or the pinned host key was refused, or git refused the objects (`fsckObjects`). Nothing was read and the running stack is untouched."
+msgstr "O `git fetch` da ref da fonte falhou: o remoto está inalcançável, a ref não existe, a chave ou a chave de host fixada foi recusada, ou o git recusou os objectos (`fsckObjects`). Nada foi lido e a stack em execução fica intacta."
+
+msgid "Check the URL and the ref, that the node reaches the remote, and that the deploy key and the pinned host keys in the named secrets are the right ones."
+msgstr "Verifica o URL e a ref, que o nó alcança o remoto, e que a chave de deploy e as chaves de host fixadas nos segredos nomeados são as certas."
+
+msgid "the GitOps timer could not be installed"
+msgstr "não foi possível instalar o temporizador GitOps"
+
+msgid "A source with `sync.automated: true` installs a systemd timer, and `systemctl` is missing or refused (no user manager in this session, for a rootless node)."
+msgstr "Uma fonte com `sync.automated: true` instala um temporizador systemd, e o `systemctl` falta ou recusou (sem gestor de utilizador nesta sessão, num nó rootless)."
+
+msgid "Run it where systemd manages the user (`loginctl enable-linger`), or set `sync.automated: false` and run `delonix gitops reconcile` from your own scheduler."
+msgstr "Corre-o onde o systemd gere o utilizador (`loginctl enable-linger`), ou põe `sync.automated: false` e corre `delonix gitops reconcile` a partir do teu próprio agendador."
+
+msgid "the commit is not signed by a trusted key"
+msgstr "o commit não está assinado por uma chave de confiança"
+
+msgid "The source asks for signed commits and `git verify-commit` did not accept the commit against the SSH `allowed_signers` in `trustedKeysRef`: unsigned, signed by another key, or signed with GPG (only SSH signatures are verified). Nothing was read from it."
+msgstr "A fonte pede commits assinados e o `git verify-commit` não aceitou o commit contra o `allowed_signers` SSH em `trustedKeysRef`: sem assinatura, assinado por outra chave, ou assinado com GPG (só se verificam assinaturas SSH). Nada foi lido dele."
+
+msgid "Sign the commit with a key listed in the trusted keys secret, or add the signer's key to it on the node."
+msgstr "Assina o commit com uma chave listada no segredo das chaves de confiança, ou acrescenta-lhe no nó a chave de quem assina."
+
+msgid "git did not finish in time"
+msgstr "o git não terminou a tempo"
+
+msgid "A git invocation of a GitOps pass ran past its ceiling (120 s) and was stopped, so a hung remote does not hold the source's lock until the next fire."
+msgstr "Uma invocação do git numa passagem GitOps passou o seu tecto (120 s) e foi parada, para que um remoto pendurado não segure o lock da fonte até ao próximo disparo."
+
+msgid "Check that the remote answers; the next fire tries again."
+msgstr "Verifica que o remoto responde; o próximo disparo tenta outra vez."
+
+msgid "spec.source.url '{url}': {why}"
+msgstr "spec.source.url '{url}': {why}"
+
+msgid "spec.source.ref '{ref}': expected refs/heads/<branch> or refs/tags/<tag> (letters, digits, '.', '_', '-', '/')"
+msgstr "spec.source.ref '{ref}': esperava-se refs/heads/<ramo> ou refs/tags/<tag> (letras, dígitos, '.', '_', '-', '/')"
+
+msgid "spec.source.path '{path}': a relative directory of plain components (no '..', no leading '/' or '-')"
+msgstr "spec.source.path '{path}': um directório relativo de componentes simples (sem '..', sem '/' ou '-' no início)"
+
+msgid "spec.source.interval '{value}': a number of seconds, minutes or hours (30s, 5m, 1h), from 15s to 24h"
+msgstr "spec.source.interval '{value}': um número de segundos, minutos ou horas (30s, 5m, 1h), de 15s a 24h"
+
+msgid "GitOpsSource '{ns}/{name}': the name and namespace are lowercase letters, digits and '-' (at most 63)"
+msgstr "GitOpsSource '{ns}/{name}': o nome e o namespace são letras minúsculas, dígitos e '-' (no máximo 63)"
+
+msgid "spec.source.{field} '{value}': not a secret name"
+msgstr "spec.source.{field} '{value}': não é um nome de segredo"
+
+msgid "an ssh:// source needs secretRef (the key) and knownHostsRef (the pinned host keys) — a host key is never accepted on first sight"
+msgstr "uma fonte ssh:// precisa de secretRef (a chave) e de knownHostsRef (as chaves de host fixadas) — uma chave de host nunca se aceita à primeira vista"
+
+msgid "secretRef/knownHostsRef are read only for an ssh:// source (an https:// credential is not implemented) — remove them, or use ssh://"
+msgstr "secretRef/knownHostsRef só se lêem numa fonte ssh:// (uma credencial https:// não está implementada) — tira-os, ou usa ssh://"
+
+msgid "signedCommitsRequired and trustedKeysRef go together: one without the other would read as a protection that is not there"
+msgstr "signedCommitsRequired e trustedKeysRef vão juntos: um sem o outro leria-se como uma protecção que não existe"
+
+msgid "spec.safety.allow '{value}': the actions a pass may take are Create, Update, Adopt, Replace and Reboot (NoOp always; Delete is spec.safety.prune; Conflict never)"
+msgstr "spec.safety.allow '{value}': as acções que uma passagem pode tomar são Create, Update, Adopt, Replace e Reboot (NoOp sempre; Delete é o spec.safety.prune; Conflict nunca)"
+
+msgid "spec.safety.kinds '{kind}': a pull source never applies RuntimePolicy, Secret or App"
+msgstr "spec.safety.kinds '{kind}': uma fonte pull nunca aplica RuntimePolicy, Secret nem App"
+
+msgid "spec.safety.kinds '{kind}': not a Kind a pass applies (a source declares itself without being listed, and never another source)"
+msgstr "spec.safety.kinds '{kind}': não é um Kind que uma passagem aplique (uma fonte declara-se a si própria sem estar na lista, e nunca outra fonte)"
+
+msgid "spec.safety.protectedResources '{value}': expected <Kind>/<name> or <Kind>/*"
+msgstr "spec.safety.protectedResources '{value}': esperava-se <Kind>/<nome> ou <Kind>/*"
+
+msgid "spec.stack '{value}': lowercase letters, digits and '-' (at most 63)"
+msgstr "spec.stack '{value}': letras minúsculas, dígitos e '-' (no máximo 63)"
+
+msgid "suspended"
+msgstr "suspensa"
+
+msgid "never reconciled"
+msgstr "nunca reconciliada"
+
+msgid "spec.source.{field}: secret '{value}' does not exist on this node — create it first (a credential never comes from the repository it unlocks)"
+msgstr "spec.source.{field}: o segredo '{value}' não existe neste nó — cria-o primeiro (uma credencial nunca vem do repositório que desbloqueia)"
+
+msgid "timer every {interval}"
+msgstr "temporizador a cada {interval}"
+
+msgid "no timer (sync.automated is false)"
+msgstr "sem temporizador (sync.automated é false)"
+
+msgid "gitopssource/{ns}/{name}: registered — {url} {ref}, {timer}"
+msgstr "gitopssource/{ns}/{name}: registada — {url} {ref}, {timer}"
+
+msgid "gitopssource '{name}' exists in several namespaces — name it as <namespace>/{name}"
+msgstr "a gitopssource '{name}' existe em vários namespaces — nomeia-a como <namespace>/{name}"
+
+msgid "gitops: '{value}' cannot be written into a systemd unit (quote, backslash or newline)"
+msgstr "gitops: '{value}' não se pode escrever num unit systemd (aspas, barra invertida ou mudança de linha)"
+
+msgid "gitops: refusing to write a timer with a relative path — a timer does not run from your current directory"
+msgstr "gitops: recuso escrever um temporizador com um caminho relativo — um temporizador não corre a partir do teu directório actual"
+
+msgid "gitops: systemctl is not available ({err}) — a source with sync.automated needs systemd; set it to false and run `delonix gitops reconcile` from your own scheduler"
+msgstr "gitops: o systemctl não está disponível ({err}) — uma fonte com sync.automated precisa do systemd; põe-no a false e corre `delonix gitops reconcile` a partir do teu próprio agendador"
+
+msgid "gitops: `systemctl {args}` failed (see its output above)"
+msgstr "gitops: `systemctl {args}` falhou (vê a saída dele acima)"
+
+msgid "gitops: a path in the commit is not UTF-8"
+msgstr "gitops: um caminho no commit não é UTF-8"
+
+msgid "gitops: unreadable tree listing"
+msgstr "gitops: listagem da árvore ilegível"
+
+msgid "gitops: the path holds {n} entries — at most {max} are read"
+msgstr "gitops: o caminho tem {n} entradas — lêem-se no máximo {max}"
+
+msgid "gitops: '{path}' is not a plain path"
+msgstr "gitops: '{path}' não é um caminho simples"
+
+msgid "gitops: '{path}' is a symlink — a source never follows one (it could point outside the tree)"
+msgstr "gitops: '{path}' é um symlink — uma fonte nunca segue um (podia apontar para fora da árvore)"
+
+msgid "gitops: '{path}' is a submodule — a source reads one repository, never the ones it points at"
+msgstr "gitops: '{path}' é um submódulo — uma fonte lê um repositório, nunca aqueles para que ele aponta"
+
+msgid "gitops: '{path}' is not a regular file (mode {mode})"
+msgstr "gitops: '{path}' não é um ficheiro normal (modo {mode})"
+
+msgid "gitops: '{path}' is larger than {max} bytes"
+msgstr "gitops: '{path}' tem mais de {max} bytes"
+
+msgid "gitops: {n} manifest files and {bytes} bytes — at most {files} files and {max} bytes are read"
+msgstr "gitops: {n} ficheiros de manifesto e {bytes} bytes — lêem-se no máximo {files} ficheiros e {max} bytes"
+
+msgid "gitops: '{path}' is a Git LFS pointer — a source reads the manifest from the commit itself"
+msgstr "gitops: '{path}' é um ponteiro Git LFS — uma fonte lê o manifesto do próprio commit"
+
+msgid "gitops: '{path}' carries private key material — a secret never comes from the repository; create it on the node and reference it by name"
+msgstr "gitops: '{path}' traz material de chave privada — um segredo nunca vem do repositório; cria-o no nó e refere-o pelo nome"
+
+msgid "{kind} is never applied from a pull source"
+msgstr "{kind} nunca se aplica a partir de uma fonte pull"
+
+msgid "{kind} is applied from a pull source only when spec.safety.kinds names it"
+msgstr "{kind} só se aplica a partir de uma fonte pull quando o spec.safety.kinds o nomeia"
+
+msgid "{kind} is not in spec.safety.kinds"
+msgstr "{kind} não está no spec.safety.kinds"
+
+msgid "{kind}/{name}: namespace '{have}' — this source applies only into '{ns}'"
+msgstr "{kind}/{name}: namespace '{have}' — esta fonte só aplica para dentro de '{ns}'"
+
+msgid "{n} documents — at most {max} are applied from one commit"
+msgstr "{n} documentos — aplicam-se no máximo {max} de um commit"
+
+msgid "{id}: names the source's own credential — a workload never consumes the key that fetches its manifest"
+msgstr "{id}: nomeia a credencial da própria fonte — uma carga nunca consome a chave que obtém o seu manifesto"
+
+msgid "{id}: an Image with build: runs the repository's code on the node — pull a built image instead"
+msgstr "{id}: uma Image com build: corre o código do repositório no nó — puxa antes uma imagem já construída"
+
+msgid "{id}: spec.{key} reaches beyond a plain local volume"
+msgstr "{id}: spec.{key} vai além de um volume local simples"
+
+msgid "{id}: only a bridge network on this node is applied from a pull source"
+msgstr "{id}: de uma fonte pull só se aplica uma rede bridge neste nó"
+
+msgid "{id}: asks for host access ({what}) — refused from a pull source"
+msgstr "{id}: pede acesso ao host ({what}) — recusado a partir de uma fonte pull"
+
+msgid "{id}: a source declares only itself — another source in its tree is how one repository would acquire the node's others"
+msgstr "{id}: uma fonte declara-se só a si própria — outra fonte na sua árvore é como um repositório tomaria os outros do nó"
+
+msgid "{id}: the repository may change only ref, path and interval of its own source — {fields} differ from the local registration (change them on the node)"
+msgstr "{id}: o repositório só pode mudar ref, path e interval da sua própria fonte — {fields} diferem do registo local (muda-os no nó)"
+
+msgid "{id}: {action} is not in spec.safety.allow"
+msgstr "{id}: {action} não está no spec.safety.allow"
+
+msgid "{id}: owned by another stack — a pass never takes it"
+msgstr "{id}: pertence a outra stack — uma passagem nunca o toma"
+
+msgid "{id}: a pass never prunes a GitOpsSource (remove one on the node)"
+msgstr "{id}: uma passagem nunca remove uma GitOpsSource (remove-a no nó)"
+
+msgid "{id}: no longer declared — kept (spec.safety.prune is false)"
+msgstr "{id}: já não está declarado — mantido (spec.safety.prune é false)"
+
+msgid "{id}: no longer declared — kept (spec.safety.protectedResources)"
+msgstr "{id}: já não está declarado — mantido (spec.safety.protectedResources)"
+
+msgid "the commit would prune {n} resource(s) — spec.safety.maximumDeletes is {max}"
+msgstr "o commit removeria {n} recurso(s) — o spec.safety.maximumDeletes é {max}"
+
+msgid "secret '{secret}' has no key '{key}'"
+msgstr "o segredo '{secret}' não tem a chave '{key}'"
+
+msgid "gitops/{who}: suspended — nothing fetched (`delonix gitops resume {name}` lifts it)"
+msgstr "gitops/{who}: suspensa — nada obtido (`delonix gitops resume {name}` levanta-o)"
+
+msgid "gitops/{who}: another pass is running — this one skipped"
+msgstr "gitops/{who}: outra passagem está a correr — esta foi saltada"
+
+msgid "applied"
+msgstr "aplicado"
+
+msgid "in sync"
+msgstr "em sincronia"
+
+msgid "gitops/{who}: synced {commit} ({msg})"
+msgstr "gitops/{who}: sincronizada {commit} ({msg})"
+
+msgid "gitops: commit {commit} does not load: {err}"
+msgstr "gitops: o commit {commit} não carrega: {err}"
+
+msgid "gitops: commit {commit} refused — {n} problem(s), nothing was applied"
+msgstr "gitops: commit {commit} recusado — {n} problema(s), nada foi aplicado"
+
+msgid "gitops: commit {commit} does not plan: {err}"
+msgstr "gitops: o commit {commit} não planeia: {err}"
+
+msgid "gitops: commit {commit} plans {n} action(s) the safety policy blocks — nothing was applied"
+msgstr "gitops: o commit {commit} planeia {n} acção(ões) que a política de segurança bloqueia — nada foi aplicado"
+
+msgid "gitops: could not fetch {ref} from {url}: {err}"
+msgstr "gitops: não foi possível obter {ref} de {url}: {err}"
+
+msgid "gitops: the fetched repository is {bytes} bytes — at most {max} are kept (the mirror was removed)"
+msgstr "gitops: o repositório obtido tem {bytes} bytes — guardam-se no máximo {max} (o espelho foi removido)"
+
+msgid "gitops: the ref did not resolve to a commit"
+msgstr "gitops: a ref não resolveu para um commit"
+
+msgid "gitops: commit {commit} is not signed by a key in '{secret}' — nothing was read from it ({err})"
+msgstr "gitops: o commit {commit} não está assinado por uma chave de '{secret}' — nada foi lido dele ({err})"
+
+msgid "gitops: commit {commit} has no directory '{path}': {err}"
+msgstr "gitops: o commit {commit} não tem o directório '{path}': {err}"
+
+msgid "gitops: commit {commit} holds no manifest under '{path}' — an empty commit is never applied (it would read as «remove everything»)"
+msgstr "gitops: o commit {commit} não tem manifesto debaixo de '{path}' — um commit vazio nunca se aplica (leria-se como «remove tudo»)"
+
+msgid "gitops: '{path}' is not UTF-8"
+msgstr "gitops: '{path}' não é UTF-8"
+
+msgid "gitops/{ns}/{name}: suspended — passes fetch nothing until `delonix gitops resume {name}`"
+msgstr "gitops/{ns}/{name}: suspensa — as passagens não obtêm nada até `delonix gitops resume {name}`"
+
+msgid "gitops/{ns}/{name}: resumed"
+msgstr "gitops/{ns}/{name}: retomada"
+
+msgid "empty or longer than 2048 characters"
+msgstr "vazio ou mais longo que 2048 caracteres"
+
+msgid "starts with '-', which git would read as an option"
+msgstr "começa por '-', que o git leria como uma opção"
+
+msgid "carries a space, a backslash or a control character"
+msgstr "leva um espaço, uma barra invertida ou um carácter de controlo"
+
+msgid "a file:// URL names an absolute path without '..'"
+msgstr "um URL file:// nomeia um caminho absoluto sem '..'"
+
+msgid "not a URL this engine fetches — use file:///<path>, https:// or ssh://"
+msgstr "não é um URL que este motor obtenha — usa file:///<caminho>, https:// ou ssh://"
+
+msgid "names no host"
+msgstr "não nomeia nenhum host"
+
+msgid "carries credentials in the URL — name a kind: Secret instead (https with a credential is not implemented)"
+msgstr "leva credenciais no URL — nomeia antes um kind: Secret (https com credencial não está implementado)"
+
+msgid "carries a password in the URL"
+msgstr "leva uma palavra-passe no URL"
+
+msgid "only file://, https:// and ssh:// are fetched (no http://, git:// or ext::)"
+msgstr "só se obtém file://, https:// e ssh:// (nada de http://, git:// nem ext::)"
+
+msgid "gitops: `git` is not installed on this node — {hint}"
+msgstr "gitops: o `git` não está instalado neste nó — {hint}"
+
+msgid "gitops: `git {what}` did not finish within {secs}s and was stopped"
+msgstr "gitops: `git {what}` não terminou em {secs}s e foi parado"
+
+msgid "gitops: `git {what}` answered more than {cap} bytes — refused"
+msgstr "gitops: `git {what}` respondeu com mais de {cap} bytes — recusado"
+
+msgid "gitopssource {name}: removed"
+msgstr "gitopssource {name}: removida"

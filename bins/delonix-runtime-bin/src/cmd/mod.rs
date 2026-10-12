@@ -20,6 +20,8 @@ pub mod dockerapi;
 pub mod drift;
 pub mod etcd;
 pub mod etcd_backup;
+pub mod gitops;
+pub mod gitops_git;
 pub use delonix_model::exitcode;
 pub mod features;
 pub mod firewall;
