@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::allowlist::Entry;
 use crate::ownership::Owner;
 use crate::Result;
@@ -18,7 +20,8 @@ pub struct PoolRef<'a> {
 /// What a probe found. **Three values**: a listing obtained without the
 /// privilege to list is `Undetermined`, never `Available` with nothing in it
 /// (ADR-0067 D3.5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum PoolProbe {
     Available,
     /// The pool cannot be used, and the driver knows why.
@@ -65,7 +68,8 @@ pub enum PoolOp {
 }
 
 /// The two things a pool hands out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VolumeShape {
     /// A mounted directory — a container volume.
     Filesystem,
@@ -80,6 +84,33 @@ impl VolumeShape {
             VolumeShape::Block => "block",
         }
     }
+
+    /// The shape a label names.
+    pub fn parse(label: &str) -> Option<Self> {
+        match label {
+            "filesystem" => Some(VolumeShape::Filesystem),
+            "block" => Some(VolumeShape::Block),
+            _ => None,
+        }
+    }
+}
+
+/// Is `name` a volume name a pool can hold? ASCII letters, digits, `.`, `_`
+/// and `-`, starting with a letter or digit, no `..`, at most 63 bytes.
+///
+/// A pool volume's name becomes one path component under the pool, an LVM
+/// logical volume name and a ZFS dataset component, so it is held to what all
+/// three accept — and a leading `-` can never be read as an option by a tool.
+pub fn valid_volume_name(name: &str) -> bool {
+    let Some(first) = name.chars().next() else {
+        return false;
+    };
+    name.len() <= 63
+        && first.is_ascii_alphanumeric()
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// One volume asked of a pool.
@@ -91,7 +122,7 @@ pub struct VolumeRequest {
 }
 
 /// What the driver handed out.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Allocation {
     pub pool: String,
     pub volume: String,
@@ -104,7 +135,7 @@ pub struct Allocation {
 }
 
 /// How full the pool is. `None` is «not measured», never zero.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoolUsage {
     pub capacity_bytes: Option<u64>,
     pub used_bytes: Option<u64>,
@@ -153,7 +184,35 @@ pub trait StoragePoolDriver: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::PoolUsage;
+    use super::{valid_volume_name, PoolUsage, VolumeShape};
+
+    #[test]
+    fn a_volume_name_is_one_safe_component_for_every_backend() {
+        for ok in ["db", "Db-1", "a.b_c", "0"] {
+            assert!(valid_volume_name(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "-x",
+            ".x",
+            "_x",
+            "a/b",
+            "a..b",
+            "a b",
+            "a\0",
+            &"x".repeat(64),
+        ] {
+            assert!(!valid_volume_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_shape_reads_back_its_label() {
+        for s in [VolumeShape::Filesystem, VolumeShape::Block] {
+            assert_eq!(VolumeShape::parse(s.label()), Some(s));
+        }
+        assert_eq!(VolumeShape::parse("raw"), None);
+    }
 
     #[test]
     fn used_pct_rounds_up_and_refuses_to_guess() {
