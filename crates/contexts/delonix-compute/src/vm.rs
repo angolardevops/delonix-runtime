@@ -713,6 +713,10 @@ where
     /// and the record is written only after it answers — the order every
     /// resize here already uses.
     pub fn resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<Vm> {
+        // An empty request is the CALLER's mistake, whatever the VM: refused
+        // before the lookup, so `vm resize <unknown>` with no flag answers
+        // "nothing to resize" (class 1), as it always did, not "no such VM".
+        refuse_empty(name, req)?;
         let vmdir = self.vmdir();
         let st = &self.repo;
         let mut vm = self.load_vm(name)?;
@@ -745,6 +749,7 @@ where
     /// has to STOP the VM first asks this before the stop, so a shape that
     /// would be refused never costs the downtime.
     pub fn check_resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<()> {
+        refuse_empty(name, req)?;
         let vm = self.load_vm(name)?;
         check_shape(name, &vm, req).map(|_| ())
     }
@@ -1262,11 +1267,9 @@ pub struct ResizeRequest {
 /// vcpus_max, memory_max_mib)`. Pure — [`VmEngine::resize_shape`] and
 /// [`VmEngine::check_resize_shape`] share it, so the check before a stop and
 /// the reshape after it can never disagree.
-fn check_shape(
-    name: &str,
-    vm: &Vm,
-    req: &ResizeRequest,
-) -> Result<(u32, u64, Option<u32>, Option<u64>)> {
+/// A request that changes nothing. Pure, and checked before the VM is even
+/// looked up.
+fn refuse_empty(name: &str, req: &ResizeRequest) -> Result<()> {
     if req.vcpus.is_none()
         && req.memory.is_none()
         && req.disk_size_gib.is_none()
@@ -1278,6 +1281,15 @@ fn check_shape(
              --vcpus-max and/or --memory-max"
         )));
     }
+    Ok(())
+}
+
+fn check_shape(
+    name: &str,
+    vm: &Vm,
+    req: &ResizeRequest,
+) -> Result<(u32, u64, Option<u32>, Option<u64>)> {
+    refuse_empty(name, req)?;
     if req.vcpus == Some(0) || req.vcpus_max == Some(Some(0)) {
         return Err(Error::InvalidResize(format!(
             "VM '{name}' cannot have 0 vCPUs"
@@ -2531,6 +2543,22 @@ mod tests {
             .update("app", Some(2), Some("128M"), Duration::from_millis(1))
             .expect("inside the ceiling");
         assert_eq!(vm.vcpus, 2);
+    }
+
+    /// An empty resize is refused before the lookup: `vm resize <unknown>`
+    /// with no flag is "nothing to resize" (class 1), never "no such VM".
+    #[test]
+    fn an_empty_resize_is_refused_before_the_vm_is_looked_up() {
+        let root = tempfile::tempdir().unwrap();
+        let e = engine(root.path(), Rc::new(Seen::default()));
+        let err = e
+            .resize_shape("vm-nada", &ResizeRequest::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidResize(_)), "{err:?}");
+        let err = e
+            .check_resize_shape("vm-nada", &ResizeRequest::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidResize(_)), "{err:?}");
     }
 
     /// The check a reboot runs BEFORE its stop: every reshape rule, on a
