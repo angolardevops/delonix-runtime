@@ -2840,6 +2840,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             apparmor_unconfined,
             volumes: &opts.volumes,
             devices: &opts.devices,
+            gpus: opts.gpus.as_deref(),
+            masked_paths: &opts.masked_path,
+            readonly_paths: &opts.readonly_path,
         }),
     )?;
     // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
@@ -6195,6 +6198,26 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         for one in delonix_sdn::expand_publish_range(spec)? {
             publish_live(store, &mut c, &one)?;
         }
+    }
+    // A hot-added host path is a bind mount like `run -v /…`, judged by the
+    // same `workloadSecurity` rule — the CLI gate found `update --volume-add
+    // /etc:/x` reading the host's files on a baseline node. Asked only when a
+    // host path is named, so a named volume logs no admission event. The
+    // image is not part of the question: an update does not pull anything.
+    if !delonix_security_runtime::admission::host_path_sources(&o.volume_add).is_empty() {
+        super::policy::enforce(
+            &super::util::state_root(),
+            &c.name,
+            &super::policy::Request {
+                image: None,
+                ..super::policy::Request::container("", false, false).with_hardening(
+                    super::policy::ContainerHardening {
+                        volumes: &o.volume_add,
+                        ..Default::default()
+                    },
+                )
+            },
+        )?;
     }
     for spec in &o.volume_add {
         let mounts = delonix_compute::ports::StorageProvider::resolve_mounts(

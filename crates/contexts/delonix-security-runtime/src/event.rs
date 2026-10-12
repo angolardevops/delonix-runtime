@@ -264,6 +264,7 @@ fn detail_of(v: &Violation) -> Option<String> {
         // goes through the same redaction as every other detail.
         Violation::BaselineHostPath { paths } => paths.join(","),
         Violation::BaselineDevice { devices } => devices.join(","),
+        Violation::BaselineUnmasked { paths } => paths.join(","),
     };
     bounded_detail(&raw)
 }
@@ -318,6 +319,7 @@ pub const EMITTED_RULES: &[Rule] = &[
     Rule::BaselineUnconfined,
     Rule::BaselineHostPath,
     Rule::BaselineDevice,
+    Rule::BaselineUnmasked,
 ];
 
 #[cfg(test)]
