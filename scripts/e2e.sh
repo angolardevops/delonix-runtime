@@ -7567,6 +7567,142 @@ check "system prune: varre o nó e a imagem com tag CONTINUA lá" ok bash -c "
   '$BIN' image ls 2>&1 | grep -qF '$IMG' || { echo 'o system prune levou a imagem com tag'; exit 1; }"
 
 ########################################
+# kind: GitOpsSource (ADR-0021, Sprint 24): uma passagem converge a stack do
+# commit, um campo quente converge com o MESMO PID, e um commit que o guarda, o
+# grafo ou a política de segurança recusam deixa a stack em execução INTACTA e
+# fica registado com o commit que nomeia. O repositório é um bare local
+# (`file://`), nada vai à rede. O temporizador é escrito num HOME falso com um
+# `systemctl` falso à frente no PATH: esta bateria nunca toca no gestor de
+# utilizador real (o `systemctl` real nunca é chamado).
+section "gitops: kind GitOpsSource — uma passagem converge, um commit recusado não toca em nada (ADR-0021)"
+if ! command -v git >/dev/null 2>&1; then
+  skip "gitops: kind GitOpsSource" "git não está instalado neste host"
+elif [ -z "${IMG:-}" ] || ! "$BIN" image ls 2>/dev/null | grep -qF "${IMG%%:*}"; then
+  skip "gitops: kind GitOpsSource" "a imagem $IMG não está no store desta corrida"
+else
+  GO="$OUT/gitops-$PFX"
+  rm -rf "$GO"; mkdir -p "$GO/home/.config" "$GO/bin" "$GO/work/env/prod"
+  printf '#!/bin/sh\necho "systemctl $*" >> "%s/systemctl.log"\nexit 0\n' "$GO" >"$GO/bin/systemctl"
+  printf '#!/bin/sh\necho Linger=yes\n' >"$GO/bin/loginctl"
+  chmod +x "$GO/bin/systemctl" "$GO/bin/loginctl"
+  GS="${PFX}-gs"
+  # O mesmo ambiente que o unit do temporizador dá à passagem, mais o HOME falso.
+  gox() { env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" "$@"; }
+  gogit() { git -C "$GO/work" -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@"; }
+  gopush() { gogit add -A >/dev/null && gogit commit -q -m "$1" && gogit push -q --force "$GO/repo.git" main && gogit rev-parse HEAD; }
+  gostate() { "$BIN" container inspect "${PFX}-gweb" 2>/dev/null \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin)[0];print(d["pid"],d["memory_max"])'; }
+  goapplied() { gox gitops status "$GS" -o json \
+    | python3 -c 'import json,sys;r=json.load(sys.stdin)[0];print(r["result"],r["commit"],r["applied"])'; }
+  export -f gox gogit gopush gostate goapplied
+  export GO GS BIN PFX IMG
+
+  git init -q --bare "$GO/repo.git"; gogit init -q -b main
+  goapp() { # $1 = memory, $2 = extra spec lines (já indentados)
+    cat >"$GO/work/env/prod/app.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: {name: ${PFX}-gnet}
+spec: {}
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: {name: ${PFX}-gweb}
+spec:
+  image: $IMG
+  network: ${PFX}-gnet
+  command: ["sleep", "infinity"]
+  memory: $1
+$2
+YAML
+  }
+  goapp 64M ""
+  GOC1=$(gopush v1)
+  cat >"$GO/source.yaml" <<YAML
+apiVersion: gitops.delonix.io/v1alpha1
+kind: GitOpsSource
+metadata: {name: $GS}
+spec:
+  source:
+    url: file://$GO/repo.git
+    path: env/prod
+    interval: 30s
+  sync:
+    automated: true
+YAML
+
+  check "gitops: stack apply regista a fonte e escreve o temporizador (systemctl falso)" ok bash -c "
+    gox stack apply -f '$GO/source.yaml' --name '$GS' >/dev/null || exit 1
+    test -f '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'sem .timer'; exit 1; }
+    grep -q 'ExecStart=.* gitops reconcile $GS --namespace default' '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.service' || { echo 'ExecStart errado'; exit 1; }
+    grep -q 'enable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'o timer não foi activado'; exit 1; }"
+  check "gitops: um manifesto inalterado planeia ZERO diferenças" 0 \
+    gox stack plan -f "$GO/source.yaml" --name "$GS" --detailed-exitcode
+  check "gitops: um nome de fonte que não é um rótulo DNS é recusado (DX-1601)" ok bash -c "
+    sed 's/name: $GS/name: Bad_Name/' '$GO/source.yaml' >'$GO/bad.yaml'
+    out=\$(gox stack apply -f '$GO/bad.yaml' --name x 2>&1) && { echo 'aceitou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo 'recusou sem o código DX-1601'; exit 1; }"
+
+  check "gitops: a primeira passagem converge a stack do commit" ok bash -c "
+    gox gitops reconcile '$GS' >/dev/null || exit 1
+    s=\$(goapplied); [ \"\$s\" = 'synced $GOC1 $GOC1' ] || { echo \"status: \$s\"; exit 1; }
+    gostate | grep -q ' 64M\$' || { echo \"container: \$(gostate)\"; exit 1; }"
+  GOPID=$(gostate | cut -d' ' -f1)
+
+  goapp 96M ""; GOC2=$(gopush 'v2: memory')
+  check "gitops: um campo quente (memory) converge na passagem seguinte com o MESMO PID" ok bash -c "
+    gox gitops reconcile '$GS' >/dev/null || exit 1
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"esperava '$GOPID 96M', está \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOC2 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+  check "gitops: uma passagem sem mudanças não escreve revisão nova" ok bash -c "
+    a=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
+    [ \"\$a\" -gt 0 ] || { echo 'as passagens anteriores não deixaram revisão nenhuma'; exit 1; }
+    gox gitops reconcile '$GS' | grep -q 'in sync' || exit 1
+    b=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
+    [ \"\$a\" = \"\$b\" ] || { echo \"revisões \$a -> \$b\"; exit 1; }"
+
+  goapp 128M "  privileged: true"; GOC3=$(gopush 'broken: privileged')
+  check "gitops: um commit que pede o host é recusado (DX-1602) e a stack fica intacta" ok bash -c "
+    out=\$(gox gitops reconcile '$GS' 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
+    grep -q 'DX-1602' <<<\"\$out\" || { echo 'sem DX-1602'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'rejected $GOC3 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  goapp 128M ""; sed -i "s/network: ${PFX}-gnet/network: ${PFX}-nosuch/" "$GO/work/env/prod/app.yaml"
+  GOC4=$(gopush 'broken: graph')
+  check "gitops: um commit cujo grafo falha é recusado e a stack fica intacta" ok bash -c "
+    gox gitops reconcile '$GS' >/dev/null 2>&1 && { echo 'aceitou'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'rejected $GOC4 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  goapp 96M ""; sed -i "s|image: $IMG|image: ${IMG%%:*}:gitops-nao-existe|" "$GO/work/env/prod/app.yaml"
+  GOC5=$(gopush 'blocked: replace')
+  check "gitops: um commit que planeia um Replace é bloqueado (DX-1604) e a stack fica intacta" ok bash -c "
+    out=\$(gox gitops reconcile '$GS' 2>&1); rc=\$?
+    [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
+    grep -q 'DX-1604' <<<\"\$out\" || { echo 'sem DX-1604'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    [ \"\$(goapplied)\" = 'blocked $GOC5 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+
+  check "gitops: suspensa, uma passagem não obtém nada" ok bash -c "
+    gox gitops suspend '$GS' >/dev/null || exit 1
+    gox gitops reconcile '$GS' | grep -q 'suspended' || exit 1
+    gox gitops resume '$GS' >/dev/null"
+  check "gitops: uma fonte inexistente diz 4 (DX-4601)" 4 gox gitops reconcile "${PFX}-nao-existe"
+
+  check "gitops: delete gitopssources desactiva o temporizador e apaga a fonte" ok bash -c "
+    : >'$GO/systemctl.log'
+    gox delete gitopssources '$GS' >/dev/null || exit 1
+    grep -q 'disable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'timer não desactivado'; exit 1; }
+    test ! -e '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'unit ficou'; exit 1; }
+    gox gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
+  cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
+  sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
+  gox stack destroy -f "$GO/app-destroy.yaml" --name "$GS" >/dev/null 2>&1 || true
+fi
+
+########################################
 log ""
 log "======================================"
 log " PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP  XFAIL=$XFAIL  XPASS=$XPASS"
