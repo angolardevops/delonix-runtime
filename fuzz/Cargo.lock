@@ -238,25 +238,52 @@ dependencies = [
 
 [[package]]
 name = "delonix-compute"
-version = "4.3.0"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
+ "delonix-net-rules",
  "delonix-node",
  "schemars",
  "serde",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
 name = "delonix-fuzz"
 version = "0.0.0"
 dependencies = [
+ "delonix-compute",
+ "delonix-linux",
+ "delonix-model",
+ "delonix-net-rules",
+ "delonix-node",
  "delonix-oci",
+ "delonix-sdn",
  "libfuzzer-sys",
 ]
 
 [[package]]
+name = "delonix-linux"
+version = "5.0.2"
+dependencies = [
+ "delonix-compute",
+ "delonix-model",
+ "delonix-node",
+ "delonix-state",
+ "libc",
+ "nix",
+ "rustix",
+ "seccompiler",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+]
+
+[[package]]
 name = "delonix-model"
-version = "4.3.0"
+version = "5.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -264,8 +291,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-net-rules"
+version = "5.0.2"
+
+[[package]]
+name = "delonix-networking"
+version = "5.0.2"
+dependencies = [
+ "delonix-compute",
+ "delonix-model",
+ "delonix-net-rules",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "delonix-node"
-version = "4.3.0"
+version = "5.0.2"
 dependencies = [
  "delonix-model",
  "libc",
@@ -275,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-oci"
-version = "4.3.0"
+version = "5.0.2"
 dependencies = [
  "base64",
  "delonix-compute",
@@ -297,8 +341,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-sdn"
+version = "5.0.2"
+dependencies = [
+ "delonix-compute",
+ "delonix-model",
+ "delonix-net-rules",
+ "delonix-networking",
+ "delonix-node",
+ "delonix-state",
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "delonix-state"
-version = "4.3.0"
+version = "5.0.2"
 dependencies = [
  "chacha20poly1305",
  "delonix-compute",
@@ -308,6 +369,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 
@@ -368,6 +430,12 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "equivalent"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "errno"
@@ -517,6 +585,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "heck"
@@ -730,6 +804,16 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "indexmap"
+version = "2.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
+dependencies = [
+ "equivalent",
+ "hashbrown",
 ]
 
 [[package]]
@@ -1244,6 +1328,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "seccompiler"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "345a3e4dddf721a478089d4697b83c6c0a8f5bf16086f6c13397e4534eb6e2e5"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,6 +1400,19 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -1612,6 +1718,12 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

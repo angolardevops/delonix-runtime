@@ -1211,6 +1211,20 @@ variable when the program runs.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>DELONIX_FUZZ_ITERS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>fuzz_smoke.<wbr>rs:iterations</code></a></td>
+<td>Mutations per target of the stable fuzz tests of the manifest loader and the compose reader.</td>
+<td>A positive integer. Unset: <code>1500</code> (under a second, so the tests run in every <code>cargo test</code>).</td>
+<td>A campaign is the same test with a bigger number, e.g. <code>DELONIX_FUZZ_ITERS=200000 cargo test -p delonix-runtime-bin fuzz_smoke</code>. The library parsers are fuzzed by cargo-fuzz in <code>fuzz/</code>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_FUZZ_SEED</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>fuzz_smoke.<wbr>rs:seed</code></a></td>
+<td>Seed of the mutator of the same tests.</td>
+<td>An integer. Unset: a fixed seed.</td>
+<td>A failing test prints the seed it ran with; set it to reproduce the input.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_URL</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Proxmox node to run the live backend tests against.</td>

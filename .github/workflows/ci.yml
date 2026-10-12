@@ -275,6 +275,14 @@ jobs:
         run: cargo +nightly fuzz run parse_dockerfile -- -max_total_time=60
       - name: parse_reference — the image reference parser with a real past bug
         run: cargo +nightly fuzz run parse_reference -- -max_total_time=60
+      - name: net_cidr — the CIDR and address rules a manifest's subnet reaches
+        run: cargo +nightly fuzz run net_cidr -- -max_total_time=60
+      - name: publish_spec — the published-port grammar (-p, compose, Docker API, CRI)
+        run: cargo +nightly fuzz run publish_spec -- -max_total_time=60
+      - name: run_options — env files, NUL env, add-host, security-opt, sizes
+        run: cargo +nightly fuzz run run_options -- -max_total_time=60
+      - name: seccomp_profile — a custom seccomp profile, and the -m/--cpus grammars
+        run: cargo +nightly fuzz run seccomp_profile -- -max_total_time=60
 
   # ---- The gate tooling's own tests were dead code ----
   #

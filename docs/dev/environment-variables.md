@@ -267,6 +267,8 @@ These are read only by tests. Without them the live tests **skip** and print `SK
 
 | Variable | Read by | Purpose | Values / default | Notes |
 |---|---|---|---|---|
+| `DELONIX_FUZZ_ITERS` | `bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs:iterations` | Mutations per target of the stable fuzz tests of the manifest loader and the compose reader. | A positive integer. Unset: `1500` (under a second, so the tests run in every `cargo test`). | A campaign is the same test with a bigger number, e.g. `DELONIX_FUZZ_ITERS=200000 cargo test -p delonix-runtime-bin fuzz_smoke`. The library parsers are fuzzed by cargo-fuzz in `fuzz/`. |
+| `DELONIX_FUZZ_SEED` | `bins/delonix-runtime-bin/src/cmd/fuzz_smoke.rs:seed` | Seed of the mutator of the same tests. | An integer. Unset: a fixed seed. | A failing test prints the seed it ran with; set it to reproduce the input. |
 | `DELONIX_PROXMOX_TEST_URL` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Proxmox node to run the live backend tests against. | `https://<host>:8006`. | Enables the tests. They create and destroy one VM; run only against a node you own. |
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Node name. | Default `pve`. | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Account for password authentication. | e.g. `root@pam`. Required. | TLS verification is disabled in these tests. |
