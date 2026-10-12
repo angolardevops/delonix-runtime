@@ -778,7 +778,8 @@ where
     ) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
         if vcpus.is_none() && memory.is_none() {
             return Err(Error::InvalidResize(format!(
-                "nothing to update on VM '{name}': give --vcpus and/or --memory"
+                "nothing to update on VM '{name}': give --vcpus, --memory, --disk-add, \
+                 --nic-add, --disk-rm and/or --nic-rm"
             )));
         }
         let target_mib = match memory {

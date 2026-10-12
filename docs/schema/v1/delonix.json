@@ -4113,7 +4113,7 @@
         },
         "memoryMax": {
           "default": null,
-          "description": "The memory hotplug ceiling, same rule as [`vcpus_max`](Self::vcpus_max)\n(`4G`, `4096M`, `4Gi`). Never below `memory`.",
+          "description": "The memory hotplug ceiling, same rule as `vcpusMax`\n(`4G`, `4096M`, `4Gi`). Never below `memory`.",
           "type": [
             "string",
             "null"

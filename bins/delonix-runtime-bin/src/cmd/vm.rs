@@ -95,7 +95,7 @@ pub(crate) struct VmSpec {
     /// any growth converges across a reboot (`stack apply --reboot`).
     #[serde(default, rename = "vcpusMax", alias = "vcpus_max")]
     vcpus_max: Option<u32>,
-    /// The memory hotplug ceiling, same rule as [`vcpus_max`](Self::vcpus_max)
+    /// The memory hotplug ceiling, same rule as `vcpusMax`
     /// (`4G`, `4096M`, `4Gi`). Never below `memory`.
     #[serde(default, rename = "memoryMax", alias = "memory_max")]
     memory_max: Option<String>,
@@ -1331,7 +1331,7 @@ pub enum VmCmd {
         #[arg(long = "no-hotplug")]
         no_hotplug: bool,
     },
-    /// Add vCPUs and/or memory to a RUNNING VM, live; on a STOPPED VM it is `vm resize`.
+    /// Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED.
     ///
     /// Adds up to the ceiling declared at create (`--vcpus-max`/`--memory-max`,
     /// ADR-0068 D1).
@@ -2000,16 +2000,28 @@ fn device_changes(
     Ok(out)
 }
 
-fn device_change_label(c: &delonix_vm::DeviceChange) -> String {
+fn device_change_label(c: &delonix_vm::DeviceChange, live: bool) -> String {
     use delonix_vm::DeviceChange as D;
-    match c {
-        D::AddDisk(d) => super::po::tf("disk {disk} attached", &[("disk", &d.source)]),
-        D::AddNic(n) => super::po::tf(
+    match (c, live) {
+        (D::AddDisk(d), true) => super::po::tf("disk {disk} attached", &[("disk", &d.source)]),
+        (D::AddDisk(d), false) => super::po::tf(
+            "disk {disk} recorded for the next boot",
+            &[("disk", &d.source)],
+        ),
+        (D::AddNic(n), true) => super::po::tf(
             "NIC on {source} attached",
             &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
         ),
-        D::RemoveDisk(k) => super::po::tf("disk {disk} removed", &[("disk", k)]),
-        D::RemoveNic(m) => super::po::tf("NIC {mac} removed", &[("mac", m)]),
+        (D::AddNic(n), false) => super::po::tf(
+            "NIC on {source} recorded for the next boot",
+            &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
+        ),
+        (D::RemoveDisk(k), _) => {
+            super::po::tf("disk {disk} removed from the next boot", &[("disk", k)])
+        }
+        (D::RemoveNic(m), _) => {
+            super::po::tf("NIC {mac} removed from the next boot", &[("mac", m)])
+        }
     }
 }
 
@@ -4029,15 +4041,14 @@ pub fn run(action: VmCmd) -> Result<()> {
             let changes = device_changes(&disk_add, &nic_add, &disk_rm, &nic_rm)?;
             let mut partial_reason: Option<String> = None;
             for change in changes {
-                let label = device_change_label(&change);
-                let (_, outcome) = delonix_vm::change_device(&base, &name, change, wait)?;
+                let (_, outcome) = delonix_vm::change_device(&base, &name, change.clone(), wait)?;
                 match outcome {
-                    None => println!("{name}: {label}"),
+                    None => println!("{name}: {}", device_change_label(&change, false)),
                     Some(delonix_vm::HotplugOutcome::Complete) => {
-                        println!("{name}: {label} (complete)")
+                        println!("{name}: {} (complete)", device_change_label(&change, true))
                     }
                     Some(delonix_vm::HotplugOutcome::Partial { reason }) => {
-                        println!("{name}: {label} (partial)");
+                        println!("{name}: {} (partial)", device_change_label(&change, true));
                         partial_reason.get_or_insert(reason);
                     }
                 }
@@ -7194,6 +7205,21 @@ mod device_flag_tests {
 
     /// Removals first: a disk replaced in one command is released before its
     /// successor is attached.
+    /// A change to a STOPPED VM is not said to be attached: it is recorded
+    /// for the next boot, and the text says so.
+    #[test]
+    fn a_cold_device_change_does_not_claim_an_attach() {
+        let d = delonix_vm::DeviceChange::AddDisk(super::parse_disk_add("/d.qcow2").unwrap());
+        assert!(super::device_change_label(&d, true).contains("attached"));
+        let cold = super::device_change_label(&d, false);
+        assert!(
+            !cold.contains("attached") && cold.contains("next boot"),
+            "{cold}"
+        );
+        let n = delonix_vm::DeviceChange::AddNic(super::parse_nic_add("user").unwrap());
+        assert!(!super::device_change_label(&n, false).contains("attached"));
+    }
+
     #[test]
     fn removals_run_before_additions() {
         let c = super::device_changes(

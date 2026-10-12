@@ -491,6 +491,36 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     Ok(out)
 }
 
+/// The lines an `Update` prints: the fields that change live, and — on a
+/// stopped VM — the ones written for its next boot, which are not live and
+/// must not be said to be. Pure.
+fn update_lines(c: &Change) -> Vec<String> {
+    let cold = c.diffs.iter().filter(|d| d.reboot).count();
+    let live = c.diffs.len() - cold;
+    let mut out = Vec::new();
+    if live > 0 {
+        out.push(super::po::tf(
+            "{kind}/{name}: updating {n} field(s) live",
+            &[
+                ("kind", &c.kind),
+                ("name", &c.name),
+                ("n", &live.to_string()),
+            ],
+        ));
+    }
+    if cold > 0 {
+        out.push(super::po::tf(
+            "{kind}/{name}: {n} field(s) written for its next boot (it is stopped)",
+            &[
+                ("kind", &c.kind),
+                ("name", &c.name),
+                ("n", &cold.to_string()),
+            ],
+        ));
+    }
+    out
+}
+
 /// What the plan knows about each resource that is not a field (see
 /// [`reconcile::Facts`]): today only the VMs have any — their power state,
 /// the fields their backend redefines across a reboot, and their hotplug
@@ -2568,17 +2598,9 @@ fn converge_and_stamp(
             super::vm::converge(&c.name, &c.diffs)?;
         }
         if c.action == Action::Update {
-            println!(
-                "{}",
-                super::po::tf(
-                    "{kind}/{name}: updating {n} field(s) live",
-                    &[
-                        ("kind", &c.kind),
-                        ("name", &c.name),
-                        ("n", &c.diffs.len().to_string()),
-                    ],
-                )
-            );
+            for line in update_lines(c) {
+                println!("{line}");
+            }
             match c.kind.as_str() {
                 // Same shape as `FIREWALL_POLICY`/`IPPOOL` just below: applying
                 // already fully overwrites `policy.json`, so converging IS
@@ -3953,6 +3975,28 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
     fn with_action(mut c: Change, a: Action) -> Change {
         c.action = a;
         c
+    }
+
+    /// A cold change on a stopped VM is not announced as live.
+    #[test]
+    fn an_update_on_a_stopped_vm_does_not_say_live() {
+        let mut c = with_action(a_change("VirtualMachine", "db"), Action::Update);
+        c.diffs = vec![reconcile::FieldDiff {
+            field: "vcpus".into(),
+            from: Some("2".into()),
+            to: Some("4".into()),
+            hot: false,
+            reboot: true,
+        }];
+        let lines = update_lines(&c);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            !lines[0].contains("live") && lines[0].contains("next boot"),
+            "{lines:?}"
+        );
+        c.diffs[0].reboot = false;
+        c.diffs[0].hot = true;
+        assert!(update_lines(&c)[0].contains("live"));
     }
 
     /// A VM shape the reshape would refuse is a validation issue, so neither

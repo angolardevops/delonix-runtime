@@ -15926,3 +15926,24 @@ msgstr "vm/{name}: a nova forma foi recusada depois da paragem — nada foi muda
 
 msgid "vm/{name}: the new shape was refused after the stop, and the VM could not be started again ({again}): it is STOPPED — bring it back with `delonix vm start {name}`"
 msgstr "vm/{name}: a nova forma foi recusada depois da paragem, e a VM não voltou a arrancar ({again}): está PARADA — traz-a de volta com `delonix vm start {name}`"
+
+msgid "disk {disk} recorded for the next boot"
+msgstr "disco {disk} registado para o próximo arranque"
+
+msgid "NIC on {source} recorded for the next boot"
+msgstr "NIC em {source} registada para o próximo arranque"
+
+msgid "disk {disk} removed from the next boot"
+msgstr "disco {disk} removido do próximo arranque"
+
+msgid "NIC {mac} removed from the next boot"
+msgstr "NIC {mac} removida do próximo arranque"
+
+msgid "{kind}/{name}: {n} field(s) written for its next boot (it is stopped)"
+msgstr "{kind}/{name}: {n} campo(s) escrito(s) para o próximo arranque (está parada)"
+
+msgid "Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED"
+msgstr "Acrescenta vCPUs, memória, discos ou NICs a uma VM: a quente quando CORRE, para o próximo arranque quando está PARADA"
+
+msgid "Add vCPUs, memory, disks or NICs to a VM: live when it RUNS, for the next boot when STOPPED.\n\nAdds up to the ceiling declared at create (`--vcpus-max`/`--memory-max`, ADR-0068 D1).\n\n**Add only** — a target at or below what the VM already has is refused; use `vm resize` on a stopped VM to decrease. Without a declared ceiling above the boot size there is no headroom to add into, and the refusal names `vm resize --vcpus-max/--memory-max`.\n\nThe hypervisor accepting the request is not the guest using it (ADR-0068 D4): this waits up to `--wait` for the guest side to confirm, and on a backend or resource with no channel to see that at all (Cloud Hypervisor's CPU add, today) settles for `partial` immediately — the record still takes the hypervisor-assigned value either way, so a restart never drops it. A `partial` outcome exits 124 (`DX-8504`), printed after the record is already updated."
+msgstr "Acrescenta vCPUs, memória, discos ou NICs a uma VM: a quente quando CORRE, para o próximo arranque quando está PARADA.\n\nAcrescenta até ao tecto declarado na criação (`--vcpus-max`/`--memory-max`, ADR-0068 D1).\n\n**Só acrescenta** — um valor igual ou menor ao que a VM já tem é recusado; usa `vm resize` numa VM parada para diminuir. Sem um tecto declarado acima do tamanho de arranque não há margem para acrescentar, e a recusa nomeia `vm resize --vcpus-max/--memory-max`.\n\nO hipervisor aceitar o pedido não é o convidado a usá-lo (ADR-0068 D4): isto espera até `--wait` pela confirmação do lado do convidado, e num backend ou recurso sem canal para ver isso (o acrescento de CPU do Cloud Hypervisor, hoje) estabiliza em `partial` de imediato — o registo fica com o valor atribuído pelo hipervisor de qualquer forma, por isso um restart nunca o perde. Um resultado `partial` sai com 124 (`DX-8504`), impresso depois de o registo já estar actualizado."
