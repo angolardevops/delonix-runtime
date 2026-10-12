@@ -33,7 +33,8 @@
 //!
 //! | Value | Meaning |
 //! |---|---|
-//! | unset / empty / `all` | **no ceiling** — byte-for-byte the previous behavior |
+//! | unset / empty | **`default`** — the safe ceiling (next row) |
+//! | `all` | **no ceiling**, by explicit choice: a `privileged: true` pod gets every capability |
 //! | `none` | no capabilities at all, for anyone |
 //! | `default` | exactly the engine's default kept set ([`delonix_linux::capabilities::KEPT_CAPS`]) |
 //! | `default,NET_ADMIN,…` | the default set plus the named ones |
@@ -58,6 +59,19 @@
 //! any error. Lowering a default the workload never requested is what "ceiling"
 //! means; refusing every pod on the node because the runtime's own default is
 //! wider than the bound would make the feature unusable.
+//!
+//! # Why the default is a ceiling and not "no ceiling"
+//!
+//! Leaving the variable unset used to mean "no ceiling", which made the safe
+//! posture something an operator had to know to ask for: a node that nobody
+//! configured admitted `privileged: true` and `capabilities.add: [SYS_ADMIN]`
+//! from anyone able to reach the socket. The default is now the engine's own
+//! default kept set — what a container gets when it asks for nothing — so an
+//! ordinary pod runs exactly as before, and a pod that asks for MORE is refused
+//! (`reject`) until the operator widens the ceiling on purpose, with a named list
+//! (`default,NET_ADMIN`) or, as the last resort, `all`. `all` is the only opt-out
+//! and it has to be written down; there is no spelling of it that an empty or
+//! missing value can reach by accident.
 //!
 //! A malformed value makes the server REFUSE TO START. A typo that quietly
 //! resolved to "no ceiling" is the exact failure this module exists to prevent.
@@ -101,7 +115,8 @@ impl CeilingMode {
     }
 }
 
-/// The node's capability ceiling. `None` mask = unlimited (no ceiling).
+/// The node's capability ceiling. `None` mask = unlimited (no ceiling), which
+/// only an explicit `all` (or [`CapCeiling::unlimited`]) produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CapCeiling {
     mask: Option<u64>,
@@ -109,13 +124,26 @@ pub struct CapCeiling {
 }
 
 impl Default for CapCeiling {
+    /// The safe ceiling. A type that is "unlimited" by default would put the
+    /// permissive posture one forgotten argument away.
     fn default() -> Self {
-        Self::unlimited()
+        Self::node_default()
     }
 }
 
 impl CapCeiling {
-    /// No ceiling — every CRI request is translated exactly as before.
+    /// The ceiling a node gets when nobody configured one: the engine's default
+    /// kept set ([`delonix_linux::capabilities::KEPT_CAPS`]), enforced in
+    /// `reject` mode. Computed from the engine's own list, never a second copy.
+    pub fn node_default() -> Self {
+        Self {
+            mask: Some(default_kept_mask()),
+            mode: CeilingMode::Reject,
+        }
+    }
+
+    /// No ceiling — every CRI request is translated without any bound. Only for
+    /// an operator who asked for it (`all`); nothing falls back to this.
     pub fn unlimited() -> Self {
         Self {
             mask: None,
@@ -128,7 +156,11 @@ impl CapCeiling {
         let mode = CeilingMode::parse(mode)?;
         let spec = spec.trim();
         if spec.is_empty() {
-            return Ok(Self { mask: None, mode });
+            // Unset or blank: the safe default, never "no ceiling".
+            return Ok(Self {
+                mask: Some(default_kept_mask()),
+                mode,
+            });
         }
         let mut mask = 0u64;
         let mut unlimited = false;
@@ -143,7 +175,7 @@ impl CapCeiling {
                 "all" => unlimited = true,
                 // `none` contributes nothing; it exists so that "no capabilities"
                 // is spellable at all — an empty value means "unset", which is
-                // the opposite.
+                // the default ceiling, not this one.
                 "none" => {}
                 "default" => mask |= default_kept_mask(),
                 _ => match cap_num(tok) {
@@ -198,18 +230,17 @@ impl CapCeiling {
         }
     }
 
-    /// The startup line and whether it is a WARNING. A node with no ceiling set is
-    /// the one case that warns: a `privileged: true` pod admitted here runs with
-    /// every capability the kernel has, and this node's only LOCAL barrier is off
-    /// — an admission controller that bounds it lives in another process, which
-    /// this socket does not see. An operator who never configured a ceiling should
-    /// be told at startup, not discover it after an escape. A ceiling in force is
-    /// the ordinary info line. See the `security:` issue on the CRI ceiling default.
+    /// The startup line and whether it is a WARNING. A node whose ceiling was
+    /// explicitly switched off (`all`) is the one case that warns: a
+    /// `privileged: true` pod admitted here runs with every capability the kernel
+    /// has, and this node's only LOCAL barrier is off — an admission controller
+    /// that bounds it lives in another process, which this socket does not see.
+    /// A ceiling in force, the default included, is the ordinary info line.
     pub fn startup_banner(&self) -> (String, bool) {
         if self.is_unlimited() {
             (
-                "no capability ceiling set — a privileged pod gets all capabilities; \
-                 set DELONIX_CRI_CAP_CEILING (e.g. 'default') or --cap-ceiling to bound it"
+                "no capability ceiling (DELONIX_CRI_CAP_CEILING=all) — a privileged pod gets \
+                 all capabilities; unset it, or set 'default' or a list of names, to bound it"
                     .to_string(),
                 true,
             )
@@ -291,14 +322,67 @@ mod tests {
         v.iter().map(|x| x.to_string()).collect()
     }
 
+    /// Only an explicit `all` removes the ceiling.
     #[test]
-    fn ausente_ou_all_significa_sem_tecto() {
-        for spec in ["", "   ", "all", "ALL", "default,all"] {
+    fn only_an_explicit_all_means_no_ceiling() {
+        for spec in ["all", "ALL", "default,all"] {
             let c = CapCeiling::parse(spec, "").unwrap();
-            assert!(c.is_unlimited(), "spec {spec:?} devia ficar sem tecto");
+            assert!(c.is_unlimited(), "spec {spec:?} must lift the ceiling");
             assert_eq!(c.cap_args(&s(&["NET_ADMIN"]), &[], true), None);
             assert!(c.rejected(&s(&["SYS_ADMIN"]), true).is_empty());
         }
+    }
+
+    /// With no configuration at all the ceiling is the engine's default kept set:
+    /// a pod that asks for more is refused, and one that asks for nothing is
+    /// unchanged. Red if the empty value goes back to meaning "no ceiling".
+    #[test]
+    fn an_unset_or_blank_value_is_the_default_ceiling() {
+        for spec in ["", "   ", "\t"] {
+            let c = CapCeiling::parse(spec, "").unwrap();
+            assert!(!c.is_unlimited(), "spec {spec:?} must not lift the ceiling");
+            assert_eq!(c, CapCeiling::node_default());
+            assert_eq!(c, CapCeiling::default());
+            // A non-privileged pod asking for SYS_ADMIN is refused...
+            assert_eq!(c.rejected(&s(&["SYS_ADMIN"]), false), vec!["SYS_ADMIN"]);
+            // ...and so is `privileged: true`.
+            assert!(c.rejected(&[], true).contains(&"SYS_ADMIN"));
+            // A pod that asks for nothing keeps exactly the engine's default set.
+            let args = c.cap_args(&[], &[], false).unwrap();
+            let added: Vec<String> = args[2..].chunks(2).map(|p| p[1].clone()).collect();
+            let want: Vec<String> = names_from_mask(default_kept_mask())
+                .into_iter()
+                .map(String::from)
+                .collect();
+            assert_eq!(added, want);
+            // A capability the default set already holds is not an escalation.
+            assert!(c
+                .rejected(&s(&["NET_BIND_SERVICE", "CHOWN"]), false)
+                .is_empty());
+        }
+    }
+
+    /// Widening is explicit: a named list that includes the capability lets the
+    /// same request through.
+    #[test]
+    fn an_explicit_wider_ceiling_allows_what_the_default_refuses() {
+        let default = CapCeiling::parse("", "").unwrap();
+        let wider = CapCeiling::parse("default,SYS_ADMIN", "").unwrap();
+        assert_eq!(
+            default.rejected(&s(&["SYS_ADMIN"]), false),
+            vec!["SYS_ADMIN"]
+        );
+        assert!(wider.rejected(&s(&["SYS_ADMIN"]), false).is_empty());
+        assert!(CapCeiling::parse("all", "")
+            .unwrap()
+            .rejected(&s(&["SYS_ADMIN"]), true)
+            .is_empty());
+        // The mode still applies on its own to the default ceiling.
+        assert!(!CapCeiling::parse("", "clamp").unwrap().is_unlimited());
+        assert!(CapCeiling::parse("", "clamp")
+            .unwrap()
+            .rejected(&s(&["SYS_ADMIN"]), false)
+            .is_empty());
     }
 
     /// Fail-closed: a malformed ceiling must be an error, never a silent
@@ -451,15 +535,20 @@ mod tests {
         );
     }
 
-    /// No ceiling is the only startup line that warns; a ceiling in force is info.
+    /// An explicit `all` is the only startup line that warns; a ceiling in force,
+    /// the default included, is info.
     #[test]
-    fn the_startup_banner_warns_only_when_there_is_no_ceiling() {
+    fn the_startup_banner_warns_only_when_the_ceiling_is_lifted() {
         let (msg, warn) = CapCeiling::unlimited().startup_banner();
         assert!(warn, "no ceiling must warn");
         assert!(
-            msg.contains("no capability ceiling set") && msg.contains("DELONIX_CRI_CAP_CEILING"),
+            msg.contains("no capability ceiling") && msg.contains("DELONIX_CRI_CAP_CEILING"),
             "the warning names the fix: {msg}"
         );
+
+        let (msg, warn) = CapCeiling::default().startup_banner();
+        assert!(!warn, "the default ceiling is not a warning");
+        assert!(msg.starts_with("capability ceiling:") && msg.contains("CHOWN"));
 
         let (msg, warn) = CapCeiling::parse("CHOWN", "reject")
             .unwrap()

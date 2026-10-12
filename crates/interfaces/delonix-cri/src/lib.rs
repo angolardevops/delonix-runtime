@@ -260,7 +260,8 @@ async fn metrics_handler() -> impl axum::response::IntoResponse {
 }
 
 /// Serves the CRI socket with the node's capability ceiling in force. See
-/// [`cap_ceiling`] — [`CapCeiling::unlimited`] keeps the historical behavior.
+/// [`cap_ceiling`] — [`CapCeiling::default`] is the safe ceiling; [`CapCeiling::unlimited`]
+/// lifts it and must be asked for.
 pub fn serve_blocking(
     base: PathBuf,
     addr: &str,

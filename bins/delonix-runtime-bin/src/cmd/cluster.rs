@@ -2954,7 +2954,13 @@ fn install_cri(
     );
     let active = remote::ssh_check(target, "systemctl is-active --quiet delonix-cri");
     match cri_action(matches, active) {
-        CriAction::Nothing => return Ok(()),
+        CriAction::Nothing => {
+            // The right binary is already running, possibly from an image that was
+            // built before the default ceiling existed: give the node the ceiling
+            // the cluster's system pods need, and restart only if it was missing.
+            remote::ssh_run(target, &ensure_cri_ceiling_command()).map_err(err)?;
+            return Ok(());
+        }
         CriAction::Start => {}
         CriAction::Replace => {
             // A CRI already running is being replaced by a different one: the
@@ -2977,13 +2983,52 @@ fn install_cri(
     remote::scp_to(target, cri_service, "/tmp/delonix-cri.service").map_err(err)?;
     // `restart`, not `enable --now`: on an active unit the latter does nothing,
     // and the old binary would keep running.
-    remote::ssh_run(
-        target,
-        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
-         systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
-    )
-    .map_err(err)?;
+    remote::ssh_run(target, &install_cri_unit_command()).map_err(err)?;
     Ok(())
+}
+
+/// Where the cluster's capability-ceiling drop-in lives on a node.
+const REMOTE_CRI_CEILING_DROPIN: &str =
+    "/etc/systemd/system/delonix-cri.service.d/10-cluster-ceiling.conf";
+
+/// The remote command that installs the `delonix-cri` unit and (re)starts it.
+///
+/// A node this command bootstraps runs Kubernetes' own system pods — kube-proxy,
+/// the CNI agent — which are `privileged` or ask for `NET_ADMIN` by design, and
+/// the CRI's default capability ceiling refuses exactly that. So the cluster
+/// bootstrap lifts the ceiling on ITS nodes, in a drop-in, as an explicit and
+/// visible choice (the CRI warns about it at startup). The drop-in is written only
+/// if absent: an operator who edits it, or who adds a later-sorted one of their
+/// own to bound the node, keeps their setting on the next run.
+fn install_cri_unit_command() -> String {
+    format!(
+        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
+         {} && \
+         systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
+        write_ceiling_dropin_if_absent(),
+    )
+}
+
+/// The remote command for a node whose `delonix-cri` is already the right binary
+/// and already running: write the ceiling drop-in if it is missing and, only then,
+/// reload and restart (a CRI restart does not touch the containers it launched).
+fn ensure_cri_ceiling_command() -> String {
+    format!(
+        "[ -e {REMOTE_CRI_CEILING_DROPIN} ] || {{ {} && systemctl daemon-reload && \
+         systemctl restart delonix-cri; }}",
+        write_ceiling_dropin_if_absent(),
+    )
+}
+
+/// Shell fragment: create the drop-in directory and the drop-in, unless the
+/// drop-in already exists.
+fn write_ceiling_dropin_if_absent() -> String {
+    let dropin = REMOTE_CRI_CEILING_DROPIN;
+    let dir = dropin.rsplit_once('/').map_or("/", |(d, _)| d);
+    format!(
+        "mkdir -p {dir} && {{ [ -e {dropin} ] || \
+         printf '[Service]\\nEnvironment=DELONIX_CRI_CAP_CEILING=all\\n' > {dropin}; }}"
+    )
 }
 
 struct JoinInfo {
@@ -3518,6 +3563,42 @@ mod tests {
     }
 
     use super::*;
+
+    /// The node's CRI must be able to run the cluster's own privileged system
+    /// pods, so the bootstrap writes an explicit ceiling drop-in next to the
+    /// unit, before the daemon is reloaded — and never overwrites an existing one.
+    #[test]
+    fn the_cluster_unit_install_lifts_the_default_ceiling_explicitly() {
+        let cmd = install_cri_unit_command();
+        assert!(cmd.contains("DELONIX_CRI_CAP_CEILING=all"), "{cmd}");
+        assert!(cmd.contains(REMOTE_CRI_CEILING_DROPIN), "{cmd}");
+        assert!(
+            cmd.contains(&format!("[ -e {REMOTE_CRI_CEILING_DROPIN} ] ||")),
+            "an existing drop-in must be kept: {cmd}"
+        );
+        assert!(cmd.contains("mkdir -p /etc/systemd/system/delonix-cri.service.d"));
+        let (write, reload) = (
+            cmd.find("DELONIX_CRI_CAP_CEILING").unwrap(),
+            cmd.find("daemon-reload").unwrap(),
+        );
+        assert!(
+            write < reload,
+            "the drop-in must exist before daemon-reload"
+        );
+    }
+
+    /// A node that already runs the right CRI (golden image) is brought to the same
+    /// ceiling without a restart when the drop-in is already there.
+    #[test]
+    fn a_node_already_running_the_cri_gets_the_ceiling_only_if_missing() {
+        let cmd = ensure_cri_ceiling_command();
+        assert!(
+            cmd.starts_with(&format!("[ -e {REMOTE_CRI_CEILING_DROPIN} ] ||")),
+            "nothing to do when the drop-in exists: {cmd}"
+        );
+        assert!(cmd.contains("DELONIX_CRI_CAP_CEILING=all"), "{cmd}");
+        assert!(cmd.contains("systemctl restart delonix-cri"), "{cmd}");
+    }
 
     /// Regression (KaaS capability audit, gap #1): the conflist this engine
     /// writes for a single-node `cni: default` cluster has to parse with the

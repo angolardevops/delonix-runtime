@@ -3780,8 +3780,14 @@ configuração este nó não consegue ver nem verificar. O tecto é a resposta l
 Pod Security mal configurado, com um `crictl` a falar directamente com este socket, ou com um
 static pod que nunca passou pelo API server.
 
-- **Gramática** (`parse`, pura e testada): ausente/vazio/`all` → **sem tecto, comportamento
-  byte-a-byte igual ao anterior**; `none` → capability nenhuma; `default` → o `KEPT_CAPS` do motor;
+- **Omissão segura (2026-10-12)**: sem configuração, o tecto é `default` (o `KEPT_CAPS` do motor,
+  modo `reject`) — ausente ou vazio já NÃO quer dizer «sem tecto». Um pod normal corre como dantes;
+  `privileged: true` e `capabilities.add` acima do conjunto de omissão são recusados no
+  `CreateContainer` até o operador alargar de propósito (`default,NET_ADMIN`, ou `all`). `all` é a
+  única saída e tem de estar escrita: nenhum valor vazio ou em falta lá chega por acidente. O
+  `Default` do tipo `CapCeiling` é o tecto seguro; `CapCeiling::unlimited()` é só para quem o pede.
+- **Gramática** (`parse`, pura e testada): ausente/vazio → `default`; `all` → **sem tecto** (explícito,
+  e o arranque avisa); `none` → capability nenhuma; `default` → o `KEPT_CAPS` do motor;
   `default,NET_ADMIN` → o baseline mais as nomeadas; lista de nomes (`CAP_` opcional,
   case-insensitive) → exactamente essas. Um nome desconhecido, um modo desconhecido, ou um valor só
   com separadores **impedem o servidor de arrancar** (`exit 2` no `delonix-cri`, erro do CLI no

@@ -39,33 +39,75 @@ fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
 /// (ADR-0062): the unpacked files are all owned by whoever runs the engine, so
 /// this is the only moment that information exists outside the blob.
 fn extract_layer_from(reader: impl std::io::Read, dest: &Path) -> Result<Vec<Owner>> {
-    with_layer_archive(reader, |archive| match archive {
-        LayerArchive::Gzip(a) => crate::owners::unpack_recording(a, dest),
-        LayerArchive::Zstd(a) => crate::owners::unpack_recording(a, dest),
-        LayerArchive::Plain(a) => crate::owners::unpack_recording(a, dest),
+    extract_layer_limited(reader, dest, LayerLimits::from_env())
+}
+
+/// [`extract_layer_from`] under explicit limits, so a test can reach them
+/// without building a layer of the real size.
+///
+/// The limits are enforced WHILE the layer streams: the byte ceiling by the
+/// [`LimitReader`] behind the decompressor, the entry ceiling by the unpack
+/// loop. Either one stops the extraction at that point, before the rest is
+/// written; the caller removes the partial directory.
+fn extract_layer_limited(
+    reader: impl std::io::Read,
+    dest: &Path,
+    limits: LayerLimits,
+) -> Result<Vec<Owner>> {
+    with_layer_archive(reader, limits.max_bytes, |archive| match archive {
+        LayerArchive::Gzip(a) => {
+            crate::owners::unpack_recording_limited(a, dest, limits.max_entries)
+        }
+        LayerArchive::Zstd(a) => {
+            crate::owners::unpack_recording_limited(a, dest, limits.max_entries)
+        }
+        LayerArchive::Plain(a) => {
+            crate::owners::unpack_recording_limited(a, dest, limits.max_entries)
+        }
     })
-    .map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
+    .map_err(|e| layer_error("failed to extract layer", &e))
+}
+
+/// The failure of a layer operation: the typed, stable
+/// [`Error::LayerLimit`] when a limit was hit (however deep in the `tar` and
+/// decompressor stack it surfaced), the generic [`Error::Layer`] otherwise.
+fn layer_error(context: &str, e: &std::io::Error) -> Error {
+    match crate::owners::exceeded(e) {
+        Some(limit) => Error::LayerLimit(format!("{context}: {limit}")),
+        None => Error::Layer(format!("{context}: {e}")),
+    }
 }
 
 /// The non-root owners of a layer blob, from its headers alone. For a layer
 /// unpacked by an engine that did not record them — which also unpacked it
 /// without its setuid/setgid/sticky bits, restored here in `unpacked`.
 fn scan_layer_owners(reader: impl std::io::Read, unpacked: &Path) -> Result<Vec<Owner>> {
-    with_layer_archive(reader, |archive| match archive {
-        LayerArchive::Gzip(a) => crate::owners::scan(a, Some(unpacked)),
-        LayerArchive::Zstd(a) => crate::owners::scan(a, Some(unpacked)),
-        LayerArchive::Plain(a) => crate::owners::scan(a, Some(unpacked)),
+    scan_layer_owners_limited(reader, unpacked, LayerLimits::from_env())
+}
+
+/// [`scan_layer_owners`] under explicit limits (see [`extract_layer_limited`]).
+fn scan_layer_owners_limited(
+    reader: impl std::io::Read,
+    unpacked: &Path,
+    limits: LayerLimits,
+) -> Result<Vec<Owner>> {
+    with_layer_archive(reader, limits.max_bytes, |archive| match archive {
+        LayerArchive::Gzip(a) => crate::owners::scan_limited(a, Some(unpacked), limits.max_entries),
+        LayerArchive::Zstd(a) => crate::owners::scan_limited(a, Some(unpacked), limits.max_entries),
+        LayerArchive::Plain(a) => {
+            crate::owners::scan_limited(a, Some(unpacked), limits.max_entries)
+        }
     })
-    .map_err(|e| Error::Layer(format!("failed to read layer headers: {e}")))
+    .map_err(|e| layer_error("failed to read layer headers", &e))
 }
 
 type Buffered<R> = std::io::BufReader<R>;
 
-use crate::owners::LimitReader;
+use crate::owners::{LayerLimits, LimitReader};
 
 /// A layer's tar, behind whichever decompressor its magic bytes name. Each is
 /// wrapped in a [`LimitReader`] so a bomb cannot drive the decompressor past
-/// the uncompressed ceiling (`owners::MAX_LAYER_UNCOMPRESSED_BYTES`).
+/// the uncompressed ceiling (`LayerLimits::max_bytes`).
 enum LayerArchive<'a, R: std::io::Read> {
     Gzip(&'a mut tar::Archive<LimitReader<flate2::read::GzDecoder<Buffered<R>>>>),
     Zstd(&'a mut tar::Archive<LimitReader<zstd::stream::read::Decoder<'static, Buffered<R>>>>),
@@ -76,6 +118,7 @@ enum LayerArchive<'a, R: std::io::Read> {
 /// hands the archive to `f`.
 fn with_layer_archive<R: std::io::Read, T>(
     reader: R,
+    limit: u64,
     f: impl FnOnce(LayerArchive<'_, R>) -> std::io::Result<T>,
 ) -> std::io::Result<T> {
     use std::io::BufRead;
@@ -83,7 +126,6 @@ fn with_layer_archive<R: std::io::Read, T>(
     let head = reader.fill_buf()?;
     let is_gzip = head.starts_with(&[0x1f, 0x8b]);
     let is_zstd = head.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
-    let limit = crate::owners::MAX_LAYER_UNCOMPRESSED_BYTES;
     if is_gzip {
         let dec = LimitReader::new(flate2::read::GzDecoder::new(reader), limit);
         f(LayerArchive::Gzip(&mut tar::Archive::new(dec)))
@@ -106,6 +148,13 @@ fn with_layer_archive<R: std::io::Read, T>(
 /// *whiteouts*: `.wh.<name>` deletes the target; `.wh..wh..opq` empties the directory. This is
 /// what makes the result a portable rootfs (e.g. an OCI *bundle* for `runc`).
 fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
+    apply_layer_flat_limited(data, dest, LayerLimits::from_env())
+}
+
+/// [`apply_layer_flat`] under explicit limits. The flat path used to be the one
+/// extraction with no ceiling at all: it decompressed a layer straight onto the
+/// bundle directory however far it expanded.
+fn apply_layer_flat_limited(data: &[u8], dest: &Path, limits: LayerLimits) -> Result<()> {
     let reader: Box<dyn std::io::Read> = if data.starts_with(&[0x1f, 0x8b]) {
         Box::new(flate2::read::GzDecoder::new(data))
     } else if data.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
@@ -116,14 +165,19 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     } else {
         Box::new(data)
     };
-    let mut ar = tar::Archive::new(reader);
+    let mut ar = tar::Archive::new(LimitReader::new(reader, limits.max_bytes));
     ar.set_preserve_permissions(true);
     ar.set_overwrite(true);
-    for entry in ar
-        .entries()
-        .map_err(|e| Error::Layer(format!("tar: {e}")))?
-    {
-        let mut entry = entry.map_err(|e| Error::Layer(format!("tar entry: {e}")))?;
+    let mut count: u64 = 0;
+    for entry in ar.entries().map_err(|e| layer_error("tar", &e))? {
+        count += 1;
+        if count > limits.max_entries {
+            return Err(layer_error(
+                "tar entry",
+                &crate::owners::too_many_entries(limits.max_entries),
+            ));
+        }
+        let mut entry = entry.map_err(|e| layer_error("tar entry", &e))?;
         let path = entry
             .path()
             .map_err(|e| Error::Layer(format!("tar path: {e}")))?
@@ -184,7 +238,13 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
             }
         }
         let is_dir = entry.header().entry_type().is_dir();
-        let _ = entry.unpack_in(dest); // ignore nodes that require privilege
+        // Nodes that require privilege are skipped, but a layer that went past a
+        // limit while this entry was being written is not one of them.
+        if let Err(e) = entry.unpack_in(dest) {
+            if crate::owners::exceeded(&e).is_some() {
+                return Err(layer_error("tar entry", &e));
+            }
+        }
         if is_dir {
             if let Some(rel) = &safe {
                 ensure_owner_writable(&dest.join(rel));
@@ -1189,5 +1249,187 @@ mod parallel_extract_tests {
         let bad_dir = root.join("layers").join(crate::cas::strip(&bad));
         assert!(!bad_dir.join(".extracted").exists());
         assert!(scratch_left(root).is_empty(), "{:?}", scratch_left(root));
+    }
+}
+
+/// The unpack ceilings, measured through the real extraction paths with tiny
+/// limits so no test writes more than a few MiB. Each refusal test fails if the
+/// limit it covers is reverted: without it the "bomb" unpacks without complaint.
+#[cfg(test)]
+mod layer_limit_tests {
+    use super::{apply_layer_flat_limited, extract_layer_limited, scan_layer_owners_limited};
+    use crate::owners::LayerLimits;
+    use crate::Error;
+    use std::io::Read;
+
+    const MIB: u64 = 1 << 20;
+
+    /// A tar holding one zero-filled file of `bytes`.
+    fn tar_with_zeros(bytes: u64) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o644);
+        h.set_size(bytes);
+        b.append_data(&mut h, "bomb", std::io::repeat(0).take(bytes))
+            .unwrap();
+        b.into_inner().unwrap()
+    }
+
+    /// A tar of `n` empty regular files.
+    fn tar_of_empty_files(n: usize) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        for i in 0..n {
+            let mut h = tar::Header::new_gnu();
+            h.set_mode(0o644);
+            h.set_size(0);
+            b.append_data(&mut h, format!("f{i}"), std::io::empty())
+                .unwrap();
+        }
+        b.into_inner().unwrap()
+    }
+
+    fn gzip(data: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        enc.write_all(data).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn zstd(data: &[u8]) -> Vec<u8> {
+        zstd::encode_all(data, 0).unwrap()
+    }
+
+    /// The three layer encodings the extraction accepts.
+    fn encodings(tar: &[u8]) -> [(&'static str, Vec<u8>); 3] {
+        [
+            ("gzip", gzip(tar)),
+            ("zstd", zstd(tar)),
+            ("plain", tar.to_vec()),
+        ]
+    }
+
+    fn limits(max_bytes: u64, max_entries: u64) -> LayerLimits {
+        LayerLimits {
+            max_bytes,
+            max_entries,
+        }
+    }
+
+    /// The error a refused layer must carry: the stable typed variant, with its
+    /// dictionary number, naming which ceiling was hit.
+    fn assert_limit(err: Error, needle: &str) {
+        match &err {
+            Error::LayerLimit(msg) => assert!(msg.contains(needle), "{msg}"),
+            other => panic!("expected the typed layer-limit error, got {other:?}"),
+        }
+        assert_eq!(err.number(), 1418);
+    }
+
+    /// A few MiB of compressed bytes that expand to far more than the ceiling are
+    /// refused WHILE streaming: the file on disk never gets past the ceiling, in
+    /// all three encodings.
+    #[test]
+    fn a_layer_that_expands_beyond_the_byte_limit_is_refused() {
+        let tar = tar_with_zeros(16 * MIB);
+        for (name, blob) in encodings(&tar) {
+            let tmp = tempfile::tempdir().unwrap();
+            let err = extract_layer_limited(&blob[..], tmp.path(), limits(MIB, u64::MAX))
+                .expect_err(&format!("{name}: 16 MiB of zeros passed a 1 MiB ceiling"));
+            assert_limit(err, "uncompressed");
+            let written = std::fs::metadata(tmp.path().join("bomb"))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            assert!(
+                written <= MIB,
+                "{name}: {written} bytes reached the disk past a {MIB}-byte ceiling"
+            );
+        }
+        // The point of the exercise: the compressed blob really is small.
+        assert!(gzip(&tar).len() < 64 * 1024);
+        assert!(zstd(&tar).len() < 64 * 1024);
+    }
+
+    /// The inode-exhaustion variant: zero-length entries slip under any byte
+    /// ceiling, so the entry count has to stop them.
+    #[test]
+    fn a_layer_with_too_many_entries_is_refused() {
+        let tar = tar_of_empty_files(500);
+        for (name, blob) in encodings(&tar) {
+            let tmp = tempfile::tempdir().unwrap();
+            let err = extract_layer_limited(&blob[..], tmp.path(), limits(u64::MAX, 50))
+                .expect_err(&format!("{name}: 500 entries passed a 50-entry ceiling"));
+            assert_limit(err, "entries");
+            assert!(tmp.path().join("f0").exists());
+            assert!(
+                !tmp.path().join("f100").exists(),
+                "{name}: entries past the ceiling were written"
+            );
+        }
+    }
+
+    /// The header-only pass over an older layer is bounded the same way.
+    #[test]
+    fn scanning_a_layer_is_bounded_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bytes = gzip(&tar_with_zeros(16 * MIB));
+        let err = scan_layer_owners_limited(&bytes[..], tmp.path(), limits(MIB, u64::MAX))
+            .expect_err("the byte ceiling applies to a scan");
+        assert_limit(err, "uncompressed");
+
+        let entries = gzip(&tar_of_empty_files(500));
+        let err = scan_layer_owners_limited(&entries[..], tmp.path(), limits(u64::MAX, 50))
+            .expect_err("the entry ceiling applies to a scan");
+        assert_limit(err, "entries");
+    }
+
+    /// The flat (bundle) extraction had no ceiling at all.
+    #[test]
+    fn the_flat_extraction_is_bounded_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bomb = gzip(&tar_with_zeros(16 * MIB));
+        let err = apply_layer_flat_limited(&bomb, tmp.path(), limits(MIB, u64::MAX))
+            .expect_err("the byte ceiling applies to the flat path");
+        assert_limit(err, "uncompressed");
+        let written = std::fs::metadata(tmp.path().join("bomb"))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        assert!(written <= MIB, "{written} bytes reached the disk");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let many = gzip(&tar_of_empty_files(500));
+        let err = apply_layer_flat_limited(&many, tmp.path(), limits(u64::MAX, 50))
+            .expect_err("the entry ceiling applies to the flat path");
+        assert_limit(err, "entries");
+        assert!(!tmp.path().join("f100").exists());
+    }
+
+    /// An ordinary layer is untouched by the defaults, and by a ceiling that is
+    /// exactly as large as it is.
+    #[test]
+    fn a_normal_layer_still_unpacks() {
+        let mut b = tar::Builder::new(Vec::new());
+        for (path, body) in [("etc/os-release", &b"alpine"[..]), ("bin/sh", &b"#!"[..])] {
+            let mut h = tar::Header::new_gnu();
+            h.set_mode(0o644);
+            h.set_size(body.len() as u64);
+            b.append_data(&mut h, path, body).unwrap();
+        }
+        let tar = b.into_inner().unwrap();
+
+        for (name, blob) in encodings(&tar) {
+            let tmp = tempfile::tempdir().unwrap();
+            extract_layer_limited(&blob[..], tmp.path(), LayerLimits::DEFAULT)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(
+                std::fs::read_to_string(tmp.path().join("etc/os-release")).unwrap(),
+                "alpine"
+            );
+
+            // Exactly at both ceilings is still within them.
+            let tmp = tempfile::tempdir().unwrap();
+            extract_layer_limited(&blob[..], tmp.path(), limits(tar.len() as u64, 2))
+                .unwrap_or_else(|e| panic!("{name} at the ceiling: {e}"));
+            assert!(tmp.path().join("bin/sh").exists());
+        }
     }
 }

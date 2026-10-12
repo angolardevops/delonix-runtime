@@ -15,7 +15,7 @@ pub enum ServeCmd {
         /// Socket address (default: `$DELONIX_CRI_ADDR` or `unix:///run/delonix-cri.sock`).
         #[arg(long)]
         addr: Option<String>,
-        /// Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), or `all` (no bound, the default), `none`, `default` (the engine's default set), or `default,<extra>...`. Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp.
+        /// Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), `none`, `default` (the engine's default set, and what an unset value means), `default,<extra>...`, or `all` (no bound, only when asked for). Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp.
         #[arg(long, value_name = "LIST")]
         cap_ceiling: Option<String>,
         /// What to do with a pod that asks for more than `--cap-ceiling`: `reject` (default, fails CreateContainer so the kubelet reports it) or `clamp` (reduce to the ceiling and log a warning). Overrides `$DELONIX_CRI_CAP_CEILING_MODE`.

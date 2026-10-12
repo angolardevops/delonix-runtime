@@ -23,21 +23,173 @@ use std::path::{Path, PathBuf};
 
 pub use delonix_compute::owners::{decode, encode, relative, Owner};
 
-/// Ceiling on the DECOMPRESSED size of one layer. The download side caps the
-/// COMPRESSED blob at 8 GiB (`registry::MAX_BLOB_BYTES`); that number says
+/// Default ceiling on the DECOMPRESSED size of one layer. The download side caps
+/// the COMPRESSED blob at 8 GiB (`registry::MAX_BLOB_BYTES`); that number says
 /// nothing about the decompressed side, where a few MB of zeros become
 /// terabytes. Applied by `overlay::with_layer_archive` through [`LimitReader`],
-/// so every real caller (pull, CRI, flat extract) inherits it. Generous for
-/// real layers (`kindest/node` runs to low single-digit GiB, AGENTS.md) and far
-/// below any bomb.
-pub(crate) const MAX_LAYER_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+/// so every real caller (pull, CRI, flat extract) inherits it.
+///
+/// Why 64 GiB: real layers are far below it (a Kubernetes node image runs to a
+/// few GiB in total, the largest public GPU/ML images to a few tens of GiB
+/// across many layers, and a single layer is a fraction of that), so no normal
+/// image comes near it — while any bomb is orders of magnitude above. A node
+/// with a small disk should LOWER it with [`BYTES_ENV`]; a trusted image that
+/// really is larger can raise it.
+pub(crate) const DEFAULT_MAX_LAYER_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
-/// Ceiling on the NUMBER of entries in one layer, against the
+/// Default ceiling on the NUMBER of entries in one layer, against the
 /// millions-of-tiny-files variant the byte ceiling alone misses: it exhausts
 /// inodes, not bytes, so a stream of zero-length entries slips under
-/// [`MAX_LAYER_UNCOMPRESSED_BYTES`]. A full distro image has well under a
-/// million files.
-pub(crate) const MAX_LAYER_ENTRIES: u64 = 4_000_000;
+/// [`DEFAULT_MAX_LAYER_BYTES`]. A full distro image has a few hundred thousand
+/// files, a `node_modules`-heavy layer rarely above a million; 4M leaves room
+/// for both and is still a fraction of a filesystem's inode table.
+pub(crate) const DEFAULT_MAX_LAYER_ENTRIES: u64 = 4_000_000;
+
+/// Environment variable that overrides [`DEFAULT_MAX_LAYER_BYTES`].
+pub(crate) const BYTES_ENV: &str = "DELONIX_LAYER_MAX_BYTES";
+/// Environment variable that overrides [`DEFAULT_MAX_LAYER_ENTRIES`].
+pub(crate) const ENTRIES_ENV: &str = "DELONIX_LAYER_MAX_ENTRIES";
+
+/// The two ceilings a layer is unpacked under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LayerLimits {
+    /// Uncompressed tar-stream bytes (headers and padding included).
+    pub max_bytes: u64,
+    /// Entries in the tar.
+    pub max_entries: u64,
+}
+
+impl LayerLimits {
+    /// What an unconfigured node enforces.
+    pub(crate) const DEFAULT: Self = Self {
+        max_bytes: DEFAULT_MAX_LAYER_BYTES,
+        max_entries: DEFAULT_MAX_LAYER_ENTRIES,
+    };
+
+    /// The limits in force: the defaults, each overridden by its environment
+    /// variable. A value that is not a positive size is IGNORED with a warning,
+    /// never read as "no limit": a typo must not switch a security bound off.
+    pub(crate) fn from_env() -> Self {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
+        let pick = |name: &str, default: u64| match get(name) {
+            None => default,
+            Some(raw) if raw.trim().is_empty() => default,
+            Some(raw) => parse_size(&raw).unwrap_or_else(|| {
+                tracing::warn!(
+                    variable = name,
+                    value = %raw,
+                    default,
+                    "ignoring a layer limit that is not a positive size; using the default"
+                );
+                default
+            }),
+        };
+        Self {
+            max_bytes: pick(BYTES_ENV, Self::DEFAULT.max_bytes),
+            max_entries: pick(ENTRIES_ENV, Self::DEFAULT.max_entries),
+        }
+    }
+}
+
+/// A positive integer with an optional binary suffix (`k`, `m`, `g`, `t`, any
+/// case; `1g` is 2^30). Zero, empty, negative, fractional or overflowing values
+/// are `None`.
+fn parse_size(raw: &str) -> Option<u64> {
+    let raw = raw.trim();
+    let digits_end = raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len());
+    let (digits, suffix) = raw.split_at(digits_end);
+    let unit: u64 = match suffix.to_ascii_lowercase().as_str() {
+        "" => 1,
+        "k" => 1 << 10,
+        "m" => 1 << 20,
+        "g" => 1 << 30,
+        "t" => 1 << 40,
+        _ => return None,
+    };
+    let n: u64 = digits.parse().ok()?;
+    n.checked_mul(unit).filter(|&v| v > 0)
+}
+
+/// Which of the two ceilings a layer went past.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LimitKind {
+    /// Too many uncompressed bytes.
+    Bytes,
+    /// Too many entries.
+    Entries,
+}
+
+/// A layer went past an unpack ceiling. Carried inside an `io::Error` through
+/// the `tar` and decompressor stack, and recovered by [`exceeded`] so the
+/// caller can raise the stable, typed [`crate::Error::LayerLimit`] instead of a
+/// string.
+#[derive(Debug)]
+pub(crate) struct LayerLimitExceeded {
+    pub kind: LimitKind,
+    pub limit: u64,
+}
+
+impl std::fmt::Display for LayerLimitExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            LimitKind::Bytes => write!(
+                f,
+                "layer expands beyond the {} uncompressed limit (possible decompression bomb); \
+                 set {BYTES_ENV} to accept a larger one",
+                human_bytes(self.limit)
+            ),
+            LimitKind::Entries => write!(
+                f,
+                "layer has more than {} entries (possible tar bomb); \
+                 set {ENTRIES_ENV} to accept a larger one",
+                self.limit
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LayerLimitExceeded {}
+
+impl LayerLimitExceeded {
+    pub(crate) fn into_io(self) -> io::Error {
+        io::Error::new(io::ErrorKind::InvalidData, self)
+    }
+}
+
+fn human_bytes(n: u64) -> String {
+    const GIB: u64 = 1 << 30;
+    const MIB: u64 = 1 << 20;
+    if n >= GIB && n.is_multiple_of(GIB) {
+        format!("{} GiB", n / GIB)
+    } else if n >= MIB && n.is_multiple_of(MIB) {
+        format!("{} MiB", n / MIB)
+    } else {
+        format!("{n} bytes")
+    }
+}
+
+/// The ceiling an error went past, if it is (or wraps) a
+/// [`LayerLimitExceeded`]. `tar` wraps the reader's error in its own context
+/// (`failed to unpack ...`), and `io::Error::source` skips the error it holds,
+/// so the walk looks inside each `io::Error` before following `source()`.
+pub(crate) fn exceeded(e: &io::Error) -> Option<&LayerLimitExceeded> {
+    fn find<'a>(mut cur: &'a (dyn std::error::Error + 'static)) -> Option<&'a LayerLimitExceeded> {
+        loop {
+            if let Some(l) = cur.downcast_ref::<LayerLimitExceeded>() {
+                return Some(l);
+            }
+            if let Some(io_err) = cur.downcast_ref::<io::Error>() {
+                cur = io_err.get_ref()?;
+                continue;
+            }
+            cur = cur.source()?;
+        }
+    }
+    find(e)
+}
 
 /// A reader that refuses to yield more than `limit` bytes, so a decompressor
 /// behind it cannot be driven to produce an unbounded stream from a small blob.
@@ -50,6 +202,7 @@ pub(crate) const MAX_LAYER_ENTRIES: u64 = 4_000_000;
 /// the layer-unpack half of the blob-size cap the download already had.
 pub(crate) struct LimitReader<R> {
     inner: R,
+    limit: u64,
     remaining: u64,
 }
 
@@ -57,6 +210,7 @@ impl<R> LimitReader<R> {
     pub(crate) fn new(inner: R, limit: u64) -> Self {
         Self {
             inner,
+            limit,
             remaining: limit,
         }
     }
@@ -64,17 +218,22 @@ impl<R> LimitReader<R> {
 
 impl<R: Read> Read for LimitReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
         if self.remaining == 0 {
-            // We have already delivered the whole budget; one more byte would
-            // exceed it. Fail closed — a truncated extraction is a clear error,
-            // a filled disk is not.
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "layer exceeds the {} GiB uncompressed ceiling (possible decompression bomb)",
-                    MAX_LAYER_UNCOMPRESSED_BYTES / (1024 * 1024 * 1024)
-                ),
-            ));
+            // The whole budget is delivered. A stream that ends exactly here is
+            // fine; one more byte would exceed it. Fail closed — a truncated
+            // extraction is a clear error, a filled disk is not.
+            let mut probe = [0u8; 1];
+            return match self.inner.read(&mut probe)? {
+                0 => Ok(0),
+                _ => Err(LayerLimitExceeded {
+                    kind: LimitKind::Bytes,
+                    limit: self.limit,
+                }
+                .into_io()),
+            };
         }
         let cap = buf
             .len()
@@ -114,7 +273,7 @@ pub fn unpack_recording<R: Read>(
     archive: &mut tar::Archive<R>,
     dst: &Path,
 ) -> io::Result<Vec<Owner>> {
-    unpack_recording_limited(archive, dst, MAX_LAYER_ENTRIES)
+    unpack_recording_limited(archive, dst, LayerLimits::from_env().max_entries)
 }
 
 /// As [`unpack_recording`], with the entry ceiling as a parameter so a test can
@@ -180,13 +339,23 @@ pub fn scan<R: Read>(
     archive: &mut tar::Archive<R>,
     unpacked: Option<&Path>,
 ) -> io::Result<Vec<Owner>> {
+    scan_limited(archive, unpacked, LayerLimits::from_env().max_entries)
+}
+
+/// As [`scan`], with the entry ceiling as a parameter (see
+/// [`unpack_recording_limited`]).
+pub(crate) fn scan_limited<R: Read>(
+    archive: &mut tar::Archive<R>,
+    unpacked: Option<&Path>,
+    max_entries: u64,
+) -> io::Result<Vec<Owner>> {
     let real_root = !delonix_node::is_rootless();
     let mut owners = Vec::new();
     let mut count: u64 = 0;
     for entry in archive.entries()? {
         count += 1;
-        if count > MAX_LAYER_ENTRIES {
-            return Err(too_many_entries(MAX_LAYER_ENTRIES));
+        if count > max_entries {
+            return Err(too_many_entries(max_entries));
         }
         let entry = entry?;
         owners.extend(owner_of(&entry));
@@ -199,11 +368,12 @@ pub fn scan<R: Read>(
 
 /// The error both unpack paths raise when a layer has more entries than the
 /// ceiling — the inode-exhaustion half of the decompression-bomb defense.
-fn too_many_entries(max: u64) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("layer has more than {max} entries (possible tar bomb)"),
-    )
+pub(crate) fn too_many_entries(max: u64) -> io::Error {
+    LayerLimitExceeded {
+        kind: LimitKind::Entries,
+        limit: max,
+    }
+    .into_io()
 }
 
 /// The special-bit mode to write on disk, given the entry's recorded `uid` and
@@ -397,6 +567,89 @@ mod tests {
         assert!(err.to_string().contains("entries"));
         // The third entry, past the ceiling, never reached the disk.
         assert!(!tmp.path().join("c").exists());
+    }
+
+    /// The byte ceiling is on what is READ, so a stream of exactly the ceiling is
+    /// not a bomb: only the byte after it is.
+    #[test]
+    fn a_stream_of_exactly_the_ceiling_is_accepted() {
+        let data = vec![7u8; 4096];
+        let mut r = LimitReader::new(&data[..], 4096);
+        let mut sink = Vec::new();
+        io::copy(&mut r, &mut sink).expect("exactly the ceiling is within it");
+        assert_eq!(sink.len(), 4096);
+
+        let mut r = LimitReader::new(&data[..], 4095);
+        let err = io::copy(&mut r, &mut Vec::new()).unwrap_err();
+        assert!(exceeded(&err).is_some_and(|l| l.kind == LimitKind::Bytes));
+    }
+
+    /// The configuration grammar: a positive size with an optional binary suffix;
+    /// everything else is rejected, and a rejected value falls back to the
+    /// default and NEVER to "no limit".
+    #[test]
+    fn limits_come_from_the_environment_and_a_bad_value_keeps_the_default() {
+        assert_eq!(parse_size("4096"), Some(4096));
+        assert_eq!(parse_size(" 2k "), Some(2048));
+        assert_eq!(parse_size("1G"), Some(1 << 30));
+        assert_eq!(parse_size("3t"), Some(3 << 40));
+        for bad in [
+            "",
+            "0",
+            "0k",
+            "-1",
+            "1.5g",
+            "10x",
+            "g",
+            "99999999999999999999",
+            "18446744073709551615t",
+        ] {
+            assert_eq!(parse_size(bad), None, "{bad:?}");
+        }
+
+        let none = LayerLimits::from_lookup(|_| None);
+        assert_eq!(none, LayerLimits::DEFAULT);
+
+        let set = LayerLimits::from_lookup(|name| match name {
+            BYTES_ENV => Some("512m".into()),
+            ENTRIES_ENV => Some("1000".into()),
+            _ => None,
+        });
+        assert_eq!(set.max_bytes, 512 << 20);
+        assert_eq!(set.max_entries, 1000);
+
+        // 0, junk and blanks do not switch the bound off.
+        for bad in ["0", "unlimited", "-1", "", "  "] {
+            let got = LayerLimits::from_lookup(|_| Some(bad.to_string()));
+            assert_eq!(got, LayerLimits::DEFAULT, "{bad:?}");
+        }
+    }
+
+    /// The limit error has to be recoverable from where it really surfaces: inside
+    /// `tar`'s own `failed to unpack` wrapper, when the byte ceiling fires in the
+    /// middle of a file's data. A string match would not survive a reworded
+    /// message; the downcast does.
+    #[test]
+    fn the_limit_is_recognised_through_the_tar_error_wrapper() {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o644);
+        h.set_size(64 * 1024);
+        b.append_data(&mut h, "big", io::repeat(0).take(64 * 1024))
+            .unwrap();
+        let data = b.into_inner().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let err = unpack_recording_limited(
+            &mut tar::Archive::new(LimitReader::new(&data[..], 8 * 1024)),
+            tmp.path(),
+            u64::MAX,
+        )
+        .unwrap_err();
+        let limit = exceeded(&err).unwrap_or_else(|| panic!("not recognised: {err:?}"));
+        assert_eq!(limit.kind, LimitKind::Bytes);
+        assert_eq!(limit.limit, 8 * 1024);
+        // An unrelated I/O error is not mistaken for a limit.
+        assert!(exceeded(&io::Error::other("disk on fire")).is_none());
     }
 
     /// Unpacking records every non-root owner and nothing else, and the files

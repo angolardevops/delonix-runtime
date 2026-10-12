@@ -53,7 +53,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> a arrancar delonix-cri (root=$DELONIX_ROOT socket=$SOCK)"
+# A conformance run is a throwaway server: the suite creates privileged containers
+# on purpose, which the default capability ceiling refuses, so the ceiling is lifted
+# explicitly here (override with DELONIX_CRI_CAP_CEILING to measure a bounded node).
 DELONIX_ROOT="$DELONIX_ROOT" DELONIX_CRI_ADDR="unix://$SOCK" \
+  DELONIX_CRI_CAP_CEILING="${DELONIX_CRI_CAP_CEILING:-all}" \
   setsid "$CRI_BIN" >"$LOG.server" 2>&1 < /dev/null &
 SRV_PID=$!
 # espera o socket ficar de pé (o servidor imprime a escutar)
