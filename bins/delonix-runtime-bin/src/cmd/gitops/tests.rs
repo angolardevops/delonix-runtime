@@ -869,3 +869,20 @@ fn the_ssh_key_is_written_private_and_removed_with_the_pass() {
     }
     assert!(!key.exists(), "the key outlived its pass");
 }
+
+#[test]
+fn a_second_pass_on_the_same_source_skips_instead_of_queuing() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join("lock");
+    let first = try_lock(&lock).unwrap();
+    assert!(first.is_some());
+    assert!(
+        try_lock(&lock).unwrap().is_none(),
+        "a second pass took the lock"
+    );
+    drop(first);
+    assert!(
+        try_lock(&lock).unwrap().is_some(),
+        "the lock outlived its pass"
+    );
+}
