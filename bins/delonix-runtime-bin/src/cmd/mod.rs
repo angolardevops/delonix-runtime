@@ -70,6 +70,8 @@ pub mod remote;
 pub(crate) mod resource;
 pub use delonix_stack::revision;
 pub mod codes;
+#[cfg(test)]
+mod fuzz_smoke;
 pub mod scaffold;
 pub mod scan;
 pub mod schema;
