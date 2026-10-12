@@ -625,6 +625,46 @@ pub trait VmBackend {
         Err(unsupported_pause(self.id(), "hotplug memory add"))
     }
 
+    /// Attaches an extra disk to a RUNNING VM (ADR-0068 D7, Phase 4). Returns
+    /// the disk as the record must keep it — with the target the hypervisor
+    /// actually gave it PINNED, so the next boot puts it where the guest
+    /// already sees it — and whether the guest is confirmed to see it (D4).
+    ///
+    /// Default: unsupported (fail closed).
+    fn hotplug_add_disk(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _disk: &ExtraDisk,
+        _wait: Duration,
+    ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
+        Err(unsupported_pause(self.id(), "hotplug disk add"))
+    }
+
+    /// Attaches an extra NIC to a RUNNING VM (ADR-0068 D7, Phase 5). Returns
+    /// the NIC with its MAC pinned, and whether the guest is confirmed to see
+    /// it (D4). Default: unsupported (fail closed).
+    fn hotplug_add_nic(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _nic: &ExtraNic,
+        _wait: Duration,
+    ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
+        Err(unsupported_pause(self.id(), "hotplug NIC add"))
+    }
+
+    /// A STOPPED VM's extra disks or NICs changed (`vm update --disk-add`,
+    /// `--disk-rm`, …): `vm` is the record as it will be written. A backend
+    /// whose record IS the whole definition (the next boot rebuilds from it)
+    /// has nothing to do; one with a definition of its own must change it here.
+    ///
+    /// Default: unsupported (fail closed) — a device change the next boot
+    /// silently ignores would be the defect this refuses.
+    fn change_devices_cold(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
+        Err(unsupported_pause(self.id(), "extra disk/NIC change"))
+    }
+
     /// `vm resize --disk-size`: grows a STOPPED VM's boot disk to `new_bytes`
     /// (`vm.disk.resize`). Called only after the engine has confirmed the
     /// record says the VM is not running; the CALLER (this method) is the

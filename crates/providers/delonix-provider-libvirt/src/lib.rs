@@ -23,7 +23,7 @@ use delonix_compute::vm_backend::{
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
-use delonix_compute::Vm;
+use delonix_compute::{ExtraDisk, ExtraNic, Vm};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -367,9 +367,13 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
                 detail: "`vm update --memory` plugs a DIMM (`attach-device --live`) into the `<maxMemory>` slots fixed at create (ADR-0068 D3), read back with `dominfo`; the agent's memory blocks decide complete or partial (D4/D8); unit-tested, never run against a guest",
             }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
-            C::VmHotplugDiskAdd => S::NotImplemented,
+            C::VmHotplugDiskAdd => bin(S::Partial {
+                detail: "`vm update --disk-add` attaches the same `<disk>` the boot XML writes at a target free in the live domain, pinned in the record (ADR-0068 D6/D7), through a spare PCIe port reserved with a hotplug ceiling (D3); read back with `domblklist`, complete when the guest agent lists one more disk; unit-tested, never run against a guest",
+            }),
             C::VmHotplugDiskRemove => S::NotImplemented,
-            C::VmHotplugNicAdd => S::NotImplemented,
+            C::VmHotplugNicAdd => bin(S::Partial {
+                detail: "`vm update --nic-add` attaches the same `<interface>` the boot XML writes, MAC pinned in the record; read back with `domiflist`, complete when the guest agent lists the MAC; unit-tested, never run against a guest",
+            }),
             C::VmHotplugNicRemove => S::NotImplemented,
             C::VmExtraDisks => bin(S::Partial {
                 detail: "`extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery",
@@ -925,7 +929,127 @@ fn parse_virtual_size(json: &str) -> Option<u64> {
         .as_u64()
 }
 
-// ---- hotplug (ADR-0068 Phases 2–3) -------------------------------------
+// ---- hotplug (ADR-0068 Phases 2–5) -------------------------------------
+
+/// Writes `xml` to the VM's state directory and attaches it live; the file is
+/// removed whatever the answer.
+fn attach_xml(
+    vmdir: &Path,
+    vm: &Vm,
+    uri: &str,
+    xml: &str,
+    what: &str,
+) -> delonix_model::Result<()> {
+    let path = vmdir.join(format!("{}.{what}.xml", vm.name));
+    std::fs::write(&path, xml).map_err(|e| {
+        delonix_model::Error::from(Error::Command {
+            context: "vm hotplug",
+            message: format!("{}: {e}", path.display()),
+        })
+    })?;
+    let file = path.to_string_lossy().into_owned();
+    let out = virsh_hotplug(
+        &attach_device_argv(uri, &vm.name, &file),
+        "virsh attach-device",
+    );
+    let _ = std::fs::remove_file(&path);
+    out.map(|_| ())
+}
+
+/// The targets `virsh domblklist` lists. Pure.
+fn parse_domblklist(out: &str) -> Vec<String> {
+    out.lines()
+        .skip_while(|l| !l.trim_start().starts_with('-'))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect()
+}
+
+/// The MACs `virsh domiflist` lists (its last column). Pure.
+fn parse_domiflist_macs(out: &str) -> Vec<String> {
+    out.lines()
+        .skip_while(|l| !l.trim_start().starts_with('-'))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().last().map(str::to_string))
+        .filter(|m| m.contains(':'))
+        .collect()
+}
+
+/// The first target letter of `bus` (`vd` for virtio, `sd` otherwise) the
+/// live domain does not use; `a` is the boot disk's. Pure.
+fn next_free_target(bus: &str, live: &[String]) -> Option<String> {
+    let prefix = if bus == "virtio" { "vd" } else { "sd" };
+    (b'b'..=b'z')
+        .map(|c| format!("{prefix}{}", c as char))
+        .find(|t| !live.contains(t))
+}
+
+/// The MAC of the VM's next extra NIC: derived from its name and the slot,
+/// like the primary's, and never one it already carries. Pure.
+fn extra_nic_mac(vm: &Vm) -> String {
+    let taken = |m: &str| {
+        m.eq_ignore_ascii_case(&vm.mac)
+            || vm
+                .boot
+                .extra_nics
+                .iter()
+                .any(|n| n.mac.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(m)))
+    };
+    (1..)
+        .map(|i| mac_for(&format!("{}#nic{i}", vm.name)))
+        .find(|m| !taken(m))
+        .unwrap_or_default()
+}
+
+/// How many disks the guest's agent lists — `None` without an agent.
+fn guest_disk_count(uri: &str, domain: &str) -> delonix_model::Result<Option<usize>> {
+    Ok(
+        qemu_agent_query(uri, domain, r#"{"execute":"guest-get-disks"}"#)?
+            .and_then(|v| v.as_array().map(Vec::len)),
+    )
+}
+
+/// D4 for a disk: complete when the guest lists one more disk than before
+/// the attach. Pure.
+fn disk_outcome(before: Option<usize>, after: Option<usize>) -> HotplugOutcome {
+    match (before, after) {
+        (Some(b), Some(a)) if a > b => HotplugOutcome::Complete,
+        (Some(b), Some(a)) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has the disk but the guest still lists {a} disk(s), as before ({b})"
+            ),
+        },
+        _ => HotplugOutcome::Partial {
+            reason: "the domain took the disk, but no guest agent answers to say the guest \
+                     sees it (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
+/// D4 for a NIC: complete when the guest's agent lists an interface with
+/// that MAC. Pure.
+fn nic_outcome(mac: &str, interfaces: Option<&serde_json::Value>) -> HotplugOutcome {
+    let Some(list) = interfaces.and_then(|v| v.as_array()) else {
+        return HotplugOutcome::Partial {
+            reason: "the domain took the NIC, but no guest agent answers to say the guest \
+                     sees it (ADR-0068 D4)"
+                .into(),
+        };
+    };
+    let seen = list.iter().any(|i| {
+        i.get("hardware-address")
+            .and_then(|m| m.as_str())
+            .is_some_and(|m| m.eq_ignore_ascii_case(mac))
+    });
+    if seen {
+        HotplugOutcome::Complete
+    } else {
+        HotplugOutcome::Partial {
+            reason: format!("the domain has the NIC {mac} but the guest does not list it yet"),
+        }
+    }
+}
 
 /// The connection a RUNNING domain lives on, or an error naming it.
 fn live_domain_uri(vm: &Vm) -> delonix_model::Result<&'static str> {
@@ -1304,6 +1428,80 @@ fn libvirt_vcpu_xml(vcpus: u32, max: Option<u32>) -> String {
     s
 }
 
+/// One extra disk's `<disk>` element at `target` — the SAME text the boot XML
+/// and a live `attach-device` use, so a hot-added disk boots next time as the
+/// guest saw it. Pure.
+fn libvirt_extra_disk_xml(d: &ExtraDisk, target: &str) -> String {
+    let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
+    let device = if d.device.is_empty() {
+        "disk"
+    } else {
+        &d.device
+    };
+    let fmt = if d.format.is_empty() {
+        "qcow2"
+    } else {
+        &d.format
+    };
+    let mut s = format!("    <disk type='file' device='{}'>\n", xml_escape(device));
+    s.push_str(&format!(
+        "      <driver name='qemu' type='{}'/>\n",
+        xml_escape(fmt)
+    ));
+    s.push_str(&format!(
+        "      <source file='{}'/>\n",
+        xml_escape(&d.source)
+    ));
+    s.push_str(&format!(
+        "      <target dev='{}' bus='{}'/>\n",
+        xml_escape(target),
+        xml_escape(bus)
+    ));
+    if d.read_only {
+        s.push_str("      <readonly/>\n");
+    }
+    s.push_str("    </disk>\n");
+    s
+}
+
+/// One extra NIC's `<interface>` — the same text for the boot XML and a live
+/// `attach-device`. Pure.
+fn libvirt_extra_nic_xml(n: &ExtraNic) -> String {
+    let model = if n.model.is_empty() {
+        "virtio"
+    } else {
+        &n.model
+    };
+    let (itype, src) = match n.kind.as_str() {
+        "bridge" => (
+            "bridge",
+            n.source
+                .as_deref()
+                .map(|b| format!("      <source bridge='{}'/>\n", xml_escape(b))),
+        ),
+        "user" => ("user", None),
+        _ => (
+            "network",
+            Some(format!(
+                "      <source network='{}'/>\n",
+                xml_escape(n.source.as_deref().unwrap_or("default"))
+            )),
+        ),
+    };
+    let mut s = format!("    <interface type='{itype}'>\n");
+    if let Some(src) = src {
+        s.push_str(&src);
+    }
+    if let Some(m) = &n.mac {
+        s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(m)));
+    }
+    s.push_str(&format!(
+        "      <model type='{}'/>\n    </interface>\n",
+        xml_escape(model)
+    ));
+    s
+}
+
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Full-domain escape hatch: the manifest author owns the entire XML. The
     // rootless seclabel is still injected at boot (`create`, via the </domain>
@@ -1496,16 +1694,6 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     let mut sd = b'b'; // next sata/scsi letter (kept from when the seed sat on sda)
     for d in &cfg.extra_disks {
         let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
-        let device = if d.device.is_empty() {
-            "disk"
-        } else {
-            &d.device
-        };
-        let fmt = if d.format.is_empty() {
-            "qcow2"
-        } else {
-            &d.format
-        };
         let target = match &d.target {
             Some(t) => t.clone(),
             None if bus == "virtio" => {
@@ -1519,27 +1707,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
                 t
             }
         };
-        s.push_str(&format!(
-            "    <disk type='file' device='{}'>\n",
-            xml_escape(device)
-        ));
-        s.push_str(&format!(
-            "      <driver name='qemu' type='{}'/>\n",
-            xml_escape(fmt)
-        ));
-        s.push_str(&format!(
-            "      <source file='{}'/>\n",
-            xml_escape(&d.source)
-        ));
-        s.push_str(&format!(
-            "      <target dev='{}' bus='{}'/>\n",
-            xml_escape(&target),
-            xml_escape(bus)
-        ));
-        if d.read_only {
-            s.push_str("      <readonly/>\n");
-        }
-        s.push_str("    </disk>\n");
+        s.push_str(&libvirt_extra_disk_xml(d, &target));
     }
     // cloud-init seed (NoCloud), as a read-only VIRTIO disk.
     //
@@ -1580,38 +1748,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str(&libvirt_interface_xml(cfg, mac));
     // Extra NICs (typed): additional interfaces beyond the primary one.
     for n in &cfg.extra_nics {
-        let model = if n.model.is_empty() {
-            "virtio"
-        } else {
-            &n.model
-        };
-        let (itype, src) = match n.kind.as_str() {
-            "bridge" => (
-                "bridge",
-                n.source
-                    .as_deref()
-                    .map(|b| format!("      <source bridge='{}'/>\n", xml_escape(b))),
-            ),
-            "user" => ("user", None),
-            _ => (
-                "network",
-                Some(format!(
-                    "      <source network='{}'/>\n",
-                    xml_escape(n.source.as_deref().unwrap_or("default"))
-                )),
-            ),
-        };
-        s.push_str(&format!("    <interface type='{itype}'>\n"));
-        if let Some(src) = src {
-            s.push_str(&src);
-        }
-        if let Some(m) = &n.mac {
-            s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(m)));
-        }
-        s.push_str(&format!(
-            "      <model type='{}'/>\n    </interface>\n",
-            xml_escape(model)
-        ));
+        s.push_str(&libvirt_extra_nic_xml(n));
     }
     // serial console (boot logs) — a capture FILE or an interactive pty, never
     // both: one guest `/dev/console` maps to one serial port. See
@@ -2657,6 +2794,148 @@ impl VmBackend for LibvirtBackend {
                 _ => std::thread::sleep(std::time::Duration::from_millis(500)),
             }
         }
+    }
+
+    /// `vm update --disk-add` on a running domain (ADR-0068 Phase 4): the
+    /// SAME `<disk>` the boot XML writes, at the next target letter free in
+    /// the LIVE domain (pinned, so the next boot keeps it), through
+    /// `attach-device --live` — which needs a spare PCIe port on q35 (D3).
+    /// Read back with `domblklist`; the guest agent's disk list growing is
+    /// what makes it complete (D4).
+    fn hotplug_add_disk(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        disk: &ExtraDisk,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
+        if disk.device == "cdrom" {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}': a cdrom is not hot-plugged — stop the VM and add it",
+                vm.name
+            ))
+            .into());
+        }
+        if !Path::new(&disk.source).is_file() {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}': the disk to add '{}' is not a file on this host",
+                vm.name, disk.source
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        let live = parse_domblklist(&virsh_hotplug(
+            &["-c", uri, "domblklist", "--domain", &vm.name],
+            "virsh domblklist",
+        )?);
+        let bus = if disk.bus.is_empty() {
+            "virtio"
+        } else {
+            &disk.bus
+        };
+        let target = match &disk.target {
+            Some(t) if live.contains(t) => {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' already has a disk at '{t}'",
+                    vm.name
+                ))
+                .into())
+            }
+            Some(t) => t.clone(),
+            None => next_free_target(bus, &live).ok_or_else(|| {
+                delonix_model::Error::from(Error::InvalidResize(format!(
+                    "VM '{}' has no free {bus} target letter left",
+                    vm.name
+                )))
+            })?,
+        };
+        let mut pinned = disk.clone();
+        pinned.target = Some(target.clone());
+        let before = guest_disk_count(uri, &vm.name)?;
+        attach_xml(
+            vmdir,
+            vm,
+            uri,
+            &libvirt_extra_disk_xml(&pinned, &target),
+            "disk",
+        )?;
+        let after_live = parse_domblklist(&virsh_hotplug(
+            &["-c", uri, "domblklist", "--domain", &vm.name],
+            "virsh domblklist",
+        )?);
+        if !after_live.contains(&target) {
+            return Err(Error::Command {
+                context: "virsh attach-device",
+                message: format!(
+                    "libvirt accepted the disk but '{target}' is not in the domain's disk list"
+                ),
+            }
+            .into());
+        }
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let after = guest_disk_count(uri, &vm.name)?;
+            let outcome = disk_outcome(before, after);
+            match outcome {
+                HotplugOutcome::Complete => return Ok((pinned, outcome)),
+                partial if std::time::Instant::now() >= deadline => return Ok((pinned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// `vm update --nic-add` on a running domain (ADR-0068 Phase 5): the
+    /// SAME `<interface>` the boot XML writes, with a MAC derived from the VM
+    /// and pinned, through `attach-device --live`. Read back with
+    /// `domiflist`; the guest agent listing that MAC makes it complete (D4).
+    fn hotplug_add_nic(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        nic: &ExtraNic,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
+        let uri = live_domain_uri(vm)?;
+        let mut pinned = nic.clone();
+        let mac = match &nic.mac {
+            Some(m) => m.clone(),
+            None => extra_nic_mac(vm),
+        };
+        pinned.mac = Some(mac.clone());
+        attach_xml(vmdir, vm, uri, &libvirt_extra_nic_xml(&pinned), "nic")?;
+        let macs = parse_domiflist_macs(&virsh_hotplug(
+            &["-c", uri, "domiflist", "--domain", &vm.name],
+            "virsh domiflist",
+        )?);
+        if !macs.iter().any(|m| m.eq_ignore_ascii_case(&mac)) {
+            return Err(Error::Command {
+                context: "virsh attach-device",
+                message: format!(
+                    "libvirt accepted the NIC but {mac} is not in the domain's interface list"
+                ),
+            }
+            .into());
+        }
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let guest = qemu_agent_query(
+                uri,
+                &vm.name,
+                r#"{"execute":"guest-network-get-interfaces"}"#,
+            )?;
+            let outcome = nic_outcome(&mac, guest.as_ref());
+            match outcome {
+                HotplugOutcome::Complete => return Ok((pinned, outcome)),
+                partial if std::time::Instant::now() >= deadline => return Ok((pinned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// Extra disks/NICs of a STOPPED VM: the record is the whole definition
+    /// and the next boot rebuilds the domain from it, so nothing else changes.
+    fn change_devices_cold(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
@@ -4247,6 +4526,91 @@ mod hotplug_tests {
             x.contains("<memory model='dimm'>") && x.contains("<size unit='KiB'>1048576</size>")
         );
         assert!(x.contains("<node>0</node>"));
+    }
+
+    /// Phases 4–5: what a live disk/NIC add reads, and how it picks a target
+    /// the live domain does not use (pinned, so the next boot agrees).
+    #[test]
+    fn a_hot_disk_takes_a_free_target_and_the_reads_parse_virsh() {
+        let blk = " Target   Source\n------------------------------------\n vda      /o.qcow2\n vdb      /seed.iso\n";
+        let live = parse_domblklist(blk);
+        assert_eq!(live, ["vda", "vdb"]);
+        assert_eq!(next_free_target("virtio", &live).as_deref(), Some("vdc"));
+        assert_eq!(next_free_target("sata", &live).as_deref(), Some("sdb"));
+        let ifl = " Interface   Type      Source    Model    MAC\n-------------------------------------------------------\n vnet0       network   default   virtio   52:54:00:12:34:56\n";
+        assert_eq!(parse_domiflist_macs(ifl), ["52:54:00:12:34:56"]);
+    }
+
+    /// The boot XML and the live attach use the SAME text — a hot-added disk
+    /// boots next time as the guest saw it.
+    #[test]
+    fn the_attach_xml_is_the_boot_xml() {
+        let d = ExtraDisk {
+            source: "/d.qcow2".into(),
+            target: Some("vdc".into()),
+            ..Default::default()
+        };
+        let mut c = cfg(1, "512M", None, None);
+        c.extra_disks = vec![d.clone()];
+        let boot = libvirt_domain_xml(&c, "/o", "m");
+        assert!(boot.contains(&libvirt_extra_disk_xml(&d, "vdc")), "{boot}");
+        let n = ExtraNic {
+            kind: "bridge".into(),
+            source: Some("br0".into()),
+            mac: Some("52:54:00:00:00:02".into()),
+            ..Default::default()
+        };
+        c.extra_nics = vec![n.clone()];
+        let boot = libvirt_domain_xml(&c, "/o", "m");
+        assert!(boot.contains(&libvirt_extra_nic_xml(&n)), "{boot}");
+    }
+
+    #[test]
+    fn a_hot_nic_gets_a_mac_the_vm_does_not_carry() {
+        let mut vm = Vm::new(
+            "hp".into(),
+            String::new(),
+            String::new(),
+            1,
+            "512M".into(),
+            "default".into(),
+            String::new(),
+            mac_for("hp"),
+            String::new(),
+        );
+        let first = extra_nic_mac(&vm);
+        assert_ne!(first, vm.mac);
+        vm.boot.extra_nics.push(ExtraNic {
+            mac: Some(first.clone()),
+            ..Default::default()
+        });
+        assert_ne!(extra_nic_mac(&vm), first);
+    }
+
+    #[test]
+    fn a_disk_or_nic_is_complete_only_when_the_guest_sees_it() {
+        assert_eq!(disk_outcome(Some(2), Some(3)), HotplugOutcome::Complete);
+        assert!(matches!(
+            disk_outcome(Some(2), Some(2)),
+            HotplugOutcome::Partial { .. }
+        ));
+        assert!(matches!(
+            disk_outcome(None, None),
+            HotplugOutcome::Partial { .. }
+        ));
+        let ifs = serde_json::json!([{"name": "eth1", "hardware-address": "52:54:00:AA:00:01"}]);
+        assert_eq!(
+            nic_outcome("52:54:00:aa:00:01", Some(&ifs)),
+            HotplugOutcome::Complete
+        );
+        assert!(matches!(
+            nic_outcome("52:54:00:aa:00:02", Some(&ifs)),
+            HotplugOutcome::Partial { .. }
+        ));
+        assert!(matches!(
+            nic_outcome("x", None),
+            HotplugOutcome::Partial { .. }
+        ));
     }
 
     #[test]

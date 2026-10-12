@@ -1362,6 +1362,18 @@ pub enum VmCmd {
         /// hot-added resource before reporting `partial` (ADR-0068 D4).
         #[arg(long, default_value = "60")]
         wait_secs: u64,
+        /// Attach a disk image (`<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repeatable.
+        #[arg(long = "disk-add", value_name = "SPEC")]
+        disk_add: Vec<String>,
+        /// Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable.
+        #[arg(long = "nic-add", value_name = "SPEC")]
+        nic_add: Vec<String>,
+        /// Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10).
+        #[arg(long = "disk-rm", value_name = "TARGET|PATH")]
+        disk_rm: Vec<String>,
+        /// Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10).
+        #[arg(long = "nic-rm", value_name = "MAC")]
+        nic_rm: Vec<String>,
     },
     /// Move a VM to another node of its cluster — same VM, same record.
     ///
@@ -1943,6 +1955,109 @@ fn manifest_ceilings(
         None => None,
     };
     Ok((vcpus_max, memory_max_mib))
+}
+
+/// `vm update`'s device flags as engine changes, removals first — so a disk
+/// replaced in one command is released before its successor is attached
+/// (the order `container update` uses). Pure.
+fn device_changes(
+    disk_add: &[String],
+    nic_add: &[String],
+    disk_rm: &[String],
+    nic_rm: &[String],
+) -> Result<Vec<delonix_vm::DeviceChange>> {
+    let mut out = Vec::new();
+    for d in disk_rm {
+        out.push(delonix_vm::DeviceChange::RemoveDisk(d.trim().to_string()));
+    }
+    for m in nic_rm {
+        out.push(delonix_vm::DeviceChange::RemoveNic(m.trim().to_string()));
+    }
+    for d in disk_add {
+        out.push(delonix_vm::DeviceChange::AddDisk(parse_disk_add(d)?));
+    }
+    for n in nic_add {
+        out.push(delonix_vm::DeviceChange::AddNic(parse_nic_add(n)?));
+    }
+    Ok(out)
+}
+
+fn device_change_label(c: &delonix_vm::DeviceChange) -> String {
+    use delonix_vm::DeviceChange as D;
+    match c {
+        D::AddDisk(d) => super::po::tf("disk {disk} attached", &[("disk", &d.source)]),
+        D::AddNic(n) => super::po::tf(
+            "NIC on {source} attached",
+            &[("source", n.source.as_deref().unwrap_or(n.kind.as_str()))],
+        ),
+        D::RemoveDisk(k) => super::po::tf("disk {disk} removed", &[("disk", k)]),
+        D::RemoveNic(m) => super::po::tf("NIC {mac} removed", &[("mac", m)]),
+    }
+}
+
+/// `<path>[,bus=…][,format=…][,ro]`. The path is made absolute: the record
+/// outlives the directory the command ran in. Pure but for that.
+fn parse_disk_add(spec: &str) -> Result<delonix_vm::ExtraDisk> {
+    let mut parts = spec.split(',');
+    let path = parts.next().unwrap_or("").trim();
+    if path.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "--disk-add '{value}': expected `<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`",
+            &[("value", spec)],
+        )));
+    }
+    let source = std::path::absolute(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    let mut d = delonix_vm::ExtraDisk {
+        source,
+        ..Default::default()
+    };
+    for p in parts {
+        match p.trim().split_once('=') {
+            Some(("bus", v)) if matches!(v, "virtio" | "sata" | "scsi") => d.bus = v.into(),
+            Some(("format", v)) if matches!(v, "qcow2" | "raw") => d.format = v.into(),
+            None if p.trim() == "ro" => d.read_only = true,
+            _ => {
+                return Err(Error::Invalid(super::po::tf(
+                    "--disk-add '{value}': '{part}' is not one of bus=virtio|sata|scsi, \
+                     format=qcow2|raw, ro",
+                    &[("value", spec), ("part", p.trim())],
+                )))
+            }
+        }
+    }
+    Ok(d)
+}
+
+/// `network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`. Pure.
+fn parse_nic_add(spec: &str) -> Result<delonix_vm::ExtraNic> {
+    let bad = || {
+        Error::Invalid(super::po::tf(
+            "--nic-add '{value}': expected `network:<name>`, `bridge:<name>` or `user`, then \
+             `[,model=…][,mac=…]`",
+            &[("value", spec)],
+        ))
+    };
+    let mut parts = spec.split(',');
+    let head = parts.next().unwrap_or("").trim();
+    let mut n = delonix_vm::ExtraNic::default();
+    match head.split_once(':') {
+        Some((kind @ ("network" | "bridge"), src)) if !src.trim().is_empty() => {
+            n.kind = kind.into();
+            n.source = Some(src.trim().into());
+        }
+        None if head == "user" => n.kind = "user".into(),
+        _ => return Err(bad()),
+    }
+    for p in parts {
+        match p.trim().split_once('=') {
+            Some(("model", v)) if !v.is_empty() => n.model = v.into(),
+            Some(("mac", v)) if v.split(':').count() == 6 => n.mac = Some(v.into()),
+            _ => return Err(bad()),
+        }
+    }
+    Ok(n)
 }
 
 /// `vm resize`'s flags as the engine's request. Pure.
@@ -3802,15 +3917,48 @@ pub fn run(action: VmCmd) -> Result<()> {
             vcpus,
             memory,
             wait_secs,
+            disk_add,
+            nic_add,
+            disk_rm,
+            nic_rm,
         } => {
             let wait = std::time::Duration::from_secs(wait_secs);
+            let changes = device_changes(&disk_add, &nic_add, &disk_rm, &nic_rm)?;
+            let mut partial_reason: Option<String> = None;
+            for change in changes {
+                let label = device_change_label(&change);
+                let (_, outcome) = delonix_vm::change_device(&base, &name, change, wait)?;
+                match outcome {
+                    None => println!("{name}: {label}"),
+                    Some(delonix_vm::HotplugOutcome::Complete) => {
+                        println!("{name}: {label} (complete)")
+                    }
+                    Some(delonix_vm::HotplugOutcome::Partial { reason }) => {
+                        println!("{name}: {label} (partial)");
+                        partial_reason.get_or_insert(reason);
+                    }
+                }
+            }
+            if vcpus.is_none() && memory.is_none() {
+                if let Some(reason) = partial_reason {
+                    return Err(Error::coded(8504, Error::Timeout(reason)));
+                }
+                if disk_add.is_empty()
+                    && nic_add.is_empty()
+                    && disk_rm.is_empty()
+                    && nic_rm.is_empty()
+                {
+                    // The engine's own refusal names what to give.
+                    delonix_vm::update(&base, &name, None, None, wait)?;
+                }
+                return Ok(());
+            }
             let (vm, outcomes) = delonix_vm::update(&base, &name, vcpus, memory.as_deref(), wait)?;
             if outcomes.is_empty() {
                 // Cold path: the VM was stopped, so `vm update` IS `vm resize` there.
                 println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
                 return Ok(());
             }
-            let mut partial_reason: Option<String> = None;
             for (field, outcome) in outcomes {
                 let value = match field {
                     "vcpus" => vm.vcpus.to_string(),
@@ -6892,5 +7040,69 @@ mod reboot_class_tests {
         assert!(
             super::resize_request_from_flags(None, None, None, None, Some("8GB"), false).is_err()
         );
+    }
+}
+
+/// Sprint 18: `vm update --disk-add/--nic-add/--disk-rm/--nic-rm` (ADR-0068 D7/D10).
+#[cfg(test)]
+mod device_flag_tests {
+    #[test]
+    fn a_disk_spec_parses_and_a_bad_one_is_refused_by_name() {
+        let d = super::parse_disk_add("/d/x.qcow2,bus=sata,format=raw,ro").unwrap();
+        assert_eq!(d.source, "/d/x.qcow2");
+        assert_eq!(
+            (d.bus.as_str(), d.format.as_str(), d.read_only),
+            ("sata", "raw", true)
+        );
+        let rel = super::parse_disk_add("x.qcow2").unwrap();
+        assert!(
+            std::path::Path::new(&rel.source).is_absolute(),
+            "{}",
+            rel.source
+        );
+        for bad in ["", ",ro", "/x,bus=nvme", "/x,format=vmdk", "/x,rw"] {
+            assert!(super::parse_disk_add(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_nic_spec_parses_and_a_bad_one_is_refused() {
+        let n = super::parse_nic_add("bridge:br0,model=e1000,mac=52:54:00:00:00:09").unwrap();
+        assert_eq!(
+            (
+                n.kind.as_str(),
+                n.source.as_deref(),
+                n.model.as_str(),
+                n.mac.as_deref()
+            ),
+            ("bridge", Some("br0"), "e1000", Some("52:54:00:00:00:09"))
+        );
+        assert_eq!(super::parse_nic_add("user").unwrap().kind, "user");
+        for bad in [
+            "",
+            "bridge:",
+            "vlan:3",
+            "network:default,mac=xx",
+            "user,speed=1",
+        ] {
+            assert!(super::parse_nic_add(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// Removals first: a disk replaced in one command is released before its
+    /// successor is attached.
+    #[test]
+    fn removals_run_before_additions() {
+        let c = super::device_changes(
+            &["/new.qcow2".into()],
+            &["user".into()],
+            &["vdc".into()],
+            &["52:54:00:00:00:09".into()],
+        )
+        .unwrap();
+        assert!(matches!(c[0], delonix_vm::DeviceChange::RemoveDisk(_)));
+        assert!(matches!(c[1], delonix_vm::DeviceChange::RemoveNic(_)));
+        assert!(matches!(c[2], delonix_vm::DeviceChange::AddDisk(_)));
+        assert!(matches!(c[3], delonix_vm::DeviceChange::AddNic(_)));
     }
 }

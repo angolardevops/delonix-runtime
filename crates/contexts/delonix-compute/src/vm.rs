@@ -780,8 +780,7 @@ where
     /// Only ADD (D10): a target at or below what the VM already has is
     /// refused, naming `vm resize` (stopped) as the way to decrease — hot
     /// removal is a separate, later capability, not a silent downgrade to
-    /// the cold path. Disk and NIC hotplug are later phases (3/4/5); this is
-    /// CPU/memory only.
+    /// the cold path. Disks and NICs go through [`Self::change_device`].
     ///
     /// Each field that changes is written to the record as soon as the
     /// backend confirms it (D6, "hypervisor first, read-back, record last,
@@ -872,6 +871,64 @@ where
         }
         Ok((vm, outcomes))
     }
+    /// `vm update --disk-add/--nic-add/--disk-rm/--nic-rm` (ADR-0068 D7/D10):
+    /// one device change. On a RUNNING VM an ADD is hot-plugged — hypervisor
+    /// first, read back, record last (D6), with the target/MAC the hypervisor
+    /// gave pinned in the record so a restart keeps it where the guest saw it;
+    /// a REMOVAL is refused by name (D10: hot removal needs the guest to
+    /// release the device first, and a lost answer would leave a disk the
+    /// guest still writes to detached). On a STOPPED VM both change the
+    /// record, and the backend is told ([`VmBackend::change_devices_cold`]).
+    /// A paused VM is refused: unpause or stop it first.
+    pub fn change_device(
+        &self,
+        name: &str,
+        change: DeviceChange,
+        wait: Duration,
+    ) -> Result<(Vm, Option<HotplugOutcome>)> {
+        let mut vm = self.load_vm(name)?;
+        let vmdir = self.vmdir();
+        let backend = self.backends.for_vm(&vm)?;
+        match vm.status {
+            Status::Paused => Err(Error::ResizeNeedsStopped(format!(
+                "VM '{name}' is paused: unpause it (`delonix vm unpause {name}`) or stop it \
+                 before changing its devices"
+            ))),
+            Status::Running => {
+                let outcome = match change {
+                    DeviceChange::AddDisk(d) => {
+                        check_new_disk(&vm, &d)?;
+                        let (d, o) = backend.hotplug_add_disk(&vmdir, &vm, &d, wait)?;
+                        vm.boot.extra_disks.push(d);
+                        o
+                    }
+                    DeviceChange::AddNic(n) => {
+                        check_new_nic(&vm, &n)?;
+                        let (n, o) = backend.hotplug_add_nic(&vmdir, &vm, &n, wait)?;
+                        vm.boot.extra_nics.push(n);
+                        o
+                    }
+                    DeviceChange::RemoveDisk(_) | DeviceChange::RemoveNic(_) => {
+                        return Err(Error::ResizeNeedsStopped(format!(
+                            "VM '{name}' is running: a disk or NIC is not removed live \
+                             (ADR-0068 D10) — `delonix vm stop {name}`, remove it, and start it"
+                        )))
+                    }
+                };
+                self.repo.set(name, &vm).map_err(Error::from)?;
+                Ok((vm, Some(outcome)))
+            }
+            _ => {
+                let mut next = vm.clone();
+                apply_device_change(&mut next, change)?;
+                backend.change_devices_cold(&vmdir, &next)?;
+                vm = next;
+                self.repo.set(name, &vm).map_err(Error::from)?;
+                Ok((vm, None))
+            }
+        }
+    }
+
     /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
     /// ADR-0053 decision 1; see [`VmBackend::move_to_node`]).
     ///
@@ -1417,6 +1474,98 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
 /// destructures: the fallback was how twenty-one fields quietly became
 /// defaults on every restart. Spelling every field out means a new one cannot
 /// be silently dropped here either.
+/// One device change of `vm update` (ADR-0068 D7/D10). A disk is removed
+/// by its pinned target (`vdc`) or its source path; a NIC by its MAC.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeviceChange {
+    AddDisk(crate::ExtraDisk),
+    AddNic(crate::ExtraNic),
+    RemoveDisk(String),
+    RemoveNic(String),
+}
+
+/// A disk the VM already has (same source, or same pinned target) is not
+/// added twice. Pure.
+fn check_new_disk(vm: &Vm, d: &crate::ExtraDisk) -> Result<()> {
+    if d.source.trim().is_empty() {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}': a disk to add needs a source",
+            vm.name
+        )));
+    }
+    let dup = vm.boot.extra_disks.iter().any(|x| {
+        x.source == d.source || (d.target.is_some() && x.target.is_some() && x.target == d.target)
+    });
+    if dup {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}' already has the disk '{}'",
+            vm.name,
+            d.target.as_deref().unwrap_or(&d.source)
+        )));
+    }
+    Ok(())
+}
+
+/// A NIC whose MAC the VM already carries is not added twice. Pure.
+fn check_new_nic(vm: &Vm, n: &crate::ExtraNic) -> Result<()> {
+    let same = |m: &str| n.mac.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(m));
+    if same(&vm.mac)
+        || vm
+            .boot
+            .extra_nics
+            .iter()
+            .any(|x| x.mac.as_deref().is_some_and(same))
+    {
+        return Err(Error::InvalidResize(format!(
+            "VM '{}' already has a NIC with MAC {}",
+            vm.name,
+            n.mac.as_deref().unwrap_or("")
+        )));
+    }
+    Ok(())
+}
+
+/// The record as a device change on a STOPPED VM leaves it. Pure.
+pub fn apply_device_change(vm: &mut Vm, change: DeviceChange) -> Result<()> {
+    match change {
+        DeviceChange::AddDisk(d) => {
+            check_new_disk(vm, &d)?;
+            vm.boot.extra_disks.push(d);
+        }
+        DeviceChange::AddNic(n) => {
+            check_new_nic(vm, &n)?;
+            vm.boot.extra_nics.push(n);
+        }
+        DeviceChange::RemoveDisk(key) => {
+            let before = vm.boot.extra_disks.len();
+            vm.boot
+                .extra_disks
+                .retain(|d| d.source != key && d.target.as_deref() != Some(key.as_str()));
+            if vm.boot.extra_disks.len() == before {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' has no extra disk '{key}' (name its target, e.g. vdc, or its source)",
+                    vm.name
+                )));
+            }
+        }
+        DeviceChange::RemoveNic(mac) => {
+            let before = vm.boot.extra_nics.len();
+            vm.boot.extra_nics.retain(|n| {
+                !n.mac
+                    .as_deref()
+                    .is_some_and(|m| m.eq_ignore_ascii_case(&mac))
+            });
+            if vm.boot.extra_nics.len() == before {
+                return Err(Error::InvalidResize(format!(
+                    "VM '{}' has no extra NIC with MAC {mac} (the primary NIC is not removable)",
+                    vm.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn config_from(vm: &Vm) -> VmConfig {
     let b = &vm.boot;
     VmConfig {
@@ -1712,6 +1861,50 @@ mod tests {
                 .borrow_mut()
                 .push(format!("resize_cold {} {vcpus} {memory_mib}", vm.name));
             *self.0.resized.borrow_mut() = Some(vm.clone());
+            Ok(())
+        }
+        fn hotplug_add_disk(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            disk: &crate::ExtraDisk,
+            _wait: Duration,
+        ) -> delonix_model::Result<(crate::ExtraDisk, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_disk {} {}", vm.name, disk.source));
+            let mut d = disk.clone();
+            d.target = Some("vdz".into());
+            Ok((d, HotplugOutcome::Complete))
+        }
+        fn hotplug_add_nic(
+            &self,
+            _vmdir: &Path,
+            vm: &Vm,
+            nic: &crate::ExtraNic,
+            _wait: Duration,
+        ) -> delonix_model::Result<(crate::ExtraNic, HotplugOutcome)> {
+            self.0
+                .calls
+                .borrow_mut()
+                .push(format!("hotplug_add_nic {}", vm.name));
+            let mut n = nic.clone();
+            n.mac = Some("52:54:00:aa:bb:cc".into());
+            Ok((
+                n,
+                HotplugOutcome::Partial {
+                    reason: "no agent".into(),
+                },
+            ))
+        }
+        fn change_devices_cold(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+            self.0.calls.borrow_mut().push(format!(
+                "change_devices_cold {} disks={} nics={}",
+                vm.name,
+                vm.boot.extra_disks.len(),
+                vm.boot.extra_nics.len()
+            ));
             Ok(())
         }
         fn hotplug_add_cpu(
@@ -2268,5 +2461,102 @@ mod tests {
             .update("app", Some(2), Some("128M"), Duration::from_millis(1))
             .expect("inside the ceiling");
         assert_eq!(vm.vcpus, 2);
+    }
+
+    /// ADR-0068 D6/D7: a hot-added disk lands in the record with the target
+    /// the hypervisor gave it PINNED, so the next boot keeps it where the
+    /// guest saw it; a NIC with its MAC pinned and its partial outcome.
+    #[test]
+    fn a_hot_added_device_reaches_the_record_pinned() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        let (vm, o) = e
+            .change_device("app", DeviceChange::AddDisk(disk.clone()), Duration::ZERO)
+            .unwrap();
+        assert_eq!(o, Some(HotplugOutcome::Complete));
+        assert_eq!(vm.boot.extra_disks[0].target.as_deref(), Some("vdz"));
+        assert_eq!(e.load_vm("app").unwrap().boot.extra_disks.len(), 1);
+        let (vm, o) = e
+            .change_device(
+                "app",
+                DeviceChange::AddNic(crate::ExtraNic {
+                    kind: "network".into(),
+                    source: Some("default".into()),
+                    ..Default::default()
+                }),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert!(matches!(o, Some(HotplugOutcome::Partial { .. })));
+        assert_eq!(
+            vm.boot.extra_nics[0].mac.as_deref(),
+            Some("52:54:00:aa:bb:cc")
+        );
+        // The same disk twice is refused before the backend.
+        let before = calls(&seen).len();
+        assert!(e
+            .change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .is_err());
+        assert_eq!(calls(&seen).len(), before);
+    }
+
+    /// D10: nothing is removed live; the refusal names `vm stop`, and the
+    /// record keeps the disk.
+    #[test]
+    fn a_device_is_not_removed_live_and_is_removed_cold() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        e.change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .unwrap();
+        let err = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveDisk("vdz".into()),
+                Duration::ZERO,
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("D10") && err.to_string().contains("vm stop"),
+            "{err}"
+        );
+        assert_eq!(e.load_vm("app").unwrap().boot.extra_disks.len(), 1);
+        e.stop("app").unwrap();
+        let (vm, o) = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveDisk("vdz".into()),
+                Duration::ZERO,
+            )
+            .unwrap();
+        assert_eq!(o, None, "cold: nothing live to report");
+        assert!(vm.boot.extra_disks.is_empty());
+        assert!(
+            calls(&seen)
+                .iter()
+                .any(|c| c == "change_devices_cold app disks=0 nics=0"),
+            "{:?}",
+            calls(&seen)
+        );
+        // A key the VM does not have is refused, by name.
+        let err = e
+            .change_device(
+                "app",
+                DeviceChange::RemoveNic("52:54:00:00:00:09".into()),
+                Duration::ZERO,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("52:54:00:00:00:09"), "{err}");
     }
 }

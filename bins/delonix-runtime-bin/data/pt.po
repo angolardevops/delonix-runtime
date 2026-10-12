@@ -15884,3 +15884,36 @@ msgstr "Autoriza PARAR e arrancar um recurso cuja mudança só converge com um r
 
 msgid "Authorize stopping and starting a resource whose change converges only across a reboot — same meaning as in `apply`"
 msgstr "Autoriza parar e arrancar um recurso cuja mudança só converge com um reinício — o mesmo significado que no `apply`"
+
+msgid "Attach a disk image (`<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repeatable"
+msgstr "Liga uma imagem de disco (`<caminho>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`), repetível"
+
+msgid "Attach a NIC (`network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`), repeatable"
+msgstr "Liga uma NIC (`network:<nome>`, `bridge:<nome>` ou `user`, e depois `[,model=…][,mac=…]`), repetível"
+
+msgid "Remove an extra disk by its target (`vdc`) or source path — stopped VMs only (ADR-0068 D10)"
+msgstr "Remove um disco extra pelo seu alvo (`vdc`) ou caminho de origem — só em VMs paradas (ADR-0068 D10)"
+
+msgid "Remove an extra NIC by its MAC — stopped VMs only (ADR-0068 D10)"
+msgstr "Remove uma NIC extra pelo seu MAC — só em VMs paradas (ADR-0068 D10)"
+
+msgid "--disk-add '{value}': expected `<path>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
+msgstr "--disk-add '{value}': esperava `<caminho>[,bus=virtio|sata|scsi][,format=qcow2|raw][,ro]`"
+
+msgid "--disk-add '{value}': '{part}' is not one of bus=virtio|sata|scsi, format=qcow2|raw, ro"
+msgstr "--disk-add '{value}': '{part}' não é um de bus=virtio|sata|scsi, format=qcow2|raw, ro"
+
+msgid "--nic-add '{value}': expected `network:<name>`, `bridge:<name>` or `user`, then `[,model=…][,mac=…]`"
+msgstr "--nic-add '{value}': esperava `network:<nome>`, `bridge:<nome>` ou `user`, e depois `[,model=…][,mac=…]`"
+
+msgid "disk {disk} attached"
+msgstr "disco {disk} ligado"
+
+msgid "NIC on {source} attached"
+msgstr "NIC em {source} ligada"
+
+msgid "disk {disk} removed"
+msgstr "disco {disk} removido"
+
+msgid "NIC {mac} removed"
+msgstr "NIC {mac} removida"

@@ -53,7 +53,7 @@ pub mod provider;
 use delonix_compute::ports::VmBackends;
 use delonix_compute::vm::VmEngine;
 pub use delonix_compute::vm::{console_socket, serial_log_path};
-pub use delonix_compute::vm::{valid_vm_name, Destroyed, ResizeRequest};
+pub use delonix_compute::vm::{valid_vm_name, Destroyed, DeviceChange, ResizeRequest};
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
 pub use delonix_compute::vm_registry::set_network;
@@ -712,6 +712,17 @@ pub fn update(
     wait: std::time::Duration,
 ) -> Result<(Vm, Vec<(&'static str, HotplugOutcome)>)> {
     engine(base)?.update(name, vcpus, memory, wait)
+}
+
+/// One extra disk/NIC change (`vm update --disk-add/--nic-add/--disk-rm/
+/// --nic-rm`, ADR-0068 D7/D10); see `VmEngine::change_device`.
+pub fn change_device(
+    base: &Path,
+    name: &str,
+    change: DeviceChange,
+    wait: std::time::Duration,
+) -> Result<(Vm, Option<HotplugOutcome>)> {
+    engine(base)?.change_device(name, change, wait)
 }
 
 /// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
