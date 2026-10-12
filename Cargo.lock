@@ -1218,6 +1218,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-storage-helper"
+version = "5.0.2"
+dependencies = [
+ "delonix-model",
+ "delonix-provider-btrfs",
+ "delonix-provider-lvm",
+ "delonix-provider-zfs",
+ "delonix-storage",
+ "delonix-volume",
+ "libc",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "delonix-telemetry"
 version = "5.0.2"
 dependencies = [

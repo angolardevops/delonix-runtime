@@ -1,0 +1,33 @@
+# delonix-storage-helper.socket — the privileged storage pool helper's socket
+# (ADR-0067 D3, option A).
+#
+# Install as root, with the binary root-owned and writable by root only (a
+# user who can replace it is root):
+#
+#   install -o root -g root -m 0755 delonix-storage-helper /usr/local/sbin/
+#   groupadd --system delonix-storage
+#   usermod -aG delonix-storage <the engine's user>
+#   install -m 0644 delonix-storage-helper.socket \
+#       delonix-storage-helper@.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now delonix-storage-helper.socket
+#
+# One process per connection (Accept=yes): nothing stays resident between
+# requests, and a request never shares a process with another caller's.
+[Unit]
+Description=Delonix storage pool helper socket (ADR-0067)
+Documentation=https://github.com/angolardevops/delonix-runtime
+
+[Socket]
+ListenStream=/run/delonix-storage-helper.sock
+# Group delonix-storage connects; the helper also checks the caller's uid
+# (SO_PEERCRED) against the pool's allowUsers on every request.
+SocketUser=root
+SocketGroup=delonix-storage
+SocketMode=0660
+Accept=yes
+# A bound on concurrent root processes, whatever the callers do.
+MaxConnections=16
+MaxConnectionsPerSource=8
+
+[Install]
+WantedBy=sockets.target

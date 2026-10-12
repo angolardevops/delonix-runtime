@@ -85,6 +85,7 @@ LAYERS = {
     "delonix-mgmt-bin": BIN,  # `delonix-mgmt`, run by `delonix serve api`
     "delonix-node-api": INTERFACE,  # the node contract on the socket (ADR-0040 P5); replaces delonix-mgmt
     "delonix-node-api-bin": BIN,  # `delonix-node-api`, run by `delonix serve node-api`
+    "delonix-storage-helper": BIN,  # the privileged storage pool helper (ADR-0067 D3, P1)
 }
 
 # Which layers each layer may depend on. The direction, in one place.

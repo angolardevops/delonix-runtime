@@ -256,7 +256,7 @@ pub fn parse_report(text: &str) -> Option<Vec<LvRow>> {
         for (_kind, list) in obj {
             for row in list.as_array()? {
                 let get = |k: &str| row.get(k).and_then(|x| x.as_str()).unwrap_or("");
-                let num = |k: &str| get(k).trim().parse::<f64>().ok();
+                let number = |k: &str| get(k).trim().parse::<f64>().ok();
                 let name = ["lv_name", "vg_name", "pv_name"]
                     .iter()
                     .map(|k| get(k))
@@ -271,8 +271,8 @@ pub fn parse_report(text: &str) -> Option<Vec<LvRow>> {
                     name,
                     attr: get("lv_attr").to_string(),
                     size,
-                    data_pct: num("data_percent"),
-                    meta_pct: num("metadata_percent"),
+                    data_pct: number("data_percent"),
+                    meta_pct: number("metadata_percent"),
                     tags: tags_raw
                         .split(',')
                         .map(str::trim)

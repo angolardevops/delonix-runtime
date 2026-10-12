@@ -34,6 +34,7 @@ members = [
     "bins/delonix-mgmt-bin",
     "crates/interfaces/delonix-node-api",
     "bins/delonix-node-api-bin",
+    "bins/delonix-storage-helper",
 ]
 
 [workspace.package]
