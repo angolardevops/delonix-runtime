@@ -250,12 +250,15 @@ container como o Docker faria.
 
 ## O que este fluxo não faz
 
-* **Não reconcilia continuamente.** Converge quando lhe chamas. O repositório
-  não é consultado por ninguém no nó — quem corre o `apply` é o CI ou o
-  operador, e o que aqui existe é um gate de deriva. Fechar essa metade sem
-  trazer um daemon é o que o [ADR-0021](adr/0021-gitops-pull-reconciler.md)
-  propõe (`delonix gitops`, por timer e opt-in); enquanto estiver *Proposed*,
-  esta linha continua a ser o estado do motor.
+* **Não reconcilia continuamente por omissão.** Converge quando lhe chamas.
+  A metade pull existe desde 2026-10-12 e é opt-in: uma `kind: GitOpsSource`
+  ([ADR-0021](adr/0021-gitops-pull-reconciler.md),
+  `examples/full-gitopssource.yaml`) nomeia um repositório, uma ref e um
+  caminho, e com `sync.automated: true` um temporizador systemd corre UMA
+  passagem e sai — o motor continua sem daemon. `delonix gitops reconcile`
+  corre uma passagem à mão, `delonix gitops status` diz o commit que cada fonte
+  viu e o que está aplicado. Um commit que a guarda ou a política de segurança
+  recusam deixa a stack em execução intacta.
 * **Não tem rollback transaccional** (ver acima).
 * **Não gere frota.** É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.
