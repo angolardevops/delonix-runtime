@@ -289,12 +289,22 @@ async fn ping() -> &'static str {
 /// over a minute on a host with heavy containers). Those two are published by
 /// `spawn_expensive_metrics_refresh`'s background loop instead — the gauges it
 /// owns are stale by up to its refresh interval, never absent.
+///
+/// The per-workload contention series (CPU throttling, pressure, OOM) are also
+/// refreshed inline: a few small cgroup file reads per running workload, and the
+/// whole set is replaced so a stopped workload stops being exported.
 async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
     let base = s.base.clone();
-    let summary =
-        tokio::task::spawn_blocking(move || dashstats::collect(&base, false, false)).await;
-    if let Ok(summary) = summary {
+    let collected = tokio::task::spawn_blocking(move || {
+        (
+            dashstats::collect(&base, false, false),
+            dashstats::collect_workload_series(&base),
+        )
+    })
+    .await;
+    if let Ok((summary, workloads)) = collected {
         dashstats::publish_to_metrics(&summary);
+        dashstats::publish_workloads_to_metrics(workloads);
     }
     (
         [(
