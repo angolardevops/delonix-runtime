@@ -43,11 +43,12 @@ fn version_line() -> String {
     format!("delonix-storage-helper {}", env!("CARGO_PKG_VERSION"))
 }
 
-const USAGE: &str =
-    "usage: delonix-storage-helper                       serve one connection (systemd)
-       delonix-storage-helper create-pool <name> [--wipe-devices]
-       delonix-storage-helper destroy-pool <name>
-       delonix-storage-helper --version";
+const USAGE: &str = concat!(
+    "usage: delonix-storage-helper                       serve one connection (systemd)\n",
+    "       delonix-storage-helper create-pool <name> [--wipe-devices]\n",
+    "       delonix-storage-helper destroy-pool <name>\n",
+    "       delonix-storage-helper --version",
+);
 
 #[derive(Debug, PartialEq)]
 enum Command {

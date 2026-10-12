@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (30 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (34 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -165,6 +165,10 @@ graph TB
     MCPBIN["delonix-mcp-bin<br>o executavel delonix-mcp, que `delonix mcp` executa (P3l)"]
     NODEAPI["delonix-node-api<br>o contrato de no delonix.node.v1 SERVIDO: gRPC e HTTP/JSON<br>dos mesmos .proto num socket unix, so o proprio uid;<br>hoje NodeService (info, health, capacity, providers) e openapi.json"]
     NODEAPIBIN["delonix-node-api-bin<br>o executavel delonix-node-api, que `delonix serve node-api` executa"]
+    BTRFS["delonix-provider-btrfs<br>driver de pool btrfs (ADR-0067 P2): um volume e uma subvolume<br>feita pelo proprio processo do motor; a quota qgroup so como root"]
+    ZFS["delonix-provider-zfs<br>driver de pool zfs (ADR-0067 P3): um volume e um dataset<br>com refquota; ler e delegado, criar e destruir passa pelo helper"]
+    LVM["delonix-provider-lvm<br>driver de pool lvm-thin (ADR-0067 P4): um volume e um LV thin<br>com ext4, criado e montado pelo helper"]
+    STORHELPER["delonix-storage-helper<br>o helper PRIVILEGIADO dos pools (ADR-0067 D3, P1): um processo<br>por ligacao no delonix-storage-helper.socket, SO_PEERCRED + allowUsers;<br>tambem o create-pool/destroy-pool do administrador"]
     MCP["delonix-mcp<br>servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino<br>stdio-only; tools chamam Store/dominio, nunca shell arbitrario"]
 
     BIN --> RT
@@ -183,6 +187,17 @@ graph TB
     MCPBIN --> MCP
     MGMTBIN --> MGMT
     NODEAPIBIN --> NODEAPI
+    BIN --> BTRFS
+    BIN --> ZFS
+    BIN --> LVM
+    BTRFS --> STORCTX
+    ZFS --> STORCTX
+    LVM --> STORCTX
+    STORHELPER --> STORCTX
+    STORHELPER --> VOL
+    STORHELPER --> BTRFS
+    STORHELPER --> ZFS
+    STORHELPER --> LVM
     NODEAPIBIN --> NODECTX
     NODEAPIBIN --> TEL
     NODEAPI --> VM2
