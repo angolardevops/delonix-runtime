@@ -1727,6 +1727,41 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network ipam prune", "network diagnose", "network inspect"],
     },
     Entry {
+        path: "network vip-pool",
+        group: "Advanced",
+        examples: &[
+            ("set the range `type: VirtualIP` Services draw their VIP from", "delonix network vip-pool set 10.90.0.0/16"),
+            ("what is in force, and where it came from", "delonix network vip-pool show"),
+        ],
+        see_also: &["network ipam ls", "network create", "network diagnose"],
+    },
+    Entry {
+        path: "network vip-pool set",
+        group: "Lifecycle",
+        examples: &[
+            ("one private prefix nothing on this node uses", "delonix network vip-pool set 10.90.0.0/16"),
+            ("two pools at once", "delonix network vip-pool set 10.90.0.0/24,10.91.0.0/24"),
+        ],
+        see_also: &["network vip-pool show", "network vip-pool clear"],
+    },
+    Entry {
+        path: "network vip-pool clear",
+        group: "Lifecycle",
+        examples: &[
+            ("remove the pool; VIPs already held stay", "delonix network vip-pool clear"),
+        ],
+        see_also: &["network vip-pool set", "network vip-pool show"],
+    },
+    Entry {
+        path: "network vip-pool show",
+        group: "Inspect",
+        examples: &[
+            ("the pool in force and its source", "delonix network vip-pool show"),
+            ("the same, for a script", "delonix network vip-pool show -o json"),
+        ],
+        see_also: &["network vip-pool set", "network ipam ls"],
+    },
+    Entry {
         path: "network ipam prune",
         group: "Maintenance",
         examples: &[

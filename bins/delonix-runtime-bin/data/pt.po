@@ -16662,3 +16662,125 @@ msgstr "gitopssource/{ns}/{name}: tomada à stack '{from}' — agora é o reposi
 
 msgid "gitopssource/{ns}/{name}: its record did not change hands — nothing was applied"
 msgstr "gitopssource/{ns}/{name}: o registo não mudou de dono — nada foi aplicado"
+
+# ---- Sprint 17 VIP/IPv6 ----
+
+msgid "The address pool `kind: Service` VIPs are drawn from (ADR-0066 D2)"
+msgstr "O conjunto de endereços de onde saem os VIP dos `kind: Service` (ADR-0066 D2)"
+
+msgid "The address pool `kind: Service` VIPs are drawn from (ADR-0066 D2).\n\nThere is no default pool: on a node without one, `type: VirtualIP` is refused. A pool is a private IPv4 prefix (RFC 1918 or 100.64.0.0/10) between /16 and /29 that nothing on this node uses — `set` refuses one that overlaps an engine network, a CNI or kind cluster range, a host address or route (a VPN included) or the holder's own subnets."
+msgstr "O conjunto de endereços de onde saem os VIP dos `kind: Service` (ADR-0066 D2).\n\nNão há conjunto por omissão: num nó sem nenhum, `type: VirtualIP` é recusado. Um conjunto é um prefixo IPv4 privado (RFC 1918 ou 100.64.0.0/10) entre /16 e /29 que nada neste nó usa — o `set` recusa um que se sobreponha a uma rede do motor, a um intervalo CNI ou de um cluster kind, a um endereço ou rota do host (uma VPN incluída) ou às sub-redes do próprio holder."
+
+msgid "Set the node's VIP pool (replaces the previous one)"
+msgstr "Define o conjunto de VIP do nó (substitui o anterior)"
+
+msgid "Set the node's VIP pool (replaces the previous one).\n\nOne or more comma-separated prefixes, e.g. `10.90.0.0/16`. Refused when a prefix is not private IPv4 between /16 and /29, when two of them overlap, or when one overlaps an address range this node uses — the refusal names the source."
+msgstr "Define o conjunto de VIP do nó (substitui o anterior).\n\nUm ou mais prefixos separados por vírgulas, p. ex. `10.90.0.0/16`. Recusado quando um prefixo não é IPv4 privado entre /16 e /29, quando dois se sobrepõem, ou quando um se sobrepõe a um intervalo que este nó usa — a recusa nomeia a origem."
+
+msgid "Remove the node's VIP pool"
+msgstr "Remove o conjunto de VIP do nó"
+
+msgid "Remove the node's VIP pool.\n\nServices that already hold a VIP keep it; a new `type: VirtualIP` is refused until a pool is set again."
+msgstr "Remove o conjunto de VIP do nó.\n\nOs Services que já têm um VIP mantêm-no; um `type: VirtualIP` novo é recusado até se definir outro conjunto."
+
+msgid "Print the pool in force and where it comes from"
+msgstr "Mostra o conjunto em vigor e de onde vem"
+
+msgid "Print the pool in force and where it comes from.\n\n`DELONIX_SERVICE_VIP_CIDR` overrides the node's file for one process."
+msgstr "Mostra o conjunto em vigor e de onde vem.\n\n`DELONIX_SERVICE_VIP_CIDR` sobrepõe-se ao ficheiro do nó para um processo."
+
+msgid "One prefix, or several separated by commas"
+msgstr "Um prefixo, ou vários separados por vírgulas"
+
+msgid "source: {source}"
+msgstr "origem: {source}"
+
+msgid "no backend ready: the VIP refuses connections"
+msgstr "nenhum backend pronto: o VIP recusa ligações"
+
+msgid "no VIP pool configured — set one with `delonix network vip-pool set <cidr>`"
+msgstr "nenhum conjunto de VIP configurado — define um com `delonix network vip-pool set <cidr>`"
+
+msgid "unknown (the holder could not be asked)"
+msgstr "desconhecido (não foi possível perguntar ao holder)"
+
+msgid "VIP pool cleared"
+msgstr "conjunto de VIP removido"
+
+msgid "VIP pool set: {pools}"
+msgstr "conjunto de VIP definido: {pools}"
+
+msgid "service/{name}: {namespace}.{count} matching workload(s), VIP {vip}:{port}"
+msgstr "service/{name}: {namespace}.{count} carga(s) seleccionada(s), VIP {vip}:{port}"
+
+msgid "Service/{name}: VIP moved {old} -> {new}; clients that kept {old} no longer reach it"
+msgstr "Service/{name}: o VIP mudou de {old} para {new}; os clientes que guardaram {old} deixam de o alcançar"
+
+msgid "warning: the VIP dataplane was not rewritten now ({why}); the holder syncs on its next round"
+msgstr "aviso: o dataplane dos VIP não foi reescrito agora ({why}); o holder sincroniza na próxima ronda"
+
+msgid "invalid VIP pool"
+msgstr "conjunto de VIP inválido"
+
+msgid "A VIP pool (`network vip-pool set`, `DELONIX_SERVICE_VIP_CIDR`) is not a private IPv4 prefix (RFC 1918 or 100.64.0.0/10) between /16 and /29 written with its host bits clear, or two pools overlap (ADR-0066 D2)."
+msgstr "Um conjunto de VIP (`network vip-pool set`, `DELONIX_SERVICE_VIP_CIDR`) não é um prefixo IPv4 privado (RFC 1918 ou 100.64.0.0/10) entre /16 e /29 escrito com os bits de host a zero, ou dois conjuntos sobrepõem-se (ADR-0066 D2)."
+
+msgid "Give one or more non-overlapping private prefixes such as 10.90.0.0/16."
+msgstr "Indica um ou mais prefixos privados sem sobreposição, como 10.90.0.0/16."
+
+msgid "VIP outside the pool"
+msgstr "VIP fora do conjunto"
+
+msgid "A Service's `spec.vip` is not inside any configured VIP pool, or is the pool's network, first or broadcast address."
+msgstr "O `spec.vip` de um Service não está dentro de nenhum conjunto de VIP configurado, ou é o endereço de rede, o primeiro ou o de broadcast do conjunto."
+
+msgid "Pick an address inside the pool `delonix network vip-pool show` prints, or drop `spec.vip` and let the engine choose."
+msgstr "Escolhe um endereço dentro do conjunto que `delonix network vip-pool show` mostra, ou tira o `spec.vip` e deixa o motor escolher."
+
+msgid "VIP pool overlaps an address range in use"
+msgstr "o conjunto de VIP sobrepõe-se a um intervalo em uso"
+
+msgid "The VIP pool shares addresses with something this node routes or serves: an engine network, a CNI pod range, a kind cluster's pod or service subnet, a host address or route (a VPN included), or the holder's own subnets (ADR-0066 D2). A VIP there would shadow real addresses."
+msgstr "O conjunto de VIP partilha endereços com algo que este nó encaminha ou serve: uma rede do motor, um intervalo de pods CNI, a sub-rede de pods ou de serviços de um cluster kind, um endereço ou rota do host (uma VPN incluída), ou as sub-redes do próprio holder (ADR-0066 D2). Um VIP aí esconderia endereços reais."
+
+msgid "Choose a pool nothing on this node uses (`delonix network vip-pool set <cidr>`); the message names the overlapping source."
+msgstr "Escolhe um conjunto que nada neste nó use (`delonix network vip-pool set <cidr>`); a mensagem nomeia a origem sobreposta."
+
+msgid "no VIP pool configured"
+msgstr "nenhum conjunto de VIP configurado"
+
+msgid "A Service with `type: VirtualIP` was applied on a node with no VIP pool. There is no default pool on purpose: a universal reservation would take a range away from every host this engine runs on (ADR-0066 D2)."
+msgstr "Foi aplicado um Service com `type: VirtualIP` num nó sem conjunto de VIP. Não há conjunto por omissão de propósito: uma reserva universal tiraria um intervalo a todos os hosts onde este motor corre (ADR-0066 D2)."
+
+msgid "Configure one with `delonix network vip-pool set <cidr>` (or `DELONIX_SERVICE_VIP_CIDR` for one process), or use `type: DNS`."
+msgstr "Configura um com `delonix network vip-pool set <cidr>` (ou `DELONIX_SERVICE_VIP_CIDR` para um processo), ou usa `type: DNS`."
+
+msgid "VIP hairpin needs br_netfilter"
+msgstr "o hairpin do VIP precisa de br_netfilter"
+
+msgid "Bridged traffic does not pass through netfilter in the holder (`net.bridge.bridge-nf-call-iptables` is not 1, or `br_netfilter` is not loaded), so a client on its backends' own network would time out on the VIP (ADR-0066 D5)."
+msgstr "O tráfego em bridge não passa pelo netfilter no holder (`net.bridge.bridge-nf-call-iptables` não está a 1, ou o `br_netfilter` não está carregado), por isso um cliente na própria rede dos backends esgotaria o tempo no VIP (ADR-0066 D5)."
+
+msgid "Load the module on the host (`modprobe br_netfilter`); `install.sh` does it by default."
+msgstr "Carrega o módulo no host (`modprobe br_netfilter`); o `install.sh` fá-lo por omissão."
+
+msgid "set the range `type: VirtualIP` Services draw their VIP from"
+msgstr "define o intervalo de onde os Services `type: VirtualIP` tiram o VIP"
+
+msgid "what is in force, and where it came from"
+msgstr "o que está em vigor, e de onde veio"
+
+msgid "one private prefix nothing on this node uses"
+msgstr "um prefixo privado que nada neste nó usa"
+
+msgid "two pools at once"
+msgstr "dois conjuntos de uma vez"
+
+msgid "remove the pool; VIPs already held stay"
+msgstr "remove o conjunto; os VIP já atribuídos ficam"
+
+msgid "the pool in force and its source"
+msgstr "o conjunto em vigor e a sua origem"
+
+msgid "the same, for a script"
+msgstr "o mesmo, para um script"

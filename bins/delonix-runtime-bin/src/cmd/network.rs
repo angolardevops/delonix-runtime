@@ -538,6 +538,18 @@ pub enum NetworkCmd {
         #[command(subcommand)]
         action: IpamCmd,
     },
+    /// The address pool `kind: Service` VIPs are drawn from (ADR-0066 D2).
+    ///
+    /// There is no default pool: on a node without one, `type: VirtualIP` is
+    /// refused. A pool is a private IPv4 prefix (RFC 1918 or 100.64.0.0/10)
+    /// between /16 and /29 that nothing on this node uses — `set` refuses one
+    /// that overlaps an engine network, a CNI or kind cluster range, a host
+    /// address or route (a VPN included) or the holder's own subnets.
+    #[command(name = "vip-pool")]
+    VipPool {
+        #[command(subcommand)]
+        action: VipPoolCmd,
+    },
     /// Create a network.
     Create {
         name: String,
@@ -652,6 +664,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Ipam { action } => cmd_ipam(action),
+        NetworkCmd::VipPool { action } => cmd_vip_pool(action),
         NetworkCmd::Create {
             name,
             driver,
@@ -1573,6 +1586,105 @@ pub enum IpamCmd {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+/// Subcommands of `network vip-pool`.
+#[derive(clap::Subcommand)]
+pub enum VipPoolCmd {
+    /// Set the node's VIP pool (replaces the previous one).
+    ///
+    /// One or more comma-separated prefixes, e.g. `10.90.0.0/16`. Refused
+    /// when a prefix is not private IPv4 between /16 and /29, when two of them
+    /// overlap, or when one overlaps an address range this node uses — the
+    /// refusal names the source.
+    Set {
+        /// One prefix, or several separated by commas.
+        cidrs: String,
+    },
+    /// Remove the node's VIP pool.
+    ///
+    /// Services that already hold a VIP keep it; a new `type: VirtualIP` is
+    /// refused until a pool is set again.
+    Clear,
+    /// Print the pool in force and where it comes from.
+    ///
+    /// `DELONIX_SERVICE_VIP_CIDR` overrides the node's file for one process.
+    Show {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
+}
+
+/// `network vip-pool set|clear|show`.
+fn cmd_vip_pool(action: VipPoolCmd) -> Result<()> {
+    use delonix_sdn::service_lb as lb;
+    match action {
+        VipPoolCmd::Set { cidrs } => {
+            let pools = lb::parse_pool_list(&cidrs).map_err(delonix_sdn::Error::VipPoolInvalid)?;
+            if pools.is_empty() {
+                return Err(delonix_sdn::Error::VipPoolInvalid(
+                    "no prefix given; use `network vip-pool clear` to remove the pool".into(),
+                )
+                .into());
+            }
+            lb::check_pools_against(&pools, &lb::collect_sources())?;
+            lb::write_pool_file(&pools)?;
+            // The guard in the holder reads the file: let it reject the new pool
+            // now instead of on its next round.
+            let _ = lb::sync();
+            println!(
+                "{}",
+                super::po::tf(
+                    "VIP pool set: {pools}",
+                    &[(
+                        "pools",
+                        &pools
+                            .iter()
+                            .map(|c| c.to_string_cidr())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    )],
+                )
+            );
+            Ok(())
+        }
+        VipPoolCmd::Clear => {
+            lb::clear_pool_file()?;
+            let _ = lb::sync();
+            println!("{}", super::po::t("VIP pool cleared"));
+            Ok(())
+        }
+        VipPoolCmd::Show { output } => {
+            let (pools, source) = lb::configured_pools()?;
+            let cidrs: Vec<String> = pools.iter().map(|c| c.to_string_cidr()).collect();
+            let source = match source {
+                lb::PoolSource::Env => lb::VIP_POOL_ENV.to_string(),
+                lb::PoolSource::File => lb::pool_file().display().to_string(),
+                lb::PoolSource::None => "none".to_string(),
+            };
+            if output == output::OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "pools": cidrs, "source": source })
+                );
+                return Ok(());
+            }
+            if cidrs.is_empty() {
+                println!(
+                    "{}",
+                    super::po::t("no VIP pool configured — set one with `delonix network vip-pool set <cidr>`")
+                );
+            } else {
+                println!("{}", cidrs.join(", "));
+                println!(
+                    "{}",
+                    super::po::tf("source: {source}", &[("source", &source)])
+                );
+            }
+            Ok(())
+        }
+    }
 }
 
 /// `network ipam ls`/`network ipam prune`.
