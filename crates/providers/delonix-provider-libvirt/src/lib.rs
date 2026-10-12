@@ -1399,6 +1399,25 @@ const MEMORY_HOTPLUG_SLOTS: u32 = 16;
 /// (ADR-0068 D3/D7).
 const SPARE_PCIE_ROOT_PORTS: u32 = 4;
 
+/// The spare PCIe root ports a q35 domain with hotplug headroom reserves
+/// (ADR-0068 D3/D7). **The `pcie-root` at index 0 is written explicitly**:
+/// a port with no index takes the first free one, and with no root declared
+/// that is index 0 — which libvirt refuses on q35 («The PCI controller with
+/// index='0' must be model='pcie-root' for this machine type»), measured on
+/// libvirt 10.0.0, so the domain could never be defined. Any other machine
+/// type (i440fx `pc`) gets nothing: its PCI bus is hot-pluggable as it is,
+/// and a PCIe port is not valid there. Pure.
+fn spare_pcie_ports_xml(machine: &str, headroom: bool) -> String {
+    if !headroom || !(machine.starts_with("q35") || machine.contains("-q35")) {
+        return String::new();
+    }
+    let mut s = String::from("    <controller type='pci' index='0' model='pcie-root'/>\n");
+    for _ in 0..SPARE_PCIE_ROOT_PORTS {
+        s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
+    }
+    s
+}
+
 /// The hotplug ceilings that open headroom: `(Some(max vCPUs), Some(max KiB))`
 /// only where the ceiling is ABOVE the boot size — a ceiling equal to it is no
 /// headroom and changes nothing in the domain. Pure.
@@ -1841,11 +1860,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Only with declared headroom (ADR-0068 D3): spare ports change the
     // domain's shape, which someone who did not ask for hotplug never gets.
     let headroom = max_vcpus.is_some() || max_kib.is_some();
-    if headroom && (machine.starts_with("q35") || machine.contains("-q35")) {
-        for _ in 0..SPARE_PCIE_ROOT_PORTS {
-            s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
-        }
-    }
+    s.push_str(&spare_pcie_ports_xml(machine, headroom));
     // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
     // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
     // manifests only (a fragment can name arbitrary host paths/devices).
@@ -4476,6 +4491,12 @@ mod hotplug_tests {
             "a DIMM needs a NUMA node to plug into: {xml}"
         );
         assert_eq!(xml.matches("model='pcie-root-port'").count(), 4, "{xml}");
+        // libvirt refuses a q35 domain whose index 0 is a port: the root has
+        // to be declared, at index 0, BEFORE any port takes that index.
+        let root = xml
+            .find("<controller type='pci' index='0' model='pcie-root'/>")
+            .expect("no pcie-root at index 0");
+        assert!(root < xml.find("pcie-root-port").unwrap(), "{xml}");
     }
 
     /// The containment limits follow the ceiling: a hard_limit sized from the
@@ -4496,6 +4517,40 @@ mod hotplug_tests {
             !without.contains("pcie-root-port"),
             "no headroom, no spare ports"
         );
+    }
+
+    /// i440fx (`pc`) has a hot-pluggable PCI bus of its own and no PCIe:
+    /// a ceiling there emits no port, and no `pcie-root` either.
+    #[test]
+    fn a_pc_machine_gets_no_pcie_controller() {
+        let mut c = cfg(2, "2048M", Some(8), Some(8192));
+        c.machine = Some("pc".into());
+        let xml = libvirt_domain_xml(&c, "/o.qcow2", "m");
+        assert!(!xml.contains("pcie-root"), "{xml}");
+        assert!(
+            xml.contains("<maxMemory"),
+            "the memory headroom stays: {xml}"
+        );
+    }
+
+    /// The domain is DEFINED by the real libvirt, never booted: `virsh define`
+    /// on `qemu:///session`, then `undefine`. Run with `--ignored` on a host
+    /// with libvirt; this is what caught the missing `pcie-root`.
+    #[test]
+    #[ignore = "needs virsh and qemu:///session; defines and undefines a domain, boots nothing"]
+    fn libvirt_accepts_the_headroom_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = dir.path().join("d.qcow2");
+        std::fs::write(&disk, b"").unwrap();
+        let mut c = cfg(2, "2048M", Some(4), Some(4096));
+        c.name = format!("dlx18-define-{}", std::process::id());
+        let xml = libvirt_domain_xml(&c, &disk.to_string_lossy(), "52:54:00:00:18:01");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let def = quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()]);
+        let _ = quiet("virsh", &["-c", uri, "undefine", "--", &c.name]);
+        def.unwrap_or_else(|e| panic!("libvirt refused the domain: {e}\n{xml}"));
     }
 
     /// A ceiling equal to the boot size is no headroom: the domain is the
