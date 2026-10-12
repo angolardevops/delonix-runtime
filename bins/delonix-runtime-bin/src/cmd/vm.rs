@@ -566,6 +566,14 @@ fn device_problems(spec: &serde_yaml::Value) -> Vec<String> {
 /// Pure; problems (unknown name, contradiction) are `device_problems`' to report.
 fn merge_device_options(m: &mut serde_yaml::Mapping) {
     use serde_yaml::Value;
+    // Only the per-name OPTIONS map is folded away. The flat `devices` of a
+    // VM is a different field with the same name — the VFIO PCI list — and
+    // a `remove` inside the `let … else` ran before the pattern failed, so
+    // a manifest's `devices: ['0000:01:00.0']` was dropped in silence (the
+    // dry-run printed `devices: []`, the apply exited 0, no passthrough).
+    if !matches!(m.get("devices"), Some(Value::Mapping(_))) {
+        return;
+    }
     let Some(Value::Mapping(devices)) = m.remove("devices") else {
         return;
     };
@@ -3109,6 +3117,31 @@ fn check_vm_namespace(name: &str, want: &str, have: &str) -> Result<()> {
     )))
 }
 
+/// What a `kind: VirtualMachine` hands the guest from the host, as the node
+/// policy's `denyDevicePassthrough` judges it. PURE.
+///
+/// The CLI asks for passthrough one way (`vm create --device`); a manifest
+/// has three more, and each is the same hole: a VFIO device in `devices`, an
+/// `extraDisks` entry whose source is a host block device (`/dev/sdb` is the
+/// host's disk, not an image), and raw libvirt XML, which can carry
+/// `<hostdev>`, `<interface type='hostdev'>` or `<qemu:commandline>` and is
+/// not validated by this engine at all — so it counts whatever it contains.
+pub(crate) fn manifest_passthrough(spec: &VmSpec) -> Vec<String> {
+    let mut out = spec.devices.clone();
+    for d in &spec.extra_disks {
+        if d.source.starts_with("/dev/") {
+            out.push(format!("extraDisks: {}", d.source));
+        }
+    }
+    if spec.libvirt_xml.is_some() {
+        out.push("libvirtXml (raw XML is not validated)".to_string());
+    }
+    if !spec.libvirt_xml_overlay.is_empty() {
+        out.push("libvirtXmlOverlay (raw XML is not validated)".to_string());
+    }
+    out
+}
+
 pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
     let base = state_root();
     let images = super::vmimage::VmImageStore::open(&base)?;
@@ -3127,6 +3160,20 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             )?;
         }
         let spec: VmSpec = vm_spec_of(doc)?;
+        // The node's runtime policy, BEFORE the image is resolved or built —
+        // the same gate, placement and request shape as the CLI `vm create`.
+        // This path had none: a node that set `denyDevicePassthrough` refused
+        // `vm create --device` and admitted the same device from a manifest.
+        let passthrough = manifest_passthrough(&spec);
+        super::policy::enforce(
+            &base,
+            name,
+            &super::policy::Request::virtual_machine(
+                (!spec.disk.is_empty()).then_some(spec.disk.as_str()),
+                &passthrough,
+                None,
+            ),
+        )?;
         let (disk, image_meta) = resolve_vm_disk(&images, name, &spec, base_dir)?;
         // The image's own `VCPUS`/`MEMORY`/`HYPERVISOR`, applied only where the
         // manifest said nothing — the same precedence, through the same
@@ -6428,9 +6475,9 @@ mod tests {
 
     use super::{
         antispoof_describe, created_spec_of, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        looks_like_address, manifest, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
-        resolve_vm_defaults, unconverged_fields_condition, vm_cluster_member, vm_role, vm_spec_of,
-        ManifestDoc, VmSpec, RECONCILED_VM_FIELDS, VM_SPEC_FIELDS,
+        looks_like_address, manifest, manifest_passthrough, normalize_vm_spec, parse_ip_gateways,
+        parse_ss_binds, resolve_vm_defaults, unconverged_fields_condition, vm_cluster_member,
+        vm_role, vm_spec_of, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS, VM_SPEC_FIELDS,
     };
     use delonix_model::records::Status;
 
@@ -6811,6 +6858,41 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         .unwrap();
         let normalized = normalize_vm_spec(flat.clone());
         assert_eq!(flat, normalized);
+    }
+
+    /// Every way a manifest can hand a host device to a guest counts for
+    /// `denyDevicePassthrough` — not only the one the CLI has.
+    #[test]
+    fn a_manifest_names_every_passthrough_it_asks_for() {
+        let spec: VmSpec = serde_yaml::from_str(
+            "disk: golden:1.0\n\
+             devices: ['0000:01:00.0']\n\
+             extraDisks:\n\
+             \x20 - source: /dev/sdb\n\
+             \x20 - source: /var/lib/delonix/data.qcow2\n\
+             libvirtXmlOverlay: [\"<hostdev mode='subsystem'/>\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest_passthrough(&spec),
+            [
+                "0000:01:00.0",
+                "extraDisks: /dev/sdb",
+                "libvirtXmlOverlay (raw XML is not validated)",
+            ]
+        );
+        let plain: VmSpec = serde_yaml::from_str("disk: golden:1.0\n").unwrap();
+        assert!(manifest_passthrough(&plain).is_empty());
+    }
+
+    /// The VFIO list survives normalisation: it used to be removed by the
+    /// fold of the per-name device options, which share its key.
+    #[test]
+    fn a_flat_vfio_device_list_survives_normalisation() {
+        let flat: serde_yaml::Value =
+            serde_yaml::from_str("disk: d\ndevices: ['0000:01:00.0']\n").unwrap();
+        let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(flat)).unwrap();
+        assert_eq!(spec.devices, ["0000:01:00.0"]);
     }
 
     #[test]
