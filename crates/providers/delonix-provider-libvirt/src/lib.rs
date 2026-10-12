@@ -1480,6 +1480,60 @@ fn libvirt_vcpu_xml(vcpus: u32, max: Option<u32>) -> String {
     s
 }
 
+/// The target of every extra disk at boot: a pinned one keeps its own; the
+/// others take, in order, the next letter of their bus (`vd` for virtio,
+/// `sd` otherwise) that no other disk holds. `vda` is the boot disk. Pure.
+fn extra_disk_targets(disks: &[ExtraDisk]) -> Vec<String> {
+    let pinned: Vec<&str> = disks.iter().filter_map(|d| d.target.as_deref()).collect();
+    let mut taken: Vec<String> = vec!["vda".into()];
+    taken.extend(pinned.iter().map(|t| t.to_string()));
+    disks
+        .iter()
+        .map(|d| match &d.target {
+            Some(t) => t.clone(),
+            None => {
+                let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
+                let t = next_free_target(bus, &taken).unwrap_or_default();
+                taken.push(t.clone());
+                t
+            }
+        })
+        .collect()
+}
+
+/// The cloud-init seed's target: the first virtio letter after `vda` that no
+/// extra disk holds. Before, it was "the letter after the unpinned extras",
+/// which a PINNED extra could already hold. Pure.
+fn seed_target(extra_targets: &[String]) -> String {
+    let mut taken = vec!["vda".to_string()];
+    taken.extend(extra_targets.iter().cloned());
+    next_free_target("virtio", &taken).unwrap_or_else(|| "vdz".into())
+}
+
+/// Pins every disk `new` adds over `old` to a letter the OLD layout leaves
+/// free — its extras and its seed included — so adding a disk to a stopped VM
+/// never moves the seed or a disk the guest already knows. Pure.
+fn pin_added_disks(old: &[ExtraDisk], new: &mut [ExtraDisk]) {
+    let old_targets = extra_disk_targets(old);
+    let mut taken = vec!["vda".to_string(), seed_target(&old_targets)];
+    taken.extend(old_targets);
+    taken.extend(new.iter().filter_map(|d| d.target.clone()));
+    for d in new.iter_mut() {
+        if d.target.is_some() || old.iter().any(|o| o.source == d.source) {
+            continue;
+        }
+        let bus = if d.bus.is_empty() {
+            "virtio"
+        } else {
+            d.bus.as_str()
+        };
+        if let Some(t) = next_free_target(bus, &taken) {
+            taken.push(t.clone());
+            d.target = Some(t);
+        }
+    }
+}
+
 /// One extra disk's `<disk>` element at `target` — the SAME text the boot XML
 /// and a live `attach-device` use, so a hot-added disk boots next time as the
 /// guest saw it. Pure.
@@ -1742,24 +1796,9 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // unless the user pinned one — `vda` stays reserved above, and the cloud-init
     // seed takes the virtio letter AFTER the extras, so adding a seed never
     // renames a disk the guest already knows.
-    let mut vd = b'b'; // next virtio letter (vda taken by the main disk)
-    let mut sd = b'b'; // next sata/scsi letter (kept from when the seed sat on sda)
-    for d in &cfg.extra_disks {
-        let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
-        let target = match &d.target {
-            Some(t) => t.clone(),
-            None if bus == "virtio" => {
-                let t = format!("vd{}", vd as char);
-                vd += 1;
-                t
-            }
-            None => {
-                let t = format!("sd{}", sd as char);
-                sd += 1;
-                t
-            }
-        };
-        s.push_str(&libvirt_extra_disk_xml(d, &target));
+    let targets = extra_disk_targets(&cfg.extra_disks);
+    for (d, target) in cfg.extra_disks.iter().zip(&targets) {
+        s.push_str(&libvirt_extra_disk_xml(d, target));
     }
     // cloud-init seed (NoCloud), as a read-only VIRTIO disk.
     //
@@ -1774,7 +1813,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // seed by its `cidata` label on any block device. `snapshot='no'` keeps it
     // out of libvirt's disk snapshots and blockcommit, as the cdrom was.
     if let Some(seed) = &cfg.seed {
-        let target = format!("vd{}", vd as char);
+        let target = seed_target(&targets);
         s.push_str("    <disk type='file' device='disk' snapshot='no'>\n");
         s.push_str("      <driver name='qemu' type='raw'/>\n");
         s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
@@ -2987,7 +3026,13 @@ impl VmBackend for LibvirtBackend {
 
     /// Extra disks/NICs of a STOPPED VM: the record is the whole definition
     /// and the next boot rebuilds the domain from it, so nothing else changes.
-    fn change_devices_cold(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
+    fn change_devices_cold(
+        &self,
+        _vmdir: &Path,
+        old: &Vm,
+        new: &mut Vm,
+    ) -> delonix_model::Result<()> {
+        pin_added_disks(&old.boot.extra_disks, &mut new.boot.extra_disks);
         Ok(())
     }
 
@@ -4656,6 +4701,46 @@ mod hotplug_tests {
         c.extra_nics = vec![n.clone()];
         let boot = libvirt_domain_xml(&c, "/o", "m");
         assert!(boot.contains(&libvirt_extra_nic_xml(&n)), "{boot}");
+    }
+
+    /// A disk added to a STOPPED VM is pinned to a letter the old layout
+    /// leaves free, so the seed (vdb with no extras) does not move to vdc at
+    /// the next boot — measured by the review: it did.
+    #[test]
+    fn a_cold_added_disk_does_not_move_the_seed() {
+        let old: Vec<ExtraDisk> = vec![];
+        assert_eq!(seed_target(&extra_disk_targets(&old)), "vdb");
+        let mut new = vec![ExtraDisk {
+            source: "/d.qcow2".into(),
+            ..Default::default()
+        }];
+        pin_added_disks(&old, &mut new);
+        assert_eq!(new[0].target.as_deref(), Some("vdc"));
+        assert_eq!(
+            seed_target(&extra_disk_targets(&new)),
+            "vdb",
+            "the seed stays"
+        );
+        // A pinned extra never shares a letter with the seed.
+        let pinned = vec![ExtraDisk {
+            source: "/p".into(),
+            target: Some("vdb".into()),
+            ..Default::default()
+        }];
+        assert_eq!(seed_target(&extra_disk_targets(&pinned)), "vdc");
+        // Unpinned extras keep the letters they always had.
+        let two = vec![
+            ExtraDisk {
+                source: "/a".into(),
+                ..Default::default()
+            },
+            ExtraDisk {
+                source: "/b".into(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(extra_disk_targets(&two), ["vdb", "vdc"]);
+        assert_eq!(seed_target(&extra_disk_targets(&two)), "vdd");
     }
 
     /// The reason libvirt gives on its SECOND line reaches the error.

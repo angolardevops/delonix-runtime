@@ -924,7 +924,7 @@ where
             _ => {
                 let mut next = vm.clone();
                 apply_device_change(&mut next, change)?;
-                backend.change_devices_cold(&vmdir, &next)?;
+                backend.change_devices_cold(&vmdir, &vm, &mut next)?;
                 vm = next;
                 self.repo.set(name, &vm).map_err(Error::from)?;
                 Ok((vm, None))
@@ -1962,7 +1962,12 @@ mod tests {
                 },
             ))
         }
-        fn change_devices_cold(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        fn change_devices_cold(
+            &self,
+            _vmdir: &Path,
+            _old: &Vm,
+            vm: &mut Vm,
+        ) -> delonix_model::Result<()> {
             self.0.calls.borrow_mut().push(format!(
                 "change_devices_cold {} disks={} nics={}",
                 vm.name,

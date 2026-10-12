@@ -669,7 +669,16 @@ pub trait VmBackend {
     ///
     /// Default: unsupported (fail closed) — a device change the next boot
     /// silently ignores would be the defect this refuses.
-    fn change_devices_cold(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
+    ///
+    /// `old` is the record before the change and `new` the one about to be
+    /// written; the backend may complete `new` (pin a target the next boot
+    /// must keep) before it is.
+    fn change_devices_cold(
+        &self,
+        _vmdir: &Path,
+        _old: &Vm,
+        _new: &mut Vm,
+    ) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "extra disk/NIC change"))
     }
 
