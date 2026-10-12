@@ -79,6 +79,7 @@ pub mod proto {
     }
 }
 
+pub mod activation;
 pub mod docs;
 pub mod events;
 pub mod network_ops;
@@ -119,12 +120,48 @@ pub fn compose() {
     });
 }
 
+/// Where the server listens.
+#[derive(Debug, Clone)]
+pub enum Listen {
+    /// A socket this process binds: a path or `unix:///path`.
+    Path(String),
+    /// A listening socket the service manager passed (`LISTEN_FDS`), already
+    /// bound, with its mode set by the `.socket` unit ([`activation`]).
+    Inherited(std::os::fd::RawFd),
+}
+
 /// Serves the node API on a unix socket, blocking the calling thread. `addr` is a
 /// path or `unix:///path`. Same pattern as `delonix_mgmt::serve_blocking`.
 pub fn serve_blocking(addr: &str) -> Result<(), Error> {
+    serve(Listen::Path(addr.to_string()), None)
+}
+
+/// Serves the node API, blocking the calling thread, until `idle` (if given)
+/// finds it idle — then returns `Ok`, which a socket-activated service reports
+/// as a clean exit (ADR-0040 P5). With `idle` `None`, or a zero timeout, it
+/// serves until killed.
+pub fn serve(listen: Listen, idle: Option<activation::IdleExit>) -> Result<(), Error> {
     compose();
-    let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     delonix_node::alloc_tuning::limit_malloc_arenas();
+    // An inherited descriptor is checked and taken before any thread exists.
+    let inherited = match &listen {
+        Listen::Inherited(fd) => {
+            activation::check_listening_unix_stream(*fd)?;
+            activation::set_cloexec(*fd)?;
+            use std::os::fd::FromRawFd;
+            // SAFETY: `fd` was passed by the service manager for this process
+            // alone (`LISTEN_PID`), was just verified to be a listening unix
+            // socket, and nothing else in this process owns it.
+            let l = unsafe { std::os::unix::net::UnixListener::from_raw_fd(*fd) };
+            l.set_nonblocking(true).map_err(|e| Error::Runtime {
+                context: "inherited socket",
+                message: e.to_string(),
+            })?;
+            Some(l)
+        }
+        Listen::Path(_) => None,
+    };
+    let idle = idle.filter(|i| !i.timeout.is_zero());
     let rt = tokio::runtime::Builder::new_multi_thread()
         // A local control-plane API: a couple of workers, the same reasoning as
         // the CRI and the management API.
@@ -136,42 +173,103 @@ pub fn serve_blocking(addr: &str) -> Result<(), Error> {
             message: e.to_string(),
         })?;
     rt.block_on(async move {
-        let _ = std::fs::remove_file(&path); // an old socket of a previous run
-        let uds = tokio::net::UnixListener::bind(&path).map_err(|e| Error::Runtime {
-            context: "bind",
-            message: e.to_string(),
-        })?;
-        // 0600 on the file AND `SO_PEERCRED` per connection (below): the file
-        // mode depends on the ambient umask at bind time, the credential check
-        // does not.
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        tracing::info!(socket = %path, "delonix-node-api (node API) listening");
-        serve_over_uds(uds, router()).await
+        let uds = match (listen, inherited) {
+            (_, Some(l)) => {
+                let uds = tokio::net::UnixListener::from_std(l).map_err(|e| Error::Runtime {
+                    context: "inherited socket",
+                    message: e.to_string(),
+                })?;
+                tracing::info!(
+                    socket = ?uds.local_addr().ok().and_then(|a| a.as_pathname().map(|p| p.display().to_string())),
+                    idle_timeout = ?idle.as_ref().map(|i| i.timeout),
+                    "delonix-node-api (node API) serving a socket-activated listener"
+                );
+                uds
+            }
+            (Listen::Path(addr), None) => {
+                let path = addr.strip_prefix("unix://").unwrap_or(&addr).to_string();
+                let _ = std::fs::remove_file(&path); // an old socket of a previous run
+                let uds = tokio::net::UnixListener::bind(&path).map_err(|e| Error::Runtime {
+                    context: "bind",
+                    message: e.to_string(),
+                })?;
+                // 0600 on the file AND `SO_PEERCRED` per connection (below): the
+                // file mode depends on the ambient umask at bind time, the
+                // credential check does not.
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                tracing::info!(socket = %path, "delonix-node-api (node API) listening");
+                uds
+            }
+            (Listen::Inherited(_), None) => unreachable!("an inherited listener is taken above"),
+        };
+        serve_listener(uds, router(), idle).await
     })
 }
 
 /// Serves the router over a `UnixListener`: accept loop + hyper-util's `auto`
 /// connection builder, which speaks HTTP/1.1 for the JSON routes and HTTP/2
 /// (prior knowledge, no TLS on a local socket) for gRPC on the same listener.
-async fn serve_over_uds(uds: tokio::net::UnixListener, app: axum::Router) -> Result<(), Error> {
+///
+/// With `idle`, returns `Ok` once no connection has been open for its timeout
+/// and no operation of this process is `RUNNING` ([`activation`]). Every
+/// accepted connection, open or closed, restarts the clock.
+pub async fn serve_listener(
+    uds: tokio::net::UnixListener,
+    app: axum::Router,
+    idle: Option<activation::IdleExit>,
+) -> Result<(), Error> {
     use delonix_node::peer_cred::peer_uid;
     use hyper::body::Incoming;
     use hyper_util::rt::{TokioExecutor, TokioIo};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use tower::Service;
     // SAFETY: geteuid() has no preconditions.
     let own_uid = unsafe { libc::geteuid() };
     let mut make = app.into_make_service();
+    let open = Arc::new(AtomicUsize::new(0));
+    let last = Arc::new(Mutex::new(std::time::Instant::now()));
+    // How often the idle condition is looked at: a fraction of the timeout,
+    // never busier than 50 ms nor lazier than 1 s.
+    let tick = idle.as_ref().map(|i| {
+        (i.timeout / 4).clamp(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_secs(1),
+        )
+    });
     loop {
+        let accepted = match (&idle, tick) {
+            (Some(i), Some(tick)) => {
+                tokio::select! {
+                    r = uds.accept() => r,
+                    _ = tokio::time::sleep(tick) => {
+                        let quiet = last.lock().map(|t| t.elapsed()).unwrap_or_default();
+                        if open.load(Ordering::SeqCst) == 0
+                            && quiet >= i.timeout
+                            && !operations::running_owned_by(&i.root, std::process::id() as i32)
+                        {
+                            tracing::info!(idle = ?quiet, "delonix-node-api idle, exiting");
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                }
+            }
+            _ => uds.accept().await,
+        };
         // Transient accept errors (EMFILE, ECONNABORTED) are retried, never
         // fatal — see the management API for the incident that taught it.
-        let (socket, _) = match uds.accept().await {
+        let (socket, _) = match accepted {
             Ok(x) => x,
             Err(e) => {
                 tracing::warn!(error = %e, "accept() failed, retrying");
                 continue;
             }
         };
+        if let Ok(mut t) = last.lock() {
+            *t = std::time::Instant::now();
+        }
         if peer_uid(&socket) != Some(own_uid) {
             continue;
         }
@@ -179,6 +277,8 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: axum::Router) -> Res
             Ok(svc) => svc,
             Err(never) => match never {},
         };
+        open.fetch_add(1, Ordering::SeqCst);
+        let (open, last) = (open.clone(), last.clone());
         tokio::spawn(async move {
             let io = TokioIo::new(socket);
             let hyper_service = hyper::service::service_fn(move |req: hyper::Request<Incoming>| {
@@ -187,6 +287,12 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: axum::Router) -> Res
             let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                 .serve_connection_with_upgrades(io, hyper_service)
                 .await;
+            // The clock restarts when the LAST connection closes, not when it
+            // opened: a long stream ending is activity.
+            if let Ok(mut t) = last.lock() {
+                *t = std::time::Instant::now();
+            }
+            open.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }

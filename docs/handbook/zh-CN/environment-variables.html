@@ -441,6 +441,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td><code>--addr</code> 优先。仅限本地（调用方的 uid）。</td>
 </tr>
 <tr>
+<td><code>DELONIX_NODE_API_IDLE_TIMEOUT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>；由 <code>cmd/serve.rs:run</code> 转发</td>
+<td>节点 API 在没有打开的连接、也没有自己 RUNNING 的操作时，等待多久后退出（ADR-0040 P5）。</td>
+<td>时长（<code>300s</code>、<code>2m</code>）；<code>0</code> 表示永不退出。通过 socket 激活时默认 <code>300s</code>，否则永不退出。</td>
+<td><code>--idle-timeout</code> 优先。<code>--install-units</code> 未指定时写入 <code>120s</code>。</td>
+</tr>
+<tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
 <td>Docker Engine API 切片（<code>delonix serve docker-api</code>）的 socket。</td>

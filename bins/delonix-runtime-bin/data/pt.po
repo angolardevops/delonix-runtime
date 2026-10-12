@@ -15703,3 +15703,49 @@ msgstr "(sem login)"
 
 msgid "note: no container listed has a known login (none declares `credentials:` and no image is in the catalogue)"
 msgstr "nota: nenhum container listado tem um login conhecido (nenhum declara `credentials:` e nenhuma imagem está no catálogo)"
+
+# serve node-api: socket activation and the idle exit (ADR-0040 P5, Sprint 14)
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040): node info, health, capacity, providers, events, operations, networks, volumes and virtual machines, with `GET /openapi.json` rendered at `GET /docs` and `GET /redoc`. It is not a daemon: `--install-units` writes a systemd socket unit that starts it on the first connection, and it exits after `--idle-timeout` with nothing open."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040): informação do nó, saúde, capacidade, providers, eventos, operações, redes, volumes e máquinas virtuais, com o `GET /openapi.json` desenhado em `GET /docs` e `GET /redoc`. Não é um daemon: o `--install-units` escreve uma unit de socket do systemd que o arranca na primeira ligação, e ele sai ao fim de `--idle-timeout` sem nada aberto."
+
+msgid "The versioned node contract (ADR-0040): node info, health, capacity, providers, events, operations, networks, volumes and virtual machines, with `GET /openapi.json` rendered at `GET /docs` and `GET /redoc`. It is not a daemon: `--install-units` writes a systemd socket unit that starts it on the first connection, and it exits after `--idle-timeout` with nothing open."
+msgstr "O contrato de nó versionado (ADR-0040): informação do nó, saúde, capacidade, providers, eventos, operações, redes, volumes e máquinas virtuais, com o `GET /openapi.json` desenhado em `GET /docs` e `GET /redoc`. Não é um daemon: o `--install-units` escreve uma unit de socket do systemd que o arranca na primeira ligação, e ele sai ao fim de `--idle-timeout` sem nada aberto."
+
+msgid "Exit after this long with no connection open and no operation running: `120`, `90s`, `5m`, `0` for never. Default: 300s when started by socket activation, never otherwise."
+msgstr "Sai ao fim deste tempo sem nenhuma ligação aberta e sem nenhuma operação a correr: `120`, `90s`, `5m`, `0` para nunca. Por omissão: 300s quando arrancado por activação de socket, nunca nos outros casos."
+
+msgid "Write a systemd socket unit and its service (user units when rootless, system units as root), reload systemd and enable the socket, instead of serving. The node API then starts on the first connection and exits when idle (default `--idle-timeout` in the unit: 120s)."
+msgstr "Escreve uma unit de socket do systemd e o seu serviço (units de utilizador em rootless, units de sistema como root), recarrega o systemd e activa o socket, em vez de servir. A API de nó passa a arrancar na primeira ligação e a sair quando fica ociosa (`--idle-timeout` por omissão na unit: 120s)."
+
+msgid "{what} '{value}' cannot go into a systemd unit as is: it has whitespace, a quote, a backslash, '%', '$', ';' or '`' — use a path without them"
+msgstr "{what} '{value}' não pode ir tal e qual para uma unit do systemd: tem espaços, uma aspa, uma barra invertida, '%', '$', ';' ou '`' — usa um caminho sem eles"
+
+msgid "--addr '{addr}' is not an absolute socket path; a .socket unit needs one"
+msgstr "--addr '{addr}' não é um caminho absoluto de socket; uma unit .socket precisa de um"
+
+msgid "the units are written, but `{cmd}` failed — run it yourself once systemd is reachable"
+msgstr "as units estão escritas, mas o `{cmd}` falhou — corre-o tu quando o systemd estiver alcançável"
+
+msgid "node API socket enabled at {sock}: the first connection starts delonix-node-api, which exits after {idle} with nothing open. Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
+msgstr "socket da API de nó activado em {sock}: a primeira ligação arranca o delonix-node-api, que sai ao fim de {idle} sem nada aberto. Remover: systemctl {scope}disable --now delonix-node-api.socket, e depois apagar os dois ficheiros acima."
+
+msgid "the socket passed by the service manager cannot be served"
+msgstr "o socket passado pelo gestor de serviços não pode ser servido"
+
+msgid "The node API was started by socket activation (`LISTEN_PID` names it) and what it was passed is not one listening unix stream socket: `LISTEN_FDS` does not read as a count, more than one socket was passed, or the descriptor is a TCP port, a datagram socket or a connection instead of a listener. Serving it anyway would lose the local-socket and `SO_PEERCRED` guarantees, or serve a socket nobody asked for."
+msgstr "A API de nó foi arrancada por activação de socket (o `LISTEN_PID` nomeia-a) e o que lhe foi passado não é um socket unix de stream à escuta: o `LISTEN_FDS` não se lê como uma contagem, foi passado mais de um socket, ou o descritor é uma porta TCP, um socket de datagramas ou uma ligação em vez de um socket à escuta. Servi-lo na mesma perderia as garantias do socket local e do `SO_PEERCRED`, ou serviria um socket que ninguém pediu."
+
+msgid "Fix the `.socket` unit: one `ListenStream=` with an absolute path, `Accept=no`, `SocketMode=0600`. `delonix serve node-api --install-units` writes a correct pair."
+msgstr "Corrige a unit `.socket`: um só `ListenStream=` com um caminho absoluto, `Accept=no`, `SocketMode=0600`. O `delonix serve node-api --install-units` escreve um par correcto."
+
+msgid "--addr was given to a socket-activated node API"
+msgstr "foi dado --addr a uma API de nó arrancada por activação de socket"
+
+msgid "The service manager passed a listening socket and the command line also names one with `--addr`. They are two different sockets; serving either one silently would leave the other's clients unanswered."
+msgstr "O gestor de serviços passou um socket à escuta e a linha de comandos também nomeia um com `--addr`. São dois sockets diferentes; servir um deles em silêncio deixaria os clientes do outro sem resposta."
+
+msgid "Drop `--addr` from the unit's `ExecStart=`: under socket activation the address is the `.socket` unit's `ListenStream=`."
+msgstr "Tira o `--addr` do `ExecStart=` da unit: com activação de socket o endereço é o `ListenStream=` da unit `.socket`."
+
+msgid "node API socket enabled at {sock}: the first connection starts delonix-node-api, which then stays up (`--idle-timeout 0`). Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
+msgstr "socket da API de nó activado em {sock}: a primeira ligação arranca o delonix-node-api, que depois fica de pé (`--idle-timeout 0`). Para remover: systemctl {scope}disable --now delonix-node-api.socket, e depois apaga os dois ficheiros acima."

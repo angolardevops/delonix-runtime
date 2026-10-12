@@ -445,6 +445,54 @@ pub fn message(rec: &Record) -> Operation {
     }
 }
 
+/// Whether an operation THIS process began is still `RUNNING` under `root` —
+/// the last question the idle exit asks ([`crate::activation`]). Every served
+/// mutation finishes inside its request today, so with no connection open this
+/// is normally false; it is asked anyway, because a client that hangs up does
+/// not stop work already handed to a blocking thread, and exiting under it
+/// would end the operation `Interrupted` for nothing.
+///
+/// A ledger that cannot be READ answers `true`: staying up one more interval
+/// costs nothing, exiting under work does. A record that reads but does not
+/// PARSE is skipped instead: this process writes its records atomically, so a
+/// malformed file is never one of its own in flight, and counting it would
+/// keep the server resident for as long as the file stays there.
+pub fn running_owned_by(root: &Path, pid: i32) -> bool {
+    let start = delonix_node::proc_starttime(pid).unwrap_or_default();
+    let entries = match std::fs::read_dir(dir(root)) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(e) => {
+            tracing::warn!(error = %e, "operation ledger unreadable; not exiting");
+            return true;
+        }
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+            continue;
+        };
+        if !valid_id(id) {
+            continue;
+        }
+        let bytes = match std::fs::read(path(root, id)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                tracing::warn!(error = %e, id, "operation record unreadable; not exiting");
+                return true;
+            }
+        };
+        let Ok(rec) = serde_json::from_slice::<Record>(&bytes) else {
+            continue;
+        };
+        if rec.state == State::Running && rec.owner_pid == pid && rec.owner_starttime == start {
+            return true;
+        }
+    }
+    false
+}
+
 /// `GetOperation` under `root`.
 pub fn get_in(root: &Path, id: &str) -> Result<Operation, Status> {
     let missing = || Status::not_found(format!("operation '{id}'"));
@@ -640,6 +688,28 @@ pub fn watch(
 mod tests {
     use super::*;
     use crate::proto::v1::PageRequest;
+
+    #[test]
+    fn only_a_running_operation_of_this_process_keeps_the_server_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id() as i32;
+        // An empty ledger (no directory at all) holds nothing.
+        assert!(!running_owned_by(dir.path(), me));
+        let rec = new(dir.path(), "create", "Network/a", "");
+        assert!(running_owned_by(dir.path(), me));
+        // Another process's running operation is not ours to wait for.
+        assert!(!running_owned_by(dir.path(), me + 1));
+        finish(dir.path(), rec, Ok(String::new())).unwrap();
+        assert!(!running_owned_by(dir.path(), me));
+        // A record that does not parse is no work of ours in flight (records
+        // are written atomically), so it must not keep the server resident.
+        std::fs::write(
+            dir.path().join("operations").join("op-junk.json"),
+            b"{not json",
+        )
+        .unwrap();
+        assert!(!running_owned_by(dir.path(), me));
+    }
 
     fn new(root: &Path, verb: &str, target: &str, request_id: &str) -> Record {
         new_fp(root, verb, target, request_id, "")

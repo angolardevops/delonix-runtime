@@ -1,0 +1,22 @@
+# delonix-node-api.socket — the node API's listening socket (ADR-0040 P5).
+#
+# A TEMPLATE: `delonix serve node-api --install-units` fills the @…@ fields and
+# writes it next to delonix-node-api.service, in ~/.config/systemd/user (a
+# rootless install) or /etc/systemd/system (root). The first connection starts
+# the service; the service exits when idle and this socket starts it again —
+# nothing stays resident (guardrail #1). A connection that arrives while the
+# service exits waits in this socket's queue, so none is lost.
+[Unit]
+Description=Delonix node API socket (delonix.node.v1)
+Documentation=https://github.com/angolardevops/delonix-runtime
+
+[Socket]
+ListenStream=@LISTEN@
+# Only the owner connects; the server also checks SO_PEERCRED per connection.
+SocketMode=0600
+# One service instance gets the listening socket (LISTEN_FDS=1), not one
+# instance per connection.
+Accept=no
+
+[Install]
+WantedBy=sockets.target

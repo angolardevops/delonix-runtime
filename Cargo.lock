@@ -947,9 +947,12 @@ dependencies = [
 name = "delonix-node-api-bin"
 version = "5.0.2"
 dependencies = [
+ "delonix-model",
  "delonix-node",
  "delonix-node-api",
  "delonix-telemetry",
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
