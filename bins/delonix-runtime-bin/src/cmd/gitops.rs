@@ -843,10 +843,14 @@ pub(crate) fn remove_for_replace(plan: &str) -> Result<()> {
     remove_timer(&namespace, &name)?;
     let dir = source_dir(&root, &namespace, &name);
     match std::fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
+    // The namespace directory goes with its last source; `remove_dir` refuses
+    // a directory that still holds another one, which is the answer wanted.
+    let _ = std::fs::remove_dir(gitops_root(&root).join(&namespace));
+    Ok(())
 }
 
 /// `ns/name`, or a bare name that names exactly one source.

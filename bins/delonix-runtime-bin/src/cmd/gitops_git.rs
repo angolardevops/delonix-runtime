@@ -115,13 +115,6 @@ impl Git {
         self
     }
 
-    /// A shorter ceiling, for tests that prove the timeout fires.
-    #[cfg(test)]
-    pub(crate) fn with_timeout(mut self, t: Duration) -> Git {
-        self.timeout = t;
-        self
-    }
-
     /// The `GIT_SSH_COMMAND` for the pinned files: no config file, no agent,
     /// no host the pinned list does not name, no prompt.
     pub(crate) fn ssh_command(files: &SshFiles) -> String {
@@ -362,6 +355,73 @@ mod tests {
         );
     }
 
+    /// Runs `script` as the git binary and returns what it printed, retrying
+    /// the ETXTBSY a freshly written script can hit while another test thread
+    /// forks (that is the harness, not the code under test).
+    fn run_fake(script: &str, timeout: Duration) -> (Result<Vec<u8>>, Duration) {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("git");
+        std::fs::write(&fake, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let g = Git {
+            bin: fake,
+            home: dir.path().join("home"),
+            path_env: Some("/usr/bin:/bin".into()),
+            ssh: None,
+            timeout,
+        };
+        loop {
+            let t = Instant::now();
+            let r = g.run(&["fetch"], 1 << 20);
+            let busy = matches_busy(&r);
+            if !busy {
+                return (r, t.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn matches_busy(r: &Result<Vec<u8>>) -> bool {
+        r.as_ref()
+            .err()
+            .is_some_and(|e| e.to_string().contains("Text file busy"))
+    }
+
+    /// Measured on the process git actually runs as: nothing of the caller's
+    /// environment reaches it. The test process carries `CARGO_*`, `RUST_*`
+    /// and `HOME`; the child sees only what [`Git::command`] set and what
+    /// `sh` adds itself.
+    #[test]
+    fn git_runs_with_nothing_of_the_callers_environment() {
+        let (out, _) = run_fake("#!/bin/sh\nenv\n", GIT_TIMEOUT);
+        let out = String::from_utf8(out.unwrap()).unwrap();
+        let allowed = [
+            "PATH",
+            "HOME",
+            "XDG_CONFIG_HOME",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_TERMINAL_PROMPT",
+            "GIT_PROTOCOL_FROM_USER",
+            "GIT_LITERAL_PATHSPECS",
+            "LC_ALL",
+            // set by sh itself
+            "PWD",
+            "OLDPWD",
+            "SHLVL",
+            "_",
+        ];
+        for line in out.lines() {
+            let name = line.split('=').next().unwrap_or_default();
+            assert!(
+                allowed.contains(&name),
+                "{name} leaked into git's environment"
+            );
+        }
+        assert!(out.contains("GIT_CONFIG_GLOBAL=/dev/null"), "{out}");
+    }
+
     /// The pinned files are quoted for the shell `GIT_SSH_COMMAND` passes
     /// through, and host-key checking cannot be relaxed by the repository.
     #[test]
@@ -381,32 +441,8 @@ mod tests {
     /// timeout (DX-8601), not left holding the pass's lock.
     #[test]
     fn a_git_that_hangs_is_killed_at_the_ceiling() {
-        let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("git");
-        std::fs::write(&fake, "#!/bin/sh\nsleep 30\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let g = Git {
-            bin: fake,
-            home: dir.path().to_path_buf(),
-            path_env: None,
-            ssh: None,
-            timeout: GIT_TIMEOUT,
-        }
-        .with_timeout(Duration::from_millis(300));
-        // A script written a moment ago can still be open for writing in a
-        // descriptor another test thread's fork inherited: `execve` then
-        // answers ETXTBSY. That is the harness, not the code under test, so it
-        // is retried rather than read as a result.
-        let (e, took) = loop {
-            let t = Instant::now();
-            let e = g.run(&["fetch"], 1024).unwrap_err();
-            let busy = e.to_string().contains("Text file busy");
-            if !busy {
-                break (e, t.elapsed());
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        };
+        let (r, took) = run_fake("#!/bin/sh\nsleep 30\n", Duration::from_millis(300));
+        let e = r.unwrap_err();
         assert!(took < Duration::from_secs(10), "{took:?}");
         assert_eq!(e.number(), 8601, "{e}");
     }
