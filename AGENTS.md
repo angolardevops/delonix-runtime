@@ -4065,6 +4065,19 @@ permitia, com os dois roots isolados):
 7. **BAIXO — o MCP passava o `name` do modelo ao argv sem `--`** (o modelo pode ter lido
    logs controlados por um atacante).
 
+**O portão funcional (`cli-tester`) chumbou a primeira versão, e com razão:** o
+*baseline* fechava o `run` e deixava três portas abertas no mesmo nó —
+`container update --volume-add /etc:/x` (o container leu o hostname do host),
+`--gpus dri` (nós `/dev/dri` crus) e `--masked-path /x` (uma lista própria SUBSTITUI a de
+omissão, e `/proc/interrupts` voltou a ter 142 linhas). Fechadas as três; o
+`--masked-path` exige o núcleo que todo o kubelet manda, **sem** o
+`/sys/devices/virtual/powercap`, que só os kubelets recentes mandam — exigi-lo recusaria
+todos os pods de um kubelet mais antigo num nó *baseline*. `--gpus nvidia` e um
+`--device` CDI continuam permitidos (são o *device plugin* do motor). Também: o disco de
+arranque de uma VM que seja um dispositivo conta como passthrough, e o DX-1349 chegava ao
+operador como DX-1000 (passava por `into_root`, que deita fora o número). A bateria
+`scripts/e2e.sh` tem agora uma secção que fixa tudo isto pela MENSAGEM da política.
+
 **Dois defeitos de correcção apanhados de caminho, os dois silenciosos:** o
 `hot_fields(RuntimePolicy)` listava 8 dos 12 campos comparados, por isso ligar
 `denyPrivateEgress` num manifesto já aplicado planeava um `Replace` impossível (há agora um
@@ -4079,7 +4092,9 @@ Qualquer argv construído para `delonix …` a partir de um valor de fora leva `
 dele. E a classe dos achados 2 e 3 é «o portão tem uma segunda porta»: uma regra de
 política vale o que vale o caminho MENOS guardado até ela.
 
-**Por fazer, com a razão:** verificação de assinatura no pull exigida pela política
+**Por fazer, com a razão:** o `delonix drift` ignora o `RuntimePolicy` (não tem dono,
+e a deriva só compara recursos carimbados) — um `policy.json` editado à mão não aparece,
+enquanto o `stack plan` o vê; é anterior a esta auditoria. Verificação de assinatura no pull exigida pela política
 (`image verify` existe e é manual — ligá-lo à admissão é uma feature com chave do nó, não
 uma linha); o perfil `restricted`; e `ExecSync`/streaming provados por teste do parser
 real e não por um `crictl exec` contra um kubelet (o argv é o mesmo).
