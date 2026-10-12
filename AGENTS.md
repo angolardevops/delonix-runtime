@@ -3739,6 +3739,72 @@ vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
 
+## Auditoria de segurança #4 (2026-10-12) — OWASP K8s/Docker Top 10, Kinds e providers
+
+Lente: OWASP Kubernetes Top 10 (K01 configuração de workload, K04 política centralizada,
+K08 segredos) e Docker Top 10 (D04/D05), aplicados à admissão do nó, ao CRI, aos Kinds e
+aos providers. **Os dois defaults que a skill `delonix-runtime-sec` dava como abertos já
+estavam fechados** (tecto de caps do CRI seguro por omissão; unpack limitado a 64 GiB e
+4 M entradas) — a baseline da skill está desactualizada. Sete achados novos, todos
+corrigidos, cada um medido antes (vermelho) e depois (verde, ao vivo quando o caminho o
+permitia, com os dois roots isolados):
+
+1. **ALTO — `kubectl exec <pod> -- -u 0 sh` corria como root no container.** A CLI lê
+   opções DEPOIS do nome do container (`container exec x -u` responde «a value is
+   required for '--user'»), e o CRI passava o comando do utilizador logo a seguir ao
+   nome — nos dois caminhos, streaming e `ExecSync`. Contornava `runAsNonRoot`/
+   `runAsUser` com só `pods/exec`. Agora `exec <nome> -- <cmd>`; um teste da CLI faz o
+   parse do argv exacto que o CRI constrói e exige `user == None`.
+2. **ALTO — `denyPrivileged` julgava UMA flag.** Medido: `--cap-add ALL --security-opt
+   seccomp=unconfined --host-pid -v /:/host --device /dev/sda` passava a admissão de um
+   nó com `denyPrivileged: true`. Campo novo, opt-in, `workloadSecurity: baseline` — o
+   perfil *baseline* dos Pod Security Standards no ÚNICO ponto de admissão (CLI,
+   manifesto, compose, Docker API e CRI convergem em `cmd_run`): caps fora da lista
+   baseline, `--host-pid/--host-ipc`, `seccomp/apparmor=unconfined`, bind de caminho do
+   host e `--device`. Regras `ADM-BASELINE-*`. A rede do host fica com `denyHostNetwork`
+   (é a rede por omissão do motor); `restricted` é recusado pelo nome (precisa do
+   utilizador efectivo da imagem, que a admissão não tem). Uma política só com
+   `denyPrivileged` passa a denunciar o próprio buraco (`POLICY-PRIVILEGE-EQUIVALENTS-OPEN`).
+3. **ALTO — `kind: VirtualMachine` não passava pela admissão.** Só o `vm create` da CLI
+   chamava `policy::enforce`; o mesmo VM por manifesto contornava `denyDevicePassthrough`,
+   `denyLatestVmImage` e `allowedImageUrlHosts`. E um manifesto tem mais portas de
+   passthrough do que a CLI: `devices`, um `extraDisks` com origem num dispositivo do host,
+   e XML cru do libvirt (não validado — conta sempre). O `vm update --disk-add` (hotplug)
+   também. A detecção segue symlinks (`./innocent.qcow2 → /dev/sda` é recusado, medido).
+4. **MÉDIO — o proxy L7 deixava o cliente escrever `X-Forwarded-*`.** Era a borda e não
+   escrevia os seus; um backend que confia neles (os templates do `init` mandam
+   `TRUSTED_PROXY=*` atrás do túnel) aceitava IP e `https` forjados. Os do cliente são
+   descartados e o proxy escreve peer, esquema do listener e Host. Medido com o
+   `ingress-proxy` e um backend de eco.
+5. **MÉDIO — credenciais de túnel no argv** (`--token`, `--authtoken`, `token@host`):
+   legíveis por qualquer utilizador local em `/proc/<pid>/cmdline`. Passam por ambiente
+   (`TUNNEL_TOKEN`, `NGROK_AUTHTOKEN`, medidos nos binários reais) ou por um ssh config
+   `0600` (pinggy); o log do agente é `0600` porque o ngrok escreve lá o authtoken quando
+   o recusa.
+6. **MÉDIO — o cliente OPNsense aceitava `http://` e userinfo** e mandava key/secret em
+   claro; os outros três providers já recusavam. DX-1349, validado dentro do `connect`.
+7. **BAIXO — o MCP passava o `name` do modelo ao argv sem `--`** (o modelo pode ter lido
+   logs controlados por um atacante).
+
+**Dois defeitos de correcção apanhados de caminho, os dois silenciosos:** o
+`hot_fields(RuntimePolicy)` listava 8 dos 12 campos comparados, por isso ligar
+`denyPrivateEgress` num manifesto já aplicado planeava um `Replace` impossível (há agora um
+teste que exige as duas listas iguais); e um `devices: ['0000:01:00.0']` plano num
+`kind: VirtualMachine` era deitado fora (`merge_device_options` fazia `remove` dentro de um
+`let … else` antes de o padrão falhar — o dry-run imprimia `devices: []`, rc 0).
+
+**Lição de método, a reter:** a classe dos achados 1 e 7 é a mesma que a auditoria #1
+fechou para `ssh`/`virsh` — um valor de outro lado no argv de um binário com opções — e
+reapareceu na CLI do PRÓPRIO motor, porque «é o nosso binário» lia-se como «é seguro».
+Qualquer argv construído para `delonix …` a partir de um valor de fora leva `--` antes
+dele. E a classe dos achados 2 e 3 é «o portão tem uma segunda porta»: uma regra de
+política vale o que vale o caminho MENOS guardado até ela.
+
+**Por fazer, com a razão:** verificação de assinatura no pull exigida pela política
+(`image verify` existe e é manual — ligá-lo à admissão é uma feature com chave do nó, não
+uma linha); o perfil `restricted`; e `ExecSync`/streaming provados por teste do parser
+real e não por um `crictl exec` contra um kubelet (o argv é o mesmo).
+
 ## CRI num nó kubeadm: eviction sem estatísticas e `kubeadm reset` com órfãos (2026-09-15)
 
 Os dois defeitos foram medidos contra um kubelet real (VM da `delonix-vm-k8s:1.36`, k8s 1.36.4)
