@@ -16261,3 +16261,6 @@ msgstr "RuntimePolicy: workloadSecurity '{value}' não é um perfil que este mot
 msgid "this node refuses `--privileged` but admits what it is made of (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — set `workloadSecurity: baseline` to refuse those too"
 msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — define `workloadSecurity: baseline` para recusar também esses"
 
+
+msgid "token cannot be empty or contain whitespace or control characters"
+msgstr "o token não pode estar vazio nem conter espaços ou caracteres de controlo"
