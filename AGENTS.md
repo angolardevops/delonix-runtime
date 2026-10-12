@@ -10031,3 +10031,38 @@ correr, nada disto deve ser lido como «funciona».
 trabalho de outras sessões): o `--extra-package` é descartado em silêncio no caminho
 offline da build da golden, e o `k8s_repo_version` tem um default independente
 (`stable:/v1.31`) que discorda do `DEFAULT_K8S_VERSION` (1.36).
+
+## `kind: GitOpsSource` — a passagem de pull sem daemon (ADR-0021, 2026-10-12)
+
+- **Uma passagem, sem processo residente**: um timer systemd de utilizador por fonte
+  (`delonix-gitops-<ns>.<nome>`, `Type=oneshot`, com atraso aleatório) corre `gitops reconcile`:
+  fetch `--depth=1` do ref, verificação, `stack plan`, guarda, apply com os digests do plano,
+  registo do commit aplicado e um evento. Um segundo disparo com a passagem anterior viva SALTA
+  (`flock` não bloqueante por fonte) e di-lo. Verbos: `gitops reconcile|status|suspend|resume`;
+  `suspend` é uma marca local, fora do spec.
+- **Um commit recusado não aplica NADA e fica registado**: YAML com chave duplicada, um grafo
+  partido, um documento proibido ou uma acção que a política não permite (DX-1602/1604) deixam
+  a stack como estava, com o último commit aplicado intacto. Medido: quatro commits recusados,
+  o mesmo PID e o mesmo `memory.max`.
+- **A fonte é entrada não confiável** — a passagem de segurança está escrita no ADR-0021. O git
+  corre com `env_clear()`, HOME privado, sem config de sistema nem global, sem hooks, só
+  `file`/`https`/`ssh`, `fsckObjects`, sem redirects nem credential helpers, tecto de 120 s. Nada
+  é checked out: a árvore lê-se por `ls-tree`/`cat-file` e só ficheiros regulares passam
+  (symlinks, submódulos, ponteiros LFS e chaves privadas recusam o commit). Tectos: 4096
+  entradas, 256 manifestos, 1 MiB por ficheiro, 8 MiB no total, 512 documentos, 256 MiB de
+  espelho. Assinaturas só SSH (`allowed_signers`); GPG é recusado.
+- **O que um repo pode declarar**: `RuntimePolicy`, `Secret`, `App` e `Image` com `build:` nunca;
+  VM, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway e IPPool só listados em
+  `safety.kinds`. Um container não pede privilégio, rede/PID/IPC do host, bind mounts,
+  dispositivos, GPU, `capAdd`, perfis unconfined nem `envFile`; um Volume é local simples e uma
+  Network é bridge. Os documentos aterram na namespace da fonte. **Um container vindo de uma
+  fonte tem de nomear uma rede**: a forma plana sem rede é `host`, que a guarda recusa.
+- **Política do plano**: `Create`/`Update`/`NoOp` por omissão; `Adopt`/`Replace`/`Reboot` só com
+  `safety.allow`; `Conflict` sempre recusado; `Delete` só com `prune: true`, abaixo de
+  `maximumDeletes` e nunca sobre `protectedResources`. Uma fonte só se declara a si própria, e o
+  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. A stack chama-se,
+  por omissão, como a fonte.
+- **Não validado**: um timer systemd real a disparar, a recuperação depois de um reboot, a
+  validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
+  como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
+  e os verbos `gitops bootstrap`/`rm`/`history` do ADR.

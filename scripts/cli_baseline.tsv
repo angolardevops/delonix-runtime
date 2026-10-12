@@ -74,6 +74,10 @@
 ~	drift
 =	explain
 ~	get
+~	gitops reconcile
+~	gitops resume
+~	gitops status
+~	gitops suspend
 ~	hosts sync
 ~	image apply
 ~	image describe
