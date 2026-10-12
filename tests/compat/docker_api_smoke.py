@@ -78,6 +78,42 @@ c.api.remove_container(cid, force=True)
 gone = not any(x["Id"] == cid for x in c.api.containers(all=True))
 check("remove", gone)
 
+# What Testcontainers does on top of the lifecycle above (measured with
+# testcontainers-python 4.8.2, 2026-10-12): it publishes the port on a host
+# port the daemon picks, asks for that port, reads `Config.Tty` before any
+# logs call, and removes the RUNNING container with `force=True` — Python's
+# spelling of a boolean, which this layer once read as false.
+tc = c.api.create_container(
+    IMAGE,
+    command=["sleep", "60"],
+    name=NAME + "-tc",
+    ports=[80],
+    host_config=c.api.create_host_config(port_bindings={80: None}),
+)["Id"]
+c.api.start(tc)
+d = c.api.inspect_container(tc)
+check("inspect Config.Tty", "Tty" in d["Config"], str(d["Config"].get("Tty")))
+published = c.api.port(tc, 80) or []
+check(
+    "a port with no host port is published on one",
+    bool(published) and bool(published[0].get("HostPort")),
+    str(published),
+)
+# A remove can wait on the host's writeback (DX-8101 answers 504 meanwhile);
+# that is retried. A 409 «use --force» is the defect, and is not.
+removed, why = False, ""
+for _ in range(24):
+    try:
+        c.api.remove_container(tc, force=True)
+        removed = True
+        break
+    except docker.errors.APIError as e:
+        why = str(e)[:120]
+        if e.status_code != 504:
+            break
+        time.sleep(5)
+check("remove of a RUNNING container with force=True", removed, why)
+
 print()
 if fails:
     print(f"{len(fails)} failed: {', '.join(fails)}")

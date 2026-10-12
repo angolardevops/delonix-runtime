@@ -667,37 +667,54 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
 ///
 /// `compose`: the create→start→inspect→stop→rm sequence this layer was built
 /// against and validated with, per `AGENTS.md` §«serve docker-api».
+///
+/// `testcontainers`: testcontainers-python 4.8.2 (docker-py 7.2.0) run through
+/// a logging proxy on 2026-10-12 — `DockerContainer(...).with_exposed_ports()`,
+/// `get_exposed_port`, `wait_for_logs`, `exec`, `get_logs`, `stop`. The calls
+/// and what each answered are in `docs/paridade-docker-podman.md`.
 pub(crate) const API_UPSTREAM_USED: &[(&str, &str, &str)] = &[
     (
         "GET",
         "/_ping",
         "compose, kind — the first call any client makes",
     ),
-    ("GET", "/version", "compose, kind"),
+    ("GET", "/version", "compose, kind, testcontainers"),
     ("GET", "/info", "kind — `info --format {{json .}}`"),
     (
         "GET",
         "/containers/json",
         "kind — `ps -a --filter label=...`",
     ),
-    ("POST", "/containers/create", "kind, compose — `run`"),
-    ("POST", "/containers/{id}/start", "compose"),
+    (
+        "POST",
+        "/containers/create",
+        "kind, compose, testcontainers — `run`",
+    ),
+    ("POST", "/containers/{id}/start", "compose, testcontainers"),
     ("POST", "/containers/{id}/stop", "compose"),
     ("POST", "/containers/{id}/kill", "compose"),
     ("POST", "/containers/{id}/wait", "compose"),
     ("POST", "/containers/{id}/restart", "compose"),
     ("POST", "/containers/{id}/rename", "compose"),
-    ("DELETE", "/containers/{id}", "kind — `rm -f -v <n>`"),
+    (
+        "DELETE",
+        "/containers/{id}",
+        "kind — `rm -f -v <n>`; testcontainers — `stop()`",
+    ),
     (
         "GET",
         "/containers/{id}/json",
-        "kind — four distinct `inspect --format`",
+        "kind — four distinct `inspect --format`; testcontainers — `get_exposed_port`",
     ),
-    ("GET", "/containers/{id}/logs", "kind — `logs -f <n>`"),
+    (
+        "GET",
+        "/containers/{id}/logs",
+        "kind — `logs -f <n>`; testcontainers — `wait_for_logs`",
+    ),
     (
         "POST",
         "/containers/{id}/exec",
-        "kind — `exec --privileged [-i] <n> <cmd>`",
+        "kind — `exec --privileged [-i] <n> <cmd>`; testcontainers — `exec()`",
     ),
     ("POST", "/images/create", "kind — `pull <ref>`"),
     (
@@ -1249,7 +1266,12 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
         Err(e) => return err_response(&e),
     };
     let _ = delonix_linux::reconcile_status(&mut c);
-    ok_json(json!({
+    ok_json(inspect_json(&c))
+}
+
+/// The inspect body of one container, from its record.
+fn inspect_json(c: &Container) -> serde_json::Value {
+    json!({
         "Id": c.id,
         "Name": format!("/{}", c.name),
         "Created": unix_to_rfc3339(c.created_unix),
@@ -1264,16 +1286,21 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
             "Cmd": c.command,
             "Env": c.env,
             "Labels": c.labels,
+            // No container here has a TTY: `container run` has no `-t`, and the
+            // create route does not map `Tty`. docker-py reads this key before
+            // every `logs()` and raised `KeyError: 'Tty'` without it.
+            "Tty": false,
         },
         "Image": c.image,
         "NetworkSettings": {
+            "Ports": docker_inspect_ports(&c.ports),
             "Networks": {
                 c.network.clone().unwrap_or_else(|| "host".to_string()): {
                     "IPAddress": c.ip.clone().unwrap_or_default(),
                 }
             }
         },
-    }))
+    })
 }
 
 /// Maps a subset of Docker's `ContainerConfig`/`HostConfig` create-request
@@ -1334,7 +1361,10 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         }
         out
     };
-    let ports = docker_port_bindings_to_publish_specs(&host["PortBindings"]);
+    let ports = docker_port_bindings_to_publish_specs(
+        &host["PortBindings"],
+        super::compose::free_host_port,
+    )?;
     let restart = host["RestartPolicy"]["Name"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -1564,27 +1594,70 @@ fn json_str_array(v: &serde_json::Value) -> Vec<String> {
 
 /// Docker's `HostConfig.PortBindings` is a map keyed `"<containerPort>/<proto>"`
 /// -> `[{"HostIp": "...", "HostPort": "..."}]`; delonix's `--publish` spec is
-/// `"hostPort:containerPort[/proto]"`. Only the FIRST host binding per
+/// `"[hostIp:]hostPort:containerPort[/proto]"`. Only the FIRST host binding per
 /// container port is used (this engine publishes one host port per spec, same
 /// as the CLI's own `-p`).
-fn docker_port_bindings_to_publish_specs(v: &serde_json::Value) -> Vec<String> {
+///
+/// An empty `HostPort` asks for a free port (`docker run -p 80`, and every
+/// `with_exposed_ports` of Testcontainers). It was dropped here, so the port
+/// was never published and the client polled the inspect until it gave up:
+/// «Port mapping … not available». The port is chosen once, here, by `free`,
+/// as the compose translator does for `ports: ["80"]`. A `HostIp` is kept; an
+/// empty one leaves the engine's own default (loopback).
+fn docker_port_bindings_to_publish_specs(
+    v: &serde_json::Value,
+    mut free: impl FnMut() -> Result<u16>,
+) -> Result<Vec<String>> {
     let Some(obj) = v.as_object() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    obj.iter()
-        .filter_map(|(key, bindings)| {
-            let (cport, proto) = key.split_once('/').unwrap_or((key, "tcp"));
-            let host_port = bindings.as_array()?.first()?["HostPort"].as_str()?;
-            if host_port.is_empty() {
-                return None;
+    let mut out = Vec::new();
+    for (key, bindings) in obj {
+        let (cport, proto) = key.split_once('/').unwrap_or((key, "tcp"));
+        let Some(first) = bindings.as_array().and_then(|b| b.first()) else {
+            continue;
+        };
+        let host_port = match first["HostPort"].as_str().unwrap_or("") {
+            "" => free()?.to_string(),
+            p => p.to_string(),
+        };
+        let addr = match first["HostIp"].as_str().unwrap_or("") {
+            "" => String::new(),
+            ip => format!("{ip}:"),
+        };
+        out.push(if proto == "tcp" {
+            format!("{addr}{host_port}:{cport}")
+        } else {
+            format!("{addr}{host_port}:{cport}/{proto}")
+        });
+    }
+    Ok(out)
+}
+
+/// `NetworkSettings.Ports` of an inspect: `{"80/tcp": [{"HostIp", "HostPort"}]}`,
+/// the shape `docker port` and docker-py's `api.port()` read. Built from the same
+/// parsed entries as the `Ports` of `GET /containers/json`, so the two never
+/// disagree. Only published ports are listed.
+fn docker_inspect_ports(ports: &[String]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for e in docker_port_entries(ports) {
+        let key = format!(
+            "{}/{}",
+            e["PrivatePort"],
+            e["Type"].as_str().unwrap_or("tcp")
+        );
+        let binding = json!({
+            "HostIp": e["IP"].as_str().unwrap_or(""),
+            "HostPort": e["PublicPort"].to_string(),
+        });
+        match map.get_mut(&key).and_then(|v| v.as_array_mut()) {
+            Some(list) => list.push(binding),
+            None => {
+                map.insert(key, json!([binding]));
             }
-            Some(if proto == "tcp" {
-                format!("{host_port}:{cport}")
-            } else {
-                format!("{host_port}:{cport}/{proto}")
-            })
-        })
-        .collect()
+        }
+    }
+    serde_json::Value::Object(map)
 }
 
 fn version_json() -> Vec<u8> {
@@ -1756,12 +1829,19 @@ fn containers_json(state: &AppState, all: bool) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(&items)?)
 }
 
-/// A boolean query parameter as the Docker API spells it: `1` or `true`.
+/// A boolean query parameter, read the way the Docker daemon reads it
+/// (`httputils.BoolValue`): case-insensitive, and false only for an absent
+/// value, `""`, `0`, `no`, `false` or `none`.
+///
+/// It read only `1` and `true` before, and docker-py — under Testcontainers —
+/// sends Python's spelling: `DELETE /containers/<id>?v=True&force=True`. The
+/// `force` was read as false and the remove of a running container answered
+/// 409 «use --force», which leaves the container running after the test.
 fn query_flag(params: &std::collections::HashMap<String, String>, key: &str) -> bool {
-    params
-        .get(key)
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false)
+    params.get(key).is_some_and(|v| {
+        let v = v.trim().to_ascii_lowercase();
+        !matches!(v.as_str(), "" | "0" | "no" | "false" | "none")
+    })
 }
 
 /// The `Ports` of a container, read with the same parser the CLI publishes with
@@ -2139,6 +2219,55 @@ mod containers_json_tests {
         );
     }
 
+    /// `with_exposed_ports(80)` sends an empty `HostPort`. It has to publish a
+    /// port, and the inspect has to name it where docker-py looks.
+    #[test]
+    fn an_empty_host_port_is_published_on_a_free_one_and_the_inspect_names_it() {
+        let bindings = json!({
+            "80/tcp": [{"HostIp": "", "HostPort": ""}],
+            "53/udp": [{"HostIp": "127.0.0.1", "HostPort": "5353"}],
+        });
+        let mut specs = docker_port_bindings_to_publish_specs(&bindings, || Ok(49152)).unwrap();
+        specs.sort();
+        assert_eq!(specs, vec!["127.0.0.1:5353:53/udp", "49152:80"]);
+
+        let recorded = ["127.0.0.1:49152:80/tcp".to_string()];
+        assert_eq!(
+            docker_inspect_ports(&recorded),
+            json!({"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]})
+        );
+    }
+
+    /// docker-py reads `Config.Tty` before every `logs()`, and `api.port()`
+    /// reads `NetworkSettings.Ports`; a missing key is a `KeyError` in the
+    /// client, not a smaller answer.
+    #[test]
+    fn the_inspect_carries_the_keys_docker_py_reads() {
+        let mut c = Container::new(
+            "id".into(),
+            "web".into(),
+            "img".into(),
+            vec!["sh".to_string()],
+            "max".into(),
+        );
+        c.ports = vec!["127.0.0.1:49152:80/tcp".to_string()];
+        let v = inspect_json(&c);
+        assert_eq!(v["Config"]["Tty"], json!(false));
+        assert_eq!(
+            v["NetworkSettings"]["Ports"]["80/tcp"][0]["HostPort"],
+            json!("49152")
+        );
+    }
+
+    #[test]
+    fn a_free_port_that_cannot_be_found_fails_the_create() {
+        let bindings = json!({"80/tcp": [{"HostIp": "", "HostPort": ""}]});
+        let r = docker_port_bindings_to_publish_specs(&bindings, || {
+            Err(Error::Invalid("no port".into()))
+        });
+        assert!(r.is_err());
+    }
+
     #[test]
     fn an_unreadable_spec_is_left_out_not_guessed() {
         assert!(docker_port_entries(&["not-a-port".to_string()]).is_empty());
@@ -2152,5 +2281,19 @@ mod containers_json_tests {
         assert!(!query_flag(&q("all=0"), "all"));
         assert!(!query_flag(&q("all=false"), "all"));
         assert!(!query_flag(&q(""), "all"));
+    }
+
+    /// docker-py sends Python's `True`/`False`. The daemon reads them as
+    /// booleans, and a remove with `force=True` has to force.
+    #[test]
+    fn a_boolean_is_read_like_the_daemon_reads_it() {
+        let q = |s: &str| parse_query(s);
+        for yes in ["True", "TRUE", "t", "yes", "on"] {
+            assert!(query_flag(&q(&format!("force={yes}")), "force"), "{yes}");
+        }
+        for no in ["False", "FALSE", "No", "none", "0", ""] {
+            assert!(!query_flag(&q(&format!("force={no}")), "force"), "{no}");
+        }
+        assert!(!query_flag(&q("v=True"), "force"), "absent is false");
     }
 }

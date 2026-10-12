@@ -273,3 +273,54 @@ Cada item fecha com: implementação, teste que falha sem ela, e validação pel
 revisor da área (`delonix-code`, `delonix-devops`, `delonix-security-compliance`).
 Nada é dado por feito só porque compila — foi assim que a primeira versão
 deste documento nasceu errada.
+
+---
+
+## 8. Testcontainers against `serve docker-api`, measured (2026-10-12)
+
+Item 10 above runs the Docker SDK through the lifecycle, and it is green. That
+is not the same as Testcontainers working: the SDK smoke removed a container
+only after stopping it, and never asked for a port the daemon picks. This
+section is what testcontainers-python **4.8.2** (docker-py **7.2.0**) actually
+calls, captured through a logging proxy in front of the socket, in an isolated
+root, with Ryuk disabled.
+
+The test: `DockerContainer("alpine:3.20").with_command(...).with_exposed_ports(80)`,
+then `get_container_host_ip`, `get_exposed_port(80)`, `wait_for_logs("ready")`,
+`exec(["echo","hi"])`, `get_logs`, `stop`.
+
+| Call | Route | Before (b1eab234) | After (S20) |
+|---|---|---|---|
+| `start` | `GET /version`, `POST /containers/create`, `POST …/start` (304), `GET …/json` | works | works |
+| `get_container_host_ip` | none | `localhost` | `localhost` |
+| `get_exposed_port(80)` | `GET …/json`, polled | **fails** after polling: «Port mapping … not available». An empty `HostPort` was dropped, the port never published, and the inspect had no `NetworkSettings.Ports` | `45821`, published on loopback |
+| `wait_for_logs`, `get_logs` | `GET …/json` then `GET …/logs` | **fails** in the client: `KeyError: 'Tty'` (docker-py reads `Config.Tty` before every logs call) | **fails** with 404: the logs route is not written |
+| `exec` | `POST …/exec` | 404, refused by design (needs a hijacked connection) | 404, same |
+| `stop` | `DELETE /containers/<id>?v=True&link=False&force=True` | **409 «use --force»**: `force=True` was read as false, and the container stayed running after the test | forced; 504 (DX-8101) while the host's writeback held the exit, then 204 |
+
+Fixed here, each with a unit test that fails with the fix reverted, and three
+checks added to `tests/compat/docker_api_smoke.py` (the base binary fails all
+three, the fixed one passes 17/17):
+
+- **Query booleans** are read the way the daemon reads them (`BoolValue`):
+  case-insensitive, false only for `""`, `0`, `no`, `false`, `none`.
+- **An empty `HostPort`** is published on a free host port chosen at create
+  time, as the compose translator does for `ports: ["80"]`. A non-empty
+  `HostIp` is kept; an empty one keeps the engine's loopback default.
+- **The inspect** carries `Config.Tty` (always `false`: no container here has a
+  TTY) and `NetworkSettings.Ports` in the shape `docker port` reads.
+
+Still not working, and none of it is small:
+
+- **`GET /containers/{id}/logs`.** `wait_for_logs` is Testcontainers' most
+  common wait strategy, so this is the gap that stops most suites. The route
+  has to frame stdout and stderr separately (the multiplexed stream of a
+  non-TTY container), and a detached container's log file here keeps them
+  mixed unless it was started with `--log-cri`. That is a design decision about
+  the log format, not a missing handler.
+- **`POST /containers/{id}/exec`.** Refused by design: it needs a hijacked
+  connection (see the module doc).
+- **`v=True` on remove** (anonymous volumes) is not read: the engine's `rm`
+  has no separate «with its anonymous volumes» mode.
+- **Ryuk** (the reaper sidecar, enabled by default) was not tried. It needs
+  the Docker socket mounted inside a container, which this layer does not map.
