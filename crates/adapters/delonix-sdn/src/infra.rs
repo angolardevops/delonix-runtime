@@ -2497,6 +2497,10 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             let _ = std::fs::write(slirp_pid_path(), (child.id() as i32).to_string());
             // the slirp lives for the entire life of the infra — we don't wait on it.
             std::mem::forget(child);
+            // A new slirp has no hostfwd: the host ports of VIP Services
+            // (ADR-0066 D6) come back here, the way a container's come back
+            // when it is restarted.
+            crate::service_lb::republish_all();
             Ok(())
         }
         Err(e) => {
@@ -6651,6 +6655,9 @@ pub struct ServiceDef {
     /// `spec.readiness.tcp`; `None` = the defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<crate::service_lb::TcpReadiness>,
+    /// `spec.publish`: host ports leading to the VIP's backends (ADR-0066 D6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publish: Vec<u16>,
 }
 
 fn services_dir() -> PathBuf {
@@ -6752,6 +6759,7 @@ pub fn service_set_lb(
     vip: Option<String>,
     vip_requested: Option<String>,
     readiness: Option<crate::service_lb::TcpReadiness>,
+    publish: Vec<u16>,
 ) -> Result<()> {
     let mut def = service_get(namespace, name)
         .ok_or_else(|| Error::ServiceNotFound(format!("service: {namespace}/{name}")))?;
@@ -6759,6 +6767,7 @@ pub fn service_set_lb(
     def.vip = vip;
     def.vip_requested = vip_requested;
     def.readiness = readiness;
+    def.publish = publish;
     write_servicedef(&def)
 }
 
@@ -6800,6 +6809,11 @@ pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
     // IPAM reaper would only reclaim later, and a VIP re-handed meanwhile is
     // not this Service's any more.
     crate::service_lb::release_vip(namespace, name);
+    if let Some(def) = service_get(namespace, name) {
+        for p in def.publish {
+            crate::service_lb::unpublish(p);
+        }
+    }
     let _ = std::fs::remove_file(servicedef_path(namespace, name));
     forget_legacy_service(namespace, name);
     Ok(())

@@ -2654,6 +2654,19 @@
           "minimum": 0,
           "type": "integer"
         },
+        "publish": {
+          "description": "`type: VirtualIP` only: host ports that lead to the VIP's backends\n(ADR-0066 D6), bound like a container's `-p` (`127.0.0.1` unless\n`DELONIX_PUBLISH_ADDR` widens it).",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "readiness": {
           "anyOf": [
             {

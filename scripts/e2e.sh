@@ -7589,9 +7589,10 @@ else
   vwait() { # <svc> <backend> <regex>: up to 20 s for the backend's state
     for _ in $(seq 1 100); do vstate "$1" "$2" | grep -qE "$3" && return 0; sleep 0.2; done; return 1
   }
-  vsvc() { # <name> <ns> <app> [vip]
-    printf 'apiVersion: networking.delonix.io/v1alpha1\nkind: Service\nmetadata: {name: %s, namespace: %s}\nspec:\n  selector: {matchLabels: {app: %s}}\n  port: 8080\n  type: VirtualIP\n%s' \
+  vsvc() { # <name> <ns> <app> [vip] [host port to publish]
+    printf 'apiVersion: networking.delonix.io/v1alpha1\nkind: Service\nmetadata: {name: %s, namespace: %s}\nspec:\n  selector: {matchLabels: {app: %s}}\n  port: 8080\n  type: VirtualIP\n%s%s' \
       "$1" "$2" "$3" "${4:+  vip: $4
+}" "${5:+  publish: [$5]
 }" > "$OUT/vsvc-$1.yaml"
     echo "$OUT/vsvc-$1.yaml"
   }
@@ -7614,7 +7615,8 @@ else
       "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900 >/dev/null 2>&1
       "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
       "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
-      check "VirtualIP: o apply atribui um VIP do conjunto" ok "$BIN" apply -f "$(vsvc vweb "$VNS" vweb)"
+      VHP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+      check "VirtualIP: o apply atribui um VIP do conjunto" ok "$BIN" apply -f "$(vsvc vweb "$VNS" vweb "" "$VHP")"
       VIP=$("$BIN" get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r["vip"] for r in json.load(sys.stdin) if r["name"]=="vweb"))' 2>/dev/null)
       vwait vweb "v1-$PFX" 'ready \(tcp\)'; vwait vweb "v2-$PFX" 'ready \(tcp\)'
       check "VirtualIP: o nome do serviço resolve para o VIP" ok bash -c \
@@ -7622,6 +7624,9 @@ else
       SPREAD=$(vcount "vc-$PFX" "$VIP" 8080 60)
       check "VirtualIP: o VIP espalha as ligações por todos os backends prontos (cada um >= 20%)" ok bash -c \
         "c1=\$(awk '\$2==\"v1\"{print \$1}' <<<'$SPREAD'); c2=\$(awk '\$2==\"v2\"{print \$1}' <<<'$SPREAD'); [ \"\${c1:-0}\" -ge 12 ] && [ \"\${c2:-0}\" -ge 12 ] && [ \$((c1+c2)) -eq 60 ]"
+      HSPREAD=$(for _ in $(seq 1 40); do curl -s -m 2 "http://127.0.0.1:$VHP/"; done | sort | uniq -c)
+      check "VirtualIP: a porta publicada leva ao mesmo conjunto (D6)" ok bash -c \
+        "c1=\$(awk '\$2==\"v1\"{print \$1}' <<<'$HSPREAD'); c2=\$(awk '\$2==\"v2\"{print \$1}' <<<'$HSPREAD'); [ \"\${c1:-0}\" -ge 8 ] && [ \"\${c2:-0}\" -ge 8 ] && [ \$((c1+c2)) -eq 40 ]"
       check "VirtualIP: o cliente na rede dos backends chega com o seu IP (hairpin, conntrack)" ok bash -c \
         "CIP=\$('$BIN' container inspect vc-$PFX | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d[\"ip\"])'); nsenter -t $(vpin) -U -n --preserve-credentials conntrack -L -d $VIP 2>/dev/null | grep -q \"src=\$CIP dst=$VIP .* dst=\$CIP \""
       check "VirtualIP: um cliente de outra namespace não passa do VIP" fail \
@@ -7673,12 +7678,15 @@ else
       "$BIN" container stop "v1-$PFX" >/dev/null 2>&1
       check "VirtualIP: sem backend pronto o VIP recusa de imediato" ok bash -c \
         "t0=\$(date +%s%N); out=\$('$BIN' container exec vc-$PFX wget -qO- -T 5 http://$VIP:8080/ 2>&1); t1=\$(date +%s%N); echo \"\$out\"; grep -q refused <<<\"\$out\" && [ \$(( (t1-t0)/1000000 )) -lt 2000 ]"
+      check "VirtualIP: sem backend pronto a porta publicada também recusa" ok bash -c \
+        "t0=\$(date +%s%N); curl -s -m 5 http://127.0.0.1:$VHP/; rc=\$?; t1=\$(date +%s%N); echo rc=\$rc; case \$rc in 7|52|56) ;; *) exit 1;; esac; [ \$(( (t1-t0)/1000000 )) -lt 2000 ]"
       check "VirtualIP: um VIP pedido e já tomado é um conflito (5)" 5 \
         "$BIN" apply -f "$(vsvc vdup "$VNS" vdup "$VIP")"
       check "VirtualIP: um VIP pedido fora do conjunto é recusado (DX-1361)" 1 \
         "$BIN" apply -f "$(vsvc vout "$VNS" vout 10.98.0.9)"
       check "VirtualIP: o delete liberta o lease do VIP" ok bash -c \
         "'$BIN' delete services $VNS/vweb >/dev/null 2>&1; ! '$BIN' network ipam ls 2>/dev/null | grep -q 'svc:$VNS/vweb'"
+      check "VirtualIP: o delete tira a porta publicada do host" 7 curl -s -m 3 "http://127.0.0.1:$VHP/"
     fi
   else
     skip "VirtualIP: o resto da secção" "não foi possível puxar $VIMG ou criar a rede"
