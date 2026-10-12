@@ -7418,6 +7418,129 @@ check "system prune: varre o nó e a imagem com tag CONTINUA lá" ok bash -c "
   '$BIN' system prune -f >/dev/null || exit 1
   '$BIN' image ls 2>&1 | grep -qF '$IMG' || { echo 'o system prune levou a imagem com tag'; exit 1; }"
 
+section "kind: Service type VirtualIP — o VIP L4 com prontidão (ADR-0066)"
+########################################
+# The VIP is judged by its EFFECT: which backend answered each connection, the
+# DNAT counter in the holder, and the spoof drop counter — never the rc of the
+# apply. A VIP that served one backend only would answer too, so every spread
+# check counts per backend.
+#
+# Only in an isolated run: the pool is written to the root's `ingress/vip-pool`
+# and the checks read the counters inside THAT root's holder.
+if [[ "$E2E_ISOLATED" != 1 ]]; then
+  skip "VirtualIP" "estado partilhado — o conjunto de VIP e o holder seriam os reais"
+else
+  VN="vn-$PFX"; VNS="vipa$$"; VNB="vipb$$"; VW="$OUT/vip-www"; VIMG="busybox:1.36"
+  VPOOL="${E2E_VIP_POOL:-10.97.0.0/24}"
+  vpin() { cat "$DELONIX_ROOT/ingress/holder.pid" 2>/dev/null; }
+  vnft() { nsenter -t "$(vpin)" -U -n --preserve-credentials nft "$@"; }
+  vcount() { # <client> <vip> <port> <n>: one line per connection, then counted
+    for _ in $(seq 1 "$4"); do "$BIN" container exec "$1" wget -qO- -T 2 "http://$2:$3/" 2>&1; done | sort | uniq -c
+  }
+  vstate() { "$BIN" describe services "$1" 2>/dev/null | grep -E "^  $2:" ; }
+  vwait() { # <svc> <backend> <regex>: up to 20 s for the backend's state
+    for _ in $(seq 1 100); do vstate "$1" "$2" | grep -qE "$3" && return 0; sleep 0.2; done; return 1
+  }
+  vsvc() { # <name> <ns> <app> [vip]
+    printf 'apiVersion: networking.delonix.io/v1alpha1\nkind: Service\nmetadata: {name: %s, namespace: %s}\nspec:\n  selector: {matchLabels: {app: %s}}\n  port: 8080\n  type: VirtualIP\n%s' \
+      "$1" "$2" "$3" "${4:+  vip: $4
+}" > "$OUT/vsvc-$1.yaml"
+    echo "$OUT/vsvc-$1.yaml"
+  }
+  mkdir -p "$VW/v1" "$VW/v2" "$VW/vh"
+  echo v1 > "$VW/v1/index.html"; echo v2 > "$VW/v2/index.html"; echo vh > "$VW/vh/index.html"
+  "$BIN" network vip-pool clear >/dev/null 2>&1
+  check "VirtualIP: sem conjunto de VIP é recusado com a classe 69" 69 \
+    env -u DELONIX_SERVICE_VIP_CIDR "$BIN" apply -f "$(vsvc vweb "$VNS" vweb)"
+  check "VirtualIP: um conjunto público é recusado (DX-1360)" 1 "$BIN" network vip-pool set 8.8.8.0/24
+  if "$BIN" image pull "$VIMG" >/dev/null 2>&1 && "$BIN" network create "$VN" --subnet 10.232.0.0/16 >/dev/null 2>&1; then
+    check "VirtualIP: um conjunto sobreposto a uma rede declarada é recusado e nomeia-a" ok bash -c \
+      "out=\$('$BIN' network vip-pool set 10.232.4.0/24 2>&1); rc=\$?; [ \$rc -eq 5 ] && grep -q 'engine network $VN' <<<\"\$out\""
+    if ! "$BIN" network vip-pool set "$VPOOL" >/dev/null 2>&1; then
+      skip "VirtualIP: o resto da secção" "o conjunto $VPOOL sobrepõe-se a algo neste host (E2E_VIP_POOL muda-o)"
+    else
+      for b in v1 v2; do
+        "$BIN" container run -d --name "$b-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
+          -v "$VW/$b:/www" "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
+      done
+      "$BIN" container run -d --name "vc-$PFX" --net "$VN" --namespace "$VNS" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container run -d --name "vx-$PFX" --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container run -d --name "vs-$PFX" --cap-add NET_ADMIN --net "$VN" --namespace "$VNB" "$VIMG" sleep 900 >/dev/null 2>&1
+      check "VirtualIP: o apply atribui um VIP do conjunto" ok "$BIN" apply -f "$(vsvc vweb "$VNS" vweb)"
+      VIP=$("$BIN" get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r["vip"] for r in json.load(sys.stdin) if r["name"]=="vweb"))' 2>/dev/null)
+      vwait vweb "v1-$PFX" 'ready \(tcp\)'; vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      check "VirtualIP: o nome do serviço resolve para o VIP" ok bash -c \
+        "'$BIN' container exec vc-$PFX nslookup -type=a vweb.$VNS.svc.delonix.internal 2>&1 | grep -q 'Address: $VIP\$'"
+      SPREAD=$(vcount "vc-$PFX" "$VIP" 8080 60)
+      check "VirtualIP: o VIP espalha as ligações por todos os backends prontos (cada um >= 20%)" ok bash -c \
+        "c1=\$(awk '\$2==\"v1\"{print \$1}' <<<'$SPREAD'); c2=\$(awk '\$2==\"v2\"{print \$1}' <<<'$SPREAD'); [ \"\${c1:-0}\" -ge 12 ] && [ \"\${c2:-0}\" -ge 12 ] && [ \$((c1+c2)) -eq 60 ]"
+      check "VirtualIP: o cliente na rede dos backends chega com o seu IP (hairpin, conntrack)" ok bash -c \
+        "CIP=\$('$BIN' container inspect vc-$PFX | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d[\"ip\"])'); nsenter -t $(vpin) -U -n --preserve-credentials conntrack -L -d $VIP 2>/dev/null | grep -q \"src=\$CIP dst=$VIP .* dst=\$CIP \""
+      check "VirtualIP: um cliente de outra namespace não passa do VIP" fail \
+        "$BIN" container exec "vx-$PFX" wget -qO- -T 2 "http://$VIP:8080/"
+      # Anti-spoof: forging a same-namespace member must not even reach the DNAT.
+      CIP=$("$BIN" container inspect "vc-$PFX" | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d[0] if isinstance(d,list) else d;print(d["ip"])')
+      vdnat() { vnft list chain ip dlxing svcpre | awk -v v="$VIP" '$0~v{for(i=1;i<=NF;i++) if($i=="packets") print $(i+1)}'; }
+      d0=$(vdnat)
+      "$BIN" container exec "vs-$PFX" ip addr add "$CIP/16" dev eth0 >/dev/null 2>&1
+      "$BIN" container exec "vs-$PFX" nc -w 2 -s "$CIP" "$VIP" 8080 </dev/null >/dev/null 2>&1
+      d1=$(vdnat)
+      # The counter must be READ (a failed nsenter would make 0 - 0 look like a
+      # pass), and a legitimate connection right after must move it.
+      "$BIN" container exec "vs-$PFX" ip addr del "$CIP/16" dev eth0 >/dev/null 2>&1
+      "$BIN" container exec "vc-$PFX" wget -qO- -T 2 "http://$VIP:8080/" >/dev/null 2>&1
+      d2=$(vdnat)
+      check "VirtualIP: uma origem forjada não chega ao DNAT (anti-spoof)" ok bash -c \
+        "[ -n '$d0' ] && [ -n '$d2' ] && [ $(( ${d1:-0} - ${d0:-0} )) -eq 0 ] && [ $(( ${d2:-0} - ${d1:-0} )) -ge 1 ]"
+      # A backend whose port stops accepting while its process stays up.
+      "$BIN" container rm -f "v2-$PFX" >/dev/null 2>&1
+      "$BIN" container run -d --name "v2-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
+        -v "$VW/v2:/www" "$VIMG" sleep 900 >/dev/null 2>&1
+      "$BIN" container exec "v2-$PFX" httpd -p 8080 -h /www >/dev/null 2>&1
+      vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      "$BIN" container exec "v2-$PFX" killall httpd >/dev/null 2>&1
+      check "VirtualIP: um backend cuja porta deixa de aceitar sai da rotação" ok vwait vweb "v2-$PFX" 'not ready$'
+      check "VirtualIP: e não recebe ligações novas (0 de 30)" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -qv '^v1\$' )"
+      # A backend gated by its health check.
+      "$BIN" container run -d --name "vh-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb -v "$VW/vh:/www" \
+        --health-cmd 'test -f /www/ok' --health-interval 1 --health-retries 1 "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
+      sleep 3
+      check "VirtualIP: um backend cujo health check não passa não recebe tráfego" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -q '^vh\$' )"
+      touch "$VW/vh/ok"
+      check "VirtualIP: com o health check a passar entra em rotação" ok vwait vweb "vh-$PFX" '[0-9] healthy$'
+      rm -f "$VW/vh/ok"
+      check "VirtualIP: e sai quando volta a falhar" ok vwait vweb "vh-$PFX" 'health: unhealthy'
+      # A backend IN ROTATION is removed: the map must drop it before `rm`
+      # returns (the detach's `nsleave`), not one probe interval later — a
+      # removed backend that was already out would prove nothing.
+      "$BIN" container exec "v2-$PFX" httpd -p 8080 -h /www >/dev/null 2>&1
+      check "VirtualIP: um backend que volta a aceitar regressa à rotação" ok vwait vweb "v2-$PFX" 'ready \(tcp\)'
+      "$BIN" container rm -f "v2-$PFX" "vh-$PFX" >/dev/null 2>&1
+      check "VirtualIP: um backend removido não recebe ligações novas" ok bash -c \
+        "! ( for i in \$(seq 1 30); do '$BIN' container exec vc-$PFX wget -qO- -T 2 http://$VIP:8080/ 2>&1; done | grep -qv '^v1\$' )"
+      check "VirtualIP: um porto do VIP que não é servido é recusado" ok bash -c \
+        "'$BIN' container exec vc-$PFX wget -qO- -T 3 http://$VIP:9999/ 2>&1 | grep -q 'refused'"
+      "$BIN" container stop "v1-$PFX" >/dev/null 2>&1
+      check "VirtualIP: sem backend pronto o VIP recusa de imediato" ok bash -c \
+        "t0=\$(date +%s%N); out=\$('$BIN' container exec vc-$PFX wget -qO- -T 5 http://$VIP:8080/ 2>&1); t1=\$(date +%s%N); echo \"\$out\"; grep -q refused <<<\"\$out\" && [ \$(( (t1-t0)/1000000 )) -lt 2000 ]"
+      check "VirtualIP: um VIP pedido e já tomado é um conflito (5)" 5 \
+        "$BIN" apply -f "$(vsvc vdup "$VNS" vdup "$VIP")"
+      check "VirtualIP: um VIP pedido fora do conjunto é recusado (DX-1361)" 1 \
+        "$BIN" apply -f "$(vsvc vout "$VNS" vout 10.98.0.9)"
+      check "VirtualIP: o delete liberta o lease do VIP" ok bash -c \
+        "'$BIN' delete services $VNS/vweb >/dev/null 2>&1; ! '$BIN' network ipam ls 2>/dev/null | grep -q 'svc:$VNS/vweb'"
+    fi
+  else
+    skip "VirtualIP: o resto da secção" "não foi possível puxar $VIMG ou criar a rede"
+  fi
+  for c in v1 v2 vh vc vx vs; do "$BIN" container rm -f "$c-$PFX" >/dev/null 2>&1; done
+  "$BIN" delete services $VNS/vweb >/dev/null 2>&1
+  "$BIN" network rm "$VN" >/dev/null 2>&1
+  "$BIN" network vip-pool clear >/dev/null 2>&1
+fi
+
 ########################################
 # kind: GitOpsSource (ADR-0021, Sprint 24): uma passagem converge a stack do
 # commit, um campo quente converge com o MESMO PID, e um commit que o guarda, o

@@ -182,7 +182,14 @@ pub fn report(host: &SdnHost) -> ProviderReport {
                 C::NetNatNpt => S::UnsupportedByProvider {
                     reason: "IPv6 is disabled in the SDN (net.ipv6)",
                 },
-                C::NetLbL4 | C::NetLbHealthCheck => S::NotImplemented,
+                // ADR-0066: a VIP per `kind: Service`, DNATed in the holder.
+                // Hairpin needs bridged traffic through netfilter (D5).
+                C::NetLbL4 => filt(S::Supported {
+                    evidence: "check:VirtualIP: o VIP espalha as ligações por todos os backends prontos (cada um >= 20%)",
+                }),
+                C::NetLbHealthCheck => filt(S::Supported {
+                    evidence: "check:VirtualIP: um backend cuja porta deixa de aceitar sai da rotação",
+                }),
                 C::NetDnsRecords | C::NetDnsAuthoritative => S::UnsupportedByProvider {
                     reason: "the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role",
                 },
