@@ -1440,15 +1440,51 @@ const SPARE_PCIE_ROOT_PORTS: u32 = 4;
 /// libvirt 10.0.0, so the domain could never be defined. Any other machine
 /// type (i440fx `pc`) gets nothing: its PCI bus is hot-pluggable as it is,
 /// and a PCIe port is not valid there. Pure.
-fn spare_pcie_ports_xml(machine: &str, headroom: bool) -> String {
+///
+/// **libvirt puts the boot devices on the declared ports FIRST** (measured:
+/// with four bare ports declared, all of them carried a boot device and a
+/// live attach answered «No more available PCI slots»). So the count is the
+/// devices the domain places on root ports, plus the spare ones —
+/// [`pcie_devices_at_boot`] errs on the side of one port too many, which
+/// costs a free slot on bus 0; one too few costs the hotplug.
+fn spare_pcie_ports_xml(cfg: &VmConfig, machine: &str, headroom: bool) -> String {
     if !headroom || !(machine.starts_with("q35") || machine.contains("-q35")) {
         return String::new();
     }
     let mut s = String::from("    <controller type='pci' index='0' model='pcie-root'/>\n");
-    for _ in 0..SPARE_PCIE_ROOT_PORTS {
+    for _ in 0..pcie_devices_at_boot(cfg) + SPARE_PCIE_ROOT_PORTS {
         s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
     }
     s
+}
+
+/// The devices a q35 domain from `cfg` places on PCIe root ports at boot:
+/// every virtio disk (the boot disk, virtio extras, the seed), a SCSI
+/// controller when an extra uses it, every 9p share, every NIC, every
+/// passed-through PCI device, a virtio video, and the three libvirt always
+/// adds (virtio-serial for the agent channel, the memory balloon, the USB
+/// controller). SATA hangs off the integrated ICH9 controller and a `vga`
+/// video is integrated on bus 0: neither takes a port. Pure.
+fn pcie_devices_at_boot(cfg: &VmConfig) -> u32 {
+    let virtio_disks = cfg
+        .extra_disks
+        .iter()
+        .filter(|d| matches!(d.bus.as_str(), "" | "virtio"))
+        .count();
+    let scsi = cfg.extra_disks.iter().any(|d| d.bus == "scsi") as usize;
+    let video =
+        matches!(cfg.video.as_deref(), Some("virtio" | "qxl")) || (cfg.video.is_none() && cfg.vnc);
+    let n = 1 // boot disk
+        + virtio_disks
+        + scsi
+        + cfg.seed.is_some() as usize
+        + cfg.volumes.len()
+        + 1 // primary NIC
+        + cfg.extra_nics.len()
+        + cfg.devices.len()
+        + video as usize
+        + 3; // virtio-serial, memballoon, USB
+    n as u32
 }
 
 /// The hotplug ceilings that open headroom: `(Some(max vCPUs), Some(max KiB))`
@@ -1932,7 +1968,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Only with declared headroom (ADR-0068 D3): spare ports change the
     // domain's shape, which someone who did not ask for hotplug never gets.
     let headroom = max_vcpus.is_some() || max_kib.is_some();
-    s.push_str(&spare_pcie_ports_xml(machine, headroom));
+    s.push_str(&spare_pcie_ports_xml(cfg, machine, headroom));
     // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
     // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
     // manifests only (a fragment can name arbitrary host paths/devices).
@@ -4573,7 +4609,13 @@ mod hotplug_tests {
             xml.contains("<cell id='0' cpus='0-7' memory='2097152' unit='KiB'/>"),
             "a DIMM needs a NUMA node to plug into: {xml}"
         );
-        assert_eq!(xml.matches("model='pcie-root-port'").count(), 4, "{xml}");
+        // The boot devices take ports first: boot disk, NIC, virtio-serial,
+        // balloon and USB here — five — and four stay spare.
+        assert_eq!(
+            xml.matches("model='pcie-root-port'").count(),
+            5 + 4,
+            "{xml}"
+        );
         // libvirt refuses a q35 domain whose index 0 is a port: the root has
         // to be declared, at index 0, BEFORE any port takes that index.
         let root = xml
@@ -4634,6 +4676,149 @@ mod hotplug_tests {
         let def = quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()]);
         let _ = quiet("virsh", &["-c", uri, "undefine", "--", &c.name]);
         def.unwrap_or_else(|e| panic!("libvirt refused the domain: {e}\n{xml}"));
+    }
+
+    /// How many `pcie-root-port` controllers of a DEFINED domain's XML carry
+    /// no device: a port's `index` is the PCI bus a device behind it names.
+    fn free_root_ports(xml: &str) -> usize {
+        let attr = |l: &str, k: &str| -> Option<String> {
+            let i = l.find(&format!("{k}='"))? + k.len() + 2;
+            Some(l[i..].split('\'').next()?.to_string())
+        };
+        let ports: Vec<u32> = xml
+            .lines()
+            .filter(|l| l.contains("model='pcie-root-port'") && l.contains("<controller"))
+            .filter_map(|l| attr(l, "index")?.parse().ok())
+            .collect();
+        let busy: Vec<u32> = xml
+            .lines()
+            .filter(|l| l.contains("<address type='pci'"))
+            .filter_map(|l| u32::from_str_radix(attr(l, "bus")?.trim_start_matches("0x"), 16).ok())
+            .collect();
+        ports.iter().filter(|p| !busy.contains(p)).count()
+    }
+
+    /// Every device that takes a root port is counted; SATA and a plain
+    /// `vga` (integrated on bus 0) are not.
+    #[test]
+    fn the_port_count_follows_the_devices() {
+        let base = cfg(2, "2048M", Some(4), None);
+        assert_eq!(pcie_devices_at_boot(&base), 5);
+        let mut more = base.clone();
+        more.seed = Some("/s.iso".into());
+        more.extra_disks = vec![
+            ExtraDisk {
+                source: "/a".into(),
+                ..Default::default()
+            },
+            ExtraDisk {
+                source: "/b".into(),
+                bus: "sata".into(),
+                ..Default::default()
+            },
+        ];
+        more.extra_nics = vec![ExtraNic::default()];
+        more.vnc = true;
+        assert_eq!(pcie_devices_at_boot(&more), 5 + 1 + 1 + 1 + 1);
+    }
+
+    #[test]
+    fn free_root_ports_reads_a_defined_domain() {
+        let xml = "<controller type='pci' index='1' model='pcie-root-port'>\n                   <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>\n                   <controller type='pci' index='2' model='pcie-root-port'>\n                   <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>\n";
+        assert_eq!(free_root_ports(xml), 1);
+    }
+
+    /// A headroom domain as libvirt DEFINES it (addresses assigned): at least
+    /// four root ports must carry nothing, or a live disk/NIC add has no slot
+    /// — the review measured all six taken by the boot devices.
+    #[test]
+    #[ignore = "needs virsh and qemu:///session; defines and undefines a domain, boots nothing"]
+    fn the_spare_ports_are_still_free_once_libvirt_places_the_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = dir.path().join("d.qcow2");
+        std::fs::write(&disk, b"").unwrap();
+        let seed = dir.path().join("seed.iso");
+        std::fs::write(&seed, b"").unwrap();
+        let mut c = cfg(2, "2048M", Some(4), Some(4096));
+        c.name = format!("dlx18-ports-{}", std::process::id());
+        c.seed = Some(seed.to_string_lossy().into_owned());
+        c.extra_disks = vec![ExtraDisk {
+            source: disk.to_string_lossy().into_owned(),
+            ..Default::default()
+        }];
+        let xml = libvirt_domain_xml(&c, &disk.to_string_lossy(), "52:54:00:00:18:02");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let def = quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()]);
+        let dumped = quiet("virsh", &["-c", uri, "dumpxml", "--", &c.name]);
+        let _ = quiet("virsh", &["-c", uri, "undefine", "--", &c.name]);
+        def.unwrap_or_else(|e| panic!("libvirt refused the domain: {e}\n{xml}"));
+        let dumped = dumped.expect("dumpxml");
+        let free = free_root_ports(&dumped);
+        assert!(free >= 4, "only {free} free root port(s):\n{dumped}");
+    }
+
+    /// A real `attach-device --live` of a disk into a RUNNING headroom domain.
+    /// The domain has an empty disk, so the VMM runs with no OS; it is
+    /// destroyed and undefined at the end.
+    #[test]
+    #[ignore = "needs virsh, qemu:///session and /dev/kvm; runs a VMM with no OS"]
+    fn a_disk_attaches_live_to_a_running_headroom_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let mk = |n: &str| {
+            let p = dir.path().join(n);
+            let out = std::process::Command::new("qemu-img")
+                .args(["create", "-q", "-f", "qcow2"])
+                .arg(&p)
+                .arg("64M")
+                .status()
+                .unwrap();
+            assert!(out.success());
+            p.to_string_lossy().into_owned()
+        };
+        let root = mk("root.qcow2");
+        let extra = mk("extra.qcow2");
+        let mut c = cfg(1, "256M", Some(2), Some(512));
+        c.name = format!("dlx18-attach-{}", std::process::id());
+        // A session libvirt cannot apply cgroup tuning: the containment
+        // blocks go, the rest of the domain is the one this code writes.
+        let strip = |x: String, tag: &str| -> String {
+            match (x.find(&format!("<{tag}>")), x.find(&format!("</{tag}>"))) {
+                (Some(a), Some(b)) => format!("{}{}", &x[..a], &x[b + tag.len() + 3..]),
+                _ => x,
+            }
+        };
+        let xml = libvirt_domain_xml(&c, &root, "52:54:00:00:18:03");
+        let xml = strip(strip(xml, "memtune"), "cputune");
+        let file = dir.path().join("d.xml");
+        std::fs::write(&file, &xml).unwrap();
+        let uri = "qemu:///session";
+        let cleanup = |name: &str| {
+            let _ = quiet("virsh", &["-c", uri, "destroy", "--", name]);
+            let _ = quiet("virsh", &["-c", uri, "undefine", "--", name]);
+        };
+        let result = (|| -> std::result::Result<String, String> {
+            quiet("virsh", &["-c", uri, "define", &file.to_string_lossy()])?;
+            virsh_hotplug(&["-c", uri, "start", "--", &c.name], "virsh start")
+                .map_err(|e| e.to_string())?;
+            let d = ExtraDisk {
+                source: extra.clone(),
+                ..Default::default()
+            };
+            let dx = dir.path().join("disk.xml");
+            std::fs::write(&dx, libvirt_extra_disk_xml(&d, "vdc")).unwrap();
+            let out = virsh_hotplug(
+                &attach_device_argv(uri, &c.name, &dx.to_string_lossy()),
+                "virsh attach-device",
+            )
+            .map_err(|e| e.to_string())?;
+            let blk = quiet("virsh", &["-c", uri, "domblklist", "--domain", &c.name])?;
+            Ok(format!("{out}\n{blk}"))
+        })();
+        cleanup(&c.name);
+        let out = result.unwrap_or_else(|e| panic!("live attach failed: {e}\n{xml}"));
+        assert!(parse_domblklist(&out).contains(&"vdc".to_string()), "{out}");
     }
 
     /// A ceiling equal to the boot size is no headroom: the domain is the
