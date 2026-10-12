@@ -421,6 +421,9 @@ Options:
       --replace &lt;KIND/NAME&gt;
           Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace &lt;Kind&gt;/&lt;name&gt;` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing. A `&lt;Kind&gt;/&lt;name&gt;` also recreates that resource when the plan shows no change for it (a field the plan does not compare, like `env`)
 
+      --reboot &lt;KIND/NAME&gt;
+          Authorize STOPPING and starting a resource whose change converges only across a reboot, keeping its disk (ADR-0012): `--reboot &lt;Kind&gt;/&lt;name&gt;` (repeatable), or `--reboot all`. Without it, `apply` refuses and changes nothing. A stopped VM needs no authorisation
+
       --prune
           Also REMOVE what this stack owns and the manifest no longer declares. Never happens without this flag
 
