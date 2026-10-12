@@ -192,6 +192,22 @@ pub fn run_supervised(
                 (sup.on_first_start)(c);
             }
             if started.is_err() {
+                // A start refused AFTER the clone (its command never ran, or
+                // the init exited before mounting) had its start hook run
+                // already: the container's own slirp4netns is up and holding
+                // the published ports, and it is this process's child, which is
+                // about to exit. Nothing else names it — the record is never
+                // published — so it stayed listening on the host port, and the
+                // next `run -d -p` on that port was refused with «in use by
+                // slirp4netns — not a delonix container» (measured 2026-10-12:
+                // still listening minutes after `run -d -p … img /no-such`).
+                // `spawn` leaves `pid` naming the child it reaped on exactly
+                // those paths; a start that failed before the clone, or before
+                // the hook, leaves it `None` (the previous incarnation's was
+                // cleared by `wait_and_record`), so nothing is released twice.
+                if let Some(pid) = c.pid {
+                    (sup.on_exit)(c, pid);
+                }
                 // A first start's failure is its caller's to clean; a restart
                 // has no caller left.
                 if restarts > 0 {

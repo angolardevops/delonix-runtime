@@ -51,6 +51,12 @@
 #             solta as portas nesse momento. A saída é segura como no
 #             `e2e_rm_force_gave_up.sh`: um `container exec` com o pai parado
 #             deixa o PID 1 em `zap_pid_ns_processes`.
+#   execfail — a detached start refused AFTER the clone (its command does
+#             not exist) had already run its start hook, so the container's
+#             own slirp was up on the published port; the supervisor exited
+#             and the slirp stayed listening (measured 2026-10-12: still there
+#             minutes later), and the next `run -d -p` on that port was
+#             refused «in use by slirp4netns — not a delonix container».
 #   infra   — o pin e o plano de controlo da rede vivem enquanto a infra viver,
 #             e eram lançados com os descritores de quem calhasse arrancá-la
 #             (aqui um fd 9 aberto pelo chamador). Corre em roots SEUS: subir e
@@ -206,6 +212,14 @@ hold_exit_of() {
 }
 
 case "$scenario" in
+execfail)
+  out=$(timeout 180 "$BIN" container run -d --name "$name" -p "$port:8000" "$IMG" /no-such-binary 2>&1); rc=$?
+  [[ $rc -ne 124 ]] || cannot "run -d did not return in 180s"
+  [[ $rc -ne 0 ]] || die "run -d of a missing command reported success"
+  grep -q "did not start" <<<"$out" || die "the start failed (rc=$rc) for another reason: $out"
+  wait_for 5 not_listening "$port" ||
+    die "the refused start left port $port listening: $(ss -Hltnp "sport = :$port" 2>/dev/null)"
+  ;;
 hang)
   # Um slirp4netns que nunca diz «pronto» nem responde — um falso, no PATH,
   # que só dorme com o que herdou. Ele próprio regista o pid.

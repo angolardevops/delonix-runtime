@@ -7341,7 +7341,9 @@ fn place_without_userns(
 ///   the userns restriction on: `run -d` rc=0, and the next `exec` said «not
 ///   running».
 ///
-/// Always consumes the exec pipe's read end.
+/// Always consumes the exec pipe's read end. A refusal leaves `container.pid`
+/// naming the child it reaped, on purpose: the start hook already ran, and the
+/// supervisor releases what it attached (the container's own slirp) by that pid.
 fn refuse_failed_detached_start(
     container: &Container,
     pid: Pid,
