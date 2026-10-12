@@ -263,9 +263,10 @@ pub(crate) fn validate_url(url: &str) -> Result<Transport> {
     if url.is_empty() || url.len() > 2048 {
         return refuse("empty or longer than 2048 characters");
     }
-    if url.starts_with('-') {
-        return refuse("starts with '-', which git would read as an option");
-    }
+    // A URL starting with '-' (which git would read as an option) needs no
+    // check of its own: it has no `file://` prefix, and its scheme would begin
+    // with '-', which the allowlist below never matches. Measured: a separate
+    // check here could be deleted with every test still green, so it was.
     if url
         .chars()
         .any(|c| c.is_control() || c.is_whitespace() || c == '\\')

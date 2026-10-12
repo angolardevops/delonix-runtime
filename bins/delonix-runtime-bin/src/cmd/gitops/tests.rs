@@ -354,17 +354,23 @@ fn container(spec_yaml: &str) -> String {
 #[test]
 fn a_container_asking_for_the_host_is_refused() {
     for host in [
-        "  image: alpine\n  privileged: true\n",
+        "  image: alpine\n  network: appnet\n  privileged: true\n",
         "  image: alpine\n  network: host\n",
-        "  image: alpine\n  volumes: [\"/etc:/x\"]\n",
-        "  image: alpine\n  volumes: [\"./data:/x\"]\n",
-        "  image: alpine\n  devices: [\"/dev/kvm\"]\n",
-        "  image: alpine\n  capAdd: [NET_ADMIN]\n",
-        "  image: alpine\n  envFile: [\"/etc/environment\"]\n",
-        "  image: alpine\n  hostPid: true\n",
+        "  image: alpine\n",
+        "  image: alpine\n  network: appnet\n  volumes: [\"/etc:/x\"]\n",
+        "  image: alpine\n  network: appnet\n  volumes: [\"./data:/x\"]\n",
+        "  image: alpine\n  network: appnet\n  devices: [\"/dev/kvm\"]\n",
+        "  image: alpine\n  network: appnet\n  capAdd: [NET_ADMIN]\n",
+        "  image: alpine\n  network: appnet\n  envFile: [\"/etc/environment\"]\n",
+        "  image: alpine\n  network: appnet\n  hostPid: true\n",
     ] {
         let y = container(host);
-        assert!(!guard(&[&y], &base_spec()).is_empty(), "{host}");
+        // Exactly one reason per case: each refusal stands on its own, and
+        // none hides behind another (a flat spec without `network` would
+        // also be refused for the host network).
+        let r = guard(&[&y], &base_spec());
+        assert_eq!(r.len(), 1, "{host}: {r:?}");
+        assert!(!r[0].contains(','), "{host}: {r:?}");
     }
     let plain = container(
         "  image: alpine\n  network: appnet\n  volumes: [\"data:/x\"]\n  ports: [\"8080:80\"]\n",
@@ -885,4 +891,19 @@ fn a_second_pass_on_the_same_source_skips_instead_of_queuing() {
         try_lock(&lock).unwrap().is_some(),
         "the lock outlived its pass"
     );
+}
+
+/// An EMPTY network is the node's own namespace too — the reading admission
+/// makes (`container::cmd_run`). No document reaches it today (a flat spec
+/// defaults to `host`), so it is asserted on the options directly.
+#[test]
+fn an_empty_network_is_the_host_network() {
+    let o = RunOpts::default();
+    assert!(o.net.is_empty());
+    assert_eq!(host_access_reasons(&o), ["host network"]);
+    let pod_member = RunOpts {
+        pod: Some("pod-x".into()),
+        ..Default::default()
+    };
+    assert!(host_access_reasons(&pod_member).is_empty());
 }
