@@ -1,0 +1,54 @@
+# kind: GitOpsSource — a git repository this node reconciles from (ADR-0021).
+#
+# Applying it writes a record and, with `sync.automated: true`, a systemd timer
+# (`delonix-gitops-<namespace>.<name>.timer`). Each fire runs ONE pass and
+# exits — nothing stays resident:
+#
+#   fetch the ref → resolve it to a commit → verify the signature (when asked)
+#   → read the YAML under `path` from the commit's tree → guard → plan → apply
+#
+# A commit that does not load, fails the guard or the graph, or plans an action
+# `safety` blocks leaves the running stack untouched, and `delonix gitops
+# status` names it. `delonix gitops reconcile <name>` runs a pass by hand;
+# `suspend`/`resume` stop and restart the passes without a commit.
+#
+# What a pass refuses from the repository whatever this file says: the Kinds
+# RuntimePolicy, Secret and App, an Image with `build:`, a container asking for
+# the host (privileged, host network/PID/IPC, a bind mount, a device, an added
+# capability), a Volume beyond a plain local one, a network other than a local
+# bridge, a symlink or a submodule under `path`, and private key material.
+# A container from a source names a network of its own: the default network
+# of a flat spec is the host's.
+#
+# The credentials are NAMED, never carried: each `*Ref` is a kind: Secret that
+# exists on the node before the source is applied.
+#   secretRef        → key `identity`         (the SSH private key)
+#   knownHostsRef    → key `known_hosts`      (the pinned host keys)
+#   trustedKeysRef   → key `allowed_signers`  (an SSH allowed_signers file)
+apiVersion: gitops.delonix.io/v1alpha1
+kind: GitOpsSource
+metadata:
+  name: production
+  namespace: production
+spec:
+  source:
+    url: ssh://git@git.example.org/infra/web.git   # also file:///<path> and https:// (anonymous)
+    ref: refs/heads/main                           # a branch or a tag, resolved to a commit first
+    path: environments/production                  # hidden paths (.github/…) are never read
+    interval: 60s                                  # 15s to 24h
+    secretRef: web-deploy-key
+    knownHostsRef: git-known-hosts
+    signedCommitsRequired: true
+    trustedKeysRef: web-signers
+  sync:
+    automated: true                                # installs the timer
+  safety:
+    allow: [Create, Update]                        # Adopt, Replace and Reboot are opt-in
+    prune: false                                   # Delete runs only with prune: true
+    maximumDeletes: 5
+    protectedResources:
+      - Volume/*
+    kinds: []                                      # empty = the default set; name VirtualMachine,
+                                                   # SystemContainer, NetworkZone, NetworkGateway,
+                                                   # StoragePool, Gateway or IPPool to let one in
+  stack: production                                # the stack a pass applies into (default: the name)

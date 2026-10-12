@@ -303,6 +303,41 @@ count unchanged.
   by name; the checkout is scanned and refused if it carries private key
   material.
 
+## Security pass (phase 1, 2026-10-12)
+
+The first phase is a `delonix-runtime-sec` pass, because a pull source is
+untrusted input: whoever can push to the repository decides what this node runs.
+Every input the source supplies is listed below with how it is refused or
+bounded. Each refusal has a test that fails with it reverted (`cmd/gitops.rs`).
+The trust anchor is the **local registration**: what the node's operator applied
+by hand (or through a signed commit, when `signedCommitsRequired` is set).
+
+| Input from the source | Threat | How it is refused or bounded |
+|---|---|---|
+| `url` | a transport that runs code or reaches the wrong place: `ext::` (runs a command), `fd::`, a bare path read as an option (`-uhelp`), `git://` and `http://` (no integrity), a redirect | Only `file:///<abs>`, `https://` (anonymous) and `ssh://` are accepted, parsed by our own validator. Git runs with `protocol.allow=never` and only those three re-allowed, `GIT_PROTOCOL_FROM_USER=0`, `http.followRedirects=false`. A URL starting with `-`, carrying a space, a control character or user-info with a password is refused. |
+| credentials | a key carried in the repository; a key leaked into argv or a helper prompt | `secretRef`/`knownHostsRef`/`trustedKeysRef` NAME a `kind: Secret` that already exists on the node; the repository can never supply one. The key is written to a private `0600` `O_EXCL` file for one invocation and removed. `ssh://` **requires** both a key and a pinned `known_hosts` (`StrictHostKeyChecking=yes`, `-F /dev/null`, `BatchMode=yes`, `IdentitiesOnly=yes`). `https://` with a credential is refused by name (not implemented). `GIT_TERMINAL_PROMPT=0`, `credential.helper=` empty, `GIT_ASKPASS` unset. |
+| git's own configuration | `~/.gitconfig`, `/etc/gitconfig`, `core.fsmonitor`, an inherited `GIT_*` variable | Every git process starts from `env_clear()`: `HOME` points at a private scratch directory, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`. |
+| hooks | a repository running code on the node merely by being fetched | `core.hooksPath=/dev/null`. Nothing is ever checked out: the tree is read with `ls-tree`/`cat-file` from a bare mirror. |
+| objects | a malformed tree (`..`, `.git` entries) | `fetch.fsckObjects=true`, `transfer.fsckObjects=true`. Every path is validated again before it is written. |
+| `ref` | a moving or shell-shaped ref (`-x`, `HEAD@{1}`, `..`) | Only `refs/heads/<n>` and `refs/tags/<n>` with `[A-Za-z0-9._/-]`, no `..`, no `//`, no `@{`, no `.lock`, no leading `-`. Fetched with `--depth=1 --no-tags` into a private ref, resolved to a 40-hex commit **before anything reads it**; every later read names the commit, never the ref. |
+| commit verification | an unsigned or forged commit when the operator asked for signed commits | `signedCommitsRequired: true` needs `trustedKeysRef` (an SSH `allowed_signers` file); `git verify-commit` with `gpg.format=ssh` must succeed or nothing is read. A GPG signature fails closed (only SSH signatures are verified in v1). |
+| `path` | escaping the repository or the checkout | Relative, components `[A-Za-z0-9._-]`, no `.`/`..`, no leading `-`. |
+| tree content | symlinks pointing outside the checkout, submodules, LFS pointers, a huge or numerous tree, private key material | Read from `ls-tree`: a symlink (`120000`) or a gitlink (`160000`) under `path` refuses the commit; only regular files are materialised, into a fresh directory per commit, with `create_new`. An LFS pointer refuses the commit. At most 256 files, 1 MiB each, 8 MiB in all, 512 documents after load. A file holding `-----BEGIN … PRIVATE KEY-----` refuses the commit. The mirror is bounded by a wall-clock timeout per git invocation (120 s) and a size ceiling (256 MiB) checked after the fetch. |
+| which Kinds | lowering the node's ceiling or minting credentials from a repository; building arbitrary code | `RuntimePolicy`, `Secret` and `App` are refused from a source, and so is an `Image` with `build:`. `VirtualMachine`, `SystemContainer`, `NetworkZone`, `NetworkGateway` and `StoragePool` are only applied when the registration names them in `safety.kinds`; that list can narrow the default set and never add the refused four. |
+| host access | a container with `privileged`, host network/PID/IPC, a bind mount, a device, a GPU, an added capability, an unconfined profile, or an `env_file` reading a host path | Refused from a source (the node's `RuntimePolicy` does not cover bind mounts). A `Volume` from a source is a plain local volume: `driver`, `device`, `options`, `mountOptions`, `share`, `nfs`, `cifs`, `webdav`, `provision` and `pool` are refused. |
+| the source's own credential | a workload consuming the deploy key | A document that names `secretRef`, `knownHostsRef` or `trustedKeysRef` anywhere in its spec is refused. |
+| self-management | a commit loosening its own policy, or repointing its credentials | A `GitOpsSource` in the tree with the source's own identity may change only `ref`, `path` and `interval`; every other field must equal the local registration. One with a different identity is refused (depth one). The running source is never pruned by its own pass. |
+| plan | a commit that fails `stack validate`/`plan`, or plans a blocked action | The commit is resolved, verified, loaded, guarded and planned **before** anything is applied. A load, guard, graph or plan failure leaves the running stack untouched and is recorded (`gitops status`, an event). Allowed by default: `Create`, `Update`, `NoOp`. `Adopt`, `Replace`, `Reboot` need `safety.allow`; `Conflict` is always refused. `Delete` only runs with `safety.prune: true`, at most `maximumDeletes`, never on `protectedResources`. The plan is applied with its digests, so a machine that moved between plan and apply refuses the apply. |
+| concurrency | two fires overlapping | One `flock` per source, non-blocking: a fire that cannot take it skips and says so. |
+| the pass itself | a resident process | None: the timer runs one pass and exits (`Type=oneshot`). Units are prefixed `delonix-gitops-`. |
+
+What this pass does **not** close, said out loud: an allowed container runs the
+image the repository names, as the node user — GitOps exists to run what the
+repository says. A compromised repository can still run any image inside the
+container boundary, publish ports and open the Kinds it is allowed. The
+boundary against the host is the container (no host access, above); the
+boundary against the repository's authors is commit signing.
+
 ## Phases, each with its gate
 
 1. **This ADR + a `delonix-runtime-sec` pass.** The feature holds a credential

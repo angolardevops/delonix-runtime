@@ -428,6 +428,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::SYSTEM_CONTAINER => super::system_container::desired(doc)?,
                 k::HTTP_ROUTE | k::INGRESS => super::httproute::desired(doc)?,
                 k::GATEWAY => super::tunnel::desired(doc)?,
+                k::GITOPS_SOURCE => super::gitops::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -469,6 +470,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::system_container::actual()?);
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
+    out.extend(super::gitops::actual()?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list()?;
     for kind in super::kinds::stack_kinds() {
@@ -868,6 +870,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::HTTP_ROUTE, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::INGRESS, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::GATEWAY, super::tunnel::RECONCILED_TUNNEL_FIELDS),
+        (
+            k::GITOPS_SOURCE,
+            super::gitops::RECONCILED_GITOPS_SOURCE_FIELDS,
+        ),
         (k::POD, super::pod::RECONCILED_POD_FIELDS),
     ]
 }
@@ -1549,6 +1555,7 @@ fn presence(
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
         k::GATEWAY => super::tunnel::presence_of(name),
+        k::GITOPS_SOURCE => super::gitops::presence_of(doc),
         _ => ("?".into(), super::po::t("unsupported kind").into()),
     }
 }
@@ -1799,7 +1806,10 @@ fn reboot_token_shape_ok(r: &str) -> bool {
 /// network documents, and for every other Kind a digest of the change itself —
 /// kind, name, action and every differing field with BOTH of its values. The
 /// machine's value being inside is what makes it go stale when the machine moves.
-fn plan_with_digests(docs: &[manifest::ManifestDoc], stack: &str) -> Result<Vec<Change>> {
+pub(crate) fn plan_with_digests(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+) -> Result<Vec<Change>> {
     let mut changes = build_plan(docs, stack)?;
     for c in &mut changes {
         let net = match docs
@@ -1851,7 +1861,11 @@ fn network_plan_digest(doc: &manifest::ManifestDoc) -> Result<Option<String>> {
 /// be one of those given — the `If-Match` rule applied to a plan. Checked
 /// before the first write; without the flag nothing is checked and `apply`
 /// plans and applies in one invocation, as it always has.
-fn refuse_stale_plan(docs: &[manifest::ManifestDoc], stack: &str, given: &[String]) -> Result<()> {
+pub(crate) fn refuse_stale_plan(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+    given: &[String],
+) -> Result<()> {
     if given.is_empty() {
         return Ok(());
     }
@@ -1921,7 +1935,7 @@ fn refuse_stale_plan(docs: &[manifest::ManifestDoc], stack: &str, given: &[Strin
 /// manifest that has since moved directories still lands on the right owner.
 /// `rollback_of` is recorded on the new revision: a rollback IS an apply, and
 /// the history should say which one it replayed.
-fn apply_docs(
+pub(crate) fn apply_docs(
     docs: &[manifest::ManifestDoc],
     path: &Path,
     stack_override: Option<&str>,
@@ -2305,6 +2319,10 @@ fn run_layers_inner(
     // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
     // listening port (see `cmd::tunnel`'s module doc) — must already be up.
     layers.run(k::GATEWAY, "🌍", || super::tunnel::apply(docs))?;
+    // A pull source LAST of all (ADR-0021): the timer it installs may fire as
+    // soon as it is written, and what it reconciles into is what this same
+    // apply just declared.
+    layers.run(k::GITOPS_SOURCE, "🔁", || super::gitops::apply(docs))?;
     Ok(())
 }
 
@@ -2409,6 +2427,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::NETWORK_GATEWAY => super::network_gateway::remove_for_replace(name),
         k::NETWORK_ZONE => super::network_zone::remove_for_replace(name),
         k::SYSTEM_CONTAINER => super::system_container::remove_for_replace(name),
+        k::GITOPS_SOURCE => super::gitops::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
@@ -2439,7 +2458,7 @@ fn teardown_order(changes: &[Change]) -> Vec<&Change> {
 /// Never runs unless asked for. An `apply` that deletes without being told to is
 /// the failure that destroys trust in an IaC tool, and no amount of correctness
 /// elsewhere makes up for it.
-fn prune(changes: &[Change]) -> Result<()> {
+pub(crate) fn prune(changes: &[Change]) -> Result<()> {
     let doomed: Vec<&Change> = teardown_order(changes)
         .into_iter()
         .filter(|c| c.action == Action::Delete)
@@ -2748,6 +2767,20 @@ fn converge_and_stamp(
                 // whole thing — which is what `apply` does, and it SIGHUPs the
                 // live proxy instead of restarting it.
                 k::HTTP_ROUTE | k::INGRESS => super::httproute::converge_all(docs)?,
+                // Same shape as `SERVICE`: applying rewrites the record and the
+                // timer, so converging is applying.
+                k::GITOPS_SOURCE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && manifest::plan_name(d) == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "GitOpsSource/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::gitops::converge_doc(doc)?
+                }
                 k::GATEWAY => {
                     let doc = docs
                         .iter()
@@ -2834,6 +2867,7 @@ fn stamp_all(
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
+            k::GITOPS_SOURCE => super::gitops::stamp(&d.name, stack, &d.fields),
             k::NETWORK_GATEWAY => super::network_gateway::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::SYSTEM_CONTAINER => super::system_container::stamp(&d.name, stack, &d.fields),
@@ -3156,7 +3190,7 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
 
 /// How many of the validation issues are VM shapes (a ceiling of 0, or
 /// below the boot size) rather than references.
-fn shape_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
+pub(crate) fn shape_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
     docs.iter()
         .filter(|d| d.kind == k::VM)
         .filter(|d| super::vm::shape_problem(d).is_some())
@@ -3165,7 +3199,7 @@ fn shape_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
 
 /// The count line under a failed validation, naming each kind of problem by
 /// what it is: a shape problem is not an «unresolved reference». Pure.
-fn issues_summary(total: usize, shapes: usize) -> String {
+pub(crate) fn issues_summary(total: usize, shapes: usize) -> String {
     let refs = total.saturating_sub(shapes);
     let mut parts = Vec::new();
     if refs > 0 {
@@ -3218,7 +3252,7 @@ fn volume_refs(doc: &manifest::ManifestDoc) -> Vec<String> {
 /// what already EXISTS in the stores (read, best-effort). Returns the list of
 /// problems (empty = intact graph). **Touches nothing** — it is the base shared
 /// by `stack validate` (dry-run) and by the `apply` gate.
-fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
+pub(crate) fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
     let root = super::util::state_root();
 
     // Resources already present on the machine count as resolved (a manifest may

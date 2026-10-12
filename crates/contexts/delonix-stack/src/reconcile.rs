@@ -332,6 +332,26 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // The apply layer writes a Secret in place; nothing is recreated.
         k::SECRET => &["keys", "fingerprint"],
         k::SERVICE => &["matchLabels", "port"],
+        // A pull source is a record and a timer (ADR-0021): rewriting the record
+        // and reinstalling the timer destroys nothing — the mirror and the
+        // stack it reconciles stay where they are.
+        k::GITOPS_SOURCE => &[
+            "url",
+            "ref",
+            "path",
+            "interval",
+            "secretRef",
+            "knownHostsRef",
+            "signedCommitsRequired",
+            "trustedKeysRef",
+            "automated",
+            "allow",
+            "prune",
+            "maximumDeletes",
+            "protectedResources",
+            "kinds",
+            "stack",
+        ],
         // An apply that died mid-way is finished by applying again: the
         // record's ledger says where it stopped, and the provider adopts what
         // the dead process staged (ADR-0059 D4). Every other field of a

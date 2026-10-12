@@ -2204,6 +2204,50 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["dashboard", "system events", "container stats", "image ls"],
     },
     Entry {
+        path: "gitops",
+        group: "Declarative",
+        examples: &[
+            ("stop the passes of a source while you act by hand", "delonix gitops suspend production -n production"),
+            ("run one pass now, without waiting for the timer", "delonix gitops reconcile production -n production"),
+            ("what each source last saw, and what is running", "delonix gitops status"),
+        ],
+        see_also: &["gitops reconcile", "gitops status", "gitops suspend", "stack apply"],
+    },
+    Entry {
+        path: "gitops reconcile",
+        group: "Lifecycle",
+        examples: &[
+            ("fetch, verify, plan and apply the source's ref once, then exit", "delonix gitops reconcile production -n production"),
+            ("a source in the default namespace", "delonix gitops reconcile web"),
+        ],
+        see_also: &["gitops status", "stack plan", "stack history"],
+    },
+    Entry {
+        path: "gitops status",
+        group: "Inspect",
+        examples: &[
+            ("every source: the commit it looked at, the commit applied, and why", "delonix gitops status"),
+            ("one source, for a script", "delonix gitops status production -n production -o json"),
+        ],
+        see_also: &["gitops reconcile", "get gitopssources", "system events"],
+    },
+    Entry {
+        path: "gitops suspend",
+        group: "Configure",
+        examples: &[
+            ("stop the passes during an incident, without a commit", "delonix gitops suspend production -n production"),
+        ],
+        see_also: &["gitops resume", "gitops status"],
+    },
+    Entry {
+        path: "gitops resume",
+        group: "Configure",
+        examples: &[
+            ("let the next fire fetch again", "delonix gitops resume production -n production"),
+        ],
+        see_also: &["gitops suspend", "gitops reconcile"],
+    },
+    Entry {
         path: "backup",
         group: "Engine",
         examples: &[

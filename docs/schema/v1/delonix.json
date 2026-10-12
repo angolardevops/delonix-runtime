@@ -1122,6 +1122,48 @@
       ],
       "type": "object"
     },
+    "GitOpsSourceSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: GitOpsSource`.",
+      "properties": {
+        "safety": {
+          "$ref": "#/$defs/SafetySpec",
+          "default": {
+            "allow": [
+              "Create",
+              "Update"
+            ],
+            "kinds": [],
+            "maximumDeletes": 5,
+            "protectedResources": [],
+            "prune": false
+          },
+          "description": "What a pass may do to the machine."
+        },
+        "source": {
+          "$ref": "#/$defs/SourceSpec",
+          "description": "Where the manifests come from."
+        },
+        "stack": {
+          "description": "The stack a pass applies into. Defaults to the source's own name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sync": {
+          "$ref": "#/$defs/SyncSpec",
+          "default": {
+            "automated": false
+          },
+          "description": "Whether a timer reconciles it."
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
     "HostAlias": {
       "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
       "properties": {
@@ -2384,6 +2426,52 @@
       },
       "type": "object"
     },
+    "SafetySpec": {
+      "additionalProperties": false,
+      "description": "`spec.safety`.",
+      "properties": {
+        "allow": {
+          "default": [
+            "Create",
+            "Update"
+          ],
+          "description": "The plan actions a pass may carry out, in the reconciler's own names.\n`NoOp` is always allowed; `Delete` is `prune`'s, `Conflict` never is.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kinds": {
+          "default": [],
+          "description": "The Kinds a pass may apply. Empty is the default set; naming a Kind\nthat is off by default is how it is let in.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "maximumDeletes": {
+          "default": 5,
+          "description": "The most a single pass may prune.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protectedResources": {
+          "default": [],
+          "description": "`Kind/name` (or `Kind/*`) a pass never prunes.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prune": {
+          "default": false,
+          "description": "Remove what the stack owns and the commit no longer declares.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "SecretKeyRef": {
       "additionalProperties": false,
       "description": "A key of a `kind: Secret`.",
@@ -2510,6 +2598,61 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "SourceSpec": {
+      "additionalProperties": false,
+      "description": "`spec.source`.",
+      "properties": {
+        "interval": {
+          "default": "60s",
+          "description": "How often the timer fires (`30s`, `5m`, `1h`): 15 seconds to 24 hours.",
+          "type": "string"
+        },
+        "knownHostsRef": {
+          "description": "A `kind: Secret` holding the pinned host keys, under `known_hosts`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": "",
+          "description": "The directory inside the repository whose YAML is the manifest.",
+          "type": "string"
+        },
+        "ref": {
+          "default": "refs/heads/main",
+          "description": "`refs/heads/<branch>` or `refs/tags/<tag>`.",
+          "type": "string"
+        },
+        "secretRef": {
+          "description": "A `kind: Secret` holding the SSH private key, under the key `identity`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signedCommitsRequired": {
+          "default": false,
+          "description": "Refuse a commit whose SSH signature is not from `trustedKeysRef`.",
+          "type": "boolean"
+        },
+        "trustedKeysRef": {
+          "description": "A `kind: Secret` holding an SSH `allowed_signers` file, under\n`allowed_signers`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "`file:///<absolute path>`, `https://…` (anonymous) or `ssh://…`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
       "type": "object"
     },
     "SpecCgroupParent": {
@@ -2746,6 +2889,39 @@
               },
               "spec": {
                 "$ref": "#/$defs/TunnelSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gitopsSources": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/GitOpsSourceSpec"
               }
             },
             "required": [
@@ -3444,6 +3620,18 @@
       "required": [
         "cidr"
       ],
+      "type": "object"
+    },
+    "SyncSpec": {
+      "additionalProperties": false,
+      "description": "`spec.sync`.",
+      "properties": {
+        "automated": {
+          "default": false,
+          "description": "Install the timer. `false` registers the source and runs a pass only\nwhen asked (`delonix gitops reconcile`).",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "SystemContainerNetDoc": {
@@ -4987,6 +5175,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "GitOpsSource"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "gitops.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/GitOpsSourceSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -5067,6 +5280,7 @@
         "core.delonix.io/v1alpha1",
         "delonix.io/v1",
         "gateway.delonix.io/v1alpha1",
+        "gitops.delonix.io/v1alpha1",
         "infrastructure.delonix.io/v1alpha1",
         "networking.delonix.io/v1alpha1",
         "security.delonix.io/v1alpha1",
@@ -5081,6 +5295,7 @@
         "Dependency",
         "FirewallPolicy",
         "Gateway",
+        "GitOpsSource",
         "HTTPRoute",
         "IPPool",
         "Image",
