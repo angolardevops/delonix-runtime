@@ -72,6 +72,7 @@ LAYERS = {
     "delonix-provider-libvirt": PROVIDER,
     "delonix-provider-cloud-hypervisor": PROVIDER,
     "delonix-provider-lvm": PROVIDER,  # ADR-0067 P4: the lvm-thin storage pool driver
+    "delonix-provider-zfs": PROVIDER,  # ADR-0067 P3: the zfs storage pool driver
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
     "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
     "delonix-powerdns": PROVIDER,  # ADR-0064 D6: the engine's own PowerDNS credential, record cleanup

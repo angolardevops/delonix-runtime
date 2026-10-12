@@ -1044,6 +1044,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-provider-zfs"
+version = "5.0.2"
+dependencies = [
+ "delonix-storage",
+ "libc",
+ "tempfile",
+]
+
+[[package]]
 name = "delonix-proxmox"
 version = "5.0.2"
 dependencies = [
