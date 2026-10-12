@@ -4380,7 +4380,7 @@
       "type": "object"
     },
     "WorkloadSecuritySpec": {
-      "description": "The profiles `workloadSecurity` accepts — an enum in the published schema,\nso `manifest validate` and an editor refuse `restricted` before a plan\ndoes.",
+      "description": "The profiles `workloadSecurity` accepts — an enum in the published schema,\nso an editor using it refuses `restricted` as it is typed. `stack\nplan`/`apply` refuse it before any effect. `manifest validate` does NOT:\nit does not deserialise a RuntimePolicy's values into their types\n(`denyPrivateEgress: maybe` passes it too), which is older than this field.",
       "oneOf": [
         {
           "const": "baseline",
