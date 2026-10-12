@@ -17,6 +17,24 @@ libfuzzer-sys = "0.4"
 [dependencies.delonix-oci]
 path = "../crates/adapters/delonix-oci"
 
+[dependencies.delonix-net-rules]
+path = "../crates/foundation/delonix-net-rules"
+
+[dependencies.delonix-model]
+path = "../crates/foundation/delonix-model"
+
+[dependencies.delonix-node]
+path = "../crates/contexts/delonix-node"
+
+[dependencies.delonix-compute]
+path = "../crates/contexts/delonix-compute"
+
+[dependencies.delonix-sdn]
+path = "../crates/adapters/delonix-sdn"
+
+[dependencies.delonix-linux]
+path = "../crates/adapters/delonix-linux"
+
 [[bin]]
 name = "parse_dockerfile"
 path = "fuzz_targets/parse_dockerfile.rs"
@@ -27,6 +45,34 @@ bench = false
 [[bin]]
 name = "parse_reference"
 path = "fuzz_targets/parse_reference.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_cidr"
+path = "fuzz_targets/net_cidr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "publish_spec"
+path = "fuzz_targets/publish_spec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "run_options"
+path = "fuzz_targets/run_options.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "seccomp_profile"
+path = "fuzz_targets/seccomp_profile.rs"
 test = false
 doc = false
 bench = false

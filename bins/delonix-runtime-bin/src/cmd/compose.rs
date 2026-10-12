@@ -1350,7 +1350,7 @@ fn valid_compose_project_name(name: &str) -> bool {
 /// characters inside a literal argv token — a correctness property (wrong
 /// tokenization would silently change what runs), not a shell-injection
 /// concern, precisely because there is no shell here to inject into.
-fn shlex_split(s: &str) -> Result<Vec<String>> {
+pub(crate) fn shlex_split(s: &str) -> Result<Vec<String>> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut chars = s.trim().chars().peekable();
@@ -1854,7 +1854,7 @@ fn resolve_compose_secrets(
 ///
 /// PURE (`&str` in, `Result` out), so every one of those paths is a data test.
 #[cfg(test)]
-fn check_unsupported_fields(text: &str) -> Result<()> {
+pub(crate) fn check_unsupported_fields(text: &str) -> Result<()> {
     check_unsupported_value(&parse_compose_value(text)?)
 }
 

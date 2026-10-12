@@ -3657,7 +3657,7 @@ check "stop: PÁRA mesmo um container --restart always (o supervisor não o ress
 # --- o slirp de um container acaba com ele, e não segura o arranque ---------
 #
 # Um `slirp4netns` não sai quando o processo que serve morre, e era lançado com
-# todos os descritores de quem o lançava. Os dez cenários — e o que cada um
+# todos os descritores de quem o lançava. Os onze cenários — e o que cada um
 # media antes da correcção — estão no cabeçalho do `e2e_slirp_lifecycle.sh`,
 # que corre sozinho contra qualquer binário. 77 = o host não deixa medir.
 declare -A SLIRP_CHECKS=(
@@ -3671,8 +3671,9 @@ declare -A SLIRP_CHECKS=(
   [zombies]="slirp: um --restart always que cai sempre não junta zombies no supervisor"
   [stopgaveup]="slirp: um stop que desiste (DX-8101) solta a porta e o slirp logo"
   [infra]="rede: o pin e o plano de controlo não ficam com descritores de quem os arrancou"
+  [execfail]="slirp: a run -d whose command does not exist releases its published port"
 )
-for _sc in fds exit start listed stats kind hang zombies stopgaveup infra; do
+for _sc in fds exit start listed stats kind hang zombies stopgaveup execfail infra; do
   _out=$(bash "$(dirname "$0")/e2e_slirp_lifecycle.sh" "$_sc" "$BIN" "$IMG" "sl$PFX" 2>&1); _rc=$?
   if [[ $_rc -eq 77 ]]; then
     skip "${SLIRP_CHECKS[$_sc]}" "$_out"

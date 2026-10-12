@@ -6439,6 +6439,16 @@ fn discard_child(container: &Container, pid: Pid) {
     remove_container_cgroup(container);
 }
 
+/// Starts the container's init and hands it over to the caller.
+///
+/// The body is a sequence of named steps, and the ORDER of the steps is the
+/// contract — every step below says what it must come after and why. The
+/// ones the comments call CRITICAL are the userns handshake (the cgroup and
+/// the network before the «GO» byte, and the «GO» before the console
+/// `recv_fd`), the mount wait (the last thing before the record is published)
+/// and the publish itself (after the wait, never before). The split into
+/// functions changed none of it: same syscalls, same order, same error paths
+/// (Sprint 23, N27).
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -6463,17 +6473,7 @@ fn spawn(
         spec.dns_config.as_ref(),
         &container.extra_hosts,
     );
-    let argv: Vec<CString> = container
-        .command
-        .iter()
-        .map(|a| {
-            CString::new(a.as_str())
-                .map_err(|_| Error::InvalidCommandArgv(format!("invalid argument: {a:?}")))
-        })
-        .collect::<Result<_>>()?;
-    if argv.is_empty() {
-        return Err(Error::EmptyCommand("empty command".into()));
-    }
+    let argv = command_argv(&container.command)?;
 
     // The disk `--device-*` caps is the one this container writes to: its
     // directory in the store, which holds the writable `upper/` (or the flat
@@ -6485,41 +6485,158 @@ fn spawn(
         let rootfs = std::path::Path::new(rootfs);
         io_device_of(rootfs.parent().unwrap_or(rootfs))
     });
-    let rootfs_owned = rootfs.to_string();
-    let detach = spec.detach;
-    let mounts = spec.mounts.clone();
-    let apparmor = spec.apparmor.clone();
-    let selinux = spec.selinux.clone();
-    let pod_infra_pid = spec.pod_infra_pid;
-    // `--secret` (env mode): the values are resolved HERE, at spawn time, from the
-    // vault, and go straight into the child's environment — they are NEVER written
-    // into `container.env`, hence never into the record on disk.
-    //
-    // **This is the fix for a confirmed credential leak.** The CLI used to do
-    // `c.env.extend(sstore.resolve_env(&secrets))` before saving, so every value
-    // a `kind: Secret` protected landed in CLEARTEXT in
-    // `<root>/containers/<id>.json` and was printed verbatim by `container
-    // inspect`/`describe` — while `secret inspect` carefully redacts the same
-    // values and hides them behind `--reveal`. The vault encrypts at rest and the
-    // first consumer undid it, permanently, in a plain file that outlives the
-    // container. `--secret-files` never had the bug precisely because it resolved
-    // at spawn time (just below); this makes the env path do the same, so both
-    // modes now keep the plaintext to process memory only.
-    //
-    // Resolving per spawn also means a rotated secret takes effect on the next
-    // `start`, instead of the record pinning the value captured at create time.
-    let env = {
-        let mut env = container.env.clone();
-        if !container.secret_files && !container.secrets.is_empty() {
-            if let Ok(ss) = delonix_state::SecretStore::open(store.base()) {
-                env.extend(ss.resolve_env(&container.secrets));
-            }
-        }
-        env
+    let env = spawn_env(store, container);
+    record_secret_versions(store, container);
+    let mut inputs = InitInputs::gather(container, rootfs, spec, hostname, argv, env);
+    let detach = inputs.detach;
+
+    // Console (pty) for PID 1: ONLY in `--privileged` detached with log (Kind
+    // nodes, which run systemd as PID 1). Gives a real `/dev/console` whose output
+    // — including the systemd boot state — is captured in the log file, so
+    // that `docker logs -f` (= what Kind uses to detect readiness) sees it.
+    // The NON-privileged path stays byte-for-byte identical (no pty, normal pipe).
+    let console = console_wanted(inputs.privileged, detach, spec.log_path.is_some());
+    let (log_pipe, log_err_pipe) =
+        open_log_pipes(detach && !console && spec.log_path.is_some(), spec.log_cri);
+    let console_sock = if console { open_console_sock() } else { None };
+
+    let (flags, userns) = clone_flags(spec);
+    let pipes = open_start_pipes(userns)?;
+    // --secret-files: read and decrypted here, at the same point of the start it
+    // always was — see `secret_file_pairs`.
+    inputs.secret_files = secret_file_pairs(store, container);
+    let io = IoSpec {
+        detach,
+        log_fd: log_pipe.map(|(_, w)| w), // the container writes to the write end
+        log_err_fd: log_err_pipe.map(|(_, w)| w),
+        sync: pipes.sync,
+        console_sock,
+        ready_w: Some(pipes.ready.1),
+        exec_w: pipes.exec.map(|(_, w)| w),
     };
-    // Which VERSION of each secret this start read (`name=version`, names only
-    // — never a value), so a rotation after the start can be told apart from a
-    // container that already has it. Written with the record the spawn saves.
+    let pid = clone_init(inputs, io, flags, &pipes)?;
+
+    // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
+    // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
+    // pty and sends the master AFTER receiving the GO; if the parent blocked on recv_fd
+    // before writing the GO, it would deadlock (parent waits for the master, child waits for the
+    // GO). Hence: 1st userns, 2nd console+log_shim.
+    //
+    // Network already configured by the hook before the GO? (only on the userns/sync path)
+    let handshaken = match pipes.sync {
+        Some(sync) => {
+            userns_handshake(container, pid, sync, spec, io_dev.as_deref())?;
+            true
+        }
+        None => false,
+    };
+
+    // Log source: in console mode it is the pty MASTER (received from the init by
+    // SCM_RIGHTS, ALREADY after the userns GO above); otherwise the READ end
+    // of the stdout/stderr pipe.
+    let log_src: Option<i32> = match console_sock {
+        Some(sock) => receive_console_master(sock),
+        None => log_pipe.map(|(r, _)| r),
+    };
+    if let Some(src) = log_src {
+        start_log_shim(src, log_pipe, log_err_pipe, spec, container);
+    }
+
+    mark_running(container, pid);
+    // The cgroup stays HERE, ahead of the wait: it is what the container's
+    // limits hang off, and every millisecond it is not in one is a millisecond
+    // it runs uncapped. Mounting allocates nothing, so waiting first would buy
+    // no safety and cost that.
+    // Already done before the GO on the userns path (the rootless default). The
+    // path without userns has no sync point to block the child on, so it keeps
+    // the historical placement — the same asymmetry the network hook has.
+    if !handshaken {
+        place_without_userns(container, pid, spec, io_dev.as_deref())?;
+    }
+
+    // Do not return until the child has finished shaping its mount namespace.
+    // Everything above this line is unchanged on purpose: the userns handshake,
+    // the console `recv_fd` and the log shim have an order the comments above
+    // call CRITICAL, and this wait needs none of it — it only has to be the LAST
+    // thing before the caller gets control.
+    // SAFETY: the read end of the readiness pipe, ours alone from here on: every
+    // early return below drops (closes) it, and a start that passed the ceiling
+    // hands it to the late-mount watcher instead.
+    let ready_r = unsafe { OwnedFd::from_raw_fd(pipes.ready.0) };
+    let mounted = wait_for_mounts(ready_r.as_raw_fd(), &container.name);
+    // Past the ceiling the process runs, but nobody has seen its root filesystem
+    // in place: the record says so, and whatever enters it refuses until the
+    // proof arrives (`require_mounted`). It used to be published as plain
+    // `Running`, which a CRI `StartContainer` answered as success and an
+    // `ExecSync` could then run on the host's filesystem (issue #793). Never a
+    // failure: the container may well come up a moment later, and killing it
+    // would turn a slow disk into a crash loop.
+    container.mount_pending = mounted == MountWait::Unknown;
+    refuse_failed_detached_start(container, pid, spec, pipes.exec, detach, &mounted)?;
+
+    publish_or_discard(store, container, pid, replaces_record)?;
+    if container.mount_pending {
+        watch_late_mount(store, container, ready_r);
+    } else {
+        drop(ready_r);
+    }
+
+    if detach {
+        return Ok(container.status.clone());
+    }
+    wait_foreground(store, container, pid)
+}
+
+/// The command as `execve` takes it. Refused before anything is cloned: a NUL
+/// inside an argument cannot cross into a C string, and an empty command has
+/// nothing to exec.
+fn command_argv(command: &[String]) -> Result<Vec<CString>> {
+    let argv: Vec<CString> = command
+        .iter()
+        .map(|a| {
+            CString::new(a.as_str())
+                .map_err(|_| Error::InvalidCommandArgv(format!("invalid argument: {a:?}")))
+        })
+        .collect::<Result<_>>()?;
+    if argv.is_empty() {
+        return Err(Error::EmptyCommand("empty command".into()));
+    }
+    Ok(argv)
+}
+
+/// The init's environment: the record's, plus the `--secret` values in env mode.
+///
+/// The values are resolved HERE, at spawn time, from the vault, and go straight
+/// into the child's environment — they are NEVER written into `container.env`,
+/// hence never into the record on disk.
+///
+/// **This is the fix for a confirmed credential leak.** The CLI used to do
+/// `c.env.extend(sstore.resolve_env(&secrets))` before saving, so every value
+/// a `kind: Secret` protected landed in CLEARTEXT in
+/// `<root>/containers/<id>.json` and was printed verbatim by `container
+/// inspect`/`describe` — while `secret inspect` carefully redacts the same
+/// values and hides them behind `--reveal`. The vault encrypts at rest and the
+/// first consumer undid it, permanently, in a plain file that outlives the
+/// container. `--secret-files` never had the bug precisely because it resolved
+/// at spawn time ([`secret_file_pairs`]); this makes the env path do the same,
+/// so both modes now keep the plaintext to process memory only.
+///
+/// Resolving per spawn also means a rotated secret takes effect on the next
+/// `start`, instead of the record pinning the value captured at create time.
+fn spawn_env(store: &Store, container: &Container) -> Vec<String> {
+    let mut env = container.env.clone();
+    if !container.secret_files && !container.secrets.is_empty() {
+        if let Ok(ss) = delonix_state::SecretStore::open(store.base()) {
+            env.extend(ss.resolve_env(&container.secrets));
+        }
+    }
+    env
+}
+
+/// Which VERSION of each secret this start read (`name=version`, names only —
+/// never a value), so a rotation after the start can be told apart from a
+/// container that already has it. Written with the record the spawn saves.
+fn record_secret_versions(store: &Store, container: &mut Container) {
     if !container.secrets.is_empty() {
         if let Ok(ss) = delonix_state::SecretStore::open(store.base()) {
             let seen: Vec<String> = container
@@ -6532,113 +6649,289 @@ fn spawn(
                 .insert("delonix.io/secret-versions".to_string(), seen.join(","));
         }
     }
-    let read_only = container.read_only;
-    // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
-    // (see setup_rootfs). Strictly gated — the non-privileged path is identical.
-    let privileged = container.privileged;
-    let cap_keep = if privileged {
-        all_caps_mask()
-    } else {
-        resolve_cap_keep(&container.cap_drop, &container.cap_add)
-    };
-    let seccomp_unconfined = privileged || container.seccomp.as_deref() == Some("unconfined");
-    // The profile travels as its CONTENT, not its path: the file lives on the
-    // host and the init runs after `pivot_root`, where that path no longer
-    // resolves. Read once, in the parent, where it still exists.
-    let seccomp_profile_json = container.seccomp_profile.clone();
-    let seccomp_detect = container.seccomp.as_deref() == Some("detect");
-    let devices = container.devices.clone();
-    let tmpfs = container.tmpfs.clone();
-    let ulimits = container.ulimits.clone();
-    let oom_score_adj = container.oom_score_adj;
-    let group_add = container.group_add.clone();
-    let masked_paths = container.masked_paths.clone();
-    let readonly_paths = container.readonly_paths.clone();
-    // Default ON — stricter than Docker/Podman, deliberately. See `no_new_privs`.
-    let no_new_privs = container.no_new_privs.unwrap_or(true);
-    let sysctls = container.sysctls.clone();
+}
 
-    // Console (pty) for PID 1: ONLY in `--privileged` detached with log (Kind
-    // nodes, which run systemd as PID 1). Gives a real `/dev/console` whose output
-    // — including the systemd boot state — is captured in the log file, so
-    // that `docker logs -f` (= what Kind uses to detect readiness) sees it.
-    // The NON-privileged path stays byte-for-byte identical (no pty, normal pipe).
-    let console = privileged && detach && spec.log_path.is_some();
-
-    // Logging shim: in detached, the container's stdout/stderr go through a pipe to
-    // a `log_shim` process that writes to `log_path` WITH size-based rotation. In
-    // console mode the "pipe" is instead the MASTER of the pty (received from the container), so
-    // no pipe is created here.
-    let log_pipe: Option<(i32, i32)> = match (detach && !console, &spec.log_path) {
-        (true, Some(_)) => {
-            let mut fds = [0i32; 2];
-            // SAFETY: pipe() fills 2 fds.
-            if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
-                Some((fds[0], fds[1]))
-            } else {
-                None
+/// `--secret-files`: reads+decrypts the values NOW (on the host, before the
+/// child's pivot) to write them into an in-namespace tmpfs. Only names/root
+/// touch outside memory; the values are captured (moved) into the clone's
+/// closure = the child's memory.
+fn secret_file_pairs(store: &Store, container: &Container) -> Vec<(String, String)> {
+    if container.secret_files && !container.secrets.is_empty() {
+        match delonix_state::SecretStore::open(store.base()) {
+            Ok(ss) => {
+                let mut map = std::collections::BTreeMap::new();
+                for n in &container.secrets {
+                    if let Ok(s) = ss.load(n) {
+                        for (k, v) in s.data {
+                            map.insert(k, v);
+                        }
+                    }
+                }
+                map.into_iter().collect()
             }
+            Err(_) => Vec::new(),
         }
-        _ => None,
-    };
-    // The READ end is the shim's alone, and the shim is a `fork` that never
-    // execs. Close-on-exec keeps it out of everything that does exec while this
-    // start holds it — the container's own command had it as a stray fd 3.
+    } else {
+        Vec::new()
+    }
+}
+
+/// Everything the init reads that is not a descriptor, OWNED: the clone's
+/// closure outlives every borrow `spawn` holds, so it takes this by move and
+/// the child builds its [`ContainerInitSpec`] of borrows into it — no
+/// allocation in the child (see the `main.rs` note on why it must not
+/// allocate before `exec`).
+///
+/// Gathered from the record and the spec by [`InitInputs::gather`], which is
+/// PURE: what the child will be confined by is a data test, not a live run.
+struct InitInputs {
+    rootfs: String,
+    cid: String,
+    hostname: String,
+    argv: Vec<CString>,
+    env: Vec<String>,
+    workdir: Option<String>,
+    run_uid: Option<u32>,
+    run_gid: Option<u32>,
+    group_add: Vec<u32>,
+    ulimits: Vec<String>,
+    sysctls: Vec<String>,
+    oom_score_adj: Option<i32>,
+    mounts: Vec<Mount>,
+    read_only: bool,
+    tmpfs: Vec<String>,
+    devices: Vec<String>,
+    /// Filled by [`secret_file_pairs`] just before the clone, where it always
+    /// was read — not by `gather`, which touches no vault.
+    secret_files: Vec<(String, String)>,
+    cap_keep: u64,
+    apparmor: Option<String>,
+    selinux: Option<String>,
+    seccomp_unconfined: bool,
+    seccomp_profile_json: Option<String>,
+    seccomp_detect: bool,
+    no_new_privs: bool,
+    privileged: bool,
+    masked_paths: Vec<String>,
+    readonly_paths: Vec<String>,
+    pod_infra_pid: Option<i32>,
+    has_own_netns: bool,
+    host_pid: bool,
+    inherit_userns: bool,
+    node_cgroup: bool,
+    detach: bool,
+}
+
+impl InitInputs {
+    fn gather(
+        container: &Container,
+        rootfs: &str,
+        spec: &RunSpec<'_>,
+        hostname: String,
+        argv: Vec<CString>,
+        env: Vec<String>,
+    ) -> Self {
+        // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
+        // (see setup_rootfs). Strictly gated — the non-privileged path is identical.
+        let privileged = container.privileged;
+        let cap_keep = if privileged {
+            all_caps_mask()
+        } else {
+            resolve_cap_keep(&container.cap_drop, &container.cap_add)
+        };
+        InitInputs {
+            rootfs: rootfs.to_string(),
+            // Container id: used for the Kind node's dedicated cgroup leaf.
+            cid: container.id.clone(),
+            hostname,
+            argv,
+            env,
+            // image CWD (OCI WorkingDir) — captured for the child to `chdir` before the exec.
+            workdir: container.workdir.clone(),
+            run_uid: spec.run_uid,
+            run_gid: spec.run_gid,
+            group_add: container.group_add.clone(),
+            ulimits: container.ulimits.clone(),
+            sysctls: container.sysctls.clone(),
+            oom_score_adj: container.oom_score_adj,
+            mounts: spec.mounts.clone(),
+            read_only: container.read_only,
+            tmpfs: container.tmpfs.clone(),
+            devices: container.devices.clone(),
+            secret_files: Vec::new(),
+            cap_keep,
+            apparmor: spec.apparmor.clone(),
+            selinux: spec.selinux.clone(),
+            seccomp_unconfined: privileged || container.seccomp.as_deref() == Some("unconfined"),
+            // The profile travels as its CONTENT, not its path: the file lives on the
+            // host and the init runs after `pivot_root`, where that path no longer
+            // resolves. Read once, in the parent, where it still exists.
+            seccomp_profile_json: container.seccomp_profile.clone(),
+            seccomp_detect: container.seccomp.as_deref() == Some("detect"),
+            // Default ON — stricter than Docker/Podman, deliberately. See `no_new_privs`.
+            no_new_privs: container.no_new_privs.unwrap_or(true),
+            privileged,
+            masked_paths: container.masked_paths.clone(),
+            readonly_paths: container.readonly_paths.clone(),
+            pod_infra_pid: spec.pod_infra_pid,
+            // Same condition that decides whether `CLONE_NEWNET` is actually added
+            // in `clone_flags` — the one place that knows whether this container
+            // ends up with an EXCLUSIVE network namespace of its own, vs sharing
+            // one (the real host's, under `--net host`, or the holder's under
+            // rootless ingress). `apply_sysctls` needs this to know whether
+            // `net.*` sysctls are safe.
+            has_own_netns: spec.new_netns && !spec.inherit_userns,
+            host_pid: spec.host_pid,
+            inherit_userns: spec.inherit_userns,
+            node_cgroup: is_kind_node(privileged, &container.labels),
+            detach: spec.detach,
+        }
+    }
+
+    /// The child's view of these inputs, plus the descriptors that tie it back
+    /// to the parent. Borrows only — called in the child.
+    fn init_spec(&self, io: IoSpec) -> ContainerInitSpec<'_> {
+        ContainerInitSpec {
+            rootfs: &self.rootfs,
+            cid: &self.cid,
+            process: ProcessSpec {
+                hostname: &self.hostname,
+                argv: &self.argv,
+                env: &self.env,
+                workdir: self.workdir.as_deref(),
+                run_uid: self.run_uid,
+                run_gid: self.run_gid,
+                group_add: &self.group_add,
+                ulimits: &self.ulimits,
+                sysctls: &self.sysctls,
+                oom_score_adj: self.oom_score_adj,
+            },
+            filesystem: FilesystemSpec {
+                mounts: &self.mounts,
+                read_only: self.read_only,
+                tmpfs: &self.tmpfs,
+                devices: &self.devices,
+                secret_files: &self.secret_files,
+            },
+            security: SecuritySpec {
+                cap_keep: self.cap_keep,
+                apparmor: self.apparmor.as_deref(),
+                selinux: self.selinux.as_deref(),
+                seccomp_unconfined: self.seccomp_unconfined,
+                seccomp_profile_json: self.seccomp_profile_json.as_deref(),
+                seccomp_detect: self.seccomp_detect,
+                no_new_privs: self.no_new_privs,
+                privileged: self.privileged,
+                masked_paths: &self.masked_paths,
+                readonly_paths: &self.readonly_paths,
+            },
+            namespaces: NamespaceSpec {
+                pod_infra_pid: self.pod_infra_pid,
+                has_own_netns: self.has_own_netns,
+                host_pid: self.host_pid,
+                inherit_userns: self.inherit_userns,
+                node_cgroup: self.node_cgroup,
+            },
+            io,
+        }
+    }
+}
+
+/// KIND node (label `io.x-k8s.kind.*`): only these get the dedicated cgroup-ns —
+/// a normal `--privileged` container keeps its cgroup hierarchy intact.
+fn is_kind_node(privileged: bool, labels: &BTreeMap<String, String>) -> bool {
+    privileged && labels.keys().any(|k| k.starts_with("io.x-k8s.kind"))
+}
+
+/// Console (pty) for PID 1 — see the caller in [`spawn`].
+fn console_wanted(privileged: bool, detach: bool, has_log_path: bool) -> bool {
+    privileged && detach && has_log_path
+}
+
+/// A plain `pipe(2)`, `(read, write)`, or `None` when the kernel refused one.
+fn open_pipe() -> PipePair {
+    let mut fds = [0i32; 2];
+    // SAFETY: pipe() fills 2 fds.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
+        Some((fds[0], fds[1]))
+    } else {
+        None
+    }
+}
+
+/// A `(read, write)` pipe, or `None` when the kernel refused one or none was wanted.
+type PipePair = Option<(i32, i32)>;
+
+/// The pipes the log shim reads: stdout always, stderr only in CRI mode.
+///
+/// Logging shim: in detached, the container's stdout/stderr go through a pipe to
+/// a `log_shim` process that writes to `log_path` WITH size-based rotation. In
+/// console mode the "pipe" is instead the MASTER of the pty (received from the
+/// container), so no pipe is created — the caller passes `wanted = false`.
+///
+/// The SECOND pipe, for stderr, exists ONLY in CRI mode. The CRI log line carries
+/// a stream tag (`<ts> stdout|stderr F <line>`) and the kubelet — and `critest` —
+/// read it; with a single pipe every line was emitted as `stdout`, including a
+/// `touch: ...: Read-only file system` that is stderr by definition. Two specs
+/// failed on exactly that, and the cause looked like a missing security feature
+/// rather than a mislabelled stream. The non-CRI format has no tag, so splitting
+/// there would only interleave the two streams worse. That path stays
+/// byte-for-byte as it was.
+///
+/// The READ ends are the shim's alone, and the shim is a `fork` that never
+/// execs. Close-on-exec keeps them out of everything that does exec while this
+/// start holds them — the container's own command had one as a stray fd 3.
+fn open_log_pipes(wanted: bool, log_cri: bool) -> (PipePair, PipePair) {
+    let log_pipe = if wanted { open_pipe() } else { None };
     if let Some((r, _)) = log_pipe {
         // SAFETY: our own descriptor, just created.
         unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
     }
-    let log_fd = log_pipe.map(|(_, w)| w); // the container writes to the write end
-                                           // SECOND pipe, for stderr, and ONLY in CRI mode. The CRI log line carries a
-                                           // stream tag (`<ts> stdout|stderr F <line>`) and the kubelet — and
-                                           // `critest` — read it; with a single pipe every line was emitted as
-                                           // `stdout`, including a `touch: ...: Read-only file system` that is stderr
-                                           // by definition. Two specs failed on exactly that, and the cause looked like
-                                           // a missing security feature rather than a mislabelled stream.
-                                           //
-                                           // The non-CRI format has no tag, so splitting there would only interleave
-                                           // the two streams worse. That path stays byte-for-byte as it was.
-    let log_err_pipe: Option<(i32, i32)> = match (log_pipe.is_some(), spec.log_cri) {
-        (true, true) => {
-            let mut fds = [0i32; 2];
-            // SAFETY: pipe() fills 2 fds.
-            if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
-                Some((fds[0], fds[1]))
-            } else {
-                None
-            }
-        }
-        _ => None,
+    let log_err_pipe = if log_pipe.is_some() && log_cri {
+        open_pipe()
+    } else {
+        None
     };
     if let Some((r, _)) = log_err_pipe {
         // SAFETY: our own descriptor, just created; see the stdout pipe above.
         unsafe { libc::fcntl(r, libc::F_SETFD, libc::FD_CLOEXEC) };
     }
-    let log_err_fd = log_err_pipe.map(|(_, w)| w);
+    (log_pipe, log_err_pipe)
+}
 
-    // Socketpair of the *console socket* (runc): the init allocates the pty in the container's
-    // devpts and returns the master through here. `(parent, child)`; the child inherits both in the
-    // clone and closes the parent's (see `setup_console`).
-    let console_sock: Option<(i32, i32)> = if console {
-        let mut sv = [0i32; 2];
-        // SAFETY: socketpair() fills 2 fds (AF_UNIX/SOCK_DGRAM, as in `exec`).
-        if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } == 0 {
-            Some((sv[0], sv[1]))
-        } else {
-            None
-        }
+/// Socketpair of the *console socket* (runc): the init allocates the pty in the
+/// container's devpts and returns the master through here. `(parent, child)`;
+/// the child inherits both in the clone and closes the parent's (see
+/// `setup_console`).
+fn open_console_sock() -> Option<(i32, i32)> {
+    let mut sv = [0i32; 2];
+    // SAFETY: socketpair() fills 2 fds (AF_UNIX/SOCK_DGRAM, as in `exec`).
+    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } == 0 {
+        Some((sv[0], sv[1]))
     } else {
         None
-    };
+    }
+}
 
-    // Isolation by default: mount, PID, UTS and **IPC** (System V/POSIX). The isolated
-    // IPC prevents a container from seeing/altering the host's shared memory and message
-    // queues (like Docker). `--host-pid`/`--host-ipc` (and the CRI
-    // `namespace_options: NODE`) waive that isolation.
-    // Pod IPC/UTS sharing: a pod member does NOT create its own IPC/UTS — it will
-    // `setns` into the infra container's (in `container_init`), so the pod shares
-    // System V/POSIX IPC and the UTS/hostname. (PID stays isolated here; sharing
-    // it is `shareProcessNamespace`, handled separately.)
+/// The namespaces the child is cloned into, and whether one of them is a new
+/// user namespace (which is what decides the uid-map handshake). PURE.
+///
+/// Isolation by default: mount, PID, UTS and **IPC** (System V/POSIX). The isolated
+/// IPC prevents a container from seeing/altering the host's shared memory and message
+/// queues (like Docker). `--host-pid`/`--host-ipc` (and the CRI
+/// `namespace_options: NODE`) waive that isolation.
+/// Pod IPC/UTS sharing: a pod member does NOT create its own IPC/UTS — it will
+/// `setns` into the infra container's (in `container_init`), so the pod shares
+/// System V/POSIX IPC and the UTS/hostname. (PID stays isolated here; sharing
+/// it is `shareProcessNamespace`, handled separately.)
+///
+/// --privileged gets its own cgroup namespace (the systemd inside the container sees
+/// its cgroup as root and can delegate sub-cgroups) — but NOT from here: the
+/// `container_init` does `unshare(CLONE_NEWCGROUP)` AFTER moving to a
+/// dedicated leaf `dlx-<id>` (see `setup_node_cgroup_ns`), so that the node's
+/// cgroup-ns root is EMPTY (the no-internal-processes rule the kubelet
+/// requires) — instead of anchoring in the cgroup-scope shared with `kind`.
+fn clone_flags(spec: &RunSpec<'_>) -> (CloneFlags, bool) {
     let join_pod = spec.pod_infra_pid.is_some();
     let mut flags = CloneFlags::CLONE_NEWNS;
     if !join_pod {
@@ -6659,13 +6952,30 @@ fn spawn(
     if userns {
         flags |= CloneFlags::CLONE_NEWUSER;
     }
-    // --privileged: its own cgroup namespace (the systemd inside the container sees
-    // its cgroup as root and can delegate sub-cgroups). We do NOT create it here: the
-    // `container_init` does `unshare(CLONE_NEWCGROUP)` AFTER moving to a
-    // dedicated leaf `dlx-<id>` (see `setup_node_cgroup_ns`), so that the node's
-    // cgroup-ns root is EMPTY (the no-internal-processes rule the kubelet
-    // requires) — instead of anchoring in the cgroup-scope shared with `kind`.
-    // Sync pipe: the child waits for the parent to map the uid/gid (user ns).
+    (flags, userns)
+}
+
+/// The three pipes between the parent and the child it is about to clone.
+struct StartPipes {
+    /// The userns handshake: the child waits on it for the parent to map the
+    /// uid/gid. Only with a new user namespace.
+    sync: Option<(i32, i32)>,
+    /// READINESS pipe — the child's proof that the mount namespace is finished.
+    /// See the `ready_w` write in `container_init` for the defect this closes.
+    /// `O_CLOEXEC` on BOTH ends is load-bearing on the write side: it is what
+    /// turns "the init died, or reached `execvp` without writing" into an EOF the
+    /// parent can act on instead of a wait with no end.
+    ready: (i32, i32),
+    /// EXEC pipe — the child's proof that its command really started. Written only
+    /// when the `execvp` fails; a successful one closes the CLOEXEC write end with
+    /// nothing in it, so the parent reads EOF.
+    exec: Option<(i32, i32)>,
+}
+
+/// Opens the [`StartPipes`], in the order they always were: sync, readiness,
+/// exec. A sync or readiness pipe the kernel refuses fails the start (closing
+/// what was already opened); a missing exec pipe only loses the exec check.
+fn open_start_pipes(userns: bool) -> Result<StartPipes> {
     let sync = if userns {
         let mut fds = [0i32; 2];
         // SAFETY: pipe() fills the 2-fd array.
@@ -6679,12 +6989,6 @@ fn spawn(
     } else {
         None
     };
-
-    // READINESS pipe — the child's proof that the mount namespace is finished.
-    // See the `ready_w` write in `container_init` for the defect this closes.
-    // `O_CLOEXEC` on BOTH ends is load-bearing on the write side: it is what
-    // turns "the init died, or reached `execvp` without writing" into an EOF the
-    // parent can act on instead of a wait with no end.
     let ready = {
         let mut fds = [0i32; 2];
         // SAFETY: pipe2() fills the 2-fd array.
@@ -6703,11 +7007,7 @@ fn spawn(
         }
         (fds[0], fds[1])
     };
-    let ready_w = ready.1;
-    // EXEC pipe — the child's proof that its command really started. Written only
-    // when the `execvp` fails; a successful one closes the CLOEXEC write end with
-    // nothing in it, so the parent reads EOF.
-    let exec_pipe = {
+    let exec = {
         let mut fds = [0i32; 2];
         // SAFETY: pipe2() fills the 2-fd array.
         if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
@@ -6716,350 +7016,274 @@ fn spawn(
             Some((fds[0], fds[1]))
         }
     };
+    Ok(StartPipes { sync, ready, exec })
+}
 
-    let host_pid = spec.host_pid;
-    let inherit_userns = spec.inherit_userns;
-    // Same condition that decides whether `CLONE_NEWNET` is actually added
-    // above — the one place that knows whether this container ends up with
-    // an EXCLUSIVE network namespace of its own, vs sharing one (the real
-    // host's, under `--net host`, or the holder's under rootless ingress).
-    // `apply_sysctls` needs this to know whether `net.*` sysctls are safe.
-    let has_own_netns = spec.new_netns && !spec.inherit_userns;
-    let run_uid = spec.run_uid;
-    let run_gid = spec.run_gid;
-    // --secret-files: reads+decrypts the values NOW (on the host, before the child's pivot)
-    // to write them into an in-namespace tmpfs. Only names/root touch outside memory;
-    // the values are captured (moved) into the clone's closure = the child's memory.
-    let secret_files: Vec<(String, String)> =
-        if container.secret_files && !container.secrets.is_empty() {
-            match delonix_state::SecretStore::open(store.base()) {
-                Ok(ss) => {
-                    let mut map = std::collections::BTreeMap::new();
-                    for n in &container.secrets {
-                        if let Ok(s) = ss.load(n) {
-                            for (k, v) in s.data {
-                                map.insert(k, v);
-                            }
-                        }
-                    }
-                    map.into_iter().collect()
-                }
-                Err(_) => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-    // image CWD (OCI WorkingDir) — captured for the child to `chdir` before the exec.
-    let workdir = container.workdir.clone();
-    // Container id: used for the Kind node's dedicated cgroup leaf.
-    let cid = container.id.clone();
-    // KIND node (label `io.x-k8s.kind.*`): only these get the dedicated cgroup-ns —
-    // a normal `--privileged` container keeps its cgroup hierarchy intact.
-    let node_cgroup = privileged
-        && container
-            .labels
-            .keys()
-            .any(|k| k.starts_with("io.x-k8s.kind"));
+/// `clone`s the init with `inputs` moved into it, and drops the parent's copy
+/// of the write ends the child alone must hold.
+///
+/// The parent drops the readiness WRITE end unconditionally: while it holds a
+/// copy, the pipe never reaches EOF, so a child that dies before signalling
+/// would leave the read in [`wait_for_mounts`] waiting forever. On a failed
+/// `clone` both ends go, or the error path would leak a pair of fds per attempt.
+fn clone_init(
+    inputs: InitInputs,
+    io: IoSpec,
+    flags: CloneFlags,
+    pipes: &StartPipes,
+) -> Result<Pid> {
     let mut stack = vec![0u8; 1024 * 1024];
-    let cb = Box::new(move || {
-        container_init(ContainerInitSpec {
-            rootfs: &rootfs_owned,
-            cid: &cid,
-            process: ProcessSpec {
-                hostname: &hostname,
-                argv: &argv,
-                env: &env,
-                workdir: workdir.as_deref(),
-                run_uid,
-                run_gid,
-                group_add: &group_add,
-                ulimits: &ulimits,
-                sysctls: &sysctls,
-                oom_score_adj,
-            },
-            filesystem: FilesystemSpec {
-                mounts: &mounts,
-                read_only,
-                tmpfs: &tmpfs,
-                devices: &devices,
-                secret_files: &secret_files,
-            },
-            security: SecuritySpec {
-                cap_keep,
-                apparmor: apparmor.as_deref(),
-                selinux: selinux.as_deref(),
-                seccomp_unconfined,
-                seccomp_profile_json: seccomp_profile_json.as_deref(),
-                seccomp_detect,
-                no_new_privs,
-                privileged,
-                masked_paths: &masked_paths,
-                readonly_paths: &readonly_paths,
-            },
-            namespaces: NamespaceSpec {
-                pod_infra_pid,
-                has_own_netns,
-                host_pid,
-                inherit_userns,
-                node_cgroup,
-            },
-            io: IoSpec {
-                detach,
-                log_fd,
-                log_err_fd,
-                sync,
-                console_sock,
-                ready_w: Some(ready_w),
-                exec_w: exec_pipe.map(|(_, w)| w),
-            },
-        })
-    });
-
+    let cb = Box::new(move || container_init(inputs.init_spec(io)));
     // SAFETY: single-threaded; the child mounts the container and does `exec`.
     let cloned = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) };
-    // The parent drops the WRITE end unconditionally: while it holds a copy, the
-    // pipe never reaches EOF, so a child that dies before signalling would leave
-    // the read below waiting forever. On a failed `clone` both ends go, or the
-    // error path would leak a pair of fds per attempt.
     // SAFETY: our own end; the child got its copy through the `clone`.
-    unsafe { libc::close(ready_w) };
-    if let Some((_, w)) = exec_pipe {
+    unsafe { libc::close(pipes.ready.1) };
+    if let Some((_, w)) = pipes.exec {
         // SAFETY: our own end; the child got its copy through the `clone`.
         unsafe { libc::close(w) };
     }
-    let pid = match cloned {
-        Ok(p) => p,
+    match cloned {
+        Ok(p) => Ok(p),
         Err(e) => {
             // SAFETY: nothing else refers to the read end once there is no child.
-            unsafe { libc::close(ready.0) };
-            if let Some((r, _)) = exec_pipe {
+            unsafe { libc::close(pipes.ready.0) };
+            if let Some((r, _)) = pipes.exec {
                 // SAFETY: as above.
                 unsafe { libc::close(r) };
             }
-            return Err(syserr("clone")(e));
+            Err(syserr("clone")(e))
         }
-    };
+    }
+}
 
-    // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
-    // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
-    // pty and sends the master AFTER receiving the GO; if the parent blocked on recv_fd
-    // before writing the GO, it would deadlock (parent waits for the master, child waits for the
-    // GO). Hence: 1st userns, 2nd console+log_shim.
-
-    // User namespace: the parent maps the uid/gid and releases the child via the pipe.
-    // Network already configured by the hook before the GO? (only on the userns/sync path)
-    let mut net_done = false;
-    let mut cgroup_done = false;
-    if let Some((r, w)) = sync {
-        // SAFETY: the parent closes the read and uses the write to release the child.
+/// User namespace: the parent maps the uid/gid, places the child in its cgroup,
+/// runs the network hook and only THEN releases it via the pipe. `Ok` means all
+/// four happened; on any failure the child is discarded ([`discard_child`]).
+fn userns_handshake(
+    container: &Container,
+    pid: Pid,
+    sync: (i32, i32),
+    spec: &RunSpec<'_>,
+    io_dev: Option<&str>,
+) -> Result<()> {
+    let (r, w) = sync;
+    // SAFETY: the parent closes the read and uses the write to release the child.
+    unsafe {
+        libc::close(r);
+    }
+    // Subuid map (range) by default in rootless when there are helpers
+    // `newuidmap`/`newgidmap` + /etc/subuid: besides allowing the image's USER≠0,
+    // it lets the entrypoints that `chown` to service uids work —
+    // e.g.: nginx chowns the caches to uid 101; with a single-uid map that
+    // gave `chown(...) failed (22: Invalid argument)` and the container exited. Without the
+    // helpers, it keeps the single-uid map (historical behavior). Does not affect
+    // ingress containers (they inherit the holder's userns).
+    let want_range = spec.run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
+    if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
+        // SAFETY: `w` is the write end of the userns sync pipe, closed once; the child is
+        // killed right after, so nothing writes to it later.
         unsafe {
-            libc::close(r);
-        }
-        // Subuid map (range) by default in rootless when there are helpers
-        // `newuidmap`/`newgidmap` + /etc/subuid: besides allowing the image's USER≠0,
-        // it lets the entrypoints that `chown` to service uids work —
-        // e.g.: nginx chowns the caches to uid 101; with a single-uid map that
-        // gave `chown(...) failed (22: Invalid argument)` and the container exited. Without the
-        // helpers, it keeps the single-uid map (historical behavior). Does not affect
-        // ingress containers (they inherit the holder's userns).
-        let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
-        if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
-            // SAFETY: `w` is the write end of the userns sync pipe, closed once; the child is
-            // killed right after, so nothing writes to it later.
-            unsafe {
-                libc::close(w);
-            }
-            discard_child(container, pid);
-            return Err(e);
-        }
-        // NETWORK BEFORE THE GO (critical order): the child is still BLOCKED waiting
-        // for this byte, so it is here — and only here — that we can guarantee the
-        // network is ready BEFORE the entrypoint runs. With the hook after the GO
-        // there was a real race: `slirp4netns` configures `tap0` from the PARENT
-        // while the child is already running, and an entrypoint that reads the IP ONCE at
-        // startup (e.g. that of `kindest/node`: "detected IPv4 address:") saw it
-        // EMPTY and the node died. Docker/podman also only start the process with the
-        // network already up. Without userns (sync=None) there is no blocking point: the
-        // hook runs further below, as before (the race remains, but that path
-        // is not the rootless/Kind one).
-        // CGROUP BEFORE THE GO (critical order) — same reason as the network
-        // right below, and it was missing for exactly the same class of race.
-        //
-        // A cgroup v2 migration moves ONE process, never its descendants. With
-        // this write after the GO, the entrypoint was already running: anything
-        // it forked in that window stayed in the CALLER's cgroup — outside the
-        // leaf, outside `dlx-containers`, and therefore outside both the
-        // per-container ceiling and the aggregate one that protects the host.
-        // The window lasts milliseconds; the consequence is PERMANENT, because
-        // nothing ever moves those descendants back.
-        //
-        // Measured before this fix, with `-m 64M`: allocating 256 MiB in PID 1
-        // was killed (rc=137, correct), and the SAME allocation in a forked
-        // child returned 0 — three times out of three; at 2 GiB it also
-        // returned 0, i.e. 32x the ceiling. The children showed up in the
-        // invoking shell's `cgroup.procs`. Registered as ACH-016 in
-        // `scripts/e2e.sh`, which fails on it until this lands.
-        if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev.as_deref()) {
-            // SAFETY: same teardown as the userns-map failure just above.
-            unsafe {
-                libc::close(w);
-            }
-            discard_child(container, pid);
-            return Err(e);
-        }
-        cgroup_done = true;
-        let net_err = spec.on_started.and_then(|hook| hook(pid.as_raw()).err());
-        // SAFETY: writes 1 byte (the "you may proceed") and closes the write.
-        unsafe {
-            let go = [1u8; 1];
-            let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
             libc::close(w);
         }
-        if let Some(e) = net_err {
-            discard_child(container, pid);
-            return Err(e);
-        }
-        net_done = true;
+        discard_child(container, pid);
+        return Err(e);
     }
-
-    // Log source: in console mode it is the pty MASTER (received from the init by
-    // SCM_RIGHTS, ALREADY after the userns GO above); otherwise the READ end
-    // of the stdout/stderr pipe.
-    let log_src: Option<i32> = if let Some((csp, csc)) = console_sock {
-        // SAFETY: the parent drops the child's end and receives the master from the init.
-        unsafe { libc::close(csc) };
-        // Receive timeout: if the init DIES before sending the pty master
-        // (e.g. the kindest/node entrypoint aborts early) and a reparented grandchild
-        // holds the socketpair end, the `recvmsg` would block FOREVER — the
-        // `run` would hang without log nor exit. With SO_RCVTIMEO, after 10s
-        // it gives up (None → no log, but the container proceeds and the status reconciles).
-        // SAFETY: `csp` is our end of the console socketpair; `tv` is a live `timeval` and the
-        // length passed is its exact size.
+    // NETWORK BEFORE THE GO (critical order): the child is still BLOCKED waiting
+    // for this byte, so it is here — and only here — that we can guarantee the
+    // network is ready BEFORE the entrypoint runs. With the hook after the GO
+    // there was a real race: `slirp4netns` configures `tap0` from the PARENT
+    // while the child is already running, and an entrypoint that reads the IP ONCE at
+    // startup (e.g. that of `kindest/node`: "detected IPv4 address:") saw it
+    // EMPTY and the node died. Docker/podman also only start the process with the
+    // network already up. Without userns (sync=None) there is no blocking point: the
+    // hook runs in `place_without_userns`, as before (the race remains, but that path
+    // is not the rootless/Kind one).
+    // CGROUP BEFORE THE GO (critical order) — same reason as the network
+    // right below, and it was missing for exactly the same class of race.
+    //
+    // A cgroup v2 migration moves ONE process, never its descendants. With
+    // this write after the GO, the entrypoint was already running: anything
+    // it forked in that window stayed in the CALLER's cgroup — outside the
+    // leaf, outside `dlx-containers`, and therefore outside both the
+    // per-container ceiling and the aggregate one that protects the host.
+    // The window lasts milliseconds; the consequence is PERMANENT, because
+    // nothing ever moves those descendants back.
+    //
+    // Measured before this fix, with `-m 64M`: allocating 256 MiB in PID 1
+    // was killed (rc=137, correct), and the SAME allocation in a forked
+    // child returned 0 — three times out of three; at 2 GiB it also
+    // returned 0, i.e. 32x the ceiling. The children showed up in the
+    // invoking shell's `cgroup.procs`. Registered as ACH-016 in
+    // `scripts/e2e.sh`, which fails on it until this lands.
+    if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev) {
+        // SAFETY: same teardown as the userns-map failure just above.
         unsafe {
-            let tv = libc::timeval {
-                tv_sec: 10,
-                tv_usec: 0,
-            };
-            libc::setsockopt(
-                csp,
-                libc::SOL_SOCKET,
-                libc::SO_RCVTIMEO,
-                (&tv as *const libc::timeval).cast(),
-                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-            );
+            libc::close(w);
         }
-        let m = recv_fd(csp);
-        // SAFETY: `csp` is ours and closed once, after `recv_fd` returned; the received master
-        // is a separate fd.
-        unsafe { libc::close(csp) };
-        m // None if the init could not allocate the pty (falls through without log, without blocking)
-    } else {
-        log_pipe.map(|(r, _)| r)
-    };
+        discard_child(container, pid);
+        return Err(e);
+    }
+    let net_err = spec.on_started.and_then(|hook| hook(pid.as_raw()).err());
+    // SAFETY: writes 1 byte (the "you may proceed") and closes the write.
+    unsafe {
+        let go = [1u8; 1];
+        let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
+        libc::close(w);
+    }
+    if let Some(e) = net_err {
+        discard_child(container, pid);
+        return Err(e);
+    }
+    Ok(())
+}
 
-    // Starts the logging shim (reads the pipe/master, writes the log with rotation). Reparented
-    // to the init when `delonix run` finishes; dies when the container closes the source.
-    if let Some(src) = log_src {
-        let lp = spec.log_path.clone().unwrap_or_default();
-        let driver = container.log_driver.clone().unwrap_or_default();
-        let tag = format!("delonix/{}", container.name);
-        // SAFETY: fork of a single-threaded process; the child-shim only does I/O and _exit.
-        if let Ok(ForkResult::Child) = unsafe { fork() } {
-            // Drops the WRITE end of the pipe (if it exists) — only the container keeps it.
-            if let Some((_, logw)) = log_pipe {
-                // SAFETY: in the forked shim child: `logw` is the write end of a pipe created
-                // by this function; the child's copy is closed once so that only the container
-                // keeps it open.
-                unsafe { libc::close(logw) };
-            }
-            if let Some((_, errw)) = log_err_pipe {
-                // SAFETY: in the forked shim child: `errw` is the write end of a pipe created
-                // by this function; the child's copy is closed once so that only the container
-                // keeps it open.
-                unsafe { libc::close(errw) };
-            }
-            // This shim never execs — it just loops copying `src` to the log file for as
-            // long as the container lives — so CLOEXEC never takes effect for it: every
-            // OTHER fd the caller had open at fork time (e.g. a long-lived server's OTHER
-            // live connections, its listening socket, epoll/eventfd) would otherwise stay
-            // open here for the container's whole life, keeping those connections from
-            // ever reaching EOF on the peer's side even after the caller itself is done
-            // with them. Close everything except `src` before doing anything else —
-            // `close_range` is a raw syscall (no allocation), the safe choice this soon
-            // after forking a process that may have other threads.
-            // Keep BOTH read ends (stdout and, in CRI mode, stderr) — close
-            // everything else. They are not adjacent, so the ranges are computed
-            // from the sorted pair rather than assumed contiguous.
-            let mut keep: Vec<u32> = vec![src as u32];
-            if let Some((r, _)) = log_err_pipe {
-                keep.push(r as u32);
-            }
-            keep.sort_unstable();
-            // SAFETY: in the forked shim child, which never returns (it ends in `log_shim`,
-            // then `_exit`): no Rust object here owns the fds being closed, so none is closed
-            // twice by a destructor; `keep` is excluded from every range.
-            unsafe {
-                let mut lo = 3u32;
-                for k in &keep {
-                    if *k > lo {
-                        close_range_raw(lo, k - 1);
-                    }
-                    lo = k + 1;
-                }
-                close_range_raw(lo, u32::MAX);
-            }
-            // The shim outlives `delonix run` (it lives as long as the container lives).
-            // It must DROP the stdio inherited from the parent — otherwise a caller that captures
-            // the stdout of `run -d` (the Docker shim, `$(...)`, CI/scripts) stays
-            // blocked waiting for EOF until the container dies. setsid + /dev/null
-            // detach it completely; the shim writes to its own log file.
-            // SAFETY: in the forked shim child: `setsid` has no preconditions, `/dev/null` is a
-            // static C string, and the fd is checked before `dup2` onto 0/1/2 and closed once.
-            unsafe {
-                libc::setsid();
-                let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
-                if null >= 0 {
-                    libc::dup2(null, 0);
-                    libc::dup2(null, 1);
-                    libc::dup2(null, 2);
-                    if null > 2 {
-                        libc::close(null);
-                    }
-                }
-            }
-            log_shim(
-                src,
-                log_err_pipe.map(|(r, _)| r),
-                lp,
-                MAX_LOG_BYTES,
-                driver,
-                tag,
-                spec.log_cri,
-            ); // does not return (the parent does not wait)
-        }
-        // The parent drops the ends: only the container (the source, via fd 1/2 or the pty
-        // slave) and the shim (src) keep them. When the container dies, the shim sees EOF/EIO.
-        // SAFETY: parent side: the shim and the container hold their own copies; ours is closed
-        // once and never used again.
-        unsafe { libc::close(src) };
+/// Receives the pty master the init allocated, over the console socketpair.
+/// Called AFTER the userns «GO» — see the CRITICAL ORDER note in [`spawn`].
+/// `None` if the init could not allocate the pty (falls through without log,
+/// without blocking).
+fn receive_console_master((csp, csc): (i32, i32)) -> Option<i32> {
+    // SAFETY: the parent drops the child's end and receives the master from the init.
+    unsafe { libc::close(csc) };
+    // Receive timeout: if the init DIES before sending the pty master
+    // (e.g. the kindest/node entrypoint aborts early) and a reparented grandchild
+    // holds the socketpair end, the `recvmsg` would block FOREVER — the
+    // `run` would hang without log nor exit. With SO_RCVTIMEO, after 10s
+    // it gives up (None → no log, but the container proceeds and the status reconciles).
+    // SAFETY: `csp` is our end of the console socketpair; `tv` is a live `timeval` and the
+    // length passed is its exact size.
+    unsafe {
+        let tv = libc::timeval {
+            tv_sec: 10,
+            tv_usec: 0,
+        };
+        libc::setsockopt(
+            csp,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            (&tv as *const libc::timeval).cast(),
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        );
+    }
+    let m = recv_fd(csp);
+    // SAFETY: `csp` is ours and closed once, after `recv_fd` returned; the received master
+    // is a separate fd.
+    unsafe { libc::close(csp) };
+    m
+}
+
+/// Starts the logging shim (reads the pipe/master, writes the log with
+/// rotation), then drops the parent's ends. Reparented to the init when
+/// `delonix run` finishes; dies when the container closes the source.
+fn start_log_shim(
+    src: i32,
+    log_pipe: PipePair,
+    log_err_pipe: PipePair,
+    spec: &RunSpec<'_>,
+    container: &Container,
+) {
+    let lp = spec.log_path.clone().unwrap_or_default();
+    let driver = container.log_driver.clone().unwrap_or_default();
+    let tag = format!("delonix/{}", container.name);
+    // SAFETY: fork of a single-threaded process; the child-shim only does I/O and _exit.
+    if let Ok(ForkResult::Child) = unsafe { fork() } {
+        // Drops the WRITE end of the pipe (if it exists) — only the container keeps it.
         if let Some((_, logw)) = log_pipe {
-            // SAFETY: parent side: the shim and the container hold their own copies; ours is
-            // closed once and never used again.
+            // SAFETY: in the forked shim child: `logw` is the write end of a pipe created
+            // by `spawn`; the child's copy is closed once so that only the container
+            // keeps it open.
             unsafe { libc::close(logw) };
         }
-        // Both ends of the stderr pipe: the read one belongs to the shim now, the
-        // write one to the container. A copy left open here would keep the shim
-        // from ever seeing EOF, so it would outlive the container forever.
-        if let Some((r, w)) = log_err_pipe {
-            // SAFETY: parent side: the shim owns its copy of the read end and the container its
-            // copy of the write end; ours are closed once.
-            unsafe {
-                libc::close(r);
-                libc::close(w);
+        if let Some((_, errw)) = log_err_pipe {
+            // SAFETY: in the forked shim child: `errw` is the write end of a pipe created
+            // by `spawn`; the child's copy is closed once so that only the container
+            // keeps it open.
+            unsafe { libc::close(errw) };
+        }
+        // This shim never execs — it just loops copying `src` to the log file for as
+        // long as the container lives — so CLOEXEC never takes effect for it: every
+        // OTHER fd the caller had open at fork time (e.g. a long-lived server's OTHER
+        // live connections, its listening socket, epoll/eventfd) would otherwise stay
+        // open here for the container's whole life, keeping those connections from
+        // ever reaching EOF on the peer's side even after the caller itself is done
+        // with them. Close everything except `src` before doing anything else —
+        // `close_range` is a raw syscall (no allocation), the safe choice this soon
+        // after forking a process that may have other threads.
+        // Keep BOTH read ends (stdout and, in CRI mode, stderr) — close
+        // everything else. They are not adjacent, so the ranges are computed
+        // from the sorted pair rather than assumed contiguous.
+        let mut keep: Vec<u32> = vec![src as u32];
+        if let Some((r, _)) = log_err_pipe {
+            keep.push(r as u32);
+        }
+        keep.sort_unstable();
+        // SAFETY: in the forked shim child, which never returns (it ends in `log_shim`,
+        // then `_exit`): no Rust object here owns the fds being closed, so none is closed
+        // twice by a destructor; `keep` is excluded from every range.
+        unsafe {
+            let mut lo = 3u32;
+            for k in &keep {
+                if *k > lo {
+                    close_range_raw(lo, k - 1);
+                }
+                lo = k + 1;
+            }
+            close_range_raw(lo, u32::MAX);
+        }
+        // The shim outlives `delonix run` (it lives as long as the container lives).
+        // It must DROP the stdio inherited from the parent — otherwise a caller that captures
+        // the stdout of `run -d` (the Docker shim, `$(...)`, CI/scripts) stays
+        // blocked waiting for EOF until the container dies. setsid + /dev/null
+        // detach it completely; the shim writes to its own log file.
+        // SAFETY: in the forked shim child: `setsid` has no preconditions, `/dev/null` is a
+        // static C string, and the fd is checked before `dup2` onto 0/1/2 and closed once.
+        unsafe {
+            libc::setsid();
+            let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+            if null >= 0 {
+                libc::dup2(null, 0);
+                libc::dup2(null, 1);
+                libc::dup2(null, 2);
+                if null > 2 {
+                    libc::close(null);
+                }
             }
         }
+        log_shim(
+            src,
+            log_err_pipe.map(|(r, _)| r),
+            lp,
+            MAX_LOG_BYTES,
+            driver,
+            tag,
+            spec.log_cri,
+        ); // does not return (the parent does not wait)
     }
+    // The parent drops the ends: only the container (the source, via fd 1/2 or the pty
+    // slave) and the shim (src) keep them. When the container dies, the shim sees EOF/EIO.
+    // SAFETY: parent side: the shim and the container hold their own copies; ours is closed
+    // once and never used again.
+    unsafe { libc::close(src) };
+    if let Some((_, logw)) = log_pipe {
+        // SAFETY: parent side: the shim and the container hold their own copies; ours is
+        // closed once and never used again.
+        unsafe { libc::close(logw) };
+    }
+    // Both ends of the stderr pipe: the read one belongs to the shim now, the
+    // write one to the container. A copy left open here would keep the shim
+    // from ever seeing EOF, so it would outlive the container forever.
+    if let Some((r, w)) = log_err_pipe {
+        // SAFETY: parent side: the shim owns its copy of the read end and the container its
+        // copy of the write end; ours are closed once.
+        unsafe {
+            libc::close(r);
+            libc::close(w);
+        }
+    }
+}
 
+/// The in-memory record of this incarnation — not yet published: see
+/// [`publish_or_discard`] for why the store only learns it after the mount wait.
+fn mark_running(container: &mut Container, pid: Pid) {
     container.pid = Some(pid.as_raw());
     container.pid_starttime = proc_starttime(pid.as_raw());
     container.status = Status::Running;
@@ -7067,70 +7291,69 @@ fn spawn(
     // `describe`/`ls` don't keep pointing at a cause that no longer applies.
     container.crash_reason = None;
     container.crashed_at = None;
-    // The cgroup stays HERE, ahead of the wait: it is what the container's
-    // limits hang off, and every millisecond it is not in one is a millisecond
-    // it runs uncapped. Mounting allocates nothing, so waiting first would buy
-    // no safety and cost that.
-    // Already done before the GO on the userns path (the rootless default). The
-    // path without userns has no sync point to block the child on, so it keeps
-    // the historical placement — the same asymmetry the network hook has.
-    if !cgroup_done {
-        // A cgroup that could not be set up must not leave the container running: it is
-        // already past `execve` here, outside every ceiling, and still holding the
-        // descriptors its caller waits on — a `run -d` hung forever on exactly this
-        // (measured 2026-09-15, a cgroupfs pod parent with no controllers enabled). Same
-        // teardown the userns path already does above.
-        if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev.as_deref()) {
+}
+
+/// The cgroup and the network hook for a child cloned WITHOUT a user namespace,
+/// which has no sync point to block it on: it is already running here.
+fn place_without_userns(
+    container: &Container,
+    pid: Pid,
+    spec: &RunSpec<'_>,
+    io_dev: Option<&str>,
+) -> Result<()> {
+    // A cgroup that could not be set up must not leave the container running: it is
+    // already past `execve` here, outside every ceiling, and still holding the
+    // descriptors its caller waits on — a `run -d` hung forever on exactly this
+    // (measured 2026-09-15, a cgroupfs pod parent with no controllers enabled). Same
+    // teardown the userns path already does.
+    if let Err(e) = setup_cgroup(container, pid.as_raw(), io_dev) {
+        discard_child(container, pid);
+        return Err(e);
+    }
+    // Configures the network (or other startup) BEFORE waiting/returning. Only the
+    // path WITHOUT userns reaches here (no sync point to block the child on) — with
+    // userns the hook already ran before the GO, with the child stopped.
+    if let Some(hook) = spec.on_started {
+        if let Err(e) = hook(pid.as_raw()) {
             discard_child(container, pid);
             return Err(e);
         }
     }
+    Ok(())
+}
 
-    // Configures the network (or other startup) BEFORE waiting/returning. Only the
-    // path WITHOUT userns reaches here (no sync point to block the child on) — with
-    // userns the hook already ran before the GO, with the child stopped (see above).
-    if !net_done {
-        if let Some(hook) = spec.on_started {
-            if let Err(e) = hook(pid.as_raw()) {
-                discard_child(container, pid);
-                return Err(e);
-            }
-        }
-    }
-
-    // Do not return until the child has finished shaping its mount namespace.
-    // Everything above this line is unchanged on purpose: the userns handshake,
-    // the console `recv_fd` and the log shim have an order the comments above
-    // call CRITICAL, and this wait needs none of it — it only has to be the LAST
-    // thing before the caller gets control.
-    // A DETACHED start whose init exited before mounting is a failed start, and says
-    // so. It used to return `Ok`, publish the record and let `run -d` exit 0 over a
-    // dead container — measured 2026-09-16 on Ubuntu 24.04 with the userns
-    // restriction on: `run -d` rc=0, and the next `exec` said «not running». A script
-    // or a CI job reads that 0 as success. We are the parent, so the real exit code is
-    // one `waitpid` away, and the record is never published. The foreground path needs
-    // nothing: its `waitpid` below already returns the code to the caller.
-    // SAFETY: the read end of the readiness pipe, ours alone from here on: every
-    // early return below drops (closes) it, and a start that passed the ceiling
-    // hands it to the late-mount watcher instead.
-    let ready_r = unsafe { OwnedFd::from_raw_fd(ready.0) };
-    let mounted = wait_for_mounts(ready_r.as_raw_fd(), &container.name);
-    // Past the ceiling the process runs, but nobody has seen its root filesystem
-    // in place: the record says so, and whatever enters it refuses until the
-    // proof arrives (`require_mounted`). It used to be published as plain
-    // `Running`, which a CRI `StartContainer` answered as success and an
-    // `ExecSync` could then run on the host's filesystem (issue #793). Never a
-    // failure: the container may well come up a moment later, and killing it
-    // would turn a slow disk into a crash loop.
-    container.mount_pending = mounted == MountWait::Unknown;
-    // A DETACHED start whose command could not be executed is a failed start too.
-    // `run -d /no-such-binary` returned 0 and the container turned up `Exited (127)`
-    // a moment later (measured); Docker refuses it on the spot with 127. Bounded:
-    // the `execvp` comes after the confinement and, for an image with a non-root
-    // `USER`, after a one-off chown of the rootfs, and `run -d` must not wait for
-    // that — past the ceiling the start is reported as it always was.
+/// Refuses a DETACHED start whose command never ran, with the real exit code.
+///
+/// Two ways a detached start fails after the clone, both of which used to
+/// return `Ok`, publish the record and let `run -d` exit 0 over a dead
+/// container — a script or a CI job reads that 0 as success. We are the
+/// parent, so the real exit code is one `waitpid` away, and the record is never
+/// published. The foreground path needs nothing: its `waitpid` in
+/// [`wait_foreground`] already returns the code to the caller.
+///
+/// - The command could not be executed. `run -d /no-such-binary` returned 0 and
+///   the container turned up `Exited (127)` a moment later (measured); Docker
+///   refuses it on the spot with 127. Bounded: the `execvp` comes after the
+///   confinement and, for an image with a non-root `USER`, after a one-off
+///   chown of the rootfs, and `run -d` must not wait for that — past the
+///   ceiling the start is reported as it always was.
+/// - The init exited before mounting — measured 2026-09-16 on Ubuntu 24.04 with
+///   the userns restriction on: `run -d` rc=0, and the next `exec` said «not
+///   running».
+///
+/// Always consumes the exec pipe's read end. A refusal leaves `container.pid`
+/// naming the child it reaped, on purpose: the start hook already ran, and the
+/// supervisor releases what it attached (the container's own slirp) by that pid.
+fn refuse_failed_detached_start(
+    container: &Container,
+    pid: Pid,
+    spec: &RunSpec<'_>,
+    exec_pipe: Option<(i32, i32)>,
+    detach: bool,
+    mounted: &MountWait,
+) -> Result<()> {
     let exec_failure = match exec_pipe {
-        Some((r, _)) if detach && mounted == MountWait::Ready => wait_for_exec(r, EXEC_CEILING_MS),
+        Some((r, _)) if detach && *mounted == MountWait::Ready => wait_for_exec(r, EXEC_CEILING_MS),
         Some((r, _)) => {
             // SAFETY: ours, and unused on this path.
             unsafe { libc::close(r) };
@@ -7149,27 +7372,12 @@ fn spawn(
             ),
         });
     }
-    if mounted == MountWait::InitExited && detach {
+    if *mounted == MountWait::InitExited && detach {
         let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
         remove_container_cgroup(container);
         // The init's own words: a detached init writes to the log file, and no record
         // will exist for `container logs` to find — so the reason travels in the error.
-        let said = spec
-            .log_path
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|s| {
-                s.lines()
-                    .rev()
-                    .take(3)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            })
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "it printed nothing".to_string());
+        let said = init_last_words(spec.log_path.as_deref());
         return Err(Error::Syscall {
             context: "container start",
             message: format!(
@@ -7179,27 +7387,60 @@ fn spawn(
             ),
         });
     }
+    Ok(())
+}
 
-    // The record is published AFTER the wait, and that ordering is the whole
-    // point. `pid` + `Running` in the store is what a THIRD process reads to
-    // decide the container is there to be entered — the CRI, `serve docker-api`,
-    // a concurrent CLI — and none of them went through the `run` that waited.
-    // Measured on the fixed binary with the save still ahead of the wait: in 2 of
-    // 15 runs, at the instant the record gained a `pid`, `/proc/<pid>/root` was
-    // still the HOST's root. Publishing later costs nothing and closes it: until
-    // this line the container has no pid in the store, so an `exec` gets the
-    // "not running" refusal (exit 3) instead of the host's filesystem.
-    //
-    // A hook that fails above now leaves the record untouched rather than saying
-    // `Running` for a process it just SIGKILLed — the honest of the two, and the
-    // same direction this engine has taken everywhere else.
-    //
-    // Under the record's lock, never a bare `save` — see `publish_incarnation`.
-    // A publish that is refused leaves a running process that no record names,
-    // which is exactly the leak it exists to prevent: take it down. The cgroup
-    // stays when another incarnation may be live — the leaf is keyed by the id,
-    // and may be the rival's — and goes with the process when the record was
-    // removed: then there is no one else, and `rm -f` has already run.
+/// The last three lines of the init's log, joined with ` | `, or «it printed
+/// nothing» when there is no log or it holds only blank text.
+fn init_last_words(log_path: Option<&str>) -> String {
+    log_path
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| last_lines(&s, 3))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "it printed nothing".to_string())
+}
+
+/// The last `n` lines of `text`, in order, joined with ` | `. PURE.
+fn last_lines(text: &str, n: usize) -> String {
+    text.lines()
+        .rev()
+        .take(n)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// Publishes the incarnation, or takes the process down when the publish is
+/// refused.
+///
+/// The record is published AFTER the mount wait, and that ordering is the whole
+/// point. `pid` + `Running` in the store is what a THIRD process reads to
+/// decide the container is there to be entered — the CRI, `serve docker-api`,
+/// a concurrent CLI — and none of them went through the `run` that waited.
+/// Measured on the fixed binary with the save still ahead of the wait: in 2 of
+/// 15 runs, at the instant the record gained a `pid`, `/proc/<pid>/root` was
+/// still the HOST's root. Publishing later costs nothing and closes it: until
+/// this line the container has no pid in the store, so an `exec` gets the
+/// "not running" refusal (exit 3) instead of the host's filesystem.
+///
+/// A hook that fails before this now leaves the record untouched rather than
+/// saying `Running` for a process it just SIGKILLed — the honest of the two,
+/// and the same direction this engine has taken everywhere else.
+///
+/// Under the record's lock, never a bare `save` — see `publish_incarnation`.
+/// A publish that is refused leaves a running process that no record names,
+/// which is exactly the leak it exists to prevent: take it down. The cgroup
+/// stays when another incarnation may be live — the leaf is keyed by the id,
+/// and may be the rival's — and goes with the process when the record was
+/// removed: then there is no one else, and `rm -f` has already run.
+fn publish_or_discard(
+    store: &Store,
+    container: &mut Container,
+    pid: Pid,
+    replaces_record: bool,
+) -> Result<()> {
     if let Err(e) = publish_incarnation(store, container, replaces_record) {
         if e.number() == PUBLISH_REMOVED {
             discard_child(container, pid);
@@ -7211,16 +7452,19 @@ fn spawn(
         container.pid_starttime = None;
         return Err(e);
     }
-    if container.mount_pending {
-        watch_late_mount(store, container, ready_r);
-    } else {
-        drop(ready_r);
-    }
+    Ok(())
+}
 
-    if detach {
-        return Ok(container.status.clone());
-    }
-
+/// The foreground start: waits for the init, records how it ended and returns
+/// that terminal status.
+///
+/// RETURN the terminal status instead of discarding it. In the foreground we
+/// ARE the container's parent, so this `waitpid` holds the one authoritative
+/// exit code that exists — and throwing it away is why `delonix container run
+/// ... sh -c "exit 42"` exited 0, along with `exit 1` and even a failed
+/// `execve` of the entrypoint. Any CI job, migration, backup or health probe
+/// run through this path saw success on failure.
+fn wait_foreground(store: &Store, container: &mut Container, pid: Pid) -> Result<Status> {
     let cgroup = live_cgroup(container);
     let oom_before = oom_kill_count(&cgroup);
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
@@ -7233,12 +7477,6 @@ fn spawn(
     }
     store.save(container)?;
     remove_container_cgroup(container);
-    // RETURN the terminal status instead of discarding it. In the foreground we
-    // ARE the container's parent, so this `waitpid` holds the one authoritative
-    // exit code that exists — and throwing it away is why `delonix container run
-    // ... sh -c "exit 42"` exited 0, along with `exit 1` and even a failed
-    // `execve` of the entrypoint. Any CI job, migration, backup or health probe
-    // run through this path saw success on failure.
     Ok(container.status.clone())
 }
 
@@ -12718,5 +12956,328 @@ mod ulimit_tests {
         assert!(parse_ulimit("nofile=lots").is_err());
         assert!(parse_ulimit("nofile=9:5").unwrap_err().contains("above"));
         assert!(ULIMIT_NAMES.iter().all(|n| ulimit_name_known(n)));
+    }
+}
+
+/// The steps `spawn` was split into (Sprint 23, N27). Each is tested on its
+/// own here, as data where it is pure and against real descriptors where it is
+/// not: the live start itself is the bateria's, and the split changed no
+/// syscall and no order.
+#[cfg(test)]
+mod spawn_step_tests {
+    use super::*;
+
+    fn ctr() -> Container {
+        Container::new(
+            "abc".into(),
+            "n".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        )
+    }
+
+    fn fd_flags(fd: i32) -> i32 {
+        // SAFETY: F_GETFD on a descriptor this test owns.
+        unsafe { libc::fcntl(fd, libc::F_GETFD) }
+    }
+
+    fn close_pair(p: Option<(i32, i32)>) {
+        if let Some((r, w)) = p {
+            // SAFETY: descriptors this test opened.
+            unsafe {
+                libc::close(r);
+                libc::close(w);
+            }
+        }
+    }
+
+    #[test]
+    fn the_command_refuses_an_empty_argv_and_a_nul() {
+        assert!(matches!(command_argv(&[]), Err(Error::EmptyCommand(_))));
+        assert!(matches!(
+            command_argv(&["a\0b".into()]),
+            Err(Error::InvalidCommandArgv(_))
+        ));
+        let argv = command_argv(&["sh".into(), "-c".into(), "exit 3".into()]).unwrap();
+        assert_eq!(argv.len(), 3);
+        assert_eq!(argv[2].to_str().unwrap(), "exit 3");
+    }
+
+    #[test]
+    fn the_clone_flags_isolate_by_default_and_waive_what_is_asked() {
+        let (f, userns) = clone_flags(&RunSpec::default());
+        assert!(!userns);
+        assert!(f.contains(CloneFlags::CLONE_NEWNS));
+        assert!(f.contains(CloneFlags::CLONE_NEWUTS));
+        assert!(f.contains(CloneFlags::CLONE_NEWPID));
+        assert!(f.contains(CloneFlags::CLONE_NEWIPC));
+        assert!(!f.contains(CloneFlags::CLONE_NEWNET));
+        assert!(!f.contains(CloneFlags::CLONE_NEWUSER));
+
+        // A pod member joins the infra's IPC and UTS, never creates them.
+        let pod = RunSpec {
+            pod_infra_pid: Some(42),
+            ..Default::default()
+        };
+        let (f, _) = clone_flags(&pod);
+        assert!(!f.contains(CloneFlags::CLONE_NEWUTS));
+        assert!(!f.contains(CloneFlags::CLONE_NEWIPC));
+        assert!(f.contains(CloneFlags::CLONE_NEWPID));
+
+        let host = RunSpec {
+            host_pid: true,
+            host_ipc: true,
+            ..Default::default()
+        };
+        let (f, _) = clone_flags(&host);
+        assert!(!f.contains(CloneFlags::CLONE_NEWPID));
+        assert!(!f.contains(CloneFlags::CLONE_NEWIPC));
+
+        let own = RunSpec {
+            new_netns: true,
+            userns: true,
+            ..Default::default()
+        };
+        let (f, userns) = clone_flags(&own);
+        assert!(userns);
+        assert!(f.contains(CloneFlags::CLONE_NEWNET));
+        assert!(f.contains(CloneFlags::CLONE_NEWUSER));
+
+        // The rootless ingress re-exec is already inside the holder's userns
+        // and netns: it creates neither, and has no handshake.
+        let inherited = RunSpec {
+            new_netns: true,
+            userns: true,
+            inherit_userns: true,
+            ..Default::default()
+        };
+        let (f, userns) = clone_flags(&inherited);
+        assert!(!userns);
+        assert!(!f.contains(CloneFlags::CLONE_NEWNET));
+        assert!(!f.contains(CloneFlags::CLONE_NEWUSER));
+    }
+
+    #[test]
+    fn the_init_inputs_carry_the_barriers_the_record_asks_for() {
+        let spec = RunSpec {
+            new_netns: true,
+            run_uid: Some(1000),
+            run_gid: Some(1000),
+            detach: true,
+            ..Default::default()
+        };
+        let mut c = ctr();
+        c.cap_drop = vec!["ALL".into()];
+        c.cap_add = vec!["CHOWN".into()];
+        let i = InitInputs::gather(&c, "/r", &spec, "h".into(), vec![], vec![]);
+        assert_eq!(i.cap_keep, resolve_cap_keep(&c.cap_drop, &c.cap_add));
+        assert!(!i.seccomp_unconfined && !i.seccomp_detect && !i.privileged);
+        // `no_new_privs` is ON unless the record says otherwise.
+        assert!(i.no_new_privs);
+        assert!(i.has_own_netns && !i.node_cgroup);
+        assert!(i.detach && i.secret_files.is_empty());
+        assert_eq!((i.run_uid, i.run_gid), (Some(1000), Some(1000)));
+        assert_eq!((i.rootfs.as_str(), i.cid.as_str()), ("/r", "abc"));
+
+        // `--privileged` keeps every capability and runs unconfined.
+        c.privileged = true;
+        let i = InitInputs::gather(&c, "/r", &spec, "h".into(), vec![], vec![]);
+        assert_eq!(i.cap_keep, all_caps_mask());
+        assert!(i.seccomp_unconfined && i.privileged && !i.node_cgroup);
+
+        // Only a privileged KIND node gets the dedicated cgroup namespace.
+        c.labels
+            .insert("io.x-k8s.kind.role".into(), "control-plane".into());
+        let i = InitInputs::gather(&c, "/r", &spec, "h".into(), vec![], vec![]);
+        assert!(i.node_cgroup);
+        c.privileged = false;
+        let i = InitInputs::gather(&c, "/r", &spec, "h".into(), vec![], vec![]);
+        assert!(!i.node_cgroup);
+
+        c.seccomp = Some("detect".into());
+        c.no_new_privs = Some(false);
+        let i = InitInputs::gather(&c, "/r", &spec, "h".into(), vec![], vec![]);
+        assert!(i.seccomp_detect && !i.seccomp_unconfined && !i.no_new_privs);
+
+        // Inheriting the holder's netns is not an exclusive netns.
+        let inherited = RunSpec {
+            new_netns: true,
+            inherit_userns: true,
+            ..Default::default()
+        };
+        let i = InitInputs::gather(&c, "/r", &inherited, "h".into(), vec![], vec![]);
+        assert!(!i.has_own_netns && i.inherit_userns);
+    }
+
+    #[test]
+    fn the_init_spec_borrows_every_field_it_was_given() {
+        let spec = RunSpec {
+            pod_infra_pid: Some(7),
+            host_pid: true,
+            ..Default::default()
+        };
+        let mut c = ctr();
+        c.read_only = true;
+        c.tmpfs = vec!["/tmp".into()];
+        c.workdir = Some("/w".into());
+        let argv = command_argv(&c.command).unwrap();
+        let mut i = InitInputs::gather(&c, "/r", &spec, "host".into(), argv, vec!["A=1".into()]);
+        i.secret_files = vec![("k".into(), "v".into())];
+        let io = IoSpec {
+            detach: true,
+            log_fd: Some(5),
+            log_err_fd: None,
+            sync: Some((3, 4)),
+            console_sock: None,
+            ready_w: Some(9),
+            exec_w: Some(11),
+        };
+        let s = i.init_spec(io);
+        assert_eq!((s.rootfs, s.cid, s.process.hostname), ("/r", "abc", "host"));
+        assert_eq!(s.process.env, ["A=1".to_string()]);
+        assert_eq!(s.process.workdir, Some("/w"));
+        assert!(s.filesystem.read_only);
+        assert_eq!(s.filesystem.tmpfs, ["/tmp".to_string()]);
+        assert_eq!(s.filesystem.secret_files.len(), 1);
+        assert_eq!(s.namespaces.pod_infra_pid, Some(7));
+        assert!(s.namespaces.host_pid);
+        assert_eq!(
+            (s.io.ready_w, s.io.exec_w, s.io.sync),
+            (Some(9), Some(11), Some((3, 4)))
+        );
+    }
+
+    #[test]
+    fn the_console_is_only_for_a_privileged_detached_start_with_a_log() {
+        assert!(console_wanted(true, true, true));
+        assert!(!console_wanted(false, true, true));
+        assert!(!console_wanted(true, false, true));
+        assert!(!console_wanted(true, true, false));
+    }
+
+    #[test]
+    fn the_log_pipes_are_close_on_exec_on_the_shims_end_only() {
+        assert_eq!(open_log_pipes(false, true), (None, None));
+
+        let (out, err) = open_log_pipes(true, false);
+        let (r, w) = out.unwrap();
+        assert!(err.is_none(), "stderr has its own pipe only in CRI mode");
+        assert_ne!(fd_flags(r) & libc::FD_CLOEXEC, 0);
+        assert_eq!(
+            fd_flags(w) & libc::FD_CLOEXEC,
+            0,
+            "the container inherits it"
+        );
+        close_pair(out);
+
+        let (out, err) = open_log_pipes(true, true);
+        let (er, ew) = err.unwrap();
+        assert_ne!(fd_flags(er) & libc::FD_CLOEXEC, 0);
+        assert_eq!(fd_flags(ew) & libc::FD_CLOEXEC, 0);
+        close_pair(out);
+        close_pair(err);
+    }
+
+    #[test]
+    fn the_start_pipes_hand_the_child_close_on_exec_proof_pipes() {
+        let p = open_start_pipes(false).unwrap();
+        assert!(
+            p.sync.is_none(),
+            "no handshake without a new user namespace"
+        );
+        for fd in [p.ready.0, p.ready.1] {
+            assert_ne!(fd_flags(fd) & libc::FD_CLOEXEC, 0);
+        }
+        let (er, ew) = p.exec.unwrap();
+        assert_ne!(fd_flags(er) & libc::FD_CLOEXEC, 0);
+        assert_ne!(fd_flags(ew) & libc::FD_CLOEXEC, 0);
+        close_pair(Some(p.ready));
+        close_pair(p.exec);
+
+        let p = open_start_pipes(true).unwrap();
+        let (sr, sw) = p.sync.unwrap();
+        // The child keeps the handshake pipe across the clone: no CLOEXEC.
+        assert_eq!(fd_flags(sr) & libc::FD_CLOEXEC, 0);
+        assert_eq!(fd_flags(sw) & libc::FD_CLOEXEC, 0);
+        close_pair(p.sync);
+        close_pair(Some(p.ready));
+        close_pair(p.exec);
+    }
+
+    #[test]
+    fn the_init_last_words_are_its_last_three_lines() {
+        assert_eq!(last_lines("a\nb\nc\nd\n", 3), "b | c | d");
+        assert_eq!(last_lines("only", 3), "only");
+        assert_eq!(init_last_words(None), "it printed nothing");
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        std::fs::write(&log, "  \n").unwrap();
+        assert_eq!(init_last_words(log.to_str()), "it printed nothing");
+        // Kept as it always was (pure refactor): two blank lines join to " |   ",
+        // which is not blank, so the message carries a bare separator.
+        std::fs::write(&log, "\n  \n").unwrap();
+        assert_eq!(init_last_words(log.to_str()), " |   ");
+        std::fs::write(&log, "boot\nfailed to prepare the rootfs: EPERM\n").unwrap();
+        assert_eq!(
+            init_last_words(log.to_str()),
+            "boot | failed to prepare the rootfs: EPERM"
+        );
+        assert_eq!(
+            init_last_words(dir.path().join("missing").to_str()),
+            "it printed nothing"
+        );
+    }
+
+    #[test]
+    fn a_detached_start_whose_exec_failed_is_refused_with_its_code() {
+        // A real child that exits 127, standing in for the init whose `execvp`
+        // failed: the parent reads the reason from the exec pipe and reaps it.
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe2 fills the array.
+        assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        // SAFETY: the test process forks a child that only writes and `_exit`s.
+        let pid = match unsafe { fork() }.unwrap() {
+            // SAFETY: in the forked child: `fds[1]` is a live pipe end and `msg` a static
+            // buffer; `_exit` leaves without running the test harness's destructors.
+            ForkResult::Child => unsafe {
+                let msg = b"exec /nope: ENOENT";
+                libc::write(fds[1], msg.as_ptr().cast(), msg.len());
+                libc::_exit(127)
+            },
+            ForkResult::Parent { child } => child,
+        };
+        // SAFETY: the parent's copy of the write end.
+        unsafe { libc::close(fds[1]) };
+        let c = ctr();
+        let e = refuse_failed_detached_start(
+            &c,
+            pid,
+            &RunSpec::default(),
+            Some((fds[0], -1)),
+            true,
+            &MountWait::Ready,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("exec /nope: ENOENT"), "{e}");
+        assert!(e.contains("exit code 127"), "{e}");
+
+        // A foreground start never reads the exec pipe: its own `waitpid` has
+        // the code. Nothing is refused here.
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe2 fills the array.
+        assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        assert!(refuse_failed_detached_start(
+            &c,
+            Pid::from_raw(1),
+            &RunSpec::default(),
+            Some((fds[0], fds[1])),
+            false,
+            &MountWait::Ready,
+        )
+        .is_ok());
+        // SAFETY: our write end; the read end was consumed by the call.
+        unsafe { libc::close(fds[1]) };
     }
 }

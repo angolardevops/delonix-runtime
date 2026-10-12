@@ -8860,10 +8860,12 @@ fn negative_reply(q: &[u8], qend: usize, rcode: u8) -> Vec<u8> {
     r
 }
 
-/// Response to a DNS query: answers AUTHORITATIVELY for names we know and for
-/// our own zone (positively, or with NODATA/NXDOMAIN); forwards the rest.
-/// `client` is the query's source address — it scopes what may be resolved.
-fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
+/// The first question of a DNS query: its name, its QTYPE and the offset just
+/// past it (QTYPE+QCLASS). `None` when the packet does not hold a well-formed
+/// question, which [`handle_dns`] forwards untouched. PURE: the bytes come from
+/// any container on the node, so this is the parser a hostile workload reaches
+/// first, and it is fuzzed on its own (`dns_packet_fuzz`).
+fn dns_question(q: &[u8]) -> Option<(String, u16, usize)> {
     // parse the 1st question (offset 12): labels until 0x00, then QTYPE+QCLASS.
     let mut i = 12usize;
     let mut name = String::new();
@@ -8874,7 +8876,7 @@ fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
             break;
         }
         if len > 63 || i + 1 + len > q.len() {
-            return forward_dns(q);
+            return None;
         }
         if !name.is_empty() {
             name.push('.');
@@ -8883,12 +8885,22 @@ fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
         i += 1 + len;
     }
     if i + 4 > q.len() {
-        return forward_dns(q);
+        return None;
     }
     let qtype = u16::from_be_bytes([q[i], q[i + 1]]);
     let qend = i + 4; // end of the question (QTYPE+QCLASS)
-                      // Only the address types (and our own zone) need the index consulted; an
-                      // `MX` for an external domain must not pay for a lookup that cannot match.
+    Some((name, qtype, qend))
+}
+
+/// Response to a DNS query: answers AUTHORITATIVELY for names we know and for
+/// our own zone (positively, or with NODATA/NXDOMAIN); forwards the rest.
+/// `client` is the query's source address — it scopes what may be resolved.
+fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
+    let Some((name, qtype, qend)) = dns_question(q) else {
+        return forward_dns(q);
+    };
+    // Only the address types (and our own zone) need the index consulted; an
+    // `MX` for an external domain must not pay for a lookup that cannot match.
     let ours = dns_owns_name(&name);
     // `kind: Service` answers are a SEPARATE path, tried first and only for
     // `A` queries: a Service name is always fully-qualified
@@ -13211,5 +13223,101 @@ mod tests_private_egress {
             "add chain ip {INGRESS_TABLE} {PRIVATE_EGRESS_CHAIN} {{ type filter hook forward \
              priority {PRIVATE_EGRESS_PRIORITY}; }}"
         )));
+    }
+}
+
+/// Property fuzzing of the parsers the holder runs on bytes a workload sends:
+/// a DNS query from any container, a DHCP request from any VM guest, and a
+/// control line (from the engine's own CLI, but built from manifest values).
+/// Stable and in `cargo test`; a panic in the holder takes the node's DNS,
+/// DHCP and control plane down with it.
+#[cfg(test)]
+mod holder_input_fuzz {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn dhcp_like() -> impl Strategy<Value = Vec<u8>> {
+        (
+            proptest::collection::vec(any::<u8>(), 236),
+            proptest::collection::vec(any::<u8>(), 0..300),
+        )
+            .prop_map(|(head, opts)| {
+                let mut p = head;
+                p.extend_from_slice(&[99, 130, 83, 99]);
+                p.extend_from_slice(&opts);
+                p
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4096))]
+
+        #[test]
+        fn dns_packet_fuzz(q in proptest::collection::vec(any::<u8>(), 0..600)) {
+            if let Some((_, _, qend)) = dns_question(&q) {
+                prop_assert!(qend >= 16 && qend <= q.len());
+                for rcode in [RCODE_NOERROR, RCODE_NXDOMAIN] {
+                    let r = negative_reply(&q, qend, rcode);
+                    prop_assert_eq!(r.len(), qend);
+                    prop_assert_eq!(&r[0..2], &q[0..2]);
+                }
+            }
+        }
+
+        #[test]
+        fn dns_question_keeps_a_wellformed_name(
+            labels in proptest::collection::vec("[a-z0-9-]{1,20}", 1..5),
+            qtype in any::<u16>(),
+        ) {
+            let mut q = vec![0u8; 12];
+            for l in &labels {
+                q.push(l.len() as u8);
+                q.extend_from_slice(l.as_bytes());
+            }
+            q.push(0);
+            q.extend_from_slice(&qtype.to_be_bytes());
+            q.extend_from_slice(&[0, 1]);
+            let (name, t, qend) = dns_question(&q).expect("a well-formed question parses");
+            prop_assert_eq!(name, labels.join("."));
+            prop_assert_eq!(t, qtype);
+            prop_assert_eq!(qend, q.len());
+        }
+
+        #[test]
+        fn dhcp_packet_fuzz(
+            req in prop_oneof![proptest::collection::vec(any::<u8>(), 0..400), dhcp_like()],
+            prefix in prop_oneof![
+                Just("10.200.0.0/16".to_string()),
+                Just("172.20.4.0/22".to_string()),
+                Just("10.0.0.0/30".to_string()),
+                Just("10.0.0.0/32".to_string()),
+                Just("0.0.0.0/0".to_string()),
+                "[0-9./]{0,20}",
+            ],
+        ) {
+            if let Some(r) = dhcp_reply(&prefix, &req) {
+                prop_assert!(r.len() > 240);
+                prop_assert_eq!(&r[236..240], &[99u8, 130, 83, 99][..]);
+                prop_assert_eq!(&r[4..8], &req[4..8]);
+            }
+            if req.len() >= 240 {
+                let _ = dhcp_opt(&req[240..], 53);
+            }
+        }
+
+        #[test]
+        fn control_line_fuzz(
+            verb in prop_oneof![
+                Just("attach"), Just("attach-extra"), Just("vmtap"), Just("vxlan"),
+                Just("spoofbind"), Just("spoofallow"), Just("netrate"), Just("l4guard"),
+                Just("wg-up"), Just("wg-peer"), Just("wg-peer-del"), Just("firewall"),
+                Just("publish"), Just("unpublish"), Just("detach"), Just("x"),
+            ],
+            rest in proptest::collection::vec("[ -~]{0,24}", 0..8),
+        ) {
+            let mut parts: Vec<&str> = vec![verb];
+            parts.extend(rest.iter().map(String::as_str));
+            let _ = validate_control_tokens(&parts);
+        }
     }
 }
