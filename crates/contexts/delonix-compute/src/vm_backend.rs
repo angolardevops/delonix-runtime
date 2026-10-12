@@ -344,6 +344,78 @@ pub enum HotplugOutcome {
     Partial { reason: String },
 }
 
+// ---- the guest's side of a hot add (ADR-0068 D4/D8), shared by every
+// backend that reads it through a QEMU guest agent (libvirt, Proxmox): the
+// agent's answers are the same JSON whoever relays them, so the decision is
+// one function and never two that drift.
+
+/// How many vCPUs the guest's agent reports ONLINE. Pure.
+pub fn guest_online_vcpus(v: &serde_json::Value) -> u32 {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|c| c.get("online").and_then(|o| o.as_bool()) == Some(true))
+                .count() as u32
+        })
+        .unwrap_or(0)
+}
+
+/// The guest's memory as its agent lists it: `(MiB in online blocks, blocks
+/// offline)`. `None` when the block size is unreadable. Pure.
+pub fn guest_memory_state(
+    blocks: &serde_json::Value,
+    info: &serde_json::Value,
+) -> Option<(u64, u32)> {
+    let size = info.get("size")?.as_u64()?;
+    let list = blocks.as_array()?;
+    let online = list
+        .iter()
+        .filter(|b| b.get("online").and_then(|o| o.as_bool()) == Some(true))
+        .count() as u64;
+    let offline = list.len() as u64 - online;
+    Some((online * size / (1024 * 1024), offline as u32))
+}
+
+/// The CPU outcome (D4): complete only when the guest's agent sees at least
+/// the vCPUs the domain has, all online. Pure.
+pub fn guest_cpu_outcome(assigned: u32, guest_online: Option<u32>) -> HotplugOutcome {
+    match guest_online {
+        Some(n) if n >= assigned => HotplugOutcome::Complete,
+        Some(n) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has {assigned} vCPUs but the guest has {n} online — its image does \
+                 not online hot-added CPUs (ADR-0068 D8: a udev rule)"
+            ),
+        },
+        None => HotplugOutcome::Partial {
+            reason: "the domain took the vCPUs, but no guest agent answers to say the guest \
+                     onlined them (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
+/// The memory outcome (D4): complete when the guest has no offline block and
+/// its online memory reaches what the domain has, give or take the firmware
+/// holes a boot map never exposes as blocks (two blocks of slack). Pure.
+pub fn guest_memory_outcome(assigned_mib: u64, guest: Option<(u64, u32)>) -> HotplugOutcome {
+    match guest {
+        Some((online_mib, 0)) if online_mib + 256 >= assigned_mib => HotplugOutcome::Complete,
+        Some((online_mib, offline)) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has {assigned_mib} MiB but the guest has {online_mib} MiB online \
+                 ({offline} block(s) offline) — its image does not online hot-added memory \
+                 (ADR-0068 D8: memhp_default_state=online or a udev rule)"
+            ),
+        },
+        None => HotplugOutcome::Partial {
+            reason: "the domain took the memory, but no guest agent answers to say the guest \
+                     onlined it (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
 /// What a guest reports about itself through its agent ([`VmBackend::guest_info`]).
 /// Every field is what the guest SAID — `None` or empty when it did not say.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]

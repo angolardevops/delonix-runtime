@@ -29,14 +29,14 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 180 (26.7 % of the schema) — 179 seen in a live trace, 1 not
-- **unsupported by design**: 359 (each with a written reason)
+- **called**: 183 (27.1 % of the schema) — 179 seen in a live trace, 4 not
+- **unsupported by design**: 356 (each with a written reason)
 - **not yet implemented**: 136
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
-| qemu | 59 | 0 | 18 | 32 | 109 |
+| qemu | 59 | 3 | 15 | 32 | 109 |
 | lxc | 22 | 0 | 40 | 0 | 62 |
 | sdn | 82 | 0 | 3 | 5 | 90 |
 | storage | 5 | 0 | 0 | 20 | 25 |
@@ -231,6 +231,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/tasks/{upid}/status` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/vzdump` | supported+tested | string | yes |  |
 | GET | `/storage` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/qemu/{vmid}/agent/get-memory-block-info` | supported+untested | object | yes |  |
+| GET | `/nodes/{node}/qemu/{vmid}/agent/get-memory-blocks` | supported+untested | object | yes |  |
+| GET | `/nodes/{node}/qemu/{vmid}/agent/get-vcpus` | supported+untested | object | yes |  |
 | GET | `/nodes/{node}/tasks` | supported+untested | array | yes |  |
 | GET | `/access/acl` | unsupported-by-design | array | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
 | PUT | `/access/acl` | unsupported-by-design | null | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
@@ -559,12 +562,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/agent/fsfreeze-freeze` | unsupported-by-design | object | yes | the node's snapshot-mode backup freezes and thaws the guest itself (the quiesced backup proves it from the task log); a separate freeze from the engine would open a window where a crash leaves the guest frozen |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/fsfreeze-thaw` | unsupported-by-design | object | yes | same as fsfreeze-freeze: the backup thaws the guest itself, and the engine reads `fsfreeze-status` afterwards to prove it |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/fstrim` | unsupported-by-design | object | yes | discards free blocks — storage housekeeping with no engine verb |
-| GET | `/nodes/{node}/qemu/{vmid}/agent/get-memory-block-info` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
-| GET | `/nodes/{node}/qemu/{vmid}/agent/get-memory-blocks` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
 | GET | `/nodes/{node}/qemu/{vmid}/agent/get-time` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
 | GET | `/nodes/{node}/qemu/{vmid}/agent/get-timezone` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
 | GET | `/nodes/{node}/qemu/{vmid}/agent/get-users` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
-| GET | `/nodes/{node}/qemu/{vmid}/agent/get-vcpus` | unsupported-by-design | object | yes | raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/set-user-password` | unsupported-by-design | object | yes | sets a password inside the guest — the engine gives a guest SSH keys through cloud-init (`vm cloud-init`) and never handles a password |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/shutdown` | unsupported-by-design | object | yes | the node's own `status/shutdown` already goes through the agent when `agent=1` (`vm stop` of a guest that answers) |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/suspend-disk` | unsupported-by-design | object | yes | guest-driven hibernation — the engine's pause is the node's vCPU suspend (`vm pause`), which keeps the guest's memory |

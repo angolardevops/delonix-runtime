@@ -9,6 +9,9 @@ delonix-node = { workspace = true }
 delonix-model = { workspace = true }
 delonix-net-rules = { workspace = true }
 serde = { workspace = true }
+# The guest agent's answers (ADR-0068 D4) are JSON whoever relays them; already
+# in the tree through `schemars`, so no new crate.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # The spec types derive their JSON Schema next to their definition, so the
@@ -17,7 +20,6 @@ tracing = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

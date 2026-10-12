@@ -17,8 +17,9 @@ use delonix_compute::capability::{
 };
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome,
-    VmBackend, VmConfig,
+    guest_cpu_outcome as cpu_outcome, guest_memory_outcome as memory_outcome, guest_memory_state,
+    guest_online_vcpus, mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem,
+    GuestInfo, HotplugOutcome, VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -1008,70 +1009,6 @@ fn parse_dominfo_memory_kib(out: &str) -> Option<u64> {
     })
 }
 
-/// How many vCPUs the guest's agent reports ONLINE. Pure.
-fn guest_online_vcpus(v: &serde_json::Value) -> u32 {
-    v.as_array()
-        .map(|a| {
-            a.iter()
-                .filter(|c| c.get("online").and_then(|o| o.as_bool()) == Some(true))
-                .count() as u32
-        })
-        .unwrap_or(0)
-}
-
-/// The guest's memory as its agent lists it: `(MiB in online blocks, blocks
-/// offline)`. `None` when the block size is unreadable. Pure.
-fn guest_memory_state(blocks: &serde_json::Value, info: &serde_json::Value) -> Option<(u64, u32)> {
-    let size = info.get("size")?.as_u64()?;
-    let list = blocks.as_array()?;
-    let online = list
-        .iter()
-        .filter(|b| b.get("online").and_then(|o| o.as_bool()) == Some(true))
-        .count() as u64;
-    let offline = list.len() as u64 - online;
-    Some((online * size / (1024 * 1024), offline as u32))
-}
-
-/// The CPU outcome (D4): complete only when the guest's agent sees at least
-/// the vCPUs the domain has, all online. Pure.
-fn cpu_outcome(assigned: u32, guest_online: Option<u32>) -> HotplugOutcome {
-    match guest_online {
-        Some(n) if n >= assigned => HotplugOutcome::Complete,
-        Some(n) => HotplugOutcome::Partial {
-            reason: format!(
-                "the domain has {assigned} vCPUs but the guest has {n} online — its image does \
-                 not online hot-added CPUs (ADR-0068 D8: a udev rule)"
-            ),
-        },
-        None => HotplugOutcome::Partial {
-            reason: "the domain took the vCPUs, but no guest agent answers to say the guest \
-                     onlined them (ADR-0068 D4)"
-                .into(),
-        },
-    }
-}
-
-/// The memory outcome (D4): complete when the guest has no offline block and
-/// its online memory reaches what the domain has, give or take the firmware
-/// holes a boot map never exposes as blocks (two blocks of slack). Pure.
-fn memory_outcome(assigned_mib: u64, guest: Option<(u64, u32)>) -> HotplugOutcome {
-    match guest {
-        Some((online_mib, 0)) if online_mib + 256 >= assigned_mib => HotplugOutcome::Complete,
-        Some((online_mib, offline)) => HotplugOutcome::Partial {
-            reason: format!(
-                "the domain has {assigned_mib} MiB but the guest has {online_mib} MiB online \
-                 ({offline} block(s) offline) — its image does not online hot-added memory \
-                 (ADR-0068 D8: memhp_default_state=online or a udev rule)"
-            ),
-        },
-        None => HotplugOutcome::Partial {
-            reason: "the domain took the memory, but no guest agent answers to say the guest \
-                     onlined it (ADR-0068 D4)"
-                .into(),
-        },
-    }
-}
-
 /// `true` when a `virsh qemu-agent-command` failure MEANS "nothing is
 /// listening", not "something else broke". Pure, extracted out of the match
 /// guard above so it is testable without a real `virsh`. `virsh` phrases
@@ -1764,7 +1701,10 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // ADR-0068 D3/D7: on q35 a hot-added disk or NIC needs a FREE PCIe root
     // port, and libvirt only creates the ports the boot devices use. Spare
     // ports are reserved here, at boot — they cannot be added live.
-    if machine.starts_with("q35") || machine.contains("-q35") {
+    // Only with declared headroom (ADR-0068 D3): spare ports change the
+    // domain's shape, which someone who did not ask for hotplug never gets.
+    let headroom = max_vcpus.is_some() || max_kib.is_some();
+    if headroom && (machine.starts_with("q35") || machine.contains("-q35")) {
         for _ in 0..SPARE_PCIE_ROOT_PORTS {
             s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
         }
@@ -4273,6 +4213,10 @@ mod hotplug_tests {
         }
         assert!(without.contains("<vcpu placement='static'>2</vcpu>"));
         assert!(!without.contains("maxMemory") && !without.contains("<numa>"));
+        assert!(
+            !without.contains("pcie-root-port"),
+            "no headroom, no spare ports"
+        );
     }
 
     /// A ceiling equal to the boot size is no headroom: the domain is the

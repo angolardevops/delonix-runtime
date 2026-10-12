@@ -1836,7 +1836,7 @@ pub(crate) fn reboot_fields_of(backend: &str) -> &'static [&'static str] {
 /// Whether a VM of `backend` grows vCPUs and memory LIVE (ADR-0068). A backend
 /// that does not is never planned a live growth — the change reboots instead.
 pub(crate) fn hotplugs(backend: &str) -> bool {
-    matches!(backend, "cloud-hypervisor" | "libvirt")
+    matches!(backend, "cloud-hypervisor" | "libvirt" | "proxmox")
 }
 
 fn parse_count(s: &str) -> Option<u64> {
