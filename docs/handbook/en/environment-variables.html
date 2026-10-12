@@ -465,6 +465,13 @@ and how to tear the isolated infra down, is in
 <td><code>--addr</code> wins. Local only (the calling uid).</td>
 </tr>
 <tr>
+<td><code>DELONIX_NODE_API_IDLE_TIMEOUT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; forwarded by <code>cmd/serve.rs:run</code></td>
+<td>How long the node API waits with no connection open and no operation of its own RUNNING before it exits (ADR-0040 P5).</td>
+<td>A duration (<code>300s</code>, <code>2m</code>); <code>0</code> never exits. Default <code>300s</code> when socket-activated, otherwise never.</td>
+<td><code>--idle-timeout</code> wins. <code>--install-units</code> writes <code>120s</code> unless given.</td>
+</tr>
+<tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
 <td>Socket of the Docker Engine API slice (<code>delonix serve docker-api</code>).</td>

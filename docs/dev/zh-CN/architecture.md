@@ -760,6 +760,7 @@ flowchart TB
   delonix_node_api --> delonix_state
   delonix_node_api --> delonix_vm
   delonix_node_api --> delonix_volume
+  delonix_node_api_bin --> delonix_model
   delonix_node_api_bin --> delonix_node
   delonix_node_api_bin --> delonix_node_api
   delonix_node_api_bin --> delonix_telemetry
