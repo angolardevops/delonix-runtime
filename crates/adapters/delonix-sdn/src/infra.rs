@@ -103,7 +103,7 @@ fn root_suffix() -> String {
 }
 
 /// Directory `<base>/ingress/` with the infra's state.
-fn ingress_dir() -> PathBuf {
+pub(crate) fn ingress_dir() -> PathBuf {
     base_root().join("ingress")
 }
 /// The **pin**'s pid — the process that owns the userns/netns/mountns and does
@@ -2367,6 +2367,10 @@ pub fn control_main() -> ! {
             std::thread::spawn(dns_server_main);
             // Router Advertisements emitter (SLAAC IPv6 for VMs/containers).
             std::thread::spawn(ra_sender_main);
+            // VIP readiness prober + dataplane sync (ADR-0066 D8 a). Idle on a
+            // node that has never served a VIP; the first round re-syncs the
+            // dataplane from the records, which is the control-start trigger.
+            std::thread::spawn(crate::service_lb::prober_main);
             // only now do we signal ready — the control socket already accepts connections.
             write_status("ready");
             control_loop(listener); // never returns (until SIGTERM)
@@ -2472,6 +2476,7 @@ fn is_readonly_verb(line: &str) -> bool {
             | "netroute-show"
             | "l4guard-show"
             | "br-netfilter-check"
+            | "svc-state"
     )
 }
 
@@ -2836,8 +2841,16 @@ fn handle_control(line: &str) -> String {
             .unwrap_or(false);
         return format!("ok {}\n", if active { "1" } else { "0" });
     }
+    // Query: what each `VirtualIP` Service serves right now — the prober's last
+    // round (ADR-0066 F3). Read-only, hex JSON for the one-line reply.
+    if let ["svc-state"] = parts.as_slice() {
+        return format!("ok {}\n", crate::service_lb::state_reply());
+    }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
+        // Re-evaluate every `VirtualIP` Service now and rewrite the VIP
+        // dataplane (ADR-0066 D7): sent by the CLI on apply/delete.
+        ["svcsync"] => crate::service_lb::sync_now(true),
         // ADR-0013 tier B: a declared route between two networks. One ELEMENT in
         // the exemption map — the spike proved the forwarding already exists and
         // an explicit pair drop is what closes it, so opening a path is not a
@@ -2872,6 +2885,8 @@ fn handle_control(line: &str) -> String {
         // exactly as before (it leaks, as it always did) instead of failing the teardown.
         ["nsleave", ip] => {
             ns_set_leave(ip);
+            // Out of every VIP map before the detach returns (ADR-0066 D7).
+            crate::service_lb::forget_address(ip);
             Ok(())
         }
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
@@ -3706,6 +3721,8 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     // container's fw_chain_body references these sets). Behavior unchanged
     // for everything in `default` (the same namespace contains all = open SDN).
     ns_set_join(ip, namespace);
+    // An address that left the wire may serve a VIP again (ADR-0066 D7).
+    crate::service_lb::address_back(ip);
     Ok(())
 }
 
@@ -5744,7 +5761,7 @@ fn do_unfirewall(ip: &str) -> Result<()> {
 }
 
 /// Hex-encode (lowercase) — to pass the firewall JSON through the line channel.
-fn hex_encode(bytes: &[u8]) -> String {
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         s.push_str(&format!("{b:02x}"));
@@ -5753,7 +5770,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 /// Hex-decode; `None` if the length is odd or there are invalid digits.
-fn hex_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
     }
@@ -6565,6 +6582,22 @@ pub struct ServiceDef {
     pub labels: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub annotations: std::collections::BTreeMap<String, String>,
+    /// `spec.type` (ADR-0066 D1). A record written before it reads as `DNS`,
+    /// which is what it always was.
+    #[serde(default, rename = "type")]
+    pub service_type: crate::service_lb::ServiceType,
+    /// The VIP this Service holds (`type: VirtualIP`), leased in the IPAM
+    /// under [`crate::service_lb::lease_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip: Option<String>,
+    /// What the manifest asked for in `spec.vip` — `None` when the address
+    /// was picked by the IPAM. Kept apart from [`Self::vip`] so the plan
+    /// compares the declaration, not the outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vip_requested: Option<String>,
+    /// `spec.readiness.tcp`; `None` = the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<crate::service_lb::TcpReadiness>,
 }
 
 fn services_dir() -> PathBuf {
@@ -6656,6 +6689,26 @@ pub fn service_set(
     write_servicedef(&def)
 }
 
+/// The VIP half of a `Service` record (ADR-0066): its type, the address it
+/// holds and what the manifest asked for, and its readiness knobs. Written
+/// after [`service_set`], on the same record.
+pub fn service_set_lb(
+    namespace: &str,
+    name: &str,
+    service_type: crate::service_lb::ServiceType,
+    vip: Option<String>,
+    vip_requested: Option<String>,
+    readiness: Option<crate::service_lb::TcpReadiness>,
+) -> Result<()> {
+    let mut def = service_get(namespace, name)
+        .ok_or_else(|| Error::ServiceNotFound(format!("service: {namespace}/{name}")))?;
+    def.service_type = service_type;
+    def.vip = vip;
+    def.vip_requested = vip_requested;
+    def.readiness = readiness;
+    write_servicedef(&def)
+}
+
 /// Records ownership on a `Service` — mirrors `route_set_metadata`.
 pub fn service_set_metadata(
     namespace: &str,
@@ -6690,6 +6743,10 @@ pub fn service_set_metadata(
 
 /// Retracts a `Service` document — what `--prune`/`destroy` call.
 pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
+    // The VIP lease goes with the record: a lease nobody declares is one the
+    // IPAM reaper would only reclaim later, and a VIP re-handed meanwhile is
+    // not this Service's any more.
+    crate::service_lb::release_vip(namespace, name);
     let _ = std::fs::remove_file(servicedef_path(namespace, name));
     forget_legacy_service(namespace, name);
     Ok(())
@@ -8439,7 +8496,7 @@ fn control_send(cmd: &str) -> Result<()> {
 
 /// Like `control_send`, but returns the BODY of the response after `ok ` (empty if just
 /// `ok`). Used by `cni-add`, whose response carries the IP assigned by the IPAM.
-fn control_query(cmd: &str) -> Result<String> {
+pub(crate) fn control_query(cmd: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // Fast-fail if the holder is NOT alive: without it there's no one to respond, and
@@ -8682,7 +8739,7 @@ fn setup_infra_netns() -> Result<()> {
 
 /// Applies an `nft` *ruleset* via stdin (`nft -f -`) — variant local to the holder
 /// (the one in `lib.rs` is private to that module).
-fn apply_nft_stdin(ruleset: &str) -> Result<()> {
+pub(crate) fn apply_nft_stdin(ruleset: &str) -> Result<()> {
     use std::io::Write;
     let mut child = Command::new("nft")
         .args(["-f", "-"])
@@ -9096,7 +9153,7 @@ fn dns_state_serves(status: Option<&str>) -> bool {
 /// traffic to something that cannot answer. A container with no health check
 /// declared has nothing to wait for: it is ready when it runs. A paused or
 /// not-yet-started one is never a backend.
-fn service_member_ready(
+pub(crate) fn service_member_ready(
     status: Option<&str>,
     has_health_check: bool,
     health: Option<&str>,
@@ -9221,14 +9278,10 @@ fn build_dns_index() -> DnsIndex {
     // Collected alongside the container loop below, for the `kind: Service`
     // pass at the end — a SECOND directory read would just re-parse the same
     // files this loop already opened.
-    // (labels, namespace, address, ready) of each serving container.
-    type ContainerSummary = (
-        std::collections::BTreeMap<String, String>,
-        String,
-        [u8; 4],
-        bool,
-    );
-    let mut container_summaries: Vec<ContainerSummary> = Vec::new();
+    // What `service_lb::service_backends` needs of each serving container — the
+    // ONE evaluation of a Service's selector, shared with the VIP dataplane
+    // (ADR-0066 D7).
+    let mut container_summaries: Vec<crate::service_lb::Member> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -9289,7 +9342,16 @@ fn build_dns_index() -> DnsIndex {
                 !v["health"].is_null(),
                 v["health_state"]["health"].as_str(),
             );
-            container_summaries.push((container_labels, ns.clone(), ip, ready));
+            container_summaries.push(crate::service_lb::Member {
+                name: name.clone(),
+                namespace: ns.clone(),
+                ip: std::net::Ipv4Addr::from(ip).to_string(),
+                labels: container_labels,
+                serving: ready,
+                has_health_check: !v["health"].is_null(),
+                health: v["health_state"]["health"].as_str().map(str::to_string),
+                running: v["status"].as_str() == Some("Running"),
+            });
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -9390,15 +9452,21 @@ fn build_dns_index() -> DnsIndex {
     // at most once per `DNS_INDEX_TTL`), which is MORE live than
     // `FirewallPolicy`'s own selector will be (apply-triggered only).
     for def in service_list() {
-        let ips: Vec<[u8; 4]> = container_summaries
+        // A `VirtualIP` Service answers ONE `A`, its VIP, whatever its backends
+        // are doing (ADR-0066 D1): with none ready the VIP itself refuses, which
+        // is the predictable unavailability the ADR asks for.
+        let ips: Vec<[u8; 4]> = if def.service_type == crate::service_lb::ServiceType::VirtualIp {
+            def.vip.as_deref().and_then(parse_v4).into_iter().collect()
+        } else {
+            crate::service_lb::service_backends(
+                &def.namespace,
+                &def.match_labels,
+                &container_summaries,
+            )
             .iter()
-            .filter(|(labels, ns, _, ready)| {
-                *ready
-                    && ns.eq_ignore_ascii_case(&def.namespace)
-                    && crate::matches_labels(labels, &def.match_labels)
-            })
-            .map(|(_, _, ip, _)| *ip)
-            .collect();
+            .filter_map(|m| parse_v4(&m.ip))
+            .collect()
+        };
         // An empty match is not an error here (ADR-0032: "applies to nothing,
         // warns loudly, succeeds") — the warning is the CALLER's job (the
         // Kind's `apply`, which runs once and can log); the index just

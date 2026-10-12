@@ -2525,6 +2525,23 @@
       },
       "type": "object"
     },
+    "ServiceReadiness": {
+      "additionalProperties": false,
+      "description": "`spec.readiness`.",
+      "properties": {
+        "tcp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TcpReadinessSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ServiceSelector": {
       "properties": {
         "matchLabels": {
@@ -2542,14 +2559,43 @@
       "description": "`spec` of `kind: Service`.",
       "properties": {
         "port": {
-          "description": "The CONTAINER port every matched workload is expected to listen on —\nmirrors the \"always container-side, post-DNAT\" convention `net ingress\nallow`'s port already uses. There is no host-side or VIP-side port,\nbecause v1 has no VIP.",
+          "description": "The CONTAINER port every matched workload is expected to listen on —\nmirrors the \"always container-side, post-DNAT\" convention `net ingress\nallow`'s port already uses. With `type: VirtualIP` it is also the VIP's\nport: one port in v1 (ADR-0066 open question 1), and no host-side port.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
         },
+        "readiness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceReadiness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`type: VirtualIP` only: the knobs of the TCP readiness check that\nalways runs for each backend."
+        },
         "selector": {
           "$ref": "#/$defs/ServiceSelector"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceTypeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`DNS` (default, ADR-0032) or `VirtualIP` (ADR-0066)."
+        },
+        "vip": {
+          "description": "`type: VirtualIP` only: the address to hold, inside the node's VIP\npool. Without it the IPAM picks one.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -2557,6 +2603,14 @@
         "port"
       ],
       "type": "object"
+    },
+    "ServiceTypeSpec": {
+      "description": "`spec.type` of a `kind: Service`.",
+      "enum": [
+        "DNS",
+        "VirtualIP"
+      ],
+      "type": "string"
     },
     "ShareBlock": {
       "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
@@ -3781,6 +3835,45 @@
       "required": [
         "image"
       ],
+      "type": "object"
+    },
+    "TcpReadinessSpec": {
+      "additionalProperties": false,
+      "description": "`spec.readiness.tcp` — every field optional, the defaults being 2 s,\n500 ms, 1 success to admit and 2 failures to eject.",
+      "properties": {
+        "failureThreshold": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "intervalSeconds": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "successThreshold": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timeoutMilliseconds": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "TlsSpec": {
