@@ -159,15 +159,6 @@ pub enum Error {
     #[error("{0}")]
     IngressBridgeProtected(String),
 
-    /// A load-balancer VIP outside the ingress address space.
-    #[error("{0}")]
-    VipOutsideIngressSpace(String),
-
-    /// An `lbset` backend list: a bad weight, a backend with no port, or an
-    /// empty list.
-    #[error("{0}")]
-    InvalidLbSpec(String),
-
     /// A port string (publish/unpublish/lbset) that is not `1..65535`.
     #[error("{0}")]
     InvalidPort(String),
@@ -361,8 +352,6 @@ impl Error {
             Error::InvalidHex(_) => 1326,
             Error::InvalidFdbDst(_) => 1327,
             Error::IngressBridgeProtected(_) => 1328,
-            Error::VipOutsideIngressSpace(_) => 1329,
-            Error::InvalidLbSpec(_) => 1330,
             Error::InvalidPort(_) => 1331,
             Error::InvalidProto(_) => 1332,
             Error::InvalidEgressPolicy(_) => 1333,
@@ -483,8 +472,6 @@ mod tests {
             Error::InvalidHex("invalid hex".into()),
             Error::InvalidFdbDst("invalid FDB dst: 'x'".into()),
             Error::IngressBridgeProtected("the default ingress bridge cannot be removed".into()),
-            Error::VipOutsideIngressSpace("VIP fora do espaço de ingress: x".into()),
-            Error::InvalidLbSpec("lbset sem backends".into()),
             Error::InvalidPort("invalid port".into()),
             Error::InvalidProto("invalid proto: x".into()),
             Error::InvalidEgressPolicy("invalid egress policy: x".into()),
