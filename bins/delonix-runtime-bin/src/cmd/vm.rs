@@ -2142,7 +2142,10 @@ pub(crate) fn shape_problem(doc: &ManifestDoc) -> Option<String> {
         spec.memory_max.as_deref(),
     )
     .err()
-    .map(|e| e.to_string())
+    .map(|e| match e {
+        Error::Invalid(m) => m,
+        other => other.to_string(),
+    })
 }
 
 /// The cold reshape a reboot-class diff asks for, as the engine takes it.

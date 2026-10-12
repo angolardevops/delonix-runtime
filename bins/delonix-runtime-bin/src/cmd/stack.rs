@@ -1940,8 +1940,11 @@ fn apply_docs(
             eprintln!("  ✗ {i}");
         }
         return Err(delonix_model::Error::Invalid(super::po::tf(
-            "stack apply aborted: {n} unresolved reference(s) (fix the manifest or use `stack validate`)",
-            &[("n", &issues.len().to_string())],
+            "stack apply aborted: {what} (fix the manifest or use `stack validate`)",
+            &[(
+                "what",
+                &issues_summary(issues.len(), shape_issue_count(docs)),
+            )],
         )));
     }
     // Decide EVERYTHING before changing anything, and refuse up front what this
@@ -3144,11 +3147,40 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
         for i in &issues {
             println!("  ✗ {i}");
         }
-        Err(delonix_model::Error::Invalid(super::po::tf(
-            "{n} unresolved reference(s)",
-            &[("n", &issues.len().to_string())],
+        Err(delonix_model::Error::Invalid(issues_summary(
+            issues.len(),
+            shape_issue_count(&docs),
         )))
     }
+}
+
+/// How many of the validation issues are VM shapes (a ceiling of 0, or
+/// below the boot size) rather than references.
+fn shape_issue_count(docs: &[manifest::ManifestDoc]) -> usize {
+    docs.iter()
+        .filter(|d| d.kind == k::VM)
+        .filter(|d| super::vm::shape_problem(d).is_some())
+        .count()
+}
+
+/// The count line under a failed validation, naming each kind of problem by
+/// what it is: a shape problem is not an «unresolved reference». Pure.
+fn issues_summary(total: usize, shapes: usize) -> String {
+    let refs = total.saturating_sub(shapes);
+    let mut parts = Vec::new();
+    if refs > 0 {
+        parts.push(super::po::tf(
+            "{n} unresolved reference(s)",
+            &[("n", &refs.to_string())],
+        ));
+    }
+    if shapes > 0 {
+        parts.push(super::po::tf(
+            "{n} invalid VM shape(s)",
+            &[("n", &shapes.to_string())],
+        ));
+    }
+    parts.join("; ")
 }
 
 /// Built-in network names (not references to a `kind: Network`): containers
@@ -3997,6 +4029,16 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         c.diffs[0].reboot = false;
         c.diffs[0].hot = true;
         assert!(update_lines(&c)[0].contains("live"));
+    }
+
+    #[test]
+    fn a_shape_problem_is_not_counted_as_a_reference() {
+        assert_eq!(issues_summary(1, 1), "1 invalid VM shape(s)");
+        assert_eq!(issues_summary(2, 0), "2 unresolved reference(s)");
+        assert_eq!(
+            issues_summary(3, 1),
+            "2 unresolved reference(s); 1 invalid VM shape(s)"
+        );
     }
 
     /// A VM shape the reshape would refuse is a validation issue, so neither
