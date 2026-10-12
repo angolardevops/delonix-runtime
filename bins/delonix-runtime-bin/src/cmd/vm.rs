@@ -1751,6 +1751,18 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         &doc.metadata.name,
         &spec,
     );
+    // The shape, checked with the RESOLVED boot size (an image's own VCPUS/
+    // MEMORY included): a plan never proposes what the reshape would refuse.
+    manifest_ceilings(
+        &doc.metadata.name,
+        fields
+            .get("vcpus")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+        fields.get("memory").map(String::as_str).unwrap_or("1G"),
+        spec.vcpus_max,
+        spec.memory_max.as_deref(),
+    )?;
     // `metadata.labels` of the document — see `network::desired`. Measured
     // before this: a VM applied with labels carried the ownership stamp and
     // nothing the manifest had declared.
@@ -1918,6 +1930,12 @@ fn manifest_ceilings(
     vcpus_max: Option<u32>,
     memory_max: Option<&str>,
 ) -> Result<(Option<u32>, Option<u64>)> {
+    if vcpus_max == Some(0) {
+        return Err(Error::Invalid(super::po::tf(
+            "vm/{name}: vcpusMax must be at least 1",
+            &[("name", name)],
+        )));
+    }
     if let Some(max) = vcpus_max {
         if max < vcpus {
             return Err(Error::Invalid(super::po::tf(
@@ -2096,6 +2114,25 @@ fn resize_request_from_flags(
     })
 }
 
+/// What is wrong with a VM document's shape, as the manifest declares it —
+/// for `stack validate` and the apply gate. The boot size an image would
+/// supply is not known here (that needs the image store), so an undeclared
+/// one reads as the engine's own fallback (1 vCPU, 1G); [`desired`] checks
+/// again with the resolved values. `None` when nothing is wrong, or when the
+/// spec does not parse (that is reported elsewhere).
+pub(crate) fn shape_problem(doc: &ManifestDoc) -> Option<String> {
+    let spec: VmSpec = vm_spec_of(doc).ok()?;
+    manifest_ceilings(
+        &doc.metadata.name,
+        spec.vcpus.unwrap_or(1),
+        spec.memory.as_deref().unwrap_or("1G"),
+        spec.vcpus_max,
+        spec.memory_max.as_deref(),
+    )
+    .err()
+    .map(|e| e.to_string())
+}
+
 /// The cold reshape a reboot-class diff asks for, as the engine takes it.
 /// `None` when no diff touches the shape (a CH `network` change only needs
 /// the stop: the next start rebuilds the NIC from the manifest). Pure.
@@ -2156,12 +2193,50 @@ pub(crate) fn converge_across_reboot(
     diffs: &[super::reconcile::FieldDiff],
     running: bool,
 ) -> Result<()> {
+    let base = state_root();
+    converge_across_reboot_with(
+        name,
+        diffs,
+        running,
+        &RebootSteps {
+            check: &|n, r| delonix_vm::check_resize_shape(&base, n, r).map_err(Error::from),
+            stop: &|n| delonix_vm::stop(&base, n).map_err(Error::from),
+            reshape: &|n, r| {
+                delonix_vm::resize_shape(&base, n, r)
+                    .map(|_| ())
+                    .map_err(Error::from)
+            },
+            start: &|n| delonix_vm::start(&base, n).map(|_| ()).map_err(Error::from),
+        },
+    )
+}
+
+/// The four engine calls a reboot makes, injected so the ORDER is testable
+/// without a VM: the check comes before the stop, always.
+struct RebootSteps<'a> {
+    check: &'a dyn Fn(&str, &delonix_vm::ResizeRequest) -> Result<()>,
+    stop: &'a dyn Fn(&str) -> Result<()>,
+    reshape: &'a dyn Fn(&str, &delonix_vm::ResizeRequest) -> Result<()>,
+    start: &'a dyn Fn(&str) -> Result<()>,
+}
+
+fn converge_across_reboot_with(
+    name: &str,
+    diffs: &[super::reconcile::FieldDiff],
+    running: bool,
+    steps: &RebootSteps<'_>,
+) -> Result<()> {
     let fields: Vec<&str> = diffs
         .iter()
         .filter(|d| d.reboot)
         .map(|d| d.field.as_str())
         .collect();
-    let base = state_root();
+    let req = resize_request_of(diffs)?;
+    // Every rule the reshape applies, BEFORE the stop: a shape it would
+    // refuse must never cost the downtime.
+    if let Some(req) = &req {
+        (steps.check)(name, req)?;
+    }
     if running {
         println!(
             "{}",
@@ -2170,12 +2245,40 @@ pub(crate) fn converge_across_reboot(
                 &[("name", name), ("fields", &fields.join(", "))],
             )
         );
-        delonix_vm::stop(&base, name)?;
+        (steps.stop)(name)?;
     }
-    if let Some(req) = resize_request_of(diffs)? {
-        delonix_vm::resize_shape(&base, name, &req)?;
+    let Some(req) = req else {
+        return Ok(());
+    };
+    match (steps.reshape)(name, &req) {
+        Ok(()) => Ok(()),
+        Err(e) if running => Err(restart_after_failed_reshape(name, e, steps.start)),
+        Err(e) => Err(e),
     }
-    Ok(())
+}
+
+/// A reshape that failed AFTER the stop: the VM is started again on the shape
+/// it had, and that is said; if the start fails too, it is said loudly that
+/// the VM was left STOPPED and how to bring it back. The reshape's own error
+/// is returned unchanged, so its class (and exit code) survives.
+fn restart_after_failed_reshape(
+    name: &str,
+    err: Error,
+    start: &dyn Fn(&str) -> Result<()>,
+) -> Error {
+    match start(name) {
+        Ok(()) => output::warn(&super::po::tf(
+            "vm/{name}: the new shape was refused after the stop — nothing was changed, and \
+             the VM was started again on its previous shape",
+            &[("name", name)],
+        )),
+        Err(again) => output::warn(&super::po::tf(
+            "vm/{name}: the new shape was refused after the stop, and the VM could not be \
+             started again ({again}): it is STOPPED — bring it back with `delonix vm start {name}`",
+            &[("name", name), ("again", &again.to_string())],
+        )),
+    }
+    err
 }
 
 /// `vm prune` — the VM half of the reclaim family, with the one semantic
@@ -7104,5 +7207,98 @@ mod device_flag_tests {
         assert!(matches!(c[1], delonix_vm::DeviceChange::RemoveNic(_)));
         assert!(matches!(c[2], delonix_vm::DeviceChange::AddDisk(_)));
         assert!(matches!(c[3], delonix_vm::DeviceChange::AddNic(_)));
+    }
+}
+
+/// Coordinator review of Sprint 18 (blocking 2): an authorised reboot never
+/// stops a VM for a shape that would be refused, and a refusal after the stop
+/// brings the VM back.
+#[cfg(test)]
+mod reboot_order_tests {
+    use super::super::reconcile::FieldDiff;
+    use std::cell::RefCell;
+
+    fn rd(field: &str, to: &str) -> FieldDiff {
+        FieldDiff {
+            field: field.into(),
+            from: Some("2".into()),
+            to: Some(to.into()),
+            hot: false,
+            reboot: true,
+        }
+    }
+
+    fn run(check_ok: bool, reshape_ok: bool) -> (super::Result<()>, Vec<String>) {
+        let log = RefCell::new(Vec::<String>::new());
+        let res = super::converge_across_reboot_with(
+            "db",
+            &[rd("vcpus", "8")],
+            true,
+            &super::RebootSteps {
+                check: &|_, _| {
+                    log.borrow_mut().push("check".into());
+                    if check_ok {
+                        Ok(())
+                    } else {
+                        Err(delonix_model::Error::Invalid("refused".into()))
+                    }
+                },
+                stop: &|_| {
+                    log.borrow_mut().push("stop".into());
+                    Ok(())
+                },
+                reshape: &|_, _| {
+                    log.borrow_mut().push("reshape".into());
+                    if reshape_ok {
+                        Ok(())
+                    } else {
+                        Err(delonix_model::Error::Invalid("late".into()))
+                    }
+                },
+                start: &|_| {
+                    log.borrow_mut().push("start".into());
+                    Ok(())
+                },
+            },
+        );
+        (res, log.into_inner())
+    }
+
+    #[test]
+    fn a_shape_that_would_be_refused_never_stops_the_vm() {
+        let (res, log) = run(false, true);
+        assert!(res.is_err());
+        assert_eq!(log, ["check"], "nothing after the refusal");
+    }
+
+    #[test]
+    fn a_refusal_after_the_stop_starts_the_vm_again_and_keeps_its_error() {
+        let (res, log) = run(true, false);
+        assert_eq!(res.unwrap_err().to_string(), "invalid argument: late");
+        assert_eq!(log, ["check", "stop", "reshape", "start"]);
+        let (res, log) = run(true, true);
+        assert!(res.is_ok());
+        assert_eq!(log, ["check", "stop", "reshape"]);
+    }
+
+    #[test]
+    fn a_bad_ceiling_is_a_shape_problem_before_any_apply() {
+        let doc = |spec: &str| {
+            super::super::manifest::load_str(&format!(
+                "apiVersion: compute.delonix.io/v1alpha1\nkind: VirtualMachine\nmetadata:\n  name: db\nspec:\n{spec}"
+            ), "test")
+            .unwrap()
+            .remove(0)
+        };
+        for bad in [
+            "  disk: /x.qcow2\n  vcpusMax: 0\n",
+            "  disk: /x.qcow2\n  memory: 2G\n  memoryMax: 1G\n",
+            "  disk: /x.qcow2\n  vcpus: 6\n  vcpusMax: 4\n",
+        ] {
+            assert!(super::shape_problem(&doc(bad)).is_some(), "{bad}");
+        }
+        assert!(
+            super::shape_problem(&doc("  disk: /x.qcow2\n  vcpus: 2\n  vcpusMax: 4\n")).is_none()
+        );
     }
 }

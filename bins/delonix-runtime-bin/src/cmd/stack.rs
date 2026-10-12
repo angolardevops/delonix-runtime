@@ -3756,6 +3756,15 @@ fn validate_graph_full(
         ));
     }
 
+    // A VM shape the reshape would refuse (a ceiling of 0, or below the boot
+    // size) is refused HERE, before any apply — an apply authorised to
+    // reboot would otherwise stop the VM and only then hear about it.
+    for d in docs.iter().filter(|d| d.kind == k::VM) {
+        if let Some(problem) = super::vm::shape_problem(d) {
+            issues.push(problem);
+        }
+    }
+
     issues
 }
 
@@ -3944,6 +3953,19 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
     fn with_action(mut c: Change, a: Action) -> Change {
         c.action = a;
         c
+    }
+
+    /// A VM shape the reshape would refuse is a validation issue, so neither
+    /// `stack validate` nor the apply gate lets it reach a reboot.
+    #[test]
+    fn a_vm_ceiling_below_the_boot_size_fails_validation() {
+        let d = manifest::load_str(
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: VirtualMachine\nmetadata:\n  name: db\nspec:\n  disk: /x.qcow2\n  vcpus: 4\n  vcpusMax: 2\n",
+            "test",
+        )
+        .unwrap();
+        let issues = validate_graph_with(&d, &[], &[], &[], &[]);
+        assert!(issues.iter().any(|i| i.contains("vcpusMax")), "{issues:?}");
     }
 
     /// ADR-0012: downtime is authorised as explicitly as data loss. A Reboot

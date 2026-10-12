@@ -15917,3 +15917,12 @@ msgstr "disco {disk} removido"
 
 msgid "NIC {mac} removed"
 msgstr "NIC {mac} removida"
+
+msgid "vm/{name}: vcpusMax must be at least 1"
+msgstr "vm/{name}: o vcpusMax tem de ser pelo menos 1"
+
+msgid "vm/{name}: the new shape was refused after the stop — nothing was changed, and the VM was started again on its previous shape"
+msgstr "vm/{name}: a nova forma foi recusada depois da paragem — nada foi mudado, e a VM voltou a arrancar com a forma anterior"
+
+msgid "vm/{name}: the new shape was refused after the stop, and the VM could not be started again ({again}): it is STOPPED — bring it back with `delonix vm start {name}`"
+msgstr "vm/{name}: a nova forma foi recusada depois da paragem, e a VM não voltou a arrancar ({again}): está PARADA — traz-a de volta com `delonix vm start {name}`"

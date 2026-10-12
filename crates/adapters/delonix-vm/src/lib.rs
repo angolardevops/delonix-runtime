@@ -688,6 +688,12 @@ pub fn resize(
     engine(base)?.resize(name, vcpus, memory, disk_size_gib)
 }
 
+/// Whether [`resize_shape`] would take `req`, without changing anything and
+/// whatever the power state; see `VmEngine::check_resize_shape`.
+pub fn check_resize_shape(base: &Path, name: &str, req: &ResizeRequest) -> Result<()> {
+    engine(base)?.check_resize_shape(name, req)
+}
+
 /// [`resize`] with the hotplug ceilings (ADR-0068 open question 2): the cold
 /// path the reconciler's reboot class (ADR-0012) and `vm resize
 /// --vcpus-max/--memory-max` share. See

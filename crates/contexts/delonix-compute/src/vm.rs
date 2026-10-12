@@ -713,49 +713,16 @@ where
     /// and the record is written only after it answers — the order every
     /// resize here already uses.
     pub fn resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<Vm> {
-        if req.vcpus.is_none()
-            && req.memory.is_none()
-            && req.disk_size_gib.is_none()
-            && req.vcpus_max.is_none()
-            && req.memory_max_mib.is_none()
-        {
-            return Err(Error::InvalidResize(format!(
-                "nothing to resize on VM '{name}': give --vcpus, --memory, --disk-size, \
-                 --vcpus-max and/or --memory-max"
-            )));
-        }
-        if req.vcpus == Some(0) || req.vcpus_max == Some(Some(0)) {
-            return Err(Error::InvalidResize(format!(
-                "VM '{name}' cannot have 0 vCPUs"
-            )));
-        }
-        if req.disk_size_gib == Some(0) {
-            return Err(Error::InvalidResize(format!(
-                "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
-            )));
-        }
-        let new_mib = match &req.memory {
-            Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
-                Error::InvalidResize(format!(
-                    "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
-                ))
-            })?),
-            None => None,
-        };
         let vmdir = self.vmdir();
         let st = &self.repo;
         let mut vm = self.load_vm(name)?;
+        let (target_vcpus, target_mib, vcpus_max, memory_max_mib) = check_shape(name, &vm, req)?;
         if matches!(vm.status, Status::Running | Status::Paused) {
             return Err(Error::ResizeNeedsStopped(format!(
                 "VM '{name}' is {:?}: `vm resize` is a cold resize — stop it first (`delonix vm stop {name}`)",
                 vm.status
             )));
         }
-        let target_vcpus = req.vcpus.unwrap_or(vm.vcpus.max(1));
-        let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
-        let vcpus_max = req.vcpus_max.unwrap_or(vm.vcpus_max);
-        let memory_max_mib = req.memory_max_mib.unwrap_or(vm.memory_max_mib);
-        check_ceilings(name, target_vcpus, target_mib, vcpus_max, memory_max_mib)?;
         let backend = self.backends.for_vm(&vm)?;
         if let Some(gib) = req.disk_size_gib {
             backend.resize_disk(&vmdir, &vm, u64::from(gib) * GIB_BYTES)?;
@@ -772,6 +739,16 @@ where
         st.set(name, &vm).map_err(Error::from)?;
         Ok(vm)
     }
+
+    /// Whether [`Self::resize_shape`] would take `req` — every rule it
+    /// applies except the power state, and nothing changed. A caller that
+    /// has to STOP the VM first asks this before the stop, so a shape that
+    /// would be refused never costs the downtime.
+    pub fn check_resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<()> {
+        let vm = self.load_vm(name)?;
+        check_shape(name, &vm, req).map(|_| ())
+    }
+
     /// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1) — ONE verb
     /// for both states: on a RUNNING VM it hot-adds, live, up to the
     /// declared ceiling (D3); on a STOPPED one it is exactly [`Self::resize`]
@@ -1250,6 +1227,54 @@ pub struct ResizeRequest {
     pub disk_size_gib: Option<u32>,
     pub vcpus_max: Option<Option<u32>>,
     pub memory_max_mib: Option<Option<u64>>,
+}
+
+/// Every rule a cold reshape applies, on the record as it is: nothing to do,
+/// zero vCPUs, a zero disk size, a memory that is not a size, and the
+/// ceilings below the boot size. Returns the target shape `(vcpus, MiB,
+/// vcpus_max, memory_max_mib)`. Pure — [`VmEngine::resize_shape`] and
+/// [`VmEngine::check_resize_shape`] share it, so the check before a stop and
+/// the reshape after it can never disagree.
+fn check_shape(
+    name: &str,
+    vm: &Vm,
+    req: &ResizeRequest,
+) -> Result<(u32, u64, Option<u32>, Option<u64>)> {
+    if req.vcpus.is_none()
+        && req.memory.is_none()
+        && req.disk_size_gib.is_none()
+        && req.vcpus_max.is_none()
+        && req.memory_max_mib.is_none()
+    {
+        return Err(Error::InvalidResize(format!(
+            "nothing to resize on VM '{name}': give --vcpus, --memory, --disk-size, \
+             --vcpus-max and/or --memory-max"
+        )));
+    }
+    if req.vcpus == Some(0) || req.vcpus_max == Some(Some(0)) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}' cannot have 0 vCPUs"
+        )));
+    }
+    if req.disk_size_gib == Some(0) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
+        )));
+    }
+    let new_mib = match &req.memory {
+        Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+            Error::InvalidResize(format!(
+                "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+            ))
+        })?),
+        None => None,
+    };
+    let target_vcpus = req.vcpus.unwrap_or(vm.vcpus.max(1));
+    let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+    let vcpus_max = req.vcpus_max.unwrap_or(vm.vcpus_max);
+    let memory_max_mib = req.memory_max_mib.unwrap_or(vm.memory_max_mib);
+    check_ceilings(name, target_vcpus, target_mib, vcpus_max, memory_max_mib)?;
+    Ok((target_vcpus, target_mib, vcpus_max, memory_max_mib))
 }
 
 /// A ceiling below what the VM boots with is not a ceiling (ADR-0068 D3):
@@ -2461,6 +2486,35 @@ mod tests {
             .update("app", Some(2), Some("128M"), Duration::from_millis(1))
             .expect("inside the ceiling");
         assert_eq!(vm.vcpus, 2);
+    }
+
+    /// The check a reboot runs BEFORE its stop: every reshape rule, on a
+    /// RUNNING VM, and nothing changed.
+    #[test]
+    fn the_shape_check_refuses_on_a_running_vm_and_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        let bad = ResizeRequest {
+            vcpus_max: Some(Some(0)),
+            ..Default::default()
+        };
+        assert!(e.check_resize_shape("app", &bad).is_err());
+        let below = ResizeRequest {
+            vcpus: Some(4),
+            vcpus_max: Some(Some(2)),
+            ..Default::default()
+        };
+        assert!(e.check_resize_shape("app", &below).is_err());
+        let fine = ResizeRequest {
+            vcpus: Some(4),
+            vcpus_max: Some(Some(8)),
+            ..Default::default()
+        };
+        e.check_resize_shape("app", &fine)
+            .expect("the power state is not the check's business");
+        assert!(seen.resized.borrow().is_none(), "nothing was reshaped");
     }
 
     /// ADR-0068 D6/D7: a hot-added disk lands in the record with the target
