@@ -66,6 +66,11 @@ pub struct ServiceSpec {
     /// always runs for each backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness: Option<ServiceReadiness>,
+    /// `type: VirtualIP` only: host ports that lead to the VIP's backends
+    /// (ADR-0066 D6), bound like a container's `-p` (`127.0.0.1` unless
+    /// `DELONIX_PUBLISH_ADDR` widens it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish: Option<Vec<u16>>,
 }
 
 /// `spec.type` of a `kind: Service`.
@@ -107,6 +112,14 @@ impl ServiceSpec {
         self.service_type == Some(ServiceTypeSpec::VirtualIp)
     }
 
+    /// `spec.publish`, sorted and without duplicates.
+    fn publish_ports(&self) -> Vec<u16> {
+        let mut v = self.publish.clone().unwrap_or_default();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
     /// The readiness knobs with every default materialised.
     fn tcp_readiness(&self) -> TcpReadiness {
         let d = TcpReadiness::default();
@@ -128,12 +141,22 @@ impl ServiceSpec {
     /// anything is written.
     fn validate(&self) -> Result<()> {
         if !self.is_virtual_ip() {
-            if self.vip.is_some() || self.readiness.is_some() {
+            if self.vip.is_some() || self.readiness.is_some() || self.publish.is_some() {
                 return Err(Error::Invalid(
-                    "spec.vip and spec.readiness apply to `type: VirtualIP` only".into(),
+                    "spec.vip, spec.readiness and spec.publish apply to `type: VirtualIP` only"
+                        .into(),
                 ));
             }
             return Ok(());
+        }
+        let ports = self.publish_ports();
+        if ports.contains(&0) {
+            return Err(Error::Invalid("spec.publish: port 0 is not a port".into()));
+        }
+        if ports.len() != self.publish.as_ref().map_or(0, Vec::len) {
+            return Err(Error::Invalid(
+                "spec.publish: a port is listed twice".into(),
+            ));
         }
         if let Some(v) = &self.vip {
             if v.parse::<std::net::Ipv4Addr>().map(|a| a.to_string()) != Ok(v.clone()) {
@@ -163,12 +186,14 @@ pub struct ServiceSelector {
 
 /// Known fields of the `spec` (drift-guard, same pattern every other Kind's
 /// spec uses).
-pub const SERVICE_SPEC_FIELDS: &[&str] = &["selector", "port", "type", "vip", "readiness"];
+pub const SERVICE_SPEC_FIELDS: &[&str] =
+    &["selector", "port", "type", "vip", "readiness", "publish"];
 
 /// Fields the reconciler compares.
 /// `type`, `vip` and `readiness` appear only for a `type: VirtualIP` Service,
 /// so a `type: DNS` one compares exactly what it always did.
-pub const RECONCILED_SERVICE_FIELDS: &[&str] = &["matchLabels", "port", "type", "vip", "readiness"];
+pub const RECONCILED_SERVICE_FIELDS: &[&str] =
+    &["matchLabels", "port", "type", "vip", "readiness", "publish"];
 
 fn service_fields(spec: &ServiceSpec) -> BTreeMap<String, String> {
     let mut f = BTreeMap::new();
@@ -192,8 +217,18 @@ fn service_fields(spec: &ServiceSpec) -> BTreeMap<String, String> {
             spec.vip.clone().unwrap_or_else(|| "auto".into()),
         );
         f.insert("readiness".into(), readiness_field(&spec.tcp_readiness()));
+        f.insert("publish".into(), publish_field(&spec.publish_ports()));
     }
     f
+}
+
+/// How `spec.publish` reads in the plan: sorted, comma-joined.
+fn publish_field(ports: &[u16]) -> String {
+    ports
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// What the manifest declares, for the reconciler. `ownable: true` — a
@@ -236,6 +271,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
                     "readiness".into(),
                     readiness_field(&def.readiness.unwrap_or_default()),
                 );
+                let mut ports = def.publish.clone();
+                ports.sort_unstable();
+                f.insert("publish".into(), publish_field(&ports));
             }
             super::reconcile::Actual {
                 kind: k::SERVICE.into(),
@@ -321,6 +359,56 @@ fn require_hairpin() -> Result<()> {
             .into(),
     )
     .into())
+}
+
+/// Brings the Service's published host ports from `old` to `new` (ADR-0066
+/// D6): a port no longer declared is removed, a new one is checked and added.
+/// A new port held by another Service, by a container or by anything else on
+/// the host is a conflict, and nothing is added. With the holder down there is
+/// no slirp: the record carries the ports, and the next slirp publishes them.
+fn publish_diff(namespace: &str, name: &str, old: &[u16], new: &[u16]) -> Result<()> {
+    let added: Vec<u16> = new.iter().copied().filter(|p| !old.contains(p)).collect();
+    for p in &added {
+        let taken_by_service = delonix_sdn::infra::service_list()
+            .into_iter()
+            .find(|d| !(d.namespace == namespace && d.name == name) && d.publish.contains(p));
+        if let Some(other) = taken_by_service {
+            return Err(Error::Conflict(format!(
+                "spec.publish: host port {p} is already published by Service {}/{}",
+                other.namespace, other.name
+            )));
+        }
+        let (_images, store) = open_stores()?;
+        if let Some(c) = super::container::port_owner(&store, &p.to_string())? {
+            return Err(Error::Conflict(format!(
+                "spec.publish: host port {p} is already published by container {c}"
+            )));
+        }
+        let addr = delonix_sdn::publish_bind_addr(None);
+        if delonix_sdn::host_port_busy(&addr, *p, delonix_sdn::Proto::Tcp) {
+            return Err(Error::Conflict(format!(
+                "spec.publish: host port {p} is already in use on {addr}"
+            )));
+        }
+    }
+    let holder_up = delonix_sdn::infra::status().holder_pid.is_some();
+    let mut done = Vec::new();
+    for p in &added {
+        if !holder_up {
+            break;
+        }
+        if let Err(e) = service_lb::publish(*p) {
+            for d in &done {
+                service_lb::unpublish(*d);
+            }
+            return Err(e.into());
+        }
+        done.push(*p);
+    }
+    for p in old.iter().filter(|p| !new.contains(p)) {
+        service_lb::unpublish(*p);
+    }
+    Ok(())
 }
 
 /// The VIP half of an apply: the pool in force, its overlap check, the
@@ -416,6 +504,16 @@ fn apply_one(containers: &[delonix_compute::Container], doc: &ManifestDoc) -> Re
     } else {
         None
     };
+    let old_publish: Vec<u16> = before
+        .as_ref()
+        .map(|b| b.publish.clone())
+        .unwrap_or_default();
+    let new_publish = if spec.is_virtual_ip() {
+        spec.publish_ports()
+    } else {
+        Vec::new()
+    };
+    publish_diff(&namespace, name, &old_publish, &new_publish)?;
     delonix_sdn::infra::service_set(&namespace, name, &spec.selector.match_labels, spec.port)?;
     if let Some(vip) = &vip {
         delonix_sdn::infra::service_set_lb(
@@ -425,6 +523,7 @@ fn apply_one(containers: &[delonix_compute::Container], doc: &ManifestDoc) -> Re
             Some(vip.clone()),
             spec.vip.clone(),
             Some(spec.tcp_readiness()),
+            new_publish,
         )?;
         if let Some(old) = before.as_ref().and_then(|b| b.vip.clone()) {
             if &old != vip {
@@ -443,7 +542,15 @@ fn apply_one(containers: &[delonix_compute::Container], doc: &ManifestDoc) -> Re
         .is_some_and(|b| b.service_type == ServiceType::VirtualIp || b.vip.is_some())
     {
         service_lb::release_vip(&namespace, name);
-        delonix_sdn::infra::service_set_lb(&namespace, name, ServiceType::Dns, None, None, None)?;
+        delonix_sdn::infra::service_set_lb(
+            &namespace,
+            name,
+            ServiceType::Dns,
+            None,
+            None,
+            None,
+            Vec::new(),
+        )?;
     }
     if vip.is_some() || before.as_ref().is_some_and(|b| b.vip.is_some()) {
         sync_dataplane();
@@ -661,6 +768,16 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 "Readiness",
                 readiness_field(&def.readiness.unwrap_or_default()),
             );
+            if !def.publish.is_empty() {
+                d.field(
+                    "Published",
+                    format!(
+                        "{}:{}",
+                        delonix_sdn::publish_bind_addr(None),
+                        publish_field(&def.publish)
+                    ),
+                );
+            }
             let states = holder_states();
             match state_of(&states, &def) {
                 Some(st) => {
@@ -832,6 +949,33 @@ mod tests {
         );
         let bad: ServiceSpec = manifest::spec_of(&vip_doc(Some("10.90.4.300"))).unwrap();
         assert_eq!(bad.validate().unwrap_err().number(), 1361);
+    }
+
+    #[test]
+    fn publish_is_virtual_ip_only_and_has_no_zero_or_duplicate() {
+        let parse = |extra: &str| -> ServiceSpec {
+            let d: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: Service\nmetadata:\n  name: web\n\
+                 spec:\n  selector:\n    matchLabels:\n      app: web\n  port: 8080\n{extra}"
+            ))
+            .unwrap();
+            manifest::spec_of(&d).unwrap()
+        };
+        assert!(parse("  type: VirtualIP\n  publish: [18080, 18081]\n")
+            .validate()
+            .is_ok());
+        assert!(parse("  publish: [18080]\n").validate().is_err());
+        assert!(parse("  type: VirtualIP\n  publish: [0]\n")
+            .validate()
+            .is_err());
+        assert!(parse("  type: VirtualIP\n  publish: [18080, 18080]\n")
+            .validate()
+            .is_err());
+        let d = desired(&vip_doc(None)).unwrap();
+        assert_eq!(
+            d.fields["publish"], "",
+            "no publish is an empty, compared field"
+        );
     }
 
     /// Mudar a porta é uma alteração REAL — `converges: true` tem de a fazer

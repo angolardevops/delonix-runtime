@@ -333,7 +333,7 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         k::SECRET => &["keys", "fingerprint"],
         // ADR-0066 D1: the VIP fields rewrite the record and the holder's
         // dataplane; nothing is recreated (a moved VIP says so out loud).
-        k::SERVICE => &["matchLabels", "port", "type", "vip", "readiness"],
+        k::SERVICE => &["matchLabels", "port", "type", "vip", "readiness", "publish"],
         // A pull source is a record and a timer (ADR-0021): rewriting the record
         // and reinstalling the timer destroys nothing — the mirror and the
         // stack it reconciles stay where they are.

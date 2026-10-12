@@ -548,6 +548,40 @@ pub fn allocate_vip(
     }))
 }
 
+/// Publishes host port `port` on the holder's slirp, leading to the VIP's
+/// backends (ADR-0066 D6). Bound like any `-p`: `127.0.0.1` unless
+/// `DELONIX_PUBLISH_ADDR` widens it.
+pub fn publish(port: u16) -> Result<()> {
+    let p = port.to_string();
+    crate::slirp_add_hostfwd(&crate::infra::slirp_sock_path(), &p, &p, "tcp", None)
+}
+
+/// Removes a host port this module published. Best effort: with the holder
+/// down there is no slirp, and so nothing to remove.
+pub fn unpublish(port: u16) {
+    let _ = crate::infra::slirp_remove_hostfwd_proto(
+        &crate::infra::slirp_sock_path(),
+        &port.to_string(),
+        Some("tcp"),
+    );
+}
+
+/// Every host port a `VirtualIP` Service declares, published again — called
+/// when a new slirp comes up, which starts with no hostfwd at all.
+pub(crate) fn republish_all() {
+    for d in crate::infra::service_list() {
+        if d.service_type != ServiceType::VirtualIp {
+            continue;
+        }
+        for p in &d.publish {
+            if let Err(e) = publish(*p) {
+                tracing::warn!(port = p, service = %d.name, error = %e,
+                    "could not publish a VIP Service's host port again");
+            }
+        }
+    }
+}
+
 /// Frees a Service's VIP lease, wherever it is. Idempotent.
 pub fn release_vip(namespace: &str, name: &str) {
     crate::ipam::release_everywhere(&lease_id(namespace, name));
@@ -682,12 +716,14 @@ pub const SVC_OUT_CHAIN: &str = "svcout";
 pub const VIP_GUARD_CHAIN: &str = "vipguard";
 pub const VIP_GUARD_OUT_CHAIN: &str = "vipguardout";
 
-/// One served VIP: its port and the READY backend addresses.
+/// One served VIP: its port, the READY backend addresses, and the host ports
+/// published for it (ADR-0066 D6).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VipPlan {
     pub vip: String,
     pub port: u16,
     pub backends: Vec<String>,
+    pub publish: Vec<u16>,
 }
 
 fn strict_v4(s: &str) -> bool {
@@ -730,6 +766,18 @@ pub fn render_script(table: &str, plans: &[VipPlan], guard: &[Cidr]) -> String {
                  random mod {} map {{ {map} }}\n",
                 p.vip,
                 p.port,
+                backends.len()
+            ));
+        }
+        // D6: a published host port arrives on the slirp's address, and is
+        // DNATed straight to the backends — no double DNAT through the VIP.
+        // Without a ready backend there is no rule, and the connection reaches
+        // the holder itself, where nothing listens: a reset, like the VIP's.
+        for hp in p.publish.iter().filter(|hp| **hp != 0) {
+            s.push_str(&format!(
+                "add rule ip {table} {SVC_PRE_CHAIN} ip daddr {} tcp dport {hp} counter dnat ip \
+                 to numgen random mod {} map {{ {map} }}\n",
+                crate::infra::INFRA_SLIRP_IP,
                 backends.len()
             ));
         }
@@ -1079,6 +1127,7 @@ pub(crate) fn sync_now(force_probe: bool) -> Result<()> {
             vip: vip.clone(),
             port: d.port,
             backends: ready,
+            publish: d.publish.clone(),
         });
         snapshot.push(ServiceState {
             namespace: d.namespace.clone(),
@@ -1231,6 +1280,7 @@ mod tests {
                 vip: "10.90.0.10".into(),
                 port: 80,
                 backends: vec![],
+                publish: vec![18080],
             }],
             &[c("10.90.0.0/16")],
         );
@@ -1248,6 +1298,7 @@ mod tests {
                 vip: "10.90.0.10".into(),
                 port: 8080,
                 backends: vec!["10.233.0.11".into(), "10.233.0.12".into()],
+                publish: vec![18080],
             }],
             &[c("10.90.0.0/16")],
         );
@@ -1260,6 +1311,16 @@ mod tests {
             s.contains(&format!("add rule ip dlxing svcout {want}")),
             "{s}"
         );
+        // D6: the published port goes straight to the same set, only from the
+        // slirp side (prerouting), never through the VIP.
+        assert!(
+            s.contains(
+                "add rule ip dlxing svcpre ip daddr 10.0.2.100 tcp dport 18080 counter dnat ip \
+                 to numgen random mod 2 map { 0 : 10.233.0.11 . 8080, 1 : 10.233.0.12 . 8080 }"
+            ),
+            "{s}"
+        );
+        assert!(!s.contains("svcout ip daddr 10.0.2.100"), "{s}");
         assert!(!s.contains("numgen inc"));
     }
 
@@ -1271,6 +1332,7 @@ mod tests {
                 vip: "10.90.0.10".into(),
                 port: 80,
                 backends: vec!["10.233.0.11; flush ruleset".into(), "10.233.0.12".into()],
+                publish: vec![],
             }],
             &[],
         );
