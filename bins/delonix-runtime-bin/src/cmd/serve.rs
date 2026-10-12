@@ -364,7 +364,7 @@ fn install_node_api_units(addr: Option<&str>, idle: Option<&str>) -> Result<()> 
     let exec = exec.display().to_string();
     let root = super::util::state_root().display().to_string();
     let idle = idle.unwrap_or(UNIT_DEFAULT_IDLE);
-    delonix_node::dispatch::parse_idle_timeout(idle)?;
+    let never_idle = delonix_node::dispatch::parse_idle_timeout(idle)?.is_zero();
     let listen = match addr {
         Some(a) => {
             let p = a.strip_prefix("unix://").unwrap_or(a);
@@ -451,10 +451,17 @@ fn install_node_api_units(addr: Option<&str>, idle: Option<&str>) -> Result<()> 
     } else {
         listen.clone()
     };
+    // `0` means the server never exits on its own, and saying "exits after 0"
+    // reads as the opposite.
+    let template = if never_idle {
+        "node API socket enabled at {sock}: the first connection starts delonix-node-api, which then stays up (`--idle-timeout 0`). Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
+    } else {
+        "node API socket enabled at {sock}: the first connection starts delonix-node-api, which exits after {idle} with nothing open. Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
+    };
     println!(
         "{}",
         super::po::tf(
-            "node API socket enabled at {sock}: the first connection starts delonix-node-api, which exits after {idle} with nothing open. Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above.",
+            template,
             &[
                 ("sock", &shown),
                 ("idle", idle),

@@ -15746,3 +15746,6 @@ msgstr "O gestor de serviços passou um socket à escuta e a linha de comandos t
 
 msgid "Drop `--addr` from the unit's `ExecStart=`: under socket activation the address is the `.socket` unit's `ListenStream=`."
 msgstr "Tira o `--addr` do `ExecStart=` da unit: com activação de socket o endereço é o `ListenStream=` da unit `.socket`."
+
+msgid "node API socket enabled at {sock}: the first connection starts delonix-node-api, which then stays up (`--idle-timeout 0`). Remove: systemctl {scope}disable --now delonix-node-api.socket, then delete the two files above."
+msgstr "socket da API de nó activado em {sock}: a primeira ligação arranca o delonix-node-api, que depois fica de pé (`--idle-timeout 0`). Para remover: systemctl {scope}disable --now delonix-node-api.socket, e depois apaga os dois ficheiros acima."
