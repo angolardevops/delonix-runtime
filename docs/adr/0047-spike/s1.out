@@ -1,0 +1,26 @@
+## host -> 127.0.0.1:18471 (Host: app.test)
+WIN-be-a
+## cl-a -> proxy at its own gateway 10.251.0.1:18471
+wget: download timed out 
+## cl-b -> proxy at its own gateway 10.251.0.1:18471
+wget: download timed out 
+## cl-a2 -> proxy at its own gateway 10.230.0.1:18471
+wget: download timed out 
+## cl-b2 -> proxy at its own gateway 10.230.0.1:18471
+wget: download timed out 
+## cl-m -> proxy at its own gateway 10.230.0.1:18471
+wget: download timed out 
+## po-c0 -> proxy at its own gateway 10.251.0.1:18471
+wget: download timed out 
+## cl-a -> be-a directly (10.251.153.125:8080)
+WIN-be-a 
+## cl-b -> be-a directly (10.251.153.125:8080)
+wget: download timed out 
+## cl-a2 -> be-a directly (10.251.153.125:8080)
+wget: download timed out 
+## cl-b2 -> be-a directly (10.251.153.125:8080)
+wget: download timed out 
+## po-c0 -> be-a directly (10.251.153.125:8080)
+wget: download timed out 
+## dlxinput
+		ct state new counter packets 24 bytes 1440 drop

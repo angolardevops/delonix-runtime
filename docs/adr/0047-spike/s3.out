@@ -1,0 +1,33 @@
+## be-a 10.251.153.125, its chain: fwc122ef17
+### 1. no policy on be-a (namespace + network isolation only)
+cl-a  teamA netA (allowed control)           direct: WIN-be-a                                 proxy: WIN-be-a 
+cl-b  teamB netA (other namespace)           direct: wget: download timed out                 proxy: WIN-be-a 
+po-c0 teamB netA (pod, other namespace)      direct: wget: download timed out                 proxy: WIN-be-a 
+cl-a2 teamA netB (other network, no route)   direct: wget: download timed out                 proxy: WIN-be-a 
+cl-b2 teamB netB (other network+namespace)   direct: wget: download timed out                 proxy: WIN-be-a 
+cl-m  teamB netB+netA (multi-homed, via netA) direct: wget: download timed out                 proxy: WIN-be-a 
+## be-a chain drops
+ct state invalid counter packets 0 bytes 0 drop
+ip daddr 10.251.153.125 ip saddr @dlxall ct state new counter packets 12 bytes 720 drop
+### 2. be-a: ingress policy deny
+be-a: default inbound policy = deny
+cl-a  teamA netA                             direct: wget: download timed out                 proxy: WIN-be-a 
+host 127.0.0.1:18471                         proxy: WIN-be-a
+## be-a chain drops
+ct state invalid counter packets 0 bytes 0 drop
+ip daddr 10.251.153.125 ip saddr @dlxall ip saddr != @dlxnse20c4037 ct state new counter packets 0 bytes 0 drop
+ip daddr 10.251.153.125 counter packets 4 bytes 240 drop
+be-a: default inbound policy = allow
+### 3. cl-a: egress policy deny (the client's own outbound policy)
+cl-a: default outbound policy = deny
+cl-a  teamA netA, egress deny                direct: wget: download timed out                 proxy: WIN-be-a 
+## cl-a chain (fwa235ccb2) drops
+ct state invalid counter packets 0 bytes 0 drop
+ip daddr 10.251.65.216 ip saddr @dlxall ct state new counter packets 0 bytes 0 drop
+ip saddr 10.251.65.216 counter packets 4 bytes 240 drop
+cl-a: default outbound policy = allow
+### 4. what the proxy knows about the backend at request time (the composed config)
+[{"host": "app.test", "path": "/", "backend": "10.251.153.125:8080", "source": "app"}]
+## dlxinput counters
+		iifname @dlxbr tcp dport { 18471, 18472 } counter packets 5 bytes 352 accept comment "adr0047-spike-d2"
+		ct state new counter packets 0 bytes 0 drop

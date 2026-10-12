@@ -1,0 +1,14 @@
+## cl-b dials the tap0 address 10.0.2.100:18472 (D2 rule as in S2: iifname @dlxbr, any daddr)
+peer=10.251.212.68:48796 local=10.0.2.100:18472 host=10.0.2.100:18472 
+## the D2 rule with a destination guard: only the bridge-side addresses
+		iifname @dlxbr ip daddr != 10.0.2.100 tcp dport { 18471, 18472 } counter packets 0 bytes 0 accept comment "adr0047-spike-d2"
+		ct state new counter packets 0 bytes 0 drop
+cl-b -> 10.0.2.100:18472: wget: download timed out 
+cl-b -> 10.251.0.1:18472:  peer=10.251.212.68:51516 local=10.251.0.1:18472 host=10.251.0.1:18472 
+host -> 127.0.0.1:18472:   peer=10.0.2.2:40364 local=10.0.2.100:18472 host=127.0.0.1:18472
+		iifname @dlxbr ip daddr != 10.0.2.100 tcp dport { 18471, 18472 } counter packets 5 bytes 360 accept comment "adr0047-spike-d2"
+		ct state new counter packets 4 bytes 240 drop
+## probe log
+1791755210.017 peer=10.251.212.68:48796 local=10.0.2.100:18472 host=10.0.2.100:18472
+1791755214.348 peer=10.251.212.68:51516 local=10.251.0.1:18472 host=10.251.0.1:18472
+1791755214.384 peer=10.0.2.2:40364 local=10.0.2.100:18472 host=127.0.0.1:18472
