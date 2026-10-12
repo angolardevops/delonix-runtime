@@ -30,6 +30,29 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 //!
+//! # Cases still owed a live run, and what each needs (N17, N18, N28)
+//!
+//! As of 2026-10-12 these have never passed against a node; each names its
+//! variables in its `#[ignore]` reason and FAILS naming one that is unset.
+//!
+//! | case | needs beyond the node |
+//! |---|---|
+//! | `a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there` | a second cluster node (`DELONIX_PROXMOX_TEST_MOVE_NODE`) and a storage both nodes share for VM disks (`DELONIX_PROXMOX_TEST_SHARED_STORAGE`, e.g. the lab's `nfs-lab`) |
+//! | `a_running_vm_moves_live_on_shared_storage_and_keeps_running` | the same two |
+//! | `a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored` | the same two |
+//! | `a_system_container_moves_to_another_node_offline_and_by_restart` | `DELONIX_PROXMOX_TEST_MOVE_NODE` and an OCI archive (`DELONIX_PROXMOX_TEST_OCI_ARCHIVE`, written by `delonix_oci::write_oci_media_archive`, e.g. `alpine:3.20` — `image save` writes Docker v2, which the node refuses) |
+//! | `o_ip_vem_do_agente_de_um_convidado_a_serio` | a running guest with `qemu-guest-agent` and two NICs (`DELONIX_PROXMOX_TEST_AGENT_VMID`; how to prepare one is in the case's comment) |
+//! | `the_dns_provider_registers_a_guest_in_the_zones_dns_server` | a DNS controller registered on the cluster and its PowerDNS reachable from the test (`DELONIX_PROXMOX_TEST_DNS_CONTROLLER`, `_DNS_ZONE`, `_DNS_URL`, `_DNS_KEY_FILE`) and `DELONIX_PROXMOX_TEST_OCI_ARCHIVE` |
+//! | `the_guest_agent_reports_its_online_vcpus_and_memory_blocks` (N28) | `DELONIX_PROXMOX_TEST_AGENT_VMID`; read-only |
+//! | `the_cluster_probe_reads_the_nodes_release` (N28) | nothing; read-only |
+//! | `the_plan_reads_a_gateway_entry_released_or_moved_by_hand_and_the_repair_clears_it` (N18) | nothing; creates and removes its own zone |
+//!
+//! Run them with `DELONIX_PROXMOX_TRACE_ROUTES` set and commit the trace: a
+//! route the matrix marks `supported+untested` is promoted only by a
+//! committed trace (ADR-0049 D2). The two-node cases and the agent guest
+//! cost two appliances and a guest: run them alone, behind
+//! `scripts/lab_budget.sh`.
+//!
 //! # Run order: two invocations, never one (N29)
 //!
 //! The firewall cases (`the_vms_own_firewall_*`,
