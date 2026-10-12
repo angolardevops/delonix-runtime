@@ -17,8 +17,8 @@ use delonix_compute::capability::{
 };
 use delonix_compute::vm::{serial_log_path, valid_vm_name};
 use delonix_compute::vm_backend::{
-    mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem, GuestInfo, VmBackend,
-    VmConfig,
+    mem_mib, BackendRegistration, Boot, CreateStage, GuestFilesystem, GuestInfo, HotplugOutcome,
+    VmBackend, VmConfig,
 };
 use delonix_compute::vm_error::{Error, Result};
 use delonix_compute::vm_registry::mac_for;
@@ -358,9 +358,13 @@ pub fn libvirt_report(host: &LibvirtHost) -> ProviderReport {
             C::VmResizeCold => bin(S::Supported {
                 evidence: "check:o domínio arranca com 2 vCPU",
             }),
-            C::VmHotplugCpuAdd => S::NotImplemented,
+            C::VmHotplugCpuAdd => bin(S::Partial {
+                detail: "`vm update --vcpus` via `virsh setvcpus --live` into the `<vcpu current=…>` maximum fixed at create (ADR-0068 D3), read back with `vcpucount`; the guest agent's `guest-get-vcpus` decides complete or partial (D4/D8); unit-tested, never run against a guest",
+            }),
             C::VmHotplugCpuRemove => S::NotImplemented,
-            C::VmHotplugMemoryAdd => S::NotImplemented,
+            C::VmHotplugMemoryAdd => bin(S::Partial {
+                detail: "`vm update --memory` plugs a DIMM (`attach-device --live`) into the `<maxMemory>` slots fixed at create (ADR-0068 D3), read back with `dominfo`; the agent's memory blocks decide complete or partial (D4/D8); unit-tested, never run against a guest",
+            }),
             C::VmHotplugMemoryRemove => S::NotImplemented,
             C::VmHotplugDiskAdd => S::NotImplemented,
             C::VmHotplugDiskRemove => S::NotImplemented,
@@ -920,6 +924,154 @@ fn parse_virtual_size(json: &str) -> Option<u64> {
         .as_u64()
 }
 
+// ---- hotplug (ADR-0068 Phases 2–3) -------------------------------------
+
+/// The connection a RUNNING domain lives on, or an error naming it.
+fn live_domain_uri(vm: &Vm) -> delonix_model::Result<&'static str> {
+    libvirt_domain_uri(&vm.name).ok_or_else(|| {
+        delonix_model::Error::from(Error::Command {
+            context: "vm hotplug",
+            message: format!("libvirt does not know a domain named '{}'", vm.name),
+        })
+    })
+}
+
+fn virsh_hotplug<S: AsRef<str>>(
+    args: &[S],
+    context: &'static str,
+) -> delonix_model::Result<String> {
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    quiet("virsh", &args).map_err(|message| Error::Command { context, message }.into())
+}
+
+/// `virsh setvcpus`, named options only (a positional after a flag is the
+/// ordering bug this file already paid for). `--live`: the next boot rebuilds
+/// the domain from the record, which the engine updates (D6). Pure.
+fn setvcpus_argv(uri: &str, name: &str, count: u32) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "setvcpus".into(),
+        "--domain".into(),
+        name.into(),
+        "--count".into(),
+        count.to_string(),
+        "--live".into(),
+    ]
+}
+
+/// `virsh vcpucount --live --active`: the vCPUs the domain HAS now. Pure.
+fn vcpucount_argv(uri: &str, name: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "vcpucount".into(),
+        "--domain".into(),
+        name.into(),
+        "--live".into(),
+        "--active".into(),
+    ]
+}
+
+fn attach_device_argv(uri: &str, name: &str, file: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "attach-device".into(),
+        "--domain".into(),
+        name.into(),
+        "--file".into(),
+        file.into(),
+        "--live".into(),
+    ]
+}
+
+/// One hot-added DIMM of `kib`, in NUMA node 0 (the only cell the domain is
+/// booted with). Pure.
+fn dimm_xml(kib: u64) -> String {
+    format!(
+        "<memory model='dimm'>\n  <target>\n    <size unit='KiB'>{kib}</size>\n    \
+         <node>0</node>\n  </target>\n</memory>\n"
+    )
+}
+
+fn parse_vcpucount(out: &str) -> Option<u32> {
+    out.trim().parse().ok()
+}
+
+/// `virsh dominfo`'s `Max memory:` — the domain's memory INCLUDING plugged
+/// DIMMs (`Used memory:` is the balloon target, not what is plugged). Pure.
+fn parse_dominfo_memory_kib(out: &str) -> Option<u64> {
+    out.lines().find_map(|l| {
+        let rest = l.trim().strip_prefix("Max memory:")?;
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
+/// How many vCPUs the guest's agent reports ONLINE. Pure.
+fn guest_online_vcpus(v: &serde_json::Value) -> u32 {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|c| c.get("online").and_then(|o| o.as_bool()) == Some(true))
+                .count() as u32
+        })
+        .unwrap_or(0)
+}
+
+/// The guest's memory as its agent lists it: `(MiB in online blocks, blocks
+/// offline)`. `None` when the block size is unreadable. Pure.
+fn guest_memory_state(blocks: &serde_json::Value, info: &serde_json::Value) -> Option<(u64, u32)> {
+    let size = info.get("size")?.as_u64()?;
+    let list = blocks.as_array()?;
+    let online = list
+        .iter()
+        .filter(|b| b.get("online").and_then(|o| o.as_bool()) == Some(true))
+        .count() as u64;
+    let offline = list.len() as u64 - online;
+    Some((online * size / (1024 * 1024), offline as u32))
+}
+
+/// The CPU outcome (D4): complete only when the guest's agent sees at least
+/// the vCPUs the domain has, all online. Pure.
+fn cpu_outcome(assigned: u32, guest_online: Option<u32>) -> HotplugOutcome {
+    match guest_online {
+        Some(n) if n >= assigned => HotplugOutcome::Complete,
+        Some(n) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has {assigned} vCPUs but the guest has {n} online — its image does \
+                 not online hot-added CPUs (ADR-0068 D8: a udev rule)"
+            ),
+        },
+        None => HotplugOutcome::Partial {
+            reason: "the domain took the vCPUs, but no guest agent answers to say the guest \
+                     onlined them (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
+/// The memory outcome (D4): complete when the guest has no offline block and
+/// its online memory reaches what the domain has, give or take the firmware
+/// holes a boot map never exposes as blocks (two blocks of slack). Pure.
+fn memory_outcome(assigned_mib: u64, guest: Option<(u64, u32)>) -> HotplugOutcome {
+    match guest {
+        Some((online_mib, 0)) if online_mib + 256 >= assigned_mib => HotplugOutcome::Complete,
+        Some((online_mib, offline)) => HotplugOutcome::Partial {
+            reason: format!(
+                "the domain has {assigned_mib} MiB but the guest has {online_mib} MiB online \
+                 ({offline} block(s) offline) — its image does not online hot-added memory \
+                 (ADR-0068 D8: memhp_default_state=online or a udev rule)"
+            ),
+        },
+        None => HotplugOutcome::Partial {
+            reason: "the domain took the memory, but no guest agent answers to say the guest \
+                     onlined it (ADR-0068 D4)"
+                .into(),
+        },
+    }
+}
+
 /// `true` when a `virsh qemu-agent-command` failure MEANS "nothing is
 /// listening", not "something else broke". Pure, extracted out of the match
 /// guard above so it is testable without a real `virsh`. `virsh` phrases
@@ -1178,6 +1330,43 @@ fn serial_capture_path(cfg: &VmConfig, overlay: &str) -> Option<String> {
     )
 }
 
+/// DIMM slots reserved for memory hotplug (ADR-0068 D3): each hot-add plugs
+/// one DIMM, so this is how many separate memory additions a boot allows.
+const MEMORY_HOTPLUG_SLOTS: u32 = 16;
+
+/// Spare PCIe root ports reserved at boot for hot-added disks and NICs
+/// (ADR-0068 D3/D7).
+const SPARE_PCIE_ROOT_PORTS: u32 = 4;
+
+/// The hotplug ceilings that open headroom: `(Some(max vCPUs), Some(max KiB))`
+/// only where the ceiling is ABOVE the boot size — a ceiling equal to it is no
+/// headroom and changes nothing in the domain. Pure.
+fn hotplug_ceilings(cfg: &VmConfig, vcpus: u32, mib: u64) -> (Option<u32>, Option<u64>) {
+    let max_vcpus = cfg.vcpus_max.filter(|m| *m > vcpus);
+    let max_kib = cfg.memory_max_mib.filter(|m| *m > mib).map(|m| m * 1024);
+    (max_vcpus, max_kib)
+}
+
+/// `<vcpu>`, and with headroom the per-vCPU `<vcpus>` table libvirt needs to
+/// hot-add them (`virsh setvcpus --live`). vCPU 0 is never hot-pluggable: the
+/// guest cannot run without it. Pure.
+fn libvirt_vcpu_xml(vcpus: u32, max: Option<u32>) -> String {
+    let Some(max) = max else {
+        return format!("  <vcpu placement='static'>{vcpus}</vcpu>\n");
+    };
+    let mut s = format!("  <vcpu placement='static' current='{vcpus}'>{max}</vcpu>\n");
+    s.push_str("  <vcpus>\n");
+    for i in 0..max {
+        let enabled = if i < vcpus { "yes" } else { "no" };
+        let hotpluggable = if i == 0 { "no" } else { "yes" };
+        s.push_str(&format!(
+            "    <vcpu id='{i}' enabled='{enabled}' hotpluggable='{hotpluggable}'/>\n"
+        ));
+    }
+    s.push_str("  </vcpus>\n");
+    s
+}
+
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Full-domain escape hatch: the manifest author owns the entire XML. The
     // rootless seclabel is still injected at boot (`create`, via the </domain>
@@ -1189,10 +1378,21 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     let kib = mib * 1024;
     let vcpus = cfg.vcpus.max(1);
     let name = xml_escape(&cfg.name);
+    // ADR-0068 D3: the hotplug CEILINGS are fixed here, at boot. Without them
+    // there is no headroom, and every limit below is sized from the boot size
+    // exactly as before; with them, the CONTAINMENT limits are sized from the
+    // ceiling — a hard_limit computed from the boot memory would OOM-kill the
+    // domain the moment the guest used the memory it was hot-added.
+    let (max_vcpus, max_kib) = hotplug_ceilings(cfg, vcpus, mib);
 
     let mut s = String::new();
     s.push_str("<domain type='kvm'>\n");
     s.push_str(&format!("  <name>{name}</name>\n"));
+    if let Some(max_kib) = max_kib {
+        s.push_str(&format!(
+            "  <maxMemory slots='{MEMORY_HOTPLUG_SLOTS}' unit='KiB'>{max_kib}</maxMemory>\n"
+        ));
+    }
     s.push_str(&format!("  <memory unit='KiB'>{kib}</memory>\n"));
     s.push_str(&format!(
         "  <currentMemory unit='KiB'>{kib}</currentMemory>\n"
@@ -1219,12 +1419,12 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // for legitimate overhead. `DELONIX_VM_MEM_OVERHEAD_PCT` tunes the
     // percentage; `DELONIX_VM_MEM_HARD_LIMIT=off` disables the element entirely
     // for anyone who measured their workload and wants the old behaviour.
-    if let Some(limit_kib) = mem_hard_limit_kib(kib) {
+    if let Some(limit_kib) = mem_hard_limit_kib(max_kib.unwrap_or(kib)) {
         s.push_str(&format!(
             "  <memtune>\n    <hard_limit unit='KiB'>{limit_kib}</hard_limit>\n  </memtune>\n"
         ));
     }
-    s.push_str(&format!("  <vcpu placement='static'>{vcpus}</vcpu>\n"));
+    s.push_str(&libvirt_vcpu_xml(vcpus, max_vcpus));
     // CPU pinning (NUMA/determinism) and CONTAINMENT (2/2).
     //
     // `<vcpu>N` bounds the vCPU THREADS to N cores, but a domain is more than
@@ -1239,7 +1439,8 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // while still bounding a runaway. `DELONIX_VM_CPU_QUOTA_CORES` overrides the
     // ceiling outright (fractional allowed — this is how you give a tenant 8
     // vCPUs for parallelism but only 2 cores of throughput); `off` disables it.
-    let cputune_quota = cpu_quota_micros(vcpus);
+    let all_vcpus = max_vcpus.unwrap_or(vcpus);
+    let cputune_quota = cpu_quota_micros(all_vcpus);
     if cfg.cpu_affinity.is_some() || cputune_quota.is_some() {
         s.push_str("  <cputune>\n");
         if let Some(q) = cputune_quota {
@@ -1248,7 +1449,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         }
         if let Some(list) = &cfg.cpu_affinity {
             let list = xml_escape(list);
-            for v in 0..vcpus {
+            for v in 0..all_vcpus {
                 s.push_str(&format!("    <vcpupin vcpu='{v}' cpuset='{list}'/>\n"));
             }
         }
@@ -1292,7 +1493,15 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     }
     s.push_str("  </os>\n");
     s.push_str("  <features>\n    <acpi/>\n    <apic/>\n  </features>\n");
-    s.push_str(&libvirt_cpu_xml(cfg));
+    // Memory hotplug needs a guest NUMA topology: a DIMM is plugged into a
+    // node. One cell, every vCPU, the boot memory.
+    let numa = max_kib.map(|_| {
+        format!(
+            "    <numa>\n      <cell id='0' cpus='0-{}' memory='{kib}' unit='KiB'/>\n    </numa>\n",
+            all_vcpus - 1
+        )
+    });
+    s.push_str(&libvirt_cpu_xml(cfg, numa.as_deref()));
     s.push_str("  <clock offset='utc'/>\n");
     s.push_str("  <on_poweroff>destroy</on_poweroff>\n");
     // restart policy: 'always'/'on-failure' → restart on crash.
@@ -1552,6 +1761,14 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("    <channel type='unix'>\n");
     s.push_str("      <target type='virtio' name='org.qemu.guest_agent.0'/>\n");
     s.push_str("    </channel>\n");
+    // ADR-0068 D3/D7: on q35 a hot-added disk or NIC needs a FREE PCIe root
+    // port, and libvirt only creates the ports the boot devices use. Spare
+    // ports are reserved here, at boot — they cannot be added live.
+    if machine.starts_with("q35") || machine.contains("-q35") {
+        for _ in 0..SPARE_PCIE_ROOT_PORTS {
+            s.push_str("    <controller type='pci' model='pcie-root-port'/>\n");
+        }
+    }
     // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
     // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
     // manifests only (a fragment can name arbitrary host paths/devices).
@@ -1569,7 +1786,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
 /// The domain's `<cpu>` element from `cpu_model` + `cpu_topology`. **Pure**.
 /// `host-passthrough` (default) exposes the host CPU exactly; `host-model`
 /// asks libvirt for the closest named model; anything else is a custom model.
-fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
+fn libvirt_cpu_xml(cfg: &VmConfig, numa: Option<&str>) -> String {
     let topo = cfg.cpu_topology.as_ref().map(|t| {
         format!(
             "    <topology sockets='{}' cores='{}' threads='{}'/>\n",
@@ -1578,6 +1795,11 @@ fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
             t.threads.max(1)
         )
     });
+    // The NUMA cell rides inside `<cpu>`, after the topology.
+    let topo = match (topo, numa) {
+        (None, None) => None,
+        (t, n) => Some(format!("{}{}", t.unwrap_or_default(), n.unwrap_or(""))),
+    };
     match cfg.cpu_model.as_deref().unwrap_or("host-passthrough") {
         "host-passthrough" => match topo {
             Some(t) => format!("  <cpu mode='host-passthrough' check='none'>\n{t}  </cpu>\n"),
@@ -2367,6 +2589,134 @@ impl VmBackend for LibvirtBackend {
             agent_version,
             filesystems,
         }))
+    }
+
+    /// `virsh setvcpus --live` (ADR-0068 Phase 2), up to the `<vcpu>` maximum
+    /// the domain was booted with (D3). The count read back is the domain's
+    /// live `vcpucount` (D5); whether the GUEST onlined them is asked of its
+    /// agent (`guest-get-vcpus`), polled for `wait` (D4). No agent, or vCPUs
+    /// the guest leaves offline (an image without the udev rule, D8), is
+    /// `Partial` — never success.
+    fn hotplug_add_cpu(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        target_vcpus: u32,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(u32, HotplugOutcome)> {
+        let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+        if target_vcpus > ceiling {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_vcpus} vCPUs — the declared maximum is \
+                 {ceiling} (see `vm resize --vcpus-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        virsh_hotplug(
+            &setvcpus_argv(uri, &vm.name, target_vcpus),
+            "virsh setvcpus",
+        )?;
+        let out = virsh_hotplug(&vcpucount_argv(uri, &vm.name), "virsh vcpucount")?;
+        let assigned = parse_vcpucount(&out).ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "virsh vcpucount",
+                message: format!("not a count: {out}"),
+            })
+        })?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let guest = qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-vcpus"}"#)?;
+            let online = guest.as_ref().map(guest_online_vcpus);
+            match cpu_outcome(assigned, online) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if std::time::Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+
+    /// A DIMM through `virsh attach-device --live` (ADR-0068 Phase 3), into
+    /// the `<maxMemory>` slots reserved at boot (D3). The size read back is
+    /// the domain's live memory from `dominfo` (D5); the guest side is its
+    /// agent's memory blocks — an image that does not online hot-added
+    /// memory (D8: no `memhp_default_state=online` nor udev rule) leaves them
+    /// offline, which is `Partial`.
+    fn hotplug_add_memory(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        target_mib: u64,
+        wait: std::time::Duration,
+    ) -> delonix_model::Result<(u64, HotplugOutcome)> {
+        let ceiling = vm.memory_max_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib > ceiling {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' has no headroom for {target_mib} MiB — the declared maximum is \
+                 {ceiling} MiB (see `vm resize --memory-max`, ADR-0068 D3)",
+                vm.name
+            ))
+            .into());
+        }
+        let uri = live_domain_uri(vm)?;
+        let current_mib = parse_dominfo_memory_kib(&virsh_hotplug(
+            &["-c", uri, "dominfo", "--domain", &vm.name],
+            "virsh dominfo",
+        )?)
+        .map(|k| k / 1024)
+        .unwrap_or_else(|| mem_mib(&vm.memory));
+        if target_mib <= current_mib {
+            return Err(Error::InvalidResize(format!(
+                "VM '{}' already has {current_mib} MiB live (asked for {target_mib} MiB)",
+                vm.name
+            ))
+            .into());
+        }
+        let xml_path = vmdir.join(format!("{}.dimm.xml", vm.name));
+        std::fs::write(&xml_path, dimm_xml((target_mib - current_mib) * 1024)).map_err(|e| {
+            delonix_model::Error::from(Error::Command {
+                context: "vm hotplug memory",
+                message: format!("{}: {e}", xml_path.display()),
+            })
+        })?;
+        let xml = xml_path.to_string_lossy().into_owned();
+        let attached = virsh_hotplug(
+            &attach_device_argv(uri, &vm.name, &xml),
+            "virsh attach-device",
+        );
+        let _ = std::fs::remove_file(&xml_path);
+        attached?;
+        let assigned = parse_dominfo_memory_kib(&virsh_hotplug(
+            &["-c", uri, "dominfo", "--domain", &vm.name],
+            "virsh dominfo",
+        )?)
+        .map(|k| k / 1024)
+        .ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "virsh dominfo",
+                message: "no 'Max memory' line — the live memory size is unknown".into(),
+            })
+        })?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let blocks =
+                qemu_agent_query(uri, &vm.name, r#"{"execute":"guest-get-memory-blocks"}"#)?;
+            let info = qemu_agent_query(
+                uri,
+                &vm.name,
+                r#"{"execute":"guest-get-memory-block-info"}"#,
+            )?;
+            let state = match (blocks, info) {
+                (Some(b), Some(i)) => guest_memory_state(&b, &i),
+                _ => None,
+            };
+            match memory_outcome(assigned, state) {
+                HotplugOutcome::Complete => return Ok((assigned, HotplugOutcome::Complete)),
+                partial if std::time::Instant::now() >= deadline => return Ok((assigned, partial)),
+                _ => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
     }
 
     /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
@@ -3850,5 +4200,162 @@ mod tests {
         c.bridge = Some("br0".into());
         let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");
         assert!(br.contains("type='bridge'") && br.contains("source bridge='br0'"));
+    }
+}
+
+/// ADR-0068 Phases 2–3 on libvirt: the ceilings fixed at boot (D3), the argv
+/// that adds live, and the outcome the guest's agent decides (D4, D8).
+#[cfg(test)]
+mod hotplug_tests {
+    use super::*;
+
+    fn cfg(vcpus: u32, memory: &str, vmax: Option<u32>, mmax: Option<u64>) -> VmConfig {
+        VmConfig {
+            name: "hp".into(),
+            disk: String::new(),
+            vcpus,
+            memory: memory.into(),
+            vcpus_max: vmax,
+            memory_max_mib: mmax,
+            ..Default::default()
+        }
+    }
+
+    /// The defect this closes: `vm create --vcpus-max/--memory-max` recorded
+    /// a ceiling the domain never had — no `current=`, no `<maxMemory>` — so
+    /// every live add failed in libvirt after the engine had accepted it.
+    #[test]
+    fn a_declared_ceiling_opens_headroom_in_the_domain() {
+        let xml = libvirt_domain_xml(
+            &cfg(2, "2048M", Some(8), Some(8192)),
+            "/o.qcow2",
+            "52:54:00:00:00:01",
+        );
+        assert!(
+            xml.contains("<vcpu placement='static' current='2'>8</vcpu>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='0' enabled='yes' hotpluggable='no'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='1' enabled='yes' hotpluggable='yes'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<vcpu id='7' enabled='no' hotpluggable='yes'/>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<maxMemory slots='16' unit='KiB'>8388608</maxMemory>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<memory unit='KiB'>2097152</memory>"), "{xml}");
+        assert!(
+            xml.contains("<cell id='0' cpus='0-7' memory='2097152' unit='KiB'/>"),
+            "a DIMM needs a NUMA node to plug into: {xml}"
+        );
+        assert_eq!(xml.matches("model='pcie-root-port'").count(), 4, "{xml}");
+    }
+
+    /// The containment limits follow the ceiling: a hard_limit sized from the
+    /// boot memory OOM-kills the domain once the guest uses a hot-added DIMM.
+    #[test]
+    fn the_containment_limits_are_sized_from_the_ceiling() {
+        let with = libvirt_domain_xml(&cfg(2, "2048M", Some(8), Some(8192)), "/o", "m");
+        let without = libvirt_domain_xml(&cfg(2, "2048M", None, None), "/o", "m");
+        if let Some(limit) = mem_hard_limit_kib(8192 * 1024) {
+            assert!(with.contains(&format!("<hard_limit unit='KiB'>{limit}</hard_limit>")));
+        }
+        if let Some(q) = cpu_quota_micros(8) {
+            assert!(with.contains(&format!("<quota>{q}</quota>")), "{with}");
+        }
+        assert!(without.contains("<vcpu placement='static'>2</vcpu>"));
+        assert!(!without.contains("maxMemory") && !without.contains("<numa>"));
+    }
+
+    /// A ceiling equal to the boot size is no headroom: the domain is the
+    /// one it always was.
+    #[test]
+    fn a_ceiling_equal_to_the_boot_size_changes_nothing() {
+        let a = libvirt_domain_xml(&cfg(2, "2048M", Some(2), Some(2048)), "/o", "m");
+        let b = libvirt_domain_xml(&cfg(2, "2048M", None, None), "/o", "m");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_live_add_argv_uses_named_options_and_live_only() {
+        assert_eq!(
+            setvcpus_argv("qemu:///system", "hp", 4).join(" "),
+            "-c qemu:///system setvcpus --domain hp --count 4 --live"
+        );
+        assert_eq!(
+            vcpucount_argv("qemu:///system", "hp").join(" "),
+            "-c qemu:///system vcpucount --domain hp --live --active"
+        );
+        assert_eq!(
+            attach_device_argv("qemu:///system", "-hp", "/f.xml").join(" "),
+            "-c qemu:///system attach-device --domain -hp --file /f.xml --live"
+        );
+        let x = dimm_xml(1048576);
+        assert!(
+            x.contains("<memory model='dimm'>") && x.contains("<size unit='KiB'>1048576</size>")
+        );
+        assert!(x.contains("<node>0</node>"));
+    }
+
+    #[test]
+    fn the_read_backs_parse_what_virsh_prints() {
+        assert_eq!(parse_vcpucount("4\n"), Some(4));
+        let dominfo = "Id:             3\nName:           hp\nMax memory:     3145728 KiB\nUsed memory:    2097152 KiB\n";
+        assert_eq!(parse_dominfo_memory_kib(dominfo), Some(3145728));
+        assert_eq!(parse_dominfo_memory_kib("nothing"), None);
+    }
+
+    /// D4/D8: success only when the GUEST is using it. No agent, or vCPUs
+    /// and memory the image leaves offline, is `Partial`, and says why.
+    #[test]
+    fn the_guest_agent_decides_complete_or_partial() {
+        let vcpus = serde_json::json!([
+            {"logical-id": 0, "online": true}, {"logical-id": 1, "online": true},
+            {"logical-id": 2, "online": false}, {"logical-id": 3, "online": false}
+        ]);
+        assert_eq!(guest_online_vcpus(&vcpus), 2);
+        assert_eq!(cpu_outcome(2, Some(2)), HotplugOutcome::Complete);
+        match cpu_outcome(4, Some(2)) {
+            HotplugOutcome::Partial { reason } => assert!(reason.contains("D8"), "{reason}"),
+            o => panic!("{o:?}"),
+        }
+        assert!(matches!(
+            cpu_outcome(4, None),
+            HotplugOutcome::Partial { .. }
+        ));
+
+        let info = serde_json::json!({"size": 134217728u64});
+        let blocks = |online: usize, offline: usize| {
+            let mut v: Vec<serde_json::Value> = (0..online)
+                .map(|_| serde_json::json!({"online": true}))
+                .collect();
+            v.extend((0..offline).map(|_| serde_json::json!({"online": false})));
+            serde_json::Value::Array(v)
+        };
+        let st = guest_memory_state(&blocks(24, 0), &info).unwrap();
+        assert_eq!(st, (3072, 0));
+        assert_eq!(memory_outcome(3072, Some(st)), HotplugOutcome::Complete);
+        let st = guest_memory_state(&blocks(16, 8), &info).unwrap();
+        match memory_outcome(3072, Some(st)) {
+            HotplugOutcome::Partial { reason } => {
+                assert!(
+                    reason.contains("8 block(s) offline") && reason.contains("D8"),
+                    "{reason}"
+                )
+            }
+            o => panic!("{o:?}"),
+        }
+        assert!(matches!(
+            memory_outcome(3072, None),
+            HotplugOutcome::Partial { .. }
+        ));
     }
 }
