@@ -469,8 +469,10 @@ pub struct RuntimePolicySpec {
 }
 
 /// The profiles `workloadSecurity` accepts — an enum in the published schema,
-/// so `manifest validate` and an editor refuse `restricted` before a plan
-/// does.
+/// so an editor using it refuses `restricted` as it is typed. `stack
+/// plan`/`apply` refuse it before any effect. `manifest validate` does NOT:
+/// it does not deserialise a RuntimePolicy's values into their types
+/// (`denyPrivateEgress: maybe` passes it too), which is older than this field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkloadSecuritySpec {
