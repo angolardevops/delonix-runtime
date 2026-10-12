@@ -1417,6 +1417,36 @@ if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
   fi
 fi
 
+# ADR-0048 D4: a declared login is shown by reference, its value only under
+# `--reveal`, and the record holds the reference and never the value.
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  CRW="$OUT/cred-$PFX"; mkdir -p "$CRW"; CRC="cred-$PFX"
+  cat > "$CRW/m.yaml" <<EOF2
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: {name: $CRC}
+spec:
+  stringData: {password: v-$PFX}
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: {name: $CRC}
+spec:
+  image: $IMG
+  network: none
+  command: [sleep, "600"]
+  credentials: {user: admin, password: {secret: $CRC, key: password}}
+EOF2
+  if "$BIN" stack apply -f "$CRW/m.yaml" >/dev/null 2>&1; then
+    check "credentials: container ls --credentials shows the user and where the password lives" ok bash -c \
+      "'$BIN' container ls --credentials | grep '$CRC' | grep -q 'admin .*(secret $CRC)'"
+    check "credentials: --reveal prints the value, and the record does not hold it" ok bash -c \
+      "'$BIN' container ls --credentials --reveal | grep '$CRC' | grep -q 'v-$PFX' && ! grep -rqs 'v-$PFX' '$DELONIX_ROOT/containers'"
+  fi
+  "$BIN" stack destroy -f "$CRW/m.yaml" >/dev/null 2>&1 || true
+  rm -rf "$CRW"
+fi
+
 # ADR-0042 passo E: uma rede com um container ligado não se remove pelo socket
 # (409 DX-5307, a nomear o container), e remove-se depois de ele sair. Aqui e
 # não na secção do node API porque precisa da imagem.

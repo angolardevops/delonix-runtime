@@ -346,6 +346,8 @@ pub(crate) fn get(
             output,
             all: true,
             namespace,
+            credentials: false,
+            reveal: false,
         }),
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.

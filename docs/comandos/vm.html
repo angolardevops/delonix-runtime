@@ -821,6 +821,12 @@ Options:
           
           Filtering is the only way to read a namespace off this listing on a host that uses none: the NAMESPACE column hides itself when every row would say `default`. Passing the flag prints the value verbatim instead, so the filter is visible in its own output.
 
+      --credentials
+          Add USER and PASSWORD: each VM&#x27;s login (ADR-0048) — declared with `credentials:`, the documented default of an appliance image this repository builds, or `-`. The password shows where it lives (`(secret NAME)`), not its value
+
+      --reveal
+          With `--credentials`: print the password itself
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

@@ -10,6 +10,7 @@ pub mod compose;
 pub mod conditions;
 pub mod config;
 pub mod container;
+pub mod credentials;
 pub mod dash;
 pub mod dependency;
 pub mod diff;

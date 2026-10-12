@@ -187,6 +187,10 @@ pub(crate) struct VmSpec {
     /// Full `<domain>` XML used verbatim (ultimate escape hatch; trusted only).
     #[serde(rename = "libvirtXml", alias = "libvirt_xml")]
     libvirt_xml: Option<String>,
+    /// The guest's login (ADR-0048 D4): a user and a REFERENCE to a
+    /// `kind: Secret` key, never the value. Shown by `vm ls --credentials`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    credentials: Option<delonix_compute::credentials::CredentialsSpec>,
 }
 
 /// `spec.cpuTopology` of a `kind: VirtualMachine`.
@@ -304,6 +308,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "libvirt_xml_overlay",
     "libvirtXml",
     "libvirt_xml",
+    "credentials",
     // Grouped-form-only keys (see `normalize_vm_spec`) — `network` needs no
     // entry of its own: it's ALREADY above, reused for both shapes (a plain
     // string in the old flat form, a mapping in the new grouped one).
@@ -324,7 +329,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
 /// working exactly as before for both shapes.
 fn vm_spec_of(doc: &ManifestDoc) -> Result<VmSpec> {
     let normalized = normalize_vm_spec(doc.spec.clone());
-    serde_yaml::from_value(normalized).map_err(|e| {
+    let spec: VmSpec = serde_yaml::from_value(normalized).map_err(|e| {
         Error::Invalid(format!(
             "{}: {e}",
             super::po::tf(
@@ -332,7 +337,12 @@ fn vm_spec_of(doc: &ManifestDoc) -> Result<VmSpec> {
                 &[("kind", &doc.kind), ("name", &doc.metadata.name)],
             )
         ))
-    })
+    })?;
+    if let Some(c) = &spec.credentials {
+        c.validate()
+            .map_err(|e| Error::Invalid(format!("VirtualMachine '{}': {e}", doc.metadata.name)))?;
+    }
+    Ok(spec)
 }
 
 /// The grouped form's tables: group name -> (sub-key, flat field it becomes).
@@ -1059,6 +1069,15 @@ pub enum VmCmd {
         /// instead, so the filter is visible in its own output.
         #[arg(long)]
         namespace: Option<String>,
+        /// Add USER and PASSWORD: each VM's login (ADR-0048) — declared with
+        /// `credentials:`, the documented default of an appliance image this
+        /// repository builds, or `-`. The password shows where it lives
+        /// (`(secret NAME)`), not its value.
+        #[arg(long)]
+        credentials: bool,
+        /// With `--credentials`: print the password itself.
+        #[arg(long, requires = "credentials")]
+        reveal: bool,
     },
     /// Attach to the VM's serial console (interactive terminal).
     ///
@@ -1534,8 +1553,15 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// machine, so every one of these is a `Replace` that `apply` refuses without
 /// `--replace`. Refusing is the point — recreating a VM throws away its overlay
 /// disk, which is everything the guest wrote since it was created.
-pub(crate) const RECONCILED_VM_FIELDS: &[&str] =
-    &["disk", "vcpus", "memory", "network", "backend", "labels"];
+pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &[
+    "disk",
+    "vcpus",
+    "memory",
+    "network",
+    "backend",
+    "labels",
+    "credentials",
+];
 
 /// The spec fields this manifest declares that the reconciler does NOT compare
 /// — named, on a VM that already exists, instead of dropped in silence.
@@ -1657,6 +1683,13 @@ fn desired_vm_fields(
     if let Some(b) = backend {
         f.insert("backend".into(), b);
     }
+    // Validated in `vm_spec_of`; only encoded here.
+    if let Some(c) = &spec.credentials {
+        f.insert(
+            super::credentials::FIELD.into(),
+            super::credentials::encode(c),
+        );
+    }
     f
 }
 
@@ -1718,6 +1751,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("backend".into(), vm.backend.clone());
             if let Some(labels) = super::reconcile::user_labels_field(&vm.labels) {
                 f.insert(super::reconcile::LABELS_FIELD.into(), labels);
+            }
+            if let Some(raw) = vm.annotations.get(super::credentials::ANNOTATION) {
+                f.insert(super::credentials::FIELD.into(), raw.clone());
             }
             super::reconcile::Actual {
                 kind: k::VM.into(),
@@ -2152,6 +2188,7 @@ pub(crate) fn stamp(
             vm.annotations
                 .insert(super::conditions::CREATED_SPEC.into(), created.clone());
         }
+        super::credentials::record(&mut vm.annotations, fields);
         true
     })?;
     Ok(())
@@ -2190,6 +2227,8 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                     true
                 })?;
             }
+            // Written by `stamp` with the rest of what this apply declared.
+            "credentials" => {}
             other => {
                 return Err(Error::Invalid(format!(
                     "vm/{name}: '{other}' does not converge hot — bug in \
@@ -2269,6 +2308,30 @@ pub(crate) fn resolve_image_ref(
 /// image and pointing at it produce the very same string. Two spellings that
 /// resolved to two strings would read as drift to the reconciler, and a `Vm`
 /// drift is a `Replace` — which throws the overlay disk away.
+/// A VM's login (ADR-0048 D4): its declared block, else the catalogue entry of
+/// the image its base disk is. A disk that is not an image of the store (a path,
+/// a downloaded file) has no catalogue entry, and no store means no lookup.
+pub(crate) fn credentials_of(
+    vm: &delonix_compute::Vm,
+    images: Option<&super::vmimage::VmImageStore>,
+    reveal: bool,
+) -> super::credentials::View {
+    use delonix_compute::credentials as cr;
+    let declared = super::credentials::declared_on(&vm.annotations);
+    let entry = if declared.is_some() {
+        None
+    } else {
+        images
+            .and_then(|s| image_at_path(s, &vm.disk))
+            .and_then(|(_, img)| cr::vm_default(&img.name))
+    };
+    super::credentials::view(
+        cr::resolve(declared.as_ref(), entry, &[]),
+        reveal,
+        &super::credentials::read_secret,
+    )
+}
+
 fn image_at_path(
     store: &super::vmimage::VmImageStore,
     reference: &str,
@@ -3088,7 +3151,17 @@ pub fn run(action: VmCmd) -> Result<()> {
             output,
             all,
             namespace,
+            credentials,
+            reveal,
         } => {
+            // Opened once, and only when asked: the catalogue lookup maps a
+            // VM's disk back to the image it was made from.
+            let images = if credentials {
+                super::vmimage::VmImageStore::open(base.to_path_buf()).ok()
+            } else {
+                None
+            };
+            let cred = |vm: &delonix_compute::Vm| credentials_of(vm, images.as_ref(), reveal);
             // A throwaway VM whose guest powered itself off never went through
             // `vm stop`; this is where such a VM is noticed.
             reap_ephemeral(&base);
@@ -3123,6 +3196,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
                     .into_iter()
                     .map(|vm| VmLsRow {
+                        credentials: credentials.then(|| cred(&vm)),
                         name: vm.name.clone(),
                         vcpus: vm.vcpus,
                         memory: vm.memory,
@@ -3165,10 +3239,15 @@ pub fn run(action: VmCmd) -> Result<()> {
             if ports {
                 cols.push("PORTS OPEN");
             }
+            if credentials {
+                cols.push("USER");
+                cols.push("PASSWORD");
+            }
             let mut t = output::Table::new(&cols)
                 // VCPUS is a count — right-aligned like the sizes.
                 .right_align(3);
             for vm in filter(delonix_vm::list(&base)?) {
+                let login = credentials.then(|| cred(&vm).cells());
                 let mut row = vec![
                     vm.name.clone(),
                     fmt_vm_image(&vm.disk),
@@ -3198,6 +3277,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                 ];
                 if ports {
                     row.push(fmt_open_ports(vm.ip.as_deref()));
+                }
+                if let Some((user, password)) = login {
+                    row.push(user);
+                    row.push(password);
                 }
                 t.row(row);
             }
@@ -3644,6 +3727,9 @@ struct VmLsRow {
     /// What a browser can open for this VM (ADR-0048); absent when nothing is.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     services: Vec<super::svc::SvcRow>,
+    /// Only with `--credentials` (ADR-0048 D4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credentials: Option<super::credentials::View>,
 }
 
 /// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
@@ -4951,6 +5037,19 @@ fn describe_one(
         vm.restart_policy.as_deref().unwrap_or("no"),
     );
 
+    // ADR-0048 D4: where the login comes from, never the value (that is
+    // `vm ls --credentials --reveal`).
+    let images = super::vmimage::VmImageStore::open(state_root()).ok();
+    let cred = credentials_of(vm, images.as_ref(), false);
+    if cred.source != "none" {
+        let (user, password) = cred.cells();
+        d.section("Credentials");
+        d.sub("User", user);
+        d.sub("Password", password);
+        d.sub("Source", cred.source);
+        d.sub_opt("Note", cred.note.as_deref());
+    }
+
     d.section("Resources");
     d.sub("vCPUs", vm.vcpus.to_string());
     d.sub("Memory", &vm.memory);
@@ -5550,6 +5649,51 @@ mod tests {
         let f = super::desired_vm_fields(&store, "vm1", &spec);
         assert_eq!(f["vcpus"], "1");
         assert_eq!(f["memory"], "512M");
+    }
+
+    /// ADR-0048 D4 for a VM: a declared login wins; without one, the image
+    /// the base disk IS gives the appliance default; a disk that is no image of
+    /// the store gives nothing. The declared block is compared and hot.
+    #[test]
+    fn a_vm_login_is_declared_or_comes_from_its_appliance_image() {
+        let (_tmp, store) = store_de_teste();
+        let img = imagem_de_teste("proxmox-ve:9.2");
+        store.save(&img).unwrap();
+        let disk = store.qcow2_path("proxmox-ve:9.2");
+        std::fs::write(&disk, b"qcow2").unwrap();
+        let mut vm = delonix_compute::Vm::new(
+            "pve".into(),
+            disk.to_string_lossy().into_owned(),
+            "/x/pve.qcow2".into(),
+            2,
+            "2G".into(),
+            "default".into(),
+            "tap0".into(),
+            "52:54:00:00:00:01".into(),
+            "/x/pve.sock".into(),
+        );
+        let v = super::credentials_of(&vm, Some(&store), false);
+        assert_eq!(v.source, "vendor-default");
+        assert_eq!(v.user.as_deref(), Some("root"));
+        // A disk the store does not know: no catalogue entry, no guess.
+        let mut other = vm.clone();
+        other.disk = "/elsewhere/disk.qcow2".into();
+        assert_eq!(
+            super::credentials_of(&other, Some(&store), false).source,
+            "none"
+        );
+
+        let spec: super::VmSpec = serde_yaml::from_str(
+            "disk: proxmox-ve:9.2\ncredentials:\n  user: ops\n  password: { secret: pve, key: root }\n",
+        )
+        .unwrap();
+        let f = super::desired_vm_fields(&store, "pve", &spec);
+        super::super::credentials::record(&mut vm.annotations, &f);
+        let v = super::credentials_of(&vm, Some(&store), false);
+        assert_eq!(v.source, "declared");
+        assert_eq!(v.cells(), ("ops".into(), "(secret pve)".into()));
+        assert!(super::RECONCILED_VM_FIELDS.contains(&"credentials"));
+        assert!(delonix_stack::reconcile::hot_fields_for(super::k::VM).contains(&"credentials"));
     }
 
     /// O `context` resolve-se contra a pasta do MANIFESTO e não contra o cwd —
