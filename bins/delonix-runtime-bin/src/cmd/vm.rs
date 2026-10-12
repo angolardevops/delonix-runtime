@@ -1790,6 +1790,73 @@ pub(crate) fn provider_holds(doc: &ManifestDoc) -> Result<Option<bool>> {
     backend.holds_vm(&doc.metadata.name)
 }
 
+/// The record annotation naming the extra devices the manifest declared at
+/// the last apply (`disk:<source>`/`nic:<mac>`, comma-separated).
+pub(crate) const DECLARED_DEVICES_ANNOTATION: &str = "delonix.io/declared-devices";
+
+/// The observed-only field naming the extra devices a VM has and its manifest
+/// did not declare — added by hand, and kept by every apply. Never desired,
+/// so the plan never acts on it; `drift` reports it.
+pub(crate) const HAND_ADDED_FIELD: &str = "handAddedDevices";
+
+fn disk_id(d: &delonix_vm::ExtraDisk) -> String {
+    format!("disk:{}", d.source)
+}
+
+fn nic_id(n: &delonix_vm::ExtraNic) -> String {
+    match &n.mac {
+        Some(m) => format!("nic:{}", m.to_ascii_lowercase()),
+        None => format!("nic:{}:{}", n.kind, n.source.as_deref().unwrap_or("")),
+    }
+}
+
+/// The identities of a device list. Pure.
+fn device_ids(disks: &[delonix_vm::ExtraDisk], nics: &[delonix_vm::ExtraNic]) -> Vec<String> {
+    disks
+        .iter()
+        .map(disk_id)
+        .chain(nics.iter().map(nic_id))
+        .collect()
+}
+
+/// Appends to the manifest's devices every device the RECORD has that the
+/// manifest does not declare (by source for a disk, MAC for a NIC), in the
+/// record's order and with its pinned target — so an apply or a reboot never
+/// drops a device the plan did not name. Pure.
+fn keep_undeclared_devices(
+    disks: &mut Vec<delonix_vm::ExtraDisk>,
+    nics: &mut Vec<delonix_vm::ExtraNic>,
+    record: &delonix_compute::Vm,
+) {
+    let declared = device_ids(disks, nics);
+    for d in &record.boot.extra_disks {
+        if !declared.contains(&disk_id(d)) {
+            disks.push(d.clone());
+        }
+    }
+    for n in &record.boot.extra_nics {
+        if !declared.contains(&nic_id(n)) {
+            nics.push(n.clone());
+        }
+    }
+}
+
+/// The record's devices its last apply did not declare. `None` when no apply
+/// recorded what it declared (nothing to compare against). Pure.
+fn hand_added_devices(vm: &delonix_compute::Vm) -> Option<String> {
+    let declared: Vec<&str> = vm
+        .annotations
+        .get(DECLARED_DEVICES_ANNOTATION)?
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let extra: Vec<String> = device_ids(&vm.boot.extra_disks, &vm.boot.extra_nics)
+        .into_iter()
+        .filter(|id| !declared.contains(&id.as_str()))
+        .collect();
+    (!extra.is_empty()).then(|| extra.join(","))
+}
+
 /// What is on the machine, for the reconciler.
 ///
 /// Reads the STORE and not `delonix_vm::status`: `status` asks the backend
@@ -1819,6 +1886,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             }
             if let Some(raw) = vm.annotations.get(super::credentials::ANNOTATION) {
                 f.insert(super::credentials::FIELD.into(), raw.clone());
+            }
+            if let Some(ids) = hand_added_devices(&vm) {
+                f.insert(HAND_ADDED_FIELD.into(), ids);
             }
             super::reconcile::Actual {
                 kind: k::VM.into(),
@@ -3228,6 +3298,16 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             libvirt_xml_overlay: spec.libvirt_xml_overlay,
             libvirt_xml: spec.libvirt_xml,
         };
+        // What the manifest declares, before the record's own devices join it.
+        let declared = device_ids(&cfg.extra_disks, &cfg.extra_nics);
+        // A device the manifest does not declare was added out of band
+        // (`vm update --disk-add/--nic-add`): KEEP it, the way `vm start`
+        // rebuilds from the record. Rebuilding from the manifest alone dropped
+        // it at the next start or reboot while the plan said nothing changes.
+        let mut cfg = cfg;
+        if let Some(existing) = on_node.iter().find(|v| &v.name == name) {
+            keep_undeclared_devices(&mut cfg.extra_disks, &mut cfg.extra_nics, existing);
+        }
         refuse_inert_vm_isolation(cfg.namespace.as_deref())?;
         let vm = delonix_vm::create(&base, &cfg)?;
         warn_if_mac_spoofing_allowed(&vm);
@@ -3236,14 +3316,17 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         // apply` outside a stack). Additive — removal is the plan's.
         let own = super::reconcile::user_labels_field(&doc.metadata.labels);
         let delta = super::reconcile::labels_delta(None, own.as_deref());
-        if !delta.is_empty() {
-            let st: delonix_state::JsonStore<delonix_compute::Vm> =
-                delonix_state::JsonStore::open(base.join("vms"))?;
-            st.update(name, |vm| {
-                set_labels(&mut vm.labels, &delta);
-                true
-            })?;
-        }
+        let st: delonix_state::JsonStore<delonix_compute::Vm> =
+            delonix_state::JsonStore::open(base.join("vms"))?;
+        let declared = declared.join(",");
+        st.update(name, |vm| {
+            set_labels(&mut vm.labels, &delta);
+            // Which devices the MANIFEST declares, so `drift` can name the
+            // ones that were added by hand and are being kept.
+            vm.annotations
+                .insert(DECLARED_DEVICES_ANNOTATION.into(), declared.clone());
+            true
+        })?;
     }
     Ok(())
 }
@@ -7329,5 +7412,88 @@ mod reboot_order_tests {
         assert!(
             super::shape_problem(&doc("  disk: /x.qcow2\n  vcpus: 2\n  vcpusMax: 4\n")).is_none()
         );
+    }
+}
+
+/// Coordinator review of Sprint 18 (blocking 1, round 3): a declarative
+/// apply or reboot keeps the devices `vm update` added; `drift` names them.
+#[cfg(test)]
+mod hand_added_device_tests {
+    fn vm_with(disks: &[&str]) -> delonix_compute::Vm {
+        let mut v = delonix_compute::Vm::new(
+            "db".into(),
+            "/d.qcow2".into(),
+            "/o.qcow2".into(),
+            2,
+            "2G".into(),
+            "default".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        v.boot.extra_disks = disks
+            .iter()
+            .map(|s| delonix_vm::ExtraDisk {
+                source: s.to_string(),
+                target: Some("vdc".into()),
+                ..Default::default()
+            })
+            .collect();
+        v.boot.extra_nics = vec![delonix_vm::ExtraNic {
+            kind: "network".into(),
+            source: Some("default".into()),
+            mac: Some("52:54:00:aa:bb:cc".into()),
+            ..Default::default()
+        }];
+        v
+    }
+
+    /// `vm update --disk-add` (stopped or live), then a stack apply or an
+    /// `apply --reboot` for an unrelated field: both rebuild the VM from the
+    /// manifest, and the disk and NIC the manifest never declared stay.
+    #[test]
+    fn an_apply_keeps_the_devices_added_by_hand() {
+        let record = vm_with(&["/data/hand.qcow2"]);
+        let mut disks = vec![delonix_vm::ExtraDisk {
+            source: "/data/declared.qcow2".into(),
+            ..Default::default()
+        }];
+        let mut nics = vec![];
+        super::keep_undeclared_devices(&mut disks, &mut nics, &record);
+        let sources: Vec<&str> = disks.iter().map(|d| d.source.as_str()).collect();
+        assert_eq!(sources, ["/data/declared.qcow2", "/data/hand.qcow2"]);
+        assert_eq!(
+            disks[1].target.as_deref(),
+            Some("vdc"),
+            "pinned target kept"
+        );
+        assert_eq!(nics.len(), 1, "the hand-added NIC stays");
+        // A device the manifest declares is not duplicated.
+        let mut disks = vec![delonix_vm::ExtraDisk {
+            source: "/data/hand.qcow2".into(),
+            ..Default::default()
+        }];
+        let mut nics = record.boot.extra_nics.clone();
+        super::keep_undeclared_devices(&mut disks, &mut nics, &record);
+        assert_eq!((disks.len(), nics.len()), (1, 1));
+    }
+
+    #[test]
+    fn the_hand_added_devices_are_named_against_the_declared_ones() {
+        let mut v = vm_with(&["/data/a.qcow2", "/data/b.qcow2"]);
+        assert_eq!(super::hand_added_devices(&v), None, "no apply recorded");
+        v.annotations.insert(
+            super::DECLARED_DEVICES_ANNOTATION.into(),
+            "disk:/data/a.qcow2".into(),
+        );
+        assert_eq!(
+            super::hand_added_devices(&v).as_deref(),
+            Some("disk:/data/b.qcow2,nic:52:54:00:aa:bb:cc")
+        );
+        v.annotations.insert(
+            super::DECLARED_DEVICES_ANNOTATION.into(),
+            "disk:/data/a.qcow2,disk:/data/b.qcow2,nic:52:54:00:aa:bb:cc".into(),
+        );
+        assert_eq!(super::hand_added_devices(&v), None);
     }
 }

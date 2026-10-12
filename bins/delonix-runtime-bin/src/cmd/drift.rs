@@ -108,7 +108,7 @@ fn rows_for(a: &Actual) -> Vec<DriftRow> {
     let Some(stamp) = a.last_applied.as_ref() else {
         return Vec::new();
     };
-    stamp
+    let mut rows: Vec<DriftRow> = stamp
         .iter()
         .filter_map(|(field, applied)| {
             let observed = a.fields.get(field).map(String::as_str).unwrap_or("-");
@@ -121,7 +121,21 @@ fn rows_for(a: &Actual) -> Vec<DriftRow> {
                 observed: observed.to_string(),
             })
         })
-        .collect()
+        .collect();
+    // Observed-only: devices added by hand that the manifest never declared.
+    // Every apply KEEPS them, so the plan never shows them; this is where
+    // they are named.
+    if let Some(ids) = a.fields.get(super::vm::HAND_ADDED_FIELD) {
+        rows.push(DriftRow {
+            stack,
+            kind: a.kind.clone(),
+            name: a.name.clone(),
+            field: super::vm::HAND_ADDED_FIELD.into(),
+            last_applied: "-".into(),
+            observed: ids.clone(),
+        });
+    }
+    rows
 }
 
 /// Pure: the whole report, given what the stores answered.
@@ -281,6 +295,23 @@ mod tests {
         assert_eq!(rows[0].field, "memory");
         assert_eq!(rows[0].last_applied, "64M");
         assert_eq!(rows[0].observed, "128M");
+    }
+
+    /// A device `vm update` added and the manifest never declared is kept by
+    /// every apply, so the plan is silent about it — drift names it.
+    #[test]
+    fn a_hand_added_device_is_drift() {
+        let a = actual(
+            "VirtualMachine",
+            "db",
+            Some("shop"),
+            &[("vcpus", "2"), ("handAddedDevices", "disk:/data/x.qcow2")],
+            Some(&[("vcpus", "2")]),
+        );
+        let rows = rows_for(&a);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].field, "handAddedDevices");
+        assert_eq!(rows[0].observed, "disk:/data/x.qcow2");
     }
 
     #[test]
