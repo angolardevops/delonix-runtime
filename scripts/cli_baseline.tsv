@@ -154,6 +154,9 @@
 ~	network rm
 ~	network route
 ~	network vlan
+~	network vip-pool clear
+~	network vip-pool set
+~	network vip-pool show
 ~	plan
 ~	pod attach
 ~	pod cp

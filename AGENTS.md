@@ -5071,6 +5071,9 @@ senão um documento removido do manifesto nunca aparecia como candidato a
 
 ## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
 
+> **Desde 2026-10-12 «sem VIP» vale só para `type: DNS`** (a omissão): `type: VirtualIP` dá um
+> endereço L4 com prontidão — ver «kind: Service type VirtualIP» mais abaixo.
+
 Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
 restruturação da CLI. Desenho completo em
 `docs/adr/0032-service-kind-dns-round-robin.md`; esta secção regista o que
@@ -9679,3 +9682,39 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
   como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
   e os verbos `gitops bootstrap`/`rm`/`history` do ADR.
+
+## `kind: Service type VirtualIP` — o VIP L4 com prontidão (ADR-0066, 2026-10-12)
+
+- **`type: DNS|VirtualIP`** (omissão `DNS`, que compara só `matchLabels`/`port` como antes). Um
+  `VirtualIP` aluga um endereço do pool (`<root>/ingress/vip-pool`, ou `DELONIX_SERVICE_VIP_CIDR`;
+  `network vip-pool set|clear|show`) como lease `svc:<ns>/<nome>` no IPAM, e o DNS responde UM
+  registo A — o VIP. `type`/`vip`/`readiness`/`publish` são campos QUENTES: mudar reescreve o
+  registo e o dataplane, sem recriar nada.
+- **O pool é recusado antes de servir**: IPv4 privado, `/16`–`/29`, bits de host a zero, sem
+  sobreposição com outro pool, com redes do motor, `subnet`s CNI, `podSubnet`/`serviceSubnet` do
+  kind, endereços e rotas do host (VPN e wg incluídos), o slirp `10.0.2.0/24` nem o `delonix0`
+  (DX-5360). Sem pool, DX-6360; VIP fora do pool, DX-1361; sem `bridge-nf-call-iptables`,
+  DX-6361 (o hairpin depende dele). A verificação de sobreposição corre no `apply`, não no `plan`.
+- **Quatro chains próprias no holder**, ao lado da ordem que já existia (`fwguard` -20,
+  `fwprivate` -15, `fwdeny` -10, `fwcont` -5, política 0): `svcpre`/`svcout` (nat, -101) fazem o
+  DNAT do VIP para os backends PRONTOS, `vipguard`/`vipguardout` (filter, -20) recusam o que o VIP
+  não serve. Reescritas com `flush` num só `nft -f`. Isolamento de namespace e anti-spoof
+  continuam a valer para o tráfego do VIP (medido: forjar a origem dá `svcpre` +0).
+- **Prontidão fail-closed**: um prober no processo de controlo (500 ms) lê os registos de
+  container em cada ronda e aplica `readiness.tcp` com `successThreshold`/`failureThreshold`;
+  só entra em rotação um backend `Running`, `healthy` se tiver health check, e com a porta a
+  responder. **Desvio do ADR (D7)**: a releitura de 500 ms substitui o disparo por evento. Verbos
+  do holder: `svcsync` e `svc-state` (só leitura); o `nsleave` tira o endereço de todos os mapas
+  antes de um detach devolver. Sem backend pronto o VIP recusa logo (RST), nunca pendura.
+- **`spec.publish`** leva portas do host ao mesmo conjunto de backends; o `start_slirp` volta a
+  publicá-las depois de um respawn.
+- **BREAKING para quem usa o `delonix-sdn` como biblioteca (D9)**: saíram `lbset`/`lbclear`,
+  `set_service_lb*`, `clear_service_lb` e `service_vip` (também no `delonix-net-rules`), e os
+  códigos DX-1329/DX-1330 (substituídos pelo DX-1361).
+- **Medido ao vivo** (roots isolados, backends busybox httpd): espalhamento 34/26 em 60 ligações,
+  `counter packets 60` no `svcpre`; porta fechada → ejectado em 2,6–3,9 s e 0/60 depois;
+  readmitido 0,66 s depois de reabrir; `container rm` → 0/60; plano de controlo morto → 30/30
+  servidos pelo ruleset do pin. Cenário de caos `service_lb`.
+- **Não validado**: a bateria inteira (só a secção nova), uma VM golden, o caminho `svcout` para um
+  cliente no próprio holder (o proxy L7). **ADR-0065 (IPv6) não começou**: a P1 passa todas as
+  regras a `table inet` e precisa de sessão própria.
