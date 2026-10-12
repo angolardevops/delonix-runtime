@@ -256,6 +256,17 @@ where
         vm.ip = boot.ip;
         vm.dhcp_lease_floor = boot.lease_floor;
         vm.backend = backend.id().to_string();
+        // A restart rebuilds the record from `cfg`, which describes the boot
+        // shape and nothing else: the labels and annotations the record
+        // carried (the stack's ownership stamp, the last-applied spec, the
+        // declared login, a policy hold) are not in it. Dropping them made a
+        // `vm stop` + `vm start` — and the reconciler's own reboot class
+        // (ADR-0012) — leave a stack's VM unowned, so the next plan proposed
+        // adopting it and a `--prune` no longer saw it.
+        if let Some(ex) = &restarting {
+            vm.labels = ex.labels.clone();
+            vm.annotations = ex.annotations.clone();
+        }
         if cfg.policy_hold && restarting.is_none() {
             vm.annotations
                 .insert(POLICY_HOLD_ANNOTATION.to_string(), "1".to_string());
@@ -681,22 +692,49 @@ where
         memory: Option<&str>,
         disk_size_gib: Option<u32>,
     ) -> Result<Vm> {
-        if vcpus.is_none() && memory.is_none() && disk_size_gib.is_none() {
+        self.resize_shape(
+            name,
+            &ResizeRequest {
+                vcpus,
+                memory: memory.map(str::to_string),
+                disk_size_gib,
+                ..ResizeRequest::default()
+            },
+        )
+    }
+
+    /// The cold resize with the hotplug ceilings too (ADR-0068 open question
+    /// 2: the ceiling changes only with the VM stopped, and holds from the
+    /// next boot). One path for `vm resize` and for the reconciler's reboot
+    /// class (ADR-0012), so the two cannot disagree about what a stopped VM
+    /// may become.
+    ///
+    /// The backend is handed the record AS IT WILL BE (new ceilings included)
+    /// and the record is written only after it answers — the order every
+    /// resize here already uses.
+    pub fn resize_shape(&self, name: &str, req: &ResizeRequest) -> Result<Vm> {
+        if req.vcpus.is_none()
+            && req.memory.is_none()
+            && req.disk_size_gib.is_none()
+            && req.vcpus_max.is_none()
+            && req.memory_max_mib.is_none()
+        {
             return Err(Error::InvalidResize(format!(
-                "nothing to resize on VM '{name}': give --vcpus, --memory and/or --disk-size"
+                "nothing to resize on VM '{name}': give --vcpus, --memory, --disk-size, \
+                 --vcpus-max and/or --memory-max"
             )));
         }
-        if vcpus == Some(0) {
+        if req.vcpus == Some(0) || req.vcpus_max == Some(Some(0)) {
             return Err(Error::InvalidResize(format!(
                 "VM '{name}' cannot have 0 vCPUs"
             )));
         }
-        if disk_size_gib == Some(0) {
+        if req.disk_size_gib == Some(0) {
             return Err(Error::InvalidResize(format!(
                 "VM '{name}': --disk-size 0 is not a size — drop the flag to leave the disk alone"
             )));
         }
-        let new_mib = match memory {
+        let new_mib = match &req.memory {
             Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
                 Error::InvalidResize(format!(
                     "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
@@ -713,17 +751,24 @@ where
                 vm.status
             )));
         }
+        let target_vcpus = req.vcpus.unwrap_or(vm.vcpus.max(1));
+        let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+        let vcpus_max = req.vcpus_max.unwrap_or(vm.vcpus_max);
+        let memory_max_mib = req.memory_max_mib.unwrap_or(vm.memory_max_mib);
+        check_ceilings(name, target_vcpus, target_mib, vcpus_max, memory_max_mib)?;
         let backend = self.backends.for_vm(&vm)?;
-        if let Some(gib) = disk_size_gib {
+        if let Some(gib) = req.disk_size_gib {
             backend.resize_disk(&vmdir, &vm, u64::from(gib) * GIB_BYTES)?;
         }
-        let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
-        let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
-        backend.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
-        vm.vcpus = target_vcpus;
-        if let Some(m) = memory {
-            vm.memory = m.trim().to_string();
+        let mut shaped = vm.clone();
+        shaped.vcpus = target_vcpus;
+        if let Some(m) = &req.memory {
+            shaped.memory = m.trim().to_string();
         }
+        shaped.vcpus_max = vcpus_max;
+        shaped.memory_max_mib = memory_max_mib;
+        backend.resize_cold(&vmdir, &shaped, target_vcpus, target_mib)?;
+        vm = shaped;
         st.set(name, &vm).map_err(Error::from)?;
         Ok(vm)
     }
@@ -786,6 +831,16 @@ where
                     vm.vcpus
                 )));
             }
+            let ceiling = vm.vcpus_max.unwrap_or(vm.vcpus);
+            if target > ceiling {
+                return Err(above_ceiling(
+                    name,
+                    "vCPUs",
+                    &target.to_string(),
+                    &ceiling.to_string(),
+                    "--vcpus-max",
+                ));
+            }
             let (assigned, outcome) = backend.hotplug_add_cpu(&vmdir, &vm, target, wait)?;
             vm.vcpus = assigned;
             st.set(name, &vm).map_err(Error::from)?;
@@ -798,6 +853,16 @@ where
                     "VM '{name}' already has {current_mib} MiB — `vm update` only adds; use \
                      `vm resize` on a stopped VM for a decrease"
                 )));
+            }
+            let ceiling = vm.memory_max_mib.unwrap_or(current_mib);
+            if target_mib > ceiling {
+                return Err(above_ceiling(
+                    name,
+                    "MiB of memory",
+                    &target_mib.to_string(),
+                    &ceiling.to_string(),
+                    "--memory-max",
+                ));
             }
             let (assigned_mib, outcome) =
                 backend.hotplug_add_memory(&vmdir, &vm, target_mib, wait)?;
@@ -1116,6 +1181,56 @@ pub struct Destroyed {
     /// is somebody's data; an extra disk outside the state directory may be an
     /// image the operator supplied). Named, never silently left.
     pub kept: Vec<String>,
+}
+
+/// What a cold resize asks for (`vm resize`, and the reconciler's reboot
+/// class). `None` leaves a field as it is; for a ceiling, `Some(None)` clears
+/// it back to «the maximum is the boot size» and `Some(Some(n))` sets it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResizeRequest {
+    pub vcpus: Option<u32>,
+    pub memory: Option<String>,
+    pub disk_size_gib: Option<u32>,
+    pub vcpus_max: Option<Option<u32>>,
+    pub memory_max_mib: Option<Option<u64>>,
+}
+
+/// A ceiling below what the VM boots with is not a ceiling (ADR-0068 D3):
+/// refused, naming both numbers, never clamped.
+fn check_ceilings(
+    name: &str,
+    vcpus: u32,
+    memory_mib: u64,
+    vcpus_max: Option<u32>,
+    memory_max_mib: Option<u64>,
+) -> Result<()> {
+    if let Some(max) = vcpus_max {
+        if max < vcpus {
+            return Err(Error::InvalidResize(format!(
+                "VM '{name}': the vCPU ceiling ({max}) cannot be below the vCPUs it boots with \
+                 ({vcpus}) — raise --vcpus-max, or lower --vcpus"
+            )));
+        }
+    }
+    if let Some(max) = memory_max_mib {
+        if max < memory_mib {
+            return Err(Error::InvalidResize(format!(
+                "VM '{name}': the memory ceiling ({max} MiB) cannot be below the memory it boots \
+                 with ({memory_mib} MiB) — raise --memory-max, or lower --memory"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// A live add above the ceiling declared at create is refused, naming the
+/// ceiling and the command that changes it (ADR-0068 D3) — never clamped.
+fn above_ceiling(name: &str, what: &str, target: &str, ceiling: &str, flag: &str) -> Error {
+    Error::InvalidResize(format!(
+        "VM '{name}' can take at most {ceiling} {what} live (asked for {target}): the hotplug \
+         ceiling is fixed at boot — `delonix vm stop {name}`, then `delonix vm resize {name} \
+         {flag} <n>`, and start it"
+    ))
 }
 
 /// Ensures the microVM (idempotent): if it already exists and is alive, does nothing; if
@@ -1533,6 +1648,9 @@ mod tests {
         /// keeps them refusing, the same shape as the trait's own
         /// fail-closed default, to exercise the refusal path too.
         hotplug_outcome: RefCell<Option<HotplugOutcome>>,
+        /// The record `resize_cold` was handed — the ceilings it must apply
+        /// travel in it (ADR-0068 open question 2).
+        resized: RefCell<Option<Vm>>,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1593,6 +1711,7 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("resize_cold {} {vcpus} {memory_mib}", vm.name));
+            *self.0.resized.borrow_mut() = Some(vm.clone());
             Ok(())
         }
         fn hotplug_add_cpu(
@@ -1929,7 +2048,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
         let e = engine(root.path(), seen.clone());
-        e.create(&cfg("app")).expect("create"); // vcpus=1, memory=64M, Running.
+        // vcpus=1, memory=64M, Running — with the headroom a live add needs.
+        let mut c = cfg("app");
+        c.vcpus_max = Some(4);
+        c.memory_max_mib = Some(256);
+        e.create(&c).expect("create");
         *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Complete);
         let (vm, outcomes) = e
             .update("app", Some(3), Some("128M"), Duration::from_millis(1))
@@ -1966,7 +2089,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let seen = Rc::new(Seen::default());
         let e = engine(root.path(), seen.clone());
-        e.create(&cfg("app")).expect("create");
+        let mut c = cfg("app");
+        c.vcpus_max = Some(2);
+        e.create(&c).expect("create");
         *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Partial {
             reason: "guest activation not observable".into(),
         });
@@ -2005,5 +2130,143 @@ mod tests {
         );
         // Neither refusal reached the backend.
         assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+    }
+
+    // ---- ceilings and restarts (ADR-0068 Q2, ADR-0012) -----------------------
+
+    /// A restart rebuilds the record from the boot shape — and used to drop
+    /// the labels and annotations with it, so a stack's VM came back unowned.
+    #[test]
+    fn a_restart_keeps_the_records_labels_and_annotations() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.repo
+            .update("app", |vm| {
+                vm.labels.insert("delonix.io/stack".into(), "shop".into());
+                vm.annotations
+                    .insert("delonix.io/last-applied".into(), "{}".into());
+                true
+            })
+            .unwrap();
+        e.stop("app").expect("stop");
+        let vm = e.start("app").expect("start");
+        assert_eq!(vm.status, Status::Running);
+        let rec = e.repo.get("app").unwrap();
+        assert_eq!(
+            rec.labels.get("delonix.io/stack").map(String::as_str),
+            Some("shop")
+        );
+        assert!(rec.annotations.contains_key("delonix.io/last-applied"));
+    }
+
+    /// The cold resize sets and clears the ceilings, and the backend is
+    /// handed the record as it will be — the ceilings included.
+    #[test]
+    fn resize_shape_sets_and_clears_the_ceilings_and_hands_them_to_the_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.stop("app").expect("stop");
+        let vm = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus: Some(2),
+                    vcpus_max: Some(Some(4)),
+                    memory_max_mib: Some(Some(256)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .expect("resize");
+        assert_eq!(
+            (vm.vcpus, vm.vcpus_max, vm.memory_max_mib),
+            (2, Some(4), Some(256))
+        );
+        let handed = seen.resized.borrow().clone().expect("backend asked");
+        assert_eq!(
+            (handed.vcpus_max, handed.memory_max_mib),
+            (Some(4), Some(256))
+        );
+        assert_eq!(e.repo.get("app").unwrap().vcpus_max, Some(4));
+        let vm = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus_max: Some(None),
+                    memory_max_mib: Some(None),
+                    ..ResizeRequest::default()
+                },
+            )
+            .expect("clear");
+        assert_eq!((vm.vcpus_max, vm.memory_max_mib), (None, None));
+    }
+
+    /// A ceiling below the boot size is refused before the backend is asked.
+    #[test]
+    fn a_ceiling_below_the_boot_size_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        e.stop("app").expect("stop");
+        let before = calls(&seen).len();
+        let err = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    vcpus: Some(4),
+                    vcpus_max: Some(Some(2)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("ceiling (2)"), "{err}");
+        let err = e
+            .resize_shape(
+                "app",
+                &ResizeRequest {
+                    memory_max_mib: Some(Some(32)),
+                    ..ResizeRequest::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("32 MiB"), "{err}");
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+    }
+
+    /// A live add above the declared ceiling is refused by the engine, naming
+    /// the ceiling and the command that changes it — the backend is never
+    /// asked to clamp.
+    #[test]
+    fn a_live_add_above_the_ceiling_is_refused_before_the_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        let mut c = cfg("app");
+        c.vcpus_max = Some(2);
+        c.memory_max_mib = Some(128);
+        e.create(&c).expect("create");
+        *seen.hotplug_outcome.borrow_mut() = Some(HotplugOutcome::Complete);
+        let before = calls(&seen).len();
+        let err = e
+            .update("app", Some(3), None, Duration::from_millis(1))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("at most 2 vCPUs") && err.to_string().contains("--vcpus-max"),
+            "{err}"
+        );
+        let err = e
+            .update("app", None, Some("256M"), Duration::from_millis(1))
+            .unwrap_err();
+        assert!(err.to_string().contains("--memory-max"), "{err}");
+        assert_eq!(calls(&seen).len(), before, "{:?}", calls(&seen));
+        // Inside the ceiling it goes through.
+        let (vm, _) = e
+            .update("app", Some(2), Some("128M"), Duration::from_millis(1))
+            .expect("inside the ceiling");
+        assert_eq!(vm.vcpus, 2);
     }
 }

@@ -53,7 +53,7 @@ pub mod provider;
 use delonix_compute::ports::VmBackends;
 use delonix_compute::vm::VmEngine;
 pub use delonix_compute::vm::{console_socket, serial_log_path};
-pub use delonix_compute::vm::{valid_vm_name, Destroyed};
+pub use delonix_compute::vm::{valid_vm_name, Destroyed, ResizeRequest};
 use delonix_compute::vm_registry;
 pub use delonix_compute::vm_registry::mac_for;
 pub use delonix_compute::vm_registry::set_network;
@@ -686,6 +686,14 @@ pub fn resize(
     disk_size_gib: Option<u32>,
 ) -> Result<Vm> {
     engine(base)?.resize(name, vcpus, memory, disk_size_gib)
+}
+
+/// [`resize`] with the hotplug ceilings (ADR-0068 open question 2): the cold
+/// path the reconciler's reboot class (ADR-0012) and `vm resize
+/// --vcpus-max/--memory-max` share. See
+/// [`delonix_compute::vm::VmEngine::resize_shape`].
+pub fn resize_shape(base: &Path, name: &str, req: &ResizeRequest) -> Result<Vm> {
+    engine(base)?.resize_shape(name, req)
 }
 
 /// `vm update <name> [--vcpus N] [--memory M]` (ADR-0068 D1): adds vCPUs

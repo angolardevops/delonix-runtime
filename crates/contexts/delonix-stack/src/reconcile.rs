@@ -1326,7 +1326,7 @@ mod tests {
         assert!(Action::Reboot.is_change());
         assert_eq!(Action::Reboot.marker(), "~↻");
         let c = vm_plan(&[("vcpus", "4")], &[("vcpus", "2")], vm_facts(Some(true)));
-        assert_eq!(summary(&[c.clone()]).get("reboot"), Some(&1));
+        assert_eq!(summary(std::slice::from_ref(&c)).get("reboot"), Some(&1));
         let json = serde_json::to_string(&c).unwrap();
         assert!(json.contains(r#""action":"reboot""#), "{json}");
         assert!(json.contains(r#""reboot_fields":["vcpus"]"#), "{json}");
