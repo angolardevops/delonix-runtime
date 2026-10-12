@@ -251,7 +251,7 @@ impl StoragePoolDriver for BtrfsDriver {
         if let Err(e) = self.run(&["btrfs", "--version"]) {
             return PoolProbe::Unavailable {
                 missing: e.to_string(),
-                remedy: "install btrfs-progs on the node".into(),
+                remedy: "the node's administrator installs it".into(),
             };
         }
         PoolProbe::Available

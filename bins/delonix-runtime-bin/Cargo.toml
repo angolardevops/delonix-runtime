@@ -19,6 +19,10 @@ delonix-stack = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-networking = { workspace = true }
 delonix-storage = { workspace = true }
+# The storage pool drivers the composition root registers (ADR-0067 P2-P4).
+delonix-provider-btrfs = { workspace = true }
+delonix-provider-lvm = { workspace = true }
+delonix-provider-zfs = { workspace = true }
 delonix-net-rules = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-linux = { workspace = true }

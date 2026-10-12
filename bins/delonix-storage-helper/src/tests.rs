@@ -161,6 +161,22 @@ fn a_request_above_the_limit_is_refused_not_truncated() {
 }
 
 #[test]
+fn a_smuggled_field_is_refused_as_such_even_without_an_allowlist() {
+    let fake = Arc::new(Fake::default());
+    let mut req: serde_json::Value = serde_json::from_slice(&allocate_request()).unwrap();
+    req["device"] = "/dev/sda".into();
+    let (reply, _) = exchange(
+        &serde_json::to_vec(&req).unwrap(),
+        Err(Error::PoolUnavailable("no allowlist".into())),
+        &fake,
+    );
+    assert!(
+        matches!(reply, Reply::Err { number: 1221, .. }),
+        "{reply:?}"
+    );
+}
+
+#[test]
 fn without_an_allowlist_the_caller_is_told_and_nothing_runs() {
     let fake = Arc::new(Fake::default());
     let (reply, _) = exchange(

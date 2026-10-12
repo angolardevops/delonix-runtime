@@ -235,8 +235,11 @@ fn serve_connection(
     let uid = peer_uid(stream);
     let parse_size = |s: &str| delonix_volume::parse_size_bytes(s);
     let result = uid.as_ref().map_err(clone_error).and_then(|&uid| {
-        let list = list?;
+        // The request's grammar first: a malformed or smuggling request is
+        // refused as such, whatever the state of the allowlist.
         let bytes = bytes?;
+        helper::Request::decode(&bytes)?.check()?;
+        let list = list?;
         let ctx = ServeContext {
             allowlist: &list,
             driver,

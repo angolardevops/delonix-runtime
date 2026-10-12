@@ -496,3 +496,30 @@ fn the_helper_never_does_as_root_what_the_driver_does_unprivileged() {
     let ctx = ctx_for(&list, &fake, &drivers);
     assert!(serve(&Request::new("probe", "fast").encode(), 1000, &ctx).is_ok());
 }
+
+#[test]
+fn a_probe_the_running_helper_refused_does_not_say_enable_the_helper() {
+    let fake = Fake::new(Privilege::Helper);
+    let list = list_with(entry(&["walter"], None));
+    let e = entry(&["walter"], None);
+    let pool = PoolRef {
+        name: "fast",
+        entry: &e,
+    };
+    let refused = helper_answering(Err(Error::PoolUnavailable("no allowlist".into())));
+    match route(fake.clone(), &list, Some(refused)).probe(&pool) {
+        PoolProbe::Undetermined { reason, remedy } => {
+            assert!(
+                reason.contains("refused the probe: no allowlist"),
+                "{reason}"
+            );
+            assert!(!remedy.contains("systemctl enable"), "{remedy}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let absent = helper_answering(Err(Error::HelperUnavailable("no socket".into())));
+    match route(fake, &list, Some(absent)).probe(&pool) {
+        PoolProbe::Undetermined { remedy, .. } => assert!(remedy.contains("systemctl enable")),
+        other => panic!("{other:?}"),
+    }
+}

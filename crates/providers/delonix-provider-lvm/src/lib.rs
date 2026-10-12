@@ -350,7 +350,7 @@ impl StoragePoolDriver for LvmThinDriver {
             Err(e) => {
                 return PoolProbe::Unavailable {
                     missing: e.to_string(),
-                    remedy: "install lvm2 and thin-provisioning-tools on the node".into(),
+                    remedy: "the node's administrator installs it".into(),
                 }
             }
         };

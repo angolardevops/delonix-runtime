@@ -546,6 +546,23 @@ impl Routed {
             remedy: HELPER_REMEDY.into(),
         }
     }
+
+    /// The helper answered and refused: its answer says what to fix, and
+    /// «enable the helper» would send the reader to one that is running.
+    fn refused_by_helper(&self, e: Error) -> PoolProbe {
+        if matches!(e, Error::HelperUnavailable(_)) {
+            return self.undetermined(e.to_string());
+        }
+        PoolProbe::Undetermined {
+            reason: format!(
+                "driver '{}': the storage helper refused the probe: {e}",
+                self.inner.id()
+            ),
+            remedy: "fix what the helper's answer names (it reads \
+                     /etc/delonix/storage-pools.yaml, not the engine's allowlist path)"
+                .into(),
+        }
+    }
 }
 
 impl StoragePoolDriver for Routed {
@@ -575,7 +592,7 @@ impl StoragePoolDriver for Routed {
             Some(h) => match h.call(&Request::new("probe", pool.name)) {
                 Ok(Outcome::Probe { probe }) => probe,
                 Ok(other) => self.undetermined(format!("the helper answered {other:?}")),
-                Err(e) => self.undetermined(e.to_string()),
+                Err(e) => self.refused_by_helper(e),
             },
         }
     }
