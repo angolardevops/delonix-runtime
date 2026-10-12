@@ -239,8 +239,9 @@ pub fn validate_target_url(url: &str) -> Result<()> {
     if !scheme.eq_ignore_ascii_case("https") {
         return Err(Error::InsecureTarget(format!(
             "invalid OPNsense url '{url}': only https:// is accepted — the API key/secret \
-             would go over the wire in the clear otherwise (use `insecure_tls` or a CA \
-             certificate for the appliance's self-signed one)"
+             would go over the wire in the clear otherwise (for the appliance's self-signed \
+             certificate use `tls.caFile` or `tls.insecureSkipVerify` in providers.yaml, or \
+             DELONIX_OPNSENSE_INSECURE_TLS=1)"
         )));
     }
     let hostport = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -1500,8 +1501,10 @@ pub fn register_with(target: Target) -> delonix_model::Result<()> {
                 return Ok(c.clone());
             }
             let c = std::sync::Arc::new(
+                // The coded error, not its root: `into_root` drops the number,
+                // and a refused target answered DX-1000 instead of DX-1349.
                 Client::connect(&target)
-                    .map_err(|e| delonix_networking::Error::from(e.into_root()))?,
+                    .map_err(|e| delonix_networking::Error::from(delonix_model::Error::from(e)))?,
             );
             *slot = Some(c.clone());
             Ok(c)
@@ -1689,6 +1692,17 @@ mod target_url_tests {
         let text = e.to_string();
         assert!(!text.contains("hunter2"), "{text}");
         assert!(text.contains("fw.example"), "{text}");
+    }
+
+    /// The number survives the way `register_with` hands the error to the
+    /// networking layer: `into_root` used to drop it, and the operator saw
+    /// DX-1000 for a refused target.
+    #[test]
+    fn the_refusal_keeps_its_number_through_the_networking_error() {
+        let e = validate_target_url("http://fw.example").unwrap_err();
+        let net = delonix_networking::Error::from(delonix_model::Error::from(e));
+        assert_eq!(net.number(), 1349);
+        assert_eq!(delonix_model::Error::from(net).number(), 1349);
     }
 
     /// The refusal happens before a client exists: nothing can be sent.

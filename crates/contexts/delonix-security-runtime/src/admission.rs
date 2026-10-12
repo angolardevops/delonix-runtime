@@ -64,6 +64,39 @@ pub const BASELINE_ADDABLE_CAPS: &[&str] = &[
     "SYS_CHROOT",
 ];
 
+/// The `/proc` and `/sys` paths a container may not see under
+/// `workloadSecurity: baseline` — the masks the kubelet sends for every
+/// non-privileged pod (and every entry of the engine's own default list but
+/// `/proc/interrupts`, which the kubelet does not mask). A custom
+/// `--masked-path` list REPLACES the default one, so a list missing any of
+/// these unmasks it: Pod Security baseline forbids an unmasked `/proc`.
+///
+/// `/sys/devices/virtual/powercap` is in the engine's default and NOT here:
+/// only recent kubelets send it, and requiring it would refuse every pod an
+/// older kubelet starts on a baseline node.
+pub const BASELINE_MASKED_PATHS: &[&str] = &[
+    "/proc/acpi",
+    "/proc/asound",
+    "/proc/kcore",
+    "/proc/keys",
+    "/proc/latency_stats",
+    "/proc/sched_debug",
+    "/proc/scsi",
+    "/proc/timer_list",
+    "/proc/timer_stats",
+    "/sys/firmware",
+];
+
+/// The paths that stay read-only under `workloadSecurity: baseline` — the
+/// kubelet's and the engine's list, which are the same.
+pub const BASELINE_READONLY_PATHS: &[&str] = &[
+    "/proc/bus",
+    "/proc/fs",
+    "/proc/irq",
+    "/proc/sys",
+    "/proc/sysrq-trigger",
+];
+
 /// What a container asks for beyond `--privileged` that can take it out of
 /// its own isolation. Read only by `workloadSecurity` rules; every field
 /// defaults to «asks for nothing», so a caller that does not fill it in
@@ -80,8 +113,46 @@ pub struct ContainerHardening<'a> {
     /// `-v` specifications, as written; the ones whose source is a host path
     /// (`/…` or `./…`, the engine's own rule) are the ones that count.
     pub volumes: &'a [String],
-    /// `--device`, as written.
+    /// `--device`, as written. A CDI name (`vendor.com/class=name`) is a
+    /// device the node's own CDI spec declares — the engine's equivalent of a
+    /// Kubernetes device plugin, which baseline allows; a host path is not.
     pub devices: &'a [String],
+    /// `--gpus`, as written: `dri` and `all` bind the raw `/dev/dri` nodes,
+    /// `nvidia` resolves through CDI.
+    pub gpus: Option<&'a str>,
+    /// `--masked-path`, as written. Empty = the engine's default list.
+    pub masked_paths: &'a [String],
+    /// `--readonly-path`, as written. Empty = the engine's default list.
+    pub readonly_paths: &'a [String],
+}
+
+/// The paths of `defaults` a custom list leaves out. Empty when the list is
+/// empty, which means «the engine's defaults», not «none».
+pub fn dropped_defaults(custom: &[String], defaults: &[&str]) -> Vec<String> {
+    if custom.is_empty() {
+        return Vec::new();
+    }
+    defaults
+        .iter()
+        .filter(|d| !custom.iter().any(|c| c.trim_end_matches('/') == **d))
+        .map(|d| d.to_string())
+        .collect()
+}
+
+/// The host devices a request binds raw: every `--device` that is a path,
+/// and `/dev/dri` when `--gpus` asks for it.
+pub fn raw_host_devices(devices: &[String], gpus: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = devices
+        .iter()
+        .filter(|d| d.starts_with('/'))
+        .cloned()
+        .collect();
+    if let Some(g) = gpus {
+        if g == "all" || g.contains("dri") {
+            out.push(format!("/dev/dri (--gpus {g})"));
+        }
+    }
+    out
 }
 
 /// The capability names in `cap_add` the baseline does not allow, normalised
@@ -183,6 +254,7 @@ pub enum Rule {
     BaselineUnconfined,
     BaselineHostPath,
     BaselineDevice,
+    BaselineUnmasked,
 }
 
 impl Rule {
@@ -200,6 +272,7 @@ impl Rule {
             Rule::BaselineUnconfined => "ADM-BASELINE-UNCONFINED",
             Rule::BaselineHostPath => "ADM-BASELINE-HOST-PATH",
             Rule::BaselineDevice => "ADM-BASELINE-DEVICE",
+            Rule::BaselineUnmasked => "ADM-BASELINE-UNMASKED",
         }
     }
 }
@@ -252,6 +325,10 @@ pub enum Violation {
     BaselineDevice {
         devices: Vec<String>,
     },
+    /// Default masked or read-only `/proc`/`/sys` paths a custom list drops.
+    BaselineUnmasked {
+        paths: Vec<String>,
+    },
 }
 
 impl Violation {
@@ -269,6 +346,7 @@ impl Violation {
             Violation::BaselineUnconfined { .. } => Rule::BaselineUnconfined,
             Violation::BaselineHostPath { .. } => Rule::BaselineHostPath,
             Violation::BaselineDevice { .. } => Rule::BaselineDevice,
+            Violation::BaselineUnmasked { .. } => Rule::BaselineUnmasked,
         }
     }
 
@@ -286,9 +364,9 @@ impl Violation {
             | Violation::BaselineDevice { .. } => Severity::Critical,
             // Weaken the boundary rather than cross it: another process's
             // memory and signals, or the syscall surface the filter removes.
-            Violation::BaselineHostNamespace { .. } | Violation::BaselineUnconfined { .. } => {
-                Severity::High
-            }
+            Violation::BaselineHostNamespace { .. }
+            | Violation::BaselineUnconfined { .. }
+            | Violation::BaselineUnmasked { .. } => Severity::High,
             // Reaching an unvetted host to fetch something you will then BOOT.
             Violation::ImageUrlHost { .. } => Severity::High,
             Violation::HostNetwork | Violation::Registry { .. } => Severity::High,
@@ -307,7 +385,8 @@ impl Violation {
             | Violation::BaselineHostNamespace { .. }
             | Violation::BaselineUnconfined { .. }
             | Violation::BaselineHostPath { .. }
-            | Violation::BaselineDevice { .. } => ActionRisk::Privileged,
+            | Violation::BaselineDevice { .. }
+            | Violation::BaselineUnmasked { .. } => ActionRisk::Privileged,
             _ => ActionRisk::SafeWrite,
         }
     }
@@ -453,10 +532,14 @@ fn baseline(r: &Request<'_>, privileged_already: bool, v: &mut Vec<Violation>) {
     if !paths.is_empty() {
         v.push(Violation::BaselineHostPath { paths });
     }
-    if !h.devices.is_empty() {
-        v.push(Violation::BaselineDevice {
-            devices: h.devices.to_vec(),
-        });
+    let devices = raw_host_devices(h.devices, h.gpus);
+    if !devices.is_empty() {
+        v.push(Violation::BaselineDevice { devices });
+    }
+    let mut paths = dropped_defaults(h.masked_paths, BASELINE_MASKED_PATHS);
+    paths.extend(dropped_defaults(h.readonly_paths, BASELINE_READONLY_PATHS));
+    if !paths.is_empty() {
+        v.push(Violation::BaselineUnmasked { paths });
     }
 }
 
@@ -820,6 +903,7 @@ mod tests {
             Rule::BaselineUnconfined,
             Rule::BaselineHostPath,
             Rule::BaselineDevice,
+            Rule::BaselineUnmasked,
         ];
         let mut ids: Vec<_> = all.iter().map(|r| r.id()).collect();
         ids.sort_unstable();
@@ -856,6 +940,7 @@ mod tests {
             apparmor_unconfined: true,
             volumes: &vols,
             devices: &devs,
+            ..Default::default()
         };
         let r = Request::container("alpine:3.20", false, false).with_hardening(h);
 
@@ -940,5 +1025,44 @@ mod tests {
             &Request::container("a:1", false, false).with_hardening(h),
         );
         assert!(matches!(d, Decision::AllowWithWarnings(ref v) if v.len() == 1));
+    }
+
+    /// The three ways past baseline the CLI gate found after it shipped:
+    /// `--gpus dri`, and a `--masked-path`/`--readonly-path` list that
+    /// replaces the defaults. A CDI device and `--gpus nvidia` stay allowed.
+    #[test]
+    fn baseline_refuses_raw_gpu_nodes_and_a_list_that_drops_default_masks() {
+        let masked = s(&["/nonexistent"]);
+        let h = ContainerHardening {
+            gpus: Some("dri"),
+            masked_paths: &masked,
+            ..Default::default()
+        };
+        let d = evaluate(
+            &baseline_only(),
+            &Request::container("a:1", false, false).with_hardening(h),
+        );
+        let rules: Vec<Rule> = d.violations().iter().map(Violation::rule).collect();
+        assert_eq!(rules, [Rule::BaselineDevice, Rule::BaselineUnmasked]);
+
+        let cdi = s(&["nvidia.com/gpu=all"]);
+        let mut keeps: Vec<String> = BASELINE_MASKED_PATHS
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        keeps.push("/proc/extra".into());
+        let ok = ContainerHardening {
+            gpus: Some("nvidia"),
+            devices: &cdi,
+            masked_paths: &keeps,
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(
+                &baseline_only(),
+                &Request::container("a:1", false, false).with_hardening(ok)
+            ),
+            Decision::Allow
+        );
     }
 }

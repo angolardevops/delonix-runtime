@@ -10420,8 +10420,8 @@ msgstr "as verificações de armazenamento/binário de que a sessão de um clien
 msgid "the full risk table as JSON, for a client or a human to read before enabling mutations"
 msgstr "a tabela de risco completa em JSON, para um cliente ou um humano ler antes de activar mutações"
 
-msgid "device passthrough ({devices}) is refused by this node's runtime policy — a passed-through device gives the guest DMA to host hardware"
-msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — um dispositivo passado dá ao convidado DMA ao hardware do host"
+msgid "device passthrough ({devices}) is refused by this node's runtime policy — it hands the guest host hardware directly (a PCI device's DMA, or a host disk)"
+msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — entrega hardware do host directamente ao convidado (o DMA de um dispositivo PCI, ou um disco do host)"
 
 msgid "VM image '{image}': this node's runtime policy refuses `:latest` and untagged references — pin a version"
 msgstr "imagem de VM '{image}': a política de runtime deste nó recusa `:latest` e referências sem etiqueta — fixa uma versão"
@@ -16255,9 +16255,6 @@ msgstr "o bind mount do caminho do host {paths} é recusado pela política de ru
 msgid "host device {devices} is refused by this node's runtime policy (workloadSecurity: baseline)"
 msgstr "o dispositivo do host {devices} é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
 
-msgid "RuntimePolicy: workloadSecurity '{value}' is not a profile this engine enforces (baseline)"
-msgstr "RuntimePolicy: workloadSecurity '{value}' não é um perfil que este motor imponha (baseline)"
-
 msgid "this node refuses `--privileged` but admits what it is made of (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — set `workloadSecurity: baseline` to refuse those too"
 msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — define `workloadSecurity: baseline` para recusar também esses"
 
@@ -16275,3 +16272,5 @@ msgstr "O URL do OPNsense não é https://, não nomeia um host, ou traz userinf
 msgid "Use https://<host> (with `tls.insecureSkipVerify: true` or a `caFile` for the appliance's self-signed certificate) and keep the credential in `auth`."
 msgstr "Usa https://<host> (com `tls.insecureSkipVerify: true` ou um `caFile` para o certificado auto-assinado da appliance) e mantém a credencial em `auth`."
 
+msgid "a --masked-path/--readonly-path list that leaves {paths} unprotected is refused by this node's runtime policy (workloadSecurity: baseline) — a custom list replaces the default one, so include them"
+msgstr "uma lista --masked-path/--readonly-path que deixa {paths} desprotegido é recusada pela política de runtime deste nó (workloadSecurity: baseline) — uma lista própria substitui a de omissão, por isso inclui-os"

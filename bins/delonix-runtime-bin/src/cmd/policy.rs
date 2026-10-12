@@ -133,8 +133,8 @@ fn render(v: &Violation) -> String {
             ],
         ),
         Violation::DevicePassthrough { devices } => super::po::tf(
-            "device passthrough ({devices}) is refused by this node's runtime policy — a \
-             passed-through device gives the guest DMA to host hardware",
+            "device passthrough ({devices}) is refused by this node's runtime policy — it \
+             hands the guest host hardware directly (a PCI device's DMA, or a host disk)",
             &[("devices", &devices.join(", "))],
         ),
         Violation::LatestVmImage { image } => super::po::tf(
@@ -168,6 +168,12 @@ fn render(v: &Violation) -> String {
         Violation::BaselineHostPath { paths } => super::po::tf(
             "bind mount of the host path {paths} is refused by this node's runtime policy \
              (workloadSecurity: baseline) — use a named volume",
+            &[("paths", &paths.join(", "))],
+        ),
+        Violation::BaselineUnmasked { paths } => super::po::tf(
+            "a --masked-path/--readonly-path list that leaves {paths} unprotected is refused \
+             by this node's runtime policy (workloadSecurity: baseline) — a custom list replaces \
+             the default one, so include them",
             &[("paths", &paths.join(", "))],
         ),
         Violation::BaselineDevice { devices } => super::po::tf(
@@ -429,10 +435,11 @@ pub struct RuntimePolicySpec {
     pub allowed_registries: Vec<String>,
     /// `baseline`: refuse what `--privileged` is made of — capabilities beyond
     /// the Pod Security baseline set, the host's PID/IPC namespace,
-    /// `seccomp`/`apparmor=unconfined`, host-path bind mounts and host
-    /// devices. Omitted = no opinion.
+    /// `seccomp`/`apparmor=unconfined`, host-path bind mounts, host devices
+    /// and a custom masked/read-only path list that drops the defaults.
+    /// Omitted = no opinion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workload_security: Option<String>,
+    pub workload_security: Option<WorkloadSecuritySpec>,
     /// Refuse `vm create --device` (VFIO PCI passthrough).
     #[serde(default)]
     pub deny_device_passthrough: bool,
@@ -459,6 +466,16 @@ pub struct RuntimePolicySpec {
     /// (canonical `a.b.c.d/len`). A GRANT: empty = none.
     #[serde(default)]
     pub allowed_egress_prefixes: Vec<String>,
+}
+
+/// The profiles `workloadSecurity` accepts — an enum in the published schema,
+/// so `manifest validate` and an editor refuse `restricted` before a plan
+/// does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkloadSecuritySpec {
+    /// The Kubernetes Pod Security Standards baseline profile.
+    Baseline,
 }
 
 /// Names accepted in the `spec` of `kind: RuntimePolicy` (unknown-field warning,
@@ -494,17 +511,9 @@ pub(crate) fn to_security_policy(spec: &RuntimePolicySpec) -> Result<SecurityPol
             )))
         }
     };
-    let workload_security = match spec.workload_security.as_deref() {
-        None => None,
-        Some("baseline") => Some(srt::policy::WorkloadSecurity::Baseline),
-        Some(other) => {
-            return Err(Error::Invalid(super::po::tf(
-                "RuntimePolicy: workloadSecurity '{value}' is not a profile this engine \
-                 enforces (baseline)",
-                &[("value", other)],
-            )))
-        }
-    };
+    let workload_security = spec.workload_security.map(|w| match w {
+        WorkloadSecuritySpec::Baseline => srt::policy::WorkloadSecurity::Baseline,
+    });
     Ok(SecurityPolicy {
         mode,
         workload_security,
@@ -1179,8 +1188,7 @@ mod tests {
             Some(srt::policy::WorkloadSecurity::Baseline)
         );
         let d = doc("workloadSecurity: restricted");
-        let spec: RuntimePolicySpec = manifest::spec_of(&d).unwrap();
-        let e = to_security_policy(&spec).unwrap_err();
+        let e = manifest::spec_of::<RuntimePolicySpec>(&d).unwrap_err();
         assert!(format!("{e}").contains("restricted"), "{e}");
     }
 
@@ -1228,7 +1236,7 @@ mod tests {
             deny_host_network: true,
             deny_latest_tag: true,
             allowed_registries: vec!["ghcr.io".into()],
-            workload_security: Some("baseline".into()),
+            workload_security: Some(WorkloadSecuritySpec::Baseline),
             deny_device_passthrough: true,
             deny_latest_vm_image: true,
             allowed_image_url_hosts: vec!["x".into()],

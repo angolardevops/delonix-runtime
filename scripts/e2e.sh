@@ -2417,6 +2417,78 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
 else
   skip "private egress" "shared state — the check would write the real node's policy.json"
 fi
+# workloadSecurity: baseline (security audit #4): what `--privileged` is made of
+# is refused by the node's ONE admission point, on `run` AND on the hot paths
+# (`container update --volume-add`, `vm update --disk-add`), and a manifest VM
+# goes through it like `vm create`. Every refusal is checked by the POLICY'S
+# message, not the rc alone: a run that fails for another reason must not read
+# as the policy working. Writes policy.json, so isolated state only.
+if [[ "$E2E_ISOLATED" == 1 ]]; then
+  WS="ws-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
+  refused() {  # <args…> → 0 when the run is refused BY THE POLICY and created nothing
+    local out; out=$("$BIN" container run --rm --net none "$@" "$IMG" true 2>&1)
+    [[ $? -ne 0 ]] && grep -q "workloadSecurity: baseline" <<<"$out"
+  }
+  printf '{"denyPrivileged":true}\n' > "$POL"
+  check "baseline: denyPrivileged alone names the hole it leaves (lint)" ok bash -c \
+    "'$BIN' container run --rm --net none '$IMG' true 2>&1 | grep -q POLICY-PRIVILEGE-EQUIVALENTS-OPEN"
+  printf '{"workloadSecurity":"baseline"}\n' > "$POL"
+  check "baseline: --cap-add ALL is refused" ok refused --cap-add ALL
+  check "baseline: --cap-add SYS_ADMIN is refused" ok refused --cap-add SYS_ADMIN
+  check "baseline: --host-pid is refused" ok refused --host-pid
+  check "baseline: seccomp=unconfined is refused" ok refused --security-opt seccomp=unconfined
+  check "baseline: a host-path bind mount is refused" ok refused -v /etc:/hostetc:ro
+  check "baseline: a host device is refused" ok refused --device /dev/null
+  check "baseline: --gpus dri is refused" ok refused --gpus dri
+  check "baseline: a --masked-path list that drops the defaults is refused" ok refused --masked-path /x
+  check "baseline: an ordinary container with an allowed capability and a named volume runs" ok \
+    "$BIN" container run --rm --net none --cap-add NET_BIND_SERVICE -v "ws-vol-$PFX":/d "$IMG" true
+  if "$BIN" container run -d --name "$WS" --net none "$IMG" sleep 900 >/dev/null 2>&1; then
+    check "baseline: update --volume-add of a host path is refused" ok bash -c \
+      "'$BIN' container update '$WS' --volume-add /etc:/hostetc:ro 2>&1 | grep -q 'workloadSecurity: baseline'"
+    check "baseline: …and the host path did not reach the container" fail \
+      "$BIN" container exec "$WS" -- test -e /hostetc/hostname
+    check "baseline: update --volume-add of a named volume still works" ok \
+      "$BIN" container update "$WS" --volume-add "ws-vol-$PFX":/d
+    # The CRI's argv shape (`exec <name> -- <cmd>`): a command that starts with
+    # `-u 0` is the command, never exec's own --user.
+    check "exec: a command after -- is never an option of exec (no uid 0)" fail bash -c \
+      "'$BIN' container exec '$WS' -- -u 0 id 2>&1 | grep -q 'uid=0'"
+  else
+    skip "baseline: update --volume-add" "could not start the container"
+  fi
+  "$BIN" container rm -f "$WS" >/dev/null 2>&1
+  printf '{"denyDevicePassthrough":true}\n' > "$POL"
+  cat > "$OUT/ws-vm-$PFX.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata: { name: ws-vm-$PFX }
+spec:
+  disk: /nonexistent/golden.qcow2
+  devices: ["0000:01:00.0"]
+YAML
+  check "vm admission: a kind: VirtualMachine with devices is refused like vm create --device" ok bash -c \
+    "'$BIN' stack apply -f '$OUT/ws-vm-$PFX.yaml' 2>&1 | grep -q 'device passthrough (0000:01:00.0'"
+  ln -sf /dev/null "$OUT/ws-disk-$PFX.qcow2"
+  check "vm admission: vm update --disk-add of a symlink to a device is refused" ok bash -c \
+    "'$BIN' vm update ws-novm --disk-add '$OUT/ws-disk-$PFX.qcow2' 2>&1 | grep -q 'device passthrough'"
+  rm -f "$POL" "$OUT/ws-disk-$PFX.qcow2"
+  # A RuntimePolicy field converges in place: before the fix, turning
+  # denyPrivateEgress on in an applied manifest planned an impossible `-/+`.
+  rp() { printf 'apiVersion: security.delonix.io/v1alpha1\nkind: RuntimePolicy\nmetadata: { name: node }\nspec:\n  denyPrivateEgress: %s\n' "$1" > "$OUT/ws-rp-$PFX.yaml"; }
+  rp false; "$BIN" stack apply -f "$OUT/ws-rp-$PFX.yaml" >/dev/null 2>&1
+  rp true
+  check "RuntimePolicy: denyPrivateEgress false→true plans an in-place update, not a replace" ok bash -c \
+    "out=\$('$BIN' stack plan -f '$OUT/ws-rp-$PFX.yaml' 2>&1); grep -q '^  ~ *RuntimePolicy/node' <<<\"\$out\" && ! grep -q '[-]/+' <<<\"\$out\""
+  "$BIN" stack apply -f "$OUT/ws-rp-$PFX.yaml" >/dev/null 2>&1
+  check "RuntimePolicy: after the apply the plan has nothing to do" 0 \
+    "$BIN" stack plan -f "$OUT/ws-rp-$PFX.yaml" --detailed-exitcode
+  "$BIN" policy unset --force >/dev/null 2>&1
+  "$BIN" volume rm "ws-vol-$PFX" >/dev/null 2>&1
+  rm -f "$POL"
+else
+  skip "workloadSecurity baseline" "shared state — the check would write the real node's policy.json"
+fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"

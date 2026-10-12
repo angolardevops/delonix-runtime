@@ -3128,6 +3128,11 @@ fn check_vm_namespace(name: &str, want: &str, have: &str) -> Result<()> {
 /// not validated by this engine at all — so it counts whatever it contains.
 pub(crate) fn manifest_passthrough(spec: &VmSpec) -> Vec<String> {
     let mut out = spec.devices.clone();
+    // The boot disk too: a `disk:` that is a host device boots the guest on
+    // the host's disk, the same hole as an `extraDisks` entry.
+    if !spec.disk.is_empty() && names_a_host_device(&spec.disk) {
+        out.push(format!("disk: {}", spec.disk));
+    }
     for d in &spec.extra_disks {
         if names_a_host_device(&d.source) {
             out.push(format!("extraDisks: {}", d.source));
@@ -3493,12 +3498,18 @@ pub fn run(action: VmCmd) -> Result<()> {
             // `--privileged` containers still accepted `--device` passthrough,
             // which hands the guest DMA to host hardware and is the wider hole
             // of the two. See ADR-0026.
+            // `--disk` that is a host device boots the guest on the host's
+            // disk: passthrough by another flag, judged with `--device`.
+            let mut passthrough = devices.clone();
+            if let Some(d) = disk.as_deref().filter(|d| names_a_host_device(d)) {
+                passthrough.push(format!("--disk {d}"));
+            }
             super::policy::enforce(
                 &base,
                 &name,
                 &super::policy::Request::virtual_machine(
                     disk.as_deref(),
-                    &devices,
+                    &passthrough,
                     url_img.as_deref(),
                 ),
             )?;
@@ -6919,6 +6930,8 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         );
         let plain: VmSpec = serde_yaml::from_str("disk: golden:1.0\n").unwrap();
         assert!(manifest_passthrough(&plain).is_empty());
+        let on_device: VmSpec = serde_yaml::from_str("disk: /dev/nvme9n1\n").unwrap();
+        assert_eq!(manifest_passthrough(&on_device), ["disk: /dev/nvme9n1"]);
     }
 
     /// A symlink to a device is the device: the check follows it.
