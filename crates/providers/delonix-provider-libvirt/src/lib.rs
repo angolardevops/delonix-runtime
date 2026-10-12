@@ -1061,12 +1061,45 @@ fn live_domain_uri(vm: &Vm) -> delonix_model::Result<&'static str> {
     })
 }
 
+/// `virsh`, with EVERY line of its stderr in the error: an `attach-device`
+/// says «Failed to attach device from …» first and the reason («No more
+/// available PCI slots») on the next line, which [`quiet`] drops.
 fn virsh_hotplug<S: AsRef<str>>(
     args: &[S],
     context: &'static str,
 ) -> delonix_model::Result<String> {
     let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
-    quiet("virsh", &args).map_err(|message| Error::Command { context, message }.into())
+    match stable_cmd("virsh").args(&args).output() {
+        Ok(out) if out.status.success() => {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        }
+        Ok(out) => Err(Error::Command {
+            context,
+            message: virsh_reason(&String::from_utf8_lossy(&out.stderr)),
+        }
+        .into()),
+        Err(e) => Err(Error::Command {
+            context,
+            message: format!("virsh: {e}"),
+        }
+        .into()),
+    }
+}
+
+/// Every non-empty stderr line of `virsh`, without its `error: ` prefix,
+/// joined. Pure.
+fn virsh_reason(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .map(|l| l.strip_prefix("error: ").unwrap_or(l))
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        "unknown error".into()
+    } else {
+        lines.join(": ")
+    }
 }
 
 /// `virsh setvcpus`, named options only (a positional after a flag is the
@@ -2823,6 +2856,7 @@ impl VmBackend for LibvirtBackend {
         vm: &Vm,
         disk: &ExtraDisk,
         wait: std::time::Duration,
+        attached: &mut dyn FnMut(&ExtraDisk) -> delonix_model::Result<()>,
     ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
         if disk.device == "cdrom" {
             return Err(Error::InvalidResize(format!(
@@ -2887,6 +2921,8 @@ impl VmBackend for LibvirtBackend {
             }
             .into());
         }
+        // Recorded now (D6), before the guest wait a kill could interrupt.
+        attached(&pinned)?;
         let deadline = std::time::Instant::now() + wait;
         loop {
             let after = guest_disk_count(uri, &vm.name)?;
@@ -2909,6 +2945,7 @@ impl VmBackend for LibvirtBackend {
         vm: &Vm,
         nic: &ExtraNic,
         wait: std::time::Duration,
+        attached: &mut dyn FnMut(&ExtraNic) -> delonix_model::Result<()>,
     ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
         let uri = live_domain_uri(vm)?;
         let mut pinned = nic.clone();
@@ -2931,6 +2968,7 @@ impl VmBackend for LibvirtBackend {
             }
             .into());
         }
+        attached(&pinned)?;
         let deadline = std::time::Instant::now() + wait;
         loop {
             let guest = qemu_agent_query(
@@ -4618,6 +4656,16 @@ mod hotplug_tests {
         c.extra_nics = vec![n.clone()];
         let boot = libvirt_domain_xml(&c, "/o", "m");
         assert!(boot.contains(&libvirt_extra_nic_xml(&n)), "{boot}");
+    }
+
+    /// The reason libvirt gives on its SECOND line reaches the error.
+    #[test]
+    fn the_whole_virsh_reason_is_kept() {
+        let e = virsh_reason(
+            "error: Failed to attach device from /x.xml\nerror: internal error: No more available PCI slots\n",
+        );
+        assert!(e.contains("No more available PCI slots"), "{e}");
+        assert!(e.starts_with("Failed to attach device"), "{e}");
     }
 
     #[test]

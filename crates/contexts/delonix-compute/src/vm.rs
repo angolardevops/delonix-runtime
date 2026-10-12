@@ -875,14 +875,40 @@ where
                 let outcome = match change {
                     DeviceChange::AddDisk(d) => {
                         check_new_disk(&vm, &d)?;
-                        let (d, o) = backend.hotplug_add_disk(&vmdir, &vm, &d, wait)?;
-                        vm.boot.extra_disks.push(d);
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let (d, o) =
+                            backend.hotplug_add_disk(&vmdir, &base, &d, wait, &mut |att| {
+                                let mut next = base.clone();
+                                next.boot.extra_disks.push(att.clone());
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or_else(|| {
+                            let mut next = base.clone();
+                            next.boot.extra_disks.push(d);
+                            next
+                        });
                         o
                     }
                     DeviceChange::AddNic(n) => {
                         check_new_nic(&vm, &n)?;
-                        let (n, o) = backend.hotplug_add_nic(&vmdir, &vm, &n, wait)?;
-                        vm.boot.extra_nics.push(n);
+                        let base = vm.clone();
+                        let mut recorded: Option<Vm> = None;
+                        let (n, o) =
+                            backend.hotplug_add_nic(&vmdir, &base, &n, wait, &mut |att| {
+                                let mut next = base.clone();
+                                next.boot.extra_nics.push(att.clone());
+                                self.repo.set(name, &next).map_err(Error::from)?;
+                                recorded = Some(next);
+                                Ok(())
+                            })?;
+                        vm = recorded.unwrap_or_else(|| {
+                            let mut next = base.clone();
+                            next.boot.extra_nics.push(n);
+                            next
+                        });
                         o
                     }
                     DeviceChange::RemoveDisk(_) | DeviceChange::RemoveNic(_) => {
@@ -1825,6 +1851,8 @@ mod tests {
         /// The record `resize_cold` was handed — the ceilings it must apply
         /// travel in it (ADR-0068 open question 2).
         resized: RefCell<Option<Vm>>,
+        /// Makes `hotplug_add_disk` fail after it reported the attachment.
+        fail_after_attach: RefCell<bool>,
     }
 
     struct FakeBackend(Rc<Seen>);
@@ -1894,6 +1922,7 @@ mod tests {
             vm: &Vm,
             disk: &crate::ExtraDisk,
             _wait: Duration,
+            attached: &mut dyn FnMut(&crate::ExtraDisk) -> delonix_model::Result<()>,
         ) -> delonix_model::Result<(crate::ExtraDisk, HotplugOutcome)> {
             self.0
                 .calls
@@ -1901,6 +1930,14 @@ mod tests {
                 .push(format!("hotplug_add_disk {} {}", vm.name, disk.source));
             let mut d = disk.clone();
             d.target = Some("vdz".into());
+            attached(&d)?;
+            // A guest wait the command is killed in: `fail_after_attach`
+            // makes the call fail AFTER the read-back confirmed the disk.
+            if *self.0.fail_after_attach.borrow() {
+                return Err(delonix_model::Error::Invalid(
+                    "killed during the wait".into(),
+                ));
+            }
             Ok((d, HotplugOutcome::Complete))
         }
         fn hotplug_add_nic(
@@ -1909,6 +1946,7 @@ mod tests {
             vm: &Vm,
             nic: &crate::ExtraNic,
             _wait: Duration,
+            attached: &mut dyn FnMut(&crate::ExtraNic) -> delonix_model::Result<()>,
         ) -> delonix_model::Result<(crate::ExtraNic, HotplugOutcome)> {
             self.0
                 .calls
@@ -1916,6 +1954,7 @@ mod tests {
                 .push(format!("hotplug_add_nic {}", vm.name));
             let mut n = nic.clone();
             n.mac = Some("52:54:00:aa:bb:cc".into());
+            attached(&n)?;
             Ok((
                 n,
                 HotplugOutcome::Partial {
@@ -2558,6 +2597,28 @@ mod tests {
             .change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
             .is_err());
         assert_eq!(calls(&seen).len(), before);
+    }
+
+    /// D6: the record names the disk as soon as the hypervisor's read-back
+    /// confirms it — a command killed during the guest wait must not leave
+    /// the domain with a disk the record does not know.
+    #[test]
+    fn a_disk_is_recorded_before_the_guest_wait() {
+        let root = tempfile::tempdir().unwrap();
+        let seen = Rc::new(Seen::default());
+        let e = engine(root.path(), seen.clone());
+        e.create(&cfg("app")).expect("create");
+        *seen.fail_after_attach.borrow_mut() = true;
+        let disk = crate::ExtraDisk {
+            source: "/data/d.qcow2".into(),
+            ..Default::default()
+        };
+        assert!(e
+            .change_device("app", DeviceChange::AddDisk(disk), Duration::ZERO)
+            .is_err());
+        let rec = e.load_vm("app").unwrap();
+        assert_eq!(rec.boot.extra_disks.len(), 1, "recorded before the wait");
+        assert_eq!(rec.boot.extra_disks[0].target.as_deref(), Some("vdz"));
     }
 
     /// D10: nothing is removed live; the refusal names `vm stop`, and the

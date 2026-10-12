@@ -630,6 +630,11 @@ pub trait VmBackend {
     /// actually gave it PINNED, so the next boot puts it where the guest
     /// already sees it — and whether the guest is confirmed to see it (D4).
     ///
+    /// `attached` is called with that disk AS SOON AS the hypervisor's
+    /// read-back confirms it, BEFORE the wait on the guest (D6): a command
+    /// killed during the wait must not leave the domain with a disk the record
+    /// does not name. An error from it is returned as the call's error.
+    ///
     /// Default: unsupported (fail closed).
     fn hotplug_add_disk(
         &self,
@@ -637,19 +642,22 @@ pub trait VmBackend {
         _vm: &Vm,
         _disk: &ExtraDisk,
         _wait: Duration,
+        _attached: &mut dyn FnMut(&ExtraDisk) -> delonix_model::Result<()>,
     ) -> delonix_model::Result<(ExtraDisk, HotplugOutcome)> {
         Err(unsupported_pause(self.id(), "hotplug disk add"))
     }
 
     /// Attaches an extra NIC to a RUNNING VM (ADR-0068 D7, Phase 5). Returns
     /// the NIC with its MAC pinned, and whether the guest is confirmed to see
-    /// it (D4). Default: unsupported (fail closed).
+    /// it (D4). `attached` as for [`VmBackend::hotplug_add_disk`].
+    /// Default: unsupported (fail closed).
     fn hotplug_add_nic(
         &self,
         _vmdir: &Path,
         _vm: &Vm,
         _nic: &ExtraNic,
         _wait: Duration,
+        _attached: &mut dyn FnMut(&ExtraNic) -> delonix_model::Result<()>,
     ) -> delonix_model::Result<(ExtraNic, HotplugOutcome)> {
         Err(unsupported_pause(self.id(), "hotplug NIC add"))
     }
