@@ -271,6 +271,49 @@ fn path_prefix_matches(path: &str, prefix: &str) -> bool {
     prefix.ends_with('/') || path.len() == prefix.len() || path.as_bytes()[prefix.len()] == b'/'
 }
 
+/// The forwarding headers a client may send and a backend may trust.
+const FORWARDING_HEADERS: [&str; 6] = [
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+    "x-forwarded-port",
+    "x-real-ip",
+];
+
+/// Rewrites the forwarding headers as the edge sees them. PURE.
+///
+/// This proxy is the edge: nothing in front of it vouches for a
+/// `X-Forwarded-For` the client wrote, so every forwarding header the client
+/// sent is DROPPED and the proxy's own are set — the peer it accepted the
+/// connection from, the scheme of the listener, the `Host` the client asked
+/// for. Before this, they passed through untouched and the proxy wrote none:
+/// a backend that trusts them (a framework behind a proxy is told to, and the
+/// `init` templates say `TRUSTED_PROXY=*` behind the tunnel) took a forged
+/// client address and `https` from anyone who typed the header.
+///
+/// The peer of a client on the host's own loopback is the slirp gateway
+/// (`10.0.2.2`), never the forged value — measured and documented in the
+/// AGENTS.md publish section; the header says where the packet came from, no
+/// more.
+fn set_forwarding_headers(headers: &mut hyper::HeaderMap, peer: std::net::IpAddr, https: bool) {
+    use hyper::header::{HeaderValue, HOST};
+    let host = headers.get(HOST).cloned();
+    for h in FORWARDING_HEADERS {
+        headers.remove(h);
+    }
+    let ip = HeaderValue::from_str(&peer.to_string()).expect("an IP is a valid header value");
+    headers.insert("x-forwarded-for", ip.clone());
+    headers.insert("x-real-ip", ip);
+    headers.insert(
+        "x-forwarded-proto",
+        HeaderValue::from_static(if https { "https" } else { "http" }),
+    );
+    if let Some(h) = host {
+        headers.insert("x-forwarded-host", h);
+    }
+}
+
 /// The request's `Host`, without the port (`loja.exemplo.ao:80` → `loja.exemplo.ao`).
 fn req_host(req: &Request<Incoming>) -> String {
     req.headers()
@@ -301,6 +344,8 @@ async fn handle(
     req: Request<Incoming>,
     routes: SharedRoutes,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
+    peer: std::net::IpAddr,
+    https: bool,
 ) -> std::result::Result<Response<RespBody>, Infallible> {
     let host = req_host(&req);
     let path = req.uri().path().to_string();
@@ -333,6 +378,7 @@ async fn handle(
     // Removes the hop-by-hop headers BEFORE forwarding (the Host stays end-to-end —
     // the backend may need it for virtual-hosting).
     strip_hop_by_hop(&mut headers);
+    set_forwarding_headers(&mut headers, peer, https);
     let mut out = Request::builder().method(parts).uri(&uri);
     if let Some(h) = out.headers_mut() {
         *h = headers;
@@ -391,10 +437,12 @@ async fn serve_io<I>(
     io: I,
     routes: SharedRoutes,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
+    peer: std::net::IpAddr,
+    https: bool,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + 'static,
 {
-    let svc = service_fn(move |req| handle(req, routes.clone(), client.clone()));
+    let svc = service_fn(move |req| handle(req, routes.clone(), client.clone(), peer, https));
     // NOTE: WebSocket/`Connection: Upgrade` is NOT tunneled yet — the legacy
     // hyper-util client does not establish the switched connection, and we remove the
     // `Upgrade` header (hop-by-hop) in forwarding. Tunneling upgrades (hyper::upgrade::on
@@ -419,7 +467,7 @@ async fn accept_loop(
     tls: Option<tokio_rustls::TlsAcceptor>,
 ) {
     loop {
-        let (stream, _peer) = match listener.accept().await {
+        let (stream, peer) = match listener.accept().await {
             Ok(s) => s,
             Err(_) => {
                 // A persistent error (EMFILE/ENFILE under fd exhaustion) on a
@@ -439,7 +487,8 @@ async fn accept_loop(
                     match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await
                     {
                         Ok(Ok(tls_stream)) => {
-                            serve_io(TokioIo::new(tls_stream), routes, client).await
+                            serve_io(TokioIo::new(tls_stream), routes, client, peer.ip(), true)
+                                .await
                         }
                         Ok(Err(e)) => eprintln!(
                             "{}",
@@ -451,7 +500,7 @@ async fn accept_loop(
                         Err(_) => { /* handshake did not complete in time — discard */ }
                     }
                 }
-                None => serve_io(TokioIo::new(stream), routes, client).await,
+                None => serve_io(TokioIo::new(stream), routes, client, peer.ip(), false).await,
             }
         });
     }
@@ -1908,5 +1957,45 @@ mod tests {
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
         assert_eq!(back.listeners.len(), 2);
         assert_eq!(back.routes[0].backend, "10.0.0.2:8080");
+    }
+}
+
+#[cfg(test)]
+mod forwarding_header_tests {
+    use super::set_forwarding_headers;
+    use hyper::header::{HeaderMap, HeaderValue};
+
+    /// What a client wrote never reaches the backend as the client's address
+    /// or scheme: the edge replaces it with what it saw.
+    #[test]
+    fn client_forwarding_headers_are_replaced_by_what_the_edge_saw() {
+        let mut h = HeaderMap::new();
+        h.insert("host", HeaderValue::from_static("shop.example"));
+        h.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
+        h.insert("x-real-ip", HeaderValue::from_static("10.0.0.1"));
+        h.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        h.insert(
+            "x-forwarded-host",
+            HeaderValue::from_static("admin.internal"),
+        );
+        h.insert(
+            "forwarded",
+            HeaderValue::from_static("for=1.2.3.4;proto=https"),
+        );
+        set_forwarding_headers(&mut h, "203.0.113.7".parse().unwrap(), false);
+        assert_eq!(h["x-forwarded-for"], "203.0.113.7");
+        assert_eq!(h["x-real-ip"], "203.0.113.7");
+        assert_eq!(h["x-forwarded-proto"], "http");
+        assert_eq!(h["x-forwarded-host"], "shop.example");
+        assert!(h.get("forwarded").is_none());
+        assert_eq!(h.get_all("x-forwarded-for").iter().count(), 1);
+    }
+
+    #[test]
+    fn a_tls_listener_says_https() {
+        let mut h = HeaderMap::new();
+        set_forwarding_headers(&mut h, "10.0.2.2".parse().unwrap(), true);
+        assert_eq!(h["x-forwarded-proto"], "https");
+        assert!(h.get("x-forwarded-host").is_none());
     }
 }
