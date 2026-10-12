@@ -41,7 +41,7 @@
 //! | `a_running_vm_moves_live_on_shared_storage_and_keeps_running` | the same two |
 //! | `a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored` | the same two |
 //! | `a_system_container_moves_to_another_node_offline_and_by_restart` | `DELONIX_PROXMOX_TEST_MOVE_NODE` and an OCI archive (`DELONIX_PROXMOX_TEST_OCI_ARCHIVE`, written by `delonix_oci::write_oci_media_archive`, e.g. `alpine:3.20` — `image save` writes Docker v2, which the node refuses) |
-//! | `o_ip_vem_do_agente_de_um_convidado_a_serio` | a running guest with `qemu-guest-agent` and two NICs (`DELONIX_PROXMOX_TEST_AGENT_VMID`; how to prepare one is in the case's comment) |
+//! | `ip()` read through a real agent (the case with a Portuguese name, just before `agent_ping_answers_false_without_an_agent` in this file) | a running guest with `qemu-guest-agent` and two NICs (`DELONIX_PROXMOX_TEST_AGENT_VMID`; how to prepare one is in the case's comment) |
 //! | `the_dns_provider_registers_a_guest_in_the_zones_dns_server` | a DNS controller registered on the cluster and its PowerDNS reachable from the test (`DELONIX_PROXMOX_TEST_DNS_CONTROLLER`, `_DNS_ZONE`, `_DNS_URL`, `_DNS_KEY_FILE`) and `DELONIX_PROXMOX_TEST_OCI_ARCHIVE` |
 //! | `the_guest_agent_reports_its_online_vcpus_and_memory_blocks` (N28) | `DELONIX_PROXMOX_TEST_AGENT_VMID`; read-only |
 //! | `the_cluster_probe_reads_the_nodes_release` (N28) | nothing; read-only |
