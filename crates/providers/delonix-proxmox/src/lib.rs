@@ -5502,7 +5502,7 @@ fn extra_devices_form(cfg: &VmConfig, default_bridge: &str) -> Result<Vec<(&'sta
 /// appliance (`cloud_init: false`) gets neither.
 /// The CPU shape of a VM, and with a hotplug CEILING above the boot size the
 /// keys that open headroom (ADR-0068 D3): `cores` = the ceiling, `vcpus` = the
-/// boot count, `numa: 1` (a hot-added DIMM needs a node) and `cpu,memory` in
+/// boot count, the guest node flag (a hot-added DIMM needs a node) and `cpu,memory` in
 /// the node's `hotplug` list. Without headroom, `cores` alone — the VM it
 /// always was. Pure.
 fn hotplug_shape(
@@ -5529,7 +5529,7 @@ fn hotplug_shape(
 const HOTPLUG_LIST: &str = "network,disk,usb,cpu,memory";
 
 /// The keys a shape WITHOUT them has to delete from the node's config: a
-/// `vcpus` with no CPU headroom left, and `numa`/a CPU-or-memory `hotplug`
+/// `vcpus` with no CPU headroom left, and the node flag/a CPU-or-memory `hotplug`
 /// with no headroom at all. A key the config does not carry is never sent —
 /// deleting nothing is a request with no reason to exist. Pure.
 fn shape_deletes(
@@ -5610,7 +5610,7 @@ fn create_form(
         // error (see `parse_agent_ip`).
         ("agent", "1".into()),
     ];
-    // `cores` (and, with a hotplug ceiling, `vcpus`/`numa`/`hotplug`).
+    // `cores` (and, with a hotplug ceiling, `vcpus`, the node flag and `hotplug`).
     form.extend(shape);
     // The cloud-init drive, and only when there is something to put in it: an
     // empty one on an image with no cloud-init is a CD-ROM the guest ignores,
@@ -9745,7 +9745,7 @@ mod hotplug_shape_tests {
             hotplug_shape(2, 2048, Some(2), Some(2048)),
             [("cores", "2".to_string())]
         );
-        // Memory headroom alone: numa and the list, no vcpus.
+        // Memory headroom alone: the node flag and the list, no vcpus.
         let f = hotplug_shape(2, 2048, None, Some(4096));
         assert!(f.iter().any(|(k, _)| *k == "numa"));
         assert!(!f.iter().any(|(k, _)| *k == "vcpus"));

@@ -3518,7 +3518,7 @@ fn a_live_memory_add_reads_the_current_config_back() {
 
 /// The defect this closes: `vm resize --vcpus-max` recorded a ceiling the
 /// node never had. Now the cold reshape writes it (`cores` = ceiling,
-/// `vcpus` = boot, `numa`, `hotplug`) and reads it back.
+/// `vcpus` = boot, the node flag, `hotplug`) and reads it back.
 #[test]
 fn a_cold_reshape_writes_the_ceiling_and_reads_it_back() {
     let node = MockNode::start(script(&[

@@ -987,7 +987,7 @@ fn attach_device_argv(uri: &str, name: &str, file: &str) -> Vec<String> {
     ]
 }
 
-/// One hot-added DIMM of `kib`, in NUMA node 0 (the only cell the domain is
+/// One hot-added DIMM of `kib`, in guest node 0 (the only cell the domain is
 /// booted with). Pure.
 fn dimm_xml(kib: u64) -> String {
     format!(
@@ -1430,15 +1430,15 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     }
     s.push_str("  </os>\n");
     s.push_str("  <features>\n    <acpi/>\n    <apic/>\n  </features>\n");
-    // Memory hotplug needs a guest NUMA topology: a DIMM is plugged into a
+    // Memory hotplug needs a guest node topology: a DIMM is plugged into a
     // node. One cell, every vCPU, the boot memory.
-    let numa = max_kib.map(|_| {
+    let node_cell = max_kib.map(|_| {
         format!(
             "    <numa>\n      <cell id='0' cpus='0-{}' memory='{kib}' unit='KiB'/>\n    </numa>\n",
             all_vcpus - 1
         )
     });
-    s.push_str(&libvirt_cpu_xml(cfg, numa.as_deref()));
+    s.push_str(&libvirt_cpu_xml(cfg, node_cell.as_deref()));
     s.push_str("  <clock offset='utc'/>\n");
     s.push_str("  <on_poweroff>destroy</on_poweroff>\n");
     // restart policy: 'always'/'on-failure' → restart on crash.
@@ -1726,7 +1726,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
 /// The domain's `<cpu>` element from `cpu_model` + `cpu_topology`. **Pure**.
 /// `host-passthrough` (default) exposes the host CPU exactly; `host-model`
 /// asks libvirt for the closest named model; anything else is a custom model.
-fn libvirt_cpu_xml(cfg: &VmConfig, numa: Option<&str>) -> String {
+fn libvirt_cpu_xml(cfg: &VmConfig, node_cell: Option<&str>) -> String {
     let topo = cfg.cpu_topology.as_ref().map(|t| {
         format!(
             "    <topology sockets='{}' cores='{}' threads='{}'/>\n",
@@ -1735,8 +1735,8 @@ fn libvirt_cpu_xml(cfg: &VmConfig, numa: Option<&str>) -> String {
             t.threads.max(1)
         )
     });
-    // The NUMA cell rides inside `<cpu>`, after the topology.
-    let topo = match (topo, numa) {
+    // The node cell rides inside `<cpu>`, after the topology.
+    let topo = match (topo, node_cell) {
         (None, None) => None,
         (t, n) => Some(format!("{}{}", t.unwrap_or_default(), n.unwrap_or(""))),
     };
