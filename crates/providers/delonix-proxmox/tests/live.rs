@@ -6978,6 +6978,34 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
     );
 }
 
+/// N28 (ADR-0049 slice 3): the cluster probe reads the node's release with
+/// `GET /version` — the route this case adds to the trace — next to the five
+/// discovery reads, all GETs. Asserts the version is the one the node's own
+/// `pveversion` would print in its first field, and says whether it is the
+/// release the route matrix is measured on.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_cluster_probe_reads_the_nodes_release() {
+    let t = target().expect(NEEDS_TARGET);
+    let b = backend(&t).expect("connect");
+    let facts = b.client().cluster_facts().expect("cluster facts");
+    let release = facts.release.clone().expect("the node names its version");
+    assert!(
+        release.split('.').count() == 3 && release.split('.').all(|p| p.parse::<u32>().is_ok()),
+        "a version of three numbers, as the matrix is keyed: {release}"
+    );
+    assert!(
+        facts.nodes.iter().any(|n| n.target),
+        "the configured node is in the cluster: {facts:?}"
+    );
+    // On the lab (9.2.2) there is nothing to say; on any other release the
+    // note names both.
+    match delonix_proxmox::cluster::release_note(Some(&release)) {
+        None => assert_eq!(release, delonix_proxmox::cluster::MATRIX_RELEASE),
+        Some(note) => assert!(note.contains(&release), "{note}"),
+    }
+}
+
 /// N29: the two-run order of the header splits on the word `firewall` in a
 /// case's NAME, so every case that calls a guest's or the datacenter's
 /// firewall must carry it — otherwise run 1 turns the firewall on and the

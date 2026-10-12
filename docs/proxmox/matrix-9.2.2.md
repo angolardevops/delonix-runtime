@@ -29,9 +29,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 183 (27.1 % of the schema) — 179 seen in a live trace, 4 not
+- **called**: 184 (27.3 % of the schema) — 179 seen in a live trace, 5 not
 - **unsupported by design**: 356 (each with a written reason)
-- **not yet implemented**: 136
+- **not yet implemented**: 135
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
@@ -44,7 +44,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | pools | 0 | 0 | 0 | 7 | 7 |
 | cluster (other) | 6 | 0 | 159 | 9 | 174 |
 | nodes (host) | 4 | 1 | 97 | 60 | 162 |
-| version | 0 | 0 | 0 | 1 | 1 |
+| version | 0 | 1 | 0 | 0 | 1 |
 
 ## Routes
 
@@ -235,6 +235,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/qemu/{vmid}/agent/get-memory-blocks` | supported+untested | object | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/agent/get-vcpus` | supported+untested | object | yes |  |
 | GET | `/nodes/{node}/tasks` | supported+untested | array | yes |  |
+| GET | `/version` | supported+untested | object | yes |  |
 | GET | `/access/acl` | unsupported-by-design | array | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
 | PUT | `/access/acl` | unsupported-by-design | null | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
 | GET | `/access/domains` | unsupported-by-design | array | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
@@ -726,4 +727,3 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/storage/{storage}` | not-yet-implemented | null | yes |  |
 | GET | `/storage/{storage}` | not-yet-implemented | object | yes |  |
 | PUT | `/storage/{storage}` | not-yet-implemented | object | yes |  |
-| GET | `/version` | not-yet-implemented | object | yes |  |

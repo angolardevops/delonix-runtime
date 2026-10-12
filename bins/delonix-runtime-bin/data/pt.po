@@ -15953,3 +15953,10 @@ msgstr "stack apply abortado: {what} (corrige o manifesto ou usa `stack validate
 
 msgid "{n} invalid VM shape(s)"
 msgstr "{n} forma(s) de VM inválida(s)"
+
+# ---- Sprint 22 ----
+msgid "Proxmox VE:"
+msgstr "Proxmox VE:"
+
+msgid "not named by the node"
+msgstr "não indicado pelo nó"

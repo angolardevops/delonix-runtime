@@ -3776,3 +3776,74 @@ fn a_gateway_entry_moved_by_hand_plans_a_repair_that_puts_it_back() {
         "after the repair the plan is in sync"
     );
 }
+
+// ===========================================================================
+// Cluster discovery reads the node's release (N28, ADR-0049 slice 3)
+// ===========================================================================
+
+fn discovery_node(version: Reply) -> MockNode {
+    MockNode::start(script(&[
+        (
+            "GET",
+            "/cluster/status",
+            ok_data(r#"[{"type":"node","name":"pve","online":1}]"#),
+        ),
+        (
+            "GET",
+            "/storage",
+            ok_data(r#"[{"storage":"local-lvm","type":"lvmthin","content":"images"}]"#),
+        ),
+        (
+            "GET",
+            "/cluster/ha/status/current",
+            ok_data(r#"[{"type":"quorum","quorate":1}]"#),
+        ),
+        ("GET", "/cluster/ha/resources", ok_data("[]")),
+        ("GET", "/cluster/sdn/zones", ok_data("[]")),
+        ("GET", "/version", version),
+    ]))
+}
+
+/// The probe's six reads are all GETs, and the release the node answers is
+/// carried next to the facts; a release other than the one the route matrix
+/// is measured on is said, the matrix's own is not.
+#[test]
+fn the_cluster_probe_reads_the_release_with_get_only() {
+    let node = discovery_node(ok_data(
+        r#"{"version":"9.3.1","release":"9.3","repoid":"deadbeef"}"#,
+    ));
+    let facts = sdn_client(&node).cluster_facts().expect("facts");
+    assert_eq!(facts.release.as_deref(), Some("9.3.1"));
+    let note = delonix_proxmox::cluster::release_note(facts.release.as_deref()).unwrap();
+    assert!(
+        note.contains("9.3.1") && note.contains(delonix_proxmox::cluster::MATRIX_RELEASE),
+        "{note}"
+    );
+    assert_eq!(node.count("GET", "/version"), 1);
+    assert!(
+        node.log()
+            .iter()
+            .all(|s| s.method == "GET" || s.path == "/access/ticket"),
+        "discovery writes nothing: {:?}",
+        node.log()
+    );
+
+    let node = discovery_node(ok_data(r#"{"version":"9.2.2","release":"9.2"}"#));
+    let facts = sdn_client(&node).cluster_facts().expect("facts");
+    assert_eq!(
+        delonix_proxmox::cluster::release_note(facts.release.as_deref()),
+        None
+    );
+}
+
+/// A `/version` the node refuses fails the probe by its class, like every
+/// other read of it — never a probe that reports a cluster with no release.
+#[test]
+fn a_refused_version_read_fails_the_probe() {
+    let node = discovery_node(Reply::Json(
+        403,
+        r#"{"data":null,"message":"Permission check failed"}"#.into(),
+    ));
+    let e = sdn_client(&node).cluster_facts().expect_err("refused");
+    assert!(matches!(e, Error::Forbidden(_)), "{e:?}");
+}
