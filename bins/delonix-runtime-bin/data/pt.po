@@ -15989,3 +15989,10 @@ msgstr "Usa https://<host> (com `tls.insecureSkipVerify: true` ou um `caFile` pa
 
 msgid "a --masked-path/--readonly-path list that leaves {paths} unprotected is refused by this node's runtime policy (workloadSecurity: baseline) — a custom list replaces the default one, so include them"
 msgstr "uma lista --masked-path/--readonly-path que deixa {paths} desprotegido é recusada pela política de runtime deste nó (workloadSecurity: baseline) — uma lista própria substitui a de omissão, por isso inclui-os"
+
+# ---- Sprint 22 ----
+msgid "Proxmox VE:"
+msgstr "Proxmox VE:"
+
+msgid "not named by the node"
+msgstr "não indicado pelo nó"

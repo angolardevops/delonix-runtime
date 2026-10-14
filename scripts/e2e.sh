@@ -343,6 +343,41 @@ xflaky() {
 
 section() { log ""; log "=== $1 ==="; }
 
+# Teardown that a section relies on, and that a loaded disk can break.
+#
+# A `container rm -f` whose process is still leaving (state D, waiting on the
+# disk's writeback) answers DX-8101 and KEEPS the record, as designed: "run
+# `rm -f` again once it is gone". Silencing that left the container behind, its
+# network could not be removed, and the next section failed on a collision that
+# had nothing to do with what it tests (measured 2026-10-12: 28 FAIL with the
+# disk at 3 GB dirty, none of them reproducible with the disk calm). So the
+# teardown repeats on DX-8101 for up to two minutes, says so when it gives up,
+# and says any other failure instead of swallowing it. A container that is
+# already gone (class 4) is not news.
+e2e_rm() {
+  local c out rc deadline
+  for c in "$@"; do
+    deadline=$((SECONDS + 120))
+    while :; do
+      out=$("$BIN" container rm -f "$c" 2>&1); rc=$?
+      (( rc == 0 || rc == 4 )) && break
+      if [[ "$out" != *DX-8101* ]]; then log "  (limpeza: container rm -f $c → rc=$rc: ${out##*$'\n'})"; break; fi
+      (( SECONDS >= deadline )) && { log "  (limpeza: $c continua a sair ao fim de 120 s — DX-8101)"; break; }
+      sleep 2
+    done
+  done
+}
+
+# A network removal that fails says why, so a leftover is never silent. Class 4
+# (already gone) is not news.
+e2e_net_rm() {
+  local n out rc
+  for n in "$@"; do
+    out=$("$BIN" network rm "$n" 2>&1); rc=$?
+    (( rc == 0 || rc == 4 )) || log "  (limpeza: network rm $n → rc=$rc: ${out##*$'\n'})"
+  done
+}
+
 [[ -x "$BIN" ]] || { log "binário não executável: $BIN"; exit 1; }
 log "binário: $BIN"
 log "versão:  $("$BIN" --version 2>&1)"
@@ -826,7 +861,7 @@ subprocess.run([os.environ["BIN"],"network","rm","e1net-a"],capture_output=True)
 code,new=get("-H","If-None-Match: "+etag); assert code=="200" and new!=etag, (code,new,etag)'
   check "uma rede que não existe é 404 com um problem+json; noutro namespace a lista é vazia" ok bash -c \
     "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' '$NETS/nao-existe') == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/namespaces/outro/networks | grep -q '\"networks\":\[\]'"
-  "$BIN" network rm e1net-a >/dev/null 2>&1; "$BIN" network rm e1net-b >/dev/null 2>&1
+  e2e_net_rm e1net-a; e2e_net_rm e1net-b
   # ADR-0042 passo E: as mutações de rede pelo contrato, cada uma respondida com
   # uma Operation PERSISTIDA antes do trabalho. Cada cenário lê o que o socket
   # respondeu E o que o motor tem depois (a CLI, os ficheiros do state root).
@@ -1306,9 +1341,9 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 \
   "$BIN" network route "$NET" "$NET2" --rm >/dev/null 2>&1 || true
   check "fechada, sai da listagem" ok bash -c \
     "! '$BIN' network route | grep -q '$NET2'"
-  "$BIN" network rm "$NET2" >/dev/null 2>&1 || true
+  e2e_net_rm "$NET2"
 else
-  "$BIN" network rm "$NET2" >/dev/null 2>&1 || true
+  e2e_net_rm "$NET2"
   skip "ciclo de uma rota" "não foi possível criar a 2.ª rede ou abrir a rota neste host"
 fi
 
@@ -1335,7 +1370,7 @@ if "$BIN" network create "$NETGW" --subnet 10.251.0.0/16 --gateway 10.251.0.254 
     "'$BIN' network inspect '$NETGW' | grep -q '10.251.0.254'"
   check "describe relata o gateway EM VIGOR" ok bash -c \
     "'$BIN' network describe '$NETGW' | grep -q '10.251.0.254'"
-  "$BIN" network rm "$NETGW" >/dev/null 2>&1 || true
+  e2e_net_rm "$NETGW"
 else
   skip "gateway declarado: relato" "network create --gateway falhou neste host"
 fi
@@ -1494,7 +1529,11 @@ build_env_path() {
   mkdir -p "$d"
   printf 'FROM %s\nENV PATH=/opt/tool/bin:$PATH\nCMD ["true"]\n' "$IMG" >"$d/Delonixfile"
   "$BIN" build -t "$tag" "$d" >"$OUT/build-env.log" 2>&1 || { echo "build failed: $(tail -1 "$OUT/build-env.log")"; return 2; }
-  got=$("$BIN" container run --rm --net none "$tag" sh -c 'command -v ls >/dev/null && echo "$PATH"' 2>&1)
+  # stdout only: the first run of a freshly built image draws its unpacking
+  # progress on stderr, and folding that in put the progress line in front of
+  # the PATH and failed a check whose PATH was right.
+  got=$("$BIN" container run --rm --net none "$tag" sh -c 'command -v ls >/dev/null && echo "$PATH"' 2>"$OUT/build-env.run.err")
+  [[ -n "$got" ]] || got="(no PATH printed; stderr: $(tail -2 "$OUT/build-env.run.err"))"
   "$BIN" image rm "$tag" >/dev/null 2>&1
   echo "PATH=$got"
   case "$got" in /opt/tool/bin:/*) return 0 ;; *) return 1 ;; esac
@@ -1637,7 +1676,7 @@ if "$BIN" build -t "$_ui" "$_ud" >/dev/null 2>&1; then
     else
       skip "commit: donos na layer" "o run do container de teste falhou neste host"
     fi
-    "$BIN" container rm -f "$_uc" >/dev/null 2>&1 || true
+    e2e_rm "$_uc"
     "$BIN" image remove "$_uci" >/dev/null 2>&1 || true
   else
     skip "-u: posse do rootfs e dos mounts" "este host não mapeia um segundo uid (sem subuid)"
@@ -1798,7 +1837,7 @@ check "run --ip sem rede custom recusa" 1 "$BIN" container run -d --name "nip-$P
 check "run -d --restart on-failure:2 arranca" ok "$BIN" container run -d --net none --restart on-failure:2 --name "rc-$PFX" "$IMG" sh -c 'exit 3'
 check "os reinícios da política contam no RESTARTS" ok bash -c \
   "for _ in \$(seq 1 30); do '$BIN' container ls -a -o json | python3 -c \"import json,sys; sys.exit(0 if any(c.get('names',c.get('name'))=='rc-$PFX' and c.get('restarts')==2 for c in json.load(sys.stdin)) else 1)\" && exit 0; sleep 1; done; exit 1"
-"$BIN" container rm -f "rc-$PFX" >/dev/null 2>&1
+e2e_rm "rc-$PFX"
 
 # Um `stop` durante a ESPERA entre reinícios tem de ser respeitado. O supervisor
 # só perguntava antes de esperar, e o `create_with` gravava a cópia antiga do
@@ -1823,7 +1862,7 @@ if e2e_in_backoff "rb-$PFX" 1; then
 else
   skip "um stop durante a espera entre reinícios é respeitado" "não apanhei o container entre reinícios"
 fi
-"$BIN" container rm -f "rb-$PFX" >/dev/null 2>&1
+e2e_rm "rb-$PFX"
 RS_SLEEP=$(( 3000 + RANDOM % 900 ))
 "$BIN" container run -d --net none --restart always --name "rs-$PFX" "$IMG" sh -c "test -f /flag || { touch /flag; exit 1; }; exec sleep $RS_SLEEP" >/dev/null 2>&1
 if e2e_in_backoff "rs-$PFX" 0; then
@@ -1834,7 +1873,7 @@ if e2e_in_backoff "rs-$PFX" 0; then
 else
   skip "stop+start durante a espera não duplica a encarnação" "não apanhei o container entre reinícios"
 fi
-"$BIN" container rm -f "rs-$PFX" >/dev/null 2>&1
+e2e_rm "rs-$PFX"
 sleep 2
 check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
 
@@ -1850,7 +1889,7 @@ if e2e_in_backoff "rn-$PFX" 0; then
 else
   skip "um rename na espera entre reinícios sobrevive ao reinício" "não apanhei o container entre reinícios"
 fi
-"$BIN" container rm -f "rn-$PFX" "rn2-$PFX" >/dev/null 2>&1
+e2e_rm "rn-$PFX" "rn2-$PFX"
 
 # `stop` seguido de `start` enquanto o supervisor da encarnação anterior ainda não
 # registou a morte: gravava `pid = None` por cima do pid que o `start` acabara de
@@ -1872,7 +1911,7 @@ if [ -n "$SS_SUP" ] && kill -STOP "$SS_SUP" 2>/dev/null; then
 else
   skip "um supervisor atrasado não apaga o pid da encarnação nova" "não encontrei o supervisor do container"
 fi
-"$BIN" container rm -f "ss-$PFX" >/dev/null 2>&1
+e2e_rm "ss-$PFX"
 sleep 1
 check "e o rm -f não deixa o processo para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $SS_SLEEP' | wc -l)\" = 0 ]"
 pkill -9 -f -x "sleep $SS_SLEEP" 2>/dev/null || true
@@ -1903,7 +1942,7 @@ if [ -n "$SW_X" ]; then
 else
   skip "um stop que retoma não apaga o pid de um start feito entretanto" "o container não arrancou"
 fi
-"$BIN" container rm -f "sw-$PFX" >/dev/null 2>&1
+e2e_rm "sw-$PFX"
 sleep 1
 check "e o rm -f não deixa esse processo para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $SW_SLEEP' | wc -l)\" = 0 ]"
 pkill -9 -f -x "sleep $SW_SLEEP" 2>/dev/null || true
@@ -1980,8 +2019,8 @@ if "$BIN" network create "$MH_BASE" >/dev/null 2>&1 \
     "! '$BIN' container exec '$MH_WA' ip route | grep -q ' via .* dev eth1'"
 fi
 "$BIN" network route "$MH_A" "$MH_B" --rm >/dev/null 2>&1 || true
-for c in "$MH_WA" "$MH_WB" "$MH_WC"; do "$BIN" container rm -f "$c" >/dev/null 2>&1 || true; done
-for n in "$MH_A" "$MH_B" "$MH_BASE"; do "$BIN" network rm "$n" >/dev/null 2>&1 || true; done
+for c in "$MH_WA" "$MH_WB" "$MH_WC"; do e2e_rm "$c"; done
+for n in "$MH_A" "$MH_B" "$MH_BASE"; do e2e_net_rm "$n"; done
 
 ########################################
 section "container em rede custom: dois starts concorrentes (#798)"
@@ -2024,7 +2063,7 @@ if "$BIN" container run -d --name "$CR" --net "$NET" "$IMG" sleep 600 >/dev/null
   else
     skip "start concorrente" "nenhuma ronda teve exactamente um start vencedor"
   fi
-  "$BIN" container rm -f "$CR" >/dev/null 2>&1
+  e2e_rm "$CR"
 else
   skip "start concorrente" "container run --net falhou neste host"
 fi
@@ -2045,7 +2084,7 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
   check "network disconnect a quente" ok "$BIN" network disconnect "$NET2" "$CN"
   check "network disconnect de rede não ligada recusa" fail "$BIN" network disconnect "$NET2" "$CN"
   check "container update --net-connect deixou de existir (corte limpo)" 2 "$BIN" container update "$CN" --net-connect "$NET2"
-  "$BIN" container rm -f "$CN" >/dev/null 2>&1
+  e2e_rm "$CN"
   # `--net-bps` no `run -d` era aceite e ignorado: o registo dizia a taxa e o veth
   # não tinha qdisc nenhuma (o shaping só corria depois do retorno do supervisor).
   # Prova-se no dataplane, dentro do holder — o registo é exactamente o que mentia.
@@ -2054,14 +2093,14 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
     PIN=$("$BIN" net netns status 2>/dev/null | grep -oE 'pin [0-9]+' | grep -oE '[0-9]+')
     check "run -d --net-bps aplica o shaping no veth" ok bash -c \
       "nsenter -t '$PIN' -U -n --preserve-credentials tc qdisc show | grep -q 'tbf .*rate 1Mbit'"
-    "$BIN" container rm -f "$CB" >/dev/null 2>&1
+    e2e_rm "$CB"
   else
     check "run -d --net-bps numa rede custom" ok false
   fi
 else
   skip "hot reconfig em rede custom" "não foi possível criar rede/container em rede custom"
 fi
-"$BIN" network rm "$NET2" >/dev/null 2>&1
+e2e_net_rm "$NET2"
 
 ########################################
 section "publish: o endereço de bind é REGISTADO e sobrevive a um start"
@@ -2137,7 +2176,7 @@ else
   else
     check "start com o env var exportado" ok false
   fi
-  "$BIN" container rm -f "$CPB" >/dev/null 2>&1
+  e2e_rm "$CPB"
 fi
 
 ########################################
@@ -2180,16 +2219,16 @@ if [ -n "$ORF0" ] && "$BIN" network create "$NET3" --subnet 10.250.0.0/16 >/dev/
   check "ipam: o stop guarda os leases (as duas redes)" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
   "$BIN" container start "$LC" >/dev/null 2>&1
   check "ipam: o start volta aos MESMOS endereços" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
-  "$BIN" container rm -f "$LC" >/dev/null 2>&1
+  e2e_rm "$LC"
   check "ipam: rm -f não deixa lease nenhum do container" ok bash -c "[ -z \"$(ipam_de "$LC")\" ]"
   check "ipam: rm -f não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
-  "$BIN" network rm "$NET3" >/dev/null 2>&1
-  "$BIN" network rm "$NET4" >/dev/null 2>&1
+  e2e_net_rm "$NET3"
+  e2e_net_rm "$NET4"
   check "ipam: network rm não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
 else
-  "$BIN" container rm -f "$LC" >/dev/null 2>&1
-  "$BIN" network rm "$NET3" >/dev/null 2>&1
-  "$BIN" network rm "$NET4" >/dev/null 2>&1
+  e2e_rm "$LC"
+  e2e_net_rm "$NET3"
+  e2e_net_rm "$NET4"
   skip "ipam: ciclo run/connect/stop/start/rm" "rede ou container em rede custom indisponível neste host"
 fi
 # O mesmo pelo caminho declarativo: uma rede com CIDR e um container nela, e o
@@ -2269,10 +2308,10 @@ else
     skip "D5: recusa sem br_netfilter" "não foi possível preparar o holder isolado (rede, imagem ou nsenter)"
   fi
   for c in "r5-$PFX" "r5b-$PFX" "v5-$PFX" "d5-$PFX" "$K5" "p5-$PFX-a"; do
-    "$BIN" container rm -f "$c" >/dev/null 2>&1
+    e2e_rm "$c"
   done
   "$BIN" pod rm "p5-$PFX" >/dev/null 2>&1
-  "$BIN" network rm "$N5" >/dev/null 2>&1
+  e2e_net_rm "$N5"
 fi
 section "network: anti-spoofing na bridge — origem e MAC forjados são bloqueados"
 ########################################
@@ -2325,8 +2364,8 @@ if "$BIN" network create "$AS" >/dev/null 2>&1 \
 else
   skip "antispoof" "não foi possível preparar a rede e os containers (imagem ou rede)"
 fi
-for c in "$A1" "$A2" "$A3" "$A4"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
-"$BIN" network rm "$AS" >/dev/null 2>&1
+for c in "$A1" "$A2" "$A3" "$A4"; do e2e_rm "$c"; done
+e2e_net_rm "$AS"
 
 # The anti-spoofing GRANTS: a container that routes gets extra source prefixes,
 # and an exceptional opt-out exists — both only when the node policy grants
@@ -2362,8 +2401,8 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
   else
     skip "antispoof: concessões" "não foi possível preparar a rede e os containers"
   fi
-  for c in "$GR" "$GT" "$GO"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
-  "$BIN" network rm "$GS" >/dev/null 2>&1
+  for c in "$GR" "$GT" "$GO"; do e2e_rm "$c"; done
+  e2e_net_rm "$GS"
   rm -f "$POL"
 else
   skip "antispoof: concessões" "estado partilhado — o check escreveria o policy.json do nó real"
@@ -2403,8 +2442,8 @@ if [[ "$E2E_ISOLATED" == 1 ]]; then
     skip "private egress" "no private primary address on this host, or the probe could not be prepared"
   fi
   [[ -n "${HSRV:-}" ]] && kill "$HSRV" 2>/dev/null
-  "$BIN" container rm -f "$PC" >/dev/null 2>&1
-  "$BIN" network rm "$PE" >/dev/null 2>&1
+  e2e_rm "$PC"
+  e2e_net_rm "$PE"
   rm -f "$POL"
 else
   skip "private egress" "shared state — the check would write the real node's policy.json"
@@ -2503,7 +2542,7 @@ spec:
 YAML
 check "stack apply diz o aviso do emptyDir uma só vez" ok bash -c \
   "[ \"\$('$BIN' stack apply -f '$WORK/emptydir.yaml' 2>&1 | grep -c 'emptyDir without')\" = 1 ]"
-"$BIN" container rm -f "ed-$PFX" >/dev/null 2>&1
+e2e_rm "ed-$PFX"
 cat >"$WORK/delonix-manifest.yaml" <<YAML
 apiVersion: delonix.io/v1
 kind: Volume
@@ -2582,7 +2621,7 @@ if "$BIN" stack apply -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1; then
   check "drift: --stack de outra stack não vê esta deriva" 0 \
     "$BIN" drift -f "$DRW/delonix-manifest.yaml" --stack naoexiste-$PFX --detailed-exitcode
   "$BIN" stack destroy -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1
-  "$BIN" container rm -f "dr-$PFX" >/dev/null 2>&1
+  e2e_rm "dr-$PFX"
 else
   skip "drift: o apply do container de teste não passou neste ambiente"
 fi
@@ -2593,7 +2632,7 @@ check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
 # mesma (parte do ficheiro, não de um registo), mas os recursos já não existem.
 check "volume describe depois do destroy recusa" fail "$BIN" volume describe "sv-$PFX"
 "$BIN" volume rm "sv-$PFX" >/dev/null 2>&1
-"$BIN" network rm "sn-$PFX" >/dev/null 2>&1
+e2e_net_rm "sn-$PFX"
 
 # ---------------------------------------------------------------------------
 # `system features` — níveis de maturidade derivados de EVIDÊNCIA.
@@ -2747,7 +2786,7 @@ YAML
     printf '%s' \"\$out\" | grep -qi adopted || { echo 'o apply adoptou sem o dizer'; exit 1; }"
   check "e o carimbo de posse ficou mesmo lá" ok bash -c "
     '$BIN' container inspect '$ADOPT' | grep -q 'delonix.io/stack'"
-  "$BIN" container rm -f "$ADOPT" >/dev/null 2>&1
+  e2e_rm "$ADOPT"
   rm -f "$OUT/adopt.yaml"
 fi
 
@@ -2823,7 +2862,7 @@ assert len(msgs) == 1 and \": env — \" in msgs[0] and \"Container/$RPC\" in ms
   else
     skip "stack apply --replace nomeado: o apply do container de teste não passou neste host"
   fi
-  "$BIN" container rm -f "$RPC" >/dev/null 2>&1
+  e2e_rm "$RPC"
 fi
 
 # Um `kind: Stack` com um GRUPO mal escrito (`contaienrs:`) expande para nada, e
@@ -2932,7 +2971,7 @@ _ils="$("$BIN" image ls 2>&1)"; _ils_rc=$?
 if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for spec in "64M:67108864" "64Mi:67108864" "1Gi:1073741824"; do
     _v=${spec%%:*}; _want=${spec##*:}; _n="${PFX}lim$(echo "$_v" | tr -d '.')"
-    "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+    e2e_rm "$_n"
     if "$BIN" container run -d --name "$_n" --net none -m "$_v" "$IMG" sleep 60 >/dev/null 2>&1; then
       # A prova é o CGROUP, não o registo: era exactamente aí que os dois
       # discordavam, com o registo a dizer 64Mi e o kernel a dizer `max`.
@@ -2941,7 +2980,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
     else
       skip "-m $_v chega ao kernel" "o container não arrancou neste host"
     fi
-    "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+    e2e_rm "$_n"
   done
   # O MESMO `-m` numa rede própria. Todos os checks de limites desta bateria
   # corriam com `--net none`, e foi por aí que isto passou: a 2.ª passagem do
@@ -2951,14 +2990,14 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # `spawn` (que destapa antes de olhar) aplicava o limite sem problema.
   # Medido 2026-09-30 com o template `odoo`, o único com `network:`.
   _ln="${PFX}limnet"; _lc="${PFX}limnetc"
-  "$BIN" container rm -f "$_lc" >/dev/null 2>&1 || true
+  e2e_rm "$_lc"
   if "$BIN" network create "$_ln" >/dev/null 2>&1; then
     check "-m 64M numa rede própria arranca (não é recusado)" ok \
       "$BIN" container run -d --name "$_lc" --net "$_ln" -m 64M "$IMG" sleep 60
     check "-m 64M numa rede própria chega ao kernel como 67108864" ok \
       bash -c "[ \"\$(_cg_of $_lc memory.max)\" = 67108864 ]" || true
-    "$BIN" container rm -f "$_lc" >/dev/null 2>&1 || true
-    "$BIN" network rm "$_ln" >/dev/null 2>&1 || true
+    e2e_rm "$_lc"
+    e2e_net_rm "$_ln"
   else
     skip "-m 64M numa rede própria" "network create falhou neste host"
   fi
@@ -2969,14 +3008,14 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for bad in abc 64MB "99999999999T"; do
     check "-m $bad é recusado, não ignorado" fail \
       "$BIN" container run -d --name "${PFX}limbad" --net none -m "$bad" "$IMG" true
-    "$BIN" container rm -f "${PFX}limbad" >/dev/null 2>&1 || true
+    e2e_rm "${PFX}limbad"
   done
   # `500m` é millicores do Kubernetes. Recusar é o ponto: convertê-lo seria o
   # motor a adivinhar, e adivinhar dava 1 CPU inteiro.
   for bad in abc 500m; do
     check "--cpus $bad é recusado, não ignorado" fail \
       "$BIN" container run -d --name "${PFX}limcpu" --net none --cpus "$bad" "$IMG" true
-    "$BIN" container rm -f "${PFX}limcpu" >/dev/null 2>&1 || true
+    e2e_rm "${PFX}limcpu"
   done
   # `--restart` é o de aresta mais afiada da classe: uma gralha (`alwyas`,
   # `on-failre`) era aceite com rc=0 e deixava `restart_policy: null` — um
@@ -2986,7 +3025,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for bad in talvez alwyas on-failure:0 always:2; do
     check "--restart $bad é recusado, não ignorado" fail \
       "$BIN" container run -d --name "${PFX}limrs" --net none --restart "$bad" "$IMG" true
-    "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+    e2e_rm "${PFX}limrs"
   done
   # Os pesos documentavam `1–10000` e não verificavam nada: `0`, `99999` e `abc`
   # caíam todos no default do kernel (100), com rc=0. Uma gama no `--help` que o
@@ -2994,18 +3033,18 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for bad in 0 10001 abc; do
     check "--cpu-weight $bad é recusado, não ignorado" fail \
       "$BIN" container run -d --name "${PFX}limw" --net none --cpu-weight "$bad" "$IMG" true
-    "$BIN" container rm -f "${PFX}limw" >/dev/null 2>&1 || true
+    e2e_rm "${PFX}limw"
   done
   # E o que passa tem de CHEGAR ao registo: aceitar a política e não a guardar é
   # o mesmo defeito com outra roupa.
-  "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+  e2e_rm "${PFX}limrs"
   if "$BIN" container run -d --name "${PFX}limrs" --net none --restart on-failure:3 "$IMG" sleep 30 >/dev/null 2>&1; then
     check "--restart on-failure:3 fica no registo" ok \
       bash -c "'$BIN' container inspect ${PFX}limrs | grep -q 'on-failure:3'" || true
   else
     skip "--restart on-failure:3 fica no registo" "o container não arrancou neste host"
   fi
-  "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+  e2e_rm "${PFX}limrs"
 else
   skip "limites: chegam ao cgroup" "sem imagem no store (precisa de rede para o pull) (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
 fi
@@ -3118,7 +3157,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # isso que fazia «sem limite» querer dizer «o host inteiro». Três propriedades
   # numa só corrida, porque as três vivem na mesma leaf.
   _n="${PFX}enfdef"
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
   if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
     check "sem flags: a leaf TEM tecto de memória (não 'max')" ok \
       bash -c '[ "$(cat "$(_leaf_of '"$_n"')/memory.max")" != max ]'
@@ -3131,7 +3170,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   else
     skip "sem flags: os tectos por omissão" "o container não arrancou neste host"
   fi
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
 
   # --- PIDs: a fork-bomb pára dentro, e o host não dá por ela ---------------
   #
@@ -3162,7 +3201,7 @@ if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   # nada que o cabeçalho desta bateria descreve. Mesmo 0,75 está muito abaixo
   # dos 4 cores que passariam sem quota nenhuma, que é o que isto tem de apanhar.
   _n="${PFX}enfcpu"
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
   if "$BIN" container run -d --name "$_n" --net none --cpus 0.5 "$IMG" \
        sh -c 'i=0; while [ $i -lt 4 ]; do (while :; do :; done) & i=$((i+1)); done; sleep 120' >/dev/null 2>&1 \
      && sleep 3 && [ -r "$(_leaf_of "$_n" 2>/dev/null)/cpu.stat" ]; then
@@ -3187,7 +3226,7 @@ sys.exit(0 if cores <= 0.75 else 1)"
   else
     skip "--cpus 0.5 estrangula mesmo" "este cgroup não delega o controlador cpu — a quota não é imponível aqui"
   fi
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
 
   # --- O TECTO AGREGADO: a soma de todos também tem limite ------------------
   #
@@ -3197,7 +3236,7 @@ sys.exit(0 if cores <= 0.75 else 1)"
   # limite. Verifica-se onde os workloads deste utilizador realmente vivem: o
   # PAI da leaf, seja ele a `delonix.slice` (root) ou a base delegada (rootless).
   _n="${PFX}enfagg"
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
   if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
     check "o cgroup PAI tem tecto agregado de memória (a soma não mata o host)" ok \
       bash -c '[ "$(cat "$(dirname "$(_leaf_of '"$_n"')")/memory.max")" != max ]'
@@ -3206,7 +3245,7 @@ sys.exit(0 if cores <= 0.75 else 1)"
   else
     skip "tecto agregado" "o container não arrancou neste host"
   fi
-  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  e2e_rm "$_n"
 
   # --- FUGA: 20 ciclos não podem deixar rasto -------------------------------
   #
@@ -3326,7 +3365,7 @@ printf '%s\n' 'apiVersion: networking.delonix.io/v1alpha1' 'kind: Network' \
   'metadata: { name: nl-pk-vol, labels: { app: web } }' 'spec: {}' > "$NLDIR/pk.yaml"
 check "network apply / volume apply fora de uma stack também escrevem os labels do documento" ok bash -c \
   "'$BIN' network apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' volume apply -f '$NLDIR/pk.yaml' >/dev/null 2>&1 && '$BIN' network describe nl-pk-net | grep -q 'app=web' && '$BIN' volume describe nl-pk-vol | grep -q 'app=web'"
-"$BIN" network rm nl-pk-net >/dev/null 2>&1; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
+e2e_net_rm nl-pk-net; "$BIN" volume rm nl-pk-vol >/dev/null 2>&1
 # The same for a `kind: VirtualMachine` — measured dropping them too. Labels are
 # the one VM field that converges in place: the domain keeps its id.
 if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
@@ -3680,7 +3719,7 @@ check "start: o exit code REAL continua a ser capturado depois de um start" ok b
   [ \"\$segundo\" = 7 ] || { echo \"depois do start: wait deu '\$segundo', esperado 7\"; exit 1; }
 "
 
-"$BIN" container rm -f "$THC" >/dev/null 2>&1
+e2e_rm "$THC"
 "$BIN" container run -d --name "$THC" --health-cmd "test -f /tmp/ok" \
   --health-interval 2 --health-timeout 2 --health-retries 1 "$IMG" sleep 300 >/dev/null 2>&1
 check "healthcheck: corre a sonda DO CONTAINER (unhealthy = rc 1, nunca 'no HEALTHCHECK')" 1 bash -c "
@@ -3695,7 +3734,7 @@ check "healthcheck: a mesma sonda a passar dá rc 0 e diz healthy" ok bash -c "
   printf '%s' \"\$out\" | grep -q healthy || { echo \"\$out\"; exit 1; }
 "
 
-"$BIN" container rm -f "$TZ" >/dev/null 2>&1
+e2e_rm "$TZ"
 "$BIN" container run -d --name "$TZ" --health-cmd "true" --health-interval 1 \
   --health-timeout 1 "$IMG" sleep 300 >/dev/null 2>&1
 if [ -n "$(_cg_of "$TZ" pids.current 2>/dev/null)" ]; then
@@ -3711,7 +3750,7 @@ else
   skip "healthcheck: a sonda não deixa processos por reapar" "cgroup do container ilegível (rootless sem delegação?)"
 fi
 TALW="talw-$PFX"
-"$BIN" container rm -f "$TALW" >/dev/null 2>&1
+e2e_rm "$TALW"
 "$BIN" container run -d --restart always --name "$TALW" "$IMG" sleep 600 >/dev/null 2>&1
 check "stop: PÁRA mesmo um container --restart always (o supervisor não o ressuscita)" ok bash -c "
   '$BIN' container stop -t 1 '$TALW' >/dev/null 2>&1
@@ -3724,7 +3763,7 @@ check "stop: PÁRA mesmo um container --restart always (o supervisor não o ress
   [ \"\$st\" = Running ] && { echo 'ressuscitou: um stop pedido não parou o container'; exit 1; }
   [ \"\$st\" = Stopped ] || { echo \"status=\$st (esperado Stopped)\"; exit 1; }
 "
-"$BIN" container rm -f "$TSTOP" "$TWAIT" "$THC" "$TZ" "$TALW" >/dev/null 2>&1
+e2e_rm "$TSTOP" "$TWAIT" "$THC" "$TZ" "$TALW"
 
 # --- o slirp de um container acaba com ele, e não segura o arranque ---------
 #
@@ -4055,7 +4094,7 @@ if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
   "$BIN" container start "pp$PFX-web" >/dev/null 2>&1
   check "o start de um membro de pod volta a publicar a porta" ok bash -c \
     "for _ in \$(seq 1 30); do [ \"\$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$PPORT/)\" = 200 ] && exit 0; sleep 0.5; done; exit 1"
-  "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
+  e2e_rm "pp$PFX-web"
   check "o rm -f de um membro de pod liberta a porta" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$PPORT')\" ]"
   check "e um pod novo na mesma porta é aceite" ok "$BIN" pod create -f "$PPY"
   # Publicar a QUENTE num membro também passa pelo ingress. Era recusado com
@@ -4066,7 +4105,7 @@ if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
     "for _ in \$(seq 1 30); do [ \"\$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$HPORT/)\" = 200 ] && exit 0; sleep 0.5; done; exit 1"
   check "container update --publish-rm num membro de pod" ok "$BIN" container update --publish-rm "$HPORT" "pp$PFX-web"
   check "e a porta deixa de escutar" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$HPORT')\" ]"
-  "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
+  e2e_rm "pp$PFX-web"
 else
   skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
 fi
@@ -4736,7 +4775,7 @@ YAML
     skip "vm: nome repetido noutra namespace" "o vm create CH falhou neste host (infra de rede?)"
   fi
   "$BIN" delete vm "$NSVM" -f >/dev/null 2>&1
-  "$BIN" network rm "$NSNET" >/dev/null 2>&1
+  e2e_net_rm "$NSNET"
   rm -rf "$NSW"
 else
   skip "vm: nome repetido noutra namespace" "sem cloud-hypervisor instalado"
@@ -4880,7 +4919,7 @@ check "system restore deixou de existir (corte limpo)" 2 "$BIN" system restore -
 check "system snapshot create continua a existir, separado" ok "$BIN" system snapshot create --help
 check "system snapshot restore continua a existir, separado" ok "$BIN" system snapshot restore --help
 
-"$BIN" container rm -f "$BKC" >/dev/null 2>&1
+e2e_rm "$BKC"
 "$BIN" volume rm -f "$BKV" >/dev/null 2>&1
 
 section "serve — arrancar, sondar, matar, e não deixar restos"
@@ -5492,8 +5531,8 @@ check "ingress ls json separa governado de aberto" ok bash -c \
   else
     skip "net ingress/egress deny/rm/unpublish" "não foi possível preparar rede+container"
   fi
-  "$BIN" container rm -f "$NGC" >/dev/null 2>&1
-  "$BIN" network rm "$NGNET" >/dev/null 2>&1
+  e2e_rm "$NGC"
+  e2e_net_rm "$NGNET"
 
   # --- os outros verbos respondem, e a classe de erro é a certa ---------------
   # As LISTAGENS de HTTPRoute e Gateway não vivem no `net`: o `net httproute`
@@ -6055,7 +6094,7 @@ if is_raw(termios.tcgetattr(slave)):
 if p.returncode != 7:
     sys.exit(f"saída normal: rc={p.returncode}, esperava 7")
 PYPROBE
-  "$BIN" container rm -f "$TTYC" >/dev/null 2>&1
+  e2e_rm "$TTYC"
 fi
 
 section "contrato de output: o que a automação lê não pode mudar sozinho"
@@ -6209,8 +6248,8 @@ if "$BIN" network create "$DP" >/dev/null 2>&1 \
 else
   skip "delete networkpolicies" "não foi possível preparar a rede e os dois containers"
 fi
-for c in "$DPS" "$DPC"; do "$BIN" container rm -f "$c" >/dev/null 2>&1; done
-"$BIN" network rm "$DP" >/dev/null 2>&1
+for c in "$DPS" "$DPC"; do e2e_rm "$c"; done
+e2e_net_rm "$DP"
 
 ########################################
 section "stack init --template --up (Sprint 7: --up passa a honrar o manifesto)"
@@ -6272,7 +6311,7 @@ if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force
 else
   skip "stack init --template httpd --up" \
     "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080/8443 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
-  "$BIN" container rm -f "$SCAFN" >/dev/null 2>&1
+  e2e_rm "$SCAFN"
 fi
 rm -rf "$SCAFDIR"
 
@@ -6487,7 +6526,7 @@ check "kill: o estado real acaba Crashed, nunca Stopped" ok bash -c "
     sleep 0.5
   done
   echo \"nunca saiu de '\$s'\"; exit 1"
-"$BIN" container rm -f "kc-$PFX" >/dev/null 2>&1
+e2e_rm "kc-$PFX"
 
 # --- `container pause`/`unpause`: o freezer do cgroup v2, não um proxy -------
 check "container run para pause" ok "$BIN" container run -d --name "pc-$PFX" --net none "$IMG" sleep 600
@@ -6497,7 +6536,7 @@ check "container pause" ok "$BIN" container pause "pc-$PFX"
 check "pause: cgroup.freeze diz 1" ok bash -c "[ \"\$(cat '/sys/fs/cgroup$PCCG/cgroup.freeze' 2>/dev/null)\" = 1 ]"
 check "container unpause" ok "$BIN" container unpause "pc-$PFX"
 check "unpause: cgroup.freeze volta a 0" ok bash -c "[ \"\$(cat '/sys/fs/cgroup$PCCG/cgroup.freeze' 2>/dev/null)\" = 0 ]"
-"$BIN" container rm -f "pc-$PFX" >/dev/null 2>&1
+e2e_rm "pc-$PFX"
 
 # --- `container restart`: reaproveita o rootfs, ganha um pid NOVO -----------
 check "container run para restart" ok "$BIN" container run -d --name "rsc-$PFX" --net none "$IMG" sleep 600
@@ -6511,7 +6550,7 @@ check "restart: pid novo, status Running" ok bash -c "
     sleep 0.5
   done
   echo \"ficou em '\$out', pid antigo era $RSCPID1\"; exit 1"
-"$BIN" container rm -f "rsc-$PFX" >/dev/null 2>&1
+e2e_rm "rsc-$PFX"
 
 # --- `container diff`: A/D relativo à imagem ---------------------------------
 check "container run para diff" ok "$BIN" container run -d --name "dc-$PFX" --net none "$IMG" sleep 600
@@ -6528,7 +6567,7 @@ check "container cp: host -> container" ok bash -c "
 check "container cp: container -> host, byte a byte" ok bash -c "
   '$BIN' container cp 'dc-$PFX:/cpin-$PFX.txt' '$OUT/cpout-$PFX.txt' || exit 1
   diff '$OUT/cpin-$PFX.txt' '$OUT/cpout-$PFX.txt'"
-"$BIN" container rm -f "dc-$PFX" >/dev/null 2>&1
+e2e_rm "dc-$PFX"
 rm -f "$OUT/cpin-$PFX.txt" "$OUT/cpout-$PFX.txt"
 
 # --- `container apply`: `kind: Container` directo, idempotente por nome -----
@@ -6537,7 +6576,7 @@ check "container apply: cria do manifesto" ok bash -c "
   '$BIN' container apply -f '$OUT/ca-$PFX.yaml'"
 check "container apply: o container do manifesto está Running" ok bash -c "
   '$BIN' container inspect 'ca-$PFX' | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[0][\"status\"]==\"Running\" else 1)'"
-"$BIN" container rm -f "ca-$PFX" >/dev/null 2>&1
+e2e_rm "ca-$PFX"
 rm -f "$OUT/ca-$PFX.yaml"
 
 # --- `container init`: as duas peças, já preenchidas -------------------------
@@ -6976,7 +7015,7 @@ check "cluster destroy: the nodes go, and cluster ls no longer lists it" ok bash
   true"
 check "cluster destroy: a cluster that does not exist is 4" 4 \
   env HOME="$L3H" KUBECONFIG="$L3H/.kube/config" "$BIN" cluster destroy "nao-existe-$PFX" --force
-for _r in control-plane worker; do "$BIN" container rm -f "$L3K-$_r" >/dev/null 2>&1; done
+for _r in control-plane worker; do e2e_rm "$L3K-$_r"; done
 
 # --- systemcontainer snapshot restore/rm: the record is read before the node --
 check "systemcontainer snapshot restore of a name not registered is 4" 4 \
@@ -7078,7 +7117,7 @@ YAML
 else
   skip "net httproute apply/rm and hosts sync" "could not start the backend container"
 fi
-"$BIN" container rm -f "$L3C-web" >/dev/null 2>&1
+e2e_rm "$L3C-web"
 
 # --- net netns: the holder's plumbing, judged on the wire --------------------
 # attach gives a netns an address on delonix0, exec runs a HOST binary inside
@@ -7214,7 +7253,7 @@ check "container attach: shows the output of a running container" ok bash -c "
   '$BIN' container run -d --name '$L3C-say' --net none '$IMG' sh -c 'echo hello-$PFX; exec sleep 600' >/dev/null || exit 1
   out=\$(timeout -s KILL 8 '$BIN' container attach '$L3C-say' 2>&1)
   grep -q 'hello-$PFX' <<<\"\$out\" || { echo \"attach did not show the output: \$out\"; exit 1; }"
-"$BIN" container rm -f "$L3C-say" >/dev/null 2>&1
+e2e_rm "$L3C-say"
 check "container attach: a container that does not exist is 4" 4 "$BIN" container attach "nao-existe-$PFX"
 
 # --- system monitor --no-stream: one sample, and the count it is built on -----
@@ -7311,7 +7350,7 @@ if "$BIN" container run -d --name "$L3C-pub" --net "$L3N" -p "$L3RP:80" "$IMG" s
 else
   skip "vm reach: host-only port" "could not start the publishing container"
 fi
-"$BIN" container rm -f "$L3C-pub" >/dev/null 2>&1
+e2e_rm "$L3C-pub"
 check "vm bridge: a DRY-RUN plan that changes nothing on the host" ok bash -c "
   before=\$(ip -o link | wc -l)
   out=\$('$BIN' vm bridge '$L3N' --vm-subnet 192.0.2.0/24 2>&1) || { printf '%s\n' \"\$out\"; exit 1; }
@@ -7334,8 +7373,8 @@ fi
 # This batch's own resources, by name — never a prune: the sweeps section after
 # the cleanup judges what each prune takes, and a leftover here would be
 # counted there.
-"$BIN" container rm -f "l3w-$PFX" "$L3C" >/dev/null 2>&1
-"$BIN" network rm "$L3N" >/dev/null 2>&1
+e2e_rm "l3w-$PFX" "$L3C"
+e2e_net_rm "$L3N"
 rm -rf "$L3"
 fi
 
@@ -7385,11 +7424,11 @@ if [ "$E2E_HAVE_IMAGE" = 1 ]; then
 else
   skip "container ps sem -a" "sem imagem de teste"
 fi
-"$BIN" container rm -f "$PSR" "$PSS" "$PSF" >/dev/null 2>&1
+e2e_rm "$PSR" "$PSS" "$PSF"
 
 section "limpeza"
 ########################################
-"$BIN" container rm -f "$C" >/dev/null 2>&1
+e2e_rm "$C"
 check "volume rm" ok "$BIN" volume rm "$VOL"
 check "network rm" ok "$BIN" network rm "$NET"
 

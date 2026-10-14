@@ -238,10 +238,9 @@ and through the CLI (`stack plan`/`apply`/`destroy` of a `NetworkZone`), unless 
   — a subnet whose entry already matches its running gateway is a no-op — so the call site in
   `network_zone.rs::apply_one` now runs it on **every** apply, not only an interrupted one. This
   widens D2.3 from "called only after a failure" to "called every time", at the cost of one extra
-  read per apply. The plan still does not read the IPAM's gateway entries on its own (a subnet
-  whose entry is missing still plans `=`, exit 0) — that is a separate, larger change (the plan
-  would need to fingerprint the IPAM side the way `uses_ipam`/`ipam_fingerprint` already do for
-  drift detection, not just for the repair step), and is left open.
+  read per apply. **Closed 2026-10-12 (N18):** the plan now reads the IPAM's gateway entries —
+  `IpamObserved.gateway_entries`, the hot `NetworkZone` field `gatewayEntries`, and the IPAM plan
+  fingerprint — see «D2.3 in the plan» below.
 - **Not fixed, by owner decision — a known limitation, not an engine bug to patch around.** A
   subnet **deleted** inside a transaction that is then rolled back comes back in the
   configuration and not in the IPAM's database (`pve-ipam-state.json`). The node then refuses
@@ -368,3 +367,33 @@ Decision section names: `{ ip, workload: "VirtualMachine/<name>" }`.
   `remove_reservation` round-trip for a reservation that names a workload — the I/O wrapper
   (`resolve_reservation_mac`) and the provider call in `apply_one` are exercised only by the pure
   tests above, not against a live node or a live VM backend.
+
+## D2.3 in the plan — the gateway entries are read, not only repaired (2026-10-12, N18)
+
+Until this, the repair of D2.3 ran inside every apply, but a plan never read the entries: a
+subnet whose gateway entry was released or moved by hand planned `=` and exit 0, so a
+`stack plan --detailed-exitcode` gate never saw it and a `stack apply` with nothing else to do
+never reached the repair.
+
+- **The port carries the flag.** `IpamObserved.gateway_entries` lists the entries the provider
+  marks as a subnet's gateway (on Proxmox, the `"gateway": 1` rows of
+  `GET /cluster/sdn/ipams/pve/status` — the same listing the entries come from, read once).
+- **One reading for the plan and the repair.** `gateway_entry_mismatches` (in
+  `delonix-networking`) names a running subnet whose entries are not exactly one, on its RUNNING
+  gateway (or none without one). `gateway_entry_drift` renders it for the plan, and the Proxmox
+  `gateway_repairs` is built on it, so the subnet a plan names is the subnet the repair touches.
+- **A hot field, compared with the running gateway.** `kind: NetworkZone` gains
+  `gatewayEntries`: the manifest wants `in sync`, the observed side is the drift lines. A
+  declared gateway that differs from the running one is `subnetSettings`' change, said once
+  there; a subnet that is not running is `remote`'s. The field is hot, so the plan is an
+  in-place update and the apply's repair converges it; it never replaces the zone.
+- **The fingerprint covers it.** `ipam_fingerprint` includes the gateway entries, so an apply
+  planned against an entry where it was is refused as stale when the entry moved since.
+- **Proved** on the TLS mock node (`tests/failure_injection.rs`): an untouched subnet plans no
+  line and writes nothing; an entry moved by hand plans one line, and the repair moves it back
+  through a free address, releases the stale entry, rolls back, applies nothing — and the next
+  observation is in sync. Unit tests cover the port, the fingerprint and the Kind's field.
+  **Not validated live:** the `#[ignore]` case
+  `the_plan_reads_a_gateway_entry_released_or_moved_by_hand_and_the_repair_clears_it` (an entry
+  released with `DELETE …/ips`, then one moved by a discarded gateway change) is written for the
+  lab and has not run against a node.

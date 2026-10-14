@@ -22,8 +22,9 @@
 use crate::sdn::{dhcp_ranges_of, DhcpRange, SubnetOptions};
 use crate::{Client, Ledger};
 use delonix_networking::ipam::{
-    gateway_held_by, normalize_mac, subnet_change, IpamController, IpamEntry, IpamObserved,
-    IpamProvider, IpamReservation, IpamSubnet, SubnetChange,
+    gateway_entry_mismatches, gateway_held_by, normalize_mac, subnet_change, IpamController,
+    IpamEntry, IpamGatewayEntry, IpamObserved, IpamProvider, IpamReservation, IpamSubnet,
+    SubnetChange,
 };
 use delonix_networking::ownership::{Owner, OwnerMark, RemoveOutcome};
 use delonix_networking::segment::EnsureOutcome;
@@ -93,15 +94,17 @@ fn is_gateway_row(row: &serde_json::Value) -> bool {
     }
 }
 
-/// The gateway entries of `zone` in an IPAM status listing, as
-/// `(vnet, address)`. Pure.
+/// The gateway entries of `zone` in an IPAM status listing. Pure.
 pub(crate) fn gateway_entries_from(
     rows: &[serde_json::Value],
     zone: &str,
-) -> Vec<(String, String)> {
+) -> Vec<IpamGatewayEntry> {
     rows.iter()
         .filter(|r| text(r, "zone") == zone && is_gateway_row(r))
-        .map(|r| (text(r, "vnet"), text(r, "ip")))
+        .map(|r| IpamGatewayEntry {
+            vnet: text(r, "vnet"),
+            ip: text(r, "ip"),
+        })
         .collect()
 }
 
@@ -179,42 +182,37 @@ pub(crate) fn free_address(subnet: &IpamSubnet, entries: &[IpamEntry]) -> Option
 ///
 /// A right entry next to stale ones (a repair cut short before its release)
 /// only releases the stale ones. `Err` names a subnet with no free address
-/// to move through. Pure.
+/// to move through.
+///
+/// Which subnets need a repair is the port's
+/// [`gateway_entry_mismatches`] — the same reading a plan reports as drift,
+/// so a subnet the plan names is the subnet the repair touches. Pure.
 pub(crate) fn gateway_repairs(
     running: &[IpamSubnet],
-    gateway_entries: &[(String, String)],
+    gateway_entries: &[IpamGatewayEntry],
     entries: &[IpamEntry],
 ) -> Result<Vec<GatewayRepair>, String> {
     let mut out = Vec::new();
-    for s in running {
-        let mine: Vec<&str> = gateway_entries
-            .iter()
-            .filter(|(vnet, ip)| *vnet == s.vnet && s.holds(ip))
-            .map(|(_, ip)| ip.as_str())
-            .collect();
-        let gateway = s.gateway.as_deref();
-        let stale: Vec<String> = mine
-            .iter()
-            .filter(|ip| Some(**ip) != gateway)
-            .map(|ip| (*ip).to_string())
-            .collect();
-        let through = match gateway {
-            Some(g) if !mine.contains(&g) => Some(free_address(s, entries).ok_or_else(|| {
+    for m in gateway_entry_mismatches(running, gateway_entries) {
+        let through = if m.missing {
+            let s = running
+                .iter()
+                .find(|s| s.vnet == m.vnet && s.cidr == m.cidr)
+                .ok_or_else(|| format!("subnet {} in vnet '{}' is not running", m.cidr, m.vnet))?;
+            Some(free_address(s, entries).ok_or_else(|| {
                 format!(
                     "subnet {} in vnet '{}': no free address to move the gateway through",
                     s.cidr, s.vnet
                 )
-            })?),
-            _ => None,
+            })?)
+        } else {
+            None
         };
-        if stale.is_empty() && through.is_none() {
-            continue;
-        }
         out.push(GatewayRepair {
-            vnet: s.vnet.clone(),
-            cidr: s.cidr.clone(),
-            gateway: gateway.map(str::to_string),
-            stale,
+            vnet: m.vnet,
+            cidr: m.cidr,
+            gateway: m.gateway,
+            stale: m.stale,
             through,
         });
     }
@@ -760,14 +758,25 @@ impl IpamProvider for ProxmoxIpamProvider {
             .map_err(delonix_model::Error::from)?;
         let row = zones.iter().find(|z| text(z, "zone") == zone);
         let subnets = self.running_subnets(zone, vnets)?;
-        let entries = self
-            .entries(zone)?
+        // One listing for both: the entries, and which of them the node flags
+        // as a gateway (N18 — what a plan needs to see an entry left away
+        // from its subnet's gateway).
+        let status = self
+            .client
+            .sdn_ipam_status(IPAM)
+            .map_err(delonix_model::Error::from)?;
+        let entries = entries_from(&status, zone)
+            .into_iter()
+            .filter(|e| vnets.contains(&e.vnet))
+            .collect();
+        let gateway_entries = gateway_entries_from(&status, zone)
             .into_iter()
             .filter(|e| vnets.contains(&e.vnet))
             .collect();
         Ok(IpamObserved {
             subnets,
             entries,
+            gateway_entries,
             zone_ipam: row.is_some_and(|z| !text(z, "ipam").is_empty()),
             zone_dhcp: row.is_some_and(|z| text(z, "dhcp") == "dnsmasq"),
             controller: row.map(|z| text(z, "ipam")).filter(|c| !c.is_empty()),
@@ -820,7 +829,7 @@ impl IpamProvider for ProxmoxIpamProvider {
         if repairs.is_empty() {
             return Ok(Vec::new());
         }
-        let gateways = || -> crate::Result<Vec<(String, String)>> {
+        let gateways = || -> crate::Result<Vec<IpamGatewayEntry>> {
             Ok(gateway_entries_from(
                 &self.client.sdn_ipam_status(IPAM)?,
                 zone,
@@ -856,18 +865,18 @@ impl IpamProvider for ProxmoxIpamProvider {
                 for r in &repairs {
                     let mine = |vnet: &str, ip: &str| vnet == r.vnet && r_holds(r, ip);
                     let right = match &r.gateway {
-                        Some(g) => held.iter().any(|(vnet, ip)| mine(vnet, ip) && ip == g),
+                        Some(g) => held.iter().any(|e| mine(&e.vnet, &e.ip) && &e.ip == g),
                         None => true,
                     };
                     if !right {
                         continue;
                     }
-                    for (_, ip) in held
+                    for e in held
                         .iter()
-                        .filter(|(vnet, ip)| mine(vnet, ip) && Some(ip) != r.gateway.as_ref())
+                        .filter(|e| mine(&e.vnet, &e.ip) && Some(&e.ip) != r.gateway.as_ref())
                     {
                         self.client
-                            .sdn_vnet_ip_delete(&self.ledger, &r.vnet, zone, ip, None)?;
+                            .sdn_vnet_ip_delete(&self.ledger, &r.vnet, zone, &e.ip, None)?;
                     }
                 }
                 Ok(())
@@ -878,8 +887,8 @@ impl IpamProvider for ProxmoxIpamProvider {
         for r in &repairs {
             let entries: Vec<&str> = after
                 .iter()
-                .filter(|(vnet, ip)| *vnet == r.vnet && r_holds(r, ip))
-                .map(|(_, ip)| ip.as_str())
+                .filter(|e| e.vnet == r.vnet && r_holds(r, &e.ip))
+                .map(|e| e.ip.as_str())
                 .collect();
             let want: Vec<&str> = r.gateway.as_deref().into_iter().collect();
             if entries != want {
@@ -939,7 +948,7 @@ mod tests {
         // The gateway row is the one the repair reads.
         assert_eq!(
             gateway_entries_from(&status, "f5bz"),
-            vec![("f5bv".to_string(), "10.78.0.1".to_string())]
+            vec![ge("f5bv", "10.78.0.1")]
         );
     }
 
@@ -994,6 +1003,13 @@ mod tests {
         }
     }
 
+    fn ge(vnet: &str, ip: &str) -> IpamGatewayEntry {
+        IpamGatewayEntry {
+            vnet: vnet.into(),
+            ip: ip.into(),
+        }
+    }
+
     fn entry(ip: &str, mac: Option<&str>) -> IpamEntry {
         IpamEntry {
             vnet: "v".into(),
@@ -1012,7 +1028,7 @@ mod tests {
             entry("10.82.0.254", None),
             entry("10.82.0.20", Some("BC:24:11:00:00:20")),
         ];
-        let stale = [("v".to_string(), "10.82.0.254".to_string())];
+        let stale = [ge("v", "10.82.0.254")];
         let r = gateway_repairs(&running, &stale, &entries).unwrap();
         assert_eq!(
             r,
@@ -1028,13 +1044,13 @@ mod tests {
         assert!(repair_line(&r[0]).contains("was on 10.82.0.254, put back on 10.82.0.1"));
 
         // In sync: nothing.
-        let right = [("v".to_string(), "10.82.0.1".to_string())];
+        let right = [ge("v", "10.82.0.1")];
         assert!(gateway_repairs(&running, &right, &entries)
             .unwrap()
             .is_empty());
         // A gateway entry of ANOTHER vnet does not count — and this subnet
         // has none of its own, which is the next case.
-        let elsewhere = [("w".to_string(), "10.82.0.254".to_string())];
+        let elsewhere = [ge("w", "10.82.0.254")];
         assert_eq!(
             gateway_repairs(&running, &elsewhere, &entries).unwrap(),
             gateway_repairs(&running, &[], &entries).unwrap()
@@ -1071,7 +1087,7 @@ mod tests {
     fn a_gateway_entry_of_a_subnet_without_a_gateway_is_released() {
         let mut no_gw = sub("10.82.0.1");
         no_gw.gateway = None;
-        let held = [("v".to_string(), "10.82.0.1".to_string())];
+        let held = [ge("v", "10.82.0.1")];
         let r = gateway_repairs(&[no_gw.clone()], &held, &[entry("10.82.0.1", None)]).unwrap();
         assert_eq!(
             r,
@@ -1093,10 +1109,7 @@ mod tests {
     #[test]
     fn an_extra_gateway_entry_next_to_the_right_one_is_released() {
         let running = [sub("10.82.0.1")];
-        let held = [
-            ("v".to_string(), "10.82.0.200".to_string()),
-            ("v".to_string(), "10.82.0.1".to_string()),
-        ];
+        let held = [ge("v", "10.82.0.200"), ge("v", "10.82.0.1")];
         let r = gateway_repairs(&running, &held, &[]).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].stale, vec!["10.82.0.200".to_string()]);
@@ -1127,7 +1140,7 @@ mod tests {
                 gateway: Some("10.82.0.1".into()),
                 ..s.clone()
             }],
-            &[("v".into(), "10.82.0.2".into())],
+            &[ge("v", "10.82.0.2")],
             &full,
         );
         assert!(r.unwrap_err().contains("no free address"));

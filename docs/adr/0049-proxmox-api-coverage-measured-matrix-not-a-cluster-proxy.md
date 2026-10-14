@@ -614,3 +614,25 @@ is either called for an engine verb or excluded with its reason, none left `not-
   because the engine's libvirt `delonix-antispoof` filter (always on, no opt-out) drops frames
   with a MAC other than the node VM's. The lab uses a NAT bridge `vmbr1` inside the node instead;
   letting a hypervisor VM bridge its guests is a security decision of its own.
+
+**Added 2026-10-12 (Sprint 22, N28): one more route with a consumer, and live cases for the
+four called-but-untested ones.**
+
+- **`GET /version` is called** by the slice-3 discovery: `Client::cluster_facts` carries the
+  node's release (`ClusterFacts.release`), and `provider describe proxmox --probe` prints it next
+  to `MATRIX_RELEASE` (9.2.2), saying when they differ — a claim about a release nobody measured
+  has no denominator (D1). Matrix after it: **184 of 675 called (27.3 %), 179 in a live trace**;
+  `/version` is `supported+untested` until a trace with it is committed. Proved on the TLS mock
+  node (six GETs and nothing else; a 403 on `/version` fails the probe as `Forbidden`).
+- **The four called routes still untested live** each have an `#[ignore]` case now:
+  `the_cluster_probe_reads_the_nodes_release` (`/version`),
+  `the_guest_agent_reports_its_online_vcpus_and_memory_blocks` (`agent/get-vcpus`,
+  `agent/get-memory-blocks`, `agent/get-memory-block-info`, read by `vm update` on a running VM,
+  ADR-0068 D4; also on the mock now). `GET /nodes/{node}/tasks` is read by every SDN apply
+  (`sdn_apply_waits_for_every_nodes_network_reload` reads each node's `srvreload` tasks), so the
+  next committed trace of that case promotes it; the trace header still names it as the
+  lost-answer path only.
+- **Nothing else in slices 3–4 has a consumer today.** HA resources stay excluded by D3, slice 4
+  is its own ADR under ADR-0010, and the rest of `not-yet-implemented` (pools, node disks and
+  network, storage administration, consoles) has no engine verb that would call it — wiring a
+  route without one would be the dead API this ADR's D6 refuses.

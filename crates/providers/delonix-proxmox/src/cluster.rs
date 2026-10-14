@@ -7,9 +7,10 @@
 //! (migration, HA, replication, Ceph) is answered from the cluster that is
 //! actually there and not from a guess.
 //!
-//! **Every call here is a `GET`.** Five of them: `/cluster/status`,
-//! `/storage`, `/cluster/ha/status/current`, `/cluster/ha/resources` and
-//! `/cluster/sdn/zones`. None forks a task and none changes the cluster, which
+//! **Every call here is a `GET`.** Six of them: `/cluster/status`,
+//! `/storage`, `/cluster/ha/status/current`, `/cluster/ha/resources`,
+//! `/cluster/sdn/zones` and `/version`. None forks a task and none changes
+//! the cluster, which
 //! is what makes it safe to point at a production cluster with an auditor's
 //! token (`PVEAuditor`). A write belongs to the slices after this one, against
 //! a lab.
@@ -81,6 +82,43 @@ pub struct ClusterFacts {
     pub ha: HaFacts,
     /// How many SDN zones the cluster defines.
     pub sdn_zones: usize,
+    /// The Proxmox VE version the node answers (`GET /version`, `version`),
+    /// `None` when it names none. Every route claim of this provider is
+    /// measured on [`MATRIX_RELEASE`]; [`release_note`] says when the cluster
+    /// runs another.
+    pub release: Option<String>,
+}
+
+/// The Proxmox VE release the route matrix (`docs/proxmox/matrix-9.2.2.md`)
+/// and every live trace behind it were measured on (ADR-0049 D1: a release
+/// enters the matrix the day a node of it is measured, never before).
+pub const MATRIX_RELEASE: &str = "9.2.2";
+
+/// The version `GET /version` names (`{"version": "9.2.2", "release":
+/// "9.2", …}`), `None` without one. Pure.
+pub fn release_from(v: &serde_json::Value) -> Option<String> {
+    text(v, "version")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// What a probe says about the release next to the facts: nothing when the
+/// cluster runs [`MATRIX_RELEASE`]; otherwise that the provider's route
+/// claims were not measured on what it runs — a compatibility claim for a
+/// release nobody measured is one without a denominator (ADR-0049). Pure.
+pub fn release_note(release: Option<&str>) -> Option<String> {
+    match release {
+        Some(r) if r == MATRIX_RELEASE => None,
+        Some(r) => Some(format!(
+            "the cluster runs Proxmox VE {r}; this provider's route matrix and live evidence \
+             are measured on {MATRIX_RELEASE} — what it claims is not measured on {r} (ADR-0049)"
+        )),
+        None => Some(format!(
+            "the node named no Proxmox VE version; this provider's route matrix is measured on \
+             {MATRIX_RELEASE}"
+        )),
+    }
 }
 
 /// What the cluster offers for one cluster-dependent capability. Not
@@ -97,7 +135,7 @@ pub struct ClusterVerdict {
 }
 
 impl Client {
-    /// Reads what the target's cluster is: five `GET`s, nothing written.
+    /// Reads what the target's cluster is: six `GET`s, nothing written.
     pub fn cluster_facts(&self) -> Result<ClusterFacts> {
         let status: Wrapped<serde_json::Value> =
             parse(&self.get("/cluster/status")?, "cluster status")?;
@@ -108,14 +146,17 @@ impl Client {
             parse(&self.get("/cluster/ha/resources")?, "ha resources")?;
         let zones: Wrapped<serde_json::Value> =
             parse(&self.get("/cluster/sdn/zones")?, "sdn zones")?;
-        Ok(facts_from(
+        let version: Wrapped<serde_json::Value> = parse(&self.get("/version")?, "version")?;
+        let mut facts = facts_from(
             &status.data,
             &storage.data,
             &ha.data,
             &ha_resources.data,
             &zones.data,
             &self.node,
-        ))
+        );
+        facts.release = release_from(&version.data);
+        Ok(facts)
     }
 }
 
@@ -192,6 +233,7 @@ pub fn facts_from(
             resources: items(ha_resources).len(),
         },
         sdn_zones: items(zones).len(),
+        release: None,
     }
 }
 
@@ -442,5 +484,22 @@ mod tests {
             "{:?}",
             v[2]
         );
+    }
+
+    /// `GET /version` as PVE answers it: the full version is what the matrix
+    /// is keyed by, and a cluster on another one is said, never assumed.
+    #[test]
+    fn the_release_is_read_and_another_one_is_said() {
+        let v = json!({"version":"9.2.2","release":"9.2","repoid":"abc123"});
+        assert_eq!(release_from(&v).as_deref(), Some("9.2.2"));
+        assert_eq!(release_note(Some(MATRIX_RELEASE)), None);
+        let other = release_note(Some("9.3.1")).unwrap();
+        assert!(other.contains("runs Proxmox VE 9.3.1"), "{other}");
+        assert!(other.contains("measured on 9.2.2"), "{other}");
+        assert_eq!(release_from(&json!({"release":"9.2"})), None);
+        assert!(release_note(None)
+            .unwrap()
+            .contains("named no Proxmox VE version"));
+        assert_eq!(lab().release, None, "facts_from alone reads no version");
     }
 }

@@ -30,14 +30,57 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 //!
-//! Order matters in one run. The firewall tests (`the_vms_own_firewall_*`,
+//! # Cases still owed a live run, and what each needs (N17, N18, N28)
+//!
+//! As of 2026-10-12 these have never passed against a node; each names its
+//! variables in its `#[ignore]` reason and FAILS naming one that is unset.
+//!
+//! | case | needs beyond the node |
+//! |---|---|
+//! | `a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there` | a second cluster node (`DELONIX_PROXMOX_TEST_MOVE_NODE`) and a storage both nodes share for VM disks (`DELONIX_PROXMOX_TEST_SHARED_STORAGE`, e.g. the lab's `nfs-lab`) |
+//! | `a_running_vm_moves_live_on_shared_storage_and_keeps_running` | the same two |
+//! | `a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored` | the same two |
+//! | `a_system_container_moves_to_another_node_offline_and_by_restart` | `DELONIX_PROXMOX_TEST_MOVE_NODE` and an OCI archive (`DELONIX_PROXMOX_TEST_OCI_ARCHIVE`, written by `delonix_oci::write_oci_media_archive`, e.g. `alpine:3.20` — `image save` writes Docker v2, which the node refuses) |
+//! | `ip()` read through a real agent (the case with a Portuguese name, just before `agent_ping_answers_false_without_an_agent` in this file) | a running guest with `qemu-guest-agent` and two NICs (`DELONIX_PROXMOX_TEST_AGENT_VMID`; how to prepare one is in the case's comment) |
+//! | `the_dns_provider_registers_a_guest_in_the_zones_dns_server` | a DNS controller registered on the cluster and its PowerDNS reachable from the test (`DELONIX_PROXMOX_TEST_DNS_CONTROLLER`, `_DNS_ZONE`, `_DNS_URL`, `_DNS_KEY_FILE`) and `DELONIX_PROXMOX_TEST_OCI_ARCHIVE` |
+//! | `the_guest_agent_reports_its_online_vcpus_and_memory_blocks` (N28) | `DELONIX_PROXMOX_TEST_AGENT_VMID`; read-only |
+//! | `the_cluster_probe_reads_the_nodes_release` (N28) | nothing; read-only |
+//! | `the_plan_reads_a_gateway_entry_released_or_moved_by_hand_and_the_repair_clears_it` (N18) | nothing; creates and removes its own zone |
+//!
+//! Run them with `DELONIX_PROXMOX_TRACE_ROUTES` set and commit the trace: a
+//! route the matrix marks `supported+untested` is promoted only by a
+//! committed trace (ADR-0049 D2). The two-node cases and the agent guest
+//! cost two appliances and a guest: run them alone, behind
+//! `scripts/lab_budget.sh`.
+//!
+//! # Run order: two invocations, never one (N29)
+//!
+//! The firewall cases (`the_vms_own_firewall_*`,
 //! `a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back`,
 //! `a_system_containers_firewall_is_applied_and_reads_back`) need the
 //! datacenter firewall ON and leave it on. A SDN zone created AFTER that is not
 //! exempted by the node's default forward policy, so a DHCP-backed guest in it
 //! gets no address — measured on the first attempt (report of 2026-10-09,
-//! §5.4/§6.2). Run the SDN/DHCP cases before the firewall ones, or in a
-//! separate run, and read a DHCP timeout after a firewall test as this first.
+//! §5.4/§6.2). And one invocation cannot order them: libtest runs the cases by
+//! NAME, so `a_scope_vm_policy_…` and `a_system_containers_firewall_…` come
+//! before `the_ipam_provider_reserves_an_address_and_a_guest_gets_it_by_dhcp`
+//! whatever the file's order. The order is therefore two runs, split by the
+//! word every firewall case carries in its name:
+//!
+//! ```text
+//! # 1. everything that does not touch a guest firewall — the SDN zones and
+//! #    their DHCP guests among them — with the datacenter firewall as found:
+//! cargo test -p delonix-proxmox --test live -- --ignored --skip firewall --test-threads=1
+//! # 2. the firewall cases (turn the datacenter firewall on first, with the
+//! #    `management` IPSet the lab needs — see the trace header):
+//! cargo test -p delonix-proxmox --test live -- --ignored firewall --test-threads=1
+//! ```
+//!
+//! The split holds only while every case that touches a guest's or the
+//! datacenter's firewall has `firewall` in its name;
+//! `every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name`
+//! (not ignored, it reads this file) fails the build when one does not. A DHCP
+//! timeout in a run that already had the firewall on is read as this first.
 
 use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};
@@ -3655,6 +3698,54 @@ fn agent_guest(t: &Target) -> (u32, delonix_compute::Vm) {
     (vmid, vm)
 }
 
+/// N28: the three agent reads a hot add is judged by (ADR-0068 D4) —
+/// `agent/get-vcpus`, `agent/get-memory-blocks`, `agent/get-memory-block-info`
+/// — are called by `vm update` and were never in a live trace. Against the
+/// prepared agent guest: the vCPUs the agent reports online are the number
+/// the guest's own `nproc` prints (read through `agent/exec`), and the memory
+/// blocks parse into a non-zero online size with a power-of-two block size.
+/// Read-only: nothing is plugged.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL, DELONIX_PROXMOX_TEST_AGENT_VMID and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_guest_agent_reports_its_online_vcpus_and_memory_blocks() {
+    let t = target().expect(NEEDS_TARGET);
+    let (vmid, _vm) = agent_guest(&t);
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let vcpus = client
+        .guest_vcpus(vmid)
+        .expect("get-vcpus")
+        .expect("the prepared guest runs an agent");
+    let online = delonix_compute::vm_backend::guest_online_vcpus(&vcpus);
+    let AgentExecStatus::Finished {
+        exit_code, stdout, ..
+    } = client
+        .agent_exec_wait(
+            vmid,
+            &["/usr/bin/nproc"],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("nproc in the guest")
+    else {
+        panic!("nproc did not finish");
+    };
+    assert_eq!(exit_code, 0);
+    assert_eq!(
+        stdout.trim().parse::<u32>().expect("nproc prints a number"),
+        online,
+        "the agent's online vCPUs are the guest's own count: {vcpus}"
+    );
+    let (blocks, info) = client
+        .guest_memory_blocks(vmid)
+        .expect("get-memory-blocks")
+        .expect("the prepared guest runs an agent");
+    let size = info["size"].as_u64().expect("a block size");
+    assert!(size > 0 && size.is_power_of_two(), "{info}");
+    let (online_mib, _offline) =
+        delonix_compute::vm_backend::guest_memory_state(&blocks, &info).expect("the blocks parse");
+    assert!(online_mib > 0, "no memory online: {blocks}");
+}
+
 /// `vm describe`'s guest block (`vm.guest-agent`), from a real agent: the OS
 /// and kernel, the hostname, the agent's version and the mounted filesystems
 /// come back, and the hostname is the SAME one the guest's own
@@ -6091,6 +6182,138 @@ fn a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired() {
     );
 }
 
+/// N18 (ADR-0063 D2.3) against a real node: the plan READS the IPAM's
+/// gateway entries. A subnet with its entry on its running gateway plans
+/// nothing; an entry released by hand (`DELETE …/ips` on the gateway's
+/// address), and one moved by a gateway change staged and discarded, each
+/// plan one line naming the subnet — the reading `kind: NetworkZone`'s
+/// `gatewayEntries` field makes — and after the repair the apply runs, the
+/// plan is in sync again. Until N18 the plan said `=` for all three.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_plan_reads_a_gateway_entry_released_or_moved_by_hand_and_the_repair_clears_it() {
+    use delonix_networking::ipam::{gateway_entry_drift, DhcpRange, IpamProvider, IpamSubnet};
+    use delonix_networking::ownership::OwnerMark;
+    use delonix_networking::segment::{NetworkZoneSpec, SegmentProvider, VNetSpec};
+    let t = target().expect(NEEDS_TARGET);
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let segment = delonix_proxmox::ProxmoxSegmentProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let ipam = delonix_proxmox::ProxmoxIpamProvider::new(
+        client.clone(),
+        delonix_proxmox::Ledger::at(dir.path()),
+    );
+    let owner = OwnerMark::from_random(
+        &(std::process::id() ^ 0x0018_0018)
+            .to_be_bytes()
+            .repeat(4)
+            .try_into()
+            .unwrap(),
+    );
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("n{suffix}");
+    let vnet = format!("p{suffix}");
+    let octet = suffix % 200 + 20;
+    let at = |last: u8| format!("10.84.{octet}.{last}");
+    let subnet = IpamSubnet {
+        vnet: vnet.clone(),
+        cidr: format!("10.84.{octet}.0/24"),
+        gateway: Some(at(1)),
+        dhcp_ranges: vec![DhcpRange {
+            start: at(100),
+            end: at(150),
+        }],
+    };
+    let plan = || {
+        let o = ipam
+            .observe(&zone, std::slice::from_ref(&vnet))
+            .expect("observe");
+        gateway_entry_drift(&o.subnets, &o.gateway_entries)
+    };
+    let repair = || {
+        ipam.repair_gateways(&zone, std::slice::from_ref(&vnet), &owner)
+            .expect("repair")
+    };
+
+    segment
+        .transaction(&mut || {
+            segment.ensure_zone(&NetworkZoneSpec { name: zone.clone() })?;
+            segment.ensure_vnet(
+                &VNetSpec {
+                    name: vnet.clone(),
+                    zone: zone.clone(),
+                    alias: Some("n18".into()),
+                },
+                &owner,
+            )?;
+            ipam.prepare_zone(&zone, "pve", true)?;
+            ipam.ensure_subnet(&zone, &subnet, &owner)?;
+            Ok(())
+        })
+        .expect("zone, vnet and subnet");
+    assert!(
+        plan().is_empty(),
+        "an untouched subnet plans nothing: {:?}",
+        plan()
+    );
+
+    // Released by hand: the router's address is free in the IPAM.
+    client
+        .sdn_vnet_ip_delete(&ledger, &vnet, &zone, &at(1), None)
+        .expect("release the gateway entry by hand");
+    let released = plan();
+    assert_eq!(released.len(), 1, "{released:?}");
+    assert!(
+        released[0].contains(&format!("no gateway entry for its gateway {}", at(1))),
+        "{released:?}"
+    );
+    assert_eq!(repair().len(), 1, "the repair puts it back");
+    assert!(plan().is_empty(), "after the repair: {:?}", plan());
+
+    // Moved: a gateway change staged and discarded (the shape ADR-0063
+    // measured after a failed transaction).
+    client
+        .sdn_discarded_change(&ledger, || {
+            client.update_sdn_subnet_with(
+                &ledger,
+                &vnet,
+                &zone,
+                &subnet.cidr,
+                &delonix_proxmox::SubnetOptions {
+                    gateway: Some(&at(200)),
+                    ..Default::default()
+                },
+            )
+        })
+        .expect("a gateway change staged and discarded");
+    let moved = plan();
+    assert_eq!(moved.len(), 1, "the plan names the subnet: {moved:?}");
+    assert_eq!(repair().len(), 1, "the repair acts on what the plan named");
+    assert!(plan().is_empty(), "after the repair: {:?}", plan());
+    assert!(repair().is_empty(), "a second repair found something to do");
+
+    segment
+        .transaction(&mut || {
+            ipam.remove_subnet(&zone, &subnet, &owner)?;
+            segment.remove_vnet(&vnet, &owner)?;
+            segment.remove_zone(&zone)
+        })
+        .expect("teardown");
+    assert!(
+        !client
+            .sdn_ipam_status("pve")
+            .unwrap()
+            .iter()
+            .any(|e| e["zone"] == zone.as_str()),
+        "an IPAM entry of the zone was left behind"
+    );
+}
+
 /// ADR-0063 D1.2/D1.3 against a real node: a NetBox and a phpIPAM controller
 /// registered on the cluster — real entries of `GET /cluster/sdn/ipams`, the
 /// node having verified each URL against a stub — are listed by the IPAM port
@@ -6823,5 +7046,78 @@ fn the_dns_provider_registers_a_guest_in_the_zones_dns_server() {
         left_a && left_ptr,
         "the node now removes a deleted subnet's gateway records (A left: {left_a}, PTR left: \
          {left_ptr}) — drop the teardown's warning (ADR-0064)"
+    );
+}
+
+/// N28 (ADR-0049 slice 3): the cluster probe reads the node's release with
+/// `GET /version` — the route this case adds to the trace — next to the five
+/// discovery reads, all GETs. Asserts the version is the one the node's own
+/// `pveversion` would print in its first field, and says whether it is the
+/// release the route matrix is measured on.
+#[ignore = "needs DELONIX_PROXMOX_TEST_URL and a reachable Proxmox node: cargo test -p delonix-proxmox --test live -- --ignored"]
+#[test]
+fn the_cluster_probe_reads_the_nodes_release() {
+    let t = target().expect(NEEDS_TARGET);
+    let b = backend(&t).expect("connect");
+    let facts = b.client().cluster_facts().expect("cluster facts");
+    let release = facts.release.clone().expect("the node names its version");
+    assert!(
+        release.split('.').count() == 3 && release.split('.').all(|p| p.parse::<u32>().is_ok()),
+        "a version of three numbers, as the matrix is keyed: {release}"
+    );
+    assert!(
+        facts.nodes.iter().any(|n| n.target),
+        "the configured node is in the cluster: {facts:?}"
+    );
+    // On the lab (9.2.2) there is nothing to say; on any other release the
+    // note names both.
+    match delonix_proxmox::cluster::release_note(Some(&release)) {
+        None => assert_eq!(release, delonix_proxmox::cluster::MATRIX_RELEASE),
+        Some(note) => assert!(note.contains(&release), "{note}"),
+    }
+}
+
+/// N29: the two-run order of the header splits on the word `firewall` in a
+/// case's NAME, so every case that calls a guest's or the datacenter's
+/// firewall must carry it — otherwise run 1 turns the firewall on and the
+/// DHCP cases after it time out for a reason that is not theirs. Reads this
+/// file; not ignored, so a new firewall case without the word fails here.
+#[test]
+fn every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name() {
+    // The calls that need (or turn on) a guest's or the datacenter's own
+    // firewall. A vnet's firewall (`…sdn_vnet_firewall…`) does not.
+    const NEEDS_IT: &[&str] = &[
+        ".apply_firewall(",
+        ".read_firewall(",
+        ".cluster_firewall_options(",
+        ".set_firewall_enabled(",
+        ".add_firewall_",
+        ".firewall_options(",
+        ".lxc_firewall_",
+    ];
+    let src = include_str!("live.rs");
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for case in src.split("\n#[test]\nfn ").skip(1) {
+        let name = case.split('(').next().unwrap_or_default();
+        if name == "every_case_that_needs_the_datacenter_firewall_says_firewall_in_its_name" {
+            continue;
+        }
+        let body = case.split("\n#[ignore").next().unwrap_or_default();
+        if NEEDS_IT.iter().any(|call| body.contains(call)) {
+            checked += 1;
+            if !name.contains("firewall") {
+                wrong.push(name.to_string());
+            }
+        }
+    }
+    assert!(
+        checked == 4,
+        "the scan found {checked} firewall case(s), the header names four — update both together"
+    );
+    assert!(
+        wrong.is_empty(),
+        "these cases call a guest's or the datacenter's firewall without `firewall` in their \
+         name, so `--skip firewall` runs them before the DHCP cases: {wrong:?}"
     );
 }

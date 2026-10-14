@@ -169,8 +169,15 @@ pub fn ipam_fingerprint(o: &crate::ipam::IpamObserved) -> serde_json::Value {
         .map(|e| serde_json::json!({ "vnet": e.vnet, "ip": e.ip, "mac": e.mac }))
         .collect();
     entries.sort_by_key(|e| format!("{}|{}", e["vnet"], e["ip"]));
+    let mut gateways: Vec<String> = o
+        .gateway_entries
+        .iter()
+        .map(|g| format!("{}|{}", g.vnet, g.ip))
+        .collect();
+    gateways.sort();
     serde_json::json!({
         "zoneIpam": o.zone_ipam, "zoneDhcp": o.zone_dhcp, "subnets": subnets, "entries": entries,
+        "gatewayEntries": gateways,
     })
 }
 
@@ -290,6 +297,29 @@ mod tests {
             base,
             plan_digest(&intent, &fp, "opnsense", "1.4.0", &caps),
             "catalog"
+        );
+    }
+
+    /// N18: a gateway entry moved on the node changes the IPAM fingerprint,
+    /// so an apply planned against the entry where it was is refused as
+    /// stale, not run against the entry where it is.
+    #[test]
+    fn a_moved_gateway_entry_changes_the_ipam_fingerprint() {
+        use crate::ipam::{IpamGatewayEntry, IpamObserved};
+        let at = |ip: &str| IpamObserved {
+            gateway_entries: vec![IpamGatewayEntry {
+                vnet: "v1".into(),
+                ip: ip.into(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            ipam_fingerprint(&at("10.0.0.1")),
+            ipam_fingerprint(&at("10.0.0.1"))
+        );
+        assert_ne!(
+            ipam_fingerprint(&at("10.0.0.1")),
+            ipam_fingerprint(&at("10.0.0.254"))
         );
     }
 }
