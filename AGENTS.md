@@ -9660,8 +9660,21 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
 - **Política do plano**: `Create`/`Update`/`NoOp` por omissão; `Adopt`/`Replace`/`Reboot` só com
   `safety.allow`; `Conflict` sempre recusado; `Delete` só com `prune: true`, abaixo de
   `maximumDeletes` e nunca sobre `protectedResources`. Uma fonte só se declara a si própria, e o
-  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. A stack chama-se,
-  por omissão, como a fonte.
+  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. `Conflict` sempre
+  recusado, com UMA excepção: o registo da própria fonte, quando o repo se declara a si próprio
+  (ver a stack de bootstrap, abaixo).
+- **A stack de bootstrap e a das passagens são duas, nunca a mesma (2026-10-14).** Medido antes:
+  com a fonte aplicada por `stack apply --name <fonte>` e a stack das passagens a chamar-se, por
+  omissão, como a fonte, o `stack plan` dava rc=2 para sempre e um `apply --prune` apagava o
+  Volume que a passagem seguinte recriava VAZIO. Agora `spec.stack` vale, por omissão,
+  `gitops.<namespace>.<nome>` (um rótulo DNS não tem pontos, logo nenhum `spec.stack` nem um
+  `--name` normal o escrevem), e `stack apply`/`plan`/`prune`/`rollback`/`validate` recusam com
+  DX-1601, antes de ler a máquina, um manifesto que declare uma fonte cujas passagens caiam na
+  stack em que o comando age. Só a passagem fica isenta, por argumento explícito
+  (`Applier::Pass`), nunca por variável de ambiente. Quando o repo se declara a si próprio, a
+  passagem toma o registo da fonte à stack do bootstrap («taken over from stack …») e devolve-o se
+  o segundo olhar recusar o commit; daí em diante o bootstrap não é dono de nada, e mudar um campo
+  não mutável de uma fonte auto-gerida é `delete gitopssources` e voltar a fazer o bootstrap.
 - **Não validado**: um timer systemd real a disparar, a recuperação depois de um reboot, a
   validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
   como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
