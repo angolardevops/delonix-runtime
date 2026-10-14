@@ -434,10 +434,27 @@ container como o Docker faria.</p>
   corre uma passagem à mão, <code>delonix gitops status</code> diz o commit que cada fonte
   viu e o que está aplicado. Um commit que a guarda ou a política de segurança
   recusam deixa a stack em execução intacta.</li>
-<li><strong>Não tem rollback transaccional</strong> (ver acima).</li>
-<li><strong>Não gere frota.</strong> É um runtime de nó: um manifesto, uma máquina. Vários nós
-  são várias corridas.</li>
 </ul>
+<p><strong>São duas stacks, e nunca a mesma.</strong> A stack que aplica a fonte à mão (o
+  bootstrap) declara só a fonte; a stack em que as passagens aplicam o
+  repositório é <code>spec.stack</code>, por omissão <code>gitops.&lt;namespace&gt;.&lt;nome&gt;</code>. Se fossem
+  a mesma, um <code>stack plan</code> do bootstrap daria rc=2 para sempre e um
+  <code>stack apply --prune</code> apagaria o que a passagem aplicou (e a passagem seguinte
+  recriava-o vazio). Por isso <code>stack apply</code>, <code>plan</code>, <code>prune</code>, <code>rollback</code> e
+  <code>validate</code> recusam (DX-1601) um manifesto que declare uma fonte cujas passagens
+  caiam na stack em que o comando age — dá outro <code>--name</code> ao bootstrap, ou
+  outra <code>spec.stack</code> à fonte:</p>
+<p><code>bash
+  delonix stack apply -f source.yaml --name bootstrap   # regista a fonte
+  delonix gitops reconcile production --namespace production
+  delonix stack plan -f source.yaml --name bootstrap --detailed-exitcode   # 0</code></p>
+<p>Se o repositório se declarar a si próprio, a primeira passagem toma o registo
+  da fonte à stack do bootstrap («taken over from stack 'bootstrap'»), e a partir
+  daí é a stack das passagens que declara tudo; o bootstrap deixa de ser dono de
+  nada.
+* <strong>Não tem rollback transaccional</strong> (ver acima).
+* <strong>Não gere frota.</strong> É um runtime de nó: um manifesto, uma máquina. Vários nós
+  são várias corridas.</p>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
