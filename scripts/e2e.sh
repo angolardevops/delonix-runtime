@@ -343,40 +343,9 @@ xflaky() {
 
 section() { log ""; log "=== $1 ==="; }
 
-# Teardown that a section relies on, and that a loaded disk can break.
-#
-# A `container rm -f` whose process is still leaving (state D, waiting on the
-# disk's writeback) answers DX-8101 and KEEPS the record, as designed: "run
-# `rm -f` again once it is gone". Silencing that left the container behind, its
-# network could not be removed, and the next section failed on a collision that
-# had nothing to do with what it tests (measured 2026-10-12: 28 FAIL with the
-# disk at 3 GB dirty, none of them reproducible with the disk calm). So the
-# teardown repeats on DX-8101 for up to two minutes, says so when it gives up,
-# and says any other failure instead of swallowing it. A container that is
-# already gone (class 4) is not news.
-e2e_rm() {
-  local c out rc deadline
-  for c in "$@"; do
-    deadline=$((SECONDS + 120))
-    while :; do
-      out=$("$BIN" container rm -f "$c" 2>&1); rc=$?
-      (( rc == 0 || rc == 4 )) && break
-      if [[ "$out" != *DX-8101* ]]; then log "  (limpeza: container rm -f $c → rc=$rc: ${out##*$'\n'})"; break; fi
-      (( SECONDS >= deadline )) && { log "  (limpeza: $c continua a sair ao fim de 120 s — DX-8101)"; break; }
-      sleep 2
-    done
-  done
-}
-
-# A network removal that fails says why, so a leftover is never silent. Class 4
-# (already gone) is not news.
-e2e_net_rm() {
-  local n out rc
-  for n in "$@"; do
-    out=$("$BIN" network rm "$n" 2>&1); rc=$?
-    (( rc == 0 || rc == 4 )) || log "  (limpeza: network rm $n → rc=$rc: ${out##*$'\n'})"
-  done
-}
+# The teardown helpers (`e2e_rm`, `e2e_net_rm`) live in their own file so the
+# scenario that proves them under a real DX-8101 sources the very same code.
+source "$(dirname "$0")/e2e_teardown.sh"
 
 [[ -x "$BIN" ]] || { log "binário não executável: $BIN"; exit 1; }
 log "binário: $BIN"
@@ -3731,6 +3700,25 @@ else
   check "rm -f que desiste (DX-8101) não deixa o supervisor ressuscitar o container" ok \
     bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
 fi
+
+# --- the battery's own teardown, proved against a real DX-8101 ---------------
+# `e2e_rm` repeats a `rm -f` that answers DX-8101 and says when it gives up;
+# without it a loaded disk turned one slow exit into a cascade of FAILs in the
+# sections after it. See the header of `e2e_rm_teardown.sh`. 77 = the host does
+# not let it measure. `converges` and `gives-up` each wait out a 30 s `rm -f`.
+declare -A RMT_CHECKS=(
+  [paths]="teardown: DX-8101 is repeated, class 4 is silent, any other failure is said"
+  [converges]="teardown: a held exit that answers DX-8101 is waited out and removed"
+  [gives-up]="teardown: a DX-8101 past the deadline is given up and said, the record kept"
+)
+for _sc in paths converges gives-up; do
+  _out=$(bash "$(dirname "$0")/e2e_rm_teardown.sh" "$_sc" "$BIN" "$IMG" "rt$PFX" 2>&1); _rc=$?
+  if [[ $_rc -eq 77 ]]; then
+    skip "${RMT_CHECKS[$_sc]}" "$_out"
+  else
+    check "${RMT_CHECKS[$_sc]}" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
+  fi
+done
 
 # --- a container past the mount ceiling is never entered (issue #793) -------
 # A start whose init has not said its mounts are done within the ceiling is
