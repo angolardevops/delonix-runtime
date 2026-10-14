@@ -267,14 +267,19 @@ pub(crate) fn enforce(root: &Path, resource: &str, r: &Request<'_>) -> Result<()
             }
             Ok(())
         }
-        Decision::Deny(v) => Err(Error::Invalid(format!(
-            "{}\n  {}",
-            super::po::tf(
-                "refused by this node's runtime policy ({path}):",
-                &[("path", &path(root).display().to_string())],
-            ),
-            v.iter().map(render).collect::<Vec<_>>().join("\n  ")
-        ))),
+        // A permission refusal, exit 77, like the source-override grants below:
+        // the remedy is a permission (or a smaller request), never a retry.
+        Decision::Deny(v) => Err(Error::coded(
+            7802,
+            Error::PermissionDenied(format!(
+                "{}\n  {}",
+                super::po::tf(
+                    "refused by this node's runtime policy ({path}):",
+                    &[("path", &path(root).display().to_string())],
+                ),
+                v.iter().map(render).collect::<Vec<_>>().join("\n  ")
+            )),
+        )),
     }
 }
 
@@ -1090,6 +1095,19 @@ mod tests {
         let devices = vec!["0000:01:00.0".to_string()];
         let e = enforce(d, "db-01", &Request::virtual_machine(None, &devices, None)).unwrap_err();
         assert!(format!("{e}").contains("0000:01:00.0"), "{e}");
+    }
+
+    /// A refusal at admission is a PERMISSION refusal: DX-7802, exit 77 — the
+    /// same class as the source-override grants (DX-7801), never the exit 1 of a
+    /// malformed request.
+    #[test]
+    fn an_admission_refusal_exits_77_with_its_own_number() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(path(d), r#"{"denyPrivileged": true}"#).unwrap();
+        let e = enforce(d, "web", &Request::container("alpine:3.20", true, false)).unwrap_err();
+        assert_eq!(e.number(), 7802, "{e}");
+        assert_eq!(delonix_model::exitcode::for_error(&e), 77, "{e}");
     }
 
     /// Every refusal is rendered — a violation with no message would reach the

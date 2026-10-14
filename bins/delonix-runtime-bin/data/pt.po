@@ -15432,6 +15432,15 @@ msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--
 msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
 msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."
 
+msgid "refused by the node's runtime policy"
+msgstr "recusado pela política de runtime do nó"
+
+msgid "The node's admission point (`policy.json`, `kind: RuntimePolicy`) refused the workload before anything was created: a container, pod or VM asked for something the policy forbids (privileged, host network, an unlisted registry, device passthrough, or what `workloadSecurity: baseline` refuses). Every reason is named, and the refusal is in the event log. It is a permission refusal, so it exits 77 like the other policy refusals."
+msgstr "O ponto de admissão do nó (`policy.json`, `kind: RuntimePolicy`) recusou o workload antes de se criar fosse o que fosse: um container, pod ou VM pediu algo que a política proíbe (privilegiado, rede do host, um registo fora da lista, passthrough de dispositivos, ou o que o `workloadSecurity: baseline` recusa). Todas as razões são nomeadas, e a recusa fica no registo de eventos. É uma recusa de permissão, por isso sai com 77, como as outras recusas da política."
+
+msgid "Drop what the policy forbids from the request, or ask the node administrator to change the runtime policy (`kind: RuntimePolicy`). `delonix describe runtimepolicies` prints what is in force."
+msgstr "Retira do pedido o que a política proíbe, ou pede ao administrador do nó que mude a política de runtime (`kind: RuntimePolicy`). `delonix describe runtimepolicies` mostra o que está em vigor."
+
 # ADR-0067: storage pools (dicionário de códigos e ajuda)
 msgid "the storage pool request cannot be served as written"
 msgstr "o pedido de pool de armazenamento não pode ser servido como está escrito"
