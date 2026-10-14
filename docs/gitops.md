@@ -259,6 +259,27 @@ container como o Docker faria.
   corre uma passagem à mão, `delonix gitops status` diz o commit que cada fonte
   viu e o que está aplicado. Um commit que a guarda ou a política de segurança
   recusam deixa a stack em execução intacta.
+
+  **São duas stacks, e nunca a mesma.** A stack que aplica a fonte à mão (o
+  bootstrap) declara só a fonte; a stack em que as passagens aplicam o
+  repositório é `spec.stack`, por omissão `gitops.<namespace>.<nome>`. Se fossem
+  a mesma, um `stack plan` do bootstrap daria rc=2 para sempre e um
+  `stack apply --prune` apagaria o que a passagem aplicou (e a passagem seguinte
+  recriava-o vazio). Por isso `stack apply`, `plan`, `prune`, `rollback` e
+  `validate` recusam (DX-1601) um manifesto que declare uma fonte cujas passagens
+  caiam na stack em que o comando age — dá outro `--name` ao bootstrap, ou
+  outra `spec.stack` à fonte:
+
+  ```bash
+  delonix stack apply -f source.yaml --name bootstrap   # regista a fonte
+  delonix gitops reconcile production --namespace production
+  delonix stack plan -f source.yaml --name bootstrap --detailed-exitcode   # 0
+  ```
+
+  Se o repositório se declarar a si próprio, a primeira passagem toma o registo
+  da fonte à stack do bootstrap («taken over from stack 'bootstrap'»), e a partir
+  daí é a stack das passagens que declara tudo; o bootstrap deixa de ser dono de
+  nada.
 * **Não tem rollback transaccional** (ver acima).
 * **Não gere frota.** É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.

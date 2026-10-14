@@ -20,6 +20,13 @@
 # A container from a source names a network of its own: the default network
 # of a flat spec is the host's.
 #
+# Two stacks, never one: the stack that applies THIS file (the bootstrap,
+# `delonix stack apply -f full-gitopssource.yaml --name bootstrap`) declares
+# only the source; the passes apply the repository into `spec.stack`
+# (default `gitops.<namespace>.<name>`). A hand-run apply, plan, prune or
+# validate of the passes' own stack is refused (DX-1601): it would see only
+# this file and plan everything the passes applied for deletion.
+#
 # The credentials are NAMED, never carried: each `*Ref` is a kind: Secret that
 # exists on the node before the source is applied.
 #   secretRef        → key `identity`         (the SSH private key)
@@ -51,4 +58,6 @@ spec:
     kinds: []                                      # empty = the default set; name VirtualMachine,
                                                    # SystemContainer, NetworkZone, NetworkGateway,
                                                    # StoragePool, Gateway or IPPool to let one in
-  stack: production                                # the stack a pass applies into (default: the name)
+  stack: production-web                            # the stack a pass applies into (default:
+                                                   # gitops.<namespace>.<name>); never the
+                                                   # stack that applies this file

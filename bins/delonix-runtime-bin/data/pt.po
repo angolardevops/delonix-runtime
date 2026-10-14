@@ -16375,3 +16375,12 @@ msgstr "gitopssource {namespace}/{name} (ver `delonix get gitopssources`)"
 
 msgid "{n} invalid GitOpsSource spec(s)"
 msgstr "{n} spec(s) de GitOpsSource inválida(s)"
+
+msgid "GitOpsSource '{source}' applies its passes into stack '{stack}', the stack this command acts on: a local plan, apply or prune of it sees only this manifest, and would plan everything the passes applied for deletion. Give this stack another name (--name), or set the source's spec.stack to a stack of its own"
+msgstr "a GitOpsSource '{source}' aplica as suas passagens na stack '{stack}', a stack sobre a qual este comando age: um plan, apply ou prune local dela só vê este manifesto, e planearia apagar tudo o que as passagens aplicaram. Dá outro nome a esta stack (--name), ou põe na spec.stack da fonte uma stack só dela"
+
+msgid "gitopssource/{ns}/{name}: taken over from stack '{from}' — its repository declares it now"
+msgstr "gitopssource/{ns}/{name}: tomada à stack '{from}' — agora é o repositório dela que a declara"
+
+msgid "gitopssource/{ns}/{name}: its record did not change hands — nothing was applied"
+msgstr "gitopssource/{ns}/{name}: o registo não mudou de dono — nada foi aplicado"

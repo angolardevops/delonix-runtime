@@ -497,6 +497,7 @@ fn by_default_a_pass_creates_and_updates_and_nothing_else() {
             change("Volume", "c", Action::NoOp),
         ],
         &base_spec(),
+        "web",
     );
     assert!(d.blocked.is_empty(), "{:?}", d.blocked);
     assert!(d.changes);
@@ -505,11 +506,15 @@ fn by_default_a_pass_creates_and_updates_and_nothing_else() {
         (Action::Replace, "Replace"),
         (Action::Reboot, "Reboot"),
     ] {
-        let d = decide(&[change("Container", "x", action)], &base_spec());
+        let d = decide(&[change("Container", "x", action)], &base_spec(), "web");
         assert_eq!(d.blocked.len(), 1, "{word}");
         assert!(d.blocked[0].contains(word), "{:?}", d.blocked);
     }
-    let d = decide(&[change("Container", "x", Action::Conflict)], &base_spec());
+    let d = decide(
+        &[change("Container", "x", Action::Conflict)],
+        &base_spec(),
+        "web",
+    );
     assert_eq!(d.blocked.len(), 1);
 }
 
@@ -517,7 +522,7 @@ fn by_default_a_pass_creates_and_updates_and_nothing_else() {
 fn an_allowed_replace_is_named_for_the_apply() {
     let mut s = base_spec();
     s.safety.allow.push("Replace".into());
-    let d = decide(&[change("Container", "x", Action::Replace)], &s);
+    let d = decide(&[change("Container", "x", Action::Replace)], &s, "web");
     assert!(d.blocked.is_empty());
     assert_eq!(d.replace, ["Container/x"]);
 }
@@ -528,23 +533,23 @@ fn a_delete_runs_only_with_prune_below_the_ceiling_and_off_the_protected_list() 
         change("Volume", "a", Action::Delete),
         change("Volume", "b", Action::Delete),
     ];
-    let d = decide(&gone, &base_spec());
+    let d = decide(&gone, &base_spec(), "web");
     assert!(d.prune.is_empty());
     assert_eq!(d.kept.len(), 2);
     assert!(!d.changes, "a delete that does not run is not a change");
 
     let mut s = base_spec();
     s.safety.prune = true;
-    let d = decide(&gone, &s);
+    let d = decide(&gone, &s, "web");
     assert_eq!(d.prune.len(), 2);
 
     s.safety.maximum_deletes = 1;
-    let d = decide(&gone, &s);
+    let d = decide(&gone, &s, "web");
     assert_eq!(d.blocked.len(), 1, "{:?}", d.blocked);
 
     s.safety.maximum_deletes = 5;
     s.safety.protected_resources = vec!["Volume/*".into()];
-    let d = decide(&gone, &s);
+    let d = decide(&gone, &s, "web");
     assert!(d.prune.is_empty());
     assert_eq!(d.kept.len(), 2);
 }
@@ -553,9 +558,99 @@ fn a_delete_runs_only_with_prune_below_the_ceiling_and_off_the_protected_list() 
 fn a_pass_never_prunes_a_source_least_of_all_itself() {
     let mut s = base_spec();
     s.safety.prune = true;
-    let d = decide(&[change("GitOpsSource", "web", Action::Delete)], &s);
+    let d = decide(&[change("GitOpsSource", "web", Action::Delete)], &s, "web");
     assert!(d.prune.is_empty());
     assert_eq!(d.kept.len(), 1);
+}
+
+/// The repository declaring its own source: the bootstrap stack's ownership
+/// is taken over (a `Conflict` on the own record), and adopting it needs no
+/// `safety.allow` — while the same action on anything else, another source
+/// included, stays what it was.
+#[test]
+fn a_pass_takes_its_own_source_over_from_the_bootstrap_stack_and_nothing_else() {
+    let mut own = change("GitOpsSource", "web", Action::Conflict);
+    own.owner = Some("boot".into());
+    let d = decide(&[own], &base_spec(), "web");
+    assert!(d.blocked.is_empty(), "{:?}", d.blocked);
+    assert_eq!(d.handover.as_deref(), Some("boot"));
+    assert!(d.changes);
+
+    let d = decide(
+        &[change("GitOpsSource", "web", Action::Adopt)],
+        &base_spec(),
+        "web",
+    );
+    assert!(d.blocked.is_empty(), "{:?}", d.blocked);
+    assert!(d.handover.is_none());
+
+    for (kind, name) in [("GitOpsSource", "other"), ("Volume", "web")] {
+        let mut c = change(kind, name, Action::Conflict);
+        c.owner = Some("boot".into());
+        let d = decide(&[c], &base_spec(), "web");
+        assert_eq!(d.blocked.len(), 1, "{kind}/{name}");
+        assert!(d.handover.is_none());
+    }
+    let mut c = change("GitOpsSource", "team-b/web", Action::Conflict);
+    c.owner = Some("boot".into());
+    assert_eq!(decide(&[c], &base_spec(), "web").blocked.len(), 1);
+}
+
+// --- the stack a pass applies into ------------------------------------------
+
+/// Two sources never share a default stack, and no `spec.stack` (a DNS label)
+/// and no ordinary bootstrap `--name` can spell it.
+#[test]
+fn the_default_target_stack_is_namespaced_and_spelled_with_dots() {
+    let s = base_spec();
+    assert_eq!(target_stack(&s, "default", "cfgs"), "gitops.default.cfgs");
+    assert_ne!(
+        target_stack(&s, "team-a", "web"),
+        target_stack(&s, "team-b", "web")
+    );
+    assert_ne!(target_stack(&s, "default", "cfgs"), "cfgs");
+    assert!(!valid_ident(&target_stack(&s, "default", "cfgs")));
+    let mut explicit = base_spec();
+    explicit.stack = Some("infra".into());
+    assert_eq!(target_stack(&explicit, "default", "cfgs"), "infra");
+}
+
+fn bootstrap(stack_line: &str) -> Vec<ManifestDoc> {
+    crate::cmd::manifest::load_str(
+        &format!(
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n{stack_line}"
+        ),
+        "test",
+    )
+    .unwrap()
+}
+
+/// G1: the stack that applies a source and the stack its passes apply into
+/// are never one, unless the applier is the pass itself.
+#[test]
+fn a_hand_run_command_on_the_passs_own_stack_is_refused_and_the_pass_is_not() {
+    let docs = bootstrap("");
+    let e = refuse_self_target(&docs, "gitops.default.cfgs", Applier::Operator).unwrap_err();
+    assert_eq!(number(&e), 1601);
+    let msg = e.to_string();
+    assert!(
+        msg.contains("--name") && msg.contains("spec.stack"),
+        "{msg}"
+    );
+    refuse_self_target(&docs, "gitops.default.cfgs", Applier::Pass).unwrap();
+    refuse_self_target(&docs, "cfgs", Applier::Operator).unwrap();
+    refuse_self_target(&docs, "boot", Applier::Operator).unwrap();
+
+    let docs = bootstrap("  stack: cfgs\n");
+    let e = refuse_self_target(&docs, "cfgs", Applier::Operator).unwrap_err();
+    assert_eq!(number(&e), 1601);
+    refuse_self_target(&docs, "cfgs", Applier::Pass).unwrap();
+    refuse_self_target(&docs, "gitops.default.cfgs", Applier::Operator).unwrap();
+
+    let lines = self_target_problems(&docs, "cfgs");
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("DX-1601"), "{lines:?}");
+    assert!(self_target_problems(&docs, "boot").is_empty());
 }
 
 // --- the timer --------------------------------------------------------------
