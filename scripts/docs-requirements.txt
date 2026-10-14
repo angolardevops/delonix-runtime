@@ -1,0 +1,7 @@
+# Pins for the site generators (docs/gen.py, scripts/dev_docs_site.py).
+# The generated HTML is committed and CI checks it byte for byte, so the
+# renderer is part of the input: markdown 3.11.1 renders zh-CN emphasis next
+# to CJK punctuation differently from 3.10.3, and an unpinned install turned
+# every PR red the day it was published. Bump this together with a
+# regeneration of docs/ and docs/handbook/, never on its own.
+markdown==3.10.3

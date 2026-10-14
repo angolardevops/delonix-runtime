@@ -437,7 +437,7 @@ jobs:
         # the `markdown` module. Without it the generator dies with
         # ModuleNotFoundError and this job fails on a missing dependency rather
         # than on anything about the docs — which is what happened here.
-        run: python3 -m pip install --break-system-packages markdown
+        run: python3 -m pip install --break-system-packages -r scripts/docs-requirements.txt
       - name: Regenera o site
         run: python3 docs/gen.py
       # The contributor handbook site (docs/handbook/<lang>/) is generated from

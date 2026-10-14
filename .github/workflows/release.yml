@@ -193,8 +193,11 @@ jobs:
       # pergunta faz sentido.
       - name: O site publicado tem de ser o gerado (gate de publicação)
         run: |
-          sudo apt-get install -y python3-markdown || pip install --break-system-packages markdown
-          PATH="$PWD/target/release:$PATH" python3 docs/gen.py
+          # A venv: this runner's pip (22.04) has no --break-system-packages.
+          DOCS_VENV="$RUNNER_TEMP/docs-venv"
+          python3 -m venv "$DOCS_VENV"
+          "$DOCS_VENV/bin/python" -m pip install --quiet -r scripts/docs-requirements.txt
+          PATH="$PWD/target/release:$PATH" "$DOCS_VENV/bin/python" docs/gen.py
           if ! git diff --quiet -- docs/; then
             echo "::error::docs/ está desactualizado face ao binário desta tag."
             echo "Corre 'python3 docs/gen.py' com um build de release e commita ANTES de cortar a tag."
@@ -383,7 +386,7 @@ jobs:
             || { echo "::error::dev_docs.py falhou — os factos de docs/dev ficam por regenerar nesta release"; FAILED="$FAILED dev_docs.py"; }
           # A venv, not `pip --break-system-packages`: it works whatever pip the runner has.
           VENV="$RUNNER_TEMP/dev-docs-venv"
-          { python3 -m venv "$VENV" && "$VENV/bin/python" -m pip install --quiet markdown \
+          { python3 -m venv "$VENV" && "$VENV/bin/python" -m pip install --quiet -r scripts/docs-requirements.txt \
               && "$VENV/bin/python" scripts/dev_docs_site.py; } \
             || { echo "::error::dev_docs_site.py falhou — o site do manual fica por regenerar nesta release"; FAILED="$FAILED dev_docs_site.py"; }
           # `git status`, not `git diff`: a page added to the handbook is an UNTRACKED
