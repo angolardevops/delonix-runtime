@@ -2422,6 +2422,17 @@
             "string",
             "null"
           ]
+        },
+        "workloadSecurity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkloadSecuritySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`baseline`: refuse what `--privileged` is made of — capabilities beyond\nthe Pod Security baseline set, the host's PID/IPC namespace,\n`seccomp`/`apparmor=unconfined`, host-path bind mounts, host devices\nand a custom masked/read-only path list that drops the defaults.\nOmitted = no opinion."
         }
       },
       "type": "object"
@@ -4661,6 +4672,16 @@
         }
       },
       "type": "object"
+    },
+    "WorkloadSecuritySpec": {
+      "description": "The profiles `workloadSecurity` accepts — an enum in the published schema,\nso an editor using it refuses `restricted` as it is typed. `stack\nplan`/`apply` refuse it before any effect. `manifest validate` does NOT:\nit does not deserialise a RuntimePolicy's values into their types\n(`denyPrivateEgress: maybe` passes it too), which is older than this field.",
+      "oneOf": [
+        {
+          "const": "baseline",
+          "description": "The Kubernetes Pod Security Standards baseline profile.",
+          "type": "string"
+        }
+      ]
     },
     "WorkloadSpec": {
       "additionalProperties": false,

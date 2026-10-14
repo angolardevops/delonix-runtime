@@ -10345,8 +10345,8 @@ msgstr "as verificações de armazenamento/binário de que a sessão de um clien
 msgid "the full risk table as JSON, for a client or a human to read before enabling mutations"
 msgstr "a tabela de risco completa em JSON, para um cliente ou um humano ler antes de activar mutações"
 
-msgid "device passthrough ({devices}) is refused by this node's runtime policy — a passed-through device gives the guest DMA to host hardware"
-msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — um dispositivo passado dá ao convidado DMA ao hardware do host"
+msgid "device passthrough ({devices}) is refused by this node's runtime policy — it hands the guest host hardware directly (a PCI device's DMA, or a host disk)"
+msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — entrega hardware do host directamente ao convidado (o DMA de um dispositivo PCI, ou um disco do host)"
 
 msgid "VM image '{image}': this node's runtime policy refuses `:latest` and untagged references — pin a version"
 msgstr "imagem de VM '{image}': a política de runtime deste nó recusa `:latest` e referências sem etiqueta — fixa uma versão"
@@ -13734,8 +13734,8 @@ msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continua
 msgid "could not remove {path}: {err}"
 msgstr "não consegui remover {path}: {err}"
 
-msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
-msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] workloadSecurity={wsec} denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}] allowedSourcePrefixes=[{srcp}] allowSourceCheckOptOut={srcoff} denyPrivateEgress={privegress} allowedEgressPrefixes=[{egressp}]"
 
 msgid "about to remove {path} — {summary}"
 msgstr "prestes a remover {path} — {summary}"
@@ -15357,6 +15357,15 @@ msgstr "Um container pediu uma excepção à anti-spoof (`--allow-source` ou `--
 msgid "Ask the node administrator to grant it in the runtime policy (`kind: RuntimePolicy`), or drop the flag. A prefix must sit inside one the policy grants."
 msgstr "Pede ao administrador do nó que o conceda na política de runtime (`kind: RuntimePolicy`), ou retira a flag. Um prefixo tem de caber dentro de um que a política conceda."
 
+msgid "refused by the node's runtime policy"
+msgstr "recusado pela política de runtime do nó"
+
+msgid "The node's admission point (`policy.json`, `kind: RuntimePolicy`) refused the workload before anything was created: a container, pod or VM asked for something the policy forbids (privileged, host network, an unlisted registry, device passthrough, or what `workloadSecurity: baseline` refuses). Every reason is named, and the refusal is in the event log. It is a permission refusal, so it exits 77 like the other policy refusals."
+msgstr "O ponto de admissão do nó (`policy.json`, `kind: RuntimePolicy`) recusou o workload antes de se criar fosse o que fosse: um container, pod ou VM pediu algo que a política proíbe (privilegiado, rede do host, um registo fora da lista, passthrough de dispositivos, ou o que o `workloadSecurity: baseline` recusa). Todas as razões são nomeadas, e a recusa fica no registo de eventos. É uma recusa de permissão, por isso sai com 77, como as outras recusas da política."
+
+msgid "Drop what the policy forbids from the request, or ask the node administrator to change the runtime policy (`kind: RuntimePolicy`). `delonix describe runtimepolicies` prints what is in force."
+msgstr "Retira do pedido o que a política proíbe, ou pede ao administrador do nó que mude a política de runtime (`kind: RuntimePolicy`). `delonix describe runtimepolicies` mostra o que está em vigor."
+
 # ADR-0067: storage pools (dicionário de códigos e ajuda)
 msgid "the storage pool request cannot be served as written"
 msgstr "o pedido de pool de armazenamento não pode ser servido como está escrito"
@@ -15953,6 +15962,42 @@ msgstr "stack apply abortado: {what} (corrige o manifesto ou usa `stack validate
 
 msgid "{n} invalid VM shape(s)"
 msgstr "{n} forma(s) de VM inválida(s)"
+
+# RuntimePolicy workloadSecurity: baseline (OWASP K01)
+msgid "--cap-add {caps}: beyond the capabilities this node's runtime policy allows (workloadSecurity: baseline)"
+msgstr "--cap-add {caps}: para além das capacidades que a política de runtime deste nó permite (workloadSecurity: baseline)"
+
+msgid "the host's {namespaces} namespace is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o namespace {namespaces} do host é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "{profiles}=unconfined is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "{profiles}=unconfined é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "bind mount of the host path {paths} is refused by this node's runtime policy (workloadSecurity: baseline) — use a named volume"
+msgstr "o bind mount do caminho do host {paths} é recusado pela política de runtime deste nó (workloadSecurity: baseline) — usa um volume nomeado"
+
+msgid "host device {devices} is refused by this node's runtime policy (workloadSecurity: baseline)"
+msgstr "o dispositivo do host {devices} é recusado pela política de runtime deste nó (workloadSecurity: baseline)"
+
+msgid "this node refuses `--privileged` but admits what it is made of (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — set `workloadSecurity: baseline` to refuse those too"
+msgstr "este nó recusa `--privileged` mas admite aquilo de que ele é feito (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, `--device`) — define `workloadSecurity: baseline` para recusar também esses"
+
+
+msgid "token cannot be empty or contain whitespace or control characters"
+msgstr "o token não pode estar vazio nem conter espaços ou caracteres de controlo"
+
+# DX-1349 network.opnsense_insecure_target
+msgid "the OPNsense URL would send the API key in the clear"
+msgstr "o URL do OPNsense mandaria a chave da API em claro"
+
+msgid "The OPNsense target URL is not https://, names no host, or carries userinfo (`user:pass@`). The key/secret pair goes in every request's Authorization header, so plain HTTP hands it to anything on the path, and userinfo is a password in the configuration under another name."
+msgstr "O URL do OPNsense não é https://, não nomeia um host, ou traz userinfo (`user:pass@`). O par key/secret vai no cabeçalho Authorization de cada pedido, por isso HTTP simples entrega-o a qualquer coisa no caminho, e userinfo é uma palavra-passe na configuração com outro nome."
+
+msgid "Use https://<host> (with `tls.insecureSkipVerify: true` or a `caFile` for the appliance's self-signed certificate) and keep the credential in `auth`."
+msgstr "Usa https://<host> (com `tls.insecureSkipVerify: true` ou um `caFile` para o certificado auto-assinado da appliance) e mantém a credencial em `auth`."
+
+msgid "a --masked-path/--readonly-path list that leaves {paths} unprotected is refused by this node's runtime policy (workloadSecurity: baseline) — a custom list replaces the default one, so include them"
+msgstr "uma lista --masked-path/--readonly-path que deixa {paths} desprotegido é recusada pela política de runtime deste nó (workloadSecurity: baseline) — uma lista própria substitui a de omissão, por isso inclui-os"
 
 # ---- Sprint 22 ----
 msgid "Proxmox VE:"

@@ -1732,3 +1732,54 @@ mod dead_command_reference_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod exec_separator_tests {
+    use super::{Cli, Cmd};
+    use crate::cmd::container::ContainerCmd;
+    use clap::Parser;
+
+    fn exec_of(argv: &[&str]) -> (Option<String>, Vec<String>, Vec<String>) {
+        let cli = Cli::try_parse_from(argv).expect("parses");
+        match cli.cmd {
+            Cmd::Container {
+                action:
+                    ContainerCmd::Exec {
+                        user, env, command, ..
+                    },
+            } => (user, env, command),
+            _ => panic!("not container exec"),
+        }
+    }
+
+    /// The argv the CRI builds for `kubectl exec <pod> -- -u 0 sh`
+    /// (`delonix_cri::streaming::subprocess_args`): the command stays the
+    /// command, and the container's own user stays in force.
+    #[test]
+    fn a_command_after_the_separator_is_never_an_option_of_exec() {
+        let (user, env, command) = exec_of(&[
+            "delonix",
+            "container",
+            "exec",
+            "cri-a",
+            "--",
+            "-u",
+            "0",
+            "-e",
+            "X=1",
+            "sh",
+        ]);
+        assert_eq!(user, None);
+        assert!(env.is_empty());
+        assert_eq!(command, ["-u", "0", "-e", "X=1", "sh"]);
+    }
+
+    /// Why the separator is needed: without it, the same tokens are options.
+    #[test]
+    fn without_the_separator_the_tokens_after_the_name_are_options() {
+        let (user, _, command) =
+            exec_of(&["delonix", "container", "exec", "cri-a", "-u", "0", "sh"]);
+        assert_eq!(user.as_deref(), Some("0"));
+        assert_eq!(command, ["sh"]);
+    }
+}

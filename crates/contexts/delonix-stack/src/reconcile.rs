@@ -388,6 +388,16 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
             "denyDevicePassthrough",
             "denyLatestVmImage",
             "allowedImageUrlHosts",
+            // The four below were compared and NOT listed here, so turning
+            // the private-egress guard on in an applied manifest planned a
+            // `Replace` of a singleton that has no teardown — refused, and
+            // the guard stayed off. `cmd::policy::RECONCILED_RUNTIME_POLICY_
+            // FIELDS` must equal this list; a test there keeps it so.
+            "allowedSourcePrefixes",
+            "allowSourceCheckOptOut",
+            "denyPrivateEgress",
+            "allowedEgressPrefixes",
+            "workloadSecurity",
         ],
         _ => &[],
     }
@@ -1136,6 +1146,48 @@ mod tests {
         let p = plan(&[d], &[a], "s");
         assert_eq!(p[0].action, Action::Replace);
         assert_eq!(p[0].cold_fields, vec!["memory".to_string()]);
+    }
+
+    /// `policy.json` is a node-wide singleton with no teardown: a cold field
+    /// would plan a `Replace` that `--replace` cannot carry out. Turning the
+    /// private-egress guard on in an applied manifest must converge in place.
+    #[test]
+    fn a_runtime_policy_change_converges_in_place() {
+        let map = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        for field in [
+            "denyPrivateEgress",
+            "allowSourceCheckOptOut",
+            "allowedSourcePrefixes",
+            "allowedEgressPrefixes",
+            "workloadSecurity",
+        ] {
+            let d = Desired {
+                kind: k::RUNTIME_POLICY.into(),
+                name: "node".into(),
+                fields: map(&[(field, "true")]),
+                converges: true,
+                ownable: false,
+            };
+            let a = Actual {
+                kind: k::RUNTIME_POLICY.into(),
+                name: "node".into(),
+                fields: map(&[(field, "false")]),
+                owner: None,
+                last_applied: None,
+            };
+            let p = plan(&[d], &[a], "s");
+            assert_eq!(
+                p[0].action,
+                Action::Update,
+                "{field}: {:?}",
+                p[0].cold_fields
+            );
+        }
     }
 
     /// A VM's hot fields are bookkeeping on its record — `labels` and the
