@@ -5097,19 +5097,19 @@ else
 { "metadata": { "name": "respod", "uid": "resc-uid-1", "namespace": "default", "attempt": 0 }, "linux": {} }
 JSON
   CRIRES_BOGUS="$OUT/ctr-res-bogus.json"
-  cat > "$CRIRES_BOGUS" <<'JSON'
+  cat > "$CRIRES_BOGUS" <<JSON
 {
   "metadata": { "name": "resc", "attempt": 0 },
-  "image": { "image": "alpine:3.19" },
+  "image": { "image": "$IMG" },
   "command": ["sleep", "300"],
   "linux": { "resources": { "unified": { "nonexistentctrl.limit": "1" } } }
 }
 JSON
   CRIRES_ESCAPE="$OUT/ctr-res-escape.json"
-  cat > "$CRIRES_ESCAPE" <<'JSON'
+  cat > "$CRIRES_ESCAPE" <<JSON
 {
   "metadata": { "name": "resc2", "attempt": 0 },
-  "image": { "image": "alpine:3.19" },
+  "image": { "image": "$IMG" },
   "command": ["sleep", "300"],
   "linux": { "resources": { "hugepage_limits": [ { "page_size": "../etc/passwd", "limit": 1 } ] } }
 }
@@ -7586,6 +7586,10 @@ else
   printf '#!/bin/sh\necho Linger=yes\n' >"$GO/bin/loginctl"
   chmod +x "$GO/bin/systemctl" "$GO/bin/loginctl"
   GS="${PFX}-gs"
+  # Duas stacks, nunca a mesma (G1): a do bootstrap só declara a fonte; as
+  # passagens aplicam o repositório em `gitops.<ns>.<nome>`.
+  GSB="${PFX}-gsboot"
+  GSS="gitops.default.$GS"
   # O mesmo ambiente que o unit do temporizador dá à passagem, mais o HOME falso.
   gox() { env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" "$@"; }
   gogit() { git -C "$GO/work" -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@"; }
@@ -7599,7 +7603,7 @@ else
   # `gox`): cli_exec_ratchet.py counts a leaf only when the engine binary is a
   # word of the asserted command, and a shell function hides it.
   GOX="env HOME='$GO/home' XDG_CONFIG_HOME='$GO/home/.config' PATH='$GO/bin:$PATH' '$BIN'"
-  export GO GS BIN PFX IMG
+  export GO GS GSB GSS BIN PFX IMG
 
   git init -q --bare "$GO/repo.git"; gogit init -q -b main
   goapp() { # $1 = memory, $2 = extra spec lines (já indentados)
@@ -7636,12 +7640,16 @@ spec:
 YAML
 
   check "gitops: stack apply regista a fonte e escreve o temporizador (systemctl falso)" ok bash -c "
-    gox stack apply -f '$GO/source.yaml' --name '$GS' >/dev/null || exit 1
+    gox stack apply -f '$GO/source.yaml' --name '$GSB' >/dev/null || exit 1
     test -f '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.timer' || { echo 'sem .timer'; exit 1; }
     grep -q 'ExecStart=.* gitops reconcile $GS --namespace default' '$GO/home/.config/systemd/user/delonix-gitops-default.$GS.service' || { echo 'ExecStart errado'; exit 1; }
     grep -q 'enable --now delonix-gitops-default.$GS.timer' '$GO/systemctl.log' || { echo 'o timer não foi activado'; exit 1; }"
   check "gitops: um manifesto inalterado planeia ZERO diferenças" 0 \
-    gox stack plan -f "$GO/source.yaml" --name "$GS" --detailed-exitcode
+    gox stack plan -f "$GO/source.yaml" --name "$GSB" --detailed-exitcode
+  check "gitops: um plan à mão da stack das passagens é recusado (DX-1601), a nomear --name e spec.stack" ok bash -c "
+    out=\$(gox stack plan -f '$GO/source.yaml' --name '$GSS' 2>&1) && { echo 'planeou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }
+    grep -q -- '--name' <<<\"\$out\" && grep -q 'spec.stack' <<<\"\$out\" || { echo \"não nomeia as saídas: \$out\"; exit 1; }"
   check "gitops: um nome de fonte que não é um rótulo DNS é recusado (DX-1601)" ok bash -c "
     sed 's/name: $GS/name: Bad_Name/' '$GO/source.yaml' >'$GO/bad.yaml'
     out=\$(gox stack apply -f '$GO/bad.yaml' --name x 2>&1) && { echo 'aceitou'; exit 1; }
@@ -7664,11 +7672,38 @@ YAML
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"esperava '$GOPID 96M', está \$(gostate)\"; exit 1; }
     [ \"\$(goapplied)\" = 'synced $GOC2 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
   check "gitops: uma passagem sem mudanças não escreve revisão nova" ok bash -c "
-    a=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
+    a=\$(ls '$DELONIX_ROOT/stacks/$GSS/revisions' 2>/dev/null | wc -l)
     [ \"\$a\" -gt 0 ] || { echo 'as passagens anteriores não deixaram revisão nenhuma'; exit 1; }
     $GOX gitops reconcile '$GS' | grep -q 'in sync' || exit 1
-    b=\$(ls '$DELONIX_ROOT/stacks/$GS/revisions' 2>/dev/null | wc -l)
+    b=\$(ls '$DELONIX_ROOT/stacks/$GSS/revisions' 2>/dev/null | wc -l)
     [ \"\$a\" = \"\$b\" ] || { echo \"revisões \$a -> \$b\"; exit 1; }"
+
+  # G1: a stack do bootstrap e a das passagens são duas. O plan do bootstrap
+  # fica em 0 e um --prune dele nunca toca no que a passagem aplicou; um
+  # --prune da stack das passagens a partir do bootstrap é recusado antes de
+  # qualquer efeito.
+  check "gitops: o plan do bootstrap fica em 0 depois das passagens" 0 \
+    gox stack plan -f "$GO/source.yaml" --name "$GSB" --detailed-exitcode
+  check "gitops: um --prune do bootstrap não toca no que a passagem aplicou" ok bash -c "
+    gox stack apply --prune -f '$GO/source.yaml' --name '$GSB' >/dev/null || exit 1
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack da passagem mexeu: \$(gostate)\"; exit 1; }
+    '$BIN' network inspect '${PFX}-gnet' >/dev/null 2>&1 || { echo 'a rede da passagem foi apagada'; exit 1; }"
+  check "gitops: um --prune da stack das passagens com o manifesto do bootstrap é recusado e não apaga nada" ok bash -c "
+    out=\$(gox stack apply --prune -f '$GO/source.yaml' --name '$GSS' 2>&1) && { echo 'aplicou'; exit 1; }
+    grep -q 'DX-1601' <<<\"\$out\" || { echo \"sem DX-1601: \$out\"; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }"
+
+  # O repositório declara-se a si próprio: a passagem toma o registo da fonte
+  # à stack do bootstrap, e daí em diante é a stack das passagens que a possui.
+  cp "$GO/source.yaml" "$GO/work/env/prod/source.yaml"; GOCS=$(gopush 'self: the repository declares its source')
+  check "gitops: uma fonte que se declara no repositório é tomada à stack do bootstrap" ok bash -c "
+    out=\$($GOX gitops reconcile '$GS' 2>&1) || { echo \"recusou: \$out\"; exit 1; }
+    grep -q \"taken over from stack '$GSB'\" <<<\"\$out\" || { echo \"sem a tomada: \$out\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOCS $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }
+    $GOX gitops reconcile '$GS' | grep -q 'in sync' || { echo 'a segunda passagem não está em sincronia'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
+    gox stack apply --prune -f '$GO/source.yaml' --name '$GSB' >/dev/null 2>&1 && { echo 'o bootstrap reaplicou uma fonte que já não é sua'; exit 1; }
+    [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"o --prune do bootstrap mexeu: \$(gostate)\"; exit 1; }"
 
   goapp 128M "  privileged: true"; GOC3=$(gopush 'broken: privileged')
   check "gitops: um commit que pede o host é recusado (DX-1602) e a stack fica intacta" ok bash -c "
@@ -7676,14 +7711,14 @@ YAML
     [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
     grep -q 'DX-1602' <<<\"\$out\" || { echo 'sem DX-1602'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
-    [ \"\$(goapplied)\" = 'rejected $GOC3 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+    [ \"\$(goapplied)\" = 'rejected $GOC3 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
 
   goapp 128M ""; sed -i "s/network: ${PFX}-gnet/network: ${PFX}-nosuch/" "$GO/work/env/prod/app.yaml"
   GOC4=$(gopush 'broken: graph')
   check "gitops: um commit cujo grafo falha é recusado e a stack fica intacta" ok bash -c "
     $GOX gitops reconcile '$GS' >/dev/null 2>&1 && { echo 'aceitou'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
-    [ \"\$(goapplied)\" = 'rejected $GOC4 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+    [ \"\$(goapplied)\" = 'rejected $GOC4 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
 
   goapp 96M ""; sed -i "s|image: $IMG|image: ${IMG%%:*}:gitops-nao-existe|" "$GO/work/env/prod/app.yaml"
   GOC5=$(gopush 'blocked: replace')
@@ -7692,12 +7727,16 @@ YAML
     [ \$rc -eq 1 ] || { echo \"rc=\$rc\"; exit 1; }
     grep -q 'DX-1604' <<<\"\$out\" || { echo 'sem DX-1604'; exit 1; }
     [ \"\$(gostate)\" = '$GOPID 96M' ] || { echo \"a stack mexeu: \$(gostate)\"; exit 1; }
-    [ \"\$(goapplied)\" = 'blocked $GOC5 $GOC2' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
+    [ \"\$(goapplied)\" = 'blocked $GOC5 $GOCS' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
 
-  check "gitops: suspensa, uma passagem não obtém nada" ok bash -c "
+  goapp 96M ""; GOC6=$(gopush 'v6: back to a good commit')
+  check "gitops: suspensa, uma passagem não obtém nada; retomada, a seguinte está em sincronia" ok bash -c "
     $GOX gitops suspend '$GS' >/dev/null || exit 1
     $GOX gitops reconcile '$GS' | grep -q 'suspended' || exit 1
-    $GOX gitops resume '$GS' >/dev/null"
+    $GOX gitops resume '$GS' >/dev/null || { echo 'resume falhou'; exit 1; }
+    out=\$($GOX gitops reconcile '$GS' 2>&1) || { echo \"a passagem depois do resume falhou: \$out\"; exit 1; }
+    grep -q 'in sync' <<<\"\$out\" || { echo \"depois do resume: \$out\"; exit 1; }
+    [ \"\$(goapplied)\" = 'synced $GOC6 $GOC6' ] || { echo \"status: \$(goapplied)\"; exit 1; }"
   check "gitops: uma fonte inexistente diz 4 (DX-4601)" 4 \
     env HOME="$GO/home" XDG_CONFIG_HOME="$GO/home/.config" PATH="$GO/bin:$PATH" "$BIN" gitops reconcile "${PFX}-nao-existe"
 
@@ -7709,7 +7748,8 @@ YAML
     $GOX gitops status '$GS' >/dev/null 2>&1 && { echo 'a fonte ficou'; exit 1; }; true"
   cp "$GO/work/env/prod/app.yaml" "$GO/app-destroy.yaml"
   sed -i "s|image: ${IMG%%:*}:gitops-nao-existe|image: $IMG|" "$GO/app-destroy.yaml"
-  gox stack destroy -f "$GO/app-destroy.yaml" --name "$GS" >/dev/null 2>&1 || true
+  gox stack destroy -f "$GO/app-destroy.yaml" --name "$GSS" >/dev/null 2>&1 || true
+  gox stack destroy -f "$GO/source.yaml" --name "$GSB" >/dev/null 2>&1 || true
 fi
 
 ########################################
