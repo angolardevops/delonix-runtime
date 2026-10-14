@@ -2456,9 +2456,9 @@ fi
 # as the policy working. Writes policy.json, so isolated state only.
 if [[ "$E2E_ISOLATED" == 1 ]]; then
   WS="ws-$PFX"; POL="$DELONIX_ROOT/policy.json"; rm -f "$POL"
-  refused() {  # <args…> → 0 when the run is refused BY THE POLICY and created nothing
+  refused() {  # <args…> → 0 when the run is refused BY THE POLICY, exit 77, and created nothing
     local out; out=$("$BIN" container run --rm --net none "$@" "$IMG" true 2>&1)
-    [[ $? -ne 0 ]] && grep -q "workloadSecurity: baseline" <<<"$out"
+    [[ $? -eq 77 ]] && grep -q "workloadSecurity: baseline" <<<"$out"
   }
   printf '{"denyPrivileged":true}\n' > "$POL"
   check "baseline: denyPrivileged alone names the hole it leaves (lint)" ok bash -c \
@@ -2669,7 +2669,9 @@ if [[ "$E2E_HAVE_IMAGE" == "1" ]]; then
   cat >"$DELONIX_ROOT/policy.json" <<'JSON'
 {"denyPrivileged": true, "denyHostNetwork": true, "denyLatestTag": true, "allowedRegistries": ["ghcr.io"]}
 JSON
-  check "com política, o run é recusado" fail \
+  # Uma recusa da política é de PERMISSÃO (DX-7802), exit 77 — nunca o 1 de um
+  # pedido mal formado.
+  check "com política, o run é recusado (exit 77)" 77 \
     "$BIN" container run --rm --net host "$IMG" true
   check "…e nomeia várias razões de uma vez" ok bash -c \
     "test \$('$BIN' container run --rm --net host '$IMG' true 2>&1 | grep -c 'runtime policy') -ge 2"
