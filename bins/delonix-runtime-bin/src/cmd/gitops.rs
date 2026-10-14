@@ -51,7 +51,11 @@ pub struct GitOpsSourceSpec {
     /// What a pass may do to the machine.
     #[serde(default)]
     pub safety: SafetySpec,
-    /// The stack a pass applies into. Defaults to the source's own name.
+    /// The stack a pass applies into. Defaults to `gitops.<namespace>.<name>`,
+    /// a name no `spec.stack` and no bootstrap `--name` spells by accident.
+    /// The stack that applies the source itself must be another one: a local
+    /// plan, apply or prune of the pass's stack would see only the source and
+    /// plan everything the passes applied for deletion (refused, DX-1601).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<String>,
 }
@@ -700,6 +704,107 @@ fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// The stack a pass applies into, and the stack that applies the source
+// ---------------------------------------------------------------------------
+
+/// The stack this source's passes apply into: `spec.stack`, or by default
+/// `gitops.<namespace>.<name>`. The dots are the point: no `spec.stack` can
+/// contain one (it is a DNS label), so two sources never share a default
+/// stack, and a bootstrap `--name` written by hand does not land on it by
+/// accident. Pure.
+pub(crate) fn target_stack(spec: &GitOpsSourceSpec, namespace: &str, name: &str) -> String {
+    spec.stack
+        .clone()
+        .unwrap_or_else(|| format!("gitops.{namespace}.{name}"))
+}
+
+/// Who is applying a manifest. Only a source's own pass may apply a manifest
+/// that declares a source whose passes apply into the very stack being
+/// applied: that is the repository declaring itself, and the pass's stack
+/// then declares everything it owns. A hand-run `stack apply`, `plan`,
+/// `prune`, `rollback` or `validate` is always [`Applier::Operator`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Applier {
+    /// A command a person (or a script) runs.
+    Operator,
+    /// `gitops reconcile`, applying the commit it fetched.
+    Pass,
+}
+
+/// One issue line per source in `docs` whose passes apply into `stack`, the
+/// stack this command acts on — in the shape `stack validate` prints. A
+/// source whose spec does not parse is left to [`spec_problem`]. Pure.
+pub(crate) fn self_target_problems(docs: &[ManifestDoc], stack: &str) -> Vec<String> {
+    docs.iter()
+        .filter(|d| d.kind == k::GITOPS_SOURCE)
+        .filter_map(|d| {
+            let spec: GitOpsSourceSpec = manifest::spec_of(d).ok()?;
+            let target = target_stack(&spec, &namespace_of(d), &d.metadata.name);
+            (target == stack).then(|| {
+                let e = self_target_error(&d.metadata.name, stack);
+                format!(
+                    "GitOpsSource '{}': DX-{:04} {}",
+                    d.metadata.name,
+                    e.number(),
+                    super::po::t_dyn(&e.to_string())
+                )
+            })
+        })
+        .collect()
+}
+
+fn self_target_error(source: &str, stack: &str) -> Error {
+    invalid_source(super::po::tf(
+        "GitOpsSource '{source}' applies its passes into stack '{stack}', the stack this command acts on: a local plan, apply or prune of it sees only this manifest, and would plan everything the passes applied for deletion. Give this stack another name (--name), or set the source's spec.stack to a stack of its own",
+        &[("source", source), ("stack", stack)],
+    ))
+}
+
+/// Refuses, before any effect, a manifest that declares a source whose passes
+/// apply into `stack` — unless the applier is that source's own pass.
+pub(crate) fn refuse_self_target(docs: &[ManifestDoc], stack: &str, by: Applier) -> Result<()> {
+    if by == Applier::Pass {
+        return Ok(());
+    }
+    let problems = self_target_problems(docs, stack);
+    if problems.is_empty() {
+        return Ok(());
+    }
+    // One source is named by the error itself; several are listed first.
+    if problems.len() > 1 {
+        for p in &problems {
+            eprintln!("  ✗ {p}");
+        }
+    }
+    let first = docs
+        .iter()
+        .filter(|d| d.kind == k::GITOPS_SOURCE)
+        .find(|d| {
+            manifest::spec_of::<GitOpsSourceSpec>(d)
+                .map(|s| target_stack(&s, &namespace_of(d), &d.metadata.name) == stack)
+                .unwrap_or(false)
+        })
+        .map(|d| d.metadata.name.clone())
+        .unwrap_or_default();
+    Err(self_target_error(&first, stack))
+}
+
+/// Writes (or, with `None`, removes) the stack label on a source's record.
+fn set_owner(root: &Path, namespace: &str, name: &str, owner: Option<&str>) -> Result<()> {
+    let mut rec = load_record(root, namespace, name)?;
+    match owner {
+        Some(o) => {
+            rec.labels
+                .insert(super::reconcile::STACK_LABEL.to_string(), o.to_string());
+        }
+        None => {
+            rec.labels.remove(super::reconcile::STACK_LABEL);
+        }
+    }
+    save_record(root, &rec)
 }
 
 // ---------------------------------------------------------------------------
@@ -1521,6 +1626,10 @@ pub(crate) struct Decision {
     pub reboot: Vec<String>,
     /// Whether anything at all is to be done.
     pub changes: bool,
+    /// The source's own record, declared by its repository and owned by
+    /// another stack (the bootstrap stack): the pass takes it over. Holds the
+    /// owner it is taken from.
+    pub handover: Option<String>,
 }
 
 fn protected(spec: &GitOpsSourceSpec, c: &Change) -> bool {
@@ -1531,7 +1640,11 @@ fn protected(spec: &GitOpsSourceSpec, c: &Change) -> bool {
     })
 }
 
-pub(crate) fn decide(changes: &[Change], spec: &GitOpsSourceSpec) -> Decision {
+/// Weighs a plan against the policy. `own` is the plan name of the source
+/// whose pass this is: its own record, declared by the repository, is taken
+/// over from the stack that bootstrapped it (a `Conflict` that is no conflict)
+/// or adopted, without `safety.allow` having to name either.
+pub(crate) fn decide(changes: &[Change], spec: &GitOpsSourceSpec, own: &str) -> Decision {
     let allowed = |a: &str| spec.safety.allow.iter().any(|x| x == a);
     let mut d = Decision::default();
     let mut deletes = Vec::new();
@@ -1543,8 +1656,14 @@ pub(crate) fn decide(changes: &[Change], spec: &GitOpsSourceSpec) -> Decision {
                 &[("id", &id), ("action", action)],
             )
         };
+        let is_own = c.kind == k::GITOPS_SOURCE && c.name == own;
         match c.action {
             Action::NoOp | Action::NotConverged => {}
+            Action::Conflict if is_own => {
+                d.handover = Some(c.owner.clone().unwrap_or_default());
+                d.changes = true;
+            }
+            Action::Adopt if is_own => {}
             Action::Create if !allowed("Create") => d.blocked.push(rule("Create")),
             Action::Update if !allowed("Update") => d.blocked.push(rule("Update")),
             Action::Adopt if !allowed("Adopt") => d.blocked.push(rule("Adopt")),
@@ -1837,42 +1956,53 @@ fn pass(root: &Path, dir: &Path, rec: &SourceRecord) -> Outcome {
             "rejected",
         );
     }
-    let stack = rec.spec.stack.clone().unwrap_or_else(|| rec.name.clone());
-    let changes = match super::stack::plan_with_digests(&docs, &stack) {
-        Ok(c) => c,
-        Err(e) => {
-            return refused(
-                Some(commit.clone()),
-                rejected(super::po::tf(
-                    "gitops: commit {commit} does not plan: {err}",
-                    &[("commit", short(&commit)), ("err", &e.to_string())],
-                )),
-                "rejected",
-            )
-        }
+    let stack = target_stack(&rec.spec, &rec.namespace, &rec.name);
+    let own = manifest::scoped_plan_name(&rec.namespace, &rec.name);
+    let (mut changes, mut decision) = match plan_and_decide(&docs, &stack, rec, &own, &commit) {
+        Ok(x) => x,
+        Err(o) => return o,
     };
-    let decision = decide(&changes, &rec.spec);
+    // The repository declares its own source, and the stack that bootstrapped
+    // it still owns the record: the pass takes it over, so from here on the
+    // pass's stack declares everything it owns. The owner moves only once the
+    // rest of the plan is known to pass, and moves back if the second look
+    // refuses it — a refused commit changes nothing, ownership included.
+    if let Some(from) = decision.handover.clone() {
+        if let Err(e) = set_owner(root, &rec.namespace, &rec.name, Some(&stack)) {
+            return refused(Some(commit), e, "failed");
+        }
+        let previous = Some(from.as_str()).filter(|f| !f.is_empty());
+        match plan_and_decide(&docs, &stack, rec, &own, &commit) {
+            Ok((c, d)) if d.handover.is_none() => {
+                changes = c;
+                decision = d;
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "gitopssource/{ns}/{name}: taken over from stack '{from}' — its repository declares it now",
+                        &[("ns", &rec.namespace), ("name", &rec.name), ("from", &from)],
+                    )
+                );
+            }
+            Ok(_) => {
+                let _ = set_owner(root, &rec.namespace, &rec.name, previous);
+                return refused(
+                    Some(commit),
+                    Error::Invalid(super::po::tf(
+                        "gitopssource/{ns}/{name}: its record did not change hands — nothing was applied",
+                        &[("ns", &rec.namespace), ("name", &rec.name)],
+                    )),
+                    "failed",
+                );
+            }
+            Err(o) => {
+                let _ = set_owner(root, &rec.namespace, &rec.name, previous);
+                return o;
+            }
+        }
+    }
     for kept in &decision.kept {
         println!("  · {kept}");
-    }
-    if !decision.blocked.is_empty() {
-        for b in &decision.blocked {
-            eprintln!("  ✗ {b}");
-        }
-        return refused(
-            Some(commit.clone()),
-            Error::coded(
-                1604,
-                Error::Invalid(super::po::tf(
-                    "gitops: commit {commit} plans {n} action(s) the safety policy blocks — nothing was applied",
-                    &[
-                        ("commit", short(&commit)),
-                        ("n", &decision.blocked.len().to_string()),
-                    ],
-                )),
-            ),
-            "blocked",
-        );
     }
     if !decision.changes {
         return Outcome::Synced {
@@ -1896,6 +2026,7 @@ fn pass(root: &Path, dir: &Path, rec: &SourceRecord) -> Outcome {
                 decision.reboot.clone(),
                 false,
                 None,
+                Applier::Pass,
             )
         })
         .and_then(|()| super::stack::prune(&decision.prune));
@@ -1906,6 +2037,46 @@ fn pass(root: &Path, dir: &Path, rec: &SourceRecord) -> Outcome {
         },
         Err(e) => refused(Some(commit), e, "failed"),
     }
+}
+
+/// The plan of a commit, weighed against the policy. A plan that fails, or
+/// that plans an action the policy blocks, is the pass's refusal.
+fn plan_and_decide(
+    docs: &[ManifestDoc],
+    stack: &str,
+    rec: &SourceRecord,
+    own: &str,
+    commit: &str,
+) -> std::result::Result<(Vec<Change>, Decision), Outcome> {
+    let changes = super::stack::plan_with_digests(docs, stack).map_err(|e| Outcome::Refused {
+        commit: Some(commit.to_string()),
+        err: rejected(super::po::tf(
+            "gitops: commit {commit} does not plan: {err}",
+            &[("commit", short(commit)), ("err", &e.to_string())],
+        )),
+        result: "rejected",
+    })?;
+    let decision = decide(&changes, &rec.spec, own);
+    if !decision.blocked.is_empty() {
+        for b in &decision.blocked {
+            eprintln!("  ✗ {b}");
+        }
+        return Err(Outcome::Refused {
+            commit: Some(commit.to_string()),
+            err: Error::coded(
+                1604,
+                Error::Invalid(super::po::tf(
+                    "gitops: commit {commit} plans {n} action(s) the safety policy blocks — nothing was applied",
+                    &[
+                        ("commit", short(commit)),
+                        ("n", &decision.blocked.len().to_string()),
+                    ],
+                )),
+            ),
+            result: "blocked",
+        });
+    }
+    Ok((changes, decision))
 }
 
 /// The git of one pass, with the source's credentials written for it.
@@ -2367,10 +2538,7 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
                 rec.spec.safety.prune, rec.spec.safety.maximum_deletes
             ),
         );
-        d.field(
-            "Stack",
-            rec.spec.stack.clone().unwrap_or_else(|| rec.name.clone()),
-        );
+        d.field("Stack", target_stack(&rec.spec, &rec.namespace, &rec.name));
         d.field("State", status_word(&root, &ns, &name));
         if let Some(st) = st {
             d.field_opt("Applied", st.applied.as_deref());

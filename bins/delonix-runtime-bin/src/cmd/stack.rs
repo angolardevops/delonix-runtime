@@ -929,6 +929,7 @@ fn plan_cmd(
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
+    super::gitops::refuse_self_target(&docs, &stack, super::gitops::Applier::Operator)?;
     let changes = plan_with_digests(&docs, &stack)?;
     let any = changes.iter().any(|c| c.changed);
     match output {
@@ -1797,6 +1798,7 @@ fn apply(
         reboot,
         do_prune,
         None,
+        super::gitops::Applier::Operator,
     )
 }
 
@@ -1941,6 +1943,10 @@ pub(crate) fn refuse_stale_plan(
 /// manifest that has since moved directories still lands on the right owner.
 /// `rollback_of` is recorded on the new revision: a rollback IS an apply, and
 /// the history should say which one it replayed.
+///
+/// `by` says who applies: only a pull source's own pass may apply a manifest
+/// declaring a source whose passes land in this very stack (ADR-0021).
+#[allow(clippy::too_many_arguments)] // each argument is one flag of `stack apply`, `rollback` or the pass
 pub(crate) fn apply_docs(
     docs: &[manifest::ManifestDoc],
     path: &Path,
@@ -1949,7 +1955,13 @@ pub(crate) fn apply_docs(
     reboot: Vec<String>,
     do_prune: bool,
     rollback_of: Option<u32>,
+    by: super::gitops::Applier,
 ) -> Result<()> {
+    let stack = stack_name(path, stack_override);
+    // A bootstrap stack that is also the stack the source's passes apply
+    // into would declare only the source, and plan everything the passes
+    // applied for deletion. Refused before anything else is read.
+    super::gitops::refuse_self_target(docs, &stack, by)?;
     // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
     // rollback, so a broken reference (an `Ingress` pointing to a container that
     // nobody declares) must stop everything BEFORE the first creation, not halfway
@@ -1974,7 +1986,6 @@ pub(crate) fn apply_docs(
     // Decide EVERYTHING before changing anything, and refuse up front what this
     // invocation is not allowed to do (a conflict, or a recreation nobody asked
     // for). Only then start creating.
-    let stack = stack_name(path, stack_override);
     let changes = build_plan(docs, &stack)?;
     // A `--replace` that names nothing in this manifest is a typo, and a typo in
     // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
@@ -2496,6 +2507,7 @@ fn prune_cmd(file: Option<PathBuf>, name: Option<String>, dry_run: bool) -> Resu
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
+    super::gitops::refuse_self_target(&docs, &stack, super::gitops::Applier::Operator)?;
     let changes = build_plan(&docs, &stack)?;
     let doomed: Vec<&Change> = teardown_order(&changes)
         .into_iter()
@@ -2991,6 +3003,7 @@ fn rollback(
         ),
     )?;
 
+    super::gitops::refuse_self_target(&docs, &stack, super::gitops::Applier::Operator)?;
     // The plan FIRST, always — printed whether or not this is a dry run. A
     // rollback is the command most likely to surprise, and the surprise is
     // cheapest before it happens.
@@ -3046,6 +3059,7 @@ fn rollback(
         reboot,
         do_prune,
         Some(to),
+        super::gitops::Applier::Operator,
     )
 }
 
@@ -3155,7 +3169,12 @@ fn history(
 fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load_lenient(&path)?;
-    let issues = validate_graph(&docs);
+    let mut issues = validate_graph(&docs);
+    // A source whose passes apply into the stack this manifest would be
+    // applied as: the apply refuses it, so validation does too.
+    let self_targets = super::gitops::self_target_problems(&docs, &stack_name(&path, None));
+    let self_target_count = self_targets.len();
+    issues.extend(self_targets);
     // Fields the load has just warned about. Saying `OK` on the line after
     // `unknown field 'resources.memoria' — ignored` was the engine contradicting
     // itself inside two lines: the reference graph WAS fine, and the manifest
@@ -3194,7 +3213,7 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
         Err(delonix_model::Error::Invalid(issues_summary(
             issues.len(),
             shape_issue_count(&docs),
-            spec_issue_count(&docs),
+            spec_issue_count(&docs) + self_target_count,
         )))
     }
 }
@@ -4141,6 +4160,64 @@ spec: { target: cc, direction: ingress, defaultPolicy: deny, rules: [] }
         assert_eq!(spec_issue_count(&doc("ext::sh -c id")), 1);
         let ok = validate_graph_with(&doc("file:///srv/repo.git"), &[], &[], &[], &[]);
         assert!(ok.is_empty(), "{ok:?}");
+    }
+
+    /// G1 (ADR-0021): a hand-run plan, prune, apply or validate of the stack a
+    /// declared source's passes apply into is refused before it reads the
+    /// machine — the bootstrap manifest declares only the source, and that
+    /// stack's plan would mark everything the passes applied for deletion.
+    /// The apply case carries a dangling reference too, so with the guard
+    /// removed it stops at the graph check (another error) and creates nothing.
+    #[test]
+    fn a_hand_run_command_on_a_sources_own_stack_is_refused_everywhere() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("source.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: cfgs\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n---\napiVersion: compute.delonix.io/v1alpha1\nkind: Container\nmetadata:\n  name: g1-probe\nspec:\n  image: alpine\n  network: g1-no-such-network\n",
+        )
+        .unwrap();
+        let docs = manifest::load(&file).unwrap();
+        let code_of = |r: Result<()>| r.unwrap_err().number();
+        assert_eq!(
+            code_of(apply_docs(
+                &docs,
+                &file,
+                Some("cfgs"),
+                Vec::new(),
+                Vec::new(),
+                true,
+                None,
+                super::super::gitops::Applier::Operator,
+            )),
+            1601
+        );
+        assert_eq!(
+            code_of(plan_cmd(
+                Some(file.clone()),
+                Some("cfgs".into()),
+                super::super::output::OutputFormat::Table,
+                false,
+                false,
+            )),
+            1601
+        );
+        assert_eq!(
+            code_of(prune_cmd(Some(file.clone()), Some("cfgs".into()), true)),
+            1601
+        );
+        // `validate` has no --name: the stack is the directory's. A source
+        // targeting it is an issue line with the apply's code.
+        let dir = tmp.path().join("cfgs");
+        std::fs::create_dir(&dir).unwrap();
+        let in_dir = dir.join("delonix-manifest.yaml");
+        std::fs::write(
+            &in_dir,
+            "apiVersion: gitops.delonix.io/v1alpha1\nkind: GitOpsSource\nmetadata:\n  name: src\nspec:\n  source:\n    url: file:///srv/repo.git\n    path: env/prod\n  stack: cfgs\n",
+        )
+        .unwrap();
+        let e = validate(Some(in_dir), false).unwrap_err();
+        assert!(e.to_string().contains("GitOpsSource"), "{e}");
     }
 
     /// ADR-0012: downtime is authorised as explicitly as data loss. A Reboot

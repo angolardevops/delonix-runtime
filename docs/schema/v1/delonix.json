@@ -1156,7 +1156,7 @@
           "description": "Where the manifests come from."
         },
         "stack": {
-          "description": "The stack a pass applies into. Defaults to the source's own name.",
+          "description": "The stack a pass applies into. Defaults to `gitops.<namespace>.<name>`,\na name no `spec.stack` and no bootstrap `--name` spells by accident.\nThe stack that applies the source itself must be another one: a local\nplan, apply or prune of the pass's stack would see only the source and\nplan everything the passes applied for deletion (refused, DX-1601).",
           "type": [
             "string",
             "null"

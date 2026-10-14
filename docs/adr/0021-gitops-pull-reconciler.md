@@ -228,6 +228,21 @@ front. From there the source may declare itself and take over. This is Argo's
 «app of apps», and it works because the circle is only closed *after* the first
 turn.
 
+**The bootstrap stack and the pass's stack are two stacks.** The local apply
+of the source is one stack (it declares the source); the passes apply into
+`spec.stack`, by default `gitops.<namespace>.<name>`. Were they one, the
+local manifest would be a second, partial declaration of the same stack, and
+its `prune` would delete what the passes applied (the first version of this
+ADR's implementation let that happen; see the Security pass). When the
+repository then declares its own source, the first pass **takes the record
+over** from the bootstrap stack — the one `Conflict` a pass resolves, and only
+on its own identity, after the rest of the plan has passed, and moved back if
+the second look refuses the commit. From there the pass's stack declares
+everything it owns, and the bootstrap stack owns nothing: re-applying the
+bootstrap manifest is refused as a conflict. Changing a non-self-mutable field
+of a self-managed source is then a deliberate local act — `delete
+gitopssources` and bootstrap again — never a side effect of an edit.
+
 **A source must never prune itself.** A commit that deletes the
 `kind: GitOpsSource` from the repository, with prune enabled, would switch off
 the very reconciliation that would later pull the revert — a node that goes
@@ -328,6 +343,7 @@ by hand (or through a signed commit, when `signedCommitsRequired` is set).
 | the source's own credential | a workload consuming the deploy key | A document that names `secretRef`, `knownHostsRef` or `trustedKeysRef` anywhere in its spec is refused. |
 | self-management | a commit loosening its own policy, or repointing its credentials | A `GitOpsSource` in the tree with the source's own identity may change only `ref`, `path` and `interval`; every other field must equal the local registration. One with a different identity is refused (depth one). The running source is never pruned by its own pass. |
 | plan | a commit that fails `stack validate`/`plan`, or plans a blocked action | The commit is resolved, verified, loaded, guarded and planned **before** anything is applied. A load, guard, graph or plan failure leaves the running stack untouched and is recorded (`gitops status`, an event). Allowed by default: `Create`, `Update`, `NoOp`. `Adopt`, `Replace`, `Reboot` need `safety.allow`; `Conflict` is always refused. `Delete` only runs with `safety.prune: true`, at most `maximumDeletes`, never on `protectedResources`. The plan is applied with its digests, so a machine that moved between plan and apply refuses the apply. |
+| the bootstrap stack | the stack that applied the source by hand and the stack its passes apply into being one stack: the hand-run manifest declares only the source, so that stack's `plan` reports every resource the passes applied as «no longer declared» forever, and `apply --prune` removes them — the next pass recreates them **empty** (measured 2026-10-12, G1: a Volume's data gone) | Two stacks, never one, enforced. `spec.stack` defaults to `gitops.<namespace>.<name>`: a DNS label (`spec.stack`) cannot contain a dot, so no explicit stack and no ordinary `--name` spells it, and two sources in different namespaces no longer share a default stack. A hand-run `stack apply`, `plan`, `prune`, `rollback` or `validate` of a manifest that declares a source whose passes land in the stack the command acts on is refused before it reads the machine (DX-1601, naming both ways out: another `--name`, or `spec.stack`). Only the source's own pass is exempt, by an explicit `Applier::Pass` argument to the apply path — never an environment variable. |
 | concurrency | two fires overlapping | One `flock` per source, non-blocking: a fire that cannot take it skips and says so. |
 | the pass itself | a resident process | None: the timer runs one pass and exits (`Type=oneshot`). Units are prefixed `delonix-gitops-`. |
 
