@@ -338,9 +338,17 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // gateway stays cold — the appliance has no update in place.
         k::NETWORK_GATEWAY => &["applied"],
         // A subnet's gateway and DHCP ranges are written in place
-        // (ADR-0063 D2); which subnets exist (`subnets`, their CIDRs) and the
-        // IPAM controller (`ipam`) stay cold.
-        k::NETWORK_ZONE => &["applied", "reservations", "dns", "subnetSettings"],
+        // (ADR-0063 D2), and an IPAM gateway entry left away from its subnet's
+        // gateway is put back by the apply's repair (`gatewayEntries`, N18);
+        // which subnets exist (`subnets`, their CIDRs) and the IPAM
+        // controller (`ipam`) stay cold.
+        k::NETWORK_ZONE => &[
+            "applied",
+            "reservations",
+            "dns",
+            "subnetSettings",
+            "gatewayEntries",
+        ],
         // `ippool::apply_one` overwrites the definition and keeps the leases.
         k::IPPOOL => &["addresses", "announce", "interface"],
         // The use of a pool is two numbers in a record; the pool itself is

@@ -190,10 +190,18 @@ pub const NETWORK_ZONE_SPEC_FIELDS: &[&str] = &["vnets", "dns", "ipam"];
 /// and makes the new ones, and writes the zone's DNS settings. All three are
 /// read from the provider, not the record, so a change made by hand
 /// converges too.
+///
+/// `gatewayEntries` (N18, ADR-0063 D2.3) is where the IPAM holds each running
+/// subnet's gateway entry: `in sync` when it is exactly one, on the subnet's
+/// running gateway. One a rolled-back change or a hand edit left elsewhere
+/// reads as a hot change, and the apply's gateway repair puts it back — the
+/// repair and this field read the same mismatch
+/// ([`delonix_networking::ipam::gateway_entry_mismatches`]).
 pub const RECONCILED_NETWORK_ZONE_FIELDS: &[&str] = &[
     "vnets",
     "subnets",
     "subnetSettings",
+    "gatewayEntries",
     "ipam",
     "dns",
     "reservations",
@@ -690,6 +698,7 @@ fn record_fields(rec: &NetworkZoneRecord) -> BTreeMap<String, String> {
         subnet_settings_field(&declared_subnets(&rec.vnets)),
     );
     f.insert("ipam".into(), ipam_field(rec.ipam.as_ref(), &rec.vnets));
+    f.insert("gatewayEntries".into(), IN_SYNC.into());
     f.insert("reservations".into(), reservations_field(&rec.reservations));
     f.insert("dns".into(), dns_field(rec.dns.as_ref()));
     f
@@ -708,6 +717,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         subnet_settings_field(&declared_subnets(&spec.vnets)),
     );
     fields.insert("ipam".into(), ipam_field(spec.ipam.as_ref(), &spec.vnets));
+    fields.insert("gatewayEntries".into(), IN_SYNC.into());
     fields.insert("dns".into(), dns_field(spec.dns.as_ref()));
     fields.insert(
         "reservations".into(),
@@ -733,6 +743,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|rec| {
             let mut fields = record_fields(&rec);
             fields.insert("subnetSettings".into(), subnet_settings_held(&rec)?);
+            fields.insert("gatewayEntries".into(), gateway_entries_held(&rec)?);
             fields.insert("reservations".into(), reservations_held(&rec)?);
             fields.insert("dns".into(), dns_held(&rec)?);
             fields.insert("remote".into(), remote_field(&rec)?);
@@ -882,6 +893,48 @@ fn subnet_settings_held(rec: &NetworkZoneRecord) -> Result<String> {
         })
         .collect();
     Ok(subnet_settings_field(&running))
+}
+
+/// The `gatewayEntries` field from what the IPAM holds: `in sync`, or one
+/// line per declared subnet whose gateway entry is not exactly one on its
+/// RUNNING gateway. Compared with the running gateway and not the declared
+/// one: a declared gateway that differs is `subnetSettings`' change, said once
+/// there. A subnet that is not running is `remote`'s. Pure.
+fn gateway_entries_field(declared: &[IpamSubnet], observed: &IpamObserved) -> String {
+    let running: Vec<IpamSubnet> = observed
+        .subnets
+        .iter()
+        .filter(|s| {
+            declared
+                .iter()
+                .any(|d| d.vnet == s.vnet && d.cidr == s.cidr)
+        })
+        .cloned()
+        .collect();
+    let drift = delonix_networking::ipam::gateway_entry_drift(&running, &observed.gateway_entries);
+    if drift.is_empty() {
+        IN_SYNC.to_string()
+    } else {
+        drift.join("; ")
+    }
+}
+
+/// The `gatewayEntries` field as the provider holds it (N18). Until this
+/// field, a subnet whose IPAM gateway entry a rolled-back change or a hand
+/// edit left elsewhere planned `=` and exit 0, and only the next apply that
+/// happened to run repaired it. A record that cannot be observed
+/// (interrupted, no mark, no subnet) reads `in sync`: there is nothing of its
+/// own to compare.
+fn gateway_entries_held(rec: &NetworkZoneRecord) -> Result<String> {
+    let declared = declared_subnets(&rec.vnets);
+    if rec.ledger.is_interrupted() || rec.owner.is_empty() || declared.is_empty() {
+        return Ok(IN_SYNC.into());
+    }
+    let (provider_id, _) = resolve_provider(&rec.provider)?;
+    Ok(gateway_entries_field(
+        &declared,
+        &observe_ipam(provider_id, rec)?,
+    ))
 }
 
 /// The `reservations` field as the provider holds it: the record's
@@ -1999,6 +2052,70 @@ mod tests {
         for f in ["subnetSettings", "ipam"] {
             assert!(RECONCILED_NETWORK_ZONE_FIELDS.contains(&f), "{f}");
         }
+    }
+
+    /// N18 (ADR-0063 D2.3): the plan reads where the IPAM holds each
+    /// declared subnet's gateway entry. Untouched is `in sync`, the value the
+    /// manifest wants; an entry moved by hand is a line naming the subnet;
+    /// the field is hot, so the plan updates in place — the apply's gateway
+    /// repair — and never replaces the zone.
+    #[test]
+    fn a_moved_gateway_entry_is_a_hot_difference_and_an_untouched_one_none() {
+        use delonix_networking::ipam::IpamGatewayEntry;
+        let declared = declared_subnets(&addressed());
+        let observed = |gw: &[&str]| IpamObserved {
+            subnets: declared.clone(),
+            gateway_entries: gw
+                .iter()
+                .map(|ip| IpamGatewayEntry {
+                    vnet: "v1".into(),
+                    ip: (*ip).into(),
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: networking.delonix.io/v1alpha1\nkind: NetworkZone\nmetadata: {name: n18z}\n",
+        )
+        .unwrap();
+        doc.spec = serde_yaml::to_value(NetworkZoneSpecDoc {
+            vnets: addressed(),
+            dns: None,
+            ipam: None,
+        })
+        .unwrap();
+        let wanted = desired(&doc).unwrap().fields["gatewayEntries"].clone();
+        assert_eq!(wanted, IN_SYNC);
+        assert_eq!(
+            gateway_entries_field(&declared, &observed(&["10.78.0.1"])),
+            wanted
+        );
+        let moved = gateway_entries_field(&declared, &observed(&["10.78.0.254"]));
+        assert!(
+            moved
+                .contains("the IPAM gateway entry is on 10.78.0.254, the subnet runs on 10.78.0.1"),
+            "{moved}"
+        );
+        // A running subnet nobody declared is `remote`'s, not this field's.
+        let mut extra = observed(&["10.78.0.1"]);
+        extra.subnets.push(IpamSubnet {
+            vnet: "v1".into(),
+            cidr: "10.78.1.0/24".into(),
+            gateway: Some("10.78.1.1".into()),
+            dhcp_ranges: vec![],
+        });
+        assert_eq!(gateway_entries_field(&declared, &extra), IN_SYNC);
+
+        let k = super::super::kinds::NETWORK_ZONE;
+        assert!(RECONCILED_NETWORK_ZONE_FIELDS.contains(&"gatewayEntries"));
+        assert!(
+            is_hot_change_of(k, "gatewayEntries", &wanted, &moved),
+            "a moved entry must converge in place, never replace the zone"
+        );
+    }
+
+    fn is_hot_change_of(kind: &str, field: &str, from: &str, to: &str) -> bool {
+        super::super::reconcile::is_hot_change(kind, field, Some(from), Some(to))
     }
 
     /// ADR-0063 D1.1: the controller defaults to the built-in one, is

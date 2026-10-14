@@ -307,6 +307,8 @@ fn cluster_json(c: &ProbedCluster) -> serde_json::Value {
         "url": c.url,
         "node": c.node,
         "facts": c.facts,
+        "matrix_release": delonix_proxmox::cluster::MATRIX_RELEASE,
+        "release_note": delonix_proxmox::cluster::release_note(c.facts.release.as_deref()),
         "verdicts": c.verdicts.iter().map(|v| serde_json::json!({
             "name": v.capability.name(),
             "offered": v.offered,
@@ -326,6 +328,16 @@ fn print_cluster(c: &ProbedCluster) {
         )
     );
     let yes_no = |b: bool| if b { "yes" } else { "no" };
+    println!(
+        "  {} {}",
+        super::po::t("Proxmox VE:"),
+        f.release
+            .clone()
+            .unwrap_or_else(|| super::po::t("not named by the node").to_string())
+    );
+    if let Some(note) = delonix_proxmox::cluster::release_note(f.release.as_deref()) {
+        println!("  {note}");
+    }
     println!(
         "  {} {}",
         super::po::t("cluster:"),

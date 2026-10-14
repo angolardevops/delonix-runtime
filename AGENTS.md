@@ -7650,6 +7650,13 @@ segredo do token em qualquer `{:?}`.
   na firewall de vnet, com 403 `user != root@pam`: essa rota recusa QUALQUER token, mesmo sem
   privsep, e só corre com a password da conta.
 
+- **A suite ao vivo corre em DUAS invocações** (`--ignored --skip firewall`, depois `--ignored
+  firewall`): ligar a firewall de datacenter parte o DHCP das zonas SDN seguintes, e o libtest corre
+  os casos por nome, por isso uma invocação só nunca respeitava a ordem que o cabeçalho pedia. Um
+  teste NÃO ignorado lê o `live.rs` e chumba se um caso que toca a firewall não tiver `firewall`
+  no nome. A sonda (`provider describe proxmox --probe`) lê `GET /version` e diz quando a release
+  do nó não é a da matriz (`MATRIX_RELEASE`, 9.2.2). Matriz: 184/675 chamadas, 179 num trace ao vivo.
+
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
 — a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
 com mais de um nó, OSPF, um NetBox/PowerDNS a sério atrás dos controladores e um lease DHCP entregue
@@ -9577,6 +9584,13 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
 - Prova: `tests/live.rs::a_subnet_changes_in_place_and_a_rolled_back_gateway_entry_is_repaired`
   (falha injectada e reparada) e o ciclo pela CLI no laboratório de dois nós, com uma falha
   NATURAL (duas subnets, a segunda recusada pelo D2.4 dentro da mesma transacção).
+- **O plano lê as entradas de gateway do IPAM** (D2.3, 2026-10-12): `gatewayEntries` é um campo
+  QUENTE do `NetworkZone`, lido do mesmo status que o `observe()` já lia. Antes, uma entrada de
+  gateway libertada ou movida à mão planeava `=` e o `--detailed-exitcode` saía 0. O plano e o
+  reparo partilham UMA regra (`gateway_entry_mismatches`: uma subnet em vigor tem exactamente uma
+  entrada, no seu gateway em vigor), para a subnet que o plano nomeia ser a que o reparo toca; e
+  a impressão digital do IPAM passou a incluí-las. Provado no nó falso; o caso ao vivo
+  (`the_plan_reads_a_gateway_entry_released_or_moved_by_hand_…`) fica para o lab.
 
 ## Egress para espaço privado: uma guarda do nó no uplink do holder (`denyPrivateEgress`, 2026-10-11)
 
