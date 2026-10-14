@@ -216,7 +216,7 @@ for pair in "mold:make LINKER=mold" "buf:scripts/contract_gate.py" "protoc-gen-o
   if has "$c"; then row ok "$c" "$(command -v "$c")"; else row opt "$c" "needed for: ${pair#*:}"; fi
 done
 
-if python3 -c 'import markdown' 2>/dev/null; then row ok "python markdown" "make gates (handbook site check)"; else row opt "python markdown" "needed for: make gates (pip install markdown)"; fi
+if python3 -c 'import markdown' 2>/dev/null; then row ok "python markdown" "make gates (handbook site check)"; else row opt "python markdown" "needed for: make gates (pip install -r scripts/requirements-docs.txt)"; fi
 
 echo "machine"
 printf '  %-18s %s\n' "cores" "$(nproc 2>/dev/null || echo '?')"

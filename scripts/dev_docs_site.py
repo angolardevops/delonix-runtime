@@ -875,7 +875,27 @@ def status() -> int:
     return 0
 
 
+def pinned_markdown() -> str:
+    """The markdown version scripts/requirements-docs.txt pins.
+
+    Another version renders the same Markdown differently (3.11.1 leaves `**…**`
+    next to CJK text as literal asterisks), so generating with it rewrites pages
+    nobody edited and checking with it fails pages nobody broke.
+    """
+    for line in (ROOT / "scripts" / "requirements-docs.txt").read_text().splitlines():
+        if line.startswith("markdown=="):
+            return line.split("==", 1)[1].strip()
+    raise SystemExit("dev_docs_site: scripts/requirements-docs.txt does not pin markdown")
+
+
 def main() -> int:
+    want = pinned_markdown()
+    if markdown.__version__ != want:
+        print(
+            f"dev_docs_site: markdown {markdown.__version__} is installed and the site is generated with {want} — "
+            "run `python3 -m pip install -r scripts/requirements-docs.txt` (a venv works too)"
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="fail when docs/handbook differs from the generated site")
     parser.add_argument("--status", action="store_true", help="list translations that are missing or behind English")

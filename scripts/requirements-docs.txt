@@ -1,0 +1,5 @@
+# The Python packages the doc generators import (docs/gen.py, scripts/dev_docs_site.py).
+# Pinned: markdown 3.11.1 renders `**…**` next to CJK text as literal asterisks, so an
+# unpinned install regenerated the zh-CN handbook pages differently from the committed
+# ones and failed the check on every PR. dev_docs_site.py refuses any other version.
+markdown==3.10.3
