@@ -615,6 +615,10 @@ fn run() -> Result<()> {
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
         state_root: cmd::util::state_root(),
     }));
+    // Same port shape for the cgroup leaf a Cloud Hypervisor VMM starts in: the
+    // provider may not reach the cgroup adapter, so the composition root hands
+    // it over. Without it, every Cloud Hypervisor VM would be refused (DX-6515).
+    delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),

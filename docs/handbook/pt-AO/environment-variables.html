@@ -591,8 +591,8 @@ antes de usares uma delas.</p>
 </tr>
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>Corre um container com <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> mesmo quando esta sessão não tem delegação de cgroup, e com <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> mesmo quando falta ao cgroup do container o controlador <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), em vez de recusar (saída 69).</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-provider-cloud-hypervisor/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-provider-cloud-hypervisor/<wbr>src/<wbr>lib.<wbr>rs:vmm_leaf</code></a></td>
+<td>Corre um container com <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> mesmo quando esta sessão não tem delegação de cgroup, e com <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> mesmo quando falta ao cgroup do container o controlador <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), em vez de recusar (saída 69). Também arranca uma VM do Cloud Hypervisor cujo VMM não pode ser posto numa folha de cgroup com os tectos de CPU e memória da VM, em vez de a recusar (DX-6515, saída 69).</td>
 <td>Definida (qualquer valor) → corre, sem limites, com um aviso.</td>
 <td>O kernel nunca vê os limites. Ver <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">delegação de cgroup</a>.</td>
 </tr>

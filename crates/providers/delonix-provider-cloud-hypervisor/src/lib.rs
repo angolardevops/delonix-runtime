@@ -15,6 +15,7 @@ use delonix_compute::capability::{
     Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
     ProviderReport,
 };
+use delonix_compute::cgroup_leaf::{leaf_dir_name, LeafLimits, ProcessLeaf};
 use delonix_compute::vm::{console_socket, serial_log_path, vm_namespace_of};
 use delonix_compute::vm_backend::{
     mem_mib, BackendRegistration, Boot, CreateStage, HotplugOutcome, VmBackend, VmConfig,
@@ -611,6 +612,141 @@ fn cpus_arg(cfg: &VmConfig) -> String {
     a
 }
 
+/// Memory the VMM process needs on top of the guest's RAM, in MiB — the margin
+/// its leaf's `memory.max` adds to the VM's memory ceiling.
+///
+/// Measured with Cloud Hypervisor v53.0 (firmware boot, 2 vCPUs, no disk): the
+/// VMM's own resident set was ~7 MiB (2.8 MiB anonymous) with 256 MiB and with
+/// 2 GiB of guest RAM alike — the overhead does not grow with the guest. Disks
+/// and a qcow2 cache add to it; 128 MiB leaves an order of magnitude of room,
+/// because a margin too tight is not a softer limit but an OOM kill of a VM that
+/// was inside its own size.
+pub const VMM_MEMORY_OVERHEAD_MIB: u64 = 128;
+
+/// The name of a VM's process leaf (the directory is `dlx-vm-<name>`).
+fn vmm_leaf_name(vm: &str) -> String {
+    format!("vm-{vm}")
+}
+
+/// Is `leaf` the one this backend created for VM `vm`? A `stop` removes only its
+/// own leaf, never whatever cgroup a recycled pid happens to be in.
+fn is_vmm_leaf(leaf: &ProcessLeaf, vm: &str) -> bool {
+    leaf.dir_name() == Some(leaf_dir_name(&vmm_leaf_name(vm)).as_str())
+}
+
+/// The ceilings of a VM's VMM leaf, from the VM's own shape. PURE.
+///
+/// * `cpu.max` — the vCPU CEILING (`vcpus_max` when hotplug headroom is declared,
+///   else `vcpus`) as whole cores: a VM sized for N vCPUs gets N cores of CPU
+///   time, its VMM threads included, the same contract a container's `--cpus`
+///   gives.
+/// * `memory.max` — the memory ceiling (`memory_max_mib` when declared above the
+///   boot size, so a hotplug up to it fits) plus [`VMM_MEMORY_OVERHEAD_MIB`]. With
+///   `hugepages` the guest RAM is charged to `hugetlb`, not `memory`, so this is
+///   then a looser bound; it is never a tighter one.
+/// * `pids.max` — the engine's per-container default, or more for a VM whose
+///   vCPU threads alone would come close to it (a task is a THREAD here: one per
+///   vCPU, plus the VMM's own — 7 measured for 2 vCPUs).
+fn vmm_leaf_limits(cfg: &VmConfig) -> LeafLimits {
+    let vcpus = cfg.vcpus_max.unwrap_or(cfg.vcpus).max(cfg.vcpus).max(1);
+    let boot_mib = mem_mib(&cfg.memory);
+    let guest_mib = cfg.memory_max_mib.unwrap_or(boot_mib).max(boot_mib);
+    LeafLimits {
+        cpu_quota_usec: Some(LeafLimits::quota_for_cores(vcpus)),
+        memory_max_bytes: Some((guest_mib + VMM_MEMORY_OVERHEAD_MIB) * 1024 * 1024),
+        pids_max: Some(delonix_compute::DEFAULT_PIDS_MAX.max(u64::from(vcpus) * 2 + 64)),
+        io_max: None,
+    }
+}
+
+/// The VMM's leaf for `cfg`, or the refusal. The decision, apart from the global
+/// registry and the environment so it is tested with a fake port.
+///
+/// A VM always declares its CPU and memory, and those ARE the ceilings: before
+/// this, the VMM ran in whatever cgroup launched it, so neither was enforced on
+/// the process that holds the vCPUs and the guest's RAM. When no leaf can hold
+/// them — no provider registered in this process, a host with no delegated
+/// cgroup, a ceiling that did not land — the VM is REFUSED
+/// ([`Error::LimitsNotEnforceable`]) instead of starting with no ceiling while
+/// its record says it has one. `escape_hatch` (`DELONIX_ALLOW_UNENFORCED_LIMITS`,
+/// the same switch the container limits use) starts it anyway, with a warning.
+fn vmm_leaf(
+    leaves: Option<&dyn delonix_compute::ports::ProcessLeaves>,
+    cfg: &VmConfig,
+    escape_hatch: bool,
+) -> Result<Option<ProcessLeaf>> {
+    let why = match leaves {
+        None => "no cgroup leaf provider is registered in this process".to_string(),
+        Some(p) => match p.create(&vmm_leaf_name(&cfg.name), &vmm_leaf_limits(cfg)) {
+            Ok(Some(leaf)) => return Ok(Some(leaf)),
+            Ok(None) => "this host gives the engine no cgroup to create it in (rootless without \
+                         a delegated cgroup)"
+                .to_string(),
+            Err(e) => e.to_string(),
+        },
+    };
+    if escape_hatch {
+        tracing::warn!(
+            vm = %cfg.name,
+            reason = %why,
+            "the VM's CPU and memory ceilings are NOT enforced on its VMM \
+             (DELONIX_ALLOW_UNENFORCED_LIMITS is set)"
+        );
+        return Ok(None);
+    }
+    Err(Error::LimitsNotEnforceable(format!(
+        "VM '{}': its CPU and memory ceilings ({} vCPU, {}) cannot be enforced on the \
+         Cloud Hypervisor process — {why}. Run as root, or rootless under a delegated scope \
+         (`systemd-run --user --scope -p Delegate=yes -- delonix vm …`); \
+         DELONIX_ALLOW_UNENFORCED_LIMITS=1 starts it without them",
+        cfg.name, cfg.vcpus, cfg.memory
+    )))
+}
+
+/// The body of [`CloudHypervisorBackend::boot`] after the refusals: the network,
+/// then the VMM — inside `leaf` when there is one.
+fn boot_on_network(
+    vmdir: &Path,
+    cfg: &VmConfig,
+    overlay: &str,
+    on: &dyn Fn(CreateStage),
+    leaf: Option<&ProcessLeaf>,
+) -> delonix_model::Result<Boot> {
+    // Own private network when named (≠ shared ingress): ensures its
+    // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
+    on(CreateStage::Network);
+    if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
+        // Not `let _`: a network that could not be created (or recorded) used to
+        // surface one step later as a bare "no such network" from the attach.
+        delonix_compute::vm_registry::network()?.ensure_network(&cfg.network)?;
+    }
+    // The MAC is needed BEFORE the attach now, not after: it is what makes
+    // the guest's future DHCP address computable, and that address is what
+    // the attach registers in the namespace sets.
+    let mac = mac_for(&cfg.name);
+    let ns = vm_namespace_of(cfg);
+    let net = delonix_compute::vm_registry::network()?;
+    let tap = net.attach_tap(&cfg.name, &cfg.network, &mac, &ns)?;
+    let lease = net.lease_ip(&cfg.network, &mac);
+    on(CreateStage::Start);
+    let pid = match boot_ch(vmdir, cfg, overlay, &tap, &mac, leaf) {
+        Ok(p) => p,
+        Err(e) => {
+            net.detach_tap(&cfg.name, lease.as_deref());
+            return Err(e.into());
+        }
+    };
+    let sock = vmdir.join(format!("{}.sock", cfg.name));
+    Ok(Boot {
+        pid: Some(pid),
+        ip: net.lease_ip(&cfg.network, &mac),
+        tap,
+        mac,
+        api_socket: sock.to_string_lossy().into_owned(),
+        lease_floor: None,
+    })
+}
+
 /// Historical backend: Cloud Hypervisor inside the infra netns (rootless).
 pub struct CloudHypervisorBackend;
 
@@ -644,39 +780,21 @@ impl VmBackend for CloudHypervisorBackend {
         // Before the network is touched: a socket path the kernel will refuse
         // kills the VMM at startup, so it is a clear error here instead.
         ch_socket_paths_fit(vmdir, cfg)?;
-        // Own private network when named (≠ shared ingress): ensures its
-        // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
-        on(CreateStage::Network);
-        if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
-            // Not `let _`: a network that could not be created (or recorded) used to
-            // surface one step later as a bare "no such network" from the attach.
-            delonix_compute::vm_registry::network()?.ensure_network(&cfg.network)?;
-        }
-        // The MAC is needed BEFORE the attach now, not after: it is what makes
-        // the guest's future DHCP address computable, and that address is what
-        // the attach registers in the namespace sets.
-        let mac = mac_for(&cfg.name);
-        let ns = vm_namespace_of(cfg);
-        let net = delonix_compute::vm_registry::network()?;
-        let tap = net.attach_tap(&cfg.name, &cfg.network, &mac, &ns)?;
-        let lease = net.lease_ip(&cfg.network, &mac);
-        on(CreateStage::Start);
-        let pid = match boot_ch(vmdir, cfg, overlay, &tap, &mac) {
-            Ok(p) => p,
-            Err(e) => {
-                net.detach_tap(&cfg.name, lease.as_deref());
-                return Err(e.into());
+        // The VMM's cgroup leaf, with the VM's ceilings, BEFORE any effect: a VM
+        // whose ceilings nothing would hold is refused here, not after its tap
+        // exists (see `vmm_leaf`).
+        let leaf = vmm_leaf(
+            delonix_compute::vm_registry::process_leaves(),
+            cfg,
+            std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some(),
+        )?;
+        let booted = boot_on_network(vmdir, cfg, overlay, on, leaf.as_ref());
+        if booted.is_err() {
+            if let Some(l) = &leaf {
+                l.remove();
             }
-        };
-        let sock = vmdir.join(format!("{}.sock", cfg.name));
-        Ok(Boot {
-            pid: Some(pid),
-            ip: net.lease_ip(&cfg.network, &mac),
-            tap,
-            mac,
-            api_socket: sock.to_string_lossy().into_owned(),
-            lease_floor: None,
-        })
+        }
+        booted
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
@@ -778,6 +896,10 @@ impl VmBackend for CloudHypervisorBackend {
         // guest is not a teardown either — so a VMM that will not leave is an
         // error here, not something to keep walking past.
         if let Some(pid) = vmm_to_signal(vm) {
+            // Read BEFORE the VMM goes: `/proc/<pid>/cgroup` leaves with it, and a
+            // stop run by another process cannot rebuild the path (the rootless
+            // base depends on the cgroup of whoever created it).
+            let leaf = ProcessLeaf::of_pid(pid).filter(|l| is_vmm_leaf(l, &vm.name));
             // `PUT /api/v1/vmm.shutdown` FIRST, `SIGTERM`/`SIGKILL` only as a
             // fallback — this is BUG-VM-001 (measured live, 2026-09-14): a real
             // guest write in flight at the moment of `SIGTERM` left the qcow2
@@ -806,6 +928,9 @@ impl VmBackend for CloudHypervisorBackend {
                     ),
                 }
                 .into());
+            }
+            if let Some(l) = leaf {
+                l.remove();
             }
         }
         // The record's own address if it learned one; otherwise the lease its MAC
@@ -1362,7 +1487,14 @@ fn ch_serial_dest(capture: bool, serial: &Path, console: &Path) -> String {
     }
 }
 
-fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
+fn boot_ch(
+    vmdir: &Path,
+    cfg: &VmConfig,
+    overlay: &str,
+    tap: &str,
+    mac: &str,
+    leaf: Option<&ProcessLeaf>,
+) -> Result<i32> {
     let join = delonix_compute::vm_registry::network()?
         .join_argv()
         .ok_or_else(|| Error::Command {
@@ -1455,7 +1587,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         pid = shq(&pidfile.to_string_lossy())
     );
 
-    launch_vmm(&join, &script, &pidfile, &sock, &log, VMM_READY_GRACE)
+    launch_vmm(&join, &script, &pidfile, &sock, &log, VMM_READY_GRACE, leaf)
 }
 
 /// How long `boot_ch` waits for a freshly launched VMM to report its VM as
@@ -1478,6 +1610,10 @@ const VMM_READY_GRACE: Duration = Duration::from_secs(10);
 /// Split out of `boot_ch` (with `join` as a parameter) so a test can run it
 /// with a no-op join and a fake VMM; that test fails if the confirmation is
 /// dropped from this path.
+///
+/// With a `leaf`, the launcher's child enters it BEFORE it execs (see
+/// [`enter_leaf_at_exec`]), so the VMM — a grandchild through the `join` and the
+/// `sh` — is born inside it and never allocates anywhere else.
 fn launch_vmm(
     join: &[String],
     script: &str,
@@ -1485,16 +1621,34 @@ fn launch_vmm(
     sock: &Path,
     log: &Path,
     ready: Duration,
+    leaf: Option<&ProcessLeaf>,
 ) -> Result<i32> {
-    let st = Command::new(&join[0])
-        .args(&join[1..])
+    let mut cmd = Command::new(&join[0]);
+    cmd.args(&join[1..])
         .args(["sh", "-c", script])
-        .env("DELONIX_INTERNAL", "1")
-        .status()
-        .map_err(|e| Error::Command {
+        .env("DELONIX_INTERNAL", "1");
+    // Held until the launcher has been spawned: the child writes through it.
+    let _procs = match leaf {
+        Some(l) => Some(enter_leaf_at_exec(&mut cmd, l).map_err(|e| {
+            Error::LimitsNotEnforceable(format!(
+                "cannot open {} to start the VMM inside its cgroup leaf: {e}",
+                l.procs_path().display()
+            ))
+        })?),
+        None => None,
+    };
+    let st = cmd.status().map_err(|e| match leaf {
+        // The `pre_exec` write is the only step that runs between the fork and the
+        // exec of a launcher that otherwise always exists; its failure surfaces here.
+        Some(l) => Error::LimitsNotEnforceable(format!(
+            "the VMM launcher could not enter its cgroup leaf {}: {e}",
+            l.path().display()
+        )),
+        None => Error::Command {
             context: "cloud-hypervisor",
             message: e.to_string(),
-        })?;
+        },
+    })?;
     if !st.success() {
         return Err(Error::Command {
             context: "vm",
@@ -1523,6 +1677,37 @@ fn launch_vmm(
     }
     wait_vmm_ready(pid, sock, log, ready)?;
     Ok(pid)
+}
+
+/// Makes `cmd`'s child move itself into `leaf` between the fork and the exec.
+///
+/// Opened HERE, in the parent, because the child may only make async-signal-safe
+/// calls: it writes `0` (cgroup v2 reads it as «the writer») through a descriptor
+/// that already exists, and a failed write aborts the spawn — the launcher never
+/// runs outside the leaf. The file is opened with `O_CLOEXEC` (std's default), so
+/// the launcher does not inherit it. The returned file must outlive the spawn.
+fn enter_leaf_at_exec(cmd: &mut Command, leaf: &ProcessLeaf) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let procs = std::fs::OpenOptions::new()
+        .write(true)
+        .open(leaf.procs_path())?;
+    let fd = procs.as_raw_fd();
+    // SAFETY: the closure runs in the forked child before `exec`. It only calls
+    // `write(2)` on a descriptor opened by the parent and kept open (`procs` is
+    // returned to, and held by, the caller across the spawn), with a static
+    // one-byte buffer, and builds its error with `last_os_error`, which reads
+    // `errno` without allocating — all async-signal-safe.
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::write(fd, b"0".as_ptr().cast(), 1) == 1 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+    Ok(procs)
 }
 
 /// Waits until the VMM at `pid` answers `GET /api/v1/vm.info` with the VM in
@@ -1921,6 +2106,127 @@ Format specific information:
         assert!(e.to_string().contains("cloud-hypervisor"), "{e}");
         assert!(!dest.exists(), "the refusal wrote the destination");
     }
+
+    /// The VMM leaf's ceilings are the VM's own shape: vCPUs as whole cores,
+    /// guest RAM plus the VMM's margin, and the hotplug ceilings when declared so a
+    /// hotplug up to them is not OOM-killed by the leaf.
+    #[test]
+    fn the_vmm_leaf_ceilings_are_the_vms_shape() {
+        let mut cfg = hpc_cfg(); // 4 vCPUs, 2G
+        let l = vmm_leaf_limits(&cfg);
+        assert_eq!(l.cpu_quota_usec, Some(400_000));
+        assert_eq!(
+            l.memory_max_bytes,
+            Some((2048 + VMM_MEMORY_OVERHEAD_MIB) * 1024 * 1024)
+        );
+        assert_eq!(l.pids_max, Some(delonix_compute::DEFAULT_PIDS_MAX));
+        assert_eq!(l.io_max, None);
+
+        cfg.vcpus_max = Some(8);
+        cfg.memory_max_mib = Some(8192);
+        let l = vmm_leaf_limits(&cfg);
+        assert_eq!(l.cpu_quota_usec, Some(800_000), "the hotplug ceiling");
+        assert_eq!(
+            l.memory_max_bytes,
+            Some((8192 + VMM_MEMORY_OVERHEAD_MIB) * 1024 * 1024)
+        );
+
+        // A ceiling BELOW the boot size never shrinks the leaf under the guest.
+        cfg.vcpus_max = Some(1);
+        cfg.memory_max_mib = Some(512);
+        let l = vmm_leaf_limits(&cfg);
+        assert_eq!(l.cpu_quota_usec, Some(400_000));
+        assert_eq!(
+            l.memory_max_bytes,
+            Some((2048 + VMM_MEMORY_OVERHEAD_MIB) * 1024 * 1024)
+        );
+
+        // A VM wide enough that its threads alone would near the default.
+        cfg.vcpus = 300;
+        cfg.vcpus_max = None;
+        assert_eq!(vmm_leaf_limits(&cfg).pids_max, Some(664));
+    }
+
+    /// A [`delonix_compute::ports::ProcessLeaves`] that answers what it is told.
+    struct FakeLeaves(std::result::Result<Option<ProcessLeaf>, String>);
+
+    impl delonix_compute::ports::ProcessLeaves for FakeLeaves {
+        fn create(
+            &self,
+            name: &str,
+            _limits: &LeafLimits,
+        ) -> delonix_model::Result<Option<ProcessLeaf>> {
+            assert_eq!(name, "vm-v", "the leaf is named after the VM");
+            self.0.clone().map_err(delonix_model::Error::Invalid)
+        }
+    }
+
+    /// No leaf → the VM is REFUSED with the typed error, whatever the reason; the
+    /// escape hatch is the only way past, and it starts the VM with no leaf.
+    #[test]
+    fn a_vm_whose_ceilings_no_leaf_can_hold_is_refused() {
+        let cfg = hpc_cfg();
+        let none = FakeLeaves(Ok(None));
+        let failed = FakeLeaves(Err("memory.max=1: boom".into()));
+        let cases: [(Option<&dyn delonix_compute::ports::ProcessLeaves>, &str); 3] = [
+            (None, "no cgroup leaf provider"),
+            (Some(&none), "no cgroup to create it in"),
+            (Some(&failed), "boom"),
+        ];
+        for (port, why) in cases {
+            let e = vmm_leaf(port, &cfg, false).expect_err("started with no leaf");
+            assert_eq!(e.number(), 6515, "{e}");
+            let text = e.to_string();
+            assert!(text.contains(why), "{text}");
+            assert!(text.contains("DELONIX_ALLOW_UNENFORCED_LIMITS"), "{text}");
+            assert_eq!(vmm_leaf(port, &cfg, true).unwrap(), None);
+        }
+        let leaf = ProcessLeaf::at("/sys/fs/cgroup/delonix.slice/dlx-vm-v");
+        let held = FakeLeaves(Ok(Some(leaf.clone())));
+        assert_eq!(vmm_leaf(Some(&held), &cfg, false).unwrap(), Some(leaf));
+    }
+
+    /// The refusal comes BEFORE any effect: `boot` returns DX-6515 without
+    /// reaching the network stage (no leaf provider — and no network — is
+    /// registered in this test process, so before the leaf existed it failed
+    /// later, on the network).
+    #[test]
+    fn boot_refuses_before_the_network_when_no_leaf_can_exist() {
+        if std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some() {
+            return; // the escape hatch is the one way past, by design
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let stages = std::cell::RefCell::new(Vec::new());
+        let on = |s: CreateStage| stages.borrow_mut().push(s);
+        let e = CloudHypervisorBackend
+            .boot(tmp.path(), &hpc_cfg(), "/nonexistent.qcow2", &on)
+            .err()
+            .expect("booted with no leaf");
+        assert_eq!(e.number(), 6515, "{e}");
+        assert!(
+            stages.borrow().is_empty(),
+            "a stage ran: {:?}",
+            stages.borrow()
+        );
+    }
+
+    /// `stop` removes only the leaf it created for this VM.
+    #[test]
+    fn a_stop_recognises_only_its_own_leaf() {
+        assert!(is_vmm_leaf(
+            &ProcessLeaf::at("/sys/fs/cgroup/delonix.slice/dlx-vm-web"),
+            "web"
+        ));
+        assert!(!is_vmm_leaf(
+            &ProcessLeaf::at("/sys/fs/cgroup/user.slice/session-2.scope"),
+            "web"
+        ));
+        assert!(!is_vmm_leaf(
+            &ProcessLeaf::at("/sys/fs/cgroup/delonix.slice/dlx-vm-web2"),
+            "web"
+        ));
+    }
+
     #[test]
     fn memory_arg_plain_and_hugepages() {
         let mut c = hpc_cfg();
@@ -2270,7 +2576,15 @@ mod tests_boot_confirms_the_vmm {
             &pid,
         );
         let began = Instant::now();
-        let r = launch_vmm(&no_join(), &s, &pid, &sock, &log, Duration::from_secs(5));
+        let r = launch_vmm(
+            &no_join(),
+            &s,
+            &pid,
+            &sock,
+            &log,
+            Duration::from_secs(5),
+            None,
+        );
         let err = r
             .expect_err("a VMM that exited at startup was reported as started")
             .to_string();
@@ -2308,8 +2622,16 @@ mod tests_boot_confirms_the_vmm {
         let (log, pidf, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
         fake_api(&sock, "Running");
         let s = script("sleep 30", &log, &pidf);
-        let pid = launch_vmm(&no_join(), &s, &pidf, &sock, &log, Duration::from_secs(5))
-            .expect("a live VMM reporting Running has to be accepted");
+        let pid = launch_vmm(
+            &no_join(),
+            &s,
+            &pidf,
+            &sock,
+            &log,
+            Duration::from_secs(5),
+            None,
+        )
+        .expect("a live VMM reporting Running has to be accepted");
         assert!(matches!(proc_state(pid), Some(st) if st != 'Z'));
         kill(pid);
     }
@@ -2330,6 +2652,7 @@ mod tests_boot_confirms_the_vmm {
             &sock,
             &log,
             Duration::from_millis(400),
+            None,
         );
         let err = r
             .expect_err("a VM that never ran was reported as started")

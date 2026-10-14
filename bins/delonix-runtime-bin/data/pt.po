@@ -16551,3 +16551,30 @@ msgstr "o conjunto em vigor e a sua origem"
 
 msgid "the same, for a script"
 msgstr "o mesmo, para um script"
+# DX-1116 / DX-6102 / DX-6515 — the cgroup group as root, and the VMM's cgroup leaf (ADR-0078)
+msgid "invalid cgroup group"
+msgstr "grupo de cgroup inválido"
+
+msgid "The container names a cgroup group (`cgroup_parent`) whose name is not one safe path segment ([a-z0-9._-], at most 64 bytes, not `.`/`..`, not starting with `-`), or whose aggregate memory, CPU or process ceiling does not parse. Nothing is placed: a name that could climb out of the engine's base, or a ceiling the kernel would not get, is refused instead of dropped."
+msgstr "O container nomeia um grupo de cgroup (`cgroup_parent`) cujo nome não é um único segmento de caminho seguro ([a-z0-9._-], no máximo 64 bytes, nem `.`/`..`, sem começar por `-`), ou cujo tecto agregado de memória, CPU ou processos não se lê. Nada é colocado: um nome que podia sair da base do motor, ou um tecto que o kernel não receberia, é recusado em vez de descartado."
+
+msgid "Use a group name made of [a-z0-9._-]; give memory as bytes or a suffix (1G, 512Mi), CPU as a decimal number of cores (0.5, 2) and processes as a whole number or `max`."
+msgstr "Usa um nome de grupo feito de [a-z0-9._-]; dá a memória em bytes ou com sufixo (1G, 512Mi), o CPU como número decimal de cores (0.5, 2) e os processos como número inteiro ou `max`."
+
+msgid "the container's cgroup group could not be created or limited"
+msgstr "não foi possível criar ou limitar o grupo de cgroup do container"
+
+msgid "As root, a container that names a cgroup group is placed under `delonix.slice/<group>/`, and the group's aggregate ceiling is written before the container joins. Creating the group, writing one of its ceilings, or handing a controller down to it failed — and a group without its ceiling would hold nothing, so the container is not started."
+msgstr "Como root, um container que nomeia um grupo de cgroup fica sob `delonix.slice/<group>/`, e o tecto agregado do grupo é escrito antes de o container entrar. Criar o grupo, escrever um dos seus tectos, ou passar-lhe um controlador falhou — e um grupo sem o seu tecto não seguraria nada, por isso o container não é arrancado."
+
+msgid "Read the message for the file and the error. Check that `delonix.slice` hands down the `memory`, `cpu` and `pids` controllers (`delonix system doctor`), and that no other process sits directly in the group's directory."
+msgstr "Lê a mensagem para o ficheiro e o erro. Confirma que o `delonix.slice` passa aos filhos os controladores `memory`, `cpu` e `pids` (`delonix system doctor`), e que nenhum outro processo está directamente no directório do grupo."
+
+msgid "the VM's CPU and memory ceilings cannot be enforced"
+msgstr "os tectos de CPU e memória da VM não podem ser aplicados"
+
+msgid "A Cloud Hypervisor VMM starts inside its own cgroup leaf, with the VM's CPU and memory as the leaf's ceilings, so the process that holds the vCPUs and the guest's RAM is the one limited. No leaf can exist for it on this host (rootless without a delegated cgroup, or no leaf provider in this process), or a ceiling did not land on the leaf. Nothing was created."
+msgstr "Um VMM do Cloud Hypervisor arranca dentro da sua própria folha de cgroup, com o CPU e a memória da VM como tectos da folha, para que o processo que segura os vCPUs e a RAM do convidado seja o limitado. Nenhuma folha pode existir para ele neste host (rootless sem cgroup delegado, ou nenhum fornecedor de folhas neste processo), ou um tecto não pegou na folha. Nada foi criado."
+
+msgid "Run the engine where it can create cgroups: as root, or rootless under a delegated scope (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). To start the VM without ceilings on purpose, set DELONIX_ALLOW_UNENFORCED_LIMITS=1."
+msgstr "Corre o motor onde ele possa criar cgroups: como root, ou rootless num scope delegado (`systemd-run --user --scope -p Delegate=yes -- delonix vm create ...`). Para arrancar a VM sem tectos de propósito, define DELONIX_ALLOW_UNENFORCED_LIMITS=1."
