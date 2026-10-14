@@ -44,6 +44,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 
 /// Kinds whose listing has no `-o json` today. Listed rather than discovered,
@@ -76,6 +77,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
@@ -94,6 +96,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::NETWORK_GATEWAY,
     kinds::NETWORK_ZONE,
     kinds::SYSTEM_CONTAINER,
+    kinds::GITOPS_SOURCE,
 ];
 
 /// A generic verb, as DATA — so the table below and its test can name one
@@ -283,7 +286,8 @@ pub(crate) fn get(
     // would be the accepted-and-ignored trap this codebase refuses elsewhere
     // (`--security-opt seccomp=`, `-v :z`, `--network-alias`) if `--namespace`
     // reached them un-checked. Refuse it up front instead.
-    const NAMESPACED_GET_KINDS: &[&str] = &[kinds::POD, kinds::VM, kinds::VOLUME];
+    const NAMESPACED_GET_KINDS: &[&str] =
+        &[kinds::POD, kinds::VM, kinds::VOLUME, kinds::GITOPS_SOURCE];
     if namespace.is_some() && !NAMESPACED_GET_KINDS.contains(&f.kind) {
         return Err(Error::Invalid(format!(
             "`get {}` has no namespace to filter by",
@@ -325,6 +329,7 @@ pub(crate) fn get(
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
         k if k == kinds::SERVICE => super::service::cmd_ls(output),
+        k if k == kinds::GITOPS_SOURCE => super::gitops::cmd_ls(output, namespace.as_deref()),
         k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
         k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_ls(output),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_ls(output),
@@ -407,6 +412,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         }
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
         k if k == kinds::SERVICE => super::service::cmd_describe(&n),
+        k if k == kinds::GITOPS_SOURCE => super::gitops::cmd_describe(&n),
         k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
         k if k == kinds::STORAGE_POOL => super::storage_pool::cmd_describe(&n),
         k if k == kinds::NETWORK_GATEWAY => super::network_gateway::cmd_describe(&n),
@@ -532,6 +538,16 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
                 println!(
                     "{}",
                     super::po::tf("ippool {name}: removed", &[("name", n)])
+                );
+            }
+            Ok(())
+        }
+        k if k == kinds::GITOPS_SOURCE => {
+            for n in names {
+                super::gitops::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf("gitopssource {name}: removed", &[("name", n)])
                 );
             }
             Ok(())

@@ -479,6 +479,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Kubernetes from scratch: ``kubeadm`` bootstrap over SSH, full VM provisioning (with automatic HA/HAProxy for multi-control-plane), day-2 (``drain``/``uncordon``/``upgrade``/``health``), and manifest generation from a running container/pod (``cluster kube generate``).
    * - ``backup``
      - Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove. The archive carries the record and the volume DATA — never the rootfs, which is re-derived from the image.
+   * - ``gitops``
+     - Pull sources (ADR-0021): a ``kind: GitOpsSource`` names a git repository, a ref and a path, and an opt-in systemd timer runs ONE pass and exits — fetch, verify, plan, apply. ``reconcile`` runs a pass now, ``status`` names the commit each source saw and the one applied, ``suspend``/``resume`` stop the passes without a commit. A commit the guard or the safety policy refuses leaves the running stack untouched.
    * - ``serve``
      - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON, plus Prometheus ``/metrics``), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
    * - ``mcp``
