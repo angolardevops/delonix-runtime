@@ -4,6 +4,8 @@ Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em R
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
 [README.md](README.md) para a arquitectura dos 34 crates.
 
+**Neste ramo `develop`: escrever `consolidado` quer dizer ler o [CONSOLIDADO.md](CONSOLIDADO.md)** — o que a consolidação de 2026-10-14 juntou, o que ficou de fora e porquê, e o que falta por ordem. Esse ficheiro e esta linha vivem só na `develop` e nunca vão para a `main`.
+
 ## Identidade e fronteira do motor (ler primeiro)
 
 Esta secção é a fonte canónica: agentes, skills, ADRs e revisões remetem para aqui, e uma
