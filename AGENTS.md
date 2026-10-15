@@ -6851,6 +6851,24 @@ checklist para quem mexer aqui do que como lista de correcções:
   vivo (`ps`, `virsh -c qemu:///system list`).** Gate: nenhum ainda — o domínio que uma falha deixa
   a correr continua por fechar, porque o `destroy` do teste só corre com o ciclo verde; o fecho é um
   guarda `Drop` que o destrói na ligação onde ele está;
+- **um passo «best-effort» sem tecto de tempo não é best-effort — é um passo que PENDURA.** O
+  `install.sh` dizia, em comentário, que a extensão de editor não pode falhar a instalação do
+  motor, e chamava o editor três vezes sem tecto: `--list-extensions` dentro de um `$(…)` e
+  `--install-extension` dentro de um `if`. Um launcher que não reconhece um argumento de CLI abre
+  a JANELA com ele e fica em primeiro plano, e os dois esperam pelo processo — a instalação do
+  motor refém de uma conveniência até alguém fechar o editor (relatado como «o editor abre e a
+  instalação trava»). Medido com o bloco REAL extraído do script e dois editores falsos (um que
+  pendura no `--version`, outro só no `--install-extension`): o bloco anterior foi morto de fora
+  aos 25 s nos dois casos; o novo desiste em 3 s, diz porquê e segue. Falhar é aceitável num
+  passo de conveniência, pendurar não é — e o mesmo vale para o stdin: o launcher do VS Code faz
+  `read -r YN` em WSL, e com `curl … | bash` o stdin É o script. **Regra: todo o comando de um
+  programa que tem GUI corre com tecto de tempo e com o stdin fechado, e o timeout (124/137)
+  diz-se com palavras diferentes de uma falha** — «não respondeu, pode ter aberto uma janela»
+  manda fechar a janela, «falhou» manda procurar um editor partido. O editor passa também a
+  PROVAR que fala CLI (`--version`, 0,14 s neste host) antes de receber um caminho de `.vsix`,
+  que é o argumento que uma janela abriria. Gate: `scripts/test_install_editor.py`, que extrai o
+  `editor_cli` do próprio `install.sh` e exige que nenhuma invocação de editor o contorne — 7/7
+  vermelhos contra o script anterior, 7/7 verdes depois (verificado);
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
