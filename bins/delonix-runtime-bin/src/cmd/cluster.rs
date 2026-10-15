@@ -2167,17 +2167,20 @@ fn ensure_single_node_cni(cp1: &SshTarget, pod_subnet: &str) -> Result<()> {
                 super::po::t("writing the default CNI conflist")
             ))
         })?;
-    let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-10-bridge.conflist");
+    // Staged under a path of this operation's own, like every other upload here
+    // (`stage_and_install`): a single-node cluster cannot race itself, but a
+    // FIXED `/tmp` name on a shared node is guessable by any local user there,
+    // which is the same reason the local side above uses `write_private_temp`.
+    let outcome = stage_and_install(cp1, &tmp, "delonix-10-bridge.conflist", |staged| {
+        format!(
+            "mkdir -p /etc/cni/net.d && \
+             mv {staged} /etc/cni/net.d/10-bridge.conflist && \
+             KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+             node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true"
+        )
+    });
     let _ = std::fs::remove_file(&tmp);
-    scp_result.map_err(|e| Error::Invalid(format!("CNI conflist: {e}")))?;
-    remote::ssh_run(
-        cp1,
-        "mkdir -p /etc/cni/net.d && \
-         mv /tmp/delonix-10-bridge.conflist /etc/cni/net.d/10-bridge.conflist && \
-         KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
-         node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true",
-    )
-    .map_err(|e| Error::Invalid(format!("applying the default CNI conflist: {e}")))?;
+    outcome.map_err(|e| Error::Invalid(format!("the default CNI conflist: {e}")))?;
     Ok(())
 }
 
@@ -2979,6 +2982,115 @@ fn prepare_host(
 /// see `install.sh`).
 const REMOTE_CLI_BIN: &str = "/usr/local/bin/delonix";
 
+/// `(directory, file)` to stage ONE upload at: a directory of this operation's
+/// own under `/tmp`, and `name` inside it.
+///
+/// BUG FIXED HERE, diagnosed live on 2026-10-15: `install_cli`/`install_cri`
+/// used the FIXED paths `/tmp/delonix-cli`, `/tmp/delonix-cri` and
+/// `/tmp/delonix-cri.service`, and `apply_ssh` prepares every host CONCURRENTLY
+/// (`std::thread::scope`). Two prep operations that land on the same host — which
+/// is what happens the moment two node records resolve to the same address —
+/// therefore raced on one filename: one thread's `mv` consumed the file the
+/// other had just `scp`ed, and the loser reported
+///
+/// ```text
+/// error[DX-1000] invalid argument: [lab-cp1] delonix-cri: invalid argument:
+/// [192.168.122.176] <ssh_run's command-failed prefix>: mv /tmp/delonix-cri ...
+/// mv: cannot stat '/tmp/delonix-cri': No such file or directory
+/// ```
+///
+/// — a message about a missing temp file, pointing nowhere near the duplicate
+/// address that caused it. With a directory per operation the same situation is a
+/// harmless repeat: each thread installs the identical binary over the same
+/// destination.
+///
+/// The pid alone is NOT enough, and the counter is not decoration: the racing
+/// threads are threads of ONE process, so they share it. Both parts are needed
+/// — the pid for two concurrent `delonix` runs, the counter for two threads of
+/// one run.
+///
+/// Shape (`<pid>.<seq>.<nanos>`) deliberately mirrors
+/// `delonix_state::write_private_temp`, which names the LOCAL side of these same
+/// transfers — one convention for "a temp path of our own", not two. The nanos
+/// buy nothing against the race (the counter already settles that) and
+/// everything against guessing it.
+///
+/// The file keeps its plain `name` INSIDE that directory: the uniqueness lives
+/// in the directory, so `ls /tmp/delonix-stage.*/` on a node mid-prep still
+/// shows an operator what is being installed.
+fn remote_staging_path(name: &str) -> (String, String) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let dir = format!("/tmp/delonix-stage.{}.{seq}.{nanos}", std::process::id());
+    (format!("{dir}/{name}"), dir)
+}
+
+/// Uploads `local` into a staging directory this operation alone owns
+/// ([`remote_staging_path`]) and runs the command `install` builds from the
+/// staged path — the `mv` into place. Returns that command's output, for the one
+/// caller that parses it (`kubeadm init`).
+///
+/// SECURITY, why a DIRECTORY and not just an unguessable filename: `scp` follows
+/// symlinks and there is no remote `O_EXCL` to ask for. A local user on the node
+/// who guesses the staged filename can pre-plant it as a symlink; `scp` then
+/// writes through it, `mv` moves the SYMLINK into place, and systemd runs
+/// content that user controls as root. A hard-to-guess name shrinks that window
+/// but does not close it.
+///
+/// `mkdir` WITHOUT `-p` is the remote `O_EXCL`: it fails if the path already
+/// exists at all, symlink included, so a squatted name is a loud error instead
+/// of a hijack. `-m 700` then means nothing can be planted inside the directory
+/// after we own it. This is the same defence
+/// `delonix_state::write_private_temp` gets locally from `create_new`, whose own
+/// hijacked-path test (in `delonix-state`'s `store.rs`) proves the primitive.
+///
+/// Created WITHOUT `sudo` on purpose ([`remote::ssh_run_as_user`]): the `scp`
+/// that follows runs as the SSH user, so a root-owned `0700` directory would
+/// refuse it. `/tmp` is writable by that user, and a directory they own is
+/// exactly what is needed.
+///
+/// The removal rides along INSIDE the install command (`rc=$?` … `exit $rc`)
+/// rather than taking a round-trip of its own: it then happens on the failure
+/// path too, which matters because a unique name per operation means nothing
+/// would ever overwrite the leftover.
+///
+/// The LOCAL file is the caller's to clean up (several build it with
+/// `delonix_state::write_private_temp` and delete it right after); this function
+/// only reads it.
+fn stage_and_install(
+    target: &SshTarget,
+    local: &std::path::Path,
+    name: &str,
+    install: impl FnOnce(&str) -> String,
+) -> Result<String> {
+    let (staged, dir) = remote_staging_path(name);
+    remote::ssh_run_as_user(target, &format!("mkdir -m 700 {dir}"))?;
+    if let Err(e) = remote::scp_to(target, local, &staged) {
+        // The install command below is what normally removes the directory; a
+        // failed upload never reaches it, and an empty directory per attempt is
+        // still litter.
+        let _ = remote::ssh_run_as_user(target, &format!("rm -rf {dir}"));
+        return Err(e);
+    }
+    remote::ssh_run(target, &staged_install_script(&install(&staged), &dir))
+}
+
+/// The remote script [`stage_and_install`] runs: the install command, then the
+/// staging directory removed, then the install's OWN exit status.
+///
+/// `{ ...; }` groups `install_cmd` so that its own `&&` chain (and the trailing
+/// `; true` one of them deliberately ends with) keeps the meaning it has when
+/// read on its own. `rc=$?` has to be captured BEFORE the `rm`, or the status
+/// this returns would be the cleanup's and every failed install would report
+/// success.
+fn staged_install_script(install_cmd: &str, dir: &str) -> String {
+    format!("{{ {install_cmd}; }}; rc=$?; rm -rf {dir}; exit $rc")
+}
+
 /// Keeps the node's `delonix` CLI in step with `install_cri`'s own `delonix-cri` —
 /// same idea, same sha256-check-then-replace shape, deliberately NOT merged
 /// into one function: a CLI binary has no systemd unit to restart.
@@ -3015,11 +3127,9 @@ fn install_cli(target: &SshTarget, label: &str, cli_bin: &std::path::Path) -> Re
             &[("label", label), ("sha", &local[..12])],
         )
     );
-    remote::scp_to(target, cli_bin, "/tmp/delonix-cli").map_err(err)?;
-    remote::ssh_run(
-        target,
-        &format!("mv /tmp/delonix-cli {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}"),
-    )
+    stage_and_install(target, cli_bin, "delonix-cli", |staged| {
+        format!("mv {staged} {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}")
+    })
     .map_err(err)?;
     Ok(())
 }
@@ -3084,18 +3194,18 @@ fn install_cri(
                     &[("label", label), ("sha", &local[..12])],
                 )
             );
-            remote::scp_to(target, cri_bin, "/tmp/delonix-cri").map_err(err)?;
-            remote::ssh_run(
-                target,
-                &format!("mv /tmp/delonix-cri {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}"),
-            )
+            stage_and_install(target, cri_bin, "delonix-cri", |staged| {
+                format!("mv {staged} {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}")
+            })
             .map_err(err)?;
         }
     }
-    remote::scp_to(target, cri_service, "/tmp/delonix-cri.service").map_err(err)?;
     // `restart`, not `enable --now`: on an active unit the latter does nothing,
     // and the old binary would keep running.
-    remote::ssh_run(target, &install_cri_unit_command()).map_err(err)?;
+    stage_and_install(target, cri_service, "delonix-cri.service", |staged| {
+        install_cri_unit_command(staged)
+    })
+    .map_err(err)?;
     Ok(())
 }
 
@@ -3103,7 +3213,10 @@ fn install_cri(
 const REMOTE_CRI_CEILING_DROPIN: &str =
     "/etc/systemd/system/delonix-cri.service.d/10-cluster-ceiling.conf";
 
-/// The remote command that installs the `delonix-cri` unit and (re)starts it.
+/// The remote command that installs the `delonix-cri` unit and (re)starts it,
+/// moving it into place from `staged` — the path [`stage_and_install`] uploaded
+/// it to, unique per operation so concurrent preps of the same host cannot
+/// consume each other's upload.
 ///
 /// A node this command bootstraps runs Kubernetes' own system pods — kube-proxy,
 /// the CNI agent — which are `privileged` or ask for `NET_ADMIN` by design, and
@@ -3112,9 +3225,9 @@ const REMOTE_CRI_CEILING_DROPIN: &str =
 /// visible choice (the CRI warns about it at startup). The drop-in is written only
 /// if absent: an operator who edits it, or who adds a later-sorted one of their
 /// own to bound the node, keeps their setting on the next run.
-fn install_cri_unit_command() -> String {
+fn install_cri_unit_command(staged: &str) -> String {
     format!(
-        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
+        "mv {staged} /etc/systemd/system/delonix-cri.service && \
          {} && \
          systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
         write_ceiling_dropin_if_absent(),
@@ -3232,16 +3345,18 @@ fn kubeadm_init(
                     super::po::t("writing local kubeadm-config.yaml")
                 ))
             })?;
-        let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-kubeadm-config.yaml");
+        // Same reasoning as the local `write_private_temp` right above, applied
+        // to the REMOTE side: `stage_and_install` picks a path of this
+        // operation's own instead of the guessable `/tmp/delonix-kubeadm-config.yaml`.
+        let outcome = stage_and_install(cp1, &tmp, "delonix-kubeadm-config.yaml", |staged| {
+            format!(
+                "mkdir -p /etc/kubernetes && \
+                 mv {staged} /etc/kubernetes/kubeadm-config.yaml && \
+                 kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml --upload-certs"
+            )
+        });
         let _ = std::fs::remove_file(&tmp);
-        scp_result.map_err(|e| Error::Invalid(format!("[{label}] kubeadm config: {e}")))?;
-        let out = remote::ssh_run(
-            cp1,
-            "mkdir -p /etc/kubernetes && \
-             mv /tmp/delonix-kubeadm-config.yaml /etc/kubernetes/kubeadm-config.yaml && \
-             kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml --upload-certs",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
+        let out = outcome.map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
         return parse_join_info(&out);
     }
     let k8s_ver_flag = spec
@@ -3681,7 +3796,7 @@ mod tests {
     /// unit, before the daemon is reloaded — and never overwrites an existing one.
     #[test]
     fn the_cluster_unit_install_lifts_the_default_ceiling_explicitly() {
-        let cmd = install_cri_unit_command();
+        let cmd = install_cri_unit_command("/tmp/delonix-cri.service.1.0");
         assert!(cmd.contains("DELONIX_CRI_CAP_CEILING=all"), "{cmd}");
         assert!(cmd.contains(REMOTE_CRI_CEILING_DROPIN), "{cmd}");
         assert!(
@@ -3696,6 +3811,206 @@ mod tests {
         assert!(
             write < reload,
             "the drop-in must exist before daemon-reload"
+        );
+    }
+
+    /// REGRESSION, diagnosed live on 2026-10-15: `install_cli`/`install_cri`
+    /// staged their uploads at FIXED paths while `apply_ssh` prepares hosts
+    /// concurrently, so two preps landing on the same host (two node records
+    /// resolving to one address) raced on one filename and the loser died with
+    /// `mv: cannot stat '/tmp/delonix-cri'`. Every staged path must now be
+    /// distinct, INCLUDING between two calls from the same process — the racing
+    /// preps are threads, so a pid-only suffix would still collide.
+    #[test]
+    fn every_staged_upload_gets_a_path_of_its_own() {
+        let n = 64;
+        let dirs: std::collections::HashSet<String> = (0..n)
+            .map(|_| remote_staging_path("delonix-cri").1)
+            .collect();
+        assert_eq!(dirs.len(), n, "staging directories collided: {dirs:?}");
+
+        let (staged, dir) = remote_staging_path("delonix-cri");
+        // The uniqueness lives in the DIRECTORY; the file keeps its plain name,
+        // so an operator looking at a node mid-prep sees what is being installed.
+        assert!(dir.starts_with("/tmp/delonix-stage."), "{dir}");
+        assert_eq!(staged, format!("{dir}/delonix-cri"));
+        // The pid is in there: it is what separates two concurrent `delonix` runs.
+        assert!(dir.contains(&format!(".{}.", std::process::id())), "{dir}");
+        // No shell metacharacter: both go straight into `ssh_run` command strings,
+        // and `dir` in particular into an `rm -rf`.
+        for p in [&staged, &dir] {
+            assert!(
+                p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)),
+                "{p}"
+            );
+        }
+        // Every other upload in this file goes through the same helper, so each
+        // lands in a directory of its own — nothing here shares a remote path.
+        for stem in [
+            "delonix-cli",
+            "delonix-cri.service",
+            "delonix-10-bridge.conflist",
+            "delonix-kubeadm-config.yaml",
+        ] {
+            let (f, d) = remote_staging_path(stem);
+            assert_eq!(f, format!("{d}/{stem}"));
+        }
+    }
+
+    /// The wrapper around every staged install is hand-written shell, so it is
+    /// checked as shell: really parsed, really run. Each case runs against a
+    /// REAL directory and asserts the three things the wrapper owes its caller —
+    /// the install's exit status (not the cleanup's), the install's stdout
+    /// (`kubeadm init`'s output is parsed), and the directory gone either way.
+    #[test]
+    fn the_staged_install_script_keeps_the_status_the_output_and_cleans_up() {
+        // Every install command this file actually builds, including the one
+        // that ends in `; true` and the one that is a multi-line `&&` chain.
+        let dummy = "/tmp/delonix-stage.0.0.0/x";
+        for cmd in [
+            format!("mv {dummy} /usr/local/bin/delonix && chmod +x /usr/local/bin/delonix"),
+            install_cri_unit_command(dummy),
+            format!(
+                "mkdir -p /etc/cni/net.d && mv {dummy} /etc/cni/net.d/10-bridge.conflist && \
+                 KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+                 node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true"
+            ),
+        ] {
+            let script = staged_install_script(&cmd, "/tmp/delonix-stage.0.0.0");
+            let out = std::process::Command::new("bash")
+                .arg("-n")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("spawn bash -n");
+            assert!(
+                out.status.success(),
+                "not valid shell: {script}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // Behaviour, for real. `bash -n` would accept a script that captured
+        // `$?` after the `rm` just as happily.
+        let run = |install: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("stage");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("payload"), b"x").unwrap();
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(staged_install_script(install, &dir.to_string_lossy()))
+                .output()
+                .expect("spawn bash");
+            (
+                out.status.success(),
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+                dir.exists(),
+            )
+        };
+
+        let (ok, stdout, leftover) = run("echo 'kubeadm join --token abc'");
+        assert!(ok, "a successful install must report success");
+        assert!(
+            stdout.contains("kubeadm join --token abc"),
+            "the install's stdout has to reach the caller: {stdout:?}"
+        );
+        assert!(!leftover, "the staging directory must be gone");
+
+        // The regression that matters most: a FAILED install must still fail,
+        // even though the `rm` right after it succeeds.
+        let (ok, _, leftover) = run("false");
+        assert!(
+            !ok,
+            "a failed install reported success — $? captured too late"
+        );
+        assert!(
+            !leftover,
+            "the staging directory must be gone on failure too"
+        );
+
+        // The deliberately-tolerant one stays tolerant.
+        let (ok, _, _) = run("false >/dev/null 2>&1; true");
+        assert!(
+            ok,
+            "`; true` must still swallow the failure it is there to swallow"
+        );
+    }
+
+    /// The staging directory is the remote `O_EXCL`: `mkdir` without `-p` fails
+    /// on an existing path (a squatted symlink included) instead of letting
+    /// `scp` write through it, and `-m 700` stops anything being planted inside
+    /// afterwards. Both flags are load-bearing — see `stage_and_install`.
+    #[test]
+    fn the_staging_directory_refuses_a_squatted_path() {
+        // The squat that matters: a symlink where our directory is about to go,
+        // pointing at a directory the attacker can write. `mkdir -p` resolves it
+        // and reports success, which would leave the upload sitting in THEIR
+        // directory — replaceable between the `scp` and the `mv`. A symlink to a
+        // plain file would be refused even by `-p`, so it proves nothing.
+        let tmp = tempfile::tempdir().unwrap();
+        let attacker = tmp.path().join("attacker-owned");
+        std::fs::create_dir(&attacker).unwrap();
+        let squatted = tmp.path().join("delonix-stage.1.0.0");
+        std::os::unix::fs::symlink(&attacker, &squatted).unwrap();
+
+        let plain = std::process::Command::new("mkdir")
+            .args(["-m", "700"])
+            .arg(&squatted)
+            .output()
+            .expect("spawn mkdir");
+        assert!(
+            !plain.status.success(),
+            "mkdir must refuse a path that already exists as a symlink"
+        );
+
+        // `-p` is exactly what would have swallowed it — the flag
+        // `stage_and_install` must never grow.
+        let with_p = std::process::Command::new("mkdir")
+            .args(["-p", "-m", "700"])
+            .arg(&squatted)
+            .output()
+            .expect("spawn mkdir -p");
+        assert!(
+            with_p.status.success(),
+            "mkdir -p accepts the squat: that is why stage_and_install omits it"
+        );
+        // ...and this is the harm it would have let through: the path we would
+        // have uploaded to resolves inside the attacker's directory.
+        std::fs::write(squatted.join("delonix-cri"), b"staged").unwrap();
+        assert!(
+            attacker.join("delonix-cri").exists(),
+            "a write through the squatted path lands in the attacker's directory"
+        );
+    }
+
+    /// The companion to the test above: no upload may go back to a path that
+    /// does not come from [`remote_staging_path`]. A new `scp_to` with a
+    /// hand-written `/tmp/...` destination is the regression this catches, and
+    /// it would reintroduce both the race and the guessable name.
+    ///
+    /// Reads this file's CODE only — the test module is cut away. The needle is
+    /// a literal, so this very assertion contains it; scanning the whole file
+    /// would make the test match itself and fail forever, which is the trap the
+    /// libvirt provider's own source-scanning test documents.
+    #[test]
+    fn no_upload_targets_a_fixed_remote_tmp_path() {
+        let src = include_str!("cluster.rs");
+        let code = src
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .map(|(code, _)| code)
+            .expect("this file's test module marks where the code ends");
+        let offenders: Vec<&str> = code
+            .lines()
+            .map(str::trim)
+            // Only the uploads: the `mv` commands take the staged path as an
+            // argument, and the doc-comments quote the old paths on purpose.
+            .filter(|l| l.contains("scp_to(") && l.contains("\"/tmp/"))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "upload to a fixed remote path — use stage_and_install: {offenders:?}"
         );
     }
 
