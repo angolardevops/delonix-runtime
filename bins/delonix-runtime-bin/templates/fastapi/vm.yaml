@@ -1,6 +1,6 @@
 # vm.yaml — declarative microVM image specification
 #
-# Alternative to VMfile: `delonix vm build -f vm.yaml -t __NAME__:latest .`
+# Alternative to VMfile: `delonix vm image build -f vm.yaml -t __NAME__:latest .`
 # This file uses compose-style YAML instead of Dockerfile syntax.
 #
 # Every relative path is relative to this file's directory.
