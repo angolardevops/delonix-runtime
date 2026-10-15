@@ -339,9 +339,17 @@ and you never need to set them:
   proving that reading a process environ matches whole names, not prefixes.
 - `DELONIX_IMAGE`, `DELONIX_DISTRO`, `DELONIX_RELEASE`, `DELONIX_BUILT_BY`, `DELONIX_BASE_IMAGE`,
   `DELONIX_BASE_SHA256`, `DELONIX_K8S_VERSION`, `DELONIX_OFFLINE`, `DELONIX_NODE_EXPORTER`,
-  `DELONIX_EXTRA_PACKAGES` — keys of the provenance file `/etc/delonix-image-release` that
-  `vm image build` writes **inside** a built VM image (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`).
+  `DELONIX_EXTRA_PACKAGES`, `DELONIX_CNI_PLUGINS`, `DELONIX_NET_PROFILES` — keys of the
+  provenance file `/etc/delonix-image-release` that `vm image build` writes **inside** a built
+  VM image (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`).
   Read them in the guest with `cat /etc/delonix-image-release`; no process reads them.
+
+  The last two carry the network half's provenance, so a node can answer "which
+  plugin set do I carry" and "which profiles is this image prepared for" without
+  anyone mounting the qcow2: `DELONIX_CNI_PLUGINS` is the pinned reference plugin
+  set with its digest (`cni_plugins::provenance`), `DELONIX_NET_PROFILES` is each
+  profile with the version it would install (`net_profiles::provenance`). Both are
+  `none` on a `--no-k8s` image, which has no kubelet to serve.
 
 ---
 
