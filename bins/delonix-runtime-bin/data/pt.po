@@ -428,9 +428,6 @@ msgstr "aviso ao publicar :{p}: {err}"
 msgid "available templates"
 msgstr "templates disponíveis"
 
-msgid "nothing to do (everything already existed)"
-msgstr "nada a fazer (tudo já existia)"
-
 msgid "secret '{name}' has no 'password' key"
 msgstr "o segredo '{name}' não tem a chave 'password'"
 
@@ -3071,6 +3068,9 @@ msgstr "  {cd}delonix build -t {name}:dev .        # constrói a imagem (Delonix
 
 msgid "  already exists, skipped: {path}  (use --force to overwrite)"
 msgstr "  já existe, saltado: {path}  (usa --force para substituir)"
+
+msgid "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force"
+msgstr "nada a fazer — todos os ficheiros já existem em {dir}. Para os actualizar, usa --force:\n  delonix init --force"
 
 msgid "writing {path}"
 msgstr "a escrever {path}"
