@@ -1451,6 +1451,213 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     Ok(())
 }
 
+/// Does this mount target land where the engine mounts `/sys` LATER, so a bind
+/// placed before `pivot_root` would end up underneath it?
+///
+/// `setup_rootfs` injects the caller's mounts over the rootfs and only then
+/// mounts `/sys` (a fresh `sysfs`, or — for a privileged container in a user ns
+/// that does not own the netns — a recursive bind of the host's `/sys`). Either
+/// way the new mount at `/sys` covers everything the earlier loop put inside
+/// it, so a `-v /sys/...` was invisible at best; with the recursive bind it was
+/// worse, because that bind CARRIES the host's own mount at the same path and
+/// the mount point ends up with two `mountinfo` entries.
+///
+/// Measured on a kubeadm node (ADR-0078): the Cilium agent asks for
+/// `hostPath /sys/fs/bpf` and refuses to start with `multiple mount points
+/// detected at /sys/fs/bpf`, on a host that has exactly one bpffs. Inside the
+/// container:
+///
+/// ```text
+/// 4921 4920 0:34 / /sys/fs/bpf rw,... shared:1241 master:12 - bpf bpf rw,mode=700
+/// 4923 4920 0:25 / /sys        rw,...             master:7  - sysfs sysfs rw
+/// 4928 4923 0:34 / /sys/fs/bpf rw,...             master:12 - bpf bpf rw,mode=700
+/// ```
+///
+/// `4921` is the caller's bind, now buried under `4923`; `4928` is the copy the
+/// recursive bind brought along — and note that it does NOT carry the
+/// `rshared` the caller asked for, which only `4921` got. So the request was
+/// both duplicated and silently downgraded.
+///
+/// The test is lexical, on the target as requested. A target that reaches
+/// `/sys` only through a symlink in the image stays on the early path and
+/// stays shadowed, exactly as before — no behaviour is invented for a shape
+/// nobody has asked for.
+fn target_under_sys(target: &str) -> bool {
+    let mut parts = std::path::Path::new(target).components();
+    matches!(parts.next(), Some(std::path::Component::RootDir))
+        && matches!(parts.next(), Some(std::path::Component::Normal(n)) if n == "sys")
+}
+
+/// How many mounts `mountinfo` lists at EXACTLY `path`.
+///
+/// Split from the mounting so the rule the fix rests on — one mount point, one
+/// entry — is testable against a real `mountinfo` without `mount(2)`. It is
+/// also the count Cilium itself does before refusing to start.
+fn mount_entries_at(mountinfo: &str, path: &str) -> usize {
+    mountinfo
+        .lines()
+        .filter(|line| {
+            // `id parent maj:min root MOUNTPOINT OPTIONS [optional...] - fstype ...`
+            let Some(mountpoint) = line.split(' ').nth(4) else {
+                return false;
+            };
+            // `mountinfo` octal-escapes space, tab, newline and backslash in paths.
+            mountpoint.replace("\\040", " ") == path
+        })
+        .count()
+}
+
+/// [`mount_entries_at`] against this process's own `mountinfo`.
+fn mount_entries_at_path(path: &str) -> usize {
+    match std::fs::read_to_string("/proc/self/mountinfo") {
+        Ok(text) => mount_entries_at(&text, path),
+        Err(_) => 0,
+    }
+}
+
+/// Are `a` and `b` the very same directory (same device AND same inode)?
+///
+/// Used to tell "the caller asked for a mount the engine's `/sys` already
+/// delivers" from "the caller asked for something else here": after the
+/// recursive bind, the container's `/sys/fs/bpf` IS the host's bpffs root that
+/// the `hostPath` names, so the two paths resolve to one object and stacking a
+/// second mount over it would only recreate the duplication.
+fn same_mount_object(a: &str, b: &str) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
+    }
+}
+
+/// Applies a mount's `readonly` and `propagation` to a mount that is ALREADY at
+/// its target — case 1 of [`bind_sys_mounts`].
+///
+/// `readonly` carries the target's locked flags forward for the same reason
+/// [`locked_flags_for`] exists: in a user namespace a remount may add
+/// restrictions, never clear one. Nothing else is remounted — the mount came
+/// from the host's `/sys` with the host's own flags, and tightening what the
+/// caller did not ask about is how a privileged container loses the writable
+/// `/sys` it was given on purpose.
+fn reflag_existing_mount(m: &Mount) -> nix::Result<()> {
+    if m.readonly {
+        mount(
+            None::<&str>,
+            m.target.as_str(),
+            None::<&str>,
+            MsFlags::MS_BIND
+                | MsFlags::MS_REMOUNT
+                | MsFlags::MS_RDONLY
+                | locked_flags_for(std::path::Path::new(&m.target)),
+            None::<&str>,
+        )?;
+    }
+    if let Some(p) = m.propagation.as_deref() {
+        let flag = match p {
+            "rslave" | "slave" => MsFlags::MS_SLAVE,
+            "rshared" | "shared" => MsFlags::MS_SHARED,
+            _ => MsFlags::MS_PRIVATE,
+        };
+        mount(
+            None::<&str>,
+            m.target.as_str(),
+            None::<&str>,
+            flag | MsFlags::MS_REC,
+            None::<&str>,
+        )?;
+    }
+    Ok(())
+}
+
+/// Applies the caller's mounts under `/sys` AFTER the engine's own `/sys` is in
+/// place, so each mount point carries exactly ONE mount — see
+/// [`target_under_sys`] for the defect this exists to prevent.
+///
+/// Runs post-`pivot_root`, so the host sources live under `old_root` (the same
+/// trick [`setup_dev_userns`] and [`bind_devices`] use), and the targets are
+/// resolved against `/`, which is now the container's own root.
+///
+/// Three cases, in the order they are decided:
+///
+/// 1. The engine's `/sys` ALREADY delivers this exact object (the common one: a
+///    `hostPath` whose source and target are the same path, arriving through
+///    the recursive bind). Nothing is stacked; only the flags the caller asked
+///    for are applied, because a dropped `readonly` would be a silent loss and
+///    a dropped `rshared` is what made the measured mount useless.
+/// 2. Something else is mounted there. It is detached first — an explicit
+///    mount from the caller wins over what the engine put there, which is also
+///    what `runc` does with an ordered spec — and then bound.
+/// 3. Nothing is mounted there: a plain bind.
+///
+/// Case 2 detaches what the ENGINE mounted (its own `cgroup2`, a fresh
+/// `sysfs`); a mount the recursive bind inherited from the host refuses it.
+/// Measured: `umount2("/sys/fs/bpf", MNT_DETACH)` → `EINVAL`, because the
+/// kernel locks a mount copied in from another namespace so that a user ns
+/// cannot unveil what it covers. So a caller who asks for a DIFFERENT source
+/// at a path the host already mounts (`-v /tmp/x:/sys/fs/bpf`) gets their
+/// mount on top — authoritative for every path lookup, which is what they
+/// asked for — and the point keeps two `mountinfo` entries. That shape is not
+/// what a `hostPath` produces and not what the measured failure was; the
+/// identity case above is, and it ends at exactly one entry.
+///
+/// A `mount(2)` failure here WARNS and carries on instead of refusing to start
+/// the container: before this function existed the same mount was silently
+/// shadowed, so a container that starts today must keep starting. A source
+/// that has gone missing is not fatal here either — `setup_rootfs` has already
+/// named every missing source, for these mounts too.
+fn bind_sys_mounts(old_root: &str, mounts: &[&Mount]) -> nix::Result<()> {
+    for m in mounts {
+        if !mount_target_safe(&m.target) {
+            return Err(nix::errno::Errno::EINVAL);
+        }
+        let src = format!("{old_root}{}", m.source);
+        if !std::path::Path::new(&src).exists() {
+            warn_mount(
+                m,
+                "skipped (the source is gone); the container starts without it",
+            );
+            continue;
+        }
+        if same_mount_object(&src, &m.target) {
+            if let Err(e) = reflag_existing_mount(m) {
+                warn_mount(
+                    m,
+                    &format!("already mounted there, but its flags could not be applied ({e})"),
+                );
+            }
+            continue;
+        }
+        for _ in 0..mount_entries_at_path(&m.target) {
+            let _ = umount2(m.target.as_str(), MntFlags::MNT_DETACH);
+        }
+        // Same mounting as every other volume (mount point shape, `nosuid`
+        // +`nodev` remount with the source's locked flags, `readonly`,
+        // propagation) — only the root and the source prefix differ.
+        let moved = Mount {
+            source: src,
+            ..(*m).clone()
+        };
+        if let Err(e) = bind_volume("/", &moved) {
+            warn_mount(
+                m,
+                &format!("skipped ({e}); the container starts without it"),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Says, BY NAME, that a mount did not land the way it was asked for.
+///
+/// One place for the sentence because four conditions now reach it, and
+/// because the whole point of the `-v` diagnostics in [`setup_rootfs`] is that
+/// a mount which did not happen must be findable without reading a JSON
+/// record. Writes to the child's stderr on purpose: this runs after `fork` and
+/// before `exec`, where the parent's tracing subscriber is not reachable.
+fn warn_mount(m: &Mount, what: &str) {
+    eprintln!("delonix: mount {} -> {}: {what}", m.source, m.target);
+}
+
 /// The essential device nodes every container should have in `/dev`.
 const ESSENTIAL_DEVS: &[&str] = &["null", "zero", "full", "random", "urandom", "tty"];
 
@@ -1865,17 +2072,24 @@ fn setup_rootfs(
         );
         return Err(nix::errno::Errno::ENOENT);
     }
-    for m in mounts {
+    // ... except the ones aimed under `/sys`, which the engine mounts further
+    // down and would bury (or duplicate) what this loop placed inside it. They
+    // are applied by `bind_sys_mounts` once `/sys` is final — see
+    // `target_under_sys`.
+    let (sys_mounts, early_mounts): (Vec<&Mount>, Vec<&Mount>) =
+        mounts.iter().partition(|m| target_under_sys(&m.target));
+    for m in early_mounts {
         match bind_volume(rootfs, m) {
             Ok(()) => {}
             // An engine-injected mount that does not fit this image degrades
-            // the container; it does not break it. Named, never silent — the
-            // whole point of the `-v` diagnostics above is that a mount which
-            // did not happen must be findable without reading a JSON record.
-            Err(e) if m.optional => eprintln!(
-                "delonix: skipped injected mount {} -> {} ({e}); the container starts without it",
-                m.source, m.target
-            ),
+            // the container; it does not break it. Named, never silent — see
+            // `warn_mount`, which now says this for the late `/sys` pass too.
+            Err(e) if m.optional => {
+                warn_mount(
+                    m,
+                    &format!("skipped ({e}); the container starts without it"),
+                );
+            }
             Err(e) => return Err(e),
         }
     }
@@ -1977,6 +2191,12 @@ fn setup_rootfs(
             Some("nsdelegate"),
         );
     }
+    // The caller's own mounts under `/sys`, LAST: `/sys` is final now, so each
+    // one lands exactly once and on top — an explicit mount from the caller
+    // wins over the `cgroup2` just above it, the same precedence an ordered
+    // runc spec gives. The host sources are still reachable in the old root
+    // (unmounted below, or by the caller under a user ns).
+    bind_sys_mounts("/.delonix_old", &sys_mounts)?;
     // With a user ns the old root is unmounted only AFTER setuid + setup_dev_userns
     // (which needs it to wire the host's real nodes into /dev) — done in the caller.
     if !userns {
@@ -11902,6 +12122,108 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // relative (resolves from the holder's cwd, not the rootfs)
         assert!(!mount_target_safe("etc/passwd"));
         assert!(!mount_target_safe(""));
+    }
+
+    /// The real `mountinfo` measured INSIDE a privileged container that asked
+    /// for `-v /sys/fs/bpf:/sys/fs/bpf:rshared` before the fix: the caller's
+    /// bind (`4921`, under the container root `4920`) plus the copy the
+    /// recursive bind of the host's `/sys` carried along (`4928`, under the
+    /// `/sys` mount `4923`). The host had exactly ONE bpffs.
+    const MI_DUPLICATED: &str = "\
+4920 4919 0:93 / / rw,relatime - overlay overlay rw,lowerdir=/l,upperdir=/u,workdir=/w
+4921 4920 0:34 / /sys/fs/bpf rw,nosuid,nodev,noexec,relatime shared:1241 master:12 - bpf bpf rw,mode=700
+4923 4920 0:25 / /sys rw,nosuid,nodev,noexec,relatime master:7 - sysfs sysfs rw
+4928 4923 0:34 / /sys/fs/bpf rw,nosuid,nodev,noexec,relatime master:12 - bpf bpf rw,mode=700
+4930 4923 0:31 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw,nsdelegate";
+
+    #[test]
+    fn two_mounts_at_one_point_is_what_cilium_refuses() {
+        // The count Cilium does before `multiple mount points detected at
+        // /sys/fs/bpf`. This is the defect, in the shape it was measured.
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/sys/fs/bpf"), 2);
+        // Everything else was already single — the duplication is specific to
+        // the point the caller named under a recursively bound `/sys`.
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/sys"), 1);
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/sys/fs/cgroup"), 1);
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/"), 1);
+        // A prefix is not a mount point, and neither is a longer path.
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/sys/fs"), 0);
+        assert_eq!(mount_entries_at(MI_DUPLICATED, "/sys/fs/bpf/delonix"), 0);
+        // Fixed shape: the caller's bind is no longer added underneath, so the
+        // point the agent checks carries exactly one entry.
+        let fixed: String = MI_DUPLICATED
+            .lines()
+            .filter(|l| !l.starts_with("4921 "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(mount_entries_at(&fixed, "/sys/fs/bpf"), 1);
+        // A space in a mount point arrives octal-escaped.
+        assert_eq!(
+            mount_entries_at(
+                "1 2 0:3 / /mnt/my\\040disk rw - ext4 /dev/sda rw",
+                "/mnt/my disk"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn mounts_under_sys_wait_for_the_engines_own_sys() {
+        // Deferred: `/sys` itself and anything inside it.
+        assert!(target_under_sys("/sys"));
+        assert!(target_under_sys("/sys/"));
+        assert!(target_under_sys("/sys/fs/bpf"));
+        assert!(target_under_sys("/sys//fs/bpf"));
+        assert!(target_under_sys("/sys/kernel/debug"));
+        // NOT deferred: a sibling whose name merely starts with `sys`, a
+        // deeper namesake, and the root itself. Deferring any of these would
+        // move a mount nobody asked to move.
+        assert!(!target_under_sys("/sysfoo"));
+        assert!(!target_under_sys("/system"));
+        assert!(!target_under_sys("/var/sys"));
+        assert!(!target_under_sys("/var/lib/sys/fs/bpf"));
+        assert!(!target_under_sys("/"));
+        assert!(!target_under_sys(""));
+
+        // The split `setup_rootfs` makes, over the Cilium agent's own mount
+        // list: only the two `/sys` host paths move to the late pass; the
+        // kernel modules, the xtables lock and the CNI directories keep going
+        // in before `pivot_root`, exactly as they did.
+        let m = |source: &str, target: &str| Mount {
+            source: source.into(),
+            target: target.into(),
+            readonly: false,
+            propagation: Some("rshared".into()),
+            optional: false,
+        };
+        let mounts = [
+            m("/sys/fs/bpf", "/sys/fs/bpf"),
+            m("/lib/modules", "/lib/modules"),
+            m("/run/xtables.lock", "/run/xtables.lock"),
+            m("/sys/fs/cgroup", "/run/cilium/cgroupv2"),
+            m("/sys/kernel/debug", "/sys/kernel/debug"),
+            m("/etc/cni/net.d", "/host/etc/cni/net.d"),
+        ];
+        let (deferred, early): (Vec<&Mount>, Vec<&Mount>) =
+            mounts.iter().partition(|m| target_under_sys(&m.target));
+        assert_eq!(
+            deferred
+                .iter()
+                .map(|m| m.target.as_str())
+                .collect::<Vec<_>>(),
+            ["/sys/fs/bpf", "/sys/kernel/debug"]
+        );
+        // A `/sys` SOURCE is not a `/sys` target: `/run/cilium/cgroupv2` is an
+        // ordinary mount point and nothing of the engine's lands on it.
+        assert_eq!(
+            early.iter().map(|m| m.target.as_str()).collect::<Vec<_>>(),
+            [
+                "/lib/modules",
+                "/run/xtables.lock",
+                "/run/cilium/cgroupv2",
+                "/host/etc/cni/net.d"
+            ]
+        );
     }
 
     #[test]
