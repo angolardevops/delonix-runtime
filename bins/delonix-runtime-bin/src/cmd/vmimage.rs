@@ -2331,24 +2331,12 @@ pub(crate) fn cmd_build(
                     .into(),
             ));
         }
-        // REFUSED, not ignored. `rootless_customization_steps` has no
-        // `extra_packages` parameter — it installs a fixed list — so every
-        // `--no-k8s --extra-package X` built an image without X while still
-        // stamping `DELONIX_EXTRA_PACKAGES=X` into
-        // `/etc/delonix-image-release`. Same accept-and-drop the golden-recipe
-        // check above already refuses for a `vm.yaml`, and the same reason:
-        // silently ignoring it lets someone believe the flag took effect.
-        // A `vm.yaml`/`VMfile` (`packages.install`) is the supported way to add
-        // packages to a non-k8s image today.
-        if !extra_packages.is_empty() {
-            return Err(Error::Invalid(
-                super::po::t(
-                    "--no-k8s does not support --extra-package (the rootless recipe installs a \
-                     fixed package list) — use a vm.yaml with `packages.install` instead",
-                )
-                .into(),
-            ));
-        }
+        // NOTA: `--extra-package` esteve aqui, REJEITADO em vez de ignorado,
+        // enquanto `rootless_customization_steps` instalava uma lista fixa e o
+        // nome só aparecia no `DELONIX_EXTRA_PACKAGES` do
+        // `/etc/delonix-image-release`. Deixou de precisar de rejeição: a
+        // receita rootless recebe agora `extra_packages` e acrescenta-os ao seu
+        // `apt-get`/`dnf install`.
     }
     // NOTA: `--delonix-bin` já foi rejeitado no caminho k8s ("only applies with
     // --no-k8s"). Deixou de o ser, e a razão é um defeito medido: a golden k8s
@@ -2483,7 +2471,13 @@ pub(crate) fn cmd_build(
             )
         );
         let delonix = resolve_delonix_bin(delonix_bin)?;
-        rootless_customization_steps(&extra_run, &delonix, distro, root_password.as_deref())
+        rootless_customization_steps(
+            &extra_packages,
+            &extra_run,
+            &delonix,
+            distro,
+            root_password.as_deref(),
+        )
     } else {
         let cri = resolve_cri_bin(cri_bin)?;
         // O mesmo resolver do caminho `--no-k8s`: explícito, senão o
@@ -5321,6 +5315,7 @@ fn shared_account_steps(
 /// container run` fails immediately on a userns error — defeating the point
 /// of a golden image.
 pub(crate) fn rootless_customization_steps(
+    extra_packages: &[String],
     extra_run: &[String],
     delonix_bin: &Path,
     distro: Distro,
@@ -5346,7 +5341,7 @@ pub(crate) fn rootless_customization_steps(
     // (ao contrário da golden, que tem o caminho `--offline` com os `.deb`
     // verificados no host), por isso não há mecanismo novo — há um nome a mais
     // numa lista que já existia.
-    let pkg_install_cmd = match distro {
+    let mut pkg_install_cmd = match distro {
         Distro::Ubuntu | Distro::Debian => {
             "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack qemu-guest-agent"
                 .to_string()
@@ -5360,6 +5355,28 @@ pub(crate) fn rootless_customization_steps(
                 .to_string()
         }
     };
+    // `--extra-package` ACEITAVA-E-DESCARTAVA aqui também, pela mesma razão que
+    // no caminho k8s: esta função não tinha sequer um parâmetro
+    // `extra_packages`, logo um `--no-k8s --extra-package htop` construía uma
+    // imagem SEM htop e ainda assim estampava `DELONIX_EXTRA_PACKAGES=htop` no
+    // `/etc/delonix-image-release`. Chegou a ser REJEITADO em `cmd_build` para
+    // não mentir; agora instala.
+    //
+    // Vão na MESMA invocação da lista fixa, não num segundo `install`: uma só
+    // transacção resolve as dependências de uma vez, e um nome inexistente faz
+    // o `apt-get`/`dnf` sair diferente de zero — ou seja, FALHA o build, que é
+    // exactamente o que um `--extra-package` com um typo deve fazer (o caminho
+    // offline precisa de um `dpkg -s` explícito para isso só porque lá o
+    // `dpkg -i` instala um directório de `.deb`; aqui o gestor de pacotes já o
+    // diz). Esta receita é sempre ONLINE (`--no-k8s` rejeita `--offline`), por
+    // isso não há nada a obter no host primeiro.
+    //
+    // Interpolação directa é segura: `cmd_build` já validou cada nome com
+    // `vmspec::valid_pkg` antes de chegar aqui.
+    for p in extra_packages {
+        pkg_install_cmd.push(' ');
+        pkg_install_cmd.push_str(p);
+    }
     let mut ops: Vec<CustomizeOp> = vec![
         CustomizeOp::RunCommand(pkg_install_cmd),
         // `delonix` — the daemonless engine binary itself. No systemd unit: it
@@ -6066,6 +6083,90 @@ mod tests {
         )));
     }
 
+    /// O espelho rootless dos dois testes acima — a TERCEIRA receita que
+    /// aceitava-e-descartava `--extra-package`. `rootless_customization_steps`
+    /// instalava uma lista fixa e não tinha parâmetro `extra_packages`, logo um
+    /// `--no-k8s --extra-package htop` saía sem htop a declarar
+    /// `DELONIX_EXTRA_PACKAGES=htop`; chegou a ser rejeitado em `cmd_build` por
+    /// isso. Aqui garante-se que o nome entra na MESMA linha de install da
+    /// lista fixa, nas duas famílias de gestor de pacotes.
+    #[test]
+    fn rootless_customization_steps_incluem_pacotes_extra() {
+        // (distro, agulha que identifica a linha de install, um nome da lista fixa)
+        let casos = [
+            (Distro::Ubuntu, "apt-get install", "slirp4netns"),
+            (Distro::Debian, "apt-get install", "slirp4netns"),
+            (Distro::Rocky, "dnf install", "shadow-utils"),
+            (Distro::Fedora, "dnf install", "shadow-utils"),
+        ];
+        for (distro, agulha, fixo) in casos {
+            let ops = rootless_customization_steps(
+                &["htop".to_string(), "jq".to_string()],
+                &[],
+                &PathBuf::from("/tmp/delonix"),
+                distro,
+                None,
+            );
+            let install_step = ops
+                .iter()
+                .find_map(|op| match op {
+                    CustomizeOp::RunCommand(c) if c.contains(agulha) => Some(c),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{distro:?}: devia haver um RunCommand de {agulha}"));
+            // A lista fixa continua lá: os extras ACRESCENTAM, não substituem.
+            assert!(
+                install_step.contains(fixo),
+                "{distro:?}: a lista fixa tem de sobreviver ({fixo} em falta): {install_step}"
+            );
+            for p in ["htop", "jq"] {
+                assert!(
+                    install_step.contains(p),
+                    "{distro:?}: o pacote extra {p} tem de entrar na linha de install: {install_step}"
+                );
+            }
+            // Na mesma invocação, não num segundo `install` acrescentado à cauda:
+            // uma só transacção resolve dependências, e é o código de saída dela
+            // que faz um nome com typo falhar o build.
+            assert_eq!(
+                ops.iter()
+                    .filter(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains(agulha)))
+                    .count(),
+                1,
+                "{distro:?}: os extras não podem abrir uma segunda linha de install"
+            );
+        }
+    }
+
+    /// Sem `--extra-package` a receita rootless fica byte-por-byte o que era —
+    /// o par do `offline_sem_pacotes_extra_nao_acrescenta_assercoes`.
+    #[test]
+    fn rootless_sem_pacotes_extra_fica_inalterado() {
+        for distro in [
+            Distro::Ubuntu,
+            Distro::Debian,
+            Distro::Rocky,
+            Distro::Fedora,
+        ] {
+            let bin = PathBuf::from("/tmp/delonix");
+            let antes = rootless_customization_steps(&[], &[], &bin, distro, None);
+            let com = rootless_customization_steps(&["htop".to_string()], &[], &bin, distro, None);
+            // Mesmo número de operações: um extra não cria passos novos.
+            assert_eq!(
+                antes.len(),
+                com.len(),
+                "{distro:?}: um pacote extra não devia acrescentar operações"
+            );
+            assert!(
+                !antes.iter().any(|o| matches!(
+                    o,
+                    CustomizeOp::RunCommand(c) if c.contains("htop")
+                )),
+                "{distro:?}: sem extras nada menciona htop"
+            );
+        }
+    }
+
     /// Um `--extra-package` que o `pkgs.k8s.io` não tem é DEVOLVIDO para o
     /// chamador o encaminhar para o arquivo da distro (onde um nome que não
     /// existe dá erro), e um que ele tem (`cri-tools`) não é pedido duas vezes.
@@ -6624,8 +6725,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn sem_a_flag_a_imagem_nao_abre_porta_nenhuma() {
         // O agente de métricas é opt-in: uma imagem publicada não leva um
         // listener que o inquilino nunca pediu.
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Ubuntu,
+            None,
+        );
         assert!(!ops.iter().any(|o| matches!(
             o,
             CustomizeOp::RunCommand(c) if c.contains("node-exporter") || c.contains("node_exporter")
@@ -6887,7 +6993,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn rootless_steps_instalam_dependencias_e_o_binario_delonix_sem_cri() {
         let delonix = PathBuf::from("/tmp/delonix");
-        let ops = rootless_customization_steps(&[], &delonix, Distro::Ubuntu, None);
+        let ops = rootless_customization_steps(&[], &[], &delonix, Distro::Ubuntu, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -6912,8 +7018,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_configuram_subuid_e_subgid_para_delonix() {
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Ubuntu,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -6931,8 +7042,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_escrevem_o_perfil_apparmor_unconfined_userns() {
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Ubuntu,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -6947,8 +7063,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_partilham_a_criacao_de_conta_delonix() {
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Ubuntu,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -6973,8 +7094,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_rocky_usa_dnf_e_pacotes_rpm() {
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Rocky,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -6995,8 +7121,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_rocky_usa_wheel_bashrc_e_dnf_clean() {
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Rocky,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -7029,7 +7160,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             )
         };
         for d in [Distro::Ubuntu, Distro::Debian, Distro::Rocky] {
-            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d, None);
+            let ops =
+                rootless_customization_steps(&[], &[], &PathBuf::from("/tmp/delonix"), d, None);
             assert!(
                 hardened(&ops),
                 "a golden rootless ({d:?}) tem de desligar o login por password"
@@ -7071,8 +7203,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // would fail and take down the whole `virt-customize` build (the
         // `&&` isn't guarded). Ubuntu-only gating is the fix; this test
         // proves Rocky never even sees the command.
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Rocky,
+            None,
+        );
         assert!(!ops
             .iter()
             .any(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("apparmor"))));
@@ -7107,7 +7244,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Distro::Rocky,
             Distro::Fedora,
         ] {
-            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d, None);
+            let ops =
+                rootless_customization_steps(&[], &[], &PathBuf::from("/tmp/delonix"), d, None);
             assert!(
                 has_lowports(&ops),
                 "rootless golden ({d:?}) needs the sysctl"
@@ -7133,8 +7271,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn rootless_steps_debian_nao_muda_de_comportamento() {
         // v0.17.0 regression guard: Debian's sudo/bashrc/apt-clean output must
         // stay byte-identical to before this Rocky-driven refactor.
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Debian, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Debian,
+            None,
+        );
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -7848,8 +7991,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // `/etc/bash.bashrc`), `dnf clean all`. Verified against the Rocky
         // steps rather than restated, so the two cannot drift apart.
         let bin = PathBuf::from("/tmp/delonix");
-        let fedora = rootless_customization_steps(&[], &bin, Distro::Fedora, None);
-        let rocky = rootless_customization_steps(&[], &bin, Distro::Rocky, None);
+        let fedora = rootless_customization_steps(&[], &[], &bin, Distro::Fedora, None);
+        let rocky = rootless_customization_steps(&[], &[], &bin, Distro::Rocky, None);
         let cmds = |ops: &[CustomizeOp]| -> Vec<String> {
             ops.iter()
                 .filter_map(|o| match o {
@@ -7871,8 +8014,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // `kernel.apparmor_restrict_unprivileged_userns` patch); Fedora uses
         // SELinux and has no /etc/apparmor.d, so writing there would fail the
         // whole `virt-customize` run — the same trap already fixed for Rocky.
-        let ops =
-            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Fedora, None);
+        let ops = rootless_customization_steps(
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix"),
+            Distro::Fedora,
+            None,
+        );
         assert!(!ops.iter().any(|o| matches!(
             o,
             CustomizeOp::RunCommand(c) if c.contains("apparmor")
