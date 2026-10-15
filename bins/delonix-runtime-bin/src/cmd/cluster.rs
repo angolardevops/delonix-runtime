@@ -672,11 +672,13 @@ pub enum ClusterCmd {
     /// and the matching context — the same thing `cluster prune <name>` does.
     ///
     /// Omitting the name resolves among KIND-MODE clusters only, so name a
-    /// VM cluster explicitly. The same removal `delonix delete clusters
-    /// <name>` already does (the generic kubectl-style verb this engine
-    /// gives every Kind) — this is just the more discoverable spelling
-    /// inside `cluster --help`, with a confirmation prompt `delete` does not
-    /// have.
+    /// VM cluster explicitly. For a kind-mode cluster this is the same
+    /// removal `delonix delete clusters <name>` already does (the generic
+    /// kubectl-style verb this engine gives every Kind) — just the more
+    /// discoverable spelling inside `cluster --help`, with a confirmation
+    /// prompt `delete` does not have. For a VM-provisioned one it is the
+    /// ONLY verb that tears the cluster down: `cmd_delete` hands straight
+    /// to kind-mode's `delete` and has no VM branch at all.
     Destroy {
         /// Cluster name. Omit when there is only one.
         #[arg(add = ArgValueCandidates::new(super::complete::destroyable_clusters))]
