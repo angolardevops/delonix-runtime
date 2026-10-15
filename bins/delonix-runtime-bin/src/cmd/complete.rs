@@ -92,6 +92,33 @@ pub fn capabilities() -> Vec<CompletionCandidate> {
     )
 }
 
+/// Scaffold template names — the `-t` of all four `init`s (`init`, `stack
+/// init`, `vm init`, `container init`; `main::TEMPLATE_INIT_PATHS` is the
+/// list), in catalog order. Static, like [`capabilities`]: the catalog is code
+/// (embedded by `build.rs`), so no store is opened.
+///
+/// Delegates to `scaffold::template_names()` — the same list `--help` and the
+/// "unknown template" refusal print, so a TAB can never offer a name the
+/// command would then reject.
+///
+/// Two things it leaves out, deliberately:
+///
+/// - **Aliases** (`TEMPLATE_ALIASES`: `python` → `fastapi`). They still answer,
+///   but completing one would teach the old name to whoever is discovering the
+///   catalog by TAB. `template_names()` already excludes them and a test in
+///   `scaffold` pins that ("an alias is not listed as a template"); this is the
+///   same decision, not a second one.
+/// - **`list`**, the pseudo-value that prints the catalog. It is a verb wearing
+///   a value's clothes, and the TAB it would be offered on *is* the catalog —
+///   `-t <TAB>` answers the question `-t list` exists to answer.
+pub fn templates() -> Vec<CompletionCandidate> {
+    cands(
+        super::scaffold::template_names()
+            .into_iter()
+            .map(String::from),
+    )
+}
+
 pub fn vms() -> Vec<CompletionCandidate> {
     cands(
         delonix_vm::list(&state_root())

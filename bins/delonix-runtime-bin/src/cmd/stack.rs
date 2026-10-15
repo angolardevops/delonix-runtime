@@ -90,7 +90,7 @@ pub enum StackCmd {
         force: bool,
         /// Generates a complete PROJECT for a stack (e.g. `fastapi`) with best practices,
         /// instead of the generic scaffold. `--template list` shows the available ones.
-        #[arg(long, short = 't')]
+        #[arg(long, short = 't', add = clap_complete::engine::ArgValueCandidates::new(super::complete::templates))]
         template: Option<String>,
         /// Version parameter some templates read — an image tag, a framework
         /// version, or a toolchain version, depending on the template; the
