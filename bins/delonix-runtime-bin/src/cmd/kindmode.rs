@@ -1228,9 +1228,7 @@ fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Conta
     }
     match name {
         Some(n) => {
-            let nodes = by_cluster
-                .remove(n)
-                .ok_or_else(|| Error::NotFound(format!("cluster kind '{n}'")))?;
+            let nodes = by_cluster.remove(n).ok_or_else(|| unresolved(n))?;
             Ok((n.to_string(), nodes))
         }
         None if by_cluster.len() == 1 => Ok(by_cluster.into_iter().next().unwrap()),
@@ -1246,6 +1244,116 @@ fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Conta
             )))
         }
     }
+}
+
+/// The kind-mode nodes labelled for `name`, WITHOUT the 0/1/many resolution
+/// [`cluster_nodes`] does for an omitted one. An empty vector is an answer
+/// here, not an error: the callers that reach for this one (`delete`,
+/// `destroy`, `prune`) each have something different to say about a cluster
+/// that has no nodes, and only they know which.
+fn nodes_of(store: &Store, name: &str) -> Result<Vec<Container>> {
+    Ok(store
+        .list()?
+        .into_iter()
+        .filter(|c| c.labels.get("io.x-k8s.kind.cluster").map(String::as_str) == Some(name))
+        .map(|mut c| {
+            delonix_linux::reconcile_status(&mut c);
+            c
+        })
+        .collect())
+}
+
+/// What `<root>/clusters` still holds for one cluster: the state directory
+/// (`kubeadm.conf`, the exported `kubeconfig.yaml`, and for a `mode: vm`
+/// cluster the SSH key `cluster kubeadm` generated) and the kubeconfig
+/// exported beside it. Both are absent for a cluster that never existed, and
+/// both OUTLIVE one whose nodes went away by another route — which is the
+/// whole reason `prune` exists, and the reason a name has to be resolvable
+/// against this and not only against containers.
+struct Leftovers {
+    dir: Option<std::path::PathBuf>,
+    kubeconfig: Option<std::path::PathBuf>,
+}
+
+impl Leftovers {
+    fn any(&self) -> bool {
+        self.dir.is_some() || self.kubeconfig.is_some()
+    }
+
+    /// The paths that are actually there, so a message can name them instead
+    /// of asserting that state exists somewhere the reader has to guess.
+    fn paths(&self) -> Vec<String> {
+        self.dir
+            .iter()
+            .chain(self.kubeconfig.iter())
+            .map(|p| p.display().to_string())
+            .collect()
+    }
+}
+
+fn leftovers_in(root: &std::path::Path, name: &str) -> Leftovers {
+    let dir = root.join("clusters").join(name);
+    let kubeconfig = root
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    Leftovers {
+        dir: dir.is_dir().then_some(dir),
+        kubeconfig: kubeconfig.is_file().then_some(kubeconfig),
+    }
+}
+
+fn leftovers(name: &str) -> Leftovers {
+    leftovers_in(&super::util::state_root(), name)
+}
+
+/// How many VMs of a cluster named `name` this host still has — by the same
+/// predicate `cluster destroy` resolves a VM cluster with
+/// (`cluster::is_cluster_vm`), which covers the `-lb` and `-etcd<N>` nodes
+/// that [`vm_clusters`]'s control-plane/worker convention deliberately does
+/// not. A host with no VM backend at all has none, which is an answer and
+/// not a failure.
+fn vm_node_count(name: &str) -> usize {
+    delonix_vm::list(&super::util::state_root())
+        .map(|vms| {
+            vms.iter()
+                .filter(|v| super::cluster::is_cluster_vm(&v.name, name))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// Why `name` did not resolve to kind-mode nodes — three answers that the one
+/// `no such cluster kind '<name>'` used to flatten into a sentence that was
+/// wrong for two of them.
+///
+/// Lived through on 2026-10-15: every container on the host had been removed
+/// out of band, and `cluster health lab` — a `mode: vm` cluster — answered
+/// `no such cluster kind 'lab'`, which reads as if `kind` described the
+/// cluster's own MODE. Ten cluster state directories were sitting in
+/// `<root>/clusters` at the time, so "no such cluster" was not true either:
+/// what was gone were the nodes, and the state the operator then had to
+/// `rm -rf` by hand was right there.
+fn unresolved(name: &str) -> Error {
+    let vms = vm_node_count(name);
+    if vms > 0 {
+        return Error::Invalid(super::po::tf(
+            "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); this command \
+             serves kind-mode clusters only, whose nodes are containers",
+            &[("name", name), ("n", &vms.to_string())],
+        ));
+    }
+    let left = leftovers(name);
+    if left.any() {
+        return Error::Invalid(super::po::tf(
+            "cluster '{name}' has no nodes left — its state is still on disk ({paths}). Collect \
+             it with `delonix cluster prune {name}`",
+            &[("name", name), ("paths", &left.paths().join(", "))],
+        ));
+    }
+    Error::NotFound(super::po::tf(
+        "kind-mode cluster '{name}'",
+        &[("name", name)],
+    ))
 }
 
 /// The snapshotter configured in the node's containerd (`fuse-overlayfs` in a
@@ -1473,88 +1581,220 @@ impl Drop for RemoveOnDrop {
     }
 }
 
-/// Removes a kind cluster: stops and deletes the nodes with the cluster label.
-/// The clusters that have state on disk but not one node left running or
-/// stopped — read once, so the preview and the sweep cannot disagree.
+/// The clusters that have state on disk but not one node left, running or
+/// stopped — read once, so a preview and the sweep that follows it cannot
+/// disagree.
 ///
-/// A cluster EXISTS when containers carry its `io.x-k8s.kind.cluster` label;
-/// `cluster ls` has always derived it that way rather than keeping a registry
-/// that could drift. The corollary is that a cluster whose nodes were removed
-/// by hand — a `container rm`, a `system prune`, a host that lost its rootfs —
-/// leaves its directory, its kubeconfig and its `~/.kube/config` context
-/// behind, and nothing ever collects them. That last one is not cosmetic: the
-/// context still names `127.0.0.1:<port>`, and that port may by now belong to
+/// A cluster EXISTS when containers carry its `io.x-k8s.kind.cluster` label
+/// (or, for `mode: vm`, when VMs carry its naming convention); `cluster ls`
+/// has always derived it that way rather than keeping a registry that could
+/// drift. The corollary is that a cluster whose nodes were removed by hand —
+/// a `container rm`, a `system prune`, a host that lost its rootfs — leaves
+/// its directory, its kubeconfig and its `~/.kube/config` context behind, and
+/// nothing ever collects them. That last one is not cosmetic: the context
+/// still names `127.0.0.1:<port>`, and that port may by now belong to
 /// something else entirely.
 pub(crate) fn doomed_clusters(store: &Store) -> Result<Vec<String>> {
-    let live: std::collections::HashSet<String> = store
+    let kind_live: std::collections::HashSet<String> = store
         .list()?
         .into_iter()
         .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned())
         .collect();
+    let root = super::util::state_root();
+    // A `mode: vm` cluster's nodes are VMs, and no VM carries a container
+    // label — so reading containers alone made every live VM cluster on this
+    // host look like a leftover. What that state directory holds is the SSH
+    // key `cluster kubeadm` generated for it (`<root>/clusters/<name>/
+    // id_ed25519`): a `cluster prune` would have locked the operator out of a
+    // cluster that was UP. Found 2026-10-15, giving `prune` its name filter.
+    let vms: Vec<String> = delonix_vm::list(&root)
+        .map(|l| l.into_iter().map(|v| v.name).collect())
+        .unwrap_or_default();
+    Ok(doomed_in(&root, &kind_live, &vms))
+}
 
-    let root = super::util::state_root().join("clusters");
+/// The pure half of [`doomed_clusters`]: the names under `<root>/clusters`
+/// that neither a labelled container nor a VM accounts for. Split out so the
+/// "a live cluster is never a candidate" rule is testable without a store, a
+/// VM backend, or a real `$HOME` — the rule is the only thing standing
+/// between `prune` and a cluster somebody is using.
+fn doomed_in(
+    root: &std::path::Path,
+    kind_live: &std::collections::HashSet<String>,
+    vms: &[String],
+) -> Vec<String> {
     let mut names = std::collections::BTreeSet::new();
-    if let Ok(rd) = std::fs::read_dir(&root) {
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().into_owned();
-            // Both shapes the state takes: the directory `<name>/` and the
-            // exported `<name>-kubeconfig.yaml` beside it.
-            let name = n
-                .strip_suffix("-kubeconfig.yaml")
-                .map(str::to_string)
-                .unwrap_or(n);
-            if !name.is_empty() && !live.contains(&name) {
-                names.insert(name);
+    let Ok(rd) = std::fs::read_dir(root.join("clusters")) else {
+        return Vec::new();
+    };
+    for e in rd.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        // Both shapes the state takes: the directory `<name>/` and the
+        // exported `<name>-kubeconfig.yaml` beside it.
+        let name = n
+            .strip_suffix("-kubeconfig.yaml")
+            .map(str::to_string)
+            .unwrap_or(n);
+        if name.is_empty() || kind_live.contains(&name) {
+            continue;
+        }
+        if vms.iter().any(|v| super::cluster::is_cluster_vm(v, &name)) {
+            continue;
+        }
+        names.insert(name);
+    }
+    names.into_iter().collect()
+}
+
+/// What `cluster prune [NAMES]...` is going to collect.
+///
+/// No name = every orphan, which is the behaviour the help and the published
+/// examples document and the only one this command had. With names, each one
+/// has to BE an orphan: a cluster that still has nodes is refused BY NAME
+/// (`cluster destroy`/`delete clusters <name>` are the verbs that take a live
+/// cluster down), and so is a name nothing on disk accounts for — collecting
+/// zero things and reporting `removed: 0` is how a typo reads as "already
+/// clean".
+pub(crate) fn prune_selection(store: &Store, names: &[String]) -> Result<Vec<String>> {
+    let doomed = doomed_clusters(store)?;
+    if names.is_empty() {
+        return Ok(doomed);
+    }
+    for n in names {
+        // The names end up in `remove_dir_all(cluster_dir(name))`, the same
+        // reason `delete` checks them before touching anything.
+        super::cluster::check_cluster_name(n)?;
+    }
+    let (selected, unmatched) = partition_doomed(&doomed, names);
+    if let Some(n) = unmatched.first() {
+        return Err(why_not_doomed(store, n)?);
+    }
+    Ok(selected)
+}
+
+/// Pure: splits the asked-for names into the ones this host has leftovers
+/// for and the ones it does not, preserving the order they were given in and
+/// collapsing a name repeated on the command line.
+fn partition_doomed(doomed: &[String], names: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut selected: Vec<String> = Vec::new();
+    let mut unmatched: Vec<String> = Vec::new();
+    for n in names {
+        if doomed.iter().any(|d| d == n) {
+            if !selected.contains(n) {
+                selected.push(n.clone());
             }
+        } else if !unmatched.contains(n) {
+            unmatched.push(n.clone());
         }
     }
-    Ok(names.into_iter().collect())
+    (selected, unmatched)
+}
+
+/// Why a name `cluster prune` was given is not a leftover — said in the terms
+/// of THIS verb, which is what sends the operator to the right one instead of
+/// to `--help`.
+fn why_not_doomed(store: &Store, name: &str) -> Result<Error> {
+    let nodes = nodes_of(store, name)?.len();
+    if nodes > 0 {
+        return Ok(Error::Invalid(super::po::tf(
+            "cluster '{name}' still has {n} node(s) — `cluster prune` only collects clusters \
+             with none left; remove it with `delonix cluster destroy {name}`",
+            &[("name", name), ("n", &nodes.to_string())],
+        )));
+    }
+    let vms = vm_node_count(name);
+    if vms > 0 {
+        return Ok(Error::Invalid(super::po::tf(
+            "cluster '{name}' still has {n} VM(s) — `cluster prune` only collects clusters with \
+             no nodes left; take it down with `delonix cluster destroy {name}`",
+            &[("name", name), ("n", &vms.to_string())],
+        )));
+    }
+    Ok(Error::NotFound(super::po::tf(
+        "cluster '{name}' — nothing under {dir} left to collect",
+        &[
+            ("name", name),
+            (
+                "dir",
+                &super::util::state_root()
+                    .join("clusters")
+                    .display()
+                    .to_string(),
+            ),
+        ],
+    )))
 }
 
 /// `cluster prune` — the leftovers of clusters whose nodes are already gone.
 ///
-/// Reuses [`delete`]'s own cleanup steps rather than restating them, because a
-/// second implementation of "what a dead cluster leaves behind" is how the two
-/// start to disagree about the kube context. A cluster with nodes — running or
-/// stopped — is never touched here: `cluster delete` is the verb for that, and
-/// it takes a name on purpose.
-pub(crate) fn prune(store: &Store) -> Result<usize> {
-    let mut n = 0;
-    for name in doomed_clusters(store)? {
-        let _ = std::fs::remove_file(kubeconfig_path(&name));
-        let _ = std::fs::remove_dir_all(cluster_dir(&name));
-        let net = cluster_net(&name);
-        if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
-            if nstore.get(&net).is_ok() {
-                let _ = nstore.remove(&net);
-                delonix_sdn::infra::network_remove(&net);
-            }
-        }
-        if let Err(e) = remove_kubecontext(&name) {
-            super::output::warn(&super::po::tf(
-                "could not remove context '{ctx}' from kubeconfig: {err}",
-                &[("ctx", &context_name(&name)), ("err", &e.to_string())],
-            ));
-        }
+/// Takes the list [`prune_selection`] resolved and the confirmation prompt
+/// just showed, instead of deriving it a second time: the preview and the
+/// removal being the same set is not something to leave to two reads of the
+/// same directory. A cluster with nodes — running or stopped — never reaches
+/// here; `cluster destroy`/`delete clusters <name>` are the verbs for that.
+pub(crate) fn prune(doomed: &[String]) -> Result<usize> {
+    for name in doomed {
+        collect_leftovers(name);
         println!("{name}");
-        n += 1;
     }
-    Ok(n)
+    Ok(doomed.len())
+}
+
+/// Everything a cluster whose nodes are gone still owns on this host: the
+/// exported kubeconfig, the state directory, the network created FOR it, and
+/// its `~/.kube/config` context.
+///
+/// ONE implementation, shared by [`prune`] and by [`delete`] on a cluster
+/// with no nodes left — a second notion of "what a dead cluster leaves
+/// behind" is how the two start to disagree about the kube context, and that
+/// is the entry that actually hurts: it still names `127.0.0.1:<port>`, and
+/// by now that port may answer for something else.
+///
+/// Best-effort by design (`remove_file`/`remove_dir_all` of what may already
+/// be gone), except the kubeconfig context, where a failure is reported —
+/// silently leaving a context pointing at a dead port is the defect.
+fn collect_leftovers(name: &str) {
+    let _ = std::fs::remove_file(kubeconfig_path(name));
+    let _ = std::fs::remove_dir_all(cluster_dir(name));
+    remove_cluster_network(name);
+    if let Err(e) = remove_kubecontext(name) {
+        super::output::warn(&super::po::tf(
+            "could not remove context '{ctx}' from kubeconfig: {err}",
+            &[("ctx", &context_name(name)), ("err", &e.to_string())],
+        ));
+    }
+}
+
+/// Is the network created FOR this cluster (`dlx-<name>`) still registered?
+/// Asked separately from removing it so `delete` only shows the step when
+/// there is one to show.
+fn cluster_network_exists(name: &str) -> bool {
+    delonix_sdn::NetworkStore::open(super::util::state_root())
+        .map(|nstore| nstore.get(&cluster_net(name)).is_ok())
+        .unwrap_or(false)
+}
+
+/// Removes `dlx-<name>`, the network this engine created for the cluster. A
+/// network the OPERATOR created is never touched — same boundary `delete`
+/// has always kept, and the reason this takes a cluster name and not a
+/// network name.
+fn remove_cluster_network(name: &str) {
+    let net = cluster_net(name);
+    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
+        if nstore.get(&net).is_ok() {
+            let _ = nstore.remove(&net);
+            delonix_sdn::infra::network_remove(&net);
+        }
+    }
 }
 
 pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<()> {
     // `delete` ends in `remove_dir_all(cluster_dir(name))` — refuse a name that
     // could point outside `<root>/clusters` before anything is touched.
     super::cluster::check_cluster_name(name)?;
-    let label = format!("io.x-k8s.kind.cluster={name}");
-    let (k, v) = label.split_once('=').unwrap();
-    let nodes: Vec<Container> = store
-        .list()?
-        .into_iter()
-        .filter(|c| c.labels.get(k).map(|x| x == v).unwrap_or(false))
-        .collect();
+    let nodes = nodes_of(store, name)?;
     if nodes.is_empty() {
-        return Err(Error::NotFound(format!("cluster kind '{name}'")));
+        return delete_without_nodes(name);
     }
     super::output::info(&format!("{} \"{name}\"", super::po::t("Deleting cluster")));
     let mut p = super::output::Progress::new();
@@ -1572,17 +1812,17 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     // (unlike a user network, which a `container rm` never deletes).
     // This way the subnet/bridge become free to reuse. Volumes are NOT touched:
     // they are explicit, like in docker.
-    let net = cluster_net(name);
-    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
-        if nstore.get(&net).is_ok() {
-            p.step(
-                &format!("{} '{net}'", super::po::t("Freeing network")),
-                "🌐",
-            );
-            let _ = nstore.remove(&net);
-            delonix_sdn::infra::network_remove(&net);
-            p.ok();
-        }
+    if cluster_network_exists(name) {
+        p.step(
+            &format!(
+                "{} '{}'",
+                super::po::t("Freeing network"),
+                cluster_net(name)
+            ),
+            "🌐",
+        );
+        remove_cluster_network(name);
+        p.ok();
     }
     p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
     let _ = std::fs::remove_file(kubeconfig_path(name));
@@ -1618,6 +1858,51 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     Ok(())
 }
 
+/// `delete clusters <name>` on a cluster that has no nodes left.
+///
+/// Name resolution goes through container labels, so an orphan — nodes gone
+/// by `container rm`, a `system prune`, a lost rootfs, a collapsed rootless
+/// netns — used to be unreachable BY NAME: `delete` answered `no such
+/// cluster kind '<name>'` while its state directory, its exported kubeconfig
+/// and its `~/.kube/config` context were all still on disk. `cluster prune`,
+/// which takes no name and collects every orphan at once, was the only verb
+/// that could reach them, so "clean up just this one" ended in `rm -rf` plus
+/// a manual `kubectl config delete-context` (lived through 2026-10-15, with
+/// ten orphaned state directories on one host).
+fn delete_without_nodes(name: &str) -> Result<()> {
+    // A `mode: vm` cluster has no containers either, and the state directory
+    // holds the SSH key its VMs are reachable BY — collecting it here would
+    // lock the operator out of a cluster that is up. `cluster destroy` is the
+    // verb that knows how to take one of those down (`destroy_vm_cluster`).
+    let vms = vm_node_count(name);
+    if vms > 0 {
+        return Err(Error::Invalid(super::po::tf(
+            "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); take it down \
+             with `delonix cluster destroy {name}`",
+            &[("name", name), ("n", &vms.to_string())],
+        )));
+    }
+    let left = leftovers(name);
+    if !left.any() {
+        // Nothing by any route: the name is simply not a cluster here.
+        return Err(unresolved(name));
+    }
+    super::output::info(&super::po::tf(
+        "Deleting the leftover state of cluster \"{name}\" — it has no nodes left",
+        &[("name", name)],
+    ));
+    collect_leftovers(name);
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}' removed (no nodes left: state, kubeconfig and the \
+             `~/.kube/config` context collected)",
+            &[("name", name)],
+        )
+    );
+    Ok(())
+}
+
 /// `cluster destroy` — the same removal [`delete`] does, behind a
 /// confirmation prompt. `delete clusters <name>` (the generic verb every
 /// Kind gets) calls `delete` directly with none — this is the more
@@ -1629,6 +1914,34 @@ pub(crate) fn destroy(
     name: Option<&str>,
     force: bool,
 ) -> Result<()> {
+    // An orphan is a legitimate target here too: `destroy` is documented as
+    // the same removal `delete` does with a prompt in front, and `delete`
+    // reaches one now. Only for an EXPLICIT name — resolving an omitted one
+    // stays a question about live clusters, and quietly picking a cluster
+    // whose nodes are already gone as "the only one" is not what a bare
+    // `cluster destroy` should do.
+    if let Some(n) = name {
+        super::cluster::check_cluster_name(n)?;
+        if nodes_of(store, n)?.is_empty() && vm_node_count(n) == 0 && leftovers(n).any() {
+            if !super::prune::confirm(
+                force,
+                &super::po::tf(
+                    "`cluster destroy` collects what is left of cluster '{name}', which has no \
+                     nodes — pass --force to confirm when not on a terminal",
+                    &[("name", n)],
+                ),
+                Some(super::po::tf(
+                    "Cluster '{name}' has no nodes left. This will remove its state directory, \
+                     its exported kubeconfig, and the matching ~/.kube/config context.",
+                    &[("name", n)],
+                )),
+                super::po::t("Continue? [y/N]"),
+            )? {
+                return Ok(());
+            }
+            return delete_without_nodes(n);
+        }
+    }
     let (resolved, nodes) = cluster_nodes(store, name)?;
     if !super::prune::confirm(
         force,
@@ -2522,5 +2835,118 @@ mod pod_cidr_tests {
                 ("new-node".to_string(), String::new()),
             ]
         );
+    }
+}
+
+/// The on-disk half of what a cluster is: `<root>/clusters`, which outlives
+/// every node and is what makes an orphan reachable by name.
+#[cfg(test)]
+mod leftover_tests {
+    use super::{doomed_in, leftovers_in, partition_doomed};
+
+    /// A state root with the two shapes a cluster's state takes on disk: the
+    /// directory `<name>/` and the exported `<name>-kubeconfig.yaml`.
+    fn state_root_with(dirs: &[&str], kubeconfigs: &[&str]) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("clusters")).unwrap();
+        for d in dirs {
+            std::fs::create_dir_all(tmp.path().join("clusters").join(d)).unwrap();
+        }
+        for k in kubeconfigs {
+            std::fs::write(
+                tmp.path()
+                    .join("clusters")
+                    .join(format!("{k}-kubeconfig.yaml")),
+                "",
+            )
+            .unwrap();
+        }
+        tmp
+    }
+
+    fn live(names: &[&str]) -> std::collections::HashSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// Both shapes count, and a cluster whose nodes are still labelled is
+    /// never a candidate — the two halves of what `prune` means.
+    #[test]
+    fn doomed_reads_the_directory_and_the_exported_kubeconfig() {
+        let root = state_root_with(&["kambacode", "up"], &["kambacode", "alone"]);
+        assert_eq!(
+            doomed_in(root.path(), &live(&["up"]), &[]),
+            vec!["alone".to_string(), "kambacode".to_string()],
+            "the directory and the `-kubeconfig.yaml` are the same cluster, counted once"
+        );
+    }
+
+    /// REGRESSION: a `mode: vm` cluster's nodes are VMs and carry no container
+    /// label, so reading containers alone made every live VM cluster look like
+    /// a leftover — and `<root>/clusters/<name>/` is where `cluster kubeadm`
+    /// keeps the SSH key those VMs are reachable by. A `cluster prune` on this
+    /// host would have locked the operator out of a cluster that was UP.
+    ///
+    /// The `-lb` and `-etcd<N>` nodes count as much as `-cp1`/`-w1`: a cluster
+    /// mid-teardown whose only remaining VM is its load balancer is still not
+    /// state nobody accounts for.
+    #[test]
+    fn a_live_vm_cluster_is_never_a_leftover() {
+        let root = state_root_with(&["lab", "gone"], &["lab", "gone"]);
+        for alive in [
+            vec!["lab-cp1".to_string(), "lab-w1".to_string()],
+            vec!["lab-lb".to_string()],
+            vec!["lab-etcd1".to_string()],
+        ] {
+            assert_eq!(
+                doomed_in(root.path(), &live(&[]), &alive),
+                vec!["gone".to_string()],
+                "cluster 'lab' still has {alive:?}"
+            );
+        }
+        // A VM whose name merely starts with the same characters belongs to
+        // another cluster and accounts for nothing here.
+        assert_eq!(
+            doomed_in(root.path(), &live(&[]), &["labextra-cp1".to_string()]),
+            vec!["gone".to_string(), "lab".to_string()],
+        );
+    }
+
+    /// No name = every orphan (the documented behaviour, kept), a name =
+    /// that one only, and a name repeated on the command line is collected
+    /// once — `remove_dir_all` twice would be harmless, but reporting
+    /// "removed: 2" for one cluster is not.
+    #[test]
+    fn prune_with_names_selects_only_those() {
+        let doomed = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let (sel, un) = partition_doomed(&doomed, &[]);
+        assert!(sel.is_empty() && un.is_empty(), "no names decides nothing");
+
+        let (sel, un) = partition_doomed(&doomed, &["c".to_string(), "a".to_string()]);
+        assert_eq!(sel, vec!["c".to_string(), "a".to_string()]);
+        assert!(un.is_empty());
+
+        let (sel, un) = partition_doomed(&doomed, &["a".to_string(), "a".to_string()]);
+        assert_eq!(sel, vec!["a".to_string()]);
+        assert!(un.is_empty());
+
+        // A name that is not a leftover is reported back, never silently
+        // dropped: collecting nothing while printing `removed: 0` is how a
+        // typo reads as "already clean".
+        let (sel, un) = partition_doomed(&doomed, &["b".to_string(), "typo".to_string()]);
+        assert_eq!(sel, vec!["b".to_string()]);
+        assert_eq!(un, vec!["typo".to_string()]);
+    }
+
+    /// `<root>/clusters` is what makes an orphan reachable by name at all —
+    /// an empty directory is not state, and a kubeconfig on its own is.
+    #[test]
+    fn leftovers_see_each_shape_the_state_takes() {
+        let root = state_root_with(&["withdir"], &["withkubeconfig"]);
+        assert!(leftovers_in(root.path(), "withdir").any());
+        assert!(leftovers_in(root.path(), "withkubeconfig").any());
+        assert!(!leftovers_in(root.path(), "never-existed").any());
+        let paths = leftovers_in(root.path(), "withdir").paths();
+        assert_eq!(paths.len(), 1, "{paths:?}");
+        assert!(paths[0].ends_with("clusters/withdir"), "{paths:?}");
     }
 }

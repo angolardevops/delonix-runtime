@@ -733,8 +733,15 @@ pub enum ClusterCmd {
     /// `127.0.0.1:<port>`, and by now that port may answer for something else.
     ///
     /// **A cluster with nodes is never touched, stopped ones included** — for
-    /// that there is `cluster delete`, which takes a name on purpose.
+    /// that there is `cluster destroy` (or `delete clusters <name>`, the same
+    /// removal without the prompt), which takes a name on purpose.
+    ///
+    /// With no NAMES this collects every orphan at once; naming one collects
+    /// that one and leaves the others exactly as they are.
     Prune {
+        /// Orphans to collect (omit = every cluster with no nodes left).
+        #[arg(add = ArgValueCandidates::new(super::complete::cluster_leftovers))]
+        names: Vec<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
         force: bool,
@@ -989,9 +996,12 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 },
             );
         }
-        ClusterCmd::Prune { force } => {
+        ClusterCmd::Prune { ref names, force } => {
             let (_, store) = super::util::open_stores()?;
-            let doomed = super::kindmode::doomed_clusters(&store)?;
+            // With names, this is also the gate: a name that is not an orphan
+            // is refused HERE, before the prompt, so the question is never
+            // asked about a set that does not match what was typed.
+            let doomed = super::kindmode::prune_selection(&store, names)?;
             let preview = (!doomed.is_empty()).then(|| {
                 super::po::tf(
                     "This will remove the leftover state of {n} cluster(s): {list}",
@@ -1015,7 +1025,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             )? {
                 return Ok(());
             }
-            let n = super::kindmode::prune(&store)?;
+            let n = super::kindmode::prune(&doomed)?;
             println!(
                 "{}",
                 super::po::tf("removed: {n} cluster leftover(s)", &[("n", &n.to_string())])
@@ -2196,7 +2206,7 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
 /// PURE, so the naming convention this file has in TWO places (the names it
 /// writes, and now the names a destroy has to find) cannot quietly drift
 /// apart from a single string literal changing in only one of them.
-fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
+pub(crate) fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
     let Some(rest) = vm_name.strip_prefix(cluster_name) else {
         return false;
     };

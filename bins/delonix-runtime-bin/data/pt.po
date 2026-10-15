@@ -6818,6 +6818,9 @@ msgstr "recupera espaço: containers parados, imagens sem uso, blobs sem referê
 msgid "in CI, where there is no terminal to confirm at"
 msgstr "em CI, onde não há terminal para confirmar"
 
+msgid "just this one orphan, leaving every other leftover exactly as it is"
+msgstr "só este órfão, deixando tudo o que sobrou dos outros exactamente como está"
+
 msgid "also drop tagged images nobody uses, not just the dangling ones"
 msgstr "apaga também as imagens com tag que ninguém usa, não só as penduradas"
 
@@ -9493,6 +9496,44 @@ msgstr "removido: o que sobrou de {n} cluster(s)"
 msgid "could not remove context '{ctx}' from kubeconfig: {err}"
 msgstr "não consegui tirar o contexto '{ctx}' do kubeconfig: {err}"
 
+# ---- clusters sem nós: resolução pelo estado em disco ---------------------
+
+msgid "Orphans to collect (omit = every cluster with no nodes left)"
+msgstr "Órfãos a recolher (omite = todos os clusters que já não têm nós)"
+
+msgid "cluster '{name}' still has {n} node(s) — `cluster prune` only collects clusters with none left; remove it with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' ainda tem {n} nó(s) — o `cluster prune` só recolhe clusters que já não têm nenhum; remove-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' still has {n} VM(s) — `cluster prune` only collects clusters with no nodes left; take it down with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' ainda tem {n} VM(s) — o `cluster prune` só recolhe clusters que já não têm nós; derruba-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' — nothing under {dir} left to collect"
+msgstr "cluster '{name}' — não sobrou nada em {dir} para recolher"
+
+msgid "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); this command serves kind-mode clusters only, whose nodes are containers"
+msgstr "o cluster '{name}' foi provisionado em VMs ({n} VM(s) — ver `delonix vm ls`); este comando só serve clusters em modo kind, cujos nós são containers"
+
+msgid "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); take it down with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' foi provisionado em VMs ({n} VM(s) — ver `delonix vm ls`); derruba-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' has no nodes left — its state is still on disk ({paths}). Collect it with `delonix cluster prune {name}`"
+msgstr "o cluster '{name}' já não tem nós — o estado dele continua em disco ({paths}). Recolhe-o com `delonix cluster prune {name}`"
+
+msgid "kind-mode cluster '{name}'"
+msgstr "cluster em modo kind '{name}'"
+
+msgid "Deleting the leftover state of cluster \"{name}\" — it has no nodes left"
+msgstr "A remover o estado que sobrou do cluster \"{name}\" — já não tem nós"
+
+msgid "cluster '{name}' removed (no nodes left: state, kubeconfig and the `~/.kube/config` context collected)"
+msgstr "cluster '{name}' removido (já não tinha nós: estado, kubeconfig e contexto no `~/.kube/config` recolhidos)"
+
+msgid "`cluster destroy` collects what is left of cluster '{name}', which has no nodes — pass --force to confirm when not on a terminal"
+msgstr "o `cluster destroy` recolhe o que sobrou do cluster '{name}', que já não tem nós — passa --force para confirmar quando não estiveres num terminal"
+
+msgid "Cluster '{name}' has no nodes left. This will remove its state directory, its exported kubeconfig, and the matching ~/.kube/config context."
+msgstr "O cluster '{name}' já não tem nós. Isto remove a pasta de estado dele, o kubeconfig exportado, e o contexto correspondente no ~/.kube/config."
+
 msgid "`cluster destroy` removes VM-provisioned cluster '{name}' — pass --force to confirm when not on a terminal"
 msgstr "o `cluster destroy` remove o cluster '{name}' provisionado por VM — passa --force para confirmar quando não estiveres num terminal"
 
@@ -9560,7 +9601,9 @@ msgid ""
 "\n"
 "That context is the reason this is not cosmetic: it still points at `127.0.0.1:<port>`, and by now that port may answer for something else.\n"
 "\n"
-"**A cluster with nodes is never touched, stopped ones included** — for that there is `cluster delete`, which takes a name on purpose."
+"**A cluster with nodes is never touched, stopped ones included** — for that there is `cluster destroy` (or `delete clusters <name>`, the same removal without the prompt), which takes a name on purpose.\n"
+"\n"
+"With no NAMES this collects every orphan at once; naming one collects that one and leaves the others exactly as they are."
 msgstr ""
 "Recupera o estado dos clusters que já não têm nós.\n"
 "\n"
@@ -9568,7 +9611,9 @@ msgstr ""
 "\n"
 "Esse contexto é a razão de isto não ser cosmético: continua a apontar para `127.0.0.1:<porta>`, e essa porta pode agora atender por outra coisa.\n"
 "\n"
-"**Um cluster com nós nunca é tocado, os parados incluídos** — para isso existe o `cluster delete`, que pede um nome de propósito."
+"**Um cluster com nós nunca é tocado, os parados incluídos** — para isso existe o `cluster destroy` (ou o `delete clusters <nome>`, a mesma remoção sem o prompt), que pede um nome de propósito.\n"
+"\n"
+"Sem NAMES recolhe todos os órfãos de uma vez; dar um nome recolhe esse e deixa os outros exactamente como estão."
 
 msgid "Show only the VMs of this isolation namespace (see `vm create --namespace`). Omit to list every namespace"
 msgstr "Mostra só as VMs deste namespace de isolamento (ver `vm create --namespace`). Omite para listar todos os namespaces"
