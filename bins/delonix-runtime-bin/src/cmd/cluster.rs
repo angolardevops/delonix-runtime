@@ -1129,6 +1129,14 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 Some(n) => n,
                 None => random_kubeadm_cluster_name(&state_root())?,
             };
+            // BUG FIXED HERE, found by running it: the pod-network refusal
+            // below promises "Nothing was created", and creating the cluster's
+            // network before it made that promise FALSE — a refused
+            // `cluster kubeadm` left a network behind, and leaked one more on
+            // every retry. `check_cni` is pure and `provision_and_apply` calls
+            // it again for its other callers, so asking here costs nothing and
+            // keeps the guarantee the message makes.
+            check_cni("vm", &cni, control_plane.saturating_add(workers))?;
             // `--network` omitted: the cluster gets its own, the same way kind
             // mode has always given each cluster one (`cluster_net`). Resolved
             // BEFORE `name` moves into the args below.
