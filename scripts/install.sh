@@ -31,7 +31,11 @@
 #   --no-gpu       não configura aceleradores (CDI da NVIDIA, grupo render).
 #                  Por omissão é LIGADO, e só faz algo se houver GPU.
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
-#   --no-editor-plugin  não instala a extensão nos editores VS Code encontrados
+#   --no-editor-plugin  não instala a extensão nos editores VS Code encontrados.
+#                  Toda a chamada a um editor tem tecto de tempo (120 s por
+#                  omissão, DELONIX_EDITOR_TIMEOUT=<segundos>): um editor que
+#                  abra uma janela em vez de responder na CLI é saltado com
+#                  aviso, nunca prende a instalação do motor.
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
 #   --with-image-build
@@ -572,13 +576,50 @@ if [ "$WITH_BINARY" = 1 ]; then
   # BEST-EFFORT, e a razão é a mesma da etiqueta de GPU que já chumbou este
   # script num host sem VGA: uma conveniência não pode falhar a instalação do
   # motor. Cada editor é tentado, uma falha avisa e segue.
+  #
+  # E "best-effort" tem de querer dizer que o passo DESISTE, não que PENDURA.
+  # O sintoma relatado — «o editor abre e a instalação trava» — é o que
+  # acontece quando um launcher não reconhece um argumento de CLI: abre a
+  # JANELA com ele e fica em primeiro plano, e o `$(…)`/`spin` espera pelo
+  # processo até alguém fechar o editor. Daí `editor_cli`: TODA a invocação de
+  # um editor é limitada no tempo e corre com o stdin FECHADO. O stdin fecha a
+  # segunda metade do problema: o launcher do VS Code faz `read -r YN` em WSL
+  # e, com `curl … | bash`, o stdin É o script — a pergunta comeria as linhas
+  # seguintes.
+  EDITOR_TIMEOUT=${DELONIX_EDITOR_TIMEOUT:-120}
+  editor_cli() {
+    local ed="$1" out="$2"; shift 2
+    if command -v timeout >/dev/null 2>&1; then
+      DONT_PROMPT_WSL_INSTALL=1 timeout -k 5 "$EDITOR_TIMEOUT" "$ed" "$@" </dev/null >"$out" 2>&1
+    else
+      DONT_PROMPT_WSL_INSTALL=1 "$ed" "$@" </dev/null >"$out" 2>&1
+    fi
+  }
   if [ "$WITH_EDITOR_PLUGIN" = 1 ]; then
     EDITORS_FOUND=""
     for ed in code code-insiders codium cursor windsurf antigravity; do
       command -v "$ed" >/dev/null 2>&1 && EDITORS_FOUND="$EDITORS_FOUND $ed"
     done
+    # Um editor só entra na lista depois de PROVAR que fala CLI, e a sonda é
+    # `--version`: o comando mais barato que toda a família VS Code serve sem
+    # GUI (medido neste host, antigravity: 0,5 s). Quem não responde nunca
+    # recebe um caminho de `.vsix` — é precisamente esse argumento que um
+    # launcher sem ramo de CLI abriria numa janela.
+    EDITORS_CLI=""
+    for ed in $EDITORS_FOUND; do
+      ed_rc=0; editor_cli "$ed" "$TMP/.ed-probe" --version || ed_rc=$?
+      case "$ed_rc" in
+        0) EDITORS_CLI="$EDITORS_CLI $ed" ;;
+        124|137)
+          warn "$ed did not answer \`--version\` within ${EDITOR_TIMEOUT}s — it is not usable as a CLI from here (a window of it may have opened; close it). Skipping its extension: install the .vsix from the editor, or re-run with --no-editor-plugin (raise the ceiling with DELONIX_EDITOR_TIMEOUT=<seconds>)" ;;
+        *)
+          warn "$ed does not answer \`--version\` (exit $ed_rc) — skipping its extension: $(tail -1 "$TMP/.ed-probe" 2>/dev/null)" ;;
+      esac
+    done
     if [ -z "$EDITORS_FOUND" ]; then
       skip editor "no VS Code-family editor on this host"
+    elif [ -z "$EDITORS_CLI" ]; then
+      skip editor "no editor here answers on the CLI (see the warnings above)"
     else
       # Sem `2>/dev/null`: foi silenciar este stderr que escondeu o 404 e fez o
       # SKIP abaixo afirmar uma coisa falsa durante uma release inteira.
@@ -593,7 +634,7 @@ if [ "$WITH_BINARY" = 1 ]; then
         # que o SHA256SUMS assinado cobre — por isso verifica-se com o nome dele
         # e instala-se com uma cópia que tem a extensão que o editor pede.
         cp "$TMP/$VSIX_ASSET" "$TMP/$VSIX_ASSET.vsix"
-        for ed in $EDITORS_FOUND; do
+        for ed in $EDITORS_CLI; do
           # NUNCA sobrepor uma extensão já instalada. A release do motor traz a
           # versão que existia quando ela foi construída, e essa pode ser MAIS
           # VELHA do que a que o editor tem — foi o que aconteceu neste host:
@@ -601,14 +642,18 @@ if [ "$WITH_BINARY" = 1 ]; then
           # recursos com ele, sem uma palavra. Quando a extensão estiver nas
           # galerias, é o editor que a mantém em dia; o trabalho deste script é
           # a PRIMEIRA instalação, e mais nenhum.
-          # `|| true`: um `grep` sem correspondência sai 1 e, sob `set -e` com
-          # `pipefail`, a atribuição inteira falha — o script morria em silêncio
-          # AQUI, no caso mais comum que existe (ainda não ter a extensão). É o
-          # mesmo defeito que a etiqueta de GPU já custou a este ficheiro, e só
-          # apareceu com um editor de teste sem extensões: contra um editor que
-          # JÁ a tinha, o grep casava e nada se via.
-          HAVE=$("$ed" --list-extensions --show-versions 2>/dev/null \
-                   | grep -i '^angolardevops\.delonix@' | head -1 || true)
+          #
+          # A listagem vai para um FICHEIRO e o `grep` corre sobre ele: o
+          # pipeline antigo (`$("$ed" … | grep …)`) juntava três coisas que
+          # falham de maneiras diferentes — um `grep` sem correspondência sai 1
+          # e, sob `set -e` com `pipefail`, matava o script no caso mais comum
+          # que existe (ainda não ter a extensão).
+          ed_rc=0; editor_cli "$ed" "$TMP/.ed-list" --list-extensions --show-versions || ed_rc=$?
+          if [ "$ed_rc" != 0 ]; then
+            warn "$ed could not list its extensions (exit $ed_rc) — skipping it: $(tail -1 "$TMP/.ed-list" 2>/dev/null)"
+            continue
+          fi
+          HAVE=$(grep -i '^angolardevops\.delonix@' "$TMP/.ed-list" | head -1 || true)
           if [ -n "$HAVE" ]; then
             # A frase NÃO promete que o editor a actualiza: isso só passa a ser
             # verdade quando a extensão estiver nas galerias, e hoje não está.
@@ -616,11 +661,18 @@ if [ "$WITH_BINARY" = 1 ]; then
             skip editor "$ed already has ${HAVE#*@} — leaving it alone (update it from the editor, or install a .vsix by hand)"
             continue
           fi
-          if "$ed" --install-extension "$TMP/$VSIX_ASSET.vsix" --force >/dev/null 2>&1; then
-            stepok editor "$ed"
-          else
-            warn "could not install the extension into $ed — install it by hand: $ed --install-extension <the .vsix from the release>"
-          fi
+          # Com um perfil frio esta chamada mede 20 s neste host: sem o spinner
+          # é indistinguível de travada, que é metade da queixa.
+          ed_rc=0
+          spin editor "$ed" "installing the extension..." \
+            editor_cli "$ed" "$TMP/.ed-install" --install-extension "$TMP/$VSIX_ASSET.vsix" --force || ed_rc=$?
+          case "$ed_rc" in
+            0) stepok editor "$ed" ;;
+            124|137)
+              warn "$ed did not finish installing the extension within ${EDITOR_TIMEOUT}s — gave up so the engine install can go on (a window of it may have opened; close it). Install it by hand: $ed --install-extension <the .vsix from the release>" ;;
+            *)
+              warn "could not install the extension into $ed (exit $ed_rc): $(tail -1 "$TMP/.ed-install" 2>/dev/null) — install it by hand: $ed --install-extension <the .vsix from the release>" ;;
+          esac
         done
       else
         # Uma release anterior à extensão não traz o asset. Não é uma falha do

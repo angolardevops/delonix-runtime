@@ -332,6 +332,13 @@ and how to tear the isolated infra down, is in
 </thead>
 <tbody>
 <tr>
+<td><code>DELONIX_EDITOR_TIMEOUT</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (editor-extension section, <code>editor_cli</code>)</td>
+<td>Ceiling, in seconds, on every call the installer makes to a VS Code-family editor (<code>--version</code> probe, <code>--list-extensions</code>, <code>--install-extension</code>).</td>
+<td>Positive integer seconds; passed to <code>timeout -k 5</code>. Unset: 120.</td>
+<td>The step is best-effort and must never hang the engine install: an editor that opens a window instead of answering on the CLI is skipped with a warning when the ceiling runs out (exit 124/137). Raise it on a slow host with a cold editor profile (measured here: 20 s for the first install into a fresh profile); <code>--no-editor-plugin</code> skips the step altogether.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PERF_CONF</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
 <td>Path of the config (<code>CPU=</code>/<code>THP=</code> flags) the helper reads.</td>
