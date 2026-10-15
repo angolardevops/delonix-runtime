@@ -592,10 +592,11 @@ fn print_plan(p: &super::prune::PrunePlan, auto: bool, would_run: bool) {
     println!(
         "{}",
         super::po::tf(
-            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}",
+            "  {d} orphan dir(s), {b} blob(s), {l} unpacked layer(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}",
             &[
                 ("d", &p.dirs.to_string()),
                 ("b", &p.blobs.to_string()),
+                ("l", &p.layers.to_string()),
                 ("g", &p.cgroups.to_string()),
                 ("n", &p.networks.to_string()),
                 ("k", &p.build_cache.to_string()),
@@ -723,12 +724,13 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
     println!(
         "{}",
         super::po::tf(
-            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed",
+            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {l} layer(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed",
             &[
                 ("c", &c.containers.to_string()),
                 ("d", &c.dirs.to_string()),
                 ("i", &i.images.to_string()),
                 ("b", &i.blobs.to_string()),
+                ("l", &i.layers.to_string()),
                 ("g", &c.cgroups.to_string()),
                 ("p", &c.ports.to_string()),
                 ("n", &rmn.to_string()),

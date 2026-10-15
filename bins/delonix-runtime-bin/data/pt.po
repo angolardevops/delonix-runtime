@@ -8656,11 +8656,11 @@ msgstr "`image prune` remove imagens sem uso e blobs não referenciados — pass
 msgid "With --all this ALSO removes TAGGED images that no container uses."
 msgstr "Com --all remove TAMBÉM imagens COM TAG que nenhum container usa."
 
-msgid "Removes unused images and the CAS blobs nobody references. Continue? [y/N]"
-msgstr "Remove imagens sem uso e os blobs do CAS que ninguém referencia. Continuar? [s/N]"
+msgid "Removes unused images, the CAS blobs nobody references and their unpacked layers. Continue? [y/N]"
+msgstr "Remove imagens sem uso, os blobs do CAS que ninguém referencia e as suas layers desempacotadas. Continuar? [s/N]"
 
-msgid "removed: {i} image(s), {b} blob(s) — {size} freed"
-msgstr "removidas: {i} imagem(ns), {b} blob(s) — {size} libertados"
+msgid "removed: {i} image(s), {b} blob(s), {l} layer(s) — {size} freed"
+msgstr "removidas: {i} imagem(ns), {b} blob(s), {l} layer(s) — {size} libertados"
 
 msgid "`volume prune` DESTROYS the data of every unreferenced volume — pass --force to confirm when not on a terminal"
 msgstr "`volume prune` DESTRÓI os dados de todos os volumes sem referências — passa --force para confirmar fora de um terminal"
@@ -14161,11 +14161,11 @@ msgstr "Terminar {n} processo(s) abandonado(s)? As raízes de estado deles desap
 msgid "reclaimed {done} process(es); {skipped} no longer matched and were left alone"
 msgstr "reclamados {done} processo(s); {skipped} já não correspondiam e ficaram intocados"
 
-msgid "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}"
-msgstr "  {d} directório(s) órfão(s), {b} blob(s), {g} cgroup(s), {n} rede(s), {k} entrada(s) de cache de build — {size}"
+msgid "  {d} orphan dir(s), {b} blob(s), {l} unpacked layer(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}"
+msgstr "  {d} directório(s) órfão(s), {b} blob(s), {l} layer(s) desempacotada(s), {g} cgroup(s), {n} rede(s), {k} entrada(s) de cache de build — {size}"
 
-msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed"
-msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {i} imagem(ns), {b} blob(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s), {k} entrada(s) de cache de build — {size} libertados"
+msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {l} layer(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed"
+msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {i} imagem(ns), {b} blob(s), {l} layer(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s), {k} entrada(s) de cache de build — {size} libertados"
 
 msgid "what is abandoned, and nothing else — the default only reports"
 msgstr "o que está abandonado, e mais nada — por omissão só relata"
