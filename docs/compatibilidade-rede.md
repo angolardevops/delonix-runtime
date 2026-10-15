@@ -410,6 +410,48 @@ mantém o perfil experimental e fica escrito nesta página com o resultado.
     continua a ser do 2026-08-25 e a listar 3 falhas de mount propagation que o
     código actual já trata (`Bidirectional`→`rshared`). Remedir é pendência.
 
+## 6.1. Nota de método: porque é que estas conclusões não dependem do binário em disco
+
+Uma sessão paralela avisou — e confirmou-se — que um `CARGO_TARGET_DIR`
+PARTILHADO entre worktrees em commits diferentes produz binários **mal
+rotulados**: a fingerprint do build-script não inclui o git HEAD, por isso o
+`commit:` que o `delonix version` imprime pode ser de outro commit que não o
+código que está dentro. Medido às 21:12 de 2026-10-15: o binário em
+`target/release/delonix` dizia `commit: ce3582329` (o desta série) e **não
+continha a string `cilium`** — era de outro ramo, escrito por cima 4 minutos
+depois de a medição do §3.2 terminar.
+
+**O que isso invalida: nada do §3.2 — e a razão importa.** As conclusões não
+se apoiam no `delonix version` nem no ficheiro que hoje está naquele caminho,
+apoiam-se no COMPORTAMENTO que ficou registado no log da corrida, e esse só
+pode vir deste código:
+
+- `Installing the cilium pod network` — passo que só existe aqui;
+- `Waiting for the cilium pod network …` e o `DX-6704` com a redacção
+  «nothing was deleted or rolled back»;
+- `--experimental-cni` aceite como flag;
+- e o próprio fix da versão a mudar o observável: `--kubernetes-version=v1.34`
+  presente na 1ª corrida, **ausente** na seguinte, com o kubeadm a responder
+  `Using Kubernetes version: v1.34.12` por si.
+
+**A lição, que vale mais do que o episódio:** um `cargo build` que termina
+`exit 0` não prova que o binário é do commit que se pensa, quando o `target/`
+é partilhado. Qualquer medição deste repositório deve ser ancorada em
+comportamento observável (uma string que só aquele código emite, uma flag que
+só ele aceita) e não na etiqueta de versão. Para medir com o `target/` próprio:
+`CARGO_TARGET_DIR=<caminho só teu> cargo build --release` — custa ~10 GB e um
+build do zero, e o disco deste host esteve a 100% três vezes no mesmo dia.
+
+**Uma variável que o §3.2 pôde excluir de graça.** Até ao commit `f945b1c7`
+(outro ramo), o `--network <nome>` era aceite, gravado e **descartado** no
+provider libvirt: todos os nós caíam na rede `default`. A corrida do §3.2 usou
+`--network default`, logo o destino era o mesmo com ou sem esse bug — e os dois
+nós receberam, medido, **endereços e client-ids distintos**
+(`192.168.122.114` e `.15`). Mais: o agente do Cilium morre em
+`Mounting BPF filesystem`, a PRIMEIRA coisa que faz, antes de tocar na rede.
+Endereçamento, escolha de rede libvirt e partilha de leases não podem explicar
+uma falha de construção de mount namespace.
+
 ## 7. Diagnóstico e recuperação
 
 **O cluster não fica `Ready`.** O bootstrap já falhou com as contagens
