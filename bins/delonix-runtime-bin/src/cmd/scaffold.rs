@@ -100,13 +100,25 @@ pub(crate) fn template_names() -> Vec<&'static str> {
 /// Whether a template supports TLS (has `tls=` in its `template.meta`).
 /// Used by autocomplete to filter unsupported `--tls-port` / `--hostname` flags.
 pub(crate) fn template_supports_tls(template_name: &str) -> bool {
-    !template_meta(canonical_template(template_name)).tls_port.is_empty()
+    !template_meta(canonical_template(template_name))
+        .tls_port
+        .is_empty()
 }
 
 /// Whether a template has a version parameter (`version=` in its `template.meta`).
 /// Used by autocomplete to filter unsupported `-v` / `--template-version` flags.
 pub(crate) fn template_has_version(template_name: &str) -> bool {
     template_meta(canonical_template(template_name)).has_version
+}
+
+/// Whether this names a real template — an alias counts, since it resolves to
+/// one. Completion asks BEFORE filtering flags: `template_meta` answers for an
+/// unknown name with its own defaults (no version, no TLS), so without this a
+/// typo — or a half-typed name, which is the common case under TAB — would
+/// hide every flag the template "does not support".
+pub(crate) fn template_is_known(template_name: &str) -> bool {
+    let name = canonical_template(template_name);
+    TEMPLATES.iter().any(|(n, _)| *n == name)
 }
 
 /// Old template names that still answer, mapped to the directory that now
@@ -3233,10 +3245,12 @@ mod tests {
 
     /// Every application template (go, node, nestjs, nextjs, fastapi, django, laravel)
     /// includes VM support: a VMfile, vm.yaml, cloud-init/user-data, and .delonixignore.
-    /// This allows `delonix vm build` to work out-of-the-box.
+    /// This allows `delonix vm image build` to work out-of-the-box.
     #[test]
     fn every_application_template_supports_vm_build() {
-        let vm_templates = ["go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel"];
+        let vm_templates = [
+            "go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel",
+        ];
 
         for name in &vm_templates {
             let (_, files) = TEMPLATES
@@ -3266,11 +3280,7 @@ mod tests {
             let has_vm_support = TEMPLATE_KV
                 .iter()
                 .find(|(n, _)| *n == *name)
-                .map(|(_, pairs)| {
-                    pairs
-                        .iter()
-                        .any(|(k, v)| *k == "vm_support" && *v == "yes")
-                })
+                .map(|(_, pairs)| pairs.iter().any(|(k, v)| *k == "vm_support" && *v == "yes"))
                 .unwrap_or(false);
             assert!(
                 has_vm_support,

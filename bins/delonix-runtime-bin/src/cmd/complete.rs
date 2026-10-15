@@ -123,6 +123,45 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     cands(nomes)
 }
 
+/// The clusters `cluster prune` can collect: state under `<root>/clusters`
+/// that no node — container or VM — accounts for. Completing with
+/// [`clusters`] here would offer precisely the names that verb refuses.
+pub fn cluster_leftovers() -> Vec<CompletionCandidate> {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
+        return Vec::new();
+    };
+    cands(super::kindmode::doomed_clusters(&store).unwrap_or_default())
+}
+
+/// Every cluster `cluster destroy` can take down, which is more than
+/// [`clusters`] sees: kind-mode (the nodes' label), VM-provisioned (`cluster
+/// kubeadm`'s naming convention, decoded by `vm::vm_cluster_member`, the one
+/// place that owns it) and the ones whose nodes are already gone but whose
+/// state is still on disk. Offering only kind-mode names here would
+/// contradict that command's own help.
+pub fn destroyable_clusters() -> Vec<CompletionCandidate> {
+    let mut names: Vec<String> = Vec::new();
+    if let Ok(store) = delonix_state::Store::open(state_root().join("containers")) {
+        names.extend(
+            store
+                .list()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned()),
+        );
+        names.extend(super::kindmode::doomed_clusters(&store).unwrap_or_default());
+    }
+    names.extend(
+        delonix_vm::list(&state_root())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| super::vm::vm_cluster_member(&v.name).map(|(p, _)| p.to_string())),
+    );
+    names.sort();
+    names.dedup();
+    cands(names)
+}
+
 /// Cluster names with a cached kubeconfig (`<root>/clusters/<name>-kubeconfig.yaml`) —
 /// covers BOTH cluster types (kind-mode and kubeadm/SSH), unlike `clusters()`
 /// above, which only sees kind-mode's container labels.

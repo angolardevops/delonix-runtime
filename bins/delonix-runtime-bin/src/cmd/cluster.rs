@@ -655,16 +655,31 @@ pub enum ClusterCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
         name: Option<String>,
     },
-    /// Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.
+    /// Remove a cluster entirely — nodes, kubeconfig, `~/.kube/config` entry.
     ///
-    /// Volumes are left alone, on purpose, same as `docker`. The same
-    /// removal `delonix delete clusters <name>` already does (the generic
-    /// kubectl-style verb this engine gives every Kind) — this is just the
-    /// more discoverable spelling inside `cluster --help`, with a
-    /// confirmation prompt `delete` does not have.
+    /// Serves BOTH families: a kind-mode cluster, whose nodes are
+    /// containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`),
+    /// whose nodes are VMs — its load balancer and etcd members included.
+    ///
+    /// What becomes of the NETWORK is the one real difference, and it
+    /// follows who created it: a kind-mode cluster's `dlx-<name>` was made
+    /// FOR it and goes with it, while the `--network` a VM cluster was given
+    /// is yours and is left alone. Volumes are never touched either, on
+    /// purpose, same as `docker`.
+    ///
+    /// A cluster whose nodes are already gone is still removable by name:
+    /// what gets collected is the state directory, the exported kubeconfig
+    /// and the matching context — the same thing `cluster prune <name>` does.
+    ///
+    /// Omitting the name resolves among KIND-MODE clusters only, so name a
+    /// VM cluster explicitly. The same removal `delonix delete clusters
+    /// <name>` already does (the generic kubectl-style verb this engine
+    /// gives every Kind) — this is just the more discoverable spelling
+    /// inside `cluster --help`, with a confirmation prompt `delete` does not
+    /// have.
     Destroy {
         /// Cluster name. Omit when there is only one.
-        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        #[arg(add = ArgValueCandidates::new(super::complete::destroyable_clusters))]
         name: Option<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
@@ -733,8 +748,15 @@ pub enum ClusterCmd {
     /// `127.0.0.1:<port>`, and by now that port may answer for something else.
     ///
     /// **A cluster with nodes is never touched, stopped ones included** — for
-    /// that there is `cluster delete`, which takes a name on purpose.
+    /// that there is `cluster destroy` (or `delete clusters <name>`, the same
+    /// removal without the prompt), which takes a name on purpose.
+    ///
+    /// With no NAMES this collects every orphan at once; naming one collects
+    /// that one and leaves the others exactly as they are.
     Prune {
+        /// Orphans to collect (omit = every cluster with no nodes left).
+        #[arg(add = ArgValueCandidates::new(super::complete::cluster_leftovers))]
+        names: Vec<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
         force: bool,
@@ -989,9 +1011,12 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 },
             );
         }
-        ClusterCmd::Prune { force } => {
+        ClusterCmd::Prune { ref names, force } => {
             let (_, store) = super::util::open_stores()?;
-            let doomed = super::kindmode::doomed_clusters(&store)?;
+            // With names, this is also the gate: a name that is not an orphan
+            // is refused HERE, before the prompt, so the question is never
+            // asked about a set that does not match what was typed.
+            let doomed = super::kindmode::prune_selection(&store, names)?;
             let preview = (!doomed.is_empty()).then(|| {
                 super::po::tf(
                     "This will remove the leftover state of {n} cluster(s): {list}",
@@ -1015,7 +1040,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             )? {
                 return Ok(());
             }
-            let n = super::kindmode::prune(&store)?;
+            let n = super::kindmode::prune(&doomed)?;
             println!(
                 "{}",
                 super::po::tf("removed: {n} cluster leftover(s)", &[("n", &n.to_string())])
@@ -2196,7 +2221,7 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
 /// PURE, so the naming convention this file has in TWO places (the names it
 /// writes, and now the names a destroy has to find) cannot quietly drift
 /// apart from a single string literal changing in only one of them.
-fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
+pub(crate) fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
     let Some(rest) = vm_name.strip_prefix(cluster_name) else {
         return false;
     };
@@ -4847,7 +4872,7 @@ workers:
     /// surfacing as `mv: cannot stat '/tmp/delonix-cri'`. The refusal has to
     /// come first, and has to name the cause.
     #[test]
-    fn nodes_que_partilham_endereco_sao_recusados_com_a_causa() {
+    fn nodes_sharing_one_address_are_refused_naming_the_cause() {
         let shared = "192.168.122.176";
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", shared),
@@ -4871,15 +4896,13 @@ workers:
     }
 
     #[test]
-    fn nodes_com_enderecos_distintos_passam() {
-        assert!(
-            check_distinct_node_addresses(&[
-                ("lab-cp1", "192.168.122.10"),
-                ("lab-w1", "192.168.122.11"),
-                ("lab-w2", "192.168.122.12"),
-            ])
-            .is_ok()
-        );
+    fn nodes_with_distinct_addresses_are_accepted() {
+        assert!(check_distinct_node_addresses(&[
+            ("lab-cp1", "192.168.122.10"),
+            ("lab-w1", "192.168.122.11"),
+            ("lab-w2", "192.168.122.12"),
+        ])
+        .is_ok());
         // A one-node cluster, and the empty case, cannot collide.
         assert!(check_distinct_node_addresses(&[("solo", "192.168.122.10")]).is_ok());
         assert!(check_distinct_node_addresses(&[]).is_ok());
@@ -4889,7 +4912,7 @@ workers:
     /// nodes share a lease must not drag the three healthy ones into the
     /// message, or the operator cannot tell which machines to look at.
     #[test]
-    fn apenas_o_grupo_em_colisao_entra_no_diagnostico() {
+    fn only_the_colliding_group_reaches_the_diagnostic() {
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", "192.168.122.10"),
             ("lab-w1", "192.168.122.176"),

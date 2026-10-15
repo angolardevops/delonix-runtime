@@ -88,6 +88,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Maintenance",
         examples: &[
             ("collect what clusters with no nodes left behind: their directory, their exported kubeconfig, and the `~/.kube/config` context still pointing at a port that may now answer for something else", "delonix cluster prune"),
+            ("just this one orphan, leaving every other leftover exactly as it is", "delonix cluster prune kambacode"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster prune -f"),
         ],
         see_also: &["delete", "get", "vm prune", "system prune"],
@@ -2347,7 +2348,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Inspect",
         examples: &[
             ("engine state in one screen: rootless, cgroup delegation, network infra, counts", "delonix system info"),
-            ("the same screen in Portuguese", "delonix system info --l18n pt"),
+            ("the same screen in Portuguese", "delonix --l18n pt system info"),
         ],
         see_also: &["system setup", "system df", "system virt", "dashboard"],
     },
