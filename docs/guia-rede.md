@@ -563,9 +563,50 @@ Escritos aqui para não serem descobertos em produção:
 
 ---
 
+## 12.1. A rede dos PODS não é esta rede
+
+Este guia é sobre a rede de **containers e VMs num host**. Um cluster
+Kubernetes criado por este motor tem, por cima disso, uma rede sua — e
+confundir as duas é a origem de uma classe de problemas que se diagnostica no
+sítio errado. São **quatro planos distintos**, com donos distintos:
+
+| plano | quem é o dono | onde se configura | onde se diagnostica |
+|---|---|---|---|
+| **rede dos pods** (pod CIDR, Service CIDR, encaminhamento entre nós) | o perfil de CNI escolhido no `spec.cni` | `spec.podSubnet`/`serviceSubnet`/`spec.network` do `kind: KubernetesCluster` | `delonix cluster network status`, `docs/compatibilidade-rede.md` |
+| **rede das VMs que são os nós** (o `--network` / `spec.vm.network`, DHCP, o firewall da VM) | este motor, pelo `kind: Network` | este guia | `delonix net netns status`, `delonix network ls` |
+| **VIP do apiserver** | o HAProxy que o `cluster kubeadm` provisiona com `--control-plane > 1` | `spec.controlPlaneEndpoint` | `cmd/lb.rs`, a VM `<nome>-lb` |
+| **Services `LoadBalancer`** | **ninguém — não entregue** | — | ADR-0066, aceite e não construído |
+
+Três consequências práticas:
+
+1. **O pod CIDR tem de não colidir com a rede das VMs.** Se colidir, o cluster
+   sobe e um host (ou uma rede inteira) fica inalcançável de dentro dos pods —
+   e isso não é um erro no momento da criação, é um sintoma depois. Por isso é
+   **recusado** antes de criar qualquer máquina (DX-1704), comparando os CIDR
+   do cluster com as redes que este host já declara.
+2. **A MTU paga-se duas vezes se ninguém contar.** A rede das VMs já pode estar
+   num overlay (VXLAN = 50 bytes, +60 se cifrado por WireGuard — ver §6), e o
+   perfil do cluster acrescenta o encapsulamento dele por cima. Daí
+   `spec.network.nodeMtu`: declara a MTU **real** dos nós, e a MTU dos pods é
+   calculada a partir dela.
+3. **O firewall deste motor não filtra a rede dos pods.** As regras `nft` das
+   tabelas `delonix`/`dlxing` governam containers e VMs deste host. O
+   isolamento *entre pods* é `NetworkPolicy`, e quem a aplica é o perfil de CNI
+   — e **o Flannel não aplica nenhuma** (ver `docs/compatibilidade-rede.md`).
+
+E uma que não é prática mas é importante: **nada aqui activa BGP, anúncios L2
+ou um controlador de endereços externos**. Um segundo dono do mesmo pool de
+endereços é um conflito que se manifesta como tráfego que às vezes chega, e
+este motor não o cria sem configuração explícita da rede onde o cluster nasce.
+
+---
+
 ## 13. Onde continuar
 
 - `delonix explain Network` — os campos do `kind: Network`, a partir do código.
 - `docs/comandos/` — referência gerada, um ficheiro por comando.
-- `docs/adr/` — as decisões e o porquê (a rede é sobretudo a ADR-0013).
+- `docs/adr/` — as decisões e o porquê (a rede é sobretudo a ADR-0013; a rede
+  dos pods de um cluster é a ADR-0078).
+- `docs/compatibilidade-rede.md` — os perfis de rede dos clusters: versões
+  fixadas, o que foi medido e o que não foi.
 - `docs/cli-stability.md` — o que pode partir num upgrade e o que não pode.

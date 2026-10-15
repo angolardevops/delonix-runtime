@@ -1269,8 +1269,11 @@ pub enum ClusterCmd {
         /// Cluster name. Omit when there is only one.
         name: Option<String>,
     },
-    /// Inspect the pod-network profiles: what exists, what a cluster runs,
-    /// and pre-fetch the artefacts for an offline install.
+    /// Inspect and prepare the pod-network profiles.
+    ///
+    /// What exists and at what support level, what a given cluster is
+    /// ACTUALLY running (and whether that drifted from what was asked), and a
+    /// verified pre-fetch of the install artefacts for an offline bootstrap.
     #[command(subcommand)]
     Network(NetworkCmd),
     /// Cordon a node and evict its pods.
@@ -2380,22 +2383,15 @@ fn apply_ssh(
             .map(|h| {
                 let target = target_for(h, &spec.ssh);
                 let label = h.label();
-                let cri_bin = &cri_bin;
-                let cri_service = &cri_service;
-                let cli_bin = &cli_bin;
-                let preflight = preflight_script.as_deref();
-                scope.spawn(move || {
-                    prepare_host(
-                        &target,
-                        &label,
-                        spec.k8s_version.as_deref(),
-                        cri_bin,
-                        cri_service,
-                        cli_bin,
-                        &spec.cni,
-                        preflight,
-                    )
-                })
+                let prep = HostPrep {
+                    k8s_version: spec.k8s_version.as_deref(),
+                    cri_bin: &cri_bin,
+                    cri_service: &cri_service,
+                    cli_bin: &cli_bin,
+                    profile: &spec.cni,
+                    preflight_script: preflight_script.as_deref(),
+                };
+                scope.spawn(move || prepare_host(&target, &label, &prep))
             })
             .collect();
         handles
@@ -3624,17 +3620,23 @@ fn create_and_wait(
 /// owns the visible line now (`apply_ssh`'s "Preparing N host(s) 🔧") — but
 /// it still tags every error, so a failure is self-contained (which host,
 /// which recipe) instead of relying on a scrolled-away "applying..." line.
-fn prepare_host(
-    target: &SshTarget,
-    label: &str,
-    k8s_version: Option<&str>,
-    cri_bin: &std::path::Path,
-    cri_service: &std::path::Path,
-    cli_bin: &std::path::Path,
-    profile: &str,
-    preflight_script: Option<&std::path::Path>,
-) -> Result<()> {
-    for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
+/// What preparing a node needs. A struct and not eight positional arguments:
+/// three of them are `&Path` to different binaries and two are the network
+/// profile, so a call that swapped `cri_bin` and `cli_bin` — or `cri_service`
+/// and the preflight — would compile and install the wrong file.
+pub(crate) struct HostPrep<'a> {
+    pub k8s_version: Option<&'a str>,
+    pub cri_bin: &'a std::path::Path,
+    pub cri_service: &'a std::path::Path,
+    pub cli_bin: &'a std::path::Path,
+    /// `spec.cni` — which profile's prerequisites the preflight measures.
+    pub profile: &'a str,
+    /// The preflight to push when the node's golden predates it.
+    pub preflight_script: Option<&'a std::path::Path>,
+}
+
+fn prepare_host(target: &SshTarget, label: &str, prep: &HostPrep) -> Result<()> {
+    for r in k8s_recipes::k8s_host_recipes(prep.k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
             continue;
         }
@@ -3642,9 +3644,9 @@ fn prepare_host(
             .map_err(|e| Error::Invalid(format!("[{label}] {}: {e}", r.name)))?;
     }
 
-    install_cri(target, label, cri_bin, cri_service)?;
-    install_cli(target, label, cli_bin)?;
-    run_node_preflight(target, label, profile, preflight_script)?;
+    install_cri(target, label, prep.cri_bin, prep.cri_service)?;
+    install_cli(target, label, prep.cli_bin)?;
+    run_node_preflight(target, label, prep.profile, prep.preflight_script)?;
     Ok(())
 }
 

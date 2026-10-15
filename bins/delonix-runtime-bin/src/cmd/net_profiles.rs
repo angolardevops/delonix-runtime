@@ -529,7 +529,7 @@ impl NetworkPlan {
 
 /// Resolves a static string out of a profile's option list, so [`NetworkPlan`]
 /// can hold `&'static str` and no copy of the table exists downstream.
-fn pick<'a>(options: &'a [&'static str], asked: Option<&str>) -> Option<&'static str> {
+fn pick(options: &[&'static str], asked: Option<&str>) -> Option<&'static str> {
     match asked {
         None => options.first().copied(),
         Some(a) => options.iter().copied().find(|o| *o == a),
@@ -748,7 +748,7 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
     let mtu = match req.mtu {
         None => auto_mtu(dataplane, node_mtu),
         Some(asked) => {
-            if asked < MIN_MTU || asked > MAX_MTU {
+            if !(MIN_MTU..=MAX_MTU).contains(&asked) {
                 return Err(Error::coded(
                     1703,
                     Error::Invalid(super::po::tf(

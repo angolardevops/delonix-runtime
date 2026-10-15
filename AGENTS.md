@@ -9779,3 +9779,106 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   `denyHostNetwork: true` ao lado (a admissão conta ambos como rede do host). As VMs do
   libvirt na rede `nat` também não. O `vm create` não sincroniza a política (só lê o
   registo pelo `ensure_up`).
+
+## A rede dos pods de um cluster é um PERFIL seleccionável (ADR-0078, 2026-10-15)
+
+**O que estava partido, e dito por extenso: este motor não conseguia criar um cluster
+kubeadm multi-nó funcional.** O `spec.cni` aceitava `default` — uma conflist
+`bridge`+`host-local`+`portmap` local ao nó, **recusada acima de UM nó** (DX-6701) porque
+não encaminha pods entre nós — e `none`, que não instala nada e deixa todos os nós
+`NotReady`. A recusa era honesta; era uma recusa. É o gap #1 da auditoria de KaaS
+(`docs/discovery/kaas-matrix-2026-10-08.md`), que nota que o estado «nó `Ready`» era
+*estruturalmente inalcançável* por este caminho.
+
+Agora o `spec.cni` aceita `default | none | cilium | calico | flannel`, e um bloco
+`spec.network` novo exprime *como* (`dataplane`, `kubeProxy`, `mtu`, `nodeMtu`,
+`ipFamily`, `interface`, `multus`, `hubble`, `experimental`, `offline`). Dois módulos,
+divididos puro/impuro de propósito: `cmd/net_profiles.rs` decide tudo o que se decide sem
+tocar num host (testado sem host), `cmd/net_profiles_install.rs` obtém, renderiza, aplica
+e **espera**. É a divisão que permite recusar um cluster mau antes de existir uma
+máquina — e é por isso que o `cluster kubeadm`, o caminho que CRIA VMs, valida o pedido de
+rede inteiro na primeira linha.
+
+**Os três perfis nascem EXPERIMENTAL, e o portão é declarativo.** Recusados (DX-1705) a
+não ser que o manifesto diga `spec.network.experimental: true` (ou `--experimental-cni`), e
+a recusa carrega a RAZÃO. O motivo não é cautela genérica: a secção «o que não foi medido»
+do ADR-0074 di-lo por escrito — *«A real cluster CNI (Calico, Cilium) declaring the
+capability differently, and more than one node, were not measured»*. O Cilium é o perfil
+que este motor quer, e é precisamente por isso que não se declara suportado antes de o
+medir.
+
+**Sete recusas novas, todas antes de existir máquina.** DX-1701 (um `cni` que não existe —
+e a mensagem lista os que existem), DX-1702 (um botão que o perfil ignora, incluindo
+qualquer botão em `cni: default`/`none`), DX-1703 (MTU que não cabe no encapsulamento),
+DX-1704 (CIDR mal formado, com bits fora do prefixo, sobreposto a si ou a uma rede deste
+host, ou pequeno demais para os nós), DX-1705 (experimental sem consentimento), DX-1706
+(`ipFamily` que não `ipv4` — dito como **não implementado**, com o ADR-0065 nomeado),
+DX-6703 (mudar a CNI de um cluster vivo: o cluster fica **intocado**), DX-6704 (artefacto
+que não se obteve ou cujos bytes não batem).
+
+Duas valem a explicação:
+
+- **A MTU é recusa e não aviso** porque uma MTU que não cabe *não falha*: o dataplane sobe
+  e descarta os pacotes grandes em silêncio, o que se lê como lentidão inexplicada. O
+  `docs/guia-rede.md` já registava a armadilha para o overlay cifrado do próprio motor.
+- **O `valid_cidr` era uma verificação de CONJUNTO DE CARACTERES** — por uma razão sólida
+  (o valor vai para um `bash -c` remoto) — e por isso `9`, `1.2.3.4`, `///` e
+  `0.0.0.0/99` passavam todos como `podSubnet`, com a falha a chegar depois, do `kubeadm`,
+  num host. A defesa do charset ficou; passou a haver aritmética por cima.
+
+**Instalar é esperar.** Um perfil considera-se instalado quando o agente dele está `Ready`
+em TODOS os nós **e** todos os nós estão `Ready` — e um perfil **espera sempre**,
+independentemente do `--copy-kubeconfig` (essa flag existe para preservar a temporização de
+um caminho que não instalava CNI nenhuma; um caminho que acabou de instalar uma e não olhou
+é a falha na forma mais pura). Um timeout é **erro com as contagens**, não aviso, e **não
+apaga nem reaplica nada**: uma CNI meio instalada é a única prova que explica a falha. A
+instalação acontece **entre o `init` e os joins**, como o kubeadm pede.
+
+**O `kubeadm --config` deixou de ser só do etcd externo.** Passa a ser gerado também para
+`kubeProxy: ipvs` (uma `KubeProxyConfiguration`) e `kubeProxy: none`
+(`skipPhases: addon/kube-proxy` — porque instalar o kube-proxy e deixar uma CNI
+substituí-lo deixa dois donos do dataplane de serviços). `stacked` + `iptables` continua
+nos flags planos, byte a byte.
+
+**Na golden.** Os plugins CNI eram o que o `pkgs.k8s.io` publicasse no dia: o único
+fornecedor era o `.deb` `kubernetes-cni`, a chegar como dependência do kubelet, sem nome na
+build e **sem versão fixada de propósito** (o `VERSIONED` do `download_k8s_debs` cobre só
+`kubeadm`/`kubelet`/`kubectl`). Agora há um subconjunto explícito e verificado por digest
+do `containernetworking/plugins` 1.9.1 — dez plugins, cada um com a razão escrita, e os
+oito que nenhum perfil alcança (`dhcp`, `vlan`, `vrf`, …) **não vão**. Mais: módulos e
+sysctls dos perfis no catálogo PARTILHADO `k8s_recipes` (a golden e um host preparado ao
+vivo não podem divergir), diagnóstico que a cloud image não traz (`ethtool`, `conntrack`,
+`tcpdump`), e proveniência (`DELONIX_CNI_PLUGINS`, `DELONIX_NET_PROFILES`) no
+`/etc/delonix-image-release`.
+
+**A golden continua a NÃO levar conflist nenhuma, e é deliberado:** o kubelet escolhe o
+primeiro ficheiro de `/etc/cni/net.d` por ordem lexical, e uma bridge genérica lá dentro
+seria escolhida **antes** da CNI pretendida.
+
+**O que a imagem não configura, verifica-se.** Não monta bpffs nem mexe no cgroup — as duas
+coisas já são verdade nestas distribuições, e escrever por cima de um sistema que funciona
+para satisfazer uma checklist parte o que não era preciso tocar. Em vez disso, o
+`dist/delonix-node-preflight.sh` mede-as (e os módulos, os sysctls, o socket do CRI, os
+plugins que aquela cadeia executa, o vxlan, o kernel ≥ 5.10 para o Cilium, o `rp_filter`
+para o Calico), reporta **todas** as falhas, e **nunca sai 0 por não ter conseguido medir**.
+O `prepare_host` corre-o antes do kubeadm e empurra-o para um nó cuja golden é anterior a ele.
+
+**BUG ENCONTRADO pelo teste que lê os manifests REAIS.** A substituição da MTU do Flannel
+não casava nada: o `kube-flannel.yml` v0.28.10 **não tem chave `MTU`**. O Flannel teria
+autodetectado a MTU do nó e cada pod pagaria o cabeçalho VXLAN duas vezes — exactamente a
+falha que o cálculo de overhead existe para impedir, derrotada por uma substituição escrita
+a partir de uma suposição. **Os testes de excerto passaram sempre**, porque o excerto foi
+escrito com a mesma suposição. É a lição a levar: um teste de excerto prova o algoritmo e
+nada sobre o ficheiro.
+
+**O que NÃO foi validado.** Nenhum perfil foi exercido contra este CRI em vários nós. Não
+foi por falta de vontade nem de ambiente: o host tinha **5 GiB livres em 938 GiB (100%
+ocupado)**, e encher a raiz de uma máquina partilhada para produzir uma medição não é uma
+troca aceitável. As políticas de rede **não** foram testadas. O procedimento reprodutível,
+com os critérios de aceitação por perfil, está em `docs/compatibilidade-rede.md` — e até
+correr, nada disto deve ser lido como «funciona».
+
+**Dois achados fora do âmbito, reportados e não corrigidos** (para não conflituar com
+trabalho de outras sessões): o `--extra-package` é descartado em silêncio no caminho
+offline da build da golden, e o `k8s_repo_version` tem um default independente
+(`stable:/v1.31`) que discorda do `DEFAULT_K8S_VERSION` (1.36).

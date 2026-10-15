@@ -1,26 +1,27 @@
-# Cluster kubeadm multi-nó com um PERFIL de rede instalado pelo bootstrap.
+# A multi-node kubeadm cluster whose pod network the bootstrap installs.
 #
-#   delonix vm image build -t k8s-golden --offline    # uma vez
+#   delonix vm image build -t k8s-golden --offline    # once
 #   delonix network create lab-net
-#   delonix cluster network profiles                  # o que existe, e o estado de cada um
+#   delonix cluster network profiles                  # what exists, and the state of each
 #   delonix cluster apply -f examples/cluster-cilium.yaml
 #
-# O QUE MUDA em relação ao `cluster-vm.yaml`: ali `cni: default` é uma bridge
-# local ao nó e serve um nó só. Aqui o `spec.cni` nomeia um perfil, e o
-# bootstrap passa a fazer três coisas que não fazia:
+# WHAT CHANGES against `cluster-vm.yaml`: there, `cni: default` is a node-local
+# bridge and serves exactly one node. Here `spec.cni` names a PROFILE, and the
+# bootstrap does three things it did not do before:
 #
-#   1. corre o preflight em cada nó (módulos, sysctls, bpffs, cgroup v2, o
-#      socket do CRI, os plugins CNI que a cadeia deste perfil executa) e
-#      RECUSA o host que não cumpra, nomeando o que falta;
-#   2. descarrega o artefacto do perfil, VERIFICA-O contra o digest que esta
-#      release fixa, renderiza-o com o pod CIDR e a MTU calculada, e aplica-o;
-#   3. ESPERA que o agente dele fique Ready em todos os nós E que todos os nós
-#      fiquem Ready — e falha com as contagens se não acontecer. Um `kubectl
-#      apply` que devolve 0 não é o critério de sucesso.
+#   1. runs the preflight on every node (modules, sysctls, bpffs, cgroup v2,
+#      the CRI socket, the CNI plugins this profile's chain execs) and REFUSES
+#      a host that does not meet them, naming what is missing;
+#   2. downloads the profile's artefact, VERIFIES it against the digest this
+#      release pins, renders it with the pod CIDR and the computed MTU, and
+#      applies it;
+#   3. WAITS for its agent to be Ready on every node AND every node to be
+#      Ready — and fails with the counts if that does not happen. A `kubectl
+#      apply` that exits 0 is not the success condition.
 #
-# LEITURA OBRIGATÓRIA antes de usar em produção:
-# `docs/compatibilidade-rede.md` — o que foi medido, o que não foi, e porquê
-# estes perfis são EXPERIMENTAIS nesta release.
+# READ FIRST, before using this anywhere that matters:
+# `docs/compatibilidade-rede.md` — what was measured, what was not, and why
+# these profiles are EXPERIMENTAL in this release.
 apiVersion: infrastructure.delonix.io/v1alpha1
 kind: KubernetesCluster
 metadata:
@@ -32,50 +33,50 @@ spec:
   podSubnet: 10.244.0.0/16
   serviceSubnet: 10.96.0.0/12
 
-  # O perfil. `delonix cluster network profiles` imprime a versão fixada, o
-  # digest do artefacto, os dataplanes renderizados e o nível de suporte.
+  # The profile. `delonix cluster network profiles` prints the pinned version,
+  # the artefact digest, the dataplanes rendered and the support level.
   cni: cilium
 
   network:
-    # Encapsulamento. Omitir = `vxlan`, o único modo que não pede nada à rede
-    # entre os nós. Os modos encaminhados (`native`, BGP) estão ausentes de
-    # propósito: exigem que a rede em volta transporte as rotas dos pods, e
-    # este motor não a configura.
+    # Encapsulation. Omit for `vxlan`, the only mode that asks nothing of the
+    # network between the nodes. The routed modes (`native`, BGP) are absent on
+    # purpose: they need the surrounding network to carry pod routes, and this
+    # engine does not configure it.
     dataplane: vxlan
 
-    # MTU dos pods. OMITIR é o recomendado: é calculada a partir da MTU do nó
-    # menos o overhead do encapsulamento (VXLAN = 50 bytes → 1450 em 1500).
-    # Um valor que não caiba é RECUSADO (DX-1703) em vez de descartar pacotes
-    # grandes em silêncio.
+    # Pod MTU. OMITTING is recommended: it is computed from the node MTU minus
+    # the encapsulation overhead (VXLAN = 50 bytes, so 1450 on 1500). A value
+    # that does not fit is REFUSED (DX-1703) rather than silently dropping the
+    # large packets.
     # mtu: 1450
-    # nodeMtu: 1500      # declara a MTU real dos nós se não for 1500
+    # nodeMtu: 1500      # declare the nodes' real MTU when it is not 1500
 
-    # kube-proxy. `iptables` (omissão) é o modo medido. `ipvs` gera uma
-    # KubeProxyConfiguration; `none` (só Cilium) salta a fase
-    # `addon/kube-proxy` do kubeadm — e por isso NÃO se liga depois de o
-    # cluster existir.
+    # kube-proxy. `iptables` (the default) is the measured mode. `ipvs`
+    # generates a KubeProxyConfiguration; `none` (Cilium only) skips kubeadm's
+    # `addon/kube-proxy` phase — and therefore cannot be turned on after the
+    # cluster exists.
     kubeProxy: iptables
 
-    # Reconhecimento explícito de que este perfil é experimental nesta
-    # release. Sem isto o manifesto é RECUSADO (DX-1705) com a razão. Não é
-    # burocracia: é a diferença entre um operador que escolheu e um operador
-    # a quem não se disse.
+    # An explicit acknowledgement that this profile is experimental in this
+    # release. Without it the manifest is REFUSED (DX-1705) with the reason.
+    # Not bureaucracy: it is the difference between an operator who chose and
+    # an operator who was not told.
     experimental: true
 
-    # Opcionais:
-    # hubble: true       # observabilidade do Cilium (mais pods, mais recursos)
-    # multus: false      # interfaces secundárias; EXTENSÃO, nunca a rede principal
-    # offline: true      # instala só da cache local (`cluster network fetch`)
-    # interface: ens3    # quando a autodetecção da interface é ambígua
+    # Optional:
+    # hubble: true       # Cilium's observability (more pods, more resources)
+    # multus: false      # extra interfaces; an EXTENSION, never the primary network
+    # offline: true      # install only from the local cache (`cluster network fetch`)
+    # interface: ens3    # when interface autodetection is ambiguous
 
   controlPlane:
     replicas: 1
   workers:
-    replicas: 2          # agora possível: o perfil encaminha pods entre nós
+    replicas: 2          # possible now: the profile routes pods between nodes
 
   vm:
     image: k8s-golden
     network: lab-net
     vcpus: 2
-    memory: 4G           # o agente do Cilium pede mais que uma bridge
+    memory: 4G           # the Cilium agent asks for more than a bridge does
     bootTimeout: 300s

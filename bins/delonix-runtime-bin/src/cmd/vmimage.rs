@@ -6148,7 +6148,7 @@ mod tests {
     /// not is a `hostPort` that works on one golden and is refused on the
     /// other, and no build log would say so.
     #[test]
-    fn os_dois_caminhos_instalam_o_mesmo_meio_de_rede() {
+    fn both_paths_install_the_same_network_half() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
@@ -6195,14 +6195,14 @@ mod tests {
         };
         let a = net_ops(&online);
         assert!(!a.is_empty(), "the online path installs no network half");
-        assert_eq!(a, net_ops(&offline), "os dois caminhos divergiram");
+        assert_eq!(a, net_ops(&offline), "the two paths diverged");
     }
 
     /// `--no-k8s` images get neither: there is no kubelet to serve, and a CNI
     /// plugin set on a machine with no Kubernetes is dead weight on an
     /// artefact that is handed to someone else.
     #[test]
-    fn uma_imagem_sem_k8s_nao_leva_plugins_cni_nem_preflight() {
+    fn a_no_k8s_image_carries_neither_cni_plugins_nor_a_preflight() {
         let eng = PathBuf::from("/tmp/delonix");
         let ops = rootless_customization_steps(&[], &eng, Distro::Ubuntu, None);
         for op in &ops {

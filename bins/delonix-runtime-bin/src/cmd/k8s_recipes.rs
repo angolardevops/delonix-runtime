@@ -167,7 +167,7 @@ pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
 pub(crate) fn cni_prereq_recipes() -> Vec<HostRecipe> {
     // Named explicitly rather than computed from the profile table, so this
     // file reads as what actually lands on a node. The test
-    // `os_modulos_cobrem_todos_os_perfis` proves the two agree, which is the
+    // `the_modules_cover_every_profile` proves the two agree, which is the
     // part that would otherwise rot.
     let modules = [
         "vxlan",        // cilium / calico / flannel VXLAN
@@ -191,7 +191,7 @@ pub(crate) fn cni_prereq_recipes() -> Vec<HostRecipe> {
     let check = format!("test -f {MODULES_FILE}");
     vec![
         HostRecipe {
-            name: "módulos de kernel dos perfis de rede persistidos",
+            name: "network-profile kernel modules persisted",
             check,
             apply: format!(
                 "printf '{lines}\\n' > {MODULES_FILE} && \
@@ -206,7 +206,7 @@ pub(crate) fn cni_prereq_recipes() -> Vec<HostRecipe> {
             offline: Some(format!("printf '{lines}\\n' > {MODULES_FILE}")),
         },
         HostRecipe {
-            name: "sysctls dos perfis de rede aplicados",
+            name: "network-profile sysctls applied",
             // One file for every profile, so the IMAGE does not have to know
             // which one it will run. `rp_filter=0` is Calico's own documented
             // requirement (its `calico-node` refuses to start otherwise); the
@@ -294,9 +294,9 @@ mod tests {
     }
 
     #[test]
-    fn sete_receitas_por_omissao() {
-        // 2 de rede (repo + pacotes) + 5 sem rede (swap, módulos do kubelet,
-        // sysctls do kubelet, módulos dos perfis, sysctls dos perfis).
+    fn seven_recipes_by_default() {
+        // 2 that need the network (repo + packages) + 5 that do not (swap, the
+        // kubelet's modules and sysctls, the profiles' modules and sysctls).
         assert_eq!(k8s_host_recipes(None, &[]).len(), 7);
     }
 
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(
             config.len(),
             5,
-            "swap + módulos/sysctls do kubelet + módulos/sysctls dos perfis de rede"
+            "swap + the kubelet's modules/sysctls + the network profiles' modules/sysctls"
         );
         // The guarantee that matters to the offline build: NONE touches the network.
         for r in &config {
@@ -321,13 +321,13 @@ mod tests {
             // --system` there configures the wrong machine.
             assert!(
                 !cmd.contains("modprobe") && !cmd.contains("sysctl --system"),
-                "receita '{}' tem efeito vivo no caminho offline: {cmd}",
+                "recipe '{}' has a live effect on the offline path: {cmd}",
                 r.name
             );
         }
         // And they are exactly the tail of the full catalogue (they do not diverge).
         let all = k8s_host_recipes(None, &[]);
-        assert_eq!(&all[2..], &config[..], "as 5 finais têm de ser as mesmas");
+        assert_eq!(&all[2..], &config[..], "the last 5 have to be the same");
     }
 
     /// The module list is written out by hand so the file reads as what lands
@@ -335,12 +335,12 @@ mod tests {
     /// declares it needs has to be in it, for every dataplane that profile
     /// renders.
     #[test]
-    fn os_modulos_cobrem_todos_os_perfis() {
+    fn the_modules_cover_every_profile() {
         use super::super::net_profiles::Profile;
         let recipes = cni_prereq_recipes();
         let modules = &recipes
             .iter()
-            .find(|r| r.name.contains("módulos"))
+            .find(|r| r.name.contains("kernel modules"))
             .unwrap()
             .apply;
         for p in [Profile::Cilium, Profile::Calico, Profile::Flannel] {
@@ -348,7 +348,7 @@ mod tests {
                 for m in p.required_modules(dp) {
                     assert!(
                         modules.contains(m),
-                        "{} precisa do módulo {m} em {dp} e a receita não o persiste: {modules}",
+                        "{} needs module {m} on {dp} and the recipe does not persist it: {modules}",
                         p.name()
                     );
                 }

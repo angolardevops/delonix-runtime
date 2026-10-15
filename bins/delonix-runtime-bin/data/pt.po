@@ -16056,3 +16056,88 @@ msgstr "O artefacto de instalação fixado para o perfil escolhido (um manifesto
 
 msgid "Online: check the host's own network reach to the publisher and re-run. Offline: pre-populate the cache with `delonix cluster network fetch --cni <profile>` on a machine that has reach, then copy `<root>/net-profiles/` across. A digest mismatch on a reachable publisher means this release's pin and the published artefact disagree — report it rather than working around it."
 msgstr "Online: confirma o alcance de rede do próprio host ao publicador e volta a correr. Offline: enche a cache antes com `delonix cluster network fetch --cni <perfil>` numa máquina com alcance, e copia o `<root>/net-profiles/` para aqui. Um digest que não bate num publicador alcançável quer dizer que o pin desta release e o artefacto publicado discordam — reporta-o em vez de contornar."
+
+# ---- help dos perfis de rede de cluster (ADR-0078) ----
+
+msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language"
+msgstr "Língua do output: `en` (omissão) ou `pt` (português, pt_AO). Também se define por `$DELONIX_L18N`. Usa com `--help` ou `<comando> --help` para obter a ajuda na língua escolhida"
+
+msgid "Pod network. `default` = the engine's node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable profile, pinned to a version and an artefact digest, installed and waited for by the bootstrap itself (`delonix cluster network profiles` lists them with their support level)"
+msgstr "Rede dos pods. `default` = a bridge local ao nó do próprio motor, que serve só um cluster de UM nó: com mais nós é recusada antes de qualquer VM ser criada. `none` = não instala nada; todos os nós ficam NotReady até aplicares a tua CNI. `cilium`/`calico`/`flannel` = um perfil seleccionável, fixado a uma versão e ao digest do artefacto, instalado e esperado pelo próprio bootstrap (o `delonix cluster network profiles` lista-os com o nível de suporte)"
+
+msgid "Encapsulation / forwarding mode of the chosen profile. Omit for its default (`vxlan`, the only mode that asks nothing of the network between the nodes). `spec.network.dataplane` in a manifest"
+msgstr "Modo de encapsulamento/encaminhamento do perfil escolhido. Omite para o default dele (`vxlan`, o único modo que não pede nada à rede entre os nós). `spec.network.dataplane` num manifesto"
+
+msgid "`iptables` (default), `ipvs`, or `none` — the last meaning the CNI replaces kube-proxy, which changes the `kubeadm init` call itself and so cannot be turned on later. `spec.network.kubeProxy`"
+msgstr "`iptables` (omissão), `ipvs`, ou `none` — o último significa que a CNI substitui o kube-proxy, o que muda o próprio `kubeadm init` e por isso não se liga depois. `spec.network.kubeProxy`"
+
+msgid "Pod MTU. Omit to compute it from the node MTU and the encapsulation overhead — an MTU that does not fit drops large packets in silence"
+msgstr "MTU dos pods. Omite para ser calculada a partir da MTU do nó e do overhead do encapsulamento — uma MTU que não cabe descarta pacotes grandes em silêncio"
+
+msgid "The nodes' own MTU, when it is not 1500. Only used to compute and bound `--cni-mtu`"
+msgstr "A MTU dos próprios nós, quando não é 1500. Só usada para calcular e limitar o `--cni-mtu`"
+
+msgid "Node interface the dataplane should use, when autodetection is ambiguous. Omit to let the profile detect it"
+msgstr "Interface do nó que o dataplane deve usar, quando a autodetecção é ambígua. Omite para o perfil a detectar"
+
+msgid "Also install Multus, as an EXTENSION over the primary CNI (secondary pod interfaces through `NetworkAttachmentDefinition`)"
+msgstr "Instala também o Multus, como EXTENSÃO por cima da CNI principal (interfaces secundárias de pod através de `NetworkAttachmentDefinition`)"
+
+msgid "Also install Hubble (Cilium's observability component)"
+msgstr "Instala também o Hubble (o componente de observabilidade do Cilium)"
+
+msgid "Acknowledge that the chosen profile is experimental in this release. Without it, an experimental profile is REFUSED (DX-1705) rather than silently used"
+msgstr "Reconhece que o perfil escolhido é experimental nesta release. Sem isto, um perfil experimental é RECUSADO (DX-1705) em vez de usado em silêncio"
+
+msgid "Install the pod network from the local artefact cache only, never from the network. Populate it with `delonix cluster network fetch`"
+msgstr "Instala a rede dos pods só a partir da cache local de artefactos, nunca da rede. Enche-a com `delonix cluster network fetch`"
+
+msgid "Which profile's artefacts. Omit for every profile this release ships, plus Multus"
+msgstr "Os artefactos de que perfil. Omite para todos os perfis que esta release traz, mais o Multus"
+
+# ---- cluster network: comentários de exemplo e descrições (ADR-0078) ----
+
+msgid "what pod networks exist, pinned version and support level of each"
+msgstr "que redes de pods existem, a versão fixada e o nível de suporte de cada uma"
+
+msgid "what this cluster is ACTUALLY running, and whether it drifted"
+msgstr "o que este cluster corre DE FACTO, e se derivou"
+
+msgid "verify the artefacts now, install without reach later"
+msgstr "verifica os artefactos agora, instala sem alcance depois"
+
+msgid "the table: versions, digests, dataplanes, support level"
+msgstr "a tabela: versões, digests, dataplanes, nível de suporte"
+
+msgid "desired against observed; non-zero when they differ"
+msgstr "desejado contra observado; sai não-zero quando diferem"
+
+msgid "every profile's artefact, verified into the local cache"
+msgstr "o artefacto de cada perfil, verificado para a cache local"
+
+msgid "just the one you will install"
+msgstr "só o que vais instalar"
+
+msgid "Inspect and prepare the pod-network profiles"
+msgstr "Inspecciona e prepara os perfis de rede dos pods"
+
+msgid "Inspect and prepare the pod-network profiles.\n\nWhat exists and at what support level, what a given cluster is ACTUALLY running (and whether that drifted from what was asked), and a verified pre-fetch of the install artefacts for an offline bootstrap."
+msgstr "Inspecciona e prepara os perfis de rede dos pods.\n\nO que existe e em que nível de suporte, o que um dado cluster corre DE FACTO (e se isso derivou do que foi pedido), e uma obtenção verificada dos artefactos de instalação para um bootstrap offline."
+
+msgid "List the pod-network profiles, their pinned versions and their support level"
+msgstr "Lista os perfis de rede dos pods, as versões fixadas de cada um e o nível de suporte"
+
+msgid "List the pod-network profiles, their pinned versions and their support level.\n\nPrints what this binary would install, not what a web page says: the version, the artefact digest, the dataplanes rendered, the kube-proxy modes, whether the profile enforces `NetworkPolicy`, and — for an experimental one — the reason it is experimental."
+msgstr "Lista os perfis de rede dos pods, as versões fixadas de cada um e o nível de suporte.\n\nImprime o que ESTE binário instalaria, não o que uma página web diz: a versão, o digest do artefacto, os dataplanes renderizados, os modos de kube-proxy, se o perfil aplica `NetworkPolicy`, e — num experimental — a razão de o ser."
+
+msgid "What pod network a cluster is ACTUALLY running, and whether it is what was asked for"
+msgstr "Que rede de pods um cluster corre DE FACTO, e se é a que foi pedida"
+
+msgid "What pod network a cluster is ACTUALLY running, and whether it is what was asked for.\n\nReads both sides: the record this engine wrote when it installed (desired) and the live cluster's own DaemonSets (observed). A divergence between them is reported as one, and exits non-zero — a status that returns 0 over a cluster running a different CNI than its manifest declares is the dishonest reporting this repo removes elsewhere."
+msgstr "Que rede de pods um cluster corre DE FACTO, e se é a que foi pedida.\n\nLê os dois lados: o registo que este motor escreveu quando instalou (desejado) e os DaemonSets do próprio cluster vivo (observado). Uma divergência entre eles é reportada como tal, e sai não-zero — um estado que devolve 0 sobre um cluster a correr uma CNI diferente da que o manifesto declara é o relato desonesto que este repositório remove noutros sítios."
+
+msgid "Download and verify the install artefacts into the local cache, for an offline install later"
+msgstr "Descarrega e verifica os artefactos de instalação para a cache local, para instalar offline depois"
+
+msgid "Download and verify the install artefacts into the local cache, for an offline install later.\n\nRun it on a machine with reach, then copy `<root>/net-profiles/` to the machine that will bootstrap the cluster and pass `--cni-offline`. Every artefact is verified against the digest this release pins; a mismatch fails and caches nothing."
+msgstr "Descarrega e verifica os artefactos de instalação para a cache local, para instalar offline depois.\n\nCorre numa máquina com alcance, copia o `<root>/net-profiles/` para a máquina que vai fazer o bootstrap, e passa `--cni-offline`. Cada artefacto é verificado contra o digest que esta release fixa; se não bater, falha e não guarda nada."
