@@ -97,18 +97,6 @@ pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
 }
 
-/// Whether a template supports TLS (has `tls=` in its `template.meta`).
-/// Used by autocomplete to filter unsupported `--tls-port` / `--hostname` flags.
-pub(crate) fn template_supports_tls(template_name: &str) -> bool {
-    !template_meta(canonical_template(template_name)).tls_port.is_empty()
-}
-
-/// Whether a template has a version parameter (`version=` in its `template.meta`).
-/// Used by autocomplete to filter unsupported `-v` / `--template-version` flags.
-pub(crate) fn template_has_version(template_name: &str) -> bool {
-    template_meta(canonical_template(template_name)).has_version
-}
-
 /// Old template names that still answer, mapped to the directory that now
 /// holds the template. A rename does not change what the project IS, so the
 /// alias is silent — the same rule as a renamed Kind (`KIND_ALIASES`). `python`
@@ -140,10 +128,6 @@ struct TemplateMeta {
     lock: &'static str,
     /// Seconds `--up` waits for the health path to answer 200.
     wait_secs: u64,
-    /// TLS port (`""` when the template does not serve TLS).
-    tls_port: &'static str,
-    /// Whether the template has a version parameter.
-    has_version: bool,
 }
 
 /// Default `8000` + the apps' health + no version if the template does not
@@ -153,15 +137,13 @@ fn template_meta(name: &str) -> TemplateMeta {
         .iter()
         .find(|m| m.0 == name)
         .map(
-            |&(_, port, health, version, versions, lock, wait_secs, tls_port)| TemplateMeta {
+            |&(_, port, health, version, versions, lock, wait_secs, _tls_port)| TemplateMeta {
                 port,
                 health,
                 version,
                 versions,
                 lock,
                 wait_secs,
-                tls_port,
-                has_version: !version.is_empty(),
             },
         )
         .unwrap_or(TemplateMeta {
@@ -171,8 +153,6 @@ fn template_meta(name: &str) -> TemplateMeta {
             versions: "",
             lock: "",
             wait_secs: 120,
-            tls_port: "",
-            has_version: false,
         })
 }
 
@@ -3236,7 +3216,9 @@ mod tests {
     /// This allows `delonix vm image build` to work out-of-the-box.
     #[test]
     fn every_application_template_supports_vm_build() {
-        let vm_templates = ["go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel"];
+        let vm_templates = [
+            "go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel",
+        ];
 
         for name in &vm_templates {
             let (_, files) = TEMPLATES
@@ -3266,11 +3248,7 @@ mod tests {
             let has_vm_support = TEMPLATE_KV
                 .iter()
                 .find(|(n, _)| *n == *name)
-                .map(|(_, pairs)| {
-                    pairs
-                        .iter()
-                        .any(|(k, v)| *k == "vm_support" && *v == "yes")
-                })
+                .map(|(_, pairs)| pairs.iter().any(|(k, v)| *k == "vm_support" && *v == "yes"))
                 .unwrap_or(false);
             assert!(
                 has_vm_support,
