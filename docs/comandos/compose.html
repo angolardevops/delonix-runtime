@@ -170,7 +170,7 @@ via topological ordering of the service graph — a cycle is a clear error, neve
 deterministic naming (<code>&lt;project&gt;_&lt;name&gt;</code>) — no registry of its own, the same
 philosophy as <code>stack describe</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs"><code>cmd/compose.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix compose [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix compose &lt;COMMAND&gt;
 
 Commands:
   down    Removes every container this project&#x27;s `up` created
@@ -181,9 +181,6 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -222,9 +219,6 @@ precisa de semântica própria de limpeza, ainda por desenhar). <code>working_di
 Options:
   -f, --file &lt;FILE&gt;
           Repeatable — `-f a.yml -f b.yml` merges left-to-right (see the module doc-comment, &quot;Multi-file compose&quot;). No `-f` at all falls back to the usual single-file search
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -p, --project-name &lt;PROJECT&gt;
           
@@ -268,9 +262,6 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -p, --project-name &lt;PROJECT&gt;
           
 
@@ -300,9 +291,6 @@ Arguments:
 Options:
   -f, --file &lt;FILE&gt;
           
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -p, --project-name &lt;PROJECT&gt;
           
@@ -337,9 +325,6 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -p, --project-name &lt;PROJECT&gt;
           
 
@@ -369,9 +354,6 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           Repeatable — must name the SAME file(s) `up` was given, so the project/network/volume names re-derive identically
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -p, --project-name &lt;PROJECT&gt;
           

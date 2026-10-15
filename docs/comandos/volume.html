@@ -163,7 +163,7 @@ Docker's own <code>docker volume create</code> idiom — local by default, or NF
 vault credentials), or an isolated, quota'd slice carved out of an already-existing volume
 (<code>--parent</code>).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix volume [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix volume &lt;COMMAND&gt;
 
 Commands:
   create    Create a named volume
@@ -177,9 +177,6 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -206,7 +203,7 @@ SEE ALSO:
   delonix › volume</code></pre></div>
 <h2 id='snapshot'><code>volume snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)</p>
-<div class='help'><pre><code>Usage: delonix volume snapshot [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix volume snapshot &lt;COMMAND&gt;
 
 Commands:
   create   Create a snapshot NOW (default name: UTC timestamp)
@@ -216,9 +213,6 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -250,9 +244,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -n, --namespace &lt;NAMESPACE&gt;
           Namespace that owns them (default: the unscoped root)
 
@@ -287,9 +278,6 @@ Options:
           Non-local drivers are configured entirely through `--opt` — the same idiom `docker volume create --driver &lt;name&gt; --opt k=v` uses, and one flag family instead of the two this used to have (`--type`+`--server`/`--share` for the network form, `--driver nfs`+`--device` for the raw one — the same information written twice two different ways).
           
           [default: local]
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --opt &lt;KEY=VALUE&gt;
           Driver option, `key=value`. Repeatable. For `nfs`/`cifs`/`smb`/ `webdav`: `server` (required — host/IP, or the base URL for `webdav`), `share` (required — NFS path, CIFS share name, or the WebDAV URL path), `username`, `password` (prefer `password-secret`), `password-secret` (vault secret with a `password` key), `ro=true` (mount read-only), `options` (extra mount options, e.g. `vers=4.1,soft`)
@@ -344,9 +332,6 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix volume ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005)
           
@@ -388,9 +373,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default, the historical text) or `json` (ADR-0005)
           
@@ -422,9 +404,6 @@ Arguments:
 Options:
   -f, --force
           Remove it even with live references — DESTROYS the data of whatever is still using it
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --destroy-remote
           ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made
@@ -466,9 +445,6 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -493,9 +469,6 @@ SEE ALSO:
 Options:
   -f, --force
           Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --namespace &lt;NAMESPACE&gt;
           Sweep the volumes owned by THIS namespace, and nothing else.

@@ -156,7 +156,7 @@ ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o
 <code>allow</code>/<code>deny</code>, or <code>allowlist</code> (denies everything except DNS and
 the given CIDRs). All on the same <code>ContainerFw</code>/nft as <code>ingress</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net egress [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net egress &lt;COMMAND&gt;
 
 Commands:
   ls      Show the outbound firewall (policy + rules)
@@ -171,9 +171,6 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -199,16 +196,13 @@ SEE ALSO:
   delonix › net › egress</code></pre></div>
 <h2 id='clear'><code>egress clear</code></h2>
 <p class='intro'>Remove all outbound rules</p>
-<div class='help'><pre><code>Usage: delonix net egress clear [OPTIONS] &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: delonix net egress clear &lt;CONTAINER&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
           Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -234,9 +228,6 @@ Arguments:
           `tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER&#x27;s port, the same one the rule was written with
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --to &lt;TO&gt;
           Only rules to this destination CIDR (default: any recorded destination)
 
@@ -267,9 +258,6 @@ Arguments:
           `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --to &lt;TO&gt;
           
 
@@ -303,9 +291,6 @@ Arguments:
           `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --to &lt;TO&gt;
           Only to this destination CIDR (default: anywhere)
 
@@ -334,7 +319,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Só deixar sair HTTPS</div><div class='cap lang-en'>Only let HTTPS out</div><pre><code>delonix net egress allow app tcp/443 --to 0.0.0.0/0</code></pre></div>
 <h2 id='policy'><code>egress policy</code></h2>
 <p class='intro'>Set the default outbound policy when no rule matches</p>
-<div class='help'><pre><code>Usage: delonix net egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
+<div class='help'><pre><code>Usage: delonix net egress policy &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
@@ -344,9 +329,6 @@ Arguments:
           [possible values: allow, deny]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -379,9 +361,6 @@ Arguments:
           - allowlist: Deny all egress EXCEPT DNS and the CIDRs given in `--to` (allowlist)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --to &lt;TO&gt;
           CIDRs for `allowlist` mode (comma-separated), e.g. `10.0.0.0/8,1.1.1.1/32`
 
@@ -406,7 +385,7 @@ SEE ALSO:
 <h2 id='host'><code>egress host</code></h2>
 <p class='intro'>Allow a network&#x27;s egress to a HOSTNAME (and <code>*.hostname</code>). Repeatable.</p>
 <p class='intro'>Learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express.</p>
-<div class='help'><pre><code>Usage: delonix net egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
+<div class='help'><pre><code>Usage: delonix net egress host &lt;NETWORK&gt; &lt;HOSTNAME&gt;
 
 Arguments:
   &lt;NETWORK&gt;
@@ -416,9 +395,6 @@ Arguments:
           e.g. `github.com` (matches `github.com` and `*.github.com`)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -447,16 +423,13 @@ Repeatable for several hostnames.</p></div>
 <h2 id='show'><code>egress show</code></h2>
 <p class='intro'>Show a NETWORK&#x27;s egress policy.</p>
 <p class='intro'>CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts.</p>
-<div class='help'><pre><code>Usage: delonix net egress show [OPTIONS] &lt;NETWORK&gt;
+<div class='help'><pre><code>Usage: delonix net egress show &lt;NETWORK&gt;
 
 Arguments:
   &lt;NETWORK&gt;
           Network whose egress this governs — the policy applies to every workload attached to it
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -479,9 +452,6 @@ Arguments:
           Container to inspect (omit to list every container&#x27;s outbound state)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005). `json` carries `governed` as its own field — a container off the SDN cannot HAVE a firewall, and a script must tell that from «open» without parsing a human sentence
           

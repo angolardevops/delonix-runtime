@@ -168,7 +168,7 @@ agent's own local API) and <strong>cloudflare</strong> (needs <code>cloudflared<
 only the ephemeral quick-tunnel <code>*.trycloudflare.com</code>, no account — a NAMED tunnel with
 its own domain needs the Cloudflare API, not implemented yet).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/tunnel.rs"><code>cmd/tunnel.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel &lt;COMMAND&gt;
 
 Commands:
   expose  One-shot expose of a local port, no manifest needed
@@ -176,9 +176,6 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -210,9 +207,6 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -240,9 +234,6 @@ Arguments:
           Local TCP port to expose
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -p, --provider &lt;PROVIDER&gt;
           `pinggy` | `ngrok` | `cloudflare`
           

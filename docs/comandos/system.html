@@ -156,7 +156,7 @@ space: stopped containers, orphan dirs, dangling images, CAS blobs, orphan hostf
 networks); <code>system df</code> shows disk usage; <code>system monitor</code> follows
 connections/conntrack; <code>system events</code> the event stream.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/system.rs"><code>cmd/system.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix system &lt;COMMAND&gt;
 
 Commands:
   df         Disk usage by area (images, containers, volumes, VM images)
@@ -178,9 +178,6 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -216,9 +213,6 @@ Options:
           Temperature (°C) at or above which it cools down
           
           [default: 85]
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --low &lt;LOW&gt;
           Temperature (°C) below which it restores
@@ -267,9 +261,6 @@ Options:
           
           [default: 1000]
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --no-stream
           One sample and exit (without clearing the screen or repeating)
 
@@ -297,9 +288,6 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix system virt [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --tune
           Apply the recommended tuning (needs root)
 
@@ -327,9 +315,6 @@ SEE ALSO:
 Options:
       --delegate
           Apply the fix instead of only reporting it. Writing the system-wide drop-in needs root; the per-session remedy never does
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -359,9 +344,6 @@ Options:
           Follow continuously (Ctrl-C to exit)
           
           [alias: -w]
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -n, --tail &lt;TAIL&gt;
           Show only the last N (default: all)
@@ -399,9 +381,6 @@ SEE ALSO:
 Options:
   -f, --force
           Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -a, --all
           Also remove unused images that DO have a tag (not just the dangling ones)
@@ -462,12 +441,9 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Recuperar espaço (GC)</div><div class='cap lang-en'>Reclaim space (GC)</div><pre><code>delonix system prune</code></pre></div>
 <h2 id='df'><code>system df</code></h2>
 <p class='intro'>Disk usage by area (images, containers, volumes, VM images)</p>
-<div class='help'><pre><code>Usage: delonix system df [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system df
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -483,12 +459,9 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Uso de disco</div><div class='cap lang-en'>Disk usage</div><pre><code>delonix system df</code></pre></div>
 <h2 id='info'><code>system info</code></h2>
 <p class='intro'>Engine state: rootless?, cgroup delegation, network infra, counts</p>
-<div class='help'><pre><code>Usage: delonix system info [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system info
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

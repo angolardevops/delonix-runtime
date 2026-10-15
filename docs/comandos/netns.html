@@ -156,7 +156,7 @@ the ingress holder up/down, attaching/detaching netns, publishing/unpublishing p
 per-container firewalling. Most users never need this — they use the higher-level groups — but
 it's exposed for debugging and integration.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/netns.rs"><code>cmd/netns.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net netns [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net netns &lt;COMMAND&gt;
 
 Commands:
   down       Force tear-down of the ingress infra (kills slirp + holder, frees the netns)
@@ -172,9 +172,6 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -210,9 +207,6 @@ Arguments:
           Netns/container name
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --spec &lt;SPEC&gt;
           ContainerFw as JSON, e.g. `{&quot;enabled&quot;:true,&quot;policyIn&quot;:&quot;deny&quot;,&quot;rules&quot;:[...]}`
 
@@ -238,16 +232,13 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar a firewall de um container no ingress</div><div class='cap lang-en'>Apply a container&#x27;s firewall on the ingress</div><pre><code>delonix net netns firewall &lt;id&gt; 10.200.0.5</code></pre></div>
 <h2 id='unpublish'><code>netns unpublish</code></h2>
 <p class='intro'>Unpublish a host port from the ingress</p>
-<div class='help'><pre><code>Usage: delonix net netns unpublish [OPTIONS] &lt;HOST_PORT&gt;
+<div class='help'><pre><code>Usage: delonix net netns unpublish &lt;HOST_PORT&gt;
 
 Arguments:
   &lt;HOST_PORT&gt;
           The HOST port to stop forwarding, as it was given to `publish`
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -275,9 +266,6 @@ Options:
       --ip &lt;IP&gt;
           Override the container IP (defaults to the deterministic one from `name`)
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -297,7 +285,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar uma porta pelo ingress, à mão</div><div class='cap lang-en'>Publish a port via ingress, by hand</div><pre><code>delonix net netns publish 8080:80 10.200.0.5</code></pre></div>
 <h2 id='exec'><code>netns exec</code></h2>
 <p class='intro'>Run a command inside an attached netns (exercises the runtime join path)</p>
-<div class='help'><pre><code>Usage: delonix net netns exec [OPTIONS] &lt;NAME&gt; &lt;COMMAND&gt;...
+<div class='help'><pre><code>Usage: delonix net netns exec &lt;NAME&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;NAME&gt;
@@ -307,9 +295,6 @@ Arguments:
           Command and arguments to run in there. Everything after the name
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -328,16 +313,13 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Correr um comando DENTRO de uma netns anexada — para depurar a rede</div><div class='cap lang-en'>Run a command INSIDE an attached netns — for debugging the network</div><pre><code>delonix net netns exec minha-netns ip -br addr</code></pre></div>
 <h2 id='detach'><code>netns detach</code></h2>
 <p class='intro'>Detach (and destroy) a previously attached netns</p>
-<div class='help'><pre><code>Usage: delonix net netns detach [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net netns detach &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           Netns to destroy — a container id, or `pod-&lt;name&gt;` for a pod&#x27;s shared one
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -362,9 +344,6 @@ Options:
       --ip &lt;IP&gt;
           IP in the infra subnet. Defaults to a deterministic one derived from `name`
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -383,12 +362,9 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ligar uma netns à bridge (o motor faz isto sozinho no run)</div><div class='cap lang-en'>Attach a netns to the bridge (the engine does this on its own during run)</div><pre><code>delonix net netns attach minha-netns</code></pre></div>
 <h2 id='down'><code>netns down</code></h2>
 <p class='intro'>Force tear-down of the ingress infra (kills slirp + holder, frees the netns)</p>
-<div class='help'><pre><code>Usage: delonix net netns down [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net netns down
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -414,9 +390,6 @@ Options:
       --json
           Emit JSON instead of a human summary
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -434,12 +407,9 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado da infra de ingress</div><div class='cap lang-en'>Ingress infra status</div><pre><code>delonix net netns status</code></pre></div>
 <h2 id='up'><code>netns up</code></h2>
 <p class='intro'>Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp</p>
-<div class='help'><pre><code>Usage: delonix net netns up [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net netns up
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

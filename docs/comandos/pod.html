@@ -177,7 +177,7 @@ N containers allowed). <strong>Known limitation:</strong> the <strong>PID</stron
 (<code>shareProcessNamespace</code>, already in the schema) is NOT shared yet — each container
 keeps its own process tree; that's the next slice.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/pod.rs"><code>cmd/pod.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix pod &lt;COMMAND&gt;
 
 Commands:
   create        Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
@@ -189,9 +189,6 @@ Commands:
   help          Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -224,9 +221,6 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -263,9 +257,6 @@ Options:
       --container &lt;CONTAINER&gt;
           Which container (its short name inside the pod). Default: the first
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -f, --follow
           
 
@@ -301,9 +292,6 @@ Arguments:
 Options:
   -i, --interactive
           Interactive (attaches stdin)
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -t, --tty
           Allocate a pseudo-terminal
@@ -351,9 +339,6 @@ Options:
       --container &lt;CONTAINER&gt;
           Which container (its short name inside the pod). Default: the first
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -383,9 +368,6 @@ Arguments:
 Options:
       --container &lt;CONTAINER&gt;
           Which container (its short name inside the pod). Default: the first
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -i, --interactive
           Refused: stdin forwarding isn&#x27;t supported (see the command&#x27;s own doc above)

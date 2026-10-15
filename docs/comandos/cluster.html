@@ -161,7 +161,7 @@ idempotent <em>with no state file</em> (every step has a <code>check</code> and 
 for SSH, and runs the SAME bootstrap — one command, from zero to a cluster running
 <code>delonix-cri</code> as its runtime (no containerd).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs"><code>cmd/cluster.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix cluster &lt;COMMAND&gt;
 
 Commands:
   backup      Back up etcd&#x27;s keyspace to a local file (VM-provisioned clusters only)
@@ -185,9 +185,6 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -220,16 +217,13 @@ SEE ALSO:
 <h2 id='kube'><code>cluster kube</code></h2>
 <p class='intro'>Generate a Kubernetes manifest from a container/pod already running locally.</p>
 <p class='intro'><code>kube generate</code> — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to <code>podman generate kube</code>).</p>
-<div class='help'><pre><code>Usage: delonix cluster kube [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix cluster kube &lt;COMMAND&gt;
 
 Commands:
   generate  Generates a `kind: Pod` from a container (or from every member of a pod) and prints it to stdout
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -255,9 +249,6 @@ Arguments:
           Images to load (`repo:tag`, as they appear in `delonix image ls`)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --name &lt;NAME&gt;
           Cluster name. Omit when there is only one — with several, this says which
 
@@ -286,9 +277,6 @@ delonix cluster load app:dev --name lab</code></pre></div>
 <div class='help'><pre><code>Usage: delonix cluster create [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --name &lt;NAME&gt;
           Cluster name (prefix of the nodes and the kubeconfig). Omit = invents one (Angolan king + place), so two `create`s in a row do not collide
 
@@ -346,16 +334,13 @@ SEE ALSO:
 <h2 id='kubeconfig'><code>cluster kubeconfig</code></h2>
 <p class='intro'>Print a cluster&#x27;s kubeconfig from the local cache (no live SSH).</p>
 <p class='intro'>The same file <code>create</code>/<code>apply</code>/<code>kubeadm</code> already wrote and merged into <code>~/.kube/config</code> at creation time. Redirect or pipe it as needed.</p>
-<div class='help'><pre><code>Usage: delonix cluster kubeconfig [OPTIONS] [NAME]
+<div class='help'><pre><code>Usage: delonix cluster kubeconfig [NAME]
 
 Arguments:
   [NAME]
           Cluster name. Omit when there is only one cached
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -391,9 +376,6 @@ Arguments:
           [default: .]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --name &lt;NAME&gt;
           Project name (default: the directory name)
 
@@ -429,9 +411,6 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --cri-bin &lt;CRI_BIN&gt;
           `delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version
 
@@ -465,9 +444,6 @@ project's offensive audit, with tests replicating the exploit.</p></div>
 <div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --name &lt;NAME&gt;
           Cluster name (used for `&lt;name&gt;-cp1`/`&lt;name&gt;-w1` VM names and the kubeconfig context). Omit for an auto-generated Angolan name (`&lt;king&gt;-&lt;place&gt;-NN`) — same pattern as auto-named containers and `cluster create` (kind mode)
 

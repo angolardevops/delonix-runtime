@@ -157,7 +157,7 @@ images</strong> (a <code>.qcow2</code> plus per-image metadata): Ubuntu cloud im
 kubeadm/kubelet/kubectl + <code>delonix-cri</code> — the base <code>delonix cluster</code> builds
 on.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/image.rs"><code>cmd/image.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix image [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix image &lt;COMMAND&gt;
 
 Commands:
   pull      Pull an image from a registry
@@ -181,9 +181,6 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -212,16 +209,13 @@ SEE ALSO:
   delonix › image</code></pre></div>
 <h2 id='logout'><code>image logout</code></h2>
 <p class='intro'>Remove the stored credentials of a registry</p>
-<div class='help'><pre><code>Usage: delonix image logout [OPTIONS] &lt;REGISTRY&gt;
+<div class='help'><pre><code>Usage: delonix image logout &lt;REGISTRY&gt;
 
 Arguments:
   &lt;REGISTRY&gt;
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -244,9 +238,6 @@ Arguments:
           Registry (e.g. `ghcr.io`, `docker.io`)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -u, --username &lt;USERNAME&gt;
           
 
@@ -272,14 +263,11 @@ SEE ALSO:
 <h2 id='load'><code>image load</code></h2>
 <p class='intro'>Load an image from an archive (the counterpart of <code>save</code>).</p>
 <p class='intro'>Reads archives produced by <code>delonix image save</code>, <code>docker save</code> or <code>podman save</code>.</p>
-<div class='help'><pre><code>Usage: delonix image load [OPTIONS] --input &lt;FILE&gt;
+<div class='help'><pre><code>Usage: delonix image load --input &lt;FILE&gt;
 
 Options:
   -i, --input &lt;FILE&gt;
           Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -299,16 +287,13 @@ SEE ALSO:
 <h2 id='save'><code>image save</code></h2>
 <p class='intro'>Save an image to a portable archive (<code>docker save</code>&#x27;s counterpart).</p>
 <p class='intro'>The way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy <code>manifest.json</code>, so <code>delonix image load</code>, <code>docker load</code>, <code>podman load</code> and <code>ctr images import</code> all read it.</p>
-<div class='help'><pre><code>Usage: delonix image save [OPTIONS] --output &lt;FILE&gt; &lt;IMAGE&gt;
+<div class='help'><pre><code>Usage: delonix image save --output &lt;FILE&gt; &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -o, --output &lt;FILE&gt;
           Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`)
 
@@ -337,9 +322,6 @@ Arguments:
           Image to scan (optional with `--update`)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --sbom
           List the SBOM (installed packages) instead of scanning
 
@@ -376,7 +358,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Procurar vulnerabilidades conhecidas numa imagem</div><div class='cap lang-en'>Look for known vulnerabilities in an image</div><pre><code>delonix image scan nginx:alpine</code></pre></div><div class="ex"><div class='cap lang-pt'>Varrer todas as imagens locais</div><div class='cap lang-en'>Scan every local image</div><pre><code>delonix image scan</code></pre></div>
 <h2 id='verify'><code>image verify</code></h2>
 <p class='intro'>Verify the cosign signature of a local image against a public key</p>
-<div class='help'><pre><code>Usage: delonix image verify [OPTIONS] &lt;IMAGE&gt; &lt;PEM&gt;
+<div class='help'><pre><code>Usage: delonix image verify &lt;IMAGE&gt; &lt;PEM&gt;
 
 Arguments:
   &lt;IMAGE&gt;
@@ -386,9 +368,6 @@ Arguments:
           Public key in PEM
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -407,16 +386,13 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Confirmar a assinatura contra uma chave pública</div><div class='cap lang-en'>Confirm the signature against a public key</div><pre><code>delonix image verify ghcr.io/aminhaorg/app:1.0 chave.pem</code></pre></div>
 <h2 id='history'><code>image history</code></h2>
 <p class='intro'>Layers of an image (digest + size), from base to top</p>
-<div class='help'><pre><code>Usage: delonix image history [OPTIONS] &lt;IMAGE&gt;
+<div class='help'><pre><code>Usage: delonix image history &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -434,7 +410,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que instrução criou cada camada</div><div class='cap lang-en'>Which instruction created each layer</div><pre><code>delonix image history app:dev</code></pre></div>
 <h2 id='tag'><code>image tag</code></h2>
 <p class='intro'>Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)</p>
-<div class='help'><pre><code>Usage: delonix image tag [OPTIONS] &lt;SOURCE&gt; &lt;TARGET&gt;
+<div class='help'><pre><code>Usage: delonix image tag &lt;SOURCE&gt; &lt;TARGET&gt;
 
 Arguments:
   &lt;SOURCE&gt;
@@ -444,9 +420,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -466,16 +439,13 @@ SEE ALSO:
 <h2 id='describe'><code>image describe</code></h2>
 <p class='intro'>Human-readable detail of one or more images, <code>kubectl describe</code>-style.</p>
 <p class='intro'>Tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir.</p>
-<div class='help'><pre><code>Usage: delonix image describe [OPTIONS] &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: delonix image describe &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -501,9 +471,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
       --verify &lt;PEM&gt;
           Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry&#x27;s own digest
 
@@ -531,9 +498,6 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix image ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005)
           
@@ -567,9 +531,6 @@ Options:
   -f, --force
           Remove it even if a container still uses it
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -587,7 +548,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix image remove alpine:3.19</code></pre></div>
 <h2 id='export'><code>image export</code></h2>
 <p class='intro'>Export an OCI runtime bundle (rootfs + config.json) for <code>runc</code>/<code>crun</code></p>
-<div class='help'><pre><code>Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
+<div class='help'><pre><code>Usage: delonix image export &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
   &lt;IMAGE&gt;
@@ -597,9 +558,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -620,7 +578,7 @@ SEE ALSO:
 <h2 id='push'><code>image push</code></h2>
 <p class='intro'>Publish a local image to an OCI registry.</p>
 <p class='intro'>Without <code>target</code>, publishes under the image&#x27;s own reference.</p>
-<div class='help'><pre><code>Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
+<div class='help'><pre><code>Usage: delonix image push &lt;NAME&gt; [TARGET]
 
 Arguments:
   &lt;NAME&gt;
@@ -630,9 +588,6 @@ Arguments:
           
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -657,9 +612,6 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

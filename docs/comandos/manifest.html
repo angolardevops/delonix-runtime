@@ -156,7 +156,7 @@ and prints the full YAML with <code>#[serde(default)]</code>s materialized — t
 <code>kubectl --dry-run=client -o yaml</code>. It applies nothing; it is how you see what a
 hand-written <code>kind:</code> will actually become once the engine reads it.</p>
 
-<div class='help'><pre><code>Usage: delonix manifest [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix manifest &lt;COMMAND&gt;
 
 Commands:
   render    Print the manifest as the engine will read it, with defaults filled in
@@ -165,9 +165,6 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
