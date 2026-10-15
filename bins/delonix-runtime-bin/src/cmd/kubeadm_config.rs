@@ -95,6 +95,12 @@ struct EtcdBlock {
 /// ones, and a call site that silently passed `service_subnet` where
 /// `pod_subnet` was expected would compile.
 pub(crate) struct InitConfig<'a> {
+    /// ALREADY in kubeadm's own shape (`v1.34.12`), or `None` to let kubeadm
+    /// use its own version — see `cluster::kubeadm_version_arg`, which is the
+    /// one place that decides it. Taking the resolved value rather than
+    /// `spec.k8sVersion` is deliberate: this struct used to take the raw field
+    /// and prepend `v`, which is how the `--config` path carried the exact
+    /// `v1.34`-is-not-semver bug the flat-flag path did.
     pub k8s_version: Option<&'a str>,
     pub control_plane_endpoint: &'a str,
     pub pod_subnet: &'a str,
@@ -158,7 +164,7 @@ pub(crate) fn render_init_config(cfg: &InitConfig) -> Result<String> {
     let cluster = ClusterConfigurationYaml {
         api_version: KUBEADM_API_VERSION,
         kind: "ClusterConfiguration",
-        kubernetes_version: cfg.k8s_version.map(|v| format!("v{v}")),
+        kubernetes_version: cfg.k8s_version.map(str::to_owned),
         control_plane_endpoint: cfg.control_plane_endpoint.to_string(),
         networking: Networking {
             pod_subnet: cfg.pod_subnet.to_string(),
@@ -200,7 +206,7 @@ mod tests {
 
     fn cfg<'a>(etcd: &'a [String], kube_proxy: &'a str) -> InitConfig<'a> {
         InitConfig {
-            k8s_version: Some("1.34.0"),
+            k8s_version: Some("v1.34.0"),
             control_plane_endpoint: "10.0.0.1:6443",
             pod_subnet: "10.244.0.0/16",
             service_subnet: "10.96.0.0/12",

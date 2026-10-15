@@ -1,8 +1,10 @@
 # ADR-0078: A rede dos pods de um cluster kubeadm é um PERFIL seleccionável, fixado por conteúdo e recusado antes de existir máquina
 
 - **Status:** Accepted (2026-10-15). **D1 a D6 implementados**; **D7 (validação
-  ao vivo multi-nó) NÃO executado** — é o que mantém os três perfis
-  `EXPERIMENTAL`, e está escrito como pendência, não como detalhe.
+  ao vivo multi-nó) EXECUTADO no mesmo dia** — e o Cilium **falhou**, com
+  causa-raiz medida (bpffs duplicado dentro do container, um defeito do CRI).
+  Tudo até ao dataplane passou. Os três perfis ficam `EXPERIMENTAL`, agora por
+  medição e não por precaução.
 - **Date:** 2026-10-15
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0074 (publicação de `hostPort` no CRI — a sua própria
@@ -213,18 +215,48 @@ primeira é a mesma mentira um nível acima), e **nunca sai 0 por não ter
 conseguido medir** — um «não sei» conta como falha. O `prepare_host` corre-o
 antes do kubeadm e **empurra-o** para um nó cuja golden é anterior a ele.
 
-### D7 — A validação ao vivo multi-nó é a condição de saída de EXPERIMENTAL, e NÃO foi feita
+### D7 — A validação ao vivo multi-nó CORREU, e o Cilium falhou
 
-Não foi executada nesta sessão, e o motivo é concreto e verificável: o host
-tinha **5 GiB livres em 938 GiB (100% ocupado)**. Uma build da golden expande o
-qcow2 durante o `virt-resize`/`virt-customize` e não cabe; três VMs de nó menos
-ainda. Encher a raiz de uma máquina partilhada para produzir uma medição não é
-uma troca aceitável.
+Corrida a 2026-10-15, dois nós (1 control-plane + 1 worker) em libvirt/NAT, com
+a golden construída na mesma sessão. O detalhe está em
+`docs/compatibilidade-rede.md` §3.2; o resumo:
 
-O procedimento reprodutível está em `docs/compatibilidade-rede.md`, com os
-critérios de aceitação por perfil. **Até ele correr, os três perfis ficam
-`Experimental` e o DX-1705 continua a dizer porquê.** Não se promove um perfil
-por o código parecer certo.
+**Passou tudo até ao dataplane.** As VMs com endereços distintos (o DX-6702, que
+a golden anterior falhava), os dois hosts preparados, `kubeadm init` em 32,4 s,
+**o passo de instalação do perfil em 1,0 s** no lugar desenhado (entre o `init`
+e o join), o worker a juntar-se em 6,3 s, e os dois nós registados no cluster
+com `CONTAINER-RUNTIME: delonix://5.1.1` — este CRI a servir um kubelet real em
+dois nós. O DaemonSet do Cilium agendou 2/2.
+
+**O agente do Cilium não arranca:**
+
+```
+level=fatal msg="Unable to mount BPF filesystem"
+            error="multiple mount points detected at /sys/fs/bpf"
+```
+
+O host do nó tem **exactamente um** bpffs, já `shared`. A duplicação é
+construída **dentro do container**, por este motor: um container `privileged`
+recebe `/sys` por bind recursivo e o pod pede `/sys/fs/bpf` como hostPath — duas
+entradas no mesmo ponto. É um **defeito do CRI**, no caminho de mounts de
+containers privilegiados, que serve muito mais do que CNIs — por isso não se
+corrige nesta mudança, e é a pendência nº1.
+
+**A espera por prontidão falhou honestamente**, que é a decisão D5 a ser
+exercida: `✗ … 7m00s` e DX-6704 com as contagens («agent Ready on 0/0 node(s)
+and 0/2 node(s) report Ready»), sem apagar nada e nomeando os comandos de
+diagnóstico. Um `kubectl apply` com êxito não foi tratado como sucesso.
+
+**O que isto prova, e que nenhuma leitura provava:** o portão `EXPERIMENTAL`
+estava certo. Um perfil com artefacto fixado, verificado, renderizado com os
+valores certos e aplicado com êxito **ainda não funciona**. Declarar o Cilium
+suportado porque o código parecia certo teria sido exactamente o relato que o
+DX-1705 existe para impedir.
+
+**O Calico e o Flannel continuam NOT RUN.** A tentativa de isolar com flannel
+(mesmo par de VMs, perfil sem bpffs) parou porque o `kubeadm reset` deixou o
+apiserver a segurar a porta 6443. É o próximo passo, e separa a falha do Cilium
+do resto da cadeia.
 
 ## Alternativas consideradas
 
@@ -276,22 +308,27 @@ foi verificado**, e é o primeiro item do laboratório.
 
 ## Pendências, por ordem de importância
 
-1. **Correr D7** (um control-plane + dois workers, por perfil) e promover ou
-   bloquear cada perfil com o resultado. Enquanto isto não acontece, nada aqui
-   deve ser lido como «funciona».
-2. **Políticas de rede testadas** (ingress e egress) nos perfis que as
+1. **O bpffs duplicado dentro de um container privilegiado** — é o que impede o
+   Cilium de arrancar (D7). `/sys` entra por bind recursivo E o pod pede
+   `/sys/fs/bpf` como hostPath; o agente recusa com «multiple mount points
+   detected». Vive no caminho de mounts de containers privilegiados, que serve
+   muito mais do que CNIs, por isso é trabalho próprio e não um remendo aqui.
+2. **Correr D7 para o Calico e o Flannel**, e promover ou bloquear cada um com
+   o resultado. O flannel é o que isola: não precisa de bpffs, por isso um
+   cross-node a funcionar nele separa a falha do Cilium do resto da cadeia.
+3. **Políticas de rede testadas** (ingress e egress) nos perfis que as
    implementam. Instalar o Cilium não é entregar isolamento.
-3. **Resolver as imagens do Calico e do Flannel para digests** (D4).
-4. **Isolamento das interfaces secundárias do Multus** — e quem pode criar uma
+4. **Resolver as imagens do Calico e do Flannel para digests** (D4).
+5. **Isolamento das interfaces secundárias do Multus** — e quem pode criar uma
    `NetworkAttachmentDefinition`.
-5. **`prevResult` no `DEL` do CNI e conflist persistida no caminho rootless**:
+6. **`prevResult` no `DEL` do CNI e conflist persistida no caminho rootless**:
    o `cni::del` passa `None`, e o `DEL` rootless relê o `/etc/cni/net.d` actual
    em vez do `sb.cni_conf` que o `ADD` gravou. É o ADR-0069 Pendente #8, e toca
    a limpeza do `portmap`.
-6. **`--extra-package` é descartado em silêncio no caminho offline** da build
+7. **`--extra-package` é descartado em silêncio no caminho offline** da build
    da golden (o `k8s_customization_steps_offline` não recebe `extra_packages`),
    e a build regista-o no `/etc/delonix-image-release` como se tivesse sido
    instalado. Achado por leitura nesta sessão, fora do âmbito desta mudança.
-7. **`k8s_repo_version` tem um default independente** (`stable:/v1.31`) que
+8. **`k8s_repo_version` tem um default independente** (`stable:/v1.31`) que
    discorda do `DEFAULT_K8S_VERSION` (1.36). Há correcção numa árvore de
    trabalho de outra sessão; não foi duplicada aqui para não conflituar.

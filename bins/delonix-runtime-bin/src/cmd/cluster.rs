@@ -3724,6 +3724,50 @@ fn run_node_preflight(
     }
 }
 
+/// What to pass to kubeadm's `--kubernetes-version`, or `None` to pass nothing.
+///
+/// **BUG FOUND LIVE** (`cluster kubeadm --k8s-version 1.34`, 2026-10-15, first
+/// real two-node run of this path): the engine built the flag as
+/// `--kubernetes-version=v{spec.k8sVersion}` verbatim, and `kubeadm` answered
+///
+/// ```text
+/// error: version "v1.34" doesn't match patterns for neither semantic version
+/// nor labels (stable, latest, ...)
+/// ```
+///
+/// kubeadm requires a FULL semver there. `valid_version` accepts major.minor,
+/// every shipped example uses it (`k8sVersion: "1.34"` in
+/// `cluster-vm.yaml`, `cluster-ssh.yaml`, `cluster-kind.yaml`,
+/// `full-kubernetescluster.yaml`), and the flag's own help says "minor
+/// version" — so EVERY documented invocation of this path failed at
+/// `kubeadm init`, after the VMs were created and the hosts prepared.
+///
+/// It is the exact MIRROR of the bug `k8s_repo_version` records: there a patch
+/// version broke the apt repo URL, which only exists at minor level, and the
+/// fix truncated for the repo path. Nobody checked the other direction, and
+/// the two consumers of one field want opposite shapes.
+///
+/// **Why `None` and not `v{major}.{minor}.0`.** Appending `.0` would be worse
+/// than the bug: measured on the golden this very run built, the installed
+/// kubeadm is `1.34.12` and `preseed_k8s_images` cached `registry.k8s.io/...:
+/// v1.34.12`. Asking for `v1.34.0` would make kubeadm request images that are
+/// NOT in the node's store — turning a working offline node into one that
+/// silently reaches for the network, or fails. Omitting the flag makes kubeadm
+/// use its OWN version, which is by construction the one the golden installed
+/// and the one that was pre-seeded.
+///
+/// A full semver is passed through untouched: an operator who pinned a patch
+/// meant it, and `valid_version` already restricts the alphabet to digits and
+/// dots so nothing here can reach a shell as anything else.
+pub(crate) fn kubeadm_version_arg(spec_version: Option<&str>) -> Option<String> {
+    let v = spec_version?;
+    // Three dot-separated numeric components = a full semver kubeadm accepts.
+    if v.split('.').count() >= 3 && v.split('.').all(|c| !c.is_empty()) {
+        return Some(format!("v{v}"));
+    }
+    None
+}
+
 /// Remote path the `delonix` CLI lives at (the golden image's own convention —
 /// see `install.sh`).
 const REMOTE_CLI_BIN: &str = "/usr/local/bin/delonix";
@@ -3976,8 +4020,12 @@ fn kubeadm_init(
     let kube_proxy = network_plan(spec, nodes)
         .map(|p| p.kube_proxy)
         .unwrap_or("iptables");
+    // The SAME resolution as the flat-flag path below, for the same reason:
+    // `ClusterConfiguration.kubernetesVersion` is validated by kubeadm with
+    // the identical semver rule that refused `v1.34` on the command line.
+    let kubeadm_version = kubeadm_version_arg(spec.k8s_version.as_deref());
     let init_cfg = kubeadm_config::InitConfig {
-        k8s_version: spec.k8s_version.as_deref(),
+        k8s_version: kubeadm_version.as_deref(),
         control_plane_endpoint: endpoint,
         pod_subnet: &spec.pod_subnet,
         service_subnet: &spec.service_subnet,
@@ -4010,10 +4058,8 @@ fn kubeadm_init(
         .map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
         return parse_join_info(&out);
     }
-    let k8s_ver_flag = spec
-        .k8s_version
-        .as_ref()
-        .map(|v| format!(" --kubernetes-version=v{v}"))
+    let k8s_ver_flag = kubeadm_version_arg(spec.k8s_version.as_deref())
+        .map(|v| format!(" --kubernetes-version={v}"))
         .unwrap_or_default();
     let cmd = format!(
         "kubeadm init --control-plane-endpoint={endpoint} --upload-certs \
@@ -5726,6 +5772,51 @@ workers:
             ..Default::default()
         };
         assert!(validate(&spec).is_ok());
+    }
+
+    /// REGRESSION, found by the first real two-node run: the engine passed
+    /// `--kubernetes-version=v{spec.k8sVersion}` verbatim, kubeadm demands a
+    /// full semver there, and every shipped example uses major.minor — so
+    /// every documented invocation of this path died at `kubeadm init`, after
+    /// the VMs existed and the hosts were prepared.
+    #[test]
+    fn a_minor_k8s_version_is_not_passed_to_kubeadm_as_a_version() {
+        // The shape that broke it. kubeadm answers «"v1.34" doesn't match
+        // patterns for neither semantic version nor labels».
+        assert_eq!(kubeadm_version_arg(Some("1.34")), None);
+        assert_eq!(kubeadm_version_arg(Some("1.36")), None);
+        // Omitted, not faked to `.0`: measured on the golden this was found
+        // with, the installed kubeadm is 1.34.12 and `preseed_k8s_images`
+        // cached v1.34.12 images. Asking for v1.34.0 would make kubeadm want
+        // images the node does not have.
+        assert_ne!(kubeadm_version_arg(Some("1.34")), Some("v1.34.0".into()));
+        // A full semver is the operator pinning a patch, and travels through.
+        assert_eq!(
+            kubeadm_version_arg(Some("1.34.12")),
+            Some("v1.34.12".into())
+        );
+        assert_eq!(kubeadm_version_arg(None), None);
+    }
+
+    /// The generated `--config` carried the identical bug, because it took the
+    /// raw `spec.k8sVersion` and prepended `v` itself.
+    #[test]
+    fn the_generated_kubeadm_config_uses_the_same_resolution() {
+        let etcd = ["https://10.0.1.1:2379".to_string()];
+        let resolved = kubeadm_version_arg(Some("1.34"));
+        let yaml = kubeadm_config::render_init_config(&kubeadm_config::InitConfig {
+            k8s_version: resolved.as_deref(),
+            control_plane_endpoint: "10.0.0.1:6443",
+            pod_subnet: "10.244.0.0/16",
+            service_subnet: "10.96.0.0/12",
+            cri_socket: DELONIX_CRI_SOCKET,
+            etcd_endpoints: &etcd,
+            kube_proxy: "iptables",
+        })
+        .expect("a config for external etcd");
+        // No `kubernetesVersion` at all, rather than an invalid one.
+        assert!(!yaml.contains("kubernetesVersion"), "{yaml}");
+        assert!(!yaml.contains("v1.34\n"), "{yaml}");
     }
 
     /// A CNI the engine does not know used to install nothing and say nothing.

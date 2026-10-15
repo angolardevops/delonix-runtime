@@ -405,9 +405,26 @@ mod tests {
         std::fs::create_dir_all(&bin).expect("mkdir");
         // What `kubernetes-cni` really ships, measured off a built golden.
         let shipped = [
-            "bandwidth", "bridge", "dhcp", "dummy", "firewall", "host-device", "host-local",
-            "ipvlan", "LICENSE", "loopback", "macvlan", "portmap", "ptp", "README.md", "sbr",
-            "static", "tap", "tuning", "vlan", "vrf",
+            "bandwidth",
+            "bridge",
+            "dhcp",
+            "dummy",
+            "firewall",
+            "host-device",
+            "host-local",
+            "ipvlan",
+            "LICENSE",
+            "loopback",
+            "macvlan",
+            "portmap",
+            "ptp",
+            "README.md",
+            "sbr",
+            "static",
+            "tap",
+            "tuning",
+            "vlan",
+            "vrf",
         ];
         for f in shipped {
             std::fs::write(bin.join(f), b"x").expect("write");

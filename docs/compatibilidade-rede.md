@@ -1,12 +1,13 @@
 # Perfis de rede dos clusters — matriz de compatibilidade e o que foi medido
 
 > **Leia primeiro isto.** Os três perfis (`cilium`, `calico`, `flannel`) são
-> **EXPERIMENTAIS** nesta release. Estão implementados, os artefactos estão
-> fixados por conteúdo e verificados, e o caminho de instalação existe — mas
-> **nenhum foi validado de ponta a ponta contra o CRI deste motor numa
-> topologia de vários nós**. Esta página diz exactamente o que foi medido, com
-> o quê, e o que não foi. Um número de conformidade que ninguém revalida deixa
-> de ser uma medição e passa a ser uma citação.
+> **EXPERIMENTAIS** nesta release, e o laboratório de dois nós de 2026-10-15
+> mostrou porquê: o Cilium **FALHA** neste CRI, com causa-raiz identificada
+> (§3.2). Tudo até ao dataplane — golden, preflight, artefactos, instalação,
+> espera por prontidão — foi medido e passa; o dataplane do Cilium não.
+> Esta página diz exactamente o que foi medido, com o quê, e o que não foi. Um
+> número de conformidade que ninguém revalida deixa de ser uma medição e passa
+> a ser uma citação.
 >
 > Decisão e trade-offs: [ADR-0078](adr/0078-selectable-pod-network-profiles.md).
 
@@ -50,7 +51,7 @@ Resolver as outras duas para digests é uma pendência, não um detalhe.
 
 | capacidade | cilium | calico | flannel | default | none |
 |---|---|---|---|---|---|
-| nível de suporte | **EXPERIMENTAL** | **EXPERIMENTAL** | **EXPERIMENTAL** | suportado | suportado |
+| nível de suporte | **EXPERIMENTAL — FALHA neste CRI** (§3.2) | **EXPERIMENTAL** | **EXPERIMENTAL** | suportado | suportado |
 | nós | vários | vários | vários | **um só** | — |
 | dataplanes renderizados | `vxlan` (omissão), `geneve` | `vxlan` (omissão), `ipip` | `vxlan` | — | — |
 | modos de kube-proxy | `iptables` (omissão), `ipvs`, `none` | `iptables` (omissão), `ipvs` | `iptables` (omissão), `ipvs` | `iptables` | `iptables` |
@@ -106,6 +107,65 @@ Kubernetes suportada. Construí-la exige o laboratório da §5.
 | 21 | Diagnóstico de rede na golden | `virt-ls` de `/usr/bin` e `/usr/sbin` | **PASS** — `tcpdump`, `ethtool`, `conntrack` |
 | 22 | A golden não leva conflist | `virt-ls -l -a … /etc/cni/net.d` | **PASS** — só `.kubernetes-cni-keep`, 0 bytes, do `.deb`. Não é `*.conflist`/`*.conf`, e o `cni::list_conf_files` filtra por extensão, logo é invisível à camada CNI |
 
+### 3.2 O laboratório de dois nós — o que correu, e onde parou
+
+Corrido a **2026-10-15**, raiz isolada `/var/tmp/delonix-lab`, golden construída
+nesta sessão, `cluster kubeadm --control-plane 1 --workers 1 --cni cilium
+--experimental-cni` em libvirt/NAT (virbr0).
+
+| # | etapa | resultado |
+|---|---|---|
+| L1 | Provisionamento das 2 VMs | **PASS** — 16,1 s + 19,4 s |
+| L2 | **Endereços DISTINTOS** (o DX-6702) | **PASS** — `labcil-cp1` 192.168.122.114, `labcil-w1` 192.168.122.15, com Client-IDs diferentes nos leases do dnsmasq. A golden de Julho dava **um** lease partilhado |
+| L3 | Preparação dos 2 hosts (receitas + CRI + CLI + preflight) | **PASS** — 3,6 s; detectou e substituiu o CLI mais antigo que a golden trazia |
+| L4 | `kubeadm init` | **PASS** — 32,4 s, depois de corrigido o bug da versão (§4.0) |
+| L5 | **Instalação do perfil** (o passo que não existia) | **PASS** — 1,0 s, entre o `init` e o join, como desenhado |
+| L6 | `kubeadm join` do worker | **PASS** — 6,3 s |
+| L7 | **Os dois nós registam-se no cluster** | **PASS** — `kubectl get nodes` mostra os 2, `v1.34.12`, e **`CONTAINER-RUNTIME: delonix://5.1.1`** — este CRI a servir um kubelet real em dois nós |
+| L8 | O DaemonSet do Cilium agenda | **PASS** — `DESIRED 2, CURRENT 2` |
+| L9 | **O agente Cilium arranca** | **FAIL** — `CrashLoopBackOff` nos dois nós |
+| L10 | A espera por prontidão **falha honestamente** | **PASS** — `✗ … 7m00s` e `DX-6704`: «its agent is Ready on 0/0 node(s) and 0/2 node(s) report Ready … nothing was deleted or rolled back». Não reportou sucesso, não apagou a prova, e nomeou os comandos de diagnóstico |
+| L11 | Cross-node, DNS, ClusterIP, MTU, NetworkPolicy | **NOT RUN** — dependem de L9 |
+
+**A causa-raiz de L9, medida:**
+
+```
+level=info  msg="Mounting BPF filesystem" bpffsRoot=/sys/fs/bpf
+level=fatal msg="Unable to mount BPF filesystem" error="multiple mount points detected at /sys/fs/bpf"
+```
+
+E o host do nó tem **exactamente um** bpffs, já `shared` (bom para propagação):
+
+```
+35 24 0:30 / /sys/fs/bpf rw,nosuid,nodev,noexec,relatime shared:11 - bpf bpf rw,mode=700
+```
+
+Logo a duplicação é **construída dentro do container**, por este motor. A
+hipótese que o código suporta: um container `privileged` recebe `/sys` por bind
+recursivo do host (`delonix-linux`, o caminho que cai no bind quando um `sysfs`
+fresco é recusado numa userns) **e** o pod pede `/sys/fs/bpf` como hostPath —
+duas entradas no mesmo ponto, que é precisamente o que o Cilium recusa. O
+registo do container confirma o par `"source": "/sys/fs/bpf"` /
+`"target": "/sys/fs/bpf"`.
+
+**Isto é um defeito do motor, no CRI, não do perfil.** Está registado como
+pendência própria: é a primeira coisa a corrigir para o Cilium sair de
+experimental, e não se corrige nesta mudança porque vive no caminho de mounts
+de containers privilegiados, que serve muito mais do que CNIs.
+
+**O que a falha PROVA, e que não se podia provar por leitura:** o portão
+`EXPERIMENTAL` estava certo. Um perfil cujo artefacto está fixado, verificado,
+renderizado com os valores certos e aplicado com sucesso **ainda não funciona**
+— e a única razão por que isso se soube é ter-se corrido. Declarar o Cilium
+suportado com base no código a parecer certo teria sido exactamente o relato
+que o DX-1705 existe para impedir.
+
+**Isolamento com flannel: NOT RUN.** A tentativa (mesmo par de VMs, perfil que
+não precisa de bpffs) parou porque o `kubeadm reset` deixou o apiserver a
+segurar a porta 6443 no control-plane, e a limpeza mais funda foi bloqueada
+pelo ambiente desta sessão. É o próximo passo e isolaria a falha do Cilium do
+resto da cadeia.
+
 ### 3.1 Requisitos de CRI do agente Cilium — PASS por leitura, não medido ao vivo
 
 Extraído do DaemonSet renderizado (o que o agente realmente pede):
@@ -128,9 +188,9 @@ isto, que o nível `EXPERIMENTAL` significa.
 | # | o que | porquê | desbloqueia com |
 |---|---|---|---|
 | B1 | Build da golden a sério | **5 GiB livres em 938 GiB (100% ocupado)**. O `virt-resize`/`virt-customize` expande o qcow2 e não cabe; encher a raiz de uma máquina partilhada não é uma troca aceitável | ~40 GiB livres |
-| B2 | Cluster 1 CP + 2 workers, por perfil | o mesmo, mais 3 VMs | §5 |
+| B2 | Cluster 1 CP + 1 worker | **JÁ CORRIDO** para o cilium — ver §3.2. O cluster sobe, os nós registam-se, o agente não arranca | corrigir o bpffs duplicado |
 | B3 | Criação/remoção de pods, DNS, `ClusterIP`/`NodePort`/`hostPort`, saída externa | precisa de B2 | §5 |
-| B4 | Comunicação no mesmo nó e **entre nós** | precisa de B2 — e é o teste que decide o nível de suporte | §5 |
+| B4 | Comunicação no mesmo nó e **entre nós** | **NOT RUN** — depende de um agente que arranque (§3.2 L9) | corrigir o bpffs duplicado, ou isolar com flannel |
 | B5 | MTU com pacotes grandes | precisa de B2 | §5 |
 | B6 | `NetworkPolicy` ingress e egress | precisa de B2 | §5 |
 | B7 | Reinício de agentes e de nós | precisa de B2 | §5 |
@@ -150,10 +210,56 @@ isto, que o nível `EXPERIMENTAL` significa.
 - **Políticas de rede.** Ver B6. Instalar o Cilium **não é** entregar
   isolamento, e esta página não o afirma.
 
-## 4. Bug encontrado por estes testes
+## 4. Bugs encontrados por estes testes
 
-**A substituição da MTU do Flannel não casava nada.** O
-`kube-flannel.yml` v0.28.10 **não tem chave `MTU`** — o `net-conf.json` dele é
+### 4.0. `--kubernetes-version=v1.34` — o kubeadm recusa, e TODOS os exemplos usavam isso
+
+Encontrado na **primeira corrida real de dois nós**, depois de as VMs existirem e
+os hosts estarem preparados:
+
+```
+kubeadm init --kubernetes-version=v1.34
+error: version "v1.34" doesn't match patterns for neither semantic version nor
+labels (stable, latest, ...)
+```
+
+O motor construía a flag como `v{spec.k8sVersion}` tal e qual. O kubeadm exige
+**semver completo**. O `valid_version` aceita major.minor, a ajuda da flag diz
+«minor version», e os cinco exemplos entregues usam `k8sVersion: "1.34"` —
+logo **todas as invocações documentadas deste caminho morriam no `kubeadm
+init`**.
+
+É o **espelho exacto** do bug que o `k8s_repo_version` já registra: lá uma
+versão com patch quebrava o URL do repo apt, que só existe a nível minor, e a
+correcção truncava. Ninguém verificou a outra direcção — os dois consumidores
+do mesmo campo querem formas opostas.
+
+**Porque se omite a flag em vez de inventar `.0`:** medido na golden que esta
+sessão construiu, o kubeadm instalado é `1.34.12` e o `preseed_k8s_images`
+cacheou imagens `v1.34.12`. Pedir `v1.34.0` faria o kubeadm querer imagens que
+o nó **não tem** — transformando um nó offline a funcionar num que vai calado à
+rede, ou falha. Omitir faz o kubeadm usar a versão dele próprio, que por
+construção é a que a golden instalou e a que foi pré-semeada. Um semver
+completo passa intacto: quem fixou um patch quis fixá-lo.
+
+### 4.1. Os 8 plugins que eu dizia não ir, iam
+
+A primeira golden construída trouxe **todos os 18** plugins mais `LICENSE` e
+`README.md`. O `.deb kubernetes-cni` chega como dependência do kubelet e é dono
+de 21 caminhos em `/opt/cni/bin`, por isso extrair dez binários verificados por
+cima dos dele deixava os outros oito intactos — enquanto o cabeçalho do módulo
+e o ADR-0078 afirmavam que não iam, com superfície de ataque como razão.
+
+**Nenhum teste unitário o podia apanhar:** os testes verificam o conteúdo de
+`REFERENCE_PLUGINS`, e os ficheiros extra vêm de um `.deb` que teste nenhum
+corre. A imagem era o único sítio onde aquela afirmação era verificável.
+
+Corrigido com um prune, e verificado numa golden reconstruída. O custo está
+escrito no código: o `dpkg` continua a achar-se dono dos ficheiros removidos.
+
+### 4.2. A substituição da MTU do Flannel não casava nada
+
+O `kube-flannel.yml` v0.28.10 **não tem chave `MTU`** — o `net-conf.json` dele é
 `Network`, `EnableNFTables` e `Backend`. O código substituía uma linha `"MTU":`
 que não existe, por isso o Flannel teria autodetectado a MTU do **nó** e cada
 pod pagaria o cabeçalho VXLAN de 50 bytes duas vezes: pacotes grandes
