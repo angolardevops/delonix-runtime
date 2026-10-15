@@ -2385,18 +2385,23 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
                 // on the shared NAT with nothing in the output to explain it.
                 // Found by testing — the first run after the auto-created network
                 // landed on `default` and there was no message to say why.
+                //
+                // `tracing::warn!` and not `eprintln!`: this is a library crate,
+                // and `arch_fitness`'s `library_prints` ratchet counts a direct
+                // stdout/stderr write as debt. Same channel the anti-spoofing
+                // and cgroup-ceiling warnings in this file already use.
                 if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
-                    eprintln!(
-                        "warning: could not define libvirt network '{net}' — the VM will fall \
-                         back to libvirt's 'default' network"
+                    tracing::warn!(
+                        network = %net,
+                        "could not define libvirt network — the VM will fall back to libvirt's 'default' network"
                     );
                     return;
                 }
             }
             None => {
-                eprintln!(
-                    "warning: network '{net}' is not defined in libvirt and no usable subnet \
-                     was resolved for it — the VM will fall back to libvirt's 'default' network"
+                tracing::warn!(
+                    network = %net,
+                    "network is not defined in libvirt and no usable subnet was resolved for it — the VM will fall back to libvirt's 'default' network"
                 );
                 return;
             }
