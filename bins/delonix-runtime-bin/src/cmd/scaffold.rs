@@ -111,6 +111,16 @@ pub(crate) fn template_has_version(template_name: &str) -> bool {
     template_meta(canonical_template(template_name)).has_version
 }
 
+/// Whether this names a real template — an alias counts, since it resolves to
+/// one. Completion asks BEFORE filtering flags: `template_meta` answers for an
+/// unknown name with its own defaults (no version, no TLS), so without this a
+/// typo — or a half-typed name, which is the common case under TAB — would
+/// hide every flag the template "does not support".
+pub(crate) fn template_is_known(template_name: &str) -> bool {
+    let name = canonical_template(template_name);
+    TEMPLATES.iter().any(|(n, _)| *n == name)
+}
+
 /// Old template names that still answer, mapped to the directory that now
 /// holds the template. A rename does not change what the project IS, so the
 /// alias is silent — the same rule as a renamed Kind (`KIND_ALIASES`). `python`
