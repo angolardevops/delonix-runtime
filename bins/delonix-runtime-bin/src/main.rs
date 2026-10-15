@@ -43,7 +43,23 @@ enum SyntaxEditor {
 struct Cli {
     /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
     /// via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language.
-    #[arg(long = "l18n", value_name = "en|pt")]
+    // `global` so the flag PARSES after a subcommand — the help above promises
+    // `<command> --help`, and `po::peek_lang` has always honoured `--l18n`
+    // anywhere in the argv, so only the declared schema disagreed.
+    //
+    // `hide` because cb047291 dropped `global = true` for a good reason
+    // ("prevent --l18n appearing in all commands"): a global arg joins the
+    // `--help` of all 232 subcommands, and `docs/gen.py` embeds that verbatim
+    // into every generated page. `hide` is a help-rendering flag and changes no
+    // parsing, so the flag is accepted everywhere and listed nowhere, leaving
+    // the generated site byte-identical.
+    //
+    // The cost is that `delonix --help` stops listing it too — `hide` is not
+    // selective, and clap copies the root arg into each subcommand as-is, so
+    // "visible here, hidden there" is not expressible. Discoverability stays
+    // where it already is: the `system info` manual examples, the cheatsheet,
+    // and the network guide page, which both call the flag global already.
+    #[arg(long = "l18n", value_name = "en|pt", global = true, hide = true)]
     l18n: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
