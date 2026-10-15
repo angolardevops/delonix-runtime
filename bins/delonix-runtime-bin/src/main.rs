@@ -43,7 +43,7 @@ enum SyntaxEditor {
 struct Cli {
     /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
     /// via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language.
-    #[arg(long = "l18n", value_name = "en|pt")]
+    #[arg(long = "l18n", global = true, value_name = "en|pt")]
     l18n: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
