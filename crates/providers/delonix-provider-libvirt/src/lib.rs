@@ -2378,7 +2378,20 @@ fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
     if !exists && net != "default" {
         match subnet.and_then(|s| libvirt_network_xml(net, s)) {
             Some(xml) => {
-                let _ = virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml);
+                // SAYS SO when the define fails, instead of `let _`. A swallowed
+                // failure here is the exact bug this function exists to kill: the
+                // network never appears, the domain's NIC falls back to `default`,
+                // and the operator who asked for `--network <name>` gets a cluster
+                // on the shared NAT with nothing in the output to explain it.
+                // Found by testing — the first run after the auto-created network
+                // landed on `default` and there was no message to say why.
+                if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
+                    eprintln!(
+                        "warning: could not define libvirt network '{net}' — the VM will fall \
+                         back to libvirt's 'default' network"
+                    );
+                    return;
+                }
             }
             None => {
                 eprintln!(
