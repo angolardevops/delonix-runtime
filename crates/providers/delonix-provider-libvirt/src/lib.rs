@@ -3715,15 +3715,15 @@ mod tests {
         assert!(x.contains("<name>k8s-net</name>"), "{x}");
         assert!(x.contains("address='10.229.0.1'"), "{x}");
         assert!(x.contains("netmask='255.255.0.0'"), "{x}");
-        assert!(
-            x.contains("start='10.229.0.2' end='10.229.255.254'"),
-            "{x}"
-        );
+        assert!(x.contains("start='10.229.0.2' end='10.229.255.254'"), "{x}");
 
         let x = libvirt_network_xml("lab", "192.168.50.0/24").expect("valid /24");
         assert!(x.contains("address='192.168.50.1'"), "{x}");
         assert!(x.contains("netmask='255.255.255.0'"), "{x}");
-        assert!(x.contains("start='192.168.50.2' end='192.168.50.254'"), "{x}");
+        assert!(
+            x.contains("start='192.168.50.2' end='192.168.50.254'"),
+            "{x}"
+        );
     }
 
     /// A subnet whose address is not the network address still yields the

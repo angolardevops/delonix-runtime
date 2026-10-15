@@ -661,11 +661,13 @@ pub enum ClusterCmd {
     /// containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`),
     /// whose nodes are VMs — its load balancer and etcd members included.
     ///
-    /// What becomes of the NETWORK is the one real difference, and it
-    /// follows who created it: a kind-mode cluster's `dlx-<name>` was made
-    /// FOR it and goes with it, while the `--network` a VM cluster was given
-    /// is yours and is left alone. Volumes are never touched either, on
-    /// purpose, same as `docker`.
+    /// What becomes of the NETWORK is the one real difference, and the rule
+    /// is the same in both families: whoever created it owns it. A kind-mode
+    /// cluster's `dlx-<name>` was made FOR it and goes with it. A VM cluster
+    /// built WITHOUT `--network` was given one of its own, named
+    /// `<cluster>-<hash>`, and that one goes with it too. A network you named
+    /// in `--network` is yours, and is left alone. Volumes are never touched
+    /// either, on purpose, same as `docker`.
     ///
     /// A cluster whose nodes are already gone is still removable by name:
     /// what gets collected is the state directory, the exported kubeconfig

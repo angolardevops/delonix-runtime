@@ -79,7 +79,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Lifecycle",
         examples: &[
             ("kind-mode: the nodes, the network it created itself, the cached kubeconfig and the ~/.kube/config entry — volumes untouched", "delonix cluster destroy lab"),
-            ("VM-provisioned, named: the node VMs, cached kubeconfig and ~/.kube/config entries go — the `--network` you created stays, remove it with `network rm` when nothing else is on it", "delonix cluster destroy prod"),
+            ("VM-provisioned, named: the node VMs, cached kubeconfig and ~/.kube/config entries go — so does the cluster's own network, unless you named one in `--network`, which stays", "delonix cluster destroy prod"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster destroy lab -f"),
         ],
         see_also: &["delete", "cluster prune", "cluster create", "cluster kubeadm", "cluster backup"],
