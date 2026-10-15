@@ -3,11 +3,13 @@ tests/test_openapi.py fails on any drift."""
 
 from __future__ import annotations
 
+from django.contrib import admin
 from django.urls import include, path
 
 from core import views as core_views
 
 urlpatterns = [
+    path("admin/", admin.site.urls),
     path("api/v1/health/live", core_views.live, name="health-live"),
     path("api/v1/health/ready", core_views.ready, name="health-ready"),
     path("api/v1/notes", include("notes.urls")),

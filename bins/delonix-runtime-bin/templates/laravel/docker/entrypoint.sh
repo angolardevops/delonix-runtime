@@ -23,6 +23,13 @@ case "$mode" in
       touch "$db"
     fi
     php artisan migrate --force --no-interaction
+
+    # Create default admin user with random password
+    php artisan admin:create-user \
+      --name="${ADMIN_NAME:-Admin User}" \
+      --email="${ADMIN_EMAIL:-admin@example.com}" \
+      --password="${ADMIN_PASSWORD:-}"
+
     exec frankenphp run --config /app/Caddyfile
     ;;
   worker)
