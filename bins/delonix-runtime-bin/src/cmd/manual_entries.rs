@@ -2348,7 +2348,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Inspect",
         examples: &[
             ("engine state in one screen: rootless, cgroup delegation, network infra, counts", "delonix system info"),
-            ("the same screen in Portuguese", "delonix system info --l18n pt"),
+            ("the same screen in Portuguese", "delonix --l18n pt system info"),
         ],
         see_also: &["system setup", "system df", "system virt", "dashboard"],
     },
