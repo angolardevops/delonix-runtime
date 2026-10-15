@@ -6030,7 +6030,7 @@ mod tests {
         let at = |needle: &str| {
             ops.iter()
                 .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
-                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+                .unwrap_or_else(|| panic!("missing step: {needle}"))
         };
         assert!(idx_extra < at("/etc/delonix-kernel-version"));
         assert!(at("/etc/delonix-kernel-version") < at("apt-get clean"));
@@ -6387,7 +6387,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let at = |needle: &str| {
             ops.iter()
                 .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
-                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+                .unwrap_or_else(|| panic!("missing step: {needle}"))
         };
         assert!(
             matches!(&ops[at("apt-get clean")], CustomizeOp::RunCommand(c) if c.contains("/var/lib/apt/lists")),
