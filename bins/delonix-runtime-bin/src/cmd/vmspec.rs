@@ -378,7 +378,10 @@ fn bad(what: &str, v: &str) -> Error {
     )
 }
 
-fn valid_pkg(p: &str) -> bool {
+/// A package name safe to interpolate into a shell `--run-command`. Shared with
+/// `cmd::vmimage`, which puts `--extra-package` through the very same
+/// `apt-get install`/`dpkg -s` lines this guards for `vm.yaml`.
+pub(crate) fn valid_pkg(p: &str) -> bool {
     !p.is_empty()
         && p.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && p.chars()
