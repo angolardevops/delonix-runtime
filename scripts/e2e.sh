@@ -7608,6 +7608,10 @@ else
     if ! "$BIN" network vip-pool set "$VPOOL" >/dev/null 2>&1; then
       skip "VirtualIP: o resto da secção" "o conjunto $VPOOL sobrepõe-se a algo neste host (E2E_VIP_POOL muda-o)"
     else
+      check "VirtualIP: vip-pool show nomeia o conjunto e o ficheiro do nó de onde vem" ok bash -c \
+        "env -u DELONIX_SERVICE_VIP_CIDR '$BIN' network vip-pool show -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d[\"pools\"]==[\"$VPOOL\"] and d[\"source\"].endswith(\"ingress/vip-pool\") else 1)'"
+      check "VirtualIP: vip-pool show diz quando a variável do processo se sobrepõe ao ficheiro" ok bash -c \
+        "out=\$(DELONIX_SERVICE_VIP_CIDR=10.233.250.0/24 '$BIN' network vip-pool show); grep -q '^10.233.250.0/24\$' <<<\"\$out\" && grep -q 'source: DELONIX_SERVICE_VIP_CIDR' <<<\"\$out\""
       for b in v1 v2; do
         "$BIN" container run -d --name "$b-$PFX" --net "$VN" --namespace "$VNS" --label app=vweb \
           -v "$VW/$b:/www" "$VIMG" httpd -f -p 8080 -h /www >/dev/null 2>&1
@@ -7700,7 +7704,8 @@ else
   for c in v1 v2 vh vc vx vs; do "$BIN" container rm -f "$c-$PFX" >/dev/null 2>&1; done
   "$BIN" delete services $VNS/vweb $VNS/vbr >/dev/null 2>&1
   "$BIN" network rm "$VN" >/dev/null 2>&1
-  "$BIN" network vip-pool clear >/dev/null 2>&1
+  check "VirtualIP: vip-pool clear tira o conjunto do nó, e o show diz que não há nenhum" ok bash -c \
+    "'$BIN' network vip-pool clear >/dev/null && env -u DELONIX_SERVICE_VIP_CIDR '$BIN' network vip-pool show -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d==dict(pools=[], source=\"none\") else 1)'"
 fi
 
 ########################################
