@@ -98,7 +98,7 @@ enum Cmd {
         #[arg(long)]
         name: Option<String>,
         /// Force a template instead of the detected one (`stack init -t list` shows them).
-        #[arg(short = 't', long)]
+        #[arg(short = 't', long, add = clap_complete::engine::ArgValueCandidates::new(cmd::complete::templates))]
         template: Option<String>,
         /// Version parameter some templates read — an image tag, a framework
         /// version, or a toolchain version, depending on the template; the
@@ -566,13 +566,25 @@ pub fn build_command() -> clap::Command {
     cmd::manual::apply(command)
 }
 
-/// The `init`s that take `-t`. They do NOT take the same flags: `EdgeArgs`
-/// (`--port`/`--tls-port`/`--hostname`) is flattened into `init` and `stack
-/// init`, while `vm init` takes only `--template-version`. Hence
+/// The `init`s that take `-t`. All four lower to `scaffold::init`, so they take
+/// the same template catalog; they do NOT take the same flags: `EdgeArgs`
+/// (`--port`/`--tls-port`/`--hostname`) is flattened into `init`, `stack init`
+/// and `container init`, while `vm init` takes only `--template-version`. Hence
 /// `hide_if_present` below rather than a per-path list of which flag lives
 /// where — `mut_arg` on an arg a command does not have PANICS, and panicking
 /// here would do it in the middle of the user's command line, on every TAB.
-const TEMPLATE_INIT_PATHS: &[&[&str]] = &[&["init"], &["stack", "init"], &["vm", "init"]];
+///
+/// `container init` joined the list when `complete::templates` was wired in:
+/// the table said "the `init`s that take `-t`" and was short one, so `container
+/// init -t go --<TAB>` still offered the `--tls-port` that template refuses.
+/// One list, because "which inits take a template" is one fact —
+/// `template_value_completion_tests` reads this same table.
+const TEMPLATE_INIT_PATHS: &[&[&str]] = &[
+    &["init"],
+    &["stack", "init"],
+    &["vm", "init"],
+    &["container", "init"],
+];
 
 /// The template already named on the line being completed (`-t go`, `-t=go`,
 /// `--template go`, `--template=go`), if any.
@@ -685,7 +697,11 @@ mod completion_filter_tests {
     /// `go` declares `version=` and no `tls=`: the TLS pair goes, `-v` stays.
     #[test]
     fn a_template_without_tls_stops_offering_the_tls_pair() {
-        for path in [&["init"][..], &["stack", "init"][..]] {
+        for path in [
+            &["init"][..],
+            &["stack", "init"][..],
+            &["container", "init"][..],
+        ] {
             assert!(hidden("go", path, "tls_port"), "{path:?}");
             assert!(hidden("go", path, "hostname"), "{path:?}");
             assert!(
@@ -772,6 +788,94 @@ mod completion_filter_tests {
                 "{arg} must stay in --help"
             );
         }
+    }
+}
+
+/// What `delonix init -t <TAB>` offers — the template VALUE, as opposed to
+/// `completion_filter_tests` above, which is about which FLAGS survive once a
+/// template is named.
+///
+/// Driven through `clap_complete::engine::complete`, the same entry point
+/// `CompleteEnv` calls after parsing `COMPLETE`/`_CLAP_COMPLETE_INDEX`, so
+/// these cover the wiring (`add = ArgValueCandidates::new(…)`) and not just
+/// `complete::templates()` in isolation — the completer existing and all four
+/// `-t` declarations reaching it are separate facts, and it was the second one
+/// that was missing.
+#[cfg(test)]
+mod template_value_completion_tests {
+    use super::cmd;
+    use clap::CommandFactory;
+    use std::ffi::OsString;
+
+    /// Candidates for `delonix <path…> -t <TAB>`, via the real engine.
+    ///
+    /// `arg_index` points at the empty word the shell is completing, which is
+    /// `delonix` + the path + `-t` — the same count the live protocol passes in
+    /// `_CLAP_COMPLETE_INDEX`.
+    fn candidates_for(path: &[&str]) -> Vec<String> {
+        let mut args: Vec<OsString> = vec!["delonix".into()];
+        args.extend(path.iter().map(OsString::from));
+        args.push("-t".into());
+        args.push("".into());
+        let arg_index = args.len() - 1;
+        clap_complete::engine::complete(&mut super::Cli::command(), args, arg_index, None)
+            .expect("the engine must answer")
+            .into_iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// Every `-t` the CLI has offers every template — one assertion per path,
+    /// off the table the flag filter already keeps, so a fourth `init` added
+    /// there is a fourth `init` tested here.
+    #[test]
+    fn every_template_init_completes_the_catalog() {
+        for path in super::TEMPLATE_INIT_PATHS {
+            let offered = candidates_for(path);
+            assert!(
+                !offered.is_empty(),
+                "`delonix {} -t <TAB>` offered nothing",
+                path.join(" ")
+            );
+            for name in cmd::scaffold::template_names() {
+                assert!(
+                    offered.iter().any(|o| o == name),
+                    "`delonix {} -t <TAB>` did not offer {name:?}; offered {offered:?}",
+                    path.join(" ")
+                );
+            }
+        }
+    }
+
+    /// An alias still PARSES (`-t python` builds the FastAPI project), and is
+    /// still not offered: TAB is how the catalog gets read now, and teaching it
+    /// the superseded name is how the rename never finishes. `template_names()`
+    /// owns that exclusion — this pins that `complete::templates` did not grow
+    /// a list of its own on the way.
+    #[test]
+    fn an_alias_is_not_offered() {
+        let offered = candidates_for(&["init"]);
+        assert!(
+            !offered.iter().any(|o| o == "python"),
+            "`python` is an alias of `fastapi`, not a template: {offered:?}"
+        );
+    }
+
+    /// A prefix narrows, which is the engine's job and not ours:
+    /// `complete::templates` returns the whole catalog on every TAB and clap
+    /// filters it. Asserted because the alternative — filtering by hand in the
+    /// completer — is the tempting shape, and it silently breaks the `-t=go`
+    /// form the engine handles for us.
+    #[test]
+    fn a_typed_prefix_narrows_the_catalog() {
+        let args: Vec<OsString> = vec!["delonix".into(), "init".into(), "-t".into(), "ngi".into()];
+        let offered: Vec<String> =
+            clap_complete::engine::complete(&mut super::Cli::command(), args, 3, None)
+                .expect("the engine must answer")
+                .into_iter()
+                .map(|c| c.get_value().to_string_lossy().into_owned())
+                .collect();
+        assert_eq!(offered, vec!["nginx".to_string()], "offered {offered:?}");
     }
 }
 

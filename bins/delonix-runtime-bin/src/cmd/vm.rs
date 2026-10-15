@@ -881,7 +881,7 @@ pub enum VmCmd {
         force: bool,
         /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
-        #[arg(long, short = 't')]
+        #[arg(long, short = 't', add = ArgValueCandidates::new(super::complete::templates))]
         template: Option<String>,
         /// Version parameter some templates read — an image tag, a framework
         /// version, or a toolchain version, depending on the template; the
