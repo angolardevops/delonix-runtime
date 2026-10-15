@@ -208,7 +208,7 @@ fn lease_entries(out: &str, mac: &str) -> Vec<(String, String)> {
 fn pick_lease_ip(out: &str, mac: &str, floor: Option<&str>) -> LeasePick {
     let entries = lease_entries(out, mac);
     if entries.is_empty() {
-        return LeasePick::NoLease;
+        return LeasePick::NoLeaseForMac;
     }
     entries
         .into_iter()
@@ -232,8 +232,23 @@ enum LeasePick {
     /// any of them is reporting a dead VM's address; the caller must NOT fall
     /// back to another source that reads the same table (`domifaddr` does).
     OnlyStale,
-    /// No lease for this MAC at all.
-    NoLease,
+    /// The table WAS read and holds no entry for this MAC: this VM does not
+    /// have an address. Same rule as [`Self::OnlyStale`] — the caller must NOT
+    /// fall back to `domifaddr`, which reads the SAME table and so can only
+    /// ever agree or add noise.
+    ///
+    /// BUG FIXED HERE, diagnosed live on 2026-10-15 (`cluster kubeadm --name
+    /// lab`): this case and [`Self::TableUnreadable`] used to be one variant,
+    /// so «the table says this VM has no address» was treated as «nobody could
+    /// tell me» and fell through to the fallback. A VM with no lease of its own
+    /// must report no address, so the `--boot-timeout` wait is what trips —
+    /// anything else hands the caller an address this VM was never given, and
+    /// `cluster kubeadm` then runs every host's prep against ONE machine.
+    NoLeaseForMac,
+    /// The lease table could not be read AT ALL (the domain is not on a
+    /// libvirt-managed network, so there is no `net-dhcp-leases` to ask). This
+    /// is the ONLY case where the `domifaddr` fallback adds information.
+    TableUnreadable,
 }
 
 /// Pure parser for `virsh net-dhcp-leases` output: among the entries matching
@@ -245,7 +260,7 @@ enum LeasePick {
 fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
     match pick_lease_ip(out, mac, None) {
         LeasePick::Current(ip) => Some(ip),
-        LeasePick::OnlyStale | LeasePick::NoLease => None,
+        LeasePick::OnlyStale | LeasePick::NoLeaseForMac | LeasePick::TableUnreadable => None,
     }
 }
 
@@ -2724,8 +2739,8 @@ impl VmBackend for LibvirtBackend {
             pid: None, // managed by libvirtd — liveness via virsh domstate
             ip: match Self::ip_from_leases(uri, &cfg.name, &mac, lease_floor.as_deref()) {
                 LeasePick::Current(ip) => Some(ip),
-                LeasePick::OnlyStale => None,
-                LeasePick::NoLease => self.ip_uri(uri, &cfg.name),
+                LeasePick::OnlyStale | LeasePick::NoLeaseForMac => None,
+                LeasePick::TableUnreadable => self.ip_uri(uri, &cfg.name),
             }
             .or_else(|| cfg.static_ip.clone()),
             // The EFFECTIVE mode (not the requested one): lets `vm describe`
@@ -2747,9 +2762,10 @@ impl VmBackend for LibvirtBackend {
         match Self::ip_from_leases(uri, &vm.name, &vm.mac, vm.dhcp_lease_floor.as_deref()) {
             LeasePick::Current(ip) => Some(ip),
             // `domifaddr` reads the same lease table without the floor — asking
-            // it would hand back the very address just rejected.
-            LeasePick::OnlyStale => None,
-            LeasePick::NoLease => self.ip_uri(uri, &vm.name),
+            // it would hand back the very address just rejected, or (for a MAC
+            // with no row at all) an answer the table has already given: none.
+            LeasePick::OnlyStale | LeasePick::NoLeaseForMac => None,
+            LeasePick::TableUnreadable => self.ip_uri(uri, &vm.name),
         }
     }
 
@@ -3569,13 +3585,18 @@ impl LibvirtBackend {
     /// carries a real `Expiry Time` per entry (`YYYY-MM-DD HH:MM:SS`, so
     /// plain string comparison sorts it correctly) — filtering by MAC and
     /// taking the MAX expiry is the only actually-correct signal available,
-    /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) when
-    /// this doesn't resolve (non-libvirt-managed network, no lease yet, ...).
+    /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) only when
+    /// there is no such table to read at all (a non-libvirt-managed network) —
+    /// NOT when the table was read and says this VM has no address.
     /// `floor` is this boot's [`Vm::dhcp_lease_floor`]: leases at or below it
     /// are an earlier boot's (see [`pick_lease_ip`]). A table that cannot be
-    /// read is [`LeasePick::NoLease`], which keeps the `domifaddr` fallback.
+    /// read is [`LeasePick::TableUnreadable`], which keeps the `domifaddr`
+    /// fallback; a table that CAN be read and holds nothing for this MAC is
+    /// [`LeasePick::NoLeaseForMac`], which does not (see that variant).
     fn ip_from_leases(uri: &str, name: &str, mac: &str, floor: Option<&str>) -> LeasePick {
-        Self::leases_of(uri, name).map_or(LeasePick::NoLease, |out| pick_lease_ip(&out, mac, floor))
+        Self::leases_of(uri, name).map_or(LeasePick::TableUnreadable, |out| {
+            pick_lease_ip(&out, mac, floor)
+        })
     }
 
     /// Raw `virsh net-dhcp-leases` of the network the domain is attached to.
@@ -3858,7 +3879,7 @@ mod tests {
         // Another VM's leases are never borrowed.
         assert_eq!(
             pick_lease_ip(before_boot, "52:54:00:aa:bb:cc", floor.as_deref()),
-            LeasePick::NoLease
+            LeasePick::NoLeaseForMac
         );
     }
     /// `vm stop` + `vm start`: the guest keeps its address and renews it. The
@@ -3876,6 +3897,54 @@ mod tests {
         assert_eq!(
             pick_lease_ip(renewed, mac, floor.as_deref()),
             LeasePick::Current("192.168.122.223".into())
+        );
+    }
+    /// REGRESSION, diagnosed live on 2026-10-15: `cluster kubeadm --name lab
+    /// --control-plane 1 --workers 2` ran every host's prep against ONE machine
+    /// because all three node VMs resolved to `192.168.122.176`. The lease table
+    /// below is the one captured at the time — a SINGLE row, for `lab-w2`'s MAC;
+    /// `lab-cp1` and `lab-w1` had no row of their own at all.
+    ///
+    /// A MAC with no row of its own must resolve to NO address, and it must say
+    /// so as [`LeasePick::NoLeaseForMac`] and not as
+    /// [`LeasePick::TableUnreadable`]: the two used to be one variant, and the
+    /// shared variant let the resolution fall through to `domifaddr` — another
+    /// reader of this same table — instead of answering "no address" and letting
+    /// the `--boot-timeout` wait trip. Collapsing them back makes this fail.
+    #[test]
+    fn a_vm_with_no_lease_of_its_own_never_resolves_to_a_siblings_address() {
+        let (cp1, w1, w2) = (
+            "52:54:00:e2:55:fb",
+            "52:54:00:b7:c8:ef",
+            "52:54:00:b7:ca:82",
+        );
+        let out = "\
+ Expiry Time           MAC address         Protocol   IP address           Hostname   Client ID or DUID
+------------------------------------------------------------------------------------------------------------------------------------------------
+ 2026-10-15 12:05:00   52:54:00:b7:ca:82   ipv4       192.168.122.176/24   lab-w2     ff:56:50:4d:98:00:02:00:00:ab:11:1c:6b:f5:9e:94:dd:d5:2e";
+
+        // The one MAC that HAS the lease is the only one that gets the address.
+        assert_eq!(
+            pick_lease_ip(out, w2, None),
+            LeasePick::Current("192.168.122.176".into())
+        );
+        // The parser never attributes a row to another MAC...
+        for mac in [cp1, w1] {
+            assert!(
+                lease_entries(out, mac).is_empty(),
+                "{mac} has no row in this table"
+            );
+            assert_eq!(parse_leases_latest_ip(out, mac), None);
+            // ...and resolution says WHY there is no address, so the caller
+            // cannot re-ask a second reader of this same table.
+            assert_eq!(pick_lease_ip(out, mac, None), LeasePick::NoLeaseForMac);
+        }
+        // The floor is orthogonal: a MAC with no row has nothing to floor, and
+        // the answer stays "no address" rather than becoming "cannot tell".
+        assert_eq!(leases_max_expiry(out, cp1), None);
+        assert_eq!(
+            pick_lease_ip(out, cp1, Some("2026-10-15 11:00:00")),
+            LeasePick::NoLeaseForMac
         );
     }
     #[test]
