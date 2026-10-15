@@ -6060,7 +6060,7 @@ mod tests {
     /// dnsmasq — which keys leases by client-id — then hands N clones a single
     /// migrating lease instead of N addresses.
     #[test]
-    fn bootloader_reinstall_nao_passa_a_frente_do_reset_do_machine_id() {
+    fn bootloader_reinstall_stays_behind_the_machine_id_reset() {
         let reset = "truncate -s 0 /etc/machine-id";
         let grub = "grub-install";
 
@@ -6071,15 +6071,15 @@ mod tests {
         let at = |needle: &str| {
             ops.iter()
                 .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
-                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+                .unwrap_or_else(|| panic!("missing step: {needle}"))
         };
         assert!(
             at(grub) < at(reset),
-            "o grub tem de correr ANTES do reset do machine-id"
+            "grub has to run BEFORE the machine-id reset"
         );
         assert!(
             matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains(reset)),
-            "o reset do machine-id devia continuar a ser o ÚLTIMO passo"
+            "the machine-id reset has to remain the LAST step"
         );
 
         // A recipe that never resets the machine-id (`--no-k8s` variants, a

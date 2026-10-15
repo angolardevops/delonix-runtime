@@ -4847,7 +4847,7 @@ workers:
     /// surfacing as `mv: cannot stat '/tmp/delonix-cri'`. The refusal has to
     /// come first, and has to name the cause.
     #[test]
-    fn nodes_que_partilham_endereco_sao_recusados_com_a_causa() {
+    fn nodes_sharing_one_address_are_refused_naming_the_cause() {
         let shared = "192.168.122.176";
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", shared),
@@ -4871,7 +4871,7 @@ workers:
     }
 
     #[test]
-    fn nodes_com_enderecos_distintos_passam() {
+    fn nodes_with_distinct_addresses_are_accepted() {
         assert!(check_distinct_node_addresses(&[
             ("lab-cp1", "192.168.122.10"),
             ("lab-w1", "192.168.122.11"),
@@ -4887,7 +4887,7 @@ workers:
     /// nodes share a lease must not drag the three healthy ones into the
     /// message, or the operator cannot tell which machines to look at.
     #[test]
-    fn apenas_o_grupo_em_colisao_entra_no_diagnostico() {
+    fn only_the_colliding_group_reaches_the_diagnostic() {
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", "192.168.122.10"),
             ("lab-w1", "192.168.122.176"),
