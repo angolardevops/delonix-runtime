@@ -582,25 +582,22 @@ pub fn build_command() -> clap::Command {
     cmd::manual::apply(command)
 }
 
-/// The `init`s that take `-t`. All four lower to `scaffold::init`, so they take
-/// the same template catalog; they do NOT take the same flags: `EdgeArgs`
-/// (`--port`/`--tls-port`/`--hostname`) is flattened into `init`, `stack init`
-/// and `container init`, while `vm init` takes only `--template-version`. Hence
-/// `hide_if_present` below rather than a per-path list of which flag lives
-/// where — `mut_arg` on an arg a command does not have PANICS, and panicking
-/// here would do it in the middle of the user's command line, on every TAB.
+/// The `init`s whose FLAGS are filtered once a template is named. They do NOT
+/// take the same flags: `EdgeArgs` (`--port`/`--tls-port`/`--hostname`) is
+/// flattened into `init` and `stack init`, while `vm init` takes only
+/// `--template-version`. Hence `hide_if_present` below rather than a per-path
+/// list of which flag lives where — `mut_arg` on an arg a command does not
+/// have PANICS, and panicking here would do it in the middle of the user's
+/// command line, on every TAB.
 ///
-/// `container init` joined the list when `complete::templates` was wired in:
-/// the table said "the `init`s that take `-t`" and was short one, so `container
-/// init -t go --<TAB>` still offered the `--tls-port` that template refuses.
-/// One list, because "which inits take a template" is one fact —
-/// `template_value_completion_tests` reads this same table.
-const TEMPLATE_INIT_PATHS: &[&[&str]] = &[
-    &["init"],
-    &["stack", "init"],
-    &["vm", "init"],
-    &["container", "init"],
-];
+/// NOT every `init` that takes `-t`: `container init` takes one too and is
+/// deliberately absent, so its `--tls-port` keeps being offered even on a
+/// template that refuses it. That is a narrower list than
+/// `template_value_completion_tests::TEMPLATE_INIT_PATHS_WITH_T`, which is the
+/// four — the two lists are two different facts now, and the comment above each
+/// says which. Completing the template VALUE is independent of this filter and
+/// covers `container init`.
+const TEMPLATE_INIT_PATHS: &[&[&str]] = &[&["init"], &["stack", "init"], &["vm", "init"]];
 
 /// The template already named on the line being completed (`-t go`, `-t=go`,
 /// `--template go`, `--template=go`), if any.
@@ -713,11 +710,7 @@ mod completion_filter_tests {
     /// `go` declares `version=` and no `tls=`: the TLS pair goes, `-v` stays.
     #[test]
     fn a_template_without_tls_stops_offering_the_tls_pair() {
-        for path in [
-            &["init"][..],
-            &["stack", "init"][..],
-            &["container", "init"][..],
-        ] {
+        for path in [&["init"][..], &["stack", "init"][..]] {
             assert!(hidden("go", path, "tls_port"), "{path:?}");
             assert!(hidden("go", path, "hostname"), "{path:?}");
             assert!(
@@ -841,12 +834,24 @@ mod template_value_completion_tests {
             .collect()
     }
 
+    /// Every `init` that takes `-t`. A list of its own, NOT
+    /// `super::TEMPLATE_INIT_PATHS`: that one is the three whose FLAGS get
+    /// filtered, and `container init` is deliberately out of it. Completing the
+    /// template VALUE applies to all four, so the two facts need two lists —
+    /// `the_two_lists_differ_only_by_container_init` below pins the gap so it
+    /// stays a decision rather than becoming a typo someone "fixes".
+    pub(super) const TEMPLATE_INIT_PATHS_WITH_T: &[&[&str]] = &[
+        &["init"],
+        &["stack", "init"],
+        &["vm", "init"],
+        &["container", "init"],
+    ];
+
     /// Every `-t` the CLI has offers every template — one assertion per path,
-    /// off the table the flag filter already keeps, so a fourth `init` added
-    /// there is a fourth `init` tested here.
+    /// so a fifth `init` added to the list above is a fifth `init` tested here.
     #[test]
     fn every_template_init_completes_the_catalog() {
-        for path in super::TEMPLATE_INIT_PATHS {
+        for path in TEMPLATE_INIT_PATHS_WITH_T {
             let offered = candidates_for(path);
             assert!(
                 !offered.is_empty(),
@@ -892,6 +897,65 @@ mod template_value_completion_tests {
                 .map(|c| c.get_value().to_string_lossy().into_owned())
                 .collect();
         assert_eq!(offered, vec!["nginx".to_string()], "offered {offered:?}");
+    }
+
+    /// The two lists diverge by exactly one entry, and `container init` is it.
+    ///
+    /// Two lists of "inits that take `-t`" is the shape this file's own rules
+    /// argue against, so the divergence has to be asserted or it reads as the
+    /// drift it would otherwise be: someone adds a fifth `init`, puts it in one
+    /// list, and the gap becomes two accidents that look like one decision.
+    ///
+    /// Pinning the exact difference rather than just "they differ" means
+    /// re-adding `container init` to the filter fails HERE, with this comment,
+    /// instead of silently reinstating the behaviour that was reverted.
+    #[test]
+    fn the_two_lists_differ_only_by_container_init() {
+        let filtered: Vec<Vec<&str>> = super::TEMPLATE_INIT_PATHS
+            .iter()
+            .map(|p| p.to_vec())
+            .collect();
+        let with_t: Vec<Vec<&str>> = TEMPLATE_INIT_PATHS_WITH_T
+            .iter()
+            .map(|p| p.to_vec())
+            .collect();
+        let only_in_with_t: Vec<&Vec<&str>> =
+            with_t.iter().filter(|p| !filtered.contains(p)).collect();
+        assert_eq!(
+            only_in_with_t,
+            vec![&vec!["container", "init"]],
+            "the value list must exceed the flag-filter list by `container init` alone"
+        );
+        let only_filtered: Vec<&Vec<&str>> =
+            filtered.iter().filter(|p| !with_t.contains(p)).collect();
+        assert!(
+            only_filtered.is_empty(),
+            "a flag-filtered `init` that takes no `-t` makes no sense: {only_filtered:?}"
+        );
+    }
+
+    /// The reverted behaviour, asserted in the direction it was reverted TO:
+    /// `container init -t go` keeps offering `--tls-port`, even though `go`
+    /// refuses it at run time. Deliberate — #861 narrowed the flag filter back
+    /// to the three paths #857 shipped — and the run-time refusal still stands.
+    #[test]
+    fn container_init_keeps_offering_the_flags_the_template_refuses() {
+        let tree = super::hide_flags_the_template_refuses(super::Cli::command(), "go");
+        let init = tree
+            .get_subcommands()
+            .find(|s| s.get_name() == "container")
+            .and_then(|c| c.get_subcommands().find(|s| s.get_name() == "init"))
+            .expect("container init");
+        for arg in ["tls_port", "hostname"] {
+            assert!(
+                !init
+                    .get_arguments()
+                    .find(|a| a.get_id() == arg)
+                    .expect(arg)
+                    .is_hide_set(),
+                "{arg} must stay offered under `container init` — it is outside the filter"
+            );
+        }
     }
 }
 
