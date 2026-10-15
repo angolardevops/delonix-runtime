@@ -3734,6 +3734,41 @@ else
   check "$MC_CHECK" ok bash -c 'printf "%s\n" "$1"; exit "$2"' _ "$_out" "$_rc"
 fi
 
+# --- one mount point under a privileged container's /sys, ONE mount --------
+# ADR-0078 pendency #1, measured on a 2-node kubeadm cluster: the Cilium agent
+# asks for `hostPath /sys/fs/bpf` and died with `multiple mount points detected
+# at /sys/fs/bpf` on a node whose host has exactly ONE bpffs. The engine hands
+# a privileged container its `/sys` (a fresh `sysfs`, or a recursive bind of
+# the host's when the user ns does not own the netns) AFTER injecting the
+# volumes, so the explicit bind ended up UNDER it — invisible with the fresh
+# sysfs, and duplicated at the same point with the recursive bind, which
+# carries the host's own bpffs along.
+#
+# Both invariants are read the way the agent reads them (field 5 of
+# `mountinfo`, the mount point itself) and hold whichever `/sys` branch ran:
+# exactly ONE mount at the point, a CHILD of `/sys` — on top of it, which is
+# what makes it the mount every lookup resolves to — and carrying the
+# propagation that was asked for. No bpffs on the host, nothing to measure.
+BPFFS_ONE="privileged: a -v under /sys is mounted ONCE, on top of /sys"
+BPFFS_PROP="privileged: that mount keeps the rshared it asked for"
+if awk '$5=="/sys/fs/bpf"' /proc/self/mountinfo | grep -q .; then
+  # The container only `cat`s its own mountinfo; the counting is done here, so
+  # the assertion does not depend on what the image's shell brings.
+  _bpfmi=$("$BIN" container run --rm --privileged -v /sys/fs/bpf:/sys/fs/bpf:rshared \
+    "$IMG" cat /proc/self/mountinfo 2>/dev/null)
+  _bpfv=$(printf '%s\n' "$_bpfmi" | awk '
+    $5 == "/sys"        { sysid = $1 }
+    $5 == "/sys/fs/bpf" { n++; parent = $2; prop = ($0 ~ / shared:/) ? "rshared" : "private" }
+    END { printf "%d %s %s\n", n + 0, (n == 1 && parent == sysid) ? "on-top" : "buried", prop }')
+  check "$BPFFS_ONE" ok bash -c \
+    '[ "${1% *}" = "1 on-top" ] || { printf "mountinfo said: %s\n" "$1"; exit 1; }' _ "$_bpfv"
+  check "$BPFFS_PROP" ok bash -c \
+    '[ "${1##* }" = rshared ] || { printf "mountinfo said: %s\n" "$1"; exit 1; }' _ "$_bpfv"
+else
+  skip "$BPFFS_ONE" "este host não tem bpffs montado em /sys/fs/bpf"
+  skip "$BPFFS_PROP" "este host não tem bpffs montado em /sys/fs/bpf"
+fi
+
 # --- a state root written by the previous release opens unchanged ----------
 # Plan 65 F0.6. DELONIX_UPGRADE_FROM names a directory with the PUBLISHED
 # binaries of the previous release (checked against SHA256SUMS and the
