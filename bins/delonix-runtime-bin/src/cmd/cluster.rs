@@ -2932,6 +2932,12 @@ fn create_and_wait(
         vcpus: args.vcpus,
         memory: args.memory.clone(),
         network: args.network.clone(),
+        // The subnet the operator DECLARED for this network, resolved here
+        // because a provider may not read the registry (docs/discovery/61).
+        // Without it the libvirt backend had nothing to define the network
+        // WITH, so `--network` was accepted and then silently ignored — every
+        // node landed on libvirt's `default` instead of the network asked for.
+        network_subnet: super::network::subnet_of(&args.network),
         kernel: None,
         initrd: None,
         firmware: None,
