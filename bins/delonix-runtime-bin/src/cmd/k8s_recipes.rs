@@ -233,13 +233,13 @@ mod tests {
         assert_eq!(super::major_minor("1"), "1");
     }
 
-    /// REGRESSION (2026-10-15): this test used to be
-    /// `sem_versao_usa_stable_v1_31` and asserted the BUG — that an omitted
-    /// version produced a `stable:/v1.31` repo — while `DEFAULT_K8S_VERSION`
-    /// said 1.36. It passed happily, because it only ever checked this
-    /// default in isolation from the one it was supposed to agree with.
+    /// REGRESSION (2026-10-15): this test was previously named after the
+    /// `stable:/v1.31` repo it expected, and asserted the BUG — that an
+    /// omitted version produced that repo — while `DEFAULT_K8S_VERSION` said
+    /// 1.36. It passed happily, because it only ever checked this default in
+    /// isolation from the one it was supposed to agree with.
     #[test]
-    fn sem_versao_usa_a_versao_por_omissao() {
+    fn no_version_uses_the_default_version() {
         let repo = k8s_repo_version(&resolve_k8s_version(None));
         assert_eq!(repo, format!("stable:/v{DEFAULT_K8S_VERSION}"));
         assert!(
@@ -252,7 +252,7 @@ mod tests {
     /// (no entry point can reach it — `cluster::valid_version` rejects
     /// letters), and it must NOT leave the version unpinned.
     #[test]
-    fn stable_resolve_para_a_versao_por_omissao() {
+    fn stable_resolves_to_the_default_version() {
         assert_eq!(resolve_k8s_version(Some("stable")), DEFAULT_K8S_VERSION);
         assert_eq!(resolve_k8s_version(None), DEFAULT_K8S_VERSION);
         assert_eq!(resolve_k8s_version(Some("1.34")), "1.34");
