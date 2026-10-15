@@ -881,7 +881,7 @@ pub enum VmCmd {
         force: bool,
         /// Generate a complete PROJECT for a stack (e.g. `fastapi`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
-        #[arg(long, short = 't')]
+        #[arg(long, short = 't', add = ArgValueCandidates::new(super::complete::templates))]
         template: Option<String>,
         /// Version parameter some templates read — an image tag, a framework
         /// version, or a toolchain version, depending on the template; the
@@ -3238,6 +3238,11 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // diferentes quando a imagem recomenda outra coisa.
             vcpus,
             memory,
+            // BEFORE `network` on purpose: this borrows `spec.network`, the
+            // next field moves it. Same resolution the `cluster kubeadm` path
+            // does — a declarative `kind: VM` asking for a network gets it for
+            // real, instead of silently landing on libvirt's `default`.
+            network_subnet: super::network::subnet_of(&spec.network),
             network: spec.network,
             // `metadata.namespace`, the same source every other Kind reads it
             // from — a VM does not get a namespace field of its own in `spec`.

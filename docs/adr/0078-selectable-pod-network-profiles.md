@@ -219,7 +219,7 @@ antes do kubeadm e **empurra-o** para um nó cuja golden é anterior a ele.
 
 Corrida a 2026-10-15, dois nós (1 control-plane + 1 worker) em libvirt/NAT, com
 a golden construída na mesma sessão. O detalhe está em
-`docs/compatibilidade-rede.md` §3.2; o resumo:
+`docs/network-compatibility.md` §3.2; o resumo:
 
 **Passou tudo até ao dataplane.** As VMs com endereços distintos (o DX-6702, que
 a golden anterior falhava), os dois hosts preparados, `kubeadm init` em 32,4 s,

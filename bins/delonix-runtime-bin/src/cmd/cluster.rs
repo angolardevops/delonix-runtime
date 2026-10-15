@@ -305,21 +305,48 @@ pub(crate) use super::net_profiles::CNI_CHOICES;
 /// DX-6701 (a node-local bridge routes nothing between nodes). `mode: kind` is
 /// not refused for `default`: there it is kindnet, which does.
 fn network_request(spec: &ClusterSpec, nodes: u32) -> super::net_profiles::NetworkRequest {
+    network_request_parts(
+        &spec.cni,
+        &spec.network,
+        &spec.pod_subnet,
+        &spec.service_subnet,
+        &spec.mode,
+        nodes,
+    )
+}
+
+/// The same request, from the loose parts, for the callers that do not have a
+/// `ClusterSpec` yet.
+///
+/// Two of them: `provision_and_apply`, which creates its VMs before the spec
+/// it builds reaches `validate()`, and the `cluster kubeadm` arm, which has to
+/// ask BEFORE it creates the cluster's own network. Both used to carry their
+/// own copy of this sixteen-field literal; a field added to `NetworkRequest`
+/// and missed in one of them is a refusal that silently stops applying on one
+/// path, so there is one builder.
+fn network_request_parts(
+    cni: &str,
+    net: &NetworkBlock,
+    pod_subnet: &str,
+    service_subnet: &str,
+    mode: &str,
+    nodes: u32,
+) -> super::net_profiles::NetworkRequest {
     super::net_profiles::NetworkRequest {
-        cni: spec.cni.clone(),
-        dataplane: spec.network.dataplane.clone(),
-        kube_proxy: spec.network.kube_proxy.clone(),
-        mtu: spec.network.mtu,
-        node_mtu: spec.network.node_mtu,
-        ip_family: spec.network.ip_family.clone(),
-        interface: spec.network.interface.clone(),
-        multus: spec.network.multus,
-        hubble: spec.network.hubble,
-        experimental: spec.network.experimental,
-        offline: spec.network.offline,
-        pod_subnet: spec.pod_subnet.clone(),
-        service_subnet: spec.service_subnet.clone(),
-        mode: spec.mode.clone(),
+        cni: cni.to_string(),
+        dataplane: net.dataplane.clone(),
+        kube_proxy: net.kube_proxy.clone(),
+        mtu: net.mtu,
+        node_mtu: net.node_mtu,
+        ip_family: net.ip_family.clone(),
+        interface: net.interface.clone(),
+        multus: net.multus,
+        hubble: net.hubble,
+        experimental: net.experimental,
+        offline: net.offline,
+        pod_subnet: pod_subnet.to_string(),
+        service_subnet: service_subnet.to_string(),
+        mode: mode.to_string(),
         nodes,
     }
 }
@@ -1030,16 +1057,35 @@ pub enum ClusterCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
         name: Option<String>,
     },
-    /// Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.
+    /// Remove a cluster entirely — nodes, kubeconfig, `~/.kube/config` entry.
     ///
-    /// Volumes are left alone, on purpose, same as `docker`. The same
+    /// Serves BOTH families: a kind-mode cluster, whose nodes are
+    /// containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`),
+    /// whose nodes are VMs — its load balancer and etcd members included.
+    ///
+    /// What becomes of the NETWORK is the one real difference, and the rule
+    /// is the same in both families: whoever created it owns it. A kind-mode
+    /// cluster's `dlx-<name>` was made FOR it and goes with it. A VM cluster
+    /// built WITHOUT `--network` was given one of its own, named
+    /// `<cluster>-<hash>`, and that one goes with it too. A network you named
+    /// in `--network` is yours, and is left alone. Volumes are never touched
+    /// either, on purpose, same as `docker`.
+    ///
+    /// A cluster whose nodes are already gone is still removable by name:
+    /// what gets collected is the state directory, the exported kubeconfig
+    /// and the matching context — the same thing `cluster prune <name>` does.
+    ///
+    /// Omitting the name resolves among KIND-MODE clusters only, so name a
+    /// VM cluster explicitly. For a kind-mode cluster this is the same
     /// removal `delonix delete clusters <name>` already does (the generic
-    /// kubectl-style verb this engine gives every Kind) — this is just the
-    /// more discoverable spelling inside `cluster --help`, with a
-    /// confirmation prompt `delete` does not have.
+    /// kubectl-style verb this engine gives every Kind) — just the more
+    /// discoverable spelling inside `cluster --help`, with a confirmation
+    /// prompt `delete` does not have. For a VM-provisioned one it is the
+    /// ONLY verb that tears the cluster down: `cmd_delete` hands straight
+    /// to kind-mode's `delete` and has no VM branch at all.
     Destroy {
         /// Cluster name. Omit when there is only one.
-        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        #[arg(add = ArgValueCandidates::new(super::complete::destroyable_clusters))]
         name: Option<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
@@ -1108,8 +1154,15 @@ pub enum ClusterCmd {
     /// `127.0.0.1:<port>`, and by now that port may answer for something else.
     ///
     /// **A cluster with nodes is never touched, stopped ones included** — for
-    /// that there is `cluster delete`, which takes a name on purpose.
+    /// that there is `cluster destroy` (or `delete clusters <name>`, the same
+    /// removal without the prompt), which takes a name on purpose.
+    ///
+    /// With no NAMES this collects every orphan at once; naming one collects
+    /// that one and leaves the others exactly as they are.
     Prune {
+        /// Orphans to collect (omit = every cluster with no nodes left).
+        #[arg(add = ArgValueCandidates::new(super::complete::cluster_leftovers))]
+        names: Vec<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
         force: bool,
@@ -1161,9 +1214,13 @@ pub enum ClusterCmd {
         /// only local image that exists.
         #[arg(long = "vm-image", add = ArgValueCandidates::new(super::complete::vm_images))]
         vm_image: Option<String>,
-        /// Already-created network (`delonix network create`) — no magic default.
+        /// Network the nodes attach to. Omit and the cluster gets its OWN,
+        /// created here and named `<cluster>-<hash>` — and removed again by
+        /// `cluster destroy`. Name one that already exists (`delonix network
+        /// create`) to attach to it instead; that one is never removed, because
+        /// you created it.
         #[arg(long, add = ArgValueCandidates::new(super::complete::networks))]
-        network: String,
+        network: Option<String>,
         /// Private SSH key to use. Omit = generates a new ed25519 pair in
         /// `<root>/clusters/<name>/id_ed25519`.
         #[arg(value_hint = clap::ValueHint::FilePath, long = "ssh-key")]
@@ -1456,9 +1513,12 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 },
             );
         }
-        ClusterCmd::Prune { force } => {
+        ClusterCmd::Prune { ref names, force } => {
             let (_, store) = super::util::open_stores()?;
-            let doomed = super::kindmode::doomed_clusters(&store)?;
+            // With names, this is also the gate: a name that is not an orphan
+            // is refused HERE, before the prompt, so the question is never
+            // asked about a set that does not match what was typed.
+            let doomed = super::kindmode::prune_selection(&store, names)?;
             let preview = (!doomed.is_empty()).then(|| {
                 super::po::tf(
                     "This will remove the leftover state of {n} cluster(s): {list}",
@@ -1482,7 +1542,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             )? {
                 return Ok(());
             }
-            let n = super::kindmode::prune(&store)?;
+            let n = super::kindmode::prune(&doomed)?;
             println!(
                 "{}",
                 super::po::tf("removed: {n} cluster leftover(s)", &[("n", &n.to_string())])
@@ -1574,6 +1634,50 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 Some(n) => n,
                 None => random_kubeadm_cluster_name(&state_root())?,
             };
+            // The flags and `spec.network` are the SAME block, built here
+            // once — so a value the manifest accepts cannot be a value the
+            // flag silently drops. Built BEFORE the refusal below, because
+            // the refusal needs it.
+            let net_block = NetworkBlock {
+                dataplane: cni_dataplane,
+                kube_proxy,
+                mtu: cni_mtu,
+                node_mtu,
+                ip_family: None,
+                interface: cni_interface,
+                multus,
+                hubble,
+                experimental: experimental_cni,
+                offline: cni_offline,
+            };
+            // BUG FIXED HERE, found by running it: the pod-network refusal
+            // promises "Nothing was created", and creating the cluster's own
+            // network before it made that promise FALSE — a refused
+            // `cluster kubeadm` left a network behind, and leaked one more on
+            // every retry.
+            //
+            // It asks the WHOLE network question and not just the CNI name,
+            // because every part of it can refuse: the dataplane, the
+            // kube-proxy mode, the MTU against the encapsulation, the CIDR
+            // arithmetic, the support level. `net_profiles::validate` is pure
+            // and `provision_and_apply` runs it again for its other callers,
+            // so asking here costs nothing and keeps the promise the message
+            // makes.
+            super::net_profiles::validate(&network_request_parts(
+                &cni,
+                &net_block,
+                &pod_subnet,
+                &service_subnet,
+                "vm",
+                control_plane.saturating_add(workers),
+            ))?;
+            // `--network` omitted: the cluster gets its own, the same way kind
+            // mode has always given each cluster one (`cluster_net`). Resolved
+            // BEFORE `name` moves into the args below.
+            let network = match network {
+                Some(n) => n,
+                None => ensure_cluster_network(&name)?,
+            };
             provision_and_apply(ProvisionArgs {
                 name,
                 control_plane,
@@ -1587,21 +1691,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 pod_subnet,
                 service_subnet,
                 cni,
-                // The flags and `spec.network` are the SAME block, built here
-                // once — so a value the manifest accepts cannot be a value the
-                // flag silently drops.
-                net_block: NetworkBlock {
-                    dataplane: cni_dataplane,
-                    kube_proxy,
-                    mtu: cni_mtu,
-                    node_mtu,
-                    ip_family: None,
-                    interface: cni_interface,
-                    multus,
-                    hubble,
-                    experimental: experimental_cni,
-                    offline: cni_offline,
-                },
+                net_block,
                 boot_timeout,
                 copy_kubeconfig,
                 etcd_cluster,
@@ -2698,17 +2788,20 @@ fn ensure_single_node_cni(cp1: &SshTarget, pod_subnet: &str) -> Result<()> {
                 super::po::t("writing the default CNI conflist")
             ))
         })?;
-    let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-10-bridge.conflist");
+    // Staged under a path of this operation's own, like every other upload here
+    // (`stage_and_install`): a single-node cluster cannot race itself, but a
+    // FIXED `/tmp` name on a shared node is guessable by any local user there,
+    // which is the same reason the local side above uses `write_private_temp`.
+    let outcome = stage_and_install(cp1, &tmp, "delonix-10-bridge.conflist", |staged| {
+        format!(
+            "mkdir -p /etc/cni/net.d && \
+             mv {staged} /etc/cni/net.d/10-bridge.conflist && \
+             KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+             node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true"
+        )
+    });
     let _ = std::fs::remove_file(&tmp);
-    scp_result.map_err(|e| Error::Invalid(format!("CNI conflist: {e}")))?;
-    remote::ssh_run(
-        cp1,
-        "mkdir -p /etc/cni/net.d && \
-         mv /tmp/delonix-10-bridge.conflist /etc/cni/net.d/10-bridge.conflist && \
-         KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
-         node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true",
-    )
-    .map_err(|e| Error::Invalid(format!("applying the default CNI conflist: {e}")))?;
+    outcome.map_err(|e| Error::Invalid(format!("the default CNI conflist: {e}")))?;
     Ok(())
 }
 
@@ -2861,7 +2954,7 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
 /// PURE, so the naming convention this file has in TWO places (the names it
 /// writes, and now the names a destroy has to find) cannot quietly drift
 /// apart from a single string literal changing in only one of them.
-fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
+pub(crate) fn is_cluster_vm(vm_name: &str, cluster_name: &str) -> bool {
     let Some(rest) = vm_name.strip_prefix(cluster_name) else {
         return false;
     };
@@ -2897,11 +2990,83 @@ pub(crate) fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
 /// (`docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md` §4.6) had to do,
 /// which is how this gap went from "known" to "fixed".
 ///
-/// Deliberately leaves the network alone: `--network` names a network the
-/// OPERATOR created (`cluster kubeadm`'s own `--help` says so — "no magic
-/// default"), so it is never this command's to remove, the same way
-/// kind-mode's own `delete` only removes the network IT created
-/// (`cluster_net(name)`) and never a user's.
+/// Name of the network a VM cluster gets when `--network` is omitted.
+///
+/// DETERMINISTIC from the cluster name, and that is the whole design: it is
+/// what lets [`destroy_vm_cluster`] recompute the name and recognize its own
+/// network without persisting a "the engine owns this one" flag anywhere. A
+/// random suffix would need that flag, and a flag that goes missing leaks a
+/// network per create/destroy cycle.
+///
+/// The suffix also keeps the name out of the way of an operator's own: a bare
+/// `lab` could collide with a network someone already has, and silently
+/// attaching a cluster to it would be worse than a clumsy name. Kind mode
+/// solves the same problem with a `dlx-` PREFIX (`cluster_net`); this path
+/// uses a suffix instead, so a cluster's network sorts next to its own name.
+fn cluster_vm_net(name: &str) -> String {
+    let h = vmimage::hex_sha256(name.as_bytes());
+    format!("{name}-{}", &h[..8])
+}
+
+/// Makes sure the cluster's OWN network exists, and returns its name.
+///
+/// Idempotent, because [`cluster_vm_net`] is deterministic: a second
+/// `cluster kubeadm` for the same name finds the network already there and
+/// reuses it instead of failing on a conflict.
+///
+/// Goes through [`super::network::create_network`] — the same entry point kind
+/// mode uses — and NOT `infra::network_create` alone, which would leave the
+/// `NetworkStore` without a record (see that function's own doc-comment for
+/// what breaks then). The subnet is left to the allocator, exactly as a bare
+/// `delonix network create` would.
+fn ensure_cluster_network(cluster: &str) -> Result<String> {
+    let net = cluster_vm_net(cluster);
+    let store = delonix_sdn::NetworkStore::open(state_root())?;
+    if store.get(&net).is_ok() {
+        return Ok(net);
+    }
+    super::network::create_network(&store, &net, "bridge", None, None, "", None, vec![], None)?;
+    output::info(&super::po::tf(
+        "created network \"{net}\" for cluster \"{cluster}\" (removed again by `cluster destroy`)",
+        &[("net", &net), ("cluster", cluster)],
+    ));
+    Ok(net)
+}
+
+/// Whether a network named exactly [`cluster_vm_net`] exists — i.e. whether
+/// this cluster has one of ITS OWN to remove. Asked before the confirmation
+/// prompt so the prompt can say which case the operator is in.
+fn owns_cluster_network(name: &str) -> bool {
+    delonix_sdn::NetworkStore::open(state_root())
+        .map(|s| s.get(&cluster_vm_net(name)).is_ok())
+        .unwrap_or(false)
+}
+
+/// Removes the cluster's own network — and ONLY its own.
+///
+/// The test is the name: [`cluster_vm_net`] is deterministic, so a network
+/// called exactly that is one [`ensure_cluster_network`] created. A network
+/// the operator passed in `--network` has any other name and is left alone,
+/// because they created it and this command did not.
+///
+/// Both stores, in the order kind mode's own prune uses: the declarative
+/// record first, then the physical plane. Best-effort throughout — a cluster
+/// whose VMs are gone must not stay undeletable because a bridge refused to.
+fn remove_cluster_network(name: &str) {
+    if !owns_cluster_network(name) {
+        return;
+    }
+    let net = cluster_vm_net(name);
+    if let Ok(store) = delonix_sdn::NetworkStore::open(state_root()) {
+        let _ = store.remove(&net);
+        delonix_sdn::infra::network_remove(&net);
+    }
+}
+
+/// Removes the network only when this command CREATED it — see
+/// [`remove_cluster_network`]. A network named in `--network` belongs to the
+/// operator and is never touched, the same way kind-mode's own `delete` only
+/// removes the network IT created (`cluster_net(name)`) and never a user's.
 fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
     if !super::prune::confirm(
         force,
@@ -2912,9 +3077,29 @@ fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
         ),
         Some(super::po::tf(
             "This will remove {n} VM(s) of cluster '{name}', its cached kubeconfig, and the \
-             matching ~/.kube/config entries. The network it used is left alone — you created \
-             it, this command did not.",
-            &[("n", &vms.len().to_string()), ("name", name)],
+             matching ~/.kube/config entries.{net}",
+            &[
+                ("n", &vms.len().to_string()),
+                ("name", name),
+                // Says which of the two cases this cluster is in, instead of
+                // one sentence that is wrong half the time: a network this
+                // command created goes with it, a network the operator named
+                // does not.
+                (
+                    "net",
+                    &match owns_cluster_network(name) {
+                        true => super::po::tf(
+                            " Its own network '{net}' goes too.",
+                            &[("net", &cluster_vm_net(name))],
+                        ),
+                        false => super::po::t(
+                            " The network it used is left alone — you created it, this command \
+                             did not.",
+                        )
+                        .to_string(),
+                    },
+                ),
+            ],
         )),
         super::po::t("Continue? [y/N]"),
     )? {
@@ -2932,6 +3117,22 @@ fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
             "🗑️",
         );
         vm::cmd_rm(&base, vm_name, true)?;
+        p.ok();
+    }
+    // AFTER the VMs: a bridge with interfaces still on it is one the kernel
+    // may refuse to take down. Only when the network is this command's own —
+    // and only then is the step even shown, so the progress does not announce
+    // work it is not doing.
+    if owns_cluster_network(name) {
+        p.step(
+            &format!(
+                "{} '{}'",
+                super::po::t("Removing network"),
+                cluster_vm_net(name)
+            ),
+            "🕸️",
+        );
+        remove_cluster_network(name);
         p.ok();
     }
     p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
@@ -3343,23 +3544,14 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     // arithmetic, the support level. `cluster kubeadm` is the path where this
     // matters most — it is the one that creates machines, so a refusal that
     // arrived after `validate()` would arrive after the VMs existed.
-    let plan = super::net_profiles::validate(&super::net_profiles::NetworkRequest {
-        cni: args.cni.clone(),
-        dataplane: args.net_block.dataplane.clone(),
-        kube_proxy: args.net_block.kube_proxy.clone(),
-        mtu: args.net_block.mtu,
-        node_mtu: args.net_block.node_mtu,
-        ip_family: args.net_block.ip_family.clone(),
-        interface: args.net_block.interface.clone(),
-        multus: args.net_block.multus,
-        hubble: args.net_block.hubble,
-        experimental: args.net_block.experimental,
-        offline: args.net_block.offline,
-        pod_subnet: args.pod_subnet.clone(),
-        service_subnet: args.service_subnet.clone(),
-        mode: "vm".to_string(),
-        nodes: args.control_plane.saturating_add(args.workers),
-    })?;
+    let plan = super::net_profiles::validate(&network_request_parts(
+        &args.cni,
+        &args.net_block,
+        &args.pod_subnet,
+        &args.service_subnet,
+        "vm",
+        args.control_plane.saturating_add(args.workers),
+    ))?;
     check_env_overlap(&plan)?;
     // And, for a profile, that the artefact can actually be obtained — BEFORE
     // the VMs exist. Discovering an unreachable publisher (or an empty
@@ -3593,6 +3785,12 @@ fn create_and_wait(
         vcpus: args.vcpus,
         memory: args.memory.clone(),
         network: args.network.clone(),
+        // The subnet the operator DECLARED for this network, resolved here
+        // because a provider may not read the registry (docs/discovery/61).
+        // Without it the libvirt backend had nothing to define the network
+        // WITH, so `--network` was accepted and then silently ignored — every
+        // node landed on libvirt's `default` instead of the network asked for.
+        network_subnet: super::network::subnet_of(&args.network),
         kernel: None,
         initrd: None,
         firmware: None,
@@ -3625,6 +3823,9 @@ fn create_and_wait(
 /// profile, so a call that swapped `cri_bin` and `cli_bin` — or `cri_service`
 /// and the preflight — would compile and install the wrong file.
 pub(crate) struct HostPrep<'a> {
+    /// What the caller ASKED for — `None` when the manifest said nothing.
+    /// Resolved to a concrete version inside `prepare_host`, never here, so
+    /// there is one resolution and not one per field reader.
     pub k8s_version: Option<&'a str>,
     pub cri_bin: &'a std::path::Path,
     pub cri_service: &'a std::path::Path,
@@ -3636,7 +3837,11 @@ pub(crate) struct HostPrep<'a> {
 }
 
 fn prepare_host(target: &SshTarget, label: &str, prep: &HostPrep) -> Result<()> {
-    for r in k8s_recipes::k8s_host_recipes(prep.k8s_version, &[]) {
+    // Same single resolution the image build uses: a manifest with no
+    // `spec.k8sVersion` used to configure a `stable:/v1.31` apt repo on hosts
+    // that `resolve_vm_image` had meanwhile defaulted to the 1.36 golden.
+    let k8s_version = k8s_recipes::resolve_k8s_version(prep.k8s_version);
+    for r in k8s_recipes::k8s_host_recipes(&k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
             continue;
         }
@@ -3690,15 +3895,16 @@ fn run_node_preflight(
             ));
             return Ok(());
         };
-        remote::scp_to(target, local, "/tmp/delonix-node-preflight")
-            .map_err(|e| Error::Invalid(format!("[{label}] node preflight: {e}")))?;
-        remote::ssh_run(
-            target,
-            &format!(
-                "mv /tmp/delonix-node-preflight {REMOTE_NODE_PREFLIGHT} && \
-                 chmod 0755 {REMOTE_NODE_PREFLIGHT}"
-            ),
-        )
+        // Staged like every other upload (#846), not written to a fixed
+        // `/tmp/delonix-node-preflight`: `apply_ssh` prepares nodes inside a
+        // `thread::scope`, so a shared name races — two nodes staging at once
+        // and one `mv` finding the file already moved — and a predictable
+        // path in a world-writable directory is a symlink someone else can
+        // plant first. `no_upload_targets_a_fixed_remote_tmp_path` is the
+        // gate that caught this one.
+        stage_and_install(target, local, "node-preflight", |staged| {
+            format!("mv {staged} {REMOTE_NODE_PREFLIGHT} && chmod 0755 {REMOTE_NODE_PREFLIGHT}")
+        })
         .map_err(|e| Error::Invalid(format!("[{label}] node preflight: {e}")))?;
     }
     let out = remote::ssh_run(target, &format!("{REMOTE_NODE_PREFLIGHT} {profile}"));
@@ -3772,6 +3978,115 @@ pub(crate) fn kubeadm_version_arg(spec_version: Option<&str>) -> Option<String> 
 /// see `install.sh`).
 const REMOTE_CLI_BIN: &str = "/usr/local/bin/delonix";
 
+/// `(directory, file)` to stage ONE upload at: a directory of this operation's
+/// own under `/tmp`, and `name` inside it.
+///
+/// BUG FIXED HERE, diagnosed live on 2026-10-15: `install_cli`/`install_cri`
+/// used the FIXED paths `/tmp/delonix-cli`, `/tmp/delonix-cri` and
+/// `/tmp/delonix-cri.service`, and `apply_ssh` prepares every host CONCURRENTLY
+/// (`std::thread::scope`). Two prep operations that land on the same host — which
+/// is what happens the moment two node records resolve to the same address —
+/// therefore raced on one filename: one thread's `mv` consumed the file the
+/// other had just `scp`ed, and the loser reported
+///
+/// ```text
+/// error[DX-1000] invalid argument: [lab-cp1] delonix-cri: invalid argument:
+/// [192.168.122.176] <ssh_run's command-failed prefix>: mv /tmp/delonix-cri ...
+/// mv: cannot stat '/tmp/delonix-cri': No such file or directory
+/// ```
+///
+/// — a message about a missing temp file, pointing nowhere near the duplicate
+/// address that caused it. With a directory per operation the same situation is a
+/// harmless repeat: each thread installs the identical binary over the same
+/// destination.
+///
+/// The pid alone is NOT enough, and the counter is not decoration: the racing
+/// threads are threads of ONE process, so they share it. Both parts are needed
+/// — the pid for two concurrent `delonix` runs, the counter for two threads of
+/// one run.
+///
+/// Shape (`<pid>.<seq>.<nanos>`) deliberately mirrors
+/// `delonix_state::write_private_temp`, which names the LOCAL side of these same
+/// transfers — one convention for "a temp path of our own", not two. The nanos
+/// buy nothing against the race (the counter already settles that) and
+/// everything against guessing it.
+///
+/// The file keeps its plain `name` INSIDE that directory: the uniqueness lives
+/// in the directory, so `ls /tmp/delonix-stage.*/` on a node mid-prep still
+/// shows an operator what is being installed.
+fn remote_staging_path(name: &str) -> (String, String) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let dir = format!("/tmp/delonix-stage.{}.{seq}.{nanos}", std::process::id());
+    (format!("{dir}/{name}"), dir)
+}
+
+/// Uploads `local` into a staging directory this operation alone owns
+/// ([`remote_staging_path`]) and runs the command `install` builds from the
+/// staged path — the `mv` into place. Returns that command's output, for the one
+/// caller that parses it (`kubeadm init`).
+///
+/// SECURITY, why a DIRECTORY and not just an unguessable filename: `scp` follows
+/// symlinks and there is no remote `O_EXCL` to ask for. A local user on the node
+/// who guesses the staged filename can pre-plant it as a symlink; `scp` then
+/// writes through it, `mv` moves the SYMLINK into place, and systemd runs
+/// content that user controls as root. A hard-to-guess name shrinks that window
+/// but does not close it.
+///
+/// `mkdir` WITHOUT `-p` is the remote `O_EXCL`: it fails if the path already
+/// exists at all, symlink included, so a squatted name is a loud error instead
+/// of a hijack. `-m 700` then means nothing can be planted inside the directory
+/// after we own it. This is the same defence
+/// `delonix_state::write_private_temp` gets locally from `create_new`, whose own
+/// hijacked-path test (in `delonix-state`'s `store.rs`) proves the primitive.
+///
+/// Created WITHOUT `sudo` on purpose ([`remote::ssh_run_as_user`]): the `scp`
+/// that follows runs as the SSH user, so a root-owned `0700` directory would
+/// refuse it. `/tmp` is writable by that user, and a directory they own is
+/// exactly what is needed.
+///
+/// The removal rides along INSIDE the install command (`rc=$?` … `exit $rc`)
+/// rather than taking a round-trip of its own: it then happens on the failure
+/// path too, which matters because a unique name per operation means nothing
+/// would ever overwrite the leftover.
+///
+/// The LOCAL file is the caller's to clean up (several build it with
+/// `delonix_state::write_private_temp` and delete it right after); this function
+/// only reads it.
+fn stage_and_install(
+    target: &SshTarget,
+    local: &std::path::Path,
+    name: &str,
+    install: impl FnOnce(&str) -> String,
+) -> Result<String> {
+    let (staged, dir) = remote_staging_path(name);
+    remote::ssh_run_as_user(target, &format!("mkdir -m 700 {dir}"))?;
+    if let Err(e) = remote::scp_to(target, local, &staged) {
+        // The install command below is what normally removes the directory; a
+        // failed upload never reaches it, and an empty directory per attempt is
+        // still litter.
+        let _ = remote::ssh_run_as_user(target, &format!("rm -rf {dir}"));
+        return Err(e);
+    }
+    remote::ssh_run(target, &staged_install_script(&install(&staged), &dir))
+}
+
+/// The remote script [`stage_and_install`] runs: the install command, then the
+/// staging directory removed, then the install's OWN exit status.
+///
+/// `{ ...; }` groups `install_cmd` so that its own `&&` chain (and the trailing
+/// `; true` one of them deliberately ends with) keeps the meaning it has when
+/// read on its own. `rc=$?` has to be captured BEFORE the `rm`, or the status
+/// this returns would be the cleanup's and every failed install would report
+/// success.
+fn staged_install_script(install_cmd: &str, dir: &str) -> String {
+    format!("{{ {install_cmd}; }}; rc=$?; rm -rf {dir}; exit $rc")
+}
+
 /// Keeps the node's `delonix` CLI in step with `install_cri`'s own `delonix-cri` —
 /// same idea, same sha256-check-then-replace shape, deliberately NOT merged
 /// into one function: a CLI binary has no systemd unit to restart.
@@ -3808,11 +4123,9 @@ fn install_cli(target: &SshTarget, label: &str, cli_bin: &std::path::Path) -> Re
             &[("label", label), ("sha", &local[..12])],
         )
     );
-    remote::scp_to(target, cli_bin, "/tmp/delonix-cli").map_err(err)?;
-    remote::ssh_run(
-        target,
-        &format!("mv /tmp/delonix-cli {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}"),
-    )
+    stage_and_install(target, cli_bin, "delonix-cli", |staged| {
+        format!("mv {staged} {REMOTE_CLI_BIN} && chmod +x {REMOTE_CLI_BIN}")
+    })
     .map_err(err)?;
     Ok(())
 }
@@ -3877,18 +4190,18 @@ fn install_cri(
                     &[("label", label), ("sha", &local[..12])],
                 )
             );
-            remote::scp_to(target, cri_bin, "/tmp/delonix-cri").map_err(err)?;
-            remote::ssh_run(
-                target,
-                &format!("mv /tmp/delonix-cri {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}"),
-            )
+            stage_and_install(target, cri_bin, "delonix-cri", |staged| {
+                format!("mv {staged} {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}")
+            })
             .map_err(err)?;
         }
     }
-    remote::scp_to(target, cri_service, "/tmp/delonix-cri.service").map_err(err)?;
     // `restart`, not `enable --now`: on an active unit the latter does nothing,
     // and the old binary would keep running.
-    remote::ssh_run(target, &install_cri_unit_command()).map_err(err)?;
+    stage_and_install(target, cri_service, "delonix-cri.service", |staged| {
+        install_cri_unit_command(staged)
+    })
+    .map_err(err)?;
     Ok(())
 }
 
@@ -3896,7 +4209,10 @@ fn install_cri(
 const REMOTE_CRI_CEILING_DROPIN: &str =
     "/etc/systemd/system/delonix-cri.service.d/10-cluster-ceiling.conf";
 
-/// The remote command that installs the `delonix-cri` unit and (re)starts it.
+/// The remote command that installs the `delonix-cri` unit and (re)starts it,
+/// moving it into place from `staged` — the path [`stage_and_install`] uploaded
+/// it to, unique per operation so concurrent preps of the same host cannot
+/// consume each other's upload.
 ///
 /// A node this command bootstraps runs Kubernetes' own system pods — kube-proxy,
 /// the CNI agent — which are `privileged` or ask for `NET_ADMIN` by design, and
@@ -3905,9 +4221,9 @@ const REMOTE_CRI_CEILING_DROPIN: &str =
 /// visible choice (the CRI warns about it at startup). The drop-in is written only
 /// if absent: an operator who edits it, or who adds a later-sorted one of their
 /// own to bound the node, keeps their setting on the next run.
-fn install_cri_unit_command() -> String {
+fn install_cri_unit_command(staged: &str) -> String {
     format!(
-        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
+        "mv {staged} /etc/systemd/system/delonix-cri.service && \
          {} && \
          systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
         write_ceiling_dropin_if_absent(),
@@ -4046,16 +4362,18 @@ fn kubeadm_init(
                     super::po::t("writing local kubeadm-config.yaml")
                 ))
             })?;
-        let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-kubeadm-config.yaml");
+        // Same reasoning as the local `write_private_temp` right above, applied
+        // to the REMOTE side: `stage_and_install` picks a path of this
+        // operation's own instead of the guessable `/tmp/delonix-kubeadm-config.yaml`.
+        let outcome = stage_and_install(cp1, &tmp, "delonix-kubeadm-config.yaml", |staged| {
+            format!(
+                "mkdir -p /etc/kubernetes && \
+                 mv {staged} /etc/kubernetes/kubeadm-config.yaml && \
+                 kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml --upload-certs"
+            )
+        });
         let _ = std::fs::remove_file(&tmp);
-        scp_result.map_err(|e| Error::Invalid(format!("[{label}] kubeadm config: {e}")))?;
-        let out = remote::ssh_run(
-            cp1,
-            "mkdir -p /etc/kubernetes && \
-             mv /tmp/delonix-kubeadm-config.yaml /etc/kubernetes/kubeadm-config.yaml && \
-             kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml --upload-certs",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
+        let out = outcome.map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
         return parse_join_info(&out);
     }
     let k8s_ver_flag = kubeadm_version_arg(spec.k8s_version.as_deref())
@@ -4488,12 +4806,36 @@ mod tests {
 
     use super::*;
 
+    /// DETERMINISM is the contract. `destroy` recomputes this name to decide
+    /// whether a network is the engine's own, so the same cluster name must
+    /// always give the same network name — otherwise `destroy` stops
+    /// recognizing what `kubeadm` created and leaks one network per cycle.
+    #[test]
+    fn the_cluster_network_name_is_deterministic() {
+        assert_eq!(cluster_vm_net("lab"), cluster_vm_net("lab"));
+        assert_ne!(cluster_vm_net("lab"), cluster_vm_net("lab2"));
+    }
+
+    /// Shape: the cluster name, then a hash suffix. The prefix is what makes it
+    /// readable in `network ls`; the suffix is what keeps it from colliding
+    /// with a network the operator already has called exactly `lab`.
+    #[test]
+    fn the_cluster_network_name_is_the_cluster_plus_a_suffix() {
+        let net = cluster_vm_net("lab");
+        assert!(net.starts_with("lab-"), "{net}");
+        assert_ne!(net, "lab", "must not shadow an operator's own 'lab'");
+        // 8 hex chars of sha256 — enough to not collide, short enough to type.
+        let suffix = net.strip_prefix("lab-").expect("prefixed");
+        assert_eq!(suffix.len(), 8, "{net}");
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{net}");
+    }
+
     /// The node's CRI must be able to run the cluster's own privileged system
     /// pods, so the bootstrap writes an explicit ceiling drop-in next to the
     /// unit, before the daemon is reloaded — and never overwrites an existing one.
     #[test]
     fn the_cluster_unit_install_lifts_the_default_ceiling_explicitly() {
-        let cmd = install_cri_unit_command();
+        let cmd = install_cri_unit_command("/tmp/delonix-cri.service.1.0");
         assert!(cmd.contains("DELONIX_CRI_CAP_CEILING=all"), "{cmd}");
         assert!(cmd.contains(REMOTE_CRI_CEILING_DROPIN), "{cmd}");
         assert!(
@@ -4508,6 +4850,206 @@ mod tests {
         assert!(
             write < reload,
             "the drop-in must exist before daemon-reload"
+        );
+    }
+
+    /// REGRESSION, diagnosed live on 2026-10-15: `install_cli`/`install_cri`
+    /// staged their uploads at FIXED paths while `apply_ssh` prepares hosts
+    /// concurrently, so two preps landing on the same host (two node records
+    /// resolving to one address) raced on one filename and the loser died with
+    /// `mv: cannot stat '/tmp/delonix-cri'`. Every staged path must now be
+    /// distinct, INCLUDING between two calls from the same process — the racing
+    /// preps are threads, so a pid-only suffix would still collide.
+    #[test]
+    fn every_staged_upload_gets_a_path_of_its_own() {
+        let n = 64;
+        let dirs: std::collections::HashSet<String> = (0..n)
+            .map(|_| remote_staging_path("delonix-cri").1)
+            .collect();
+        assert_eq!(dirs.len(), n, "staging directories collided: {dirs:?}");
+
+        let (staged, dir) = remote_staging_path("delonix-cri");
+        // The uniqueness lives in the DIRECTORY; the file keeps its plain name,
+        // so an operator looking at a node mid-prep sees what is being installed.
+        assert!(dir.starts_with("/tmp/delonix-stage."), "{dir}");
+        assert_eq!(staged, format!("{dir}/delonix-cri"));
+        // The pid is in there: it is what separates two concurrent `delonix` runs.
+        assert!(dir.contains(&format!(".{}.", std::process::id())), "{dir}");
+        // No shell metacharacter: both go straight into `ssh_run` command strings,
+        // and `dir` in particular into an `rm -rf`.
+        for p in [&staged, &dir] {
+            assert!(
+                p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)),
+                "{p}"
+            );
+        }
+        // Every other upload in this file goes through the same helper, so each
+        // lands in a directory of its own — nothing here shares a remote path.
+        for stem in [
+            "delonix-cli",
+            "delonix-cri.service",
+            "delonix-10-bridge.conflist",
+            "delonix-kubeadm-config.yaml",
+        ] {
+            let (f, d) = remote_staging_path(stem);
+            assert_eq!(f, format!("{d}/{stem}"));
+        }
+    }
+
+    /// The wrapper around every staged install is hand-written shell, so it is
+    /// checked as shell: really parsed, really run. Each case runs against a
+    /// REAL directory and asserts the three things the wrapper owes its caller —
+    /// the install's exit status (not the cleanup's), the install's stdout
+    /// (`kubeadm init`'s output is parsed), and the directory gone either way.
+    #[test]
+    fn the_staged_install_script_keeps_the_status_the_output_and_cleans_up() {
+        // Every install command this file actually builds, including the one
+        // that ends in `; true` and the one that is a multi-line `&&` chain.
+        let dummy = "/tmp/delonix-stage.0.0.0/x";
+        for cmd in [
+            format!("mv {dummy} /usr/local/bin/delonix && chmod +x /usr/local/bin/delonix"),
+            install_cri_unit_command(dummy),
+            format!(
+                "mkdir -p /etc/cni/net.d && mv {dummy} /etc/cni/net.d/10-bridge.conflist && \
+                 KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+                 node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true"
+            ),
+        ] {
+            let script = staged_install_script(&cmd, "/tmp/delonix-stage.0.0.0");
+            let out = std::process::Command::new("bash")
+                .arg("-n")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("spawn bash -n");
+            assert!(
+                out.status.success(),
+                "not valid shell: {script}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // Behaviour, for real. `bash -n` would accept a script that captured
+        // `$?` after the `rm` just as happily.
+        let run = |install: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("stage");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("payload"), b"x").unwrap();
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(staged_install_script(install, &dir.to_string_lossy()))
+                .output()
+                .expect("spawn bash");
+            (
+                out.status.success(),
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+                dir.exists(),
+            )
+        };
+
+        let (ok, stdout, leftover) = run("echo 'kubeadm join --token abc'");
+        assert!(ok, "a successful install must report success");
+        assert!(
+            stdout.contains("kubeadm join --token abc"),
+            "the install's stdout has to reach the caller: {stdout:?}"
+        );
+        assert!(!leftover, "the staging directory must be gone");
+
+        // The regression that matters most: a FAILED install must still fail,
+        // even though the `rm` right after it succeeds.
+        let (ok, _, leftover) = run("false");
+        assert!(
+            !ok,
+            "a failed install reported success — $? captured too late"
+        );
+        assert!(
+            !leftover,
+            "the staging directory must be gone on failure too"
+        );
+
+        // The deliberately-tolerant one stays tolerant.
+        let (ok, _, _) = run("false >/dev/null 2>&1; true");
+        assert!(
+            ok,
+            "`; true` must still swallow the failure it is there to swallow"
+        );
+    }
+
+    /// The staging directory is the remote `O_EXCL`: `mkdir` without `-p` fails
+    /// on an existing path (a squatted symlink included) instead of letting
+    /// `scp` write through it, and `-m 700` stops anything being planted inside
+    /// afterwards. Both flags are load-bearing — see `stage_and_install`.
+    #[test]
+    fn the_staging_directory_refuses_a_squatted_path() {
+        // The squat that matters: a symlink where our directory is about to go,
+        // pointing at a directory the attacker can write. `mkdir -p` resolves it
+        // and reports success, which would leave the upload sitting in THEIR
+        // directory — replaceable between the `scp` and the `mv`. A symlink to a
+        // plain file would be refused even by `-p`, so it proves nothing.
+        let tmp = tempfile::tempdir().unwrap();
+        let attacker = tmp.path().join("attacker-owned");
+        std::fs::create_dir(&attacker).unwrap();
+        let squatted = tmp.path().join("delonix-stage.1.0.0");
+        std::os::unix::fs::symlink(&attacker, &squatted).unwrap();
+
+        let plain = std::process::Command::new("mkdir")
+            .args(["-m", "700"])
+            .arg(&squatted)
+            .output()
+            .expect("spawn mkdir");
+        assert!(
+            !plain.status.success(),
+            "mkdir must refuse a path that already exists as a symlink"
+        );
+
+        // `-p` is exactly what would have swallowed it — the flag
+        // `stage_and_install` must never grow.
+        let with_p = std::process::Command::new("mkdir")
+            .args(["-p", "-m", "700"])
+            .arg(&squatted)
+            .output()
+            .expect("spawn mkdir -p");
+        assert!(
+            with_p.status.success(),
+            "mkdir -p accepts the squat: that is why stage_and_install omits it"
+        );
+        // ...and this is the harm it would have let through: the path we would
+        // have uploaded to resolves inside the attacker's directory.
+        std::fs::write(squatted.join("delonix-cri"), b"staged").unwrap();
+        assert!(
+            attacker.join("delonix-cri").exists(),
+            "a write through the squatted path lands in the attacker's directory"
+        );
+    }
+
+    /// The companion to the test above: no upload may go back to a path that
+    /// does not come from [`remote_staging_path`]. A new `scp_to` with a
+    /// hand-written `/tmp/...` destination is the regression this catches, and
+    /// it would reintroduce both the race and the guessable name.
+    ///
+    /// Reads this file's CODE only — the test module is cut away. The needle is
+    /// a literal, so this very assertion contains it; scanning the whole file
+    /// would make the test match itself and fail forever, which is the trap the
+    /// libvirt provider's own source-scanning test documents.
+    #[test]
+    fn no_upload_targets_a_fixed_remote_tmp_path() {
+        let src = include_str!("cluster.rs");
+        let code = src
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .map(|(code, _)| code)
+            .expect("this file's test module marks where the code ends");
+        let offenders: Vec<&str> = code
+            .lines()
+            .map(str::trim)
+            // Only the uploads: the `mv` commands take the staged path as an
+            // argument, and the doc-comments quote the old paths on purpose.
+            .filter(|l| l.contains("scp_to(") && l.contains("\"/tmp/"))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "upload to a fixed remote path — use stage_and_install: {offenders:?}"
         );
     }
 
@@ -5684,7 +6226,7 @@ workers:
     /// surfacing as `mv: cannot stat '/tmp/delonix-cri'`. The refusal has to
     /// come first, and has to name the cause.
     #[test]
-    fn nodes_que_partilham_endereco_sao_recusados_com_a_causa() {
+    fn nodes_sharing_one_address_are_refused_naming_the_cause() {
         let shared = "192.168.122.176";
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", shared),
@@ -5708,7 +6250,7 @@ workers:
     }
 
     #[test]
-    fn nodes_com_enderecos_distintos_passam() {
+    fn nodes_with_distinct_addresses_are_accepted() {
         assert!(check_distinct_node_addresses(&[
             ("lab-cp1", "192.168.122.10"),
             ("lab-w1", "192.168.122.11"),
@@ -5724,7 +6266,7 @@ workers:
     /// nodes share a lease must not drag the three healthy ones into the
     /// message, or the operator cannot tell which machines to look at.
     #[test]
-    fn apenas_o_grupo_em_colisao_entra_no_diagnostico() {
+    fn only_the_colliding_group_reaches_the_diagnostic() {
         let err = check_distinct_node_addresses(&[
             ("lab-cp1", "192.168.122.10"),
             ("lab-w1", "192.168.122.176"),

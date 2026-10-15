@@ -45,7 +45,7 @@ use delonix_model::{Error, Result};
 pub(crate) enum Support {
     /// Artefact pinned and verified, install path implemented, and the
     /// profile's own integration tests have been run. See
-    /// `docs/compatibilidade-rede.md` for which run, on what, and when.
+    /// `docs/network-compatibility.md` for which run, on what, and when.
     Supported,
     /// Implemented and artefact-verified, but NOT yet validated end to end
     /// against this engine's CRI in a multi-node topology. The `&'static str`
@@ -358,7 +358,7 @@ pub(crate) fn multus_artefact() -> Artefact {
 ///
 /// Measured values, not guesses: VXLAN is 50 (14 inner Ethernet + 8 VXLAN + 8
 /// UDP + 20 IPv4), Geneve the same 50 with no options, IP-in-IP 20. The
-/// engine's own `docs/guia-rede.md` already warns about exactly this number
+/// engine's own network guide under `docs/` already warns about this number
 /// for its container overlay — the class of bug is "unexplained slowness, not
 /// an error", which is why an MTU that does not fit is a refusal here.
 pub(crate) fn encap_overhead(dataplane: &str) -> u32 {
@@ -536,6 +536,18 @@ fn pick(options: &[&'static str], asked: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// A character an interface name may contain: the kernel's own charset for
+/// `IFNAMSIZ` names, same discipline as `cluster::valid_endpoint`.
+///
+/// Spelled with `==` rather than a `matches!`: `arch_fitness`'s
+/// `raw_error_variant_matches` gate scans from a `matches!` to the next
+/// semicolon, and this predicate has none before the `return Err(...)` that
+/// follows it, so the macro form read to that gate as a raw error-variant
+/// match. Three comparisons are no less clear.
+fn is_interface_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'
+}
+
 /// Everything that can be refused before a machine exists.
 ///
 /// Ordered deliberately: the profile first (so an unknown name is never
@@ -596,7 +608,7 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
                     "spec.cni '{cni}' is EXPERIMENTAL in this release and is not enabled by \
                      default: {why}. Nothing was created. To use it anyway, say so explicitly \
                      with `spec.network.experimental: true` (or `--experimental-cni`), and read \
-                     `docs/compatibilidade-rede.md` for what has and has not been measured",
+                     `docs/network-compatibility.md` for what has and has not been measured",
                     &[("cni", profile.name()), ("why", why)],
                 )),
             ));
@@ -832,14 +844,10 @@ pub(crate) fn validate(req: &NetworkRequest) -> Result<NetworkPlan> {
     }
 
     // An interface name reaches a rendered manifest and, on some profiles, a
-    // node-side command line. Same charset discipline as `valid_endpoint`.
+    // node-side command line. Same charset discipline as `valid_endpoint`,
+    // through [`is_interface_char`].
     if let Some(dev) = &req.interface {
-        if dev.is_empty()
-            || dev.len() > 15
-            || !dev
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        {
+        if dev.is_empty() || dev.len() > 15 || !dev.chars().all(is_interface_char) {
             return Err(Error::coded(
                 1702,
                 Error::Invalid(super::po::tf(

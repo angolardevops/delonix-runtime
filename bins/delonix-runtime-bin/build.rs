@@ -19,8 +19,13 @@ fn main() {
     // version), the lock file of its package manager (`""`: none), how
     // many seconds `--up` waits for the health path (`wait=`, default 120),
     // and the TLS port (`""` when the template does not serve TLS).
+    // Named, like `TemplateFile` above: an eight-field tuple written inline is
+    // what `clippy::type_complexity` refuses, and the alias is also the only
+    // place the row's shape is stated once for every reader.
     let mut meta = String::from(
-        "pub static TEMPLATE_META: &[(&str, &str, &str, &str, &str, &str, u64, &str)] = &[\n",
+        "pub type TemplateMetaRow = (\n    &'static str,\n    &'static str,\n    &'static str,\n    \
+         &'static str,\n    &'static str,\n    &'static str,\n    u64,\n    &'static str,\n);\n\
+         pub static TEMPLATE_META: &[TemplateMetaRow] = &[\n",
     );
     // Every `key=value` of each `template.meta`, verbatim. The tuple above
     // carries the keys the generator always needs; the optional ones (`tls=`,

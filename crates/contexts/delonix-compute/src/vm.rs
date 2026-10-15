@@ -1459,6 +1459,21 @@ pub fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         devices: _,
         backend: _,
         net_mode: _,
+        // NOT restored, and the reason is narrow: this subnet only ever feeds
+        // `ensure_libvirt_network`'s DEFINE branch. By the time a `vm start`
+        // runs, the network it describes already exists, so that branch is not
+        // taken and the value would be dead. `network` IS persisted, and
+        // `boot` re-derives `bridge` from it, so the VM goes back onto the same
+        // network it was created on.
+        //
+        // The one case this gives up on: if the libvirt network is removed out
+        // of band between `create` and `start`, the restart cannot redefine it
+        // (no subnet) and `ensure_libvirt_network` warns and leaves it. The
+        // domain then names a network the daemon does not have and `virsh
+        // start` fails — loudly, which is the point. Persisting the subnet
+        // would need a new flat `Vm` field; worth doing if that case shows up
+        // in practice.
+        network_subnet: _,
         // Consumido em `prepare_local_overlay` no momento da criação: depois de
         // o overlay existir, o tamanho é uma propriedade DELE e não há nada a
         // reaplicar no arranque (e `prepare_local_overlay` salta um overlay que
@@ -1652,6 +1667,10 @@ pub fn config_from(vm: &Vm) -> VmConfig {
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
         net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
+        // `None` on purpose — see the `network_subnet` note in `boot_spec_of`:
+        // only the DEFINE branch reads it, and a restart's network already
+        // exists. `network` above is what puts the VM back on it.
+        network_subnet: None,
         // `None` de propósito: o overlay já tem o tamanho com que nasceu, e um
         // restart não o redimensiona. Reafirmar aqui um número seria convidar um
         // resize acidental em cada arranque.

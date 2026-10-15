@@ -78,16 +78,18 @@ pub static ENTRIES: &[Entry] = &[
         path: "cluster destroy",
         group: "Lifecycle",
         examples: &[
-            ("nodes, network, cached kubeconfig and the ~/.kube/config entry — volumes untouched", "delonix cluster destroy lab"),
+            ("kind-mode: the nodes, the network it created itself, the cached kubeconfig and the ~/.kube/config entry — volumes untouched", "delonix cluster destroy lab"),
+            ("VM-provisioned, named: the node VMs, cached kubeconfig and ~/.kube/config entries go — so does the cluster's own network, unless you named one in `--network`, which stays", "delonix cluster destroy prod"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster destroy lab -f"),
         ],
-        see_also: &["delete", "cluster prune", "cluster create", "cluster backup"],
+        see_also: &["delete", "cluster prune", "cluster create", "cluster kubeadm", "cluster backup"],
     },
     Entry {
         path: "cluster prune",
         group: "Maintenance",
         examples: &[
             ("collect what clusters with no nodes left behind: their directory, their exported kubeconfig, and the `~/.kube/config` context still pointing at a port that may now answer for something else", "delonix cluster prune"),
+            ("just this one orphan, leaving every other leftover exactly as it is", "delonix cluster prune kambacode"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster prune -f"),
         ],
         see_also: &["delete", "get", "vm prune", "system prune"],
@@ -2383,7 +2385,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "Inspect",
         examples: &[
             ("engine state in one screen: rootless, cgroup delegation, network infra, counts", "delonix system info"),
-            ("the same screen in Portuguese", "delonix system info --l18n pt"),
+            ("the same screen in Portuguese", "delonix --l18n pt system info"),
         ],
         see_also: &["system setup", "system df", "system virt", "dashboard"],
     },

@@ -20,7 +20,7 @@
 #      apply` that exits 0 is not the success condition.
 #
 # READ FIRST, before using this anywhere that matters:
-# `docs/compatibilidade-rede.md` — what was measured, what was not, and why
+# `docs/network-compatibility.md` — what was measured, what was not, and why
 # these profiles are EXPERIMENTAL in this release.
 apiVersion: infrastructure.delonix.io/v1alpha1
 kind: KubernetesCluster

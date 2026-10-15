@@ -92,6 +92,37 @@ pub fn capabilities() -> Vec<CompletionCandidate> {
     )
 }
 
+/// Scaffold template names — the `-t` of all four `init`s (`init`, `stack
+/// init`, `vm init`, `container init`), in catalog order. Static, like
+/// [`capabilities`]: the catalog is code (embedded by `build.rs`), so no store
+/// is opened.
+///
+/// All four complete the VALUE. Which of them also get their FLAGS filtered
+/// once a template is named is a narrower and separate question, answered by
+/// `main::TEMPLATE_INIT_PATHS` — three of the four, `container init` excluded.
+///
+/// Delegates to `scaffold::template_names()` — the same list `--help` and the
+/// "unknown template" refusal print, so a TAB can never offer a name the
+/// command would then reject.
+///
+/// Two things it leaves out, deliberately:
+///
+/// - **Aliases** (`TEMPLATE_ALIASES`: `python` → `fastapi`). They still answer,
+///   but completing one would teach the old name to whoever is discovering the
+///   catalog by TAB. `template_names()` already excludes them and a test in
+///   `scaffold` pins that ("an alias is not listed as a template"); this is the
+///   same decision, not a second one.
+/// - **`list`**, the pseudo-value that prints the catalog. It is a verb wearing
+///   a value's clothes, and the TAB it would be offered on *is* the catalog —
+///   `-t <TAB>` answers the question `-t list` exists to answer.
+pub fn templates() -> Vec<CompletionCandidate> {
+    cands(
+        super::scaffold::template_names()
+            .into_iter()
+            .map(String::from),
+    )
+}
+
 pub fn vms() -> Vec<CompletionCandidate> {
     cands(
         delonix_vm::list(&state_root())
@@ -121,6 +152,45 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     nomes.sort();
     nomes.dedup();
     cands(nomes)
+}
+
+/// The clusters `cluster prune` can collect: state under `<root>/clusters`
+/// that no node — container or VM — accounts for. Completing with
+/// [`clusters`] here would offer precisely the names that verb refuses.
+pub fn cluster_leftovers() -> Vec<CompletionCandidate> {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
+        return Vec::new();
+    };
+    cands(super::kindmode::doomed_clusters(&store).unwrap_or_default())
+}
+
+/// Every cluster `cluster destroy` can take down, which is more than
+/// [`clusters`] sees: kind-mode (the nodes' label), VM-provisioned (`cluster
+/// kubeadm`'s naming convention, decoded by `vm::vm_cluster_member`, the one
+/// place that owns it) and the ones whose nodes are already gone but whose
+/// state is still on disk. Offering only kind-mode names here would
+/// contradict that command's own help.
+pub fn destroyable_clusters() -> Vec<CompletionCandidate> {
+    let mut names: Vec<String> = Vec::new();
+    if let Ok(store) = delonix_state::Store::open(state_root().join("containers")) {
+        names.extend(
+            store
+                .list()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned()),
+        );
+        names.extend(super::kindmode::doomed_clusters(&store).unwrap_or_default());
+    }
+    names.extend(
+        delonix_vm::list(&state_root())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| super::vm::vm_cluster_member(&v.name).map(|(p, _)| p.to_string())),
+    );
+    names.sort();
+    names.dedup();
+    cands(names)
 }
 
 /// Cluster names with a cached kubeconfig (`<root>/clusters/<name>-kubeconfig.yaml`) —

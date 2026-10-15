@@ -572,7 +572,7 @@ sítio errado. São **quatro planos distintos**, com donos distintos:
 
 | plano | quem é o dono | onde se configura | onde se diagnostica |
 |---|---|---|---|
-| **rede dos pods** (pod CIDR, Service CIDR, encaminhamento entre nós) | o perfil de CNI escolhido no `spec.cni` | `spec.podSubnet`/`serviceSubnet`/`spec.network` do `kind: KubernetesCluster` | `delonix cluster network status`, `docs/compatibilidade-rede.md` |
+| **rede dos pods** (pod CIDR, Service CIDR, encaminhamento entre nós) | o perfil de CNI escolhido no `spec.cni` | `spec.podSubnet`/`serviceSubnet`/`spec.network` do `kind: KubernetesCluster` | `delonix cluster network status`, `docs/network-compatibility.md` |
 | **rede das VMs que são os nós** (o `--network` / `spec.vm.network`, DHCP, o firewall da VM) | este motor, pelo `kind: Network` | este guia | `delonix net netns status`, `delonix network ls` |
 | **VIP do apiserver** | o HAProxy que o `cluster kubeadm` provisiona com `--control-plane > 1` | `spec.controlPlaneEndpoint` | `cmd/lb.rs`, a VM `<nome>-lb` |
 | **Services `LoadBalancer`** | **ninguém — não entregue** | — | ADR-0066, aceite e não construído |
@@ -592,7 +592,7 @@ Três consequências práticas:
 3. **O firewall deste motor não filtra a rede dos pods.** As regras `nft` das
    tabelas `delonix`/`dlxing` governam containers e VMs deste host. O
    isolamento *entre pods* é `NetworkPolicy`, e quem a aplica é o perfil de CNI
-   — e **o Flannel não aplica nenhuma** (ver `docs/compatibilidade-rede.md`).
+   — e **o Flannel não aplica nenhuma** (ver `docs/network-compatibility.md`).
 
 E uma que não é prática mas é importante: **nada aqui activa BGP, anúncios L2
 ou um controlador de endereços externos**. Um segundo dono do mesmo pool de
@@ -607,6 +607,6 @@ este motor não o cria sem configuração explícita da rede onde o cluster nasc
 - `docs/comandos/` — referência gerada, um ficheiro por comando.
 - `docs/adr/` — as decisões e o porquê (a rede é sobretudo a ADR-0013; a rede
   dos pods de um cluster é a ADR-0078).
-- `docs/compatibilidade-rede.md` — os perfis de rede dos clusters: versões
+- `docs/network-compatibility.md` — os perfis de rede dos clusters: versões
   fixadas, o que foi medido e o que não foi.
 - `docs/cli-stability.md` — o que pode partir num upgrade e o que não pode.

@@ -1020,7 +1020,7 @@ pub static CATALOG: &[Code] = &[
     code!(1705, "cluster.network_profile_experimental", InvalidArgument, Cluster, 1,
         "the chosen pod-network profile is experimental",
         "The profile is implemented and its artefact is pinned and verified, but it has NOT been validated end to end against this engine's CRI in a multi-node topology — ADR-0074's own «what was not measured» section says so in writing. Enabling it by default would be the «reports success, does nothing» failure this project refuses, so it is gated behind an explicit opt-in instead of being hidden or removed.",
-        "To use it anyway, say so in the manifest (`spec.network.experimental: true`) or on the command line (`--experimental-cni`), and read `docs/compatibilidade-rede.md` for exactly what has and has not been measured. The refusal names the reason for that specific profile."),
+        "To use it anyway, say so in the manifest (`spec.network.experimental: true`) or on the command line (`--experimental-cni`), and read `docs/network-compatibility.md` for exactly what has and has not been measured. The refusal names the reason for that specific profile."),
     code!(1706, "cluster.network_feature_not_implemented", InvalidArgument, Cluster, 1,
         "a network feature the cluster path does not implement yet",
         "The manifest asked for something this bootstrap does not do yet — today that is any `spec.network.ipFamily` other than `ipv4`: the cluster path renders IPv4 pod and service CIDRs only, and its CIDR validation is IPv4 arithmetic. This is «not implemented», not «impossible»: ADR-0065 carries the IPv6 dataplane and the work is real, it has simply not reached this path.",

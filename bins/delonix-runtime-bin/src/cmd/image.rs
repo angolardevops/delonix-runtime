@@ -978,7 +978,10 @@ fn cmd_prune(
              when not on a terminal",
         ),
         preview,
-        super::po::t("Removes unused images and the CAS blobs nobody references. Continue? [y/N]"),
+        super::po::t(
+            "Removes unused images, the CAS blobs nobody references and their unpacked layers. \
+             Continue? [y/N]",
+        ),
     )? {
         return Ok(());
     }
@@ -986,10 +989,11 @@ fn cmd_prune(
     println!(
         "{}",
         super::po::tf(
-            "removed: {i} image(s), {b} blob(s) — {size} freed",
+            "removed: {i} image(s), {b} blob(s), {l} layer(s) — {size} freed",
             &[
                 ("i", &i.images.to_string()),
                 ("b", &i.blobs.to_string()),
+                ("l", &i.layers.to_string()),
                 ("size", &i.freed.fmt()),
             ]
         )

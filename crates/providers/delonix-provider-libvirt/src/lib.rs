@@ -208,7 +208,7 @@ fn lease_entries(out: &str, mac: &str) -> Vec<(String, String)> {
 fn pick_lease_ip(out: &str, mac: &str, floor: Option<&str>) -> LeasePick {
     let entries = lease_entries(out, mac);
     if entries.is_empty() {
-        return LeasePick::NoLease;
+        return LeasePick::NoLeaseForMac;
     }
     entries
         .into_iter()
@@ -232,8 +232,23 @@ enum LeasePick {
     /// any of them is reporting a dead VM's address; the caller must NOT fall
     /// back to another source that reads the same table (`domifaddr` does).
     OnlyStale,
-    /// No lease for this MAC at all.
-    NoLease,
+    /// The table WAS read and holds no entry for this MAC: this VM does not
+    /// have an address. Same rule as [`Self::OnlyStale`] — the caller must NOT
+    /// fall back to `domifaddr`, which reads the SAME table and so can only
+    /// ever agree or add noise.
+    ///
+    /// BUG FIXED HERE, diagnosed live on 2026-10-15 (`cluster kubeadm --name
+    /// lab`): this case and [`Self::TableUnreadable`] used to be one variant,
+    /// so «the table says this VM has no address» was treated as «nobody could
+    /// tell me» and fell through to the fallback. A VM with no lease of its own
+    /// must report no address, so the `--boot-timeout` wait is what trips —
+    /// anything else hands the caller an address this VM was never given, and
+    /// `cluster kubeadm` then runs every host's prep against ONE machine.
+    NoLeaseForMac,
+    /// The lease table could not be read AT ALL (the domain is not on a
+    /// libvirt-managed network, so there is no `net-dhcp-leases` to ask). This
+    /// is the ONLY case where the `domifaddr` fallback adds information.
+    TableUnreadable,
 }
 
 /// Pure parser for `virsh net-dhcp-leases` output: among the entries matching
@@ -245,7 +260,7 @@ enum LeasePick {
 fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
     match pick_lease_ip(out, mac, None) {
         LeasePick::Current(ip) => Some(ip),
-        LeasePick::OnlyStale | LeasePick::NoLease => None,
+        LeasePick::OnlyStale | LeasePick::NoLeaseForMac | LeasePick::TableUnreadable => None,
     }
 }
 
@@ -2312,7 +2327,42 @@ fn virsh_define_xml(uri: &str, subcommand: &str, tag: &str, xml: &str) -> bool {
 /// Best-effort: if `net` does not exist and is the `default`, it defines the standard NAT
 /// network (virbr0, 192.168.122.0/24, DHCP); then `net-start` + `net-autostart`. A
 /// clear warning if the system connection is unreachable (missing the libvirt group).
-fn ensure_libvirt_network(uri: &str, net: &str) {
+/// The `<network>` XML of a NAT network called `name` over `cidr` — the one
+/// place that turns an operator's `--network <name>` into a libvirt object.
+///
+/// **Pure**, so the address arithmetic is tested without a daemon. No
+/// `<bridge>` element on purpose: libvirt then picks a free `virbrN` itself,
+/// which is the only way to avoid colliding with the engine's OWN bridge for
+/// the same network (`dlxn…`, in a rootless netns that `qemu:///system`
+/// cannot see anyway).
+///
+/// Returns `None` for anything it cannot place an address range inside —
+/// a malformed CIDR, or a prefix of /31 or /32, which has no room for a
+/// gateway plus a DHCP range. The caller then leaves the network alone rather
+/// than defining something broken.
+fn libvirt_network_xml(name: &str, cidr: &str) -> Option<String> {
+    let (addr, prefix) = cidr.split_once('/')?;
+    let prefix: u32 = prefix.parse().ok()?;
+    if prefix > 30 {
+        return None;
+    }
+    let ip: std::net::Ipv4Addr = addr.parse().ok()?;
+    let mask: u32 = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
+    let base = u32::from(ip) & mask;
+    let gateway = std::net::Ipv4Addr::from(base + 1);
+    let first = std::net::Ipv4Addr::from(base + 2);
+    // `| !mask` is the broadcast; the last usable host is one below it.
+    let last = std::net::Ipv4Addr::from((base | !mask) - 1);
+    let netmask = std::net::Ipv4Addr::from(mask);
+    let n = xml_escape(name);
+    Some(format!(
+        "<network>\n  <name>{n}</name>\n  <forward mode='nat'/>\n  \
+         <ip address='{gateway}' netmask='{netmask}'>\n    \
+         <dhcp><range start='{first}' end='{last}'/></dhcp>\n  </ip>\n</network>\n"
+    ))
+}
+
+fn ensure_libvirt_network(uri: &str, net: &str, subnet: Option<&str>) {
     // System connection reachable? (NAT lives in qemu:///system.)
     if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
         eprintln!(
@@ -2322,6 +2372,41 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
         return;
     }
     let exists = capture("virsh", &["-c", uri, "net-info", "--", net]).is_some();
+    // A named network the operator asked for, with a subnet resolved from the
+    // registry: define it. Without this the name was accepted and dropped, and
+    // the VM silently used `default` instead.
+    if !exists && net != "default" {
+        match subnet.and_then(|s| libvirt_network_xml(net, s)) {
+            Some(xml) => {
+                // SAYS SO when the define fails, instead of `let _`. A swallowed
+                // failure here is the exact bug this function exists to kill: the
+                // network never appears, the domain's NIC falls back to `default`,
+                // and the operator who asked for `--network <name>` gets a cluster
+                // on the shared NAT with nothing in the output to explain it.
+                // Found by testing — the first run after the auto-created network
+                // landed on `default` and there was no message to say why.
+                //
+                // `tracing::warn!` and not `eprintln!`: this is a library crate,
+                // and `arch_fitness`'s `library_prints` ratchet counts a direct
+                // stdout/stderr write as debt. Same channel the anti-spoofing
+                // and cgroup-ceiling warnings in this file already use.
+                if !virsh_define_xml(uri, "net-define", &format!("libvirt-{net}"), &xml) {
+                    tracing::warn!(
+                        network = %net,
+                        "could not define libvirt network — the VM will fall back to libvirt's 'default' network"
+                    );
+                    return;
+                }
+            }
+            None => {
+                tracing::warn!(
+                    network = %net,
+                    "network is not defined in libvirt and no usable subnet was resolved for it — the VM will fall back to libvirt's 'default' network"
+                );
+                return;
+            }
+        }
+    }
     if !exists && net == "default" {
         // XML of the standard libvirt NAT network (the one most distros ship).
         let xml = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n                     <bridge name='virbr0' stp='on' delay='0'/>\n                     <ip address='192.168.122.1' netmask='255.255.255.0'>\n                       <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>\n                     </ip>\n</network>\n";
@@ -2567,6 +2652,17 @@ impl VmBackend for LibvirtBackend {
         if cfg.net_mode.is_none() && system_libvirt_usable() {
             cfg.net_mode = Some("nat".into());
         }
+        // `--network <name>` now REACHES the domain. This provider used to have
+        // zero readers of `cfg.network`: the name was accepted, recorded and
+        // shown by `vm ls`, while `bridge` stayed `None` and the `nat` arm below
+        // fell through to `unwrap_or("default")` — so a cluster asked for on
+        // `--network lab-net` had every node on libvirt's `default` instead,
+        // which is the behaviour `network_of`'s doc-comment records as found
+        // live. Mapping it here (and not in `libvirt_interface_xml`) keeps the
+        // XML generator pure and leaves ONE place that decides the network.
+        if cfg.bridge.is_none() && !cfg.network.is_empty() && cfg.network != "default" {
+            cfg.bridge = Some(cfg.network.clone());
+        }
         let cfg = &cfg;
         if let Some(ip) = cfg.static_ip.as_deref() {
             if !matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
@@ -2597,7 +2693,7 @@ impl VmBackend for LibvirtBackend {
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             on(CreateStage::Network);
             let net = cfg.bridge.as_deref().unwrap_or("default");
-            ensure_libvirt_network(uri, net);
+            ensure_libvirt_network(uri, net, cfg.network_subnet.as_deref());
             // Static IP: DHCP reservation MAC→IP on the libvirt network, BEFORE
             // the domain boots (the guest's DHCP request must already find it).
             if let Some(ip) = cfg.static_ip.as_deref() {
@@ -2724,8 +2820,8 @@ impl VmBackend for LibvirtBackend {
             pid: None, // managed by libvirtd — liveness via virsh domstate
             ip: match Self::ip_from_leases(uri, &cfg.name, &mac, lease_floor.as_deref()) {
                 LeasePick::Current(ip) => Some(ip),
-                LeasePick::OnlyStale => None,
-                LeasePick::NoLease => self.ip_uri(uri, &cfg.name),
+                LeasePick::OnlyStale | LeasePick::NoLeaseForMac => None,
+                LeasePick::TableUnreadable => self.ip_uri(uri, &cfg.name),
             }
             .or_else(|| cfg.static_ip.clone()),
             // The EFFECTIVE mode (not the requested one): lets `vm describe`
@@ -2747,9 +2843,10 @@ impl VmBackend for LibvirtBackend {
         match Self::ip_from_leases(uri, &vm.name, &vm.mac, vm.dhcp_lease_floor.as_deref()) {
             LeasePick::Current(ip) => Some(ip),
             // `domifaddr` reads the same lease table without the floor — asking
-            // it would hand back the very address just rejected.
-            LeasePick::OnlyStale => None,
-            LeasePick::NoLease => self.ip_uri(uri, &vm.name),
+            // it would hand back the very address just rejected, or (for a MAC
+            // with no row at all) an answer the table has already given: none.
+            LeasePick::OnlyStale | LeasePick::NoLeaseForMac => None,
+            LeasePick::TableUnreadable => self.ip_uri(uri, &vm.name),
         }
     }
 
@@ -3569,13 +3666,18 @@ impl LibvirtBackend {
     /// carries a real `Expiry Time` per entry (`YYYY-MM-DD HH:MM:SS`, so
     /// plain string comparison sorts it correctly) — filtering by MAC and
     /// taking the MAX expiry is the only actually-correct signal available,
-    /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) when
-    /// this doesn't resolve (non-libvirt-managed network, no lease yet, ...).
+    /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) only when
+    /// there is no such table to read at all (a non-libvirt-managed network) —
+    /// NOT when the table was read and says this VM has no address.
     /// `floor` is this boot's [`Vm::dhcp_lease_floor`]: leases at or below it
     /// are an earlier boot's (see [`pick_lease_ip`]). A table that cannot be
-    /// read is [`LeasePick::NoLease`], which keeps the `domifaddr` fallback.
+    /// read is [`LeasePick::TableUnreadable`], which keeps the `domifaddr`
+    /// fallback; a table that CAN be read and holds nothing for this MAC is
+    /// [`LeasePick::NoLeaseForMac`], which does not (see that variant).
     fn ip_from_leases(uri: &str, name: &str, mac: &str, floor: Option<&str>) -> LeasePick {
-        Self::leases_of(uri, name).map_or(LeasePick::NoLease, |out| pick_lease_ip(&out, mac, floor))
+        Self::leases_of(uri, name).map_or(LeasePick::TableUnreadable, |out| {
+            pick_lease_ip(&out, mac, floor)
+        })
     }
 
     /// Raw `virsh net-dhcp-leases` of the network the domain is attached to.
@@ -3606,6 +3708,79 @@ impl LibvirtBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The address arithmetic of a NAT network, for the two prefixes that
+    /// actually show up: a /16 (what `network create` hands out) and a /24.
+    /// Gateway is the first host, the DHCP range runs from the second host to
+    /// the last one BELOW the broadcast — getting that off by one is how you
+    /// ship a network that leases its own broadcast address.
+    #[test]
+    fn libvirt_network_xml_places_gateway_and_range_inside_the_subnet() {
+        let x = libvirt_network_xml("k8s-net", "10.229.0.0/16").expect("valid /16");
+        assert!(x.contains("<name>k8s-net</name>"), "{x}");
+        assert!(x.contains("address='10.229.0.1'"), "{x}");
+        assert!(x.contains("netmask='255.255.0.0'"), "{x}");
+        assert!(x.contains("start='10.229.0.2' end='10.229.255.254'"), "{x}");
+
+        let x = libvirt_network_xml("lab", "192.168.50.0/24").expect("valid /24");
+        assert!(x.contains("address='192.168.50.1'"), "{x}");
+        assert!(x.contains("netmask='255.255.255.0'"), "{x}");
+        assert!(
+            x.contains("start='192.168.50.2' end='192.168.50.254'"),
+            "{x}"
+        );
+    }
+
+    /// A subnet whose address is not the network address still yields the
+    /// network's own gateway — the operator writing `10.229.5.7/16` means that
+    /// /16, and the XML must not inherit the stray host part.
+    #[test]
+    fn libvirt_network_xml_masks_the_address_down_to_the_network() {
+        let x = libvirt_network_xml("n", "10.229.5.7/16").expect("valid");
+        assert!(x.contains("address='10.229.0.1'"), "{x}");
+    }
+
+    /// NO `<bridge>` element, deliberately: libvirt then picks a free
+    /// `virbrN`. Naming one here is how you collide with the engine's OWN
+    /// bridge for the same network (`dlxn…`), which lives in a rootless netns
+    /// that `qemu:///system` cannot see anyway.
+    #[test]
+    fn libvirt_network_xml_lets_libvirt_choose_the_bridge() {
+        let x = libvirt_network_xml("k8s-net", "10.229.0.0/16").expect("valid");
+        assert!(!x.contains("<bridge"), "must not pin a bridge name: {x}");
+        assert!(x.contains("<forward mode='nat'/>"), "{x}");
+    }
+
+    /// Refuses what it cannot place a range inside, instead of emitting XML
+    /// that libvirt would reject (or worse, accept). /31 and /32 have no room
+    /// for a gateway plus a range; a malformed CIDR has no meaning at all.
+    #[test]
+    fn libvirt_network_xml_refuses_what_has_no_room() {
+        assert!(libvirt_network_xml("n", "10.0.0.0/31").is_none());
+        assert!(libvirt_network_xml("n", "10.0.0.0/32").is_none());
+        assert!(libvirt_network_xml("n", "10.0.0.0").is_none());
+        assert!(libvirt_network_xml("n", "not-a-cidr/16").is_none());
+        assert!(libvirt_network_xml("n", "10.0.0.0/abc").is_none());
+    }
+
+    /// REGRESSION (the whole point of the `network_subnet` field): with the
+    /// libvirt network resolved into `bridge`, the domain's NIC sources THAT
+    /// network. Before, `bridge` stayed `None` on the `cluster kubeadm` path
+    /// and this arm fell through to `unwrap_or("default")`, so every node of a
+    /// cluster asked for on `--network k8s-net` ran on libvirt's `default` —
+    /// measured live via `virsh domiflist`.
+    #[test]
+    fn interface_xml_sources_the_requested_network_not_default() {
+        let cfg = VmConfig {
+            name: "lab-cp1".into(),
+            net_mode: Some("nat".into()),
+            bridge: Some("k8s-net".into()),
+            ..Default::default()
+        };
+        let x = libvirt_interface_xml(&cfg, "52:54:00:aa:bb:cc");
+        assert!(x.contains("<source network='k8s-net'/>"), "{x}");
+        assert!(!x.contains("network='default'"), "{x}");
+    }
 
     /// REGRESSION: every tool whose OUTPUT this crate parses runs with a
     /// pinned locale. `virsh` is a gettext program, and with its catalogues
@@ -3858,7 +4033,7 @@ mod tests {
         // Another VM's leases are never borrowed.
         assert_eq!(
             pick_lease_ip(before_boot, "52:54:00:aa:bb:cc", floor.as_deref()),
-            LeasePick::NoLease
+            LeasePick::NoLeaseForMac
         );
     }
     /// `vm stop` + `vm start`: the guest keeps its address and renews it. The
@@ -3876,6 +4051,54 @@ mod tests {
         assert_eq!(
             pick_lease_ip(renewed, mac, floor.as_deref()),
             LeasePick::Current("192.168.122.223".into())
+        );
+    }
+    /// REGRESSION, diagnosed live on 2026-10-15: `cluster kubeadm --name lab
+    /// --control-plane 1 --workers 2` ran every host's prep against ONE machine
+    /// because all three node VMs resolved to `192.168.122.176`. The lease table
+    /// below is the one captured at the time — a SINGLE row, for `lab-w2`'s MAC;
+    /// `lab-cp1` and `lab-w1` had no row of their own at all.
+    ///
+    /// A MAC with no row of its own must resolve to NO address, and it must say
+    /// so as [`LeasePick::NoLeaseForMac`] and not as
+    /// [`LeasePick::TableUnreadable`]: the two used to be one variant, and the
+    /// shared variant let the resolution fall through to `domifaddr` — another
+    /// reader of this same table — instead of answering "no address" and letting
+    /// the `--boot-timeout` wait trip. Collapsing them back makes this fail.
+    #[test]
+    fn a_vm_with_no_lease_of_its_own_never_resolves_to_a_siblings_address() {
+        let (cp1, w1, w2) = (
+            "52:54:00:e2:55:fb",
+            "52:54:00:b7:c8:ef",
+            "52:54:00:b7:ca:82",
+        );
+        let out = "\
+ Expiry Time           MAC address         Protocol   IP address           Hostname   Client ID or DUID
+------------------------------------------------------------------------------------------------------------------------------------------------
+ 2026-10-15 12:05:00   52:54:00:b7:ca:82   ipv4       192.168.122.176/24   lab-w2     ff:56:50:4d:98:00:02:00:00:ab:11:1c:6b:f5:9e:94:dd:d5:2e";
+
+        // The one MAC that HAS the lease is the only one that gets the address.
+        assert_eq!(
+            pick_lease_ip(out, w2, None),
+            LeasePick::Current("192.168.122.176".into())
+        );
+        // The parser never attributes a row to another MAC...
+        for mac in [cp1, w1] {
+            assert!(
+                lease_entries(out, mac).is_empty(),
+                "{mac} has no row in this table"
+            );
+            assert_eq!(parse_leases_latest_ip(out, mac), None);
+            // ...and resolution says WHY there is no address, so the caller
+            // cannot re-ask a second reader of this same table.
+            assert_eq!(pick_lease_ip(out, mac, None), LeasePick::NoLeaseForMac);
+        }
+        // The floor is orthogonal: a MAC with no row has nothing to floor, and
+        // the answer stays "no address" rather than becoming "cannot tell".
+        assert_eq!(leases_max_expiry(out, cp1), None);
+        assert_eq!(
+            pick_lease_ip(out, cp1, Some("2026-10-15 11:00:00")),
+            LeasePick::NoLeaseForMac
         );
     }
     #[test]

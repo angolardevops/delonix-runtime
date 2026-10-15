@@ -583,12 +583,26 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
   `labdata` e `pbs`, três pastas com **53 GiB de discos VIVOS** citados pelos `.xml`/`.json` de
   VMs existentes, e nenhuma com nome de VM; uma varredura por nome chamava-lhes órfãos.
   `--stopped` opta pelo comportamento destrutivo, e diz na pré-visualização quantas máquinas leva.
-- `delonix cluster prune` — o estado dos clusters que já não têm um único nó. Um cluster existe
-  enquanto houver containers com a etiqueta `io.x-k8s.kind.cluster` (o `cluster ls` deriva-o
-  assim, sem registo próprio), logo os nós removidos por outro caminho deixam para trás a pasta,
-  o kubeconfig e — o que não é cosmético — o contexto no `~/.kube/config` a apontar para uma
-  porta que entretanto pode ser de outra coisa. Reutiliza a limpeza do `kindmode::delete`; um
-  cluster COM nós, mesmo parados, nunca é tocado.
+- `delonix cluster prune [NAMES]...` — o estado dos clusters que já não têm um único nó. Um
+  cluster existe enquanto houver containers com a etiqueta `io.x-k8s.kind.cluster` (o `cluster
+  ls` deriva-o assim, sem registo próprio), logo os nós removidos por outro caminho deixam para
+  trás a pasta, o kubeconfig e — o que não é cosmético — o contexto no `~/.kube/config` a
+  apontar para uma porta que entretanto pode ser de outra coisa. Sem nomes recolhe todos os
+  órfãos (o comportamento de sempre); **com nomes recolhe só esses**, e um nome que não seja
+  órfão é RECUSADO pelo nome — recolher zero e dizer `removed: 0` é como um erro de escrita se
+  lê como «já estava limpo». Um cluster COM nós, mesmo parados, nunca é tocado.
+  **E «nós» conta VMs** (`cluster::is_cluster_vm`, que também vê os `-lb`/`-etcd<N>`): um
+  cluster `mode: vm` não tem container nenhum com etiqueta, por isso ler só containers fazia
+  cada cluster de VMs vivo parecer sobra — e o que está em `<root>/clusters/<nome>/` é a CHAVE
+  SSH que o `cluster kubeadm` gerou. Medido 2026-10-15 com o binário da `main`: um `cluster
+  prune -f` apagou o `id_ed25519` de um cluster que estava de pé.
+- **Um órfão é alcançável pelo nome.** O `delete clusters <nome>` e o `cluster destroy <nome>`
+  resolvem pelo estado em disco quando não há nós (`kindmode::delete_without_nodes`), em vez do
+  `DX-4000 no such cluster kind` que obrigava a `rm -rf` à mão mais um `kubectl config
+  delete-context`. Nos verbos só-de-leitura (`health`, `describe`, `stop`, `start`) a recusa
+  passa a dizer qual dos três casos é (`kindmode::unresolved`): cluster provisionado em VMs,
+  cluster sem nós mas com estado em disco, ou nome que não é cluster nenhum aqui. Um nome com
+  VMs vivas nunca entra pelo caminho dos órfãos — seria apagar a chave de acesso ao que está de pé.
 - `delonix stack prune -f <manifesto>` — a metade de poda do `apply --prune`, isolada: remove o
   que o stack possui e o manifesto já não declara, sem criar nem convergir nada. Constrói o mesmo
   plano do `apply` e fica-lhe só com as mudanças `Delete`, para não haver uma segunda noção de
@@ -9875,7 +9889,7 @@ nada sobre o ficheiro.
 foi por falta de vontade nem de ambiente: o host tinha **5 GiB livres em 938 GiB (100%
 ocupado)**, e encher a raiz de uma máquina partilhada para produzir uma medição não é uma
 troca aceitável. As políticas de rede **não** foram testadas. O procedimento reprodutível,
-com os critérios de aceitação por perfil, está em `docs/compatibilidade-rede.md` — e até
+com os critérios de aceitação por perfil, está em `docs/network-compatibility.md` — e até
 correr, nada disto deve ser lido como «funciona».
 
 **Dois achados fora do âmbito, reportados e não corrigidos** (para não conflituar com

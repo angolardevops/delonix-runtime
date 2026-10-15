@@ -337,6 +337,22 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // the dead process staged (ADR-0059 D4). Every other field of a
         // gateway stays cold — the appliance has no update in place.
         k::NETWORK_GATEWAY => &["applied"],
+        // Every compared field of a tunnel converges live, and the arm that
+        // does it was ALREADY in `stack::converge_and_stamp`
+        // (`tunnel::converge_doc` -> `apply_one`): the record is rewritten,
+        // the old provider agent signalled, the new one spawned, same name.
+        // A tunnel has no identity to destroy — the agent IS the resource.
+        //
+        // **This arm was MISSING**, the same way `HTTP_ROUTE`'s was above and
+        // with the same three consequences, only reported from the other end:
+        // no field was hot, so EVERY edit planned as `Replace` and `apply`
+        // refused with «does not converge live: provider — pass `--replace`»
+        // (reported live against a `cloudflare` tunnel being switched), which
+        // made a Gateway look like something you create once and may never
+        // change. `converge_and_stamp`'s `k::GATEWAY` arm was unreachable the
+        // whole time, and `RECONCILED_TUNNEL_FIELDS` documented four compared
+        // fields whose only convergence path was destroy-and-recreate.
+        k::GATEWAY => &["provider", "localPort", "hostname", "insecureSkipTlsVerify"],
         // A subnet's gateway and DHCP ranges are written in place
         // (ADR-0063 D2), and an IPAM gateway entry left away from its subnet's
         // gateway is put back by the apply's repair (`gatewayEntries`, N18);
@@ -1246,6 +1262,63 @@ mod tests {
         assert_eq!(c.reboot_fields, vec!["memory".to_string(), "vcpus".into()]);
         assert!(c.diffs.iter().all(|d| d.reboot && !d.hot), "{:?}", c.diffs);
         assert!(c.reason.as_deref().unwrap().contains("stop and a start"));
+    }
+
+    /// **BUG FIXED: every edit of a `kind: Gateway` demanded `--replace`.**
+    ///
+    /// `hot_fields` had no `GATEWAY` arm, so all four compared fields fell to
+    /// `_ => &[]` and classified Cold. Reported live while switching a
+    /// cloudflare tunnel's provider:
+    ///
+    /// ```text
+    /// ✗ Gateway/kambacode-lr-tunnel: does not converge live: provider —
+    ///   pass `--replace Gateway/kambacode-lr-tunnel` …
+    /// error[DX-1000] stack apply refused: 1 resource(s) need an explicit decision
+    /// ```
+    ///
+    /// A tunnel is an agent process plus a record: `tunnel::apply_one` signals
+    /// the old agent, spawns the new one and rewrites the record under the
+    /// same name, which is precisely a live convergence — and
+    /// `stack::converge_and_stamp` had the `k::GATEWAY` arm calling it all
+    /// along, unreachable because the planner could never emit `Update`.
+    /// Removing the `k::GATEWAY` arm from `hot_fields` makes this fail.
+    #[test]
+    fn every_compared_field_of_a_gateway_converges_live() {
+        let gw = |fields: &[(&str, &str)]| (map(fields), "t".to_string());
+        for (field, from, to) in [
+            ("provider", "cloudflare", "ngrok"),
+            ("localPort", "8443", "8080"),
+            ("hostname", "a.example.org", "b.example.org"),
+            ("insecureSkipTlsVerify", "true", "false"),
+        ] {
+            let (want, name) = gw(&[(field, to)]);
+            let (have, _) = gw(&[(field, from)]);
+            let c = plan(
+                &[Desired {
+                    kind: k::GATEWAY.into(),
+                    name: name.clone(),
+                    fields: want,
+                    converges: true,
+                    ownable: false,
+                }],
+                &[Actual {
+                    kind: k::GATEWAY.into(),
+                    name,
+                    fields: have,
+                    owner: Some("s".into()),
+                    last_applied: None,
+                }],
+                "s",
+            )
+            .remove(0);
+            assert_eq!(
+                c.action,
+                Action::Update,
+                "{field}: devia convergir em vivo, não exigir --replace"
+            );
+            assert!(c.cold_fields.is_empty(), "{field}: {:?}", c.cold_fields);
+            assert!(c.diffs.iter().all(|d| d.hot), "{field}: {:?}", c.diffs);
+        }
     }
 
     /// Unknown (or paused) is planned as running: the gate is asked for.

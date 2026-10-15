@@ -13,8 +13,8 @@ msgstr ""
 msgid "Delonix Engine — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
 msgstr "Delonix Engine — motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust). O motor open-source que alimenta o Delonix."
 
-msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand."
-msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Global — funciona antes de qualquer subcomando."
+msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language."
+msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Usa-a com `--help` ou `<comando> --help` para receber a ajuda na língua escolhida."
 
 msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
 msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
@@ -427,9 +427,6 @@ msgstr "aviso ao publicar :{p}: {err}"
 
 msgid "available templates"
 msgstr "templates disponíveis"
-
-msgid "nothing to do (everything already existed)"
-msgstr "nada a fazer (tudo já existia)"
 
 msgid "secret '{name}' has no 'password' key"
 msgstr "o segredo '{name}' não tem a chave 'password'"
@@ -1953,11 +1950,29 @@ msgstr "Pára todos os nós de um cluster kind-mode de uma vez — sem reconstru
 msgid "Start every node of a stopped kind-mode cluster back up"
 msgstr "Arranca de novo todos os nós de um cluster kind-mode parado"
 
-msgid "Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry"
-msgstr "Remove um cluster kind-mode por inteiro — nós, rede, kubeconfig, entrada em `~/.kube/config`"
+msgid "Remove a cluster entirely — nodes, kubeconfig, `~/.kube/config` entry"
+msgstr "Remove um cluster por inteiro — nós, kubeconfig, entrada em `~/.kube/config`"
 
-msgid "Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.\n\nVolumes are left alone, on purpose, same as `docker`. The same removal `delonix delete clusters <name>` already does (the generic kubectl-style verb this engine gives every Kind) — this is just the more discoverable spelling inside `cluster --help`, with a confirmation prompt `delete` does not have."
-msgstr "Remove um cluster kind-mode por inteiro — nós, rede, kubeconfig, entrada em `~/.kube/config`.\n\nOs volumes ficam intocados, de propósito, tal como no `docker`. É a mesma remoção que `delonix delete clusters <nome>` já faz (o verbo genérico ao estilo kubectl que este motor dá a todo Kind) — isto é só a grafia mais descobrível dentro de `cluster --help`, com uma confirmação que o `delete` não tem."
+msgid ""
+"Remove a cluster entirely — nodes, kubeconfig, `~/.kube/config` entry.\n"
+"\n"
+"Serves BOTH families: a kind-mode cluster, whose nodes are containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`), whose nodes are VMs — its load balancer and etcd members included.\n"
+"\n"
+"What becomes of the NETWORK is the one real difference, and the rule is the same in both families: whoever created it owns it. A kind-mode cluster's `dlx-<name>` was made FOR it and goes with it. A VM cluster built WITHOUT `--network` was given one of its own, named `<cluster>-<hash>`, and that one goes with it too. A network you named in `--network` is yours, and is left alone. Volumes are never touched either, on purpose, same as `docker`.\n"
+"\n"
+"A cluster whose nodes are already gone is still removable by name: what gets collected is the state directory, the exported kubeconfig and the matching context — the same thing `cluster prune <name>` does.\n"
+"\n"
+"Omitting the name resolves among KIND-MODE clusters only, so name a VM cluster explicitly. For a kind-mode cluster this is the same removal `delonix delete clusters <name>` already does (the generic kubectl-style verb this engine gives every Kind) — just the more discoverable spelling inside `cluster --help`, with a confirmation prompt `delete` does not have. For a VM-provisioned one it is the ONLY verb that tears the cluster down: `cmd_delete` hands straight to kind-mode's `delete` and has no VM branch at all."
+msgstr ""
+"Remove um cluster por inteiro — nós, kubeconfig, entrada em `~/.kube/config`.\n"
+"\n"
+"Serve AS DUAS famílias: um cluster em modo kind, cujos nós são containers, e um provisionado em VMs (`cluster kubeadm` / `mode: vm`), cujos nós são VMs — incluindo o load balancer e os membros de etcd.\n"
+"\n"
+"O que acontece à REDE é a única diferença a sério, e a regra é a mesma nas duas famílias: quem a criou é dono dela. O `dlx-<nome>` de um cluster em modo kind foi feito PARA ele e vai com ele. Um cluster de VMs construído SEM `--network` ganhou uma só sua, chamada `<cluster>-<hash>`, e essa vai com ele também. Uma rede que nomeaste em `--network` é tua, e fica intocada. Os volumes também nunca são tocados, de propósito, tal como no `docker`.\n"
+"\n"
+"Um cluster cujos nós já desapareceram continua a poder ser removido pelo nome: o que é recolhido é a pasta de estado, o kubeconfig exportado e o contexto correspondente — o mesmo que o `cluster prune <nome>` faz.\n"
+"\n"
+"Omitir o nome resolve só entre os clusters em MODO KIND, por isso nomeia um cluster de VMs explicitamente. Para um cluster em modo kind é a mesma remoção que `delonix delete clusters <nome>` já faz (o verbo genérico ao estilo kubectl que este motor dá a todo Kind) — só a grafia mais descobrível dentro de `cluster --help`, com uma confirmação que o `delete` não tem. Para um provisionado em VMs é o ÚNICO verbo que o desmonta: o `cmd_delete` entrega directamente ao `delete` do modo kind e não tem ramo nenhum para VMs."
 
 msgid "the clusters that are up, kind-mode and VM alike"
 msgstr "os clusters de pé, tanto em modo kind como em VM"
@@ -1971,8 +1986,11 @@ msgstr "todos os nós do único cluster que tem, sem reconstruir — workers pri
 msgid "bring a stopped cluster back up — control-plane first, so workers find an apiserver waiting"
 msgstr "arranca de novo um cluster parado — control-plane primeiro, para os workers encontrarem um apiserver à espera"
 
-msgid "nodes, network, cached kubeconfig and the ~/.kube/config entry — volumes untouched"
-msgstr "nós, rede, kubeconfig em cache e a entrada em ~/.kube/config — volumes intocados"
+msgid "kind-mode: the nodes, the network it created itself, the cached kubeconfig and the ~/.kube/config entry — volumes untouched"
+msgstr "kind-mode: os nós, a rede que ele próprio criou, o kubeconfig em cache e a entrada em ~/.kube/config — volumes intocados"
+
+msgid "VM-provisioned, named: the node VMs, cached kubeconfig and ~/.kube/config entries go — so does the cluster's own network, unless you named one in `--network`, which stays"
+msgstr "provisionado em VMs, com nome: vão-se as VMs dos nós, o kubeconfig em cache e as entradas em ~/.kube/config — e também a rede própria do cluster, a não ser que tenha nomeado uma em `--network`, que fica"
 
 msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand."
 msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão."
@@ -1980,8 +1998,8 @@ msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a u
 msgid "Tag of the golden VM image (`delonix image --vm ls`). Omit = uses the only local image that exists."
 msgstr "Tag da imagem VM dourada (`delonix image --vm ls`). Omitir = usa a única imagem local existente."
 
-msgid "Already-created network (`delonix network create`) — no magic default."
-msgstr "Rede já criada (`delonix network create`) — sem default mágico."
+msgid "Network the nodes attach to. Omit and the cluster gets its OWN, created here and named `<cluster>-<hash>` — and removed again by `cluster destroy`. Name one that already exists (`delonix network create`) to attach to it instead; that one is never removed, because you created it"
+msgstr "Rede a que os nós se ligam. Omitir e o cluster ganha uma SÓ SUA, criada aqui e chamada `<cluster>-<hash>` — e removida de novo pelo `cluster destroy`. Nomeia uma que já exista (`delonix network create`) para se ligar a essa; essa nunca é removida, porque foste tu que a criaste"
 
 msgid "Private SSH key to use. Omit = generates a new ed25519 pair in `<root>/clusters/<name>/id_ed25519`."
 msgstr "Chave SSH privada a usar. Omitir = gera um par ed25519 novo em `<root>/clusters/<name>/id_ed25519`."
@@ -3053,6 +3071,9 @@ msgstr "  {cd}delonix build -t {name}:dev .        # constrói a imagem (Delonix
 
 msgid "  already exists, skipped: {path}  (use --force to overwrite)"
 msgstr "  já existe, saltado: {path}  (usa --force para substituir)"
+
+msgid "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force"
+msgstr "nada a fazer — todos os ficheiros já existem em {dir}. Para os actualizar, usa --force:\n  delonix init --force"
 
 msgid "writing {path}"
 msgstr "a escrever {path}"
@@ -6818,6 +6839,9 @@ msgstr "recupera espaço: containers parados, imagens sem uso, blobs sem referê
 msgid "in CI, where there is no terminal to confirm at"
 msgstr "em CI, onde não há terminal para confirmar"
 
+msgid "just this one orphan, leaving every other leftover exactly as it is"
+msgstr "só este órfão, deixando tudo o que sobrou dos outros exactamente como está"
+
 msgid "also drop tagged images nobody uses, not just the dangling ones"
 msgstr "apaga também as imagens com tag que ninguém usa, não só as penduradas"
 
@@ -8632,11 +8656,11 @@ msgstr "`image prune` remove imagens sem uso e blobs não referenciados — pass
 msgid "With --all this ALSO removes TAGGED images that no container uses."
 msgstr "Com --all remove TAMBÉM imagens COM TAG que nenhum container usa."
 
-msgid "Removes unused images and the CAS blobs nobody references. Continue? [y/N]"
-msgstr "Remove imagens sem uso e os blobs do CAS que ninguém referencia. Continuar? [s/N]"
+msgid "Removes unused images, the CAS blobs nobody references and their unpacked layers. Continue? [y/N]"
+msgstr "Remove imagens sem uso, os blobs do CAS que ninguém referencia e as suas layers desempacotadas. Continuar? [s/N]"
 
-msgid "removed: {i} image(s), {b} blob(s) — {size} freed"
-msgstr "removidas: {i} imagem(ns), {b} blob(s) — {size} libertados"
+msgid "removed: {i} image(s), {b} blob(s), {l} layer(s) — {size} freed"
+msgstr "removidas: {i} imagem(ns), {b} blob(s), {l} layer(s) — {size} libertados"
 
 msgid "`volume prune` DESTROYS the data of every unreferenced volume — pass --force to confirm when not on a terminal"
 msgstr "`volume prune` DESTRÓI os dados de todos os volumes sem referências — passa --force para confirmar fora de um terminal"
@@ -9493,6 +9517,44 @@ msgstr "removido: o que sobrou de {n} cluster(s)"
 msgid "could not remove context '{ctx}' from kubeconfig: {err}"
 msgstr "não consegui tirar o contexto '{ctx}' do kubeconfig: {err}"
 
+# ---- clusters sem nós: resolução pelo estado em disco ---------------------
+
+msgid "Orphans to collect (omit = every cluster with no nodes left)"
+msgstr "Órfãos a recolher (omite = todos os clusters que já não têm nós)"
+
+msgid "cluster '{name}' still has {n} node(s) — `cluster prune` only collects clusters with none left; remove it with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' ainda tem {n} nó(s) — o `cluster prune` só recolhe clusters que já não têm nenhum; remove-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' still has {n} VM(s) — `cluster prune` only collects clusters with no nodes left; take it down with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' ainda tem {n} VM(s) — o `cluster prune` só recolhe clusters que já não têm nós; derruba-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' — nothing under {dir} left to collect"
+msgstr "cluster '{name}' — não sobrou nada em {dir} para recolher"
+
+msgid "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); this command serves kind-mode clusters only, whose nodes are containers"
+msgstr "o cluster '{name}' foi provisionado em VMs ({n} VM(s) — ver `delonix vm ls`); este comando só serve clusters em modo kind, cujos nós são containers"
+
+msgid "cluster '{name}' is VM-provisioned ({n} VM(s) — see `delonix vm ls`); take it down with `delonix cluster destroy {name}`"
+msgstr "o cluster '{name}' foi provisionado em VMs ({n} VM(s) — ver `delonix vm ls`); derruba-o com `delonix cluster destroy {name}`"
+
+msgid "cluster '{name}' has no nodes left — its state is still on disk ({paths}). Collect it with `delonix cluster prune {name}`"
+msgstr "o cluster '{name}' já não tem nós — o estado dele continua em disco ({paths}). Recolhe-o com `delonix cluster prune {name}`"
+
+msgid "kind-mode cluster '{name}'"
+msgstr "cluster em modo kind '{name}'"
+
+msgid "Deleting the leftover state of cluster \"{name}\" — it has no nodes left"
+msgstr "A remover o estado que sobrou do cluster \"{name}\" — já não tem nós"
+
+msgid "cluster '{name}' removed (no nodes left: state, kubeconfig and the `~/.kube/config` context collected)"
+msgstr "cluster '{name}' removido (já não tinha nós: estado, kubeconfig e contexto no `~/.kube/config` recolhidos)"
+
+msgid "`cluster destroy` collects what is left of cluster '{name}', which has no nodes — pass --force to confirm when not on a terminal"
+msgstr "o `cluster destroy` recolhe o que sobrou do cluster '{name}', que já não tem nós — passa --force para confirmar quando não estiveres num terminal"
+
+msgid "Cluster '{name}' has no nodes left. This will remove its state directory, its exported kubeconfig, and the matching ~/.kube/config context."
+msgstr "O cluster '{name}' já não tem nós. Isto remove a pasta de estado dele, o kubeconfig exportado, e o contexto correspondente no ~/.kube/config."
+
 msgid "`cluster destroy` removes VM-provisioned cluster '{name}' — pass --force to confirm when not on a terminal"
 msgstr "o `cluster destroy` remove o cluster '{name}' provisionado por VM — passa --force para confirmar quando não estiveres num terminal"
 
@@ -9560,7 +9622,9 @@ msgid ""
 "\n"
 "That context is the reason this is not cosmetic: it still points at `127.0.0.1:<port>`, and by now that port may answer for something else.\n"
 "\n"
-"**A cluster with nodes is never touched, stopped ones included** — for that there is `cluster delete`, which takes a name on purpose."
+"**A cluster with nodes is never touched, stopped ones included** — for that there is `cluster destroy` (or `delete clusters <name>`, the same removal without the prompt), which takes a name on purpose.\n"
+"\n"
+"With no NAMES this collects every orphan at once; naming one collects that one and leaves the others exactly as they are."
 msgstr ""
 "Recupera o estado dos clusters que já não têm nós.\n"
 "\n"
@@ -9568,7 +9632,9 @@ msgstr ""
 "\n"
 "Esse contexto é a razão de isto não ser cosmético: continua a apontar para `127.0.0.1:<porta>`, e essa porta pode agora atender por outra coisa.\n"
 "\n"
-"**Um cluster com nós nunca é tocado, os parados incluídos** — para isso existe o `cluster delete`, que pede um nome de propósito."
+"**Um cluster com nós nunca é tocado, os parados incluídos** — para isso existe o `cluster destroy` (ou o `delete clusters <nome>`, a mesma remoção sem o prompt), que pede um nome de propósito.\n"
+"\n"
+"Sem NAMES recolhe todos os órfãos de uma vez; dar um nome recolhe esse e deixa os outros exactamente como estão."
 
 msgid "Show only the VMs of this isolation namespace (see `vm create --namespace`). Omit to list every namespace"
 msgstr "Mostra só as VMs deste namespace de isolamento (ver `vm create --namespace`). Omite para listar todos os namespaces"
@@ -14095,11 +14161,11 @@ msgstr "Terminar {n} processo(s) abandonado(s)? As raízes de estado deles desap
 msgid "reclaimed {done} process(es); {skipped} no longer matched and were left alone"
 msgstr "reclamados {done} processo(s); {skipped} já não correspondiam e ficaram intocados"
 
-msgid "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}"
-msgstr "  {d} directório(s) órfão(s), {b} blob(s), {g} cgroup(s), {n} rede(s), {k} entrada(s) de cache de build — {size}"
+msgid "  {d} orphan dir(s), {b} blob(s), {l} unpacked layer(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}"
+msgstr "  {d} directório(s) órfão(s), {b} blob(s), {l} layer(s) desempacotada(s), {g} cgroup(s), {n} rede(s), {k} entrada(s) de cache de build — {size}"
 
-msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed"
-msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {i} imagem(ns), {b} blob(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s), {k} entrada(s) de cache de build — {size} libertados"
+msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {l} layer(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed"
+msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {i} imagem(ns), {b} blob(s), {l} layer(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s), {k} entrada(s) de cache de build — {size} libertados"
 
 msgid "what is abandoned, and nothing else — the default only reports"
 msgstr "o que está abandonado, e mais nada — por omissão só relata"
@@ -16027,8 +16093,8 @@ msgstr "o perfil de rede escolhido é experimental"
 msgid "The profile is implemented and its artefact is pinned and verified, but it has NOT been validated end to end against this engine's CRI in a multi-node topology — ADR-0074's own «what was not measured» section says so in writing. Enabling it by default would be the «reports success, does nothing» failure this project refuses, so it is gated behind an explicit opt-in instead of being hidden or removed."
 msgstr "O perfil está implementado e o artefacto dele está fixado e verificado, mas NÃO foi validado de ponta a ponta contra o CRI deste motor numa topologia de vários nós — a própria secção «o que não foi medido» do ADR-0074 di-lo por escrito. Activá-lo por omissão seria a falha «diz que sim sobre trabalho que não fez» que este projecto recusa, por isso fica atrás de um consentimento explícito em vez de ser escondido ou removido."
 
-msgid "To use it anyway, say so in the manifest (`spec.network.experimental: true`) or on the command line (`--experimental-cni`), and read `docs/compatibilidade-rede.md` for exactly what has and has not been measured. The refusal names the reason for that specific profile."
-msgstr "Para o usar mesmo assim, di-lo no manifesto (`spec.network.experimental: true`) ou na linha de comandos (`--experimental-cni`), e lê o `docs/compatibilidade-rede.md` para saber exactamente o que foi e o que não foi medido. A recusa nomeia a razão desse perfil em concreto."
+msgid "To use it anyway, say so in the manifest (`spec.network.experimental: true`) or on the command line (`--experimental-cni`), and read `docs/network-compatibility.md` for exactly what has and has not been measured. The refusal names the reason for that specific profile."
+msgstr "Para o usar mesmo assim, di-lo no manifesto (`spec.network.experimental: true`) ou na linha de comandos (`--experimental-cni`), e lê o `docs/network-compatibility.md` para saber exactamente o que foi e o que não foi medido. A recusa nomeia a razão desse perfil em concreto."
 
 msgid "a network feature the cluster path does not implement yet"
 msgstr "uma capacidade de rede que o caminho do cluster ainda não implementa"

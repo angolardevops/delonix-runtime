@@ -146,6 +146,23 @@ pub struct VmConfig {
     /// Name of the host bridge (mode `net_mode = "bridge"`) or of the libvirt network (mode
     /// `"nat"`; default `"default"`).
     pub bridge: Option<String>,
+    /// CIDR of the network named by [`Self::network`], RESOLVED by the caller
+    /// that owns the network registry (a provider may not read it — see
+    /// `docs/discovery/61`).
+    ///
+    /// This is what lets `--network <name>` mean something to the libvirt
+    /// backend. Until it existed, `cfg.network` had ZERO readers in that
+    /// provider: the name was accepted, recorded, shown by `vm ls`, and then
+    /// silently dropped, so every VM landed on libvirt's own `default` NAT
+    /// network whatever the operator asked for (documented live on
+    /// `network_of`). `boot` now derives the libvirt network from
+    /// [`Self::network`] and defines it with THIS subnet, instead of only ever
+    /// knowing how to define `default`.
+    ///
+    /// `None` = the caller has no subnet to offer (no registry entry, or a
+    /// backend that does its own networking), and the old behaviour stands: an
+    /// unknown network name cannot be defined, so it is left to libvirt.
+    pub network_subnet: Option<String>,
     /// Volumes/Storage shared into the VM (via **virtio-9p**). Each one
     /// comes already RESOLVED by the bin (the `Volume`/`Storage` name → host
     /// directory). Only the **libvirt** backend materializes them (Cloud Hypervisor does not do
