@@ -3,3 +3,4 @@ versions=5.2,6.0,6.1
 port=8000
 health=/api/v1/health/live
 lock=uv.lock
+vm_support=yes

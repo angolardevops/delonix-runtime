@@ -1,0 +1,55 @@
+# vm.yaml — declarative microVM image specification
+#
+# Alternative to VMfile: `delonix vm build -f vm.yaml -t __NAME__:latest .`
+# This file uses compose-style YAML instead of Dockerfile syntax.
+#
+# Every relative path is relative to this file's directory.
+
+version: 1
+
+images:
+  __NAME__:
+    # ── base ──────────────────────────────────────────────────────
+    distro: ubuntu
+    release: "26.04"
+    tag: __NAME__:latest
+    size: 10G
+
+    # ── defaults recorded in the image (used by `vm create`) ─────
+    hostname: __NAME__
+    vcpus: 2
+    memory: 2G
+
+    # ── build-time network. false: reproducible, true: reach internet
+    network: true
+
+    # ── content ───────────────────────────────────────────────────
+    packages:
+      upgrade: false
+      install: [ca-certificates, curl, php8.4-fpm, php8.4-cli, php8.4-mbstring, php8.4-xml]
+
+    files:
+      - src: dist/__NAME__
+        dst: /usr/local/bin/__NAME__
+        mode: "0755"
+      - src: cloud-init/user-data
+        dst: /etc/cloud/cloud.cfg.d/99-__NAME__.cfg
+        mode: "0644"
+
+    env:
+      APP_ENV: production
+
+    # ── first boot ────────────────────────────────────────────────
+    cloud_init: cloud-init/user-data
+
+    # ── housekeeping (defaults; say false to keep) ────────────────
+    cleanup:
+      package_cache: true
+      logs: true
+      history: true
+      tmp: true
+      machine_id: true
+      ssh_host_keys: false
+
+    labels:
+      org.opencontainers.image.title: __NAME__

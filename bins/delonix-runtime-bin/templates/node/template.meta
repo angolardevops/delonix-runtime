@@ -3,3 +3,4 @@ health=/api/v1/health/live
 version=5
 versions=5
 lock=pnpm-lock.yaml
+vm_support=yes

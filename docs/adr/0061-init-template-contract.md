@@ -199,6 +199,40 @@ the README gives, then the GitLab job as written and every `run:` step of the Gi
 workflow. The `uses:` actions of the GitHub workflow (checkout, toolchain setup) are the one
 part not executed; the GitLab image and `before_script` stand in for them.
 
+### D12 — Every application template includes VM support
+
+Application templates (`go`, `node`, `nestjs`, `nextjs`, `fastapi`, `django`, `laravel`)
+are born ready for deployment to microVMs via `delonix vm build`. Each template includes:
+
+1. **VMfile** — Dockerfile-style imperative recipe for building a bootable qcow2 disk image,
+   OR
+2. **vm.yaml** — Compose-style declarative config (alternative to VMfile)
+3. **cloud-init/user-data** — First-boot script that:
+   - Creates an `app` user with sudo access
+   - Writes a systemd service unit to `/etc/systemd/system/__NAME__.service`
+   - Enables and starts the service at boot
+4. **.delonixignore** — Excludes build artifacts (`cloud-init/`, `dist/`, `artifacts/`, `vm.yaml`)
+   so they are not packaged into the VM image
+
+When a developer runs `delonix vm build -t myapp:1.0 .`, the project is built as a bootable
+qcow2 image with the service running on first boot. The VM is created by `delonix vm create`
+using metadata recorded in the image (vcpus, memory, hypervisor preference) and assigned to
+the `app` user inside the guest.
+
+The systemd service is configured to:
+- Start after network-online, ensuring connectivity
+- Restart on failure with 5-second backoff
+- Log to systemd journal (JSON output is captured)
+- Shut down gracefully with a 30-second timeout, signaling SIGTERM to the process
+
+Infrastructure templates (`nginx`, `httpd`, `haproxy`) and `odoo` are out of scope — they
+are not standalone application services in the same deployment sense: `nginx`/`httpd`/`haproxy`
+are reverse proxies whose config is data (not requiring a binary), and `odoo` is an ERP
+requiring persistent add-ons and database state managed outside the image.
+
+`scripts/init-ci.sh` validates that every application template includes syntactically valid
+VMfile and cloud-init/user-data.
+
 ## Alternatives considered
 
 - **Ship locks for every ecosystem.** Rejected for uv/pnpm/Composer by D2: stale for any

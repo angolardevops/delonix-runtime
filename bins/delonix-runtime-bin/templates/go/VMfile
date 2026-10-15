@@ -1,0 +1,22 @@
+# VMfile — a bootable qcow2, built from Ubuntu cloud image.
+#
+#   delonix vm build -t __NAME__:latest .
+
+FROM ubuntu:24.04
+
+SIZE 10G
+HOSTNAME __NAME__
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl
+
+# Copy the built binary and cloud-init configuration
+COPY ./dist/__NAME__ /usr/local/bin/__NAME__
+COPY ./cloud-init/user-data /etc/cloud/cloud.cfg.d/99-__NAME__.cfg
+
+ENV APP_ENV=production
+
+USER app
+VCPUS 2
+MEMORY 2G
+LABEL org.opencontainers.image.title=__NAME__

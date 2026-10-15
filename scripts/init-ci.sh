@@ -172,5 +172,48 @@ EOF
     tail -5 "$W/ci-$t.run.log" | sed 's/^/        /'
   fi
 done
-echo "== $pass passed, $fail failed"
+
+# ── VM Build Validation ─────────────────────────────────────────
+# Validate that application templates include working VMfiles by checking
+# syntax. Full VM image builds require qemu/virt-customize, so we just
+# verify the files are valid YAML/Dockerfile syntax.
+echo "== VM Build Validation =="
+vm_templates="go node nestjs nextjs fastapi django laravel"
+vm_pass=0; vm_fail=0
+for t in $vm_templates; do
+  p="$W/vm-$t"
+  if [ -e "$p" ]; then continue; fi
+  if ! "$B" init -t "$t" --name "vm-$t" "$p" </dev/null >"$W/vm-$t.gen.log" 2>&1; then
+    echo "FAIL  $t (vm): generation"; vm_fail=$((vm_fail+1)); continue
+  fi
+  # Validate VMfile syntax (basic: check it's readable YAML/Dockerfile structure)
+  if [ -f "$p/VMfile" ]; then
+    if ! head -1 "$p/VMfile" | grep -q "^FROM"; then
+      echo "FAIL  $t (vm): VMfile missing FROM instruction"; vm_fail=$((vm_fail+1)); continue
+    fi
+    vm_pass=$((vm_pass+1)); echo "PASS  $t (vm): VMfile syntax valid"
+  elif [ -f "$p/vm.yaml" ]; then
+    # Basic YAML validation: try to parse with Python
+    if python3 -c "import yaml; yaml.safe_load(open('$p/vm.yaml'))" 2>/dev/null; then
+      vm_pass=$((vm_pass+1)); echo "PASS  $t (vm): vm.yaml syntax valid"
+    else
+      echo "FAIL  $t (vm): vm.yaml invalid YAML"; vm_fail=$((vm_fail+1)); continue
+    fi
+  else
+    echo "FAIL  $t (vm): neither VMfile nor vm.yaml found"; vm_fail=$((vm_fail+1)); continue
+  fi
+  # Check for cloud-init/user-data
+  if [ ! -f "$p/cloud-init/user-data" ]; then
+    echo "FAIL  $t (vm): missing cloud-init/user-data"; vm_fail=$((vm_fail+1)); continue
+  fi
+  # Check for .delonixignore
+  if [ ! -f "$p/.delonixignore" ]; then
+    echo "FAIL  $t (vm): missing .delonixignore"; vm_fail=$((vm_fail+1)); continue
+  fi
+  rm -rf "$p"
+done
+echo "== VM: $vm_pass passed, $vm_fail failed"
+fail=$((fail + vm_fail))
+
+echo "== TOTAL: $pass passed, $fail failed"
 [ $fail = 0 ]

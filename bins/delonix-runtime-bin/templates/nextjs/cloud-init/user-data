@@ -1,0 +1,50 @@
+#cloud-config
+# First-boot configuration for __NAME__ service VM.
+# Installs systemd service and starts it on boot.
+
+hostname: __NAME__
+fqdn: __NAME__.local
+package_update: false
+ssh_pwauth: false
+
+users:
+  - name: app
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys: []
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable __NAME__.service
+  - systemctl start __NAME__.service
+  - systemctl status __NAME__.service
+
+write_files:
+  - path: /etc/systemd/system/__NAME__.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=__NAME__ Service
+      Documentation=http://localhost:__PORT__/api/v1/health/live
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=app
+      WorkingDirectory=/home/app
+      ExecStart=/usr/local/bin/__NAME__
+      Restart=on-failure
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+      StandardInput=null
+
+      # Graceful shutdown
+      TimeoutStopSec=30s
+      KillMode=mixed
+      KillSignal=SIGTERM
+
+      [Install]
+      WantedBy=multi-user.target

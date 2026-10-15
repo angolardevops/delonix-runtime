@@ -3208,4 +3208,52 @@ mod tests {
             );
         }
     }
+
+    /// Every application template (go, node, nestjs, nextjs, fastapi, django, laravel)
+    /// includes VM support: a VMfile, vm.yaml, cloud-init/user-data, and .delonixignore.
+    /// This allows `delonix vm build` to work out-of-the-box.
+    #[test]
+    fn every_application_template_supports_vm_build() {
+        let vm_templates = ["go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel"];
+
+        for name in &vm_templates {
+            let (_, files) = TEMPLATES
+                .iter()
+                .find(|(n, _)| *n == *name)
+                .unwrap_or_else(|| panic!("no template {name}"));
+
+            // Check for VMfile
+            assert!(
+                files.iter().any(|(p, _, _)| *p == "VMfile"),
+                "template {name} missing VMfile"
+            );
+
+            // Check for cloud-init/user-data
+            assert!(
+                files.iter().any(|(p, _, _)| *p == "cloud-init/user-data"),
+                "template {name} missing cloud-init/user-data"
+            );
+
+            // Check for .delonixignore
+            assert!(
+                files.iter().any(|(p, _, _)| *p == ".delonixignore"),
+                "template {name} missing .delonixignore"
+            );
+
+            // Check template.meta has vm_support=yes
+            let has_vm_support = TEMPLATE_KV
+                .iter()
+                .find(|(n, _)| *n == *name)
+                .map(|(_, pairs)| {
+                    pairs
+                        .iter()
+                        .any(|(k, v)| *k == "vm_support" && *v == "yes")
+                })
+                .unwrap_or(false);
+            assert!(
+                has_vm_support,
+                "template {name} missing vm_support=yes in template.meta"
+            );
+        }
+    }
 }

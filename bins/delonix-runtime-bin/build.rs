@@ -79,6 +79,7 @@ fn main() {
                     "login",
                     "password",
                     "up_secret",
+                    "vm_support",
                 ];
                 match line.split_once('=') {
                     Some((k, v)) => {
