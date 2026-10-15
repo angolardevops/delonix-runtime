@@ -816,10 +816,11 @@ fn render_planned(
         None => None,
     };
     if n == 0 {
-        eprintln!(
-            "{}",
-            super::po::t("nothing to do (everything already existed)")
+        let msg = super::po::tf(
+            "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force",
+            &[("dir", &o.dir.display().to_string())],
         );
+        eprintln!("{}", msg);
         return Ok(cert);
     }
     if adopt {
@@ -1706,10 +1707,11 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         }
     }
     if n == 0 {
-        eprintln!(
-            "{}",
-            super::po::t("nothing to do (everything already existed)")
+        let msg = super::po::tf(
+            "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force",
+            &[("dir", &o.dir.display().to_string())],
         );
+        eprintln!("{}", msg);
         return Ok(());
     }
     println!("{}", next_steps(target, o));
