@@ -3233,7 +3233,7 @@ mod tests {
 
     /// Every application template (go, node, nestjs, nextjs, fastapi, django, laravel)
     /// includes VM support: a VMfile, vm.yaml, cloud-init/user-data, and .delonixignore.
-    /// This allows `delonix vm build` to work out-of-the-box.
+    /// This allows `delonix vm image build` to work out-of-the-box.
     #[test]
     fn every_application_template_supports_vm_build() {
         let vm_templates = ["go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel"];
