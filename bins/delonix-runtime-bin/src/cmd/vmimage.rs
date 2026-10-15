@@ -2661,16 +2661,12 @@ pub(crate) fn cmd_build(
     // `virt-resize` warns about exactly this: «carefully check that the resized
     // disk boots and works correctly».
     //
-    // Runs last, after everything is installed, and needs no network: Ubuntu
+    // Runs after everything is installed, and needs no network: Ubuntu
     // cloud images already ship `grub-install` and the `i386-pc` modules
-    // (checked on the 26.04 base), so it works under `--offline` too.
-    let ops = {
-        let mut ops = ops;
-        ops.push(CustomizeOp::RunCommand(
-            "grub-install --target=i386-pc /dev/sda && update-grub".into(),
-        ));
-        ops
-    };
+    // (checked on the 26.04 base), so it works under `--offline` too. "After
+    // everything" stops short of the machine-id reset — see
+    // [`with_bootloader_reinstall`].
+    let ops = with_bootloader_reinstall(ops);
 
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
@@ -3163,6 +3159,37 @@ pub(crate) fn splice_before_machine_id(
         ops.insert(at + i, op);
     }
     ops
+}
+
+/// Appends the bootloader reinstall `virt-resize` makes mandatory (the long
+/// comment at the call site in [`cmd_build`] says why) — BEFORE the machine-id
+/// reset, not after it.
+///
+/// BUG FIXED HERE: the step used to be `push`ed straight onto the recipe's
+/// `ops`, which put real guest code — `grub-install` + `update-grub`, running
+/// maintainer scripts inside the chroot — AFTER the reset that
+/// [`shared_account_steps`] documents, and that a test asserts, as the
+/// ABSOLUTE last step «so nothing after it regenerates one». The invariant
+/// held inside the recipe and was then broken by the assembly, and no test
+/// could see it: they check what the recipe functions RETURN, never the vector
+/// `cmd_build` finally hands to `virt-customize`. That is the same class of
+/// defect as the incident that created the invariant — one baked machine-id
+/// shared by every clone means one shared systemd DHCP client-id (DUID-EN,
+/// enterprise 43793), and dnsmasq keys leases by client-id, so N clones get a
+/// SINGLE lease that migrates to whichever asked last.
+///
+/// Reuses [`splice_before_machine_id`], which exists for exactly this and is
+/// already how `node_exporter` and the build manifest get in. The SELinux
+/// relabel [`customize_args`] appends after this is deliberately left last: it
+/// is a `setfiles` label pass that creates no files, so it cannot materialise a
+/// machine-id, and on a guest without `/etc/selinux/config` it is a no-op.
+fn with_bootloader_reinstall(ops: Vec<CustomizeOp>) -> Vec<CustomizeOp> {
+    splice_before_machine_id(
+        ops,
+        vec![CustomizeOp::RunCommand(
+            "grub-install --target=i386-pc /dev/sda && update-grub".into(),
+        )],
+    )
 }
 
 pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Result<Vec<CustomizeOp>> {
@@ -6017,6 +6044,53 @@ mod tests {
         assert!(
             matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("truncate -s 0 /etc/machine-id")),
             "o reset do machine-id devia ser o ÚLTIMO passo"
+        );
+    }
+
+    /// REGRESSION, found live: the test above asserts the machine-id reset is
+    /// last in what the RECIPE returns, and `cmd_build` then appended the
+    /// bootloader reinstall after it — so the invariant the recipe documents
+    /// was broken by the assembly, invisibly to every existing test. This one
+    /// covers the assembly step itself.
+    ///
+    /// Why it matters: `grub-install`/`update-grub` run maintainer scripts in
+    /// the guest chroot, which is precisely how a machine-id gets materialised
+    /// into an image that is supposed to ship without one. Every VM cloned
+    /// from such an image derives the SAME systemd DHCP client-id from it, and
+    /// dnsmasq — which keys leases by client-id — then hands N clones a single
+    /// migrating lease instead of N addresses.
+    #[test]
+    fn bootloader_reinstall_nao_passa_a_frente_do_reset_do_machine_id() {
+        let reset = "truncate -s 0 /etc/machine-id";
+        let grub = "grub-install";
+
+        let ops = with_bootloader_reinstall(vec![
+            CustomizeOp::RunCommand("apt-get clean".into()),
+            CustomizeOp::RunCommand(format!("{reset} && rm -f /var/lib/dbus/machine-id")),
+        ]);
+        let at = |needle: &str| {
+            ops.iter()
+                .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
+                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+        };
+        assert!(
+            at(grub) < at(reset),
+            "o grub tem de correr ANTES do reset do machine-id"
+        );
+        assert!(
+            matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains(reset)),
+            "o reset do machine-id devia continuar a ser o ÚLTIMO passo"
+        );
+
+        // A recipe that never resets the machine-id (`--no-k8s` variants, a
+        // distro where the step is skipped) must still GET the bootloader
+        // step — `splice_before_machine_id` falls back to appending, and
+        // silently losing the reinstall is how a golden image stops booting.
+        let ops = with_bootloader_reinstall(vec![CustomizeOp::RunCommand("apt-get clean".into())]);
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(grub))),
+            "sem marcador, o passo do grub tem de ser acrescentado"
         );
     }
 
