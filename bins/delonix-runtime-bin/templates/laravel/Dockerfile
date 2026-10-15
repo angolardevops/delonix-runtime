@@ -1,0 +1,59 @@
+# Dockerfile — build with:
+#   docker build -t __NAME__:dev .
+#
+# Same grammar as Delonixfile — this file mirrors it for Docker/Compose users.
+# See Delonixfile for build details and rationale.
+#
+# Two stages. The official Composer image installs the PHP dependencies (no
+# installer script piped from the network); only the application and its
+# vendor/ reach the FrankenPHP runtime image.
+FROM composer:2 AS vendor
+WORKDIR /app
+COPY . /app
+# From composer.lock when the project has one (reproducible); otherwise
+# resolved now, with a warning — commit composer.lock (README, Quickstart).
+RUN --mount=type=cache,target=/tmp/composer-cache \
+    export COMPOSER_CACHE_DIR=/tmp/composer-cache; \
+    if [ -f composer.lock ]; then \
+      composer install --no-dev --no-scripts --no-interaction --no-progress --prefer-dist; \
+    else \
+      echo "WARNING: no composer.lock in the build context; resolving dependencies now" >&2; \
+      composer update --no-dev --no-scripts --no-interaction --no-progress --prefer-dist; \
+    fi \
+    && composer dump-autoload --no-dev --no-scripts --classmap-authoritative
+
+FROM dunglas/frankenphp:1-php8.4
+# The image already has pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl,
+# dom and opcache. ext-pcntl is added so the queue worker finishes the job in
+# hand on SIGTERM and enforces a job's timeout.
+RUN install-php-extensions pcntl \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app
+ARG VERSION=dev
+ENV APP_ENV=production \
+    APP_DEBUG=false \
+    APP_VERSION=${VERSION} \
+    LOG_CHANNEL=json \
+    PORT=__PORT__ \
+    DB_CONNECTION=sqlite \
+    DB_DATABASE=/var/lib/app/database.sqlite \
+    APP_CONFIG_CACHE=/tmp/laravel/config.php \
+    APP_ROUTES_CACHE=/tmp/laravel/routes.php \
+    APP_EVENTS_CACHE=/tmp/laravel/events.php
+WORKDIR /app
+COPY --from=vendor /app /app
+# Package manifests depend only on composer, so they are safe to build in.
+RUN php artisan package:discover --ansi \
+    && mkdir -p /var/lib/app && chown app:app /var/lib/app \
+    && chmod +x /app/docker/entrypoint.sh
+VOLUME /var/lib/app
+EXPOSE __PORT__
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD php -r "exit(@file_get_contents('http://127.0.0.1:__PORT__/api/v1/health/live') === false ? 1 : 0);"
+STOPSIGNAL SIGTERM
+# The unprivileged user created above (uid 10001). It owns /var/lib/app — the
+# database volume takes that owner on its first mount — and nothing else.
+USER app
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
+CMD ["serve"]

@@ -1,0 +1,36 @@
+# Dockerfile — build with:
+#   docker build -t __NAME__:dev .
+#
+# Same grammar as Delonixfile — this file mirrors it for Docker/Compose users.
+# See Delonixfile for build details and rationale.
+#
+# Two stages: uv resolves and installs into /app/.venv in the first, and the
+# runtime image gets the project and its virtualenv without uv or its cache.
+FROM python:3.13-slim AS build
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_NO_DEV=1
+RUN pip install --no-cache-dir uv==0.12.8
+WORKDIR /app
+COPY . /app
+# From the lock when the project has one (reproducible); a fresh project that
+# has not run `uv lock` yet resolves here instead, so `delonix init --up` works.
+RUN --mount=type=cache,target=/root/.cache/uv if [ -f uv.lock ]; then uv sync --locked; else echo "uv.lock not found: resolving now — run 'uv lock' and commit uv.lock for reproducible images" >&2; uv sync; fi
+
+FROM python:3.13-slim
+ARG VERSION=dev
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 APP_VERSION=${VERSION}
+WORKDIR /app
+COPY --from=build /app /app
+# An unprivileged user for the service (uid 10001). The only thing it owns is /data,
+# where bind-mounts and volumes land: an empty named volume takes the owner
+# the image gives its mount point.
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent app \
+    && mkdir /data && chown app:app /data && chmod +x /app/docker/entrypoint.sh
+EXPOSE __PORT__
+# The runtime probes liveness; readiness is for the load balancer.
+HEALTHCHECK CMD /app/.venv/bin/python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live', timeout=2)" || exit 1
+STOPSIGNAL SIGTERM
+USER app
+# The entrypoint applies the migrations first when MIGRATE_ON_START=true,
+# then execs gunicorn, which reads /app/gunicorn.conf.py.
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
+CMD ["/app/.venv/bin/gunicorn", "config.wsgi:application"]

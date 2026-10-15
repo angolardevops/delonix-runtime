@@ -1,0 +1,6 @@
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-data
+spec:
+  driver: local
