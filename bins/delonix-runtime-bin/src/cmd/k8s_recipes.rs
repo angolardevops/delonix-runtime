@@ -33,7 +33,41 @@ impl HostRecipe {
     }
 }
 
-/// The version of the `pkgs.k8s.io` repository (`stable:/v1.31` by default).
+/// Resolves "what version did the caller ask for" into a CONCRETE number —
+/// the ONE place where "the caller did not choose" becomes
+/// [`vmimage::DEFAULT_K8S_VERSION`].
+///
+/// BUG FOUND (2026-10-15, by reading the assembled `virt-customize` command
+/// line of a live `delonix vm image build -t k8s-golden`): this fallback used
+/// to be an INDEPENDENT hardcoded `stable:/v1.31` inside `k8s_repo_version`,
+/// while `DEFAULT_K8S_VERSION` had already moved to 1.36. A build with no
+/// `--k8s-version` therefore ran
+/// `curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key` —
+/// four minor versions older than the documented default, and
+/// `DEFAULT_K8S_VERSION` was dead code on that path. Two independent defaults
+/// for one number always drift, so there is now exactly one: this function.
+/// [`k8s_repo_version`] below CANNOT default anymore (it takes a concrete
+/// `&str`), which is what stops the drift from coming back.
+///
+/// `"stable"` is the historical "newest in the channel" sentinel. No entry
+/// point can reach it today — `cluster::valid_version` allows only digits and
+/// dots, so it rejects the word on both the `--k8s-version` and the
+/// `spec.k8sVersion` paths — so it resolves to the default as well, rather
+/// than leaving the version unpinned.
+pub(crate) fn resolve_k8s_version(k8s_version: Option<&str>) -> String {
+    match k8s_version {
+        Some(v) if v != "stable" => v.to_string(),
+        _ => super::vmimage::DEFAULT_K8S_VERSION.to_string(),
+    }
+}
+
+/// The `pkgs.k8s.io` repository path for a CONCRETE version: `"1.36"` →
+/// `"stable:/v1.36"`.
+///
+/// Takes `&str` and not `Option<&str>` ON PURPOSE: the caller resolves with
+/// [`resolve_k8s_version`] first, so this function has no default of its own
+/// to drift away from `DEFAULT_K8S_VERSION` — see that function for the build
+/// this exact divergence shipped.
 ///
 /// BUG FOUND: `cluster.rs::valid_version` explicitly accepts (and its own
 /// doc-comment/tests assert) a PATCH version like `1.31.2` — but
@@ -44,11 +78,8 @@ impl HostRecipe {
 /// well after the manifest was accepted as valid. Truncate to major.minor
 /// for the REPO path only; `--kubernetes-version` (kubeadm's own flag,
 /// built elsewhere) still gets the full version, which is correct there.
-pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
-    match k8s_version {
-        Some(v) if v != "stable" => format!("stable:/v{}", major_minor(v)),
-        _ => "stable:/v1.31".to_string(),
-    }
+pub(crate) fn k8s_repo_version(k8s_version: &str) -> String {
+    format!("stable:/v{}", major_minor(k8s_version))
 }
 
 /// `"1.31.2"` → `"1.31"`; `"1.31"` → `"1.31"` unchanged (no third
@@ -63,10 +94,9 @@ fn major_minor(v: &str) -> &str {
 /// Builds the catalogue — `extra_packages` extends the list of packages
 /// installed in the `kubeadm/kubelet/kubectl` recipe without touching this function
 /// (it is the "100% parameterized" part of the pipeline).
-pub(crate) fn k8s_host_recipes(
-    k8s_version: Option<&str>,
-    extra_packages: &[String],
-) -> Vec<HostRecipe> {
+/// `k8s_version` is CONCRETE (already through [`resolve_k8s_version`]) — the
+/// catalogue never decides the version by omission.
+pub(crate) fn k8s_host_recipes(k8s_version: &str, extra_packages: &[String]) -> Vec<HostRecipe> {
     let repo = k8s_repo_version(k8s_version);
     let mut packages = vec![
         "kubeadm".to_string(),
@@ -146,9 +176,17 @@ pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
 mod tests {
     use super::*;
 
+    use super::super::vmimage::DEFAULT_K8S_VERSION;
+
+    /// A version for the cases that are not ABOUT the version — concrete,
+    /// because the catalogue no longer accepts "unspecified", and deliberately
+    /// NOT `DEFAULT_K8S_VERSION`: these tests must not start passing or
+    /// failing because the default moved.
+    const ANY: &str = "1.33";
+
     #[test]
     fn extra_packages_entram_na_receita_de_instalacao() {
-        let recipes = k8s_host_recipes(None, &["ipvsadm".to_string()]);
+        let recipes = k8s_host_recipes(ANY, &["ipvsadm".to_string()]);
         let install = recipes
             .iter()
             .find(|r| r.name.contains("instalados"))
@@ -159,7 +197,7 @@ mod tests {
 
     #[test]
     fn k8s_version_explicita_entra_no_repo() {
-        let recipes = k8s_host_recipes(Some("1.30"), &[]);
+        let recipes = k8s_host_recipes("1.30", &[]);
         let repo_step = recipes
             .iter()
             .find(|r| r.name.contains("repositório"))
@@ -175,7 +213,7 @@ mod tests {
         // directories — the untruncated version produced a 404 repo URL,
         // failing `apt-get update` on every host, well past manifest
         // validation.
-        let recipes = k8s_host_recipes(Some("1.31.2"), &[]);
+        let recipes = k8s_host_recipes("1.31.2", &[]);
         let repo_step = recipes
             .iter()
             .find(|r| r.name.contains("repositório"))
@@ -195,19 +233,34 @@ mod tests {
         assert_eq!(super::major_minor("1"), "1");
     }
 
+    /// REGRESSION (2026-10-15): this test was previously named after the
+    /// `stable:/v1.31` repo it expected, and asserted the BUG — that an
+    /// omitted version produced that repo — while `DEFAULT_K8S_VERSION` said
+    /// 1.36. It passed happily, because it only ever checked this default in
+    /// isolation from the one it was supposed to agree with.
     #[test]
-    fn sem_versao_usa_stable_v1_31() {
-        let recipes = k8s_host_recipes(None, &[]);
-        let repo_step = recipes
-            .iter()
-            .find(|r| r.name.contains("repositório"))
-            .unwrap();
-        assert!(repo_step.apply.contains("stable:/v1.31"));
+    fn no_version_uses_the_default_version() {
+        let repo = k8s_repo_version(&resolve_k8s_version(None));
+        assert_eq!(repo, format!("stable:/v{DEFAULT_K8S_VERSION}"));
+        assert!(
+            !repo.contains("v1.31"),
+            "o default independente de 1.31 voltou: {repo}"
+        );
+    }
+
+    /// `"stable"` is the one non-numeric input the resolver still special-cases
+    /// (no entry point can reach it — `cluster::valid_version` rejects
+    /// letters), and it must NOT leave the version unpinned.
+    #[test]
+    fn stable_resolves_to_the_default_version() {
+        assert_eq!(resolve_k8s_version(Some("stable")), DEFAULT_K8S_VERSION);
+        assert_eq!(resolve_k8s_version(None), DEFAULT_K8S_VERSION);
+        assert_eq!(resolve_k8s_version(Some("1.34")), "1.34");
     }
 
     #[test]
     fn cinco_receitas_por_omissao() {
-        assert_eq!(k8s_host_recipes(None, &[]).len(), 5);
+        assert_eq!(k8s_host_recipes(ANY, &[]).len(), 5);
     }
 
     #[test]
@@ -224,7 +277,7 @@ mod tests {
             );
         }
         // And they are exactly the tail of the full catalogue (they do not diverge).
-        let all = k8s_host_recipes(None, &[]);
+        let all = k8s_host_recipes(ANY, &[]);
         assert_eq!(&all[2..], &config[..], "as 3 finais têm de ser as mesmas");
     }
 }

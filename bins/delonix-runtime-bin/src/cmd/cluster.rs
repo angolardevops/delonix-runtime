@@ -2967,7 +2967,11 @@ fn prepare_host(
     cri_service: &std::path::Path,
     cli_bin: &std::path::Path,
 ) -> Result<()> {
-    for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
+    // Same single resolution the image build uses: a manifest with no
+    // `spec.k8sVersion` used to configure a `stable:/v1.31` apt repo on hosts
+    // that `resolve_vm_image` had meanwhile defaulted to the 1.36 golden.
+    let k8s_version = k8s_recipes::resolve_k8s_version(k8s_version);
+    for r in k8s_recipes::k8s_host_recipes(&k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
             continue;
         }

@@ -25,9 +25,10 @@ use super::vmimage::{cpu_has_x86_64_v3, hex_sha256_file, http_get_text, stream_d
 /// versions this project's golden images target (1.34/1.35) is 3.5.x.
 /// **Flagged, not assumed**: confirmed live against `etcd-io/etcd`'s GitHub
 /// releases that this exact tag/asset exists (2026-07-26); a future k8s
-/// version needing a different etcd version is a manual follow-up, same
-/// accepted v1 simplification `k8s_recipes::k8s_repo_version`'s hardcoded
-/// `stable:/v1.31` fallback already uses.
+/// version needing a different etcd version is a manual follow-up — this is
+/// now the LAST hardcoded version default of its kind: `k8s_recipes`' own
+/// `stable:/v1.31` fallback was removed once it was caught shipping goldens
+/// four minor versions behind `DEFAULT_K8S_VERSION`.
 const DEFAULT_ETCD_VERSION: &str = "3.5.17";
 
 pub(crate) struct EtcdBootstrapResult {
