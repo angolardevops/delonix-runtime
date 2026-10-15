@@ -500,6 +500,96 @@ pub(crate) struct ImageSweep {
     pub freed: Reclaimed,
 }
 
+/// **PURE** — the `layers/<hex>` a mount table says are in use, from the text
+/// of one `/proc/<pid>/mountinfo`.
+///
+/// Every form the kernel writes is covered by scanning for the path itself:
+/// modern `lowerdir+=/…/layers/<hex>` repeated per layer, the older
+/// `lowerdir=/…/layers/<a>:/…/layers/<b>` colon list, and `upperdir=`/
+/// `workdir=` (which never point into `layers/`, but cost nothing to accept).
+/// A `<hex>.owners` path yields its `<hex>`, which is the conservative answer.
+pub(crate) fn parse_mounted_layer_hexes(
+    mountinfo: &str,
+    layers_dir: &std::path::Path,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Some(prefix) = layers_dir.to_str() else {
+        return out;
+    };
+    let needle = format!("{prefix}/");
+    for line in mountinfo.lines() {
+        let mut rest = line;
+        while let Some(i) = rest.find(&needle) {
+            rest = &rest[i + needle.len()..];
+            let hex: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            if hex.len() == 64 {
+                out.insert(hex);
+            }
+        }
+    }
+    out
+}
+
+/// The layers the KERNEL says are mounted right now, across every mount
+/// namespace this process can read.
+///
+/// # Why the image records are not enough, measured and not supposed
+///
+/// The first version of the layer sweep trusted one claim: that a live
+/// container always has a registry entry, so `in_use` spares its image record
+/// and `referenced` therefore covers its layers. **That is false, and this
+/// host proved it before the sweep ever ran.** It had six containers holding
+/// overlay mounts and exactly ONE registry record — `container ls -a` listed
+/// `meet-pg` and nothing else. The other five (a Kubernetes node running
+/// kubelet/containerd, a PostgreSQL with its full worker set, three more) ran
+/// from layers no surviving record named: 19 of the 198 directories the sweep
+/// had just classified as orphans were live `lowerdir`s. Their `upperdir`s
+/// pointed at `containers/<id>/upper` paths already deleted from disk, the
+/// mounts alive only on open inodes — so the registry was not merely
+/// incomplete, it had already been believed once too often.
+///
+/// Hence liveness comes from the kernel, which cannot be out of date about
+/// its own mounts. This is the same lesson `AuthoritativeLivePorts` encodes
+/// one screen up: a liveness set assembled from the wrong source does not
+/// fail by reporting less, it fails by reaping something that is running.
+///
+/// # The blind spot, stated out loud
+///
+/// A `/proc/<pid>/mountinfo` this user cannot read is skipped, so a mount held
+/// only by another user's process is invisible here (measured on this host: 8
+/// of 855 pids unreadable, all root-owned). In rootless — where the workloads
+/// are this user's own — that gap is empty; under `root` it is not, and a
+/// layer mounted solely by a foreign namespace could still be swept. Sparing
+/// an orphan costs disk; reaping a live lowerdir costs somebody's database.
+pub(crate) fn layers_in_use_now(layers_dir: &std::path::Path) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Ok(rd) = std::fs::read_dir("/proc") else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(n) = name.to_str() else { continue };
+        if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+            continue; // not a pid directory
+        }
+        if let Ok(txt) = std::fs::read_to_string(e.path().join("mountinfo")) {
+            out.extend(parse_mounted_layer_hexes(&txt, layers_dir));
+        }
+    }
+    out
+}
+
+/// Every layer hex that must survive a sweep: the ones image records name,
+/// UNION the ones the kernel has mounted. Both, never either.
+pub(crate) fn layers_to_keep(
+    layers_dir: &std::path::Path,
+    referenced: &HashSet<String>,
+) -> HashSet<String> {
+    let mut keep = referenced.clone();
+    keep.extend(layers_in_use_now(layers_dir));
+    keep
+}
+
 /// The entries of `layers/` that no surviving image accounts for.
 #[derive(Default)]
 pub(crate) struct LayerPlan {
@@ -525,6 +615,14 @@ pub(crate) struct LayerPlan {
 /// layer directories, 198 of them orphaned, 26 GiB unreclaimable by any
 /// command, on a root at 100%.
 ///
+/// # `keep` must come from [`layers_to_keep`], never from the records alone
+///
+/// A layer is live if ANY of two independent sources says so: an image record
+/// names it, or the kernel has it mounted. Passing only the records here is
+/// the bug [`layers_in_use_now`] documents — on the host this was written for
+/// it would have unlinked the `lowerdir`s of a running Kubernetes node and a
+/// PostgreSQL.
+///
 /// # Keyed on the HEX, never on the entry name
 ///
 /// `layers/` is not a flat set of digest directories. Beside each `<hex>/`
@@ -547,7 +645,7 @@ pub(crate) struct LayerPlan {
 /// corrupting a concurrent `container run`.
 pub(crate) fn plan_orphan_layers(
     layers_dir: &std::path::Path,
-    referenced: &HashSet<String>,
+    keep: &HashSet<String>,
 ) -> LayerPlan {
     let mut out = LayerPlan::default();
     let Ok(rd) = std::fs::read_dir(layers_dir) else {
@@ -562,7 +660,7 @@ pub(crate) fn plan_orphan_layers(
             .strip_suffix(".owners")
             .or_else(|| name.strip_suffix(".modes"))
             .unwrap_or(name.as_str());
-        if referenced.contains(hex) {
+        if keep.contains(hex) {
             continue;
         }
         let path = e.path();
@@ -580,8 +678,8 @@ pub(crate) fn plan_orphan_layers(
 }
 
 /// Removes what [`plan_orphan_layers`] named. Returns `(directories, bytes)`.
-fn sweep_layers(layers_dir: &std::path::Path, referenced: &HashSet<String>) -> (usize, Reclaimed) {
-    let plan = plan_orphan_layers(layers_dir, referenced);
+fn sweep_layers(layers_dir: &std::path::Path, keep: &HashSet<String>) -> (usize, Reclaimed) {
+    let plan = plan_orphan_layers(layers_dir, keep);
     let mut dirs = 0;
     for path in plan.doomed {
         if path.is_dir() {
@@ -652,14 +750,13 @@ pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Res
         }
     }
 
-    // The UNPACKED layers, against the same `referenced` set — and that shared
-    // set is what makes a live container's layers safe without a second
-    // liveness query: `in_use` above spares the image record of every
-    // container in the registry, running or stopped, so the layers under its
-    // overlay mount stay referenced here. (`image rm` refuses while a
-    // container references the image, so a record cannot vanish from under a
-    // live mount by that route either.)
-    let (layer_dirs, layer_bytes) = sweep_layers(&images.root().join("layers"), &referenced);
+    // The UNPACKED layers. `referenced` alone is NOT a liveness set here —
+    // see `layers_in_use_now` for the host that had six live overlay mounts
+    // and one registry record — so the kernel's mount tables are unioned in
+    // before anything is unlinked.
+    let layers_dir = images.root().join("layers");
+    let keep = layers_to_keep(&layers_dir, &referenced);
+    let (layer_dirs, layer_bytes) = sweep_layers(&layers_dir, &keep);
     out.layers = layer_dirs;
     out.freed.add(layer_bytes);
 
@@ -899,9 +996,12 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
     }
 
     // B — unpacked layers nothing would reference once the doomed images are
-    // gone. Same helper the sweep removes with, so a directory cannot be
-    // doomed by one and spared by the other.
-    let lp = plan_orphan_layers(&images.root().join("layers"), &referenced);
+    // gone, MINUS whatever the kernel has mounted. Same two helpers the sweep
+    // uses, so a directory cannot be doomed by the report and spared by the
+    // sweep — or, far worse, promised by the report and then found to be a
+    // live container's lowerdir.
+    let layers_dir = images.root().join("layers");
+    let lp = plan_orphan_layers(&layers_dir, &layers_to_keep(&layers_dir, &referenced));
     out.layers = lp.dirs;
     out.layers_bytes = lp.freed;
 
@@ -2336,5 +2436,97 @@ mod tests {
 
         // Idempotent: a second sweep finds nothing left to take.
         assert_eq!(super::sweep_layers(&layers, &referenced).0, 0);
+    }
+
+    /// REGRESSION GUARD for the bug the first version of this sweep shipped
+    /// with: it trusted the image records as a liveness set.
+    ///
+    /// Measured on the host it was written for, BEFORE it ran: six containers
+    /// held overlay mounts, the registry had ONE record (`meet-pg`), and 19 of
+    /// the 198 directories the sweep called orphans were live `lowerdir`s — a
+    /// Kubernetes node (kubelet/containerd) and a PostgreSQL among them. A
+    /// layer the kernel has mounted survives even when NO record names it.
+    #[test]
+    fn a_mounted_layer_survives_even_when_no_image_record_names_it() {
+        let layers = std::path::Path::new("/home/w/.local/share/delonix/layers");
+        let live = "a".repeat(64); // mounted, unreferenced — the k8s/pg case
+        let other = "b".repeat(64);
+
+        // The real line this host produced, `lowerdir+=` per layer.
+        let modern = format!(
+            "4796 4768 0:157 / / rw,relatime shared:1266 master:1245 - overlay none \
+             rw,lowerdir+={d}/{live},lowerdir+={d}/{other},\
+             upperdir={u}/3197c4ffcd242d1e/upper,workdir={u}/3197c4ffcd242d1e/work",
+            d = layers.display(),
+            u = "/home/w/.local/share/delonix/containers",
+            live = live,
+            other = other,
+        );
+        let got = super::parse_mounted_layer_hexes(&modern, layers);
+        assert!(got.contains(&live) && got.contains(&other));
+        assert_eq!(got.len(), 2, "upperdir/workdir contribute no layer hexes");
+
+        // The older colon-list form must parse identically.
+        let legacy = format!(
+            "1 1 0:1 / / rw - overlay none rw,lowerdir={d}/{live}:{d}/{other}",
+            d = layers.display(),
+            live = live,
+            other = other,
+        );
+        assert_eq!(super::parse_mounted_layer_hexes(&legacy, layers), got);
+
+        // A mount under a DIFFERENT root must not be read as ours.
+        let elsewhere = format!("1 1 0:1 / / rw - overlay none rw,lowerdir=/other/layers/{live}");
+        assert!(
+            super::parse_mounted_layer_hexes(&elsewhere, layers).is_empty(),
+            "só o nosso `layers/` conta"
+        );
+        // Noise that merely looks like a digest is not one.
+        let short = format!(
+            "1 1 0:1 / / rw - overlay none rw,lowerdir={}/deadbeef",
+            layers.display()
+        );
+        assert!(super::parse_mounted_layer_hexes(&short, layers).is_empty());
+
+        // And the whole point: `keep` = records ∪ mounted, so a mounted layer
+        // that no record names is NOT doomed.
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("layers");
+        std::fs::create_dir_all(real.join(&live)).unwrap();
+        std::fs::create_dir_all(real.join(&other)).unwrap();
+
+        let records: std::collections::HashSet<String> = std::collections::HashSet::new();
+        assert_eq!(
+            super::plan_orphan_layers(&real, &records).dirs,
+            2,
+            "sem registo e sem mount, as duas são órfãs"
+        );
+
+        let mut keep = records.clone();
+        keep.insert(live.clone()); // what the kernel reported
+        let plan = super::plan_orphan_layers(&real, &keep);
+        assert_eq!(plan.dirs, 1, "a layer montada é poupada");
+        assert!(
+            plan.doomed.iter().all(|p| !p.ends_with(&live)),
+            "uma lowerdir viva NUNCA entra no conjunto a remover"
+        );
+    }
+
+    /// The `/proc` walk must not panic or invent hexes on a real system, and
+    /// must agree with the parser about this root's `layers/`.
+    #[test]
+    fn the_proc_walk_reads_real_mount_tables_without_inventing_anything() {
+        let found = super::layers_in_use_now(std::path::Path::new(
+            "/nonexistent-root-for-this-test/layers",
+        ));
+        assert!(
+            found.is_empty(),
+            "um root que não existe não tem layers montadas"
+        );
+        // Whatever it reports for a plausible root, every entry is a digest.
+        for hex in super::layers_in_use_now(std::path::Path::new("/var/lib/delonix/layers")) {
+            assert_eq!(hex.len(), 64);
+            assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+        }
     }
 }
