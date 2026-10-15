@@ -93,9 +93,13 @@ pub fn capabilities() -> Vec<CompletionCandidate> {
 }
 
 /// Scaffold template names — the `-t` of all four `init`s (`init`, `stack
-/// init`, `vm init`, `container init`; `main::TEMPLATE_INIT_PATHS` is the
-/// list), in catalog order. Static, like [`capabilities`]: the catalog is code
-/// (embedded by `build.rs`), so no store is opened.
+/// init`, `vm init`, `container init`), in catalog order. Static, like
+/// [`capabilities`]: the catalog is code (embedded by `build.rs`), so no store
+/// is opened.
+///
+/// All four complete the VALUE. Which of them also get their FLAGS filtered
+/// once a template is named is a narrower and separate question, answered by
+/// `main::TEMPLATE_INIT_PATHS` — three of the four, `container init` excluded.
 ///
 /// Delegates to `scaffold::template_names()` — the same list `--help` and the
 /// "unknown template" refusal print, so a TAB can never offer a name the
