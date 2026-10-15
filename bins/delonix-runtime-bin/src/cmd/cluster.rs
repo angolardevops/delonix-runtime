@@ -655,16 +655,31 @@ pub enum ClusterCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
         name: Option<String>,
     },
-    /// Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.
+    /// Remove a cluster entirely — nodes, kubeconfig, `~/.kube/config` entry.
     ///
-    /// Volumes are left alone, on purpose, same as `docker`. The same
-    /// removal `delonix delete clusters <name>` already does (the generic
-    /// kubectl-style verb this engine gives every Kind) — this is just the
-    /// more discoverable spelling inside `cluster --help`, with a
-    /// confirmation prompt `delete` does not have.
+    /// Serves BOTH families: a kind-mode cluster, whose nodes are
+    /// containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`),
+    /// whose nodes are VMs — its load balancer and etcd members included.
+    ///
+    /// What becomes of the NETWORK is the one real difference, and it
+    /// follows who created it: a kind-mode cluster's `dlx-<name>` was made
+    /// FOR it and goes with it, while the `--network` a VM cluster was given
+    /// is yours and is left alone. Volumes are never touched either, on
+    /// purpose, same as `docker`.
+    ///
+    /// A cluster whose nodes are already gone is still removable by name:
+    /// what gets collected is the state directory, the exported kubeconfig
+    /// and the matching context — the same thing `cluster prune <name>` does.
+    ///
+    /// Omitting the name resolves among KIND-MODE clusters only, so name a
+    /// VM cluster explicitly. The same removal `delonix delete clusters
+    /// <name>` already does (the generic kubectl-style verb this engine
+    /// gives every Kind) — this is just the more discoverable spelling
+    /// inside `cluster --help`, with a confirmation prompt `delete` does not
+    /// have.
     Destroy {
         /// Cluster name. Omit when there is only one.
-        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        #[arg(add = ArgValueCandidates::new(super::complete::destroyable_clusters))]
         name: Option<String>,
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
