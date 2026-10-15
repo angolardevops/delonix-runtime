@@ -566,6 +566,227 @@ pub fn build_command() -> clap::Command {
     cmd::manual::apply(command)
 }
 
+/// The `init`s that take `-t`. They do NOT take the same flags: `EdgeArgs`
+/// (`--port`/`--tls-port`/`--hostname`) is flattened into `init` and `stack
+/// init`, while `vm init` takes only `--template-version`. Hence
+/// `hide_if_present` below rather than a per-path list of which flag lives
+/// where — `mut_arg` on an arg a command does not have PANICS, and panicking
+/// here would do it in the middle of the user's command line, on every TAB.
+const TEMPLATE_INIT_PATHS: &[&[&str]] = &[&["init"], &["stack", "init"], &["vm", "init"]];
+
+/// The template already named on the line being completed (`-t go`, `-t=go`,
+/// `--template go`, `--template=go`), if any.
+///
+/// Reading the raw argv is not a shortcut here: `CompleteEnv` is handed the
+/// words to complete and the tree has to be shaped BEFORE clap parses them,
+/// which is the same ordering problem `po::peek_lang` solves for the language.
+fn peek_template() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "-t" || a == "--template" {
+            return args.next().filter(|v| !v.starts_with('-'));
+        }
+        for p in ["--template=", "-t="] {
+            if let Some(v) = a.strip_prefix(p) {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The tree `clap_complete` completes against: the real one, minus the flags
+/// the named template cannot honour.
+///
+/// `delonix init -t go --<TAB>` used to offer `--tls-port` and `--hostname` on
+/// a template that does not serve TLS, and `-v` on one with no version
+/// parameter — suggestions whose only outcome is the refusal in
+/// `scaffold::settle_plan` ("template 'go' does not serve TLS") or in the
+/// version check. The refusals stay: this hides the flag at TAB time, it does
+/// not police it, and completing is the one moment where we know the template
+/// before the command runs.
+///
+/// Only completion uses this. `build_command` is deliberately untouched, so
+/// `--help` and the generated manpages keep describing every flag the command
+/// accepts regardless of template.
+fn completion_tree() -> clap::Command {
+    let cmd = <Cli as clap::CommandFactory>::command();
+    match peek_template() {
+        Some(t) => hide_flags_the_template_refuses(cmd, &t),
+        None => cmd,
+    }
+}
+
+/// Split from `completion_tree` so it can be tested: the tree is the testable
+/// part, `peek_template`'s argv is not.
+fn hide_flags_the_template_refuses(cmd: clap::Command, template: &str) -> clap::Command {
+    if !cmd::scaffold::template_is_known(template) {
+        return cmd;
+    }
+    let hide_tls = !cmd::scaffold::template_supports_tls(template);
+    let hide_version = !cmd::scaffold::template_has_version(template);
+    if !hide_tls && !hide_version {
+        return cmd;
+    }
+    // `hide` rather than removal: clap_complete skips hidden args, and an arg
+    // that is still THERE keeps parsing (and refusing) exactly as before.
+    let hide_if_present = |c: clap::Command, id: &str| -> clap::Command {
+        if c.get_arguments().any(|a| a.get_id() == id) {
+            c.mut_arg(id, |a| a.hide(true))
+        } else {
+            c
+        }
+    };
+    let strip = |c: clap::Command| -> clap::Command {
+        let mut c = c;
+        if hide_tls {
+            c = hide_if_present(c, "tls_port");
+            c = hide_if_present(c, "hostname");
+        }
+        if hide_version {
+            c = hide_if_present(c, "template_version");
+        }
+        c
+    };
+    TEMPLATE_INIT_PATHS
+        .iter()
+        .fold(cmd, |acc, path| mut_at(acc, path, &strip))
+}
+
+/// What `delonix init -t <template> --<TAB>` offers.
+///
+/// The accessors these tests cover shipped in `cb047291` with doc comments
+/// saying «used by autocomplete to filter unsupported flags» and NO caller, so
+/// `clippy -D warnings` failed on two `dead_code`s and the filtering never
+/// happened. Testing the tree, not the shell, is the point: the shell protocol
+/// is `clap_complete`'s to keep working, the per-template shape is ours.
+#[cfg(test)]
+mod completion_filter_tests {
+    use clap::CommandFactory;
+
+    /// Whether `arg` is hidden (i.e. not offered) under `path`, for `template`.
+    fn hidden(template: &str, path: &[&str], arg: &str) -> bool {
+        let tree = super::hide_flags_the_template_refuses(super::Cli::command(), template);
+        let mut cur = &tree;
+        for seg in path {
+            cur = cur
+                .get_subcommands()
+                .find(|s| s.get_name() == *seg)
+                .unwrap_or_else(|| panic!("no subcommand {seg}"));
+        }
+        let is_hidden = cur
+            .get_arguments()
+            .find(|a| a.get_id() == arg)
+            .unwrap_or_else(|| panic!("no arg {arg} under {}", path.join(" ")))
+            .is_hide_set();
+        is_hidden
+    }
+
+    /// `go` declares `version=` and no `tls=`: the TLS pair goes, `-v` stays.
+    #[test]
+    fn a_template_without_tls_stops_offering_the_tls_pair() {
+        for path in [&["init"][..], &["stack", "init"][..]] {
+            assert!(hidden("go", path, "tls_port"), "{path:?}");
+            assert!(hidden("go", path, "hostname"), "{path:?}");
+            assert!(
+                !hidden("go", path, "template_version"),
+                "go has version=1.26, so -v must still be offered: {path:?}"
+            );
+        }
+    }
+
+    /// `nginx` declares both, so nothing is hidden anywhere.
+    #[test]
+    fn a_template_with_tls_and_a_version_hides_nothing() {
+        for arg in ["tls_port", "hostname", "template_version"] {
+            assert!(!hidden("nginx", &["init"], arg), "{arg}");
+        }
+    }
+
+    /// An unknown name — which under TAB is mostly a HALF-TYPED one — must hide
+    /// nothing. `template_meta` answers for it with its own no-version/no-TLS
+    /// defaults, so the tempting `template_supports_tls` alone would quietly
+    /// hide every flag while the operator is still typing `ngi`.
+    #[test]
+    fn an_unknown_or_half_typed_template_hides_nothing() {
+        for name in ["nonsense", "", "ngi"] {
+            for arg in ["tls_port", "hostname", "template_version"] {
+                assert!(!hidden(name, &["init"], arg), "{name}/{arg}");
+            }
+        }
+    }
+
+    /// `python` is an alias of `fastapi` (`TEMPLATE_ALIASES`). An alias has to
+    /// answer like its target, or `-t python` filters as if it were unknown.
+    #[test]
+    fn an_alias_filters_like_the_template_it_resolves_to() {
+        for arg in ["tls_port", "hostname"] {
+            assert_eq!(
+                hidden("python", &["init"], arg),
+                hidden("fastapi", &["init"], arg),
+                "{arg}"
+            );
+        }
+    }
+
+    /// `vm init` takes `-t` and `--template-version` but NOT the flattened
+    /// `EdgeArgs`. `mut_arg` panics on an argument a command does not have, and
+    /// a completer panics in the middle of the operator's command line — this
+    /// is the regression that made `delonix init -t go --<TAB>` print a
+    /// backtrace instead of suggestions.
+    #[test]
+    fn an_init_without_the_edge_args_is_left_alone_instead_of_panicking() {
+        let tree = super::hide_flags_the_template_refuses(super::Cli::command(), "go");
+        let vm_init = tree
+            .get_subcommands()
+            .find(|s| s.get_name() == "vm")
+            .and_then(|vm| {
+                vm.get_subcommands()
+                    .find(|s| s.get_name() == "init")
+                    .cloned()
+            })
+            .expect("vm init");
+        assert!(
+            vm_init.get_arguments().all(|a| a.get_id() != "tls_port"),
+            "precondition: vm init has no --tls-port, which is why hide_if_present exists"
+        );
+        assert!(!hidden("go", &["vm", "init"], "template_version"));
+    }
+
+    /// `--help` and the generated manpages describe the command, not one
+    /// template's subset of it, so the real tree keeps every flag visible.
+    #[test]
+    fn the_help_tree_is_not_filtered() {
+        let help = super::build_command();
+        let init = help
+            .get_subcommands()
+            .find(|s| s.get_name() == "init")
+            .expect("init");
+        for arg in ["tls_port", "hostname", "template_version"] {
+            assert!(
+                !init
+                    .get_arguments()
+                    .find(|a| a.get_id() == arg)
+                    .expect(arg)
+                    .is_hide_set(),
+                "{arg} must stay in --help"
+            );
+        }
+    }
+}
+
+/// Applies `f` to the subcommand at `path`, however deep it sits.
+fn mut_at(
+    cmd: clap::Command,
+    path: &[&str],
+    f: &dyn Fn(clap::Command) -> clap::Command,
+) -> clap::Command {
+    match path {
+        [] => f(cmd),
+        [head, tail @ ..] => cmd.mut_subcommand(head, |s| mut_at(s, tail, f)),
+    }
+}
+
 fn run() -> Result<()> {
     // Language BEFORE the clap parse: the help is generated DURING the parse,
     // so the decision has to come from a peek at the argv/environment (`--l18n`
@@ -978,7 +1199,7 @@ fn main() {
 
     // Dynamic autocompletion: if the shell asked for suggestions (env
     // COMPLETE), handle that and exit; otherwise, follow the normal flow.
-    clap_complete::CompleteEnv::with_factory(<Cli as clap::CommandFactory>::command).complete();
+    clap_complete::CompleteEnv::with_factory(completion_tree).complete();
 
     if let Err(e) = run() {
         // Gap closed: the 4 hidden re-exec paths above already ran their errors
