@@ -4,15 +4,22 @@
 > de uma consolidação, não documentação do produto. Escrito em pt-AO de propósito:
 > é um prompt para o dono ditar, não doc canónica (essa é em inglês).
 
-**Gatilho.** Escrever `consolidado` numa sessão aberta neste repositório significa:
-«lê este ficheiro inteiro, confirma o estado contra o remoto, e continua de onde a
-consolidação de 2026-10-14 parou». Não refazer a consolidação — ela está feita.
+**Gatilho.** `/consolidado` é uma **skill multi-repo** (10 repos; o ficheiro canónico
+dela vive em `docs/CONSOLIDADO.md` do repo que a definiu, e instala-se com
+`cp docs/CONSOLIDADO.md ~/.claude/commands/consolidado.md`). **Este ficheiro não é o
+comando — é o ESTADO do `delonix-runtime`** que o passo 1 dessa skill descobriria, já
+descoberto e medido. Escrever `consolidado` numa sessão deste repositório significa: lê
+isto primeiro, confirma contra o remoto, e **continua** de onde a consolidação de
+2026-10-14 parou. **Não refazer a consolidação** — está feita, e o passo 3 da skill
+(cherry-pick) daria conflitos sobre trabalho que já lá está.
 
 ## 1. O que a `develop` já tem
 
 Criada de `origin/main` em `3cd14ec7` (PR #837) a 2026-10-14, por **quatro merges
-`--no-ff`**, um por linha de trabalho. **35 commits próprios, 165 ficheiros,
-+13 686/−687.** A versão continua `5.0.2`, igual à última tag — trabalho entre
+`--no-ff`**, um por linha de trabalho, mais dois commits próprios (as páginas geradas e
+os checks recuperados). **36 commits próprios, 166 ficheiros.** No remoto está como
+**`consolida/develop-2026-10-14`** (ver §5.4 para o porquê de a `develop` não ter sido
+empurrada directamente). A versão continua `5.0.2`, igual à última tag — trabalho entre
 releases, como o `version_gate.py` exige.
 
 | Merge | Branch de origem | Próprios | O que traz |
@@ -47,18 +54,25 @@ escolher uma apaga o achado de outra pessoa).
   `claude/silly-lovelace-2b696b`, `worktree-agent-a207e8b6eace29570`,
   `worktree-agent-ab20a26997fd591e1`, `worktree-agent-ac2db8ad83b6435b3`.
 
-## 3. Os dois PRs abertos ficam redundantes
+## 3. Os dois PRs redundantes estão FECHADOS
 
-| PR | Ramo | Estado face à `develop` |
+Por decisão do dono, a 2026-10-14. Cada um levou a razão em comentário e o `git cherry`
+que a mede (**0 patches ausentes** nos dois). O repositório ficou **sem PRs abertos**.
+
+| PR | Ramo | Absorvido por |
 |---|---|---|
-| [#835](https://github.com/angolardevops/delonix-runtime/pull/835) | `sec/owasp-audit` | **contido** (via `integra/owasp-audit`) |
-| [#836](https://github.com/angolardevops/delonix-runtime/pull/836) | `plan/s24-gitops` | **contido** (via `plan/s17-vip-ipv6`) |
+| #835 | `sec/owasp-audit` | merge de `integra/owasp-audit` |
+| #836 | `plan/s24-gitops` | merge de `plan/s17-vip-ipv6` |
 
-Decisão do dono: ou se fundem os dois à `main` pelo caminho normal e a `develop`
-rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os dois E a
-`develop`** — seria o mesmo trabalho duas vezes com hashes diferentes.
+A consolidação passa a ser o único veículo deste trabalho.
 
 ## 4. O que já está PROVADO nesta ponta (2026-10-14)
+
+- **`cargo test --workspace`: 3413 passados, 0 falhados**, `TEST_RC=0`. O número conta:
+  um filtro que não casa com nada sai 0 e não prova nada — e a primeira corrida desta
+  consolidação foi feita com `| tail -40`, que cortou o resumo e deixou um `EXIT=0` que
+  era do `echo` final, não dos testes. Falso verde apanhado e refeito sem filtro.
+- **`cargo fmt --check` e `clippy --workspace --all-targets -- -D warnings`**: limpos.
 
 - **O workspace consolidado compila**: `cargo build --release --workspace` → `EXIT=0`,
   os cinco binários mais o `delonix-storage-helper`. É a primeira prova de que os
@@ -72,10 +86,7 @@ rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os do
 
 ## 5. O que FALTA, por ordem
 
-1. **`make ci`** — `cargo fmt --check`, `clippy -D warnings` e `cargo test --workspace`
-   não foram concluídos nesta ponta (ver o estado em `/tmp/claude-1000/ci-develop.log`
-   se a sessão for a mesma; senão correr de novo).
-2. **UM gate está VERMELHO, e é um achado do ramo de origem, não da consolidação.**
+1. **UM gate está VERMELHO, e é um achado do ramo de origem, não da consolidação.**
    `scripts/cli_exec_ratchet.py` chumba: «the CLI grew: 274 leaves in the baseline,
    277 today». As três folhas novas são **`network vip-pool set`, `network vip-pool
    show` e `network vip-pool clear`** (`--list-missing` confirma-o), acrescentadas pelo
@@ -90,7 +101,12 @@ rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os do
    ```
    O `--commit` é obrigatório: o default carimba o HEAD, e regravar uma corrida antiga
    numa ponta mais nova já nomeou o commit errado uma vez.
-3. **Os gates que o CI apanha e o local não** (correr sem `tail`, que esconde a causa):
+   **Metade disto já está feita**: o commit `ee3e00c6` dá às três folhas um check
+   julgado cada — recuperado de trabalho **por commitar** que estava no worktree
+   `s17-vip-ipv6` e que uma limpeza de worktrees teria destruído. O terceiro check
+   substitui o `vip-pool clear >/dev/null 2>&1` do teardown por um check julgado, que é
+   a própria regra do ratchet. **Falta só a corrida** que regrava o trace.
+2. **Os gates que o CI apanha e o local não** (correr sem `tail`, que esconde a causa):
    `python3 scripts/lang_ratchet.py`, `scripts/arch_fitness.py`,
    `scripts/contract_gate.py`, `scripts/version_gate.py`, `scripts/docs_cli_gate.py`,
    `scripts/cli_exec_ratchet.py`, `scripts/tmp_roots_gate.py`, `scripts/test_*.py`.
@@ -98,7 +114,7 @@ rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os do
    `cli_exec_baseline.json`, `cli_exec_trace.tsv`, `lang_baseline.json`) — se
    discordarem, **a corrida da `develop` é que manda**: regravar com a proveniência
    (`--commit <sha da develop>`), nunca carimbar o HEAD de outra ponta.
-4. **A bateria E2E e o caos** — não correm no CI (o runner alojado bloqueia userns),
+3. **A bateria E2E e o caos** — não correm no CI (o runner alojado bloqueia userns),
    por isso só esta máquina (ou o lab) os prova. Com os **quatro binários irmãos** no
    mesmo `target` (`-cri`, `-mgmt`, `-mcp`, `-node-api`), senão dá FAIL falso, e com
    **os dois roots isolados**:
@@ -107,11 +123,40 @@ rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os do
    ```
    Só `DELONIX_ROOT` aponta o teardown à infra real — **meia isolação é pior que
    nenhuma** e já reiniciou um container de produção deste host.
-5. **O push.** O hook recusa `git push` sem veredicto `APPROVED` do agente
-   `cli-tester` para `HEAD^{tree}` (`cli_funcional_gate`). Num ramo de consolidação
-   isso é caro; saltar o gate é **decisão do dono**, não minha.
+4. **O push: são DOIS hooks, e o segundo foi surpresa.**
+   - `cli_funcional_gate` (PreToolUse) nega o push sem veredicto `APPROVED` do agente
+     `cli-tester` para `HEAD^{tree}`. Saltou-se com `DELONIX_CLI_GATE=skip`, **com
+     autorização explícita do dono** — o próprio gate diz que um modelo só o usa assim.
+   - `pre-push` (`ngolacloud/ci/hooks`) trata **`develop` como ramo protegido**: recebe
+     por PR, e um push directo faz a CI **publicar uma imagem `<versão>-<sha8>`** desde
+     2026-08-28. Por isso a consolidação foi para **`consolida/develop-2026-10-14`**
+     (ramo de funcionalidade, portão leve, já no remoto) e a `develop` ficou por criar
+     no remoto. Para a criar são duas vias, e a escolha é do dono:
+     ```bash
+     # a) directo, publica a imagem:
+     NGOLA_GITFLOW_FORCE=1 DELONIX_CLI_GATE=skip git push -u origin develop
+     # b) por PR, sem publicar: criar develop no GitHub a partir de consolida/… e
+     #    abrir PR consolida/… -> develop
+     ```
 
-## 6. Armadilhas desta árvore que custaram tempo antes
+## 6. Trabalho fora dos ramos — o que a skill manda olhar e quase se perdeu
+
+- **RECUPERADO: três checks por commitar** no worktree `s17-vip-ipv6`
+  (`scripts/e2e.sh`, +6/−1). Era o remédio do gate vermelho e **uma limpeza de
+  worktrees teria-o destruído**. Está em `ee3e00c6`.
+- **Dois stashes, nenhum é trabalho a recuperar** — e a leitura foi medida, não lida da
+  mensagem deles:
+  - `stash@{0}` (2026-10-10, «resíduo Sprint 9 (ja em 00399db4)»): o commit `00399db4`
+    («cli: fold `image vm` … Sprint 9») **é ancestral de `origin/main`**, e o diff é
+    dominado por deleções (857+/−1129) — árvore atrasada face à `main`, não trabalho
+    novo. Consolidá-lo reverteria a `main`.
+  - `stash@{1}` (2026-08-27, «reversão espúria do #128»): numa branch
+    `integra/perf-recursos` que já não existe, e é uma *reversão* — o oposto de
+    trabalho.
+  - **Ficam onde estão.** São a única cópia e ninguém pediu para os apagar.
+- Nenhum outro worktree tem ficheiros sujos.
+
+## 7. Armadilhas desta árvore que custaram tempo antes
 
 - **Este host corre produção** (Odoo, Postgres, Redis, registries, nós k8s). Nunca
   `prune`/`rm -f`/`--force` sobre o que não é da corrida. Um `DELONIX_ROOT` derivado
@@ -125,7 +170,7 @@ rebaseia, ou se fecham e a `develop` passa a ser o veículo. **Não fundir os do
 - **Builds longos**: `setsid nohup`, log fora de `/tmp` do sistema, e esperar pela
   **condição** (`until grep -q '^EXIT='`), nunca por tempo.
 
-## 7. As outras oito sessões de consolidação (2026-10-14, 18:19Z)
+## 8. As outras oito sessões de consolidação (2026-10-14, 18:19Z)
 
 O mesmo pedido foi para nove sessões, uma por repositório — cada uma consolida a sua
 `develop` e escreve o seu próprio ficheiro. Esta é a do `delonix-runtime`.
@@ -137,7 +182,7 @@ O mesmo pedido foi para nove sessões, uma por repositório — cada uma consoli
 nem corre builds nesses outros repos, mesmo quando o assunto lhes pertence. O que for
 achado e for deles **reporta-se**, não se corrige daqui (decisão do dono, 2026-09-16).
 
-## 8. Sessões anteriores deste repositório
+## 9. Sessões anteriores deste repositório
 
 | Sessão | PR | Estado |
 |---|---|---|
