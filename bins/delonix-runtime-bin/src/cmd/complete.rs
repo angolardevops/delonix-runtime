@@ -123,6 +123,16 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     cands(nomes)
 }
 
+/// The clusters `cluster prune` can collect: state under `<root>/clusters`
+/// that no node — container or VM — accounts for. Completing with
+/// [`clusters`] here would offer precisely the names that verb refuses.
+pub fn cluster_leftovers() -> Vec<CompletionCandidate> {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
+        return Vec::new();
+    };
+    cands(super::kindmode::doomed_clusters(&store).unwrap_or_default())
+}
+
 /// Cluster names with a cached kubeconfig (`<root>/clusters/<name>-kubeconfig.yaml`) —
 /// covers BOTH cluster types (kind-mode and kubeadm/SSH), unlike `clusters()`
 /// above, which only sees kind-mode's container labels.
