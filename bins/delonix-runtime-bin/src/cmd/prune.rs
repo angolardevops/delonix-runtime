@@ -21,8 +21,12 @@
 //!   orphan host ports and orphan slirps. Everything whose lifetime is a
 //!   container's.
 //! * [`sweep_images`] — dangling (or, with `all`, every unused) image, plus the
-//!   CAS blobs nobody references afterwards. The blob pass MUST follow the
-//!   image pass: it is the image removal that makes the blobs unreferenced.
+//!   CAS blobs AND the unpacked `layers/<hex>/` nobody references afterwards.
+//!   Both passes MUST follow the image pass: it is the image removal that
+//!   makes them unreferenced. The layer pass is the larger reclaim of the two
+//!   — `blobs/` holds the compressed layer, `layers/` the extracted one — and
+//!   for a long time it did not exist, which is how a host reached 198 orphan
+//!   extractions (26 GiB) that no command could name, let alone remove.
 //! * [`sweep_volumes`] — volumes nothing references. **New**: `system prune`
 //!   never touched volumes and still does not, exactly as `docker system prune`
 //!   leaves them alone. Removing a volume destroys data; it takes its own verb.
@@ -492,14 +496,125 @@ pub(crate) fn owns_shared_ingress_at(root: &std::path::Path) -> bool {
 pub(crate) struct ImageSweep {
     pub images: usize,
     pub blobs: usize,
+    pub layers: usize,
     pub freed: Reclaimed,
 }
 
-/// Dangling images — or, with `all`, every image no container uses — followed
-/// by the CAS blobs nobody references any more.
+/// The entries of `layers/` that no surviving image accounts for.
+#[derive(Default)]
+pub(crate) struct LayerPlan {
+    /// Everything to unlink: the orphan layer directories AND the sidecar
+    /// files that belong to them.
+    pub doomed: Vec<std::path::PathBuf>,
+    /// How many of `doomed` are layer DIRECTORIES — the number worth
+    /// reporting, since the sidecars are bookkeeping, not the content.
+    pub dirs: usize,
+    pub freed: Reclaimed,
+}
+
+/// The extracted layer directories nobody references any more.
 ///
-/// The order is not a preference: the blobs only become unreferenced once the
-/// images that named them are gone.
+/// # Why this exists at all
+///
+/// The blob pass in [`sweep_images`] reclaims the *compressed* layer in
+/// `blobs/`; the UNPACKED copy in `layers/<hex>/` — several times larger — had
+/// no reaper whatsoever. Neither `image rm` (which unlinks only the JSON
+/// record, see `ImageStore::remove`) nor `image prune` nor `system prune` ever
+/// enumerated `layers/`, so every removed, retagged or replaced image left its
+/// extraction behind forever. Measured on the host this was written for: 218
+/// layer directories, 198 of them orphaned, 26 GiB unreclaimable by any
+/// command, on a root at 100%.
+///
+/// # Keyed on the HEX, never on the entry name
+///
+/// `layers/` is not a flat set of digest directories. Beside each `<hex>/`
+/// live two SIBLING files — `<hex>.owners` (the uid/gid index a rootless
+/// container's files are restored from) and `<hex>.modes` — written there
+/// deliberately, because anything placed INSIDE the directory becomes a file
+/// of every container of that image (`overlay.rs`). So the test is run against
+/// the hex the entry BELONGS to, with the suffix stripped first: matching the
+/// raw name against `referenced` would find no `<hex>.owners` in it and delete
+/// the ownership index of every LIVE layer, which `layer_owners` can then only
+/// recover by re-scanning the blob — assuming the blob is still there.
+///
+/// # What is deliberately left alone
+///
+/// Scratch from an extraction running RIGHT NOW: `.<hex>.<pid>.tmp/` and
+/// `.<hex>.doomed.<pid>/` (both dot-prefixed, like the blob pass already
+/// skips) and `<hex>.owners.<pid>.tmp` (not dot-prefixed — hence the second
+/// test). These belong to a live writer that is about to `rename` them into
+/// place; `overlay.rs` owns their cleanup, and a sweep that took them would be
+/// corrupting a concurrent `container run`.
+pub(crate) fn plan_orphan_layers(
+    layers_dir: &std::path::Path,
+    referenced: &HashSet<String>,
+) -> LayerPlan {
+    let mut out = LayerPlan::default();
+    let Ok(rd) = std::fs::read_dir(layers_dir) else {
+        return out; // no `layers/` yet — nothing was ever extracted
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || name.ends_with(".tmp") {
+            continue;
+        }
+        let hex = name
+            .strip_suffix(".owners")
+            .or_else(|| name.strip_suffix(".modes"))
+            .unwrap_or(name.as_str());
+        if referenced.contains(hex) {
+            continue;
+        }
+        let path = e.path();
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            // `measure`, so an extraction holding SUBUID files the caller
+            // cannot stat reports `≥` instead of a confident undercount.
+            out.freed.add(measure(&path));
+            out.dirs += 1;
+        } else {
+            out.freed.bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+        out.doomed.push(path);
+    }
+    out
+}
+
+/// Removes what [`plan_orphan_layers`] named. Returns `(directories, bytes)`.
+fn sweep_layers(layers_dir: &std::path::Path, referenced: &HashSet<String>) -> (usize, Reclaimed) {
+    let plan = plan_orphan_layers(layers_dir, referenced);
+    let mut dirs = 0;
+    for path in plan.doomed {
+        if path.is_dir() {
+            // `remove_dir_all` FIRST, unlike the container-rootfs pass: a
+            // layer tree is uniformly owned by the real user even in rootless
+            // (its real uid/gid live in the `.owners` sidecar precisely so
+            // the extraction does not need a SUBUID — `overlay.rs`), so the
+            // cheap path is the normal one here. The mapped removal is the
+            // fallback for the tree that does need a subuid to unlink, under
+            // `root`-mode extractions and layers left by older engines.
+            if std::fs::remove_dir_all(&path).is_err() {
+                delonix_linux::remove_tree_mapped(&path);
+            }
+            // Counted only once it is actually GONE: the summary line is an
+            // operator's evidence that the disk came back, so it must not
+            // claim a directory that is still sitting there.
+            if !path.exists() {
+                dirs += 1;
+            }
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    (dirs, plan.freed)
+}
+
+/// Dangling images — or, with `all`, every image no container uses — followed
+/// by the CAS blobs and the unpacked layers nobody references any more.
+///
+/// The order is not a preference: neither the blobs nor the layers become
+/// unreferenced until the images that named them are gone. Both content passes
+/// then share ONE `referenced` set, which is what keeps them from disagreeing
+/// about what is still in use — see [`plan_orphan_layers`].
 pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Result<ImageSweep> {
     let mut out = ImageSweep::default();
 
@@ -537,6 +652,17 @@ pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Res
         }
     }
 
+    // The UNPACKED layers, against the same `referenced` set — and that shared
+    // set is what makes a live container's layers safe without a second
+    // liveness query: `in_use` above spares the image record of every
+    // container in the registry, running or stopped, so the layers under its
+    // overlay mount stay referenced here. (`image rm` refuses while a
+    // container references the image, so a record cannot vanish from under a
+    // live mount by that route either.)
+    let (layer_dirs, layer_bytes) = sweep_layers(&images.root().join("layers"), &referenced);
+    out.layers = layer_dirs;
+    out.freed.add(layer_bytes);
+
     Ok(out)
 }
 
@@ -563,6 +689,11 @@ pub(crate) struct PrunePlan {
     /// B — CAS blobs nothing would reference once the images above are gone.
     pub blobs: usize,
     pub blobs_bytes: u64,
+    /// B — extracted `layers/<hex>/` directories nothing would reference
+    /// once the images above are gone. Usually the LARGEST line in the
+    /// report: this is the unpacked content, not the compressed blob.
+    pub layers: usize,
+    pub layers_bytes: Reclaimed,
     /// B — empty auto-created `dlx-*` networks.
     pub networks: usize,
     /// B — build-cache entries nothing has used for [`BUILD_CACHE_TTL_DAYS`].
@@ -584,6 +715,7 @@ impl PrunePlan {
             partial: false,
         });
         r.add(self.build_cache_bytes);
+        r.add(self.layers_bytes);
         r
     }
 
@@ -593,6 +725,7 @@ impl PrunePlan {
             && self.dirs == 0
             && self.cgroups == 0
             && self.blobs == 0
+            && self.layers == 0
             && self.networks == 0
             && self.build_cache == 0
     }
@@ -764,6 +897,13 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
             out.blobs += 1;
         }
     }
+
+    // B — unpacked layers nothing would reference once the doomed images are
+    // gone. Same helper the sweep removes with, so a directory cannot be
+    // doomed by one and spared by the other.
+    let lp = plan_orphan_layers(&images.root().join("layers"), &referenced);
+    out.layers = lp.dirs;
+    out.layers_bytes = lp.freed;
 
     // B — empty auto-created `dlx-*` networks.
     out.networks = doomed_networks(store)?.len();
@@ -2100,5 +2240,101 @@ mod tests {
         for id in &live {
             assert!(containers.join(id).is_dir(), "vivo preservado no disco");
         }
+    }
+
+    /// REGRESSION GUARD for the leak that had NO reaper at all: the unpacked
+    /// `layers/<hex>/`. `image rm` unlinks the JSON record, `image prune`
+    /// swept `blobs/` only, and nothing in the engine ever enumerated
+    /// `layers/` — so on the host this was written against, 198 of 218 layer
+    /// directories (26 GiB) were unreachable by any command, on a root at
+    /// 100%.
+    ///
+    /// Four extractions on disk, an image that references two: exactly those
+    /// two survive.
+    #[test]
+    fn layers_no_image_references_are_swept_and_the_referenced_ones_survive() {
+        let dir = tempfile::tempdir().unwrap();
+        let images = delonix_oci::ImageStore::open(dir.path()).unwrap();
+
+        let (keep_a, keep_b) = ("a".repeat(64), "b".repeat(64));
+        let (gone_a, gone_b) = ("c".repeat(64), "d".repeat(64));
+
+        images
+            .save(&delonix_oci::Image {
+                id: format!("sha256:{}", "e".repeat(64)),
+                repo_tags: vec!["alpine:latest".to_string()],
+                // Stored as full digests; the directories are the bare hex.
+                layers: vec![format!("sha256:{keep_a}"), format!("sha256:{keep_b}")],
+                config: Default::default(),
+                created_unix: 0,
+            })
+            .unwrap();
+
+        let layers = images.root().join("layers");
+        std::fs::create_dir_all(&layers).unwrap();
+        for hex in [&keep_a, &keep_b, &gone_a, &gone_b] {
+            std::fs::create_dir_all(layers.join(hex)).unwrap();
+            std::fs::write(layers.join(hex).join(".extracted"), b"ok").unwrap();
+            // The SIBLING bookkeeping `overlay.rs` writes beside every layer.
+            std::fs::write(layers.join(format!("{hex}.owners")), b"x").unwrap();
+            std::fs::write(layers.join(format!("{hex}.modes")), b"").unwrap();
+        }
+        // Scratch from an extraction in flight — all three shapes.
+        std::fs::create_dir_all(layers.join(format!(".{gone_a}.4242.tmp"))).unwrap();
+        std::fs::create_dir_all(layers.join(format!(".{gone_b}.doomed.4242"))).unwrap();
+        std::fs::write(layers.join(format!("{gone_a}.owners.4242.tmp")), b"x").unwrap();
+
+        // `referenced` exactly as `sweep_images`/`plan` build it.
+        let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for img in images.list().unwrap() {
+            referenced.insert(delonix_oci::cas::strip(&img.id).to_string());
+            for l in &img.layers {
+                referenced.insert(delonix_oci::cas::strip(l).to_string());
+            }
+        }
+
+        // The plan names the two orphan DIRECTORIES — and not the scratch.
+        let plan = super::plan_orphan_layers(&layers, &referenced);
+        assert_eq!(plan.dirs, 2, "dois directórios órfãos, nem mais nem menos");
+
+        let (swept, _freed) = super::sweep_layers(&layers, &referenced);
+        assert_eq!(swept, 2);
+
+        assert!(
+            layers.join(&keep_a).is_dir(),
+            "layer referenciada preservada"
+        );
+        assert!(
+            layers.join(&keep_b).is_dir(),
+            "layer referenciada preservada"
+        );
+        assert!(!layers.join(&gone_a).exists(), "layer órfã reclamada");
+        assert!(!layers.join(&gone_b).exists(), "layer órfã reclamada");
+
+        // THE TRAP: the sidecars are keyed on the hex they belong to, never on
+        // their own name. Matching the raw entry name against `referenced`
+        // finds no `<hex>.owners` in it and deletes the uid/gid index of every
+        // LIVE layer — silent, and only visible later as wrong ownership
+        // inside a rootless container.
+        for hex in [&keep_a, &keep_b] {
+            assert!(
+                layers.join(format!("{hex}.owners")).exists(),
+                "owners de uma layer VIVA nunca é removido"
+            );
+            assert!(layers.join(format!("{hex}.modes")).exists());
+        }
+        for hex in [&gone_a, &gone_b] {
+            assert!(!layers.join(format!("{hex}.owners")).exists());
+            assert!(!layers.join(format!("{hex}.modes")).exists());
+        }
+
+        // A concurrent extraction's scratch is untouched: it belongs to a
+        // live writer about to rename it into place.
+        assert!(layers.join(format!(".{gone_a}.4242.tmp")).is_dir());
+        assert!(layers.join(format!(".{gone_b}.doomed.4242")).is_dir());
+        assert!(layers.join(format!("{gone_a}.owners.4242.tmp")).exists());
+
+        // Idempotent: a second sweep finds nothing left to take.
+        assert_eq!(super::sweep_layers(&layers, &referenced).0, 0);
     }
 }
