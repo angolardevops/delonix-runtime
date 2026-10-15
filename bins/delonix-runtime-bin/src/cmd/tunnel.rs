@@ -1813,9 +1813,13 @@ mod tests {
         // And the own-record exemption is by NAME, not "first record wins":
         // a rival hiding behind one's own record is still found.
         assert_eq!(
-            ngrok_rival(vec![rec("web", "ngrok"), rec("api", "ngrok")], "web", |_| true)
-                .map(|r| r.name)
-                .as_deref(),
+            ngrok_rival(
+                vec![rec("web", "ngrok"), rec("api", "ngrok")],
+                "web",
+                |_| true
+            )
+            .map(|r| r.name)
+            .as_deref(),
             Some("api")
         );
     }
