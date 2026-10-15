@@ -512,21 +512,36 @@ pub fn progress_bar(label: &str, done: u64, total: Option<u64>) {
     if !color_enabled() {
         return;
     }
-    const WIDTH: usize = 24;
+    const WIDTH: usize = 20;
+    const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+    // Spinner frame based on done bytes (cycles through frames)
+    let spinner = SPINNERS[((done / (1024 * 1024)) as usize) % SPINNERS.len()];
+
     match total {
         Some(t) if t > 0 => {
             let frac = (done as f64 / t as f64).clamp(0.0, 1.0);
             let filled = (frac * WIDTH as f64).round() as usize;
             let bar: String = "█".repeat(filled) + &"░".repeat(WIDTH - filled);
+
+            // Calculate remaining time (rough estimate based on done bytes)
+            let remaining = t.saturating_sub(done);
+            let eta = if done > 0 {
+                format!("~{:>3}s", (remaining as f64 / (done as f64 / 2.0)) as u32)
+            } else {
+                "  --s".to_string()
+            };
+
             eprint!(
-                "\r\x1b[K{label}  {bar}  {:>3}%  {} / {}",
+                "\r\x1b[K{spinner} {label}  {bar}  {:>3}%  {} / {}  {eta}",
                 (frac * 100.0) as u32,
                 fmt_size(done),
                 fmt_size(t)
             );
         }
         _ => {
-            eprint!("\r\x1b[K{label}  {} downloaded", fmt_size(done));
+            let spinner = SPINNERS[((done / (1024 * 1024)) as usize) % SPINNERS.len()];
+            eprint!("\r\x1b[K{spinner} {label}  {} downloaded", fmt_size(done));
         }
     }
     use std::io::Write;
