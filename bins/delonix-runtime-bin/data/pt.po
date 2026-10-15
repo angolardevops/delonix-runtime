@@ -11188,11 +11188,11 @@ msgstr "larga a rede adicional — a principal fica"
 
 # ---- delonix init: adopt an existing project (2026-09-13) ----
 
-msgid "Start the right project for THIS directory.\n\nDetects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why.\n\nADOPTS an existing, non-empty project instead of scaffolding: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout and needs a look before `build`."
-msgstr "Arranca o projecto certo para ESTE directório.\n\nDetecta e encaminha para `stack init`/`vm init` com o template correspondente, dizendo o que detectou e porquê.\n\nADOPTA um projecto existente e não-vazio em vez de o gerar: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template e precisa de ser revisto antes do `build`."
+msgid "Start the right project for THIS directory.\n\nDetects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why.\n\nADOPTS an existing, non-empty project instead of scaffolding: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout and needs a look before `build`.\n\nThe project is left as a git repository on `main`, with one commit holding everything it was just given — so the next step is adding a remote and pushing, not four commands of setup. Skipped inside an existing work tree (a monorepo subdirectory), over an existing `.git`, and when adopting a project that already has a history."
+msgstr "Arranca o projecto certo para ESTE directório.\n\nDetecta e encaminha para `stack init`/`vm init` com o template correspondente, dizendo o que detectou e porquê.\n\nADOPTA um projecto existente e não-vazio em vez de o gerar: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template e precisa de ser revisto antes do `build`.\n\nO projecto fica como um repositório git em `main`, com um commit que leva tudo o que acabou de receber — por isso o passo seguinte é acrescentar um remote e empurrar, e não quatro comandos de preparação. Saltado dentro de uma work tree existente (um subdirectório de monorepo), sobre um `.git` que já existe, e ao adoptar um projecto que já tem história."
 
-msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.\n\nFiles ALREADY FILLED IN (images included), ready to use without editing anything.\n\nADOPTS an existing, non-empty project instead: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout."
-msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README.\n\nFicheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada.\n\nADOPTA um projecto existente e não-vazio em vez disso: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template."
+msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.\n\nFiles ALREADY FILLED IN (images included), ready to use without editing anything.\n\nADOPTS an existing, non-empty project instead: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout.\n\nThe project is left as a git repository on `main`, with one commit holding everything it was just given — so the next step is adding a remote and pushing, not four commands of setup. Skipped inside an existing work tree (a monorepo subdirectory), over an existing `.git`, and when adopting a project that already has a history."
+msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README.\n\nFicheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada.\n\nADOPTA um projecto existente e não-vazio em vez disso: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template.\n\nO projecto fica como um repositório git em `main`, com um commit que leva tudo o que acabou de receber — por isso o passo seguinte é acrescentar um remote e empurrar, e não quatro comandos de preparação. Saltado dentro de uma work tree existente (um subdirectório de monorepo), sobre um `.git` que já existe, e ao adoptar um projecto que já tem história."
 
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
@@ -16216,3 +16216,25 @@ msgstr "Descarrega e verifica os artefactos de instalação para a cache local, 
 
 msgid "Download and verify the install artefacts into the local cache, for an offline install later.\n\nRun it on a machine with reach, then copy `<root>/net-profiles/` to the machine that will bootstrap the cluster and pass `--cni-offline`. Every artefact is verified against the digest this release pins; a mismatch fails and caches nothing."
 msgstr "Descarrega e verifica os artefactos de instalação para a cache local, para instalar offline depois.\n\nCorre numa máquina com alcance, copia o `<root>/net-profiles/` para a máquina que vai fazer o bootstrap, e passa `--cni-offline`. Cada artefacto é verificado contra o digest que esta release fixa; se não bater, falha e não guarda nada."
+
+# ---- init: o projecto gerado nasce como repositório (2026-10-15) ----
+msgid "git does not work here, so the project is not a repository yet"
+msgstr "o git não funciona aqui, por isso o projecto ainda não é um repositório"
+
+msgid "this directory is already inside a git repository — not creating one inside it"
+msgstr "este directório já está dentro de um repositório git — não crio outro lá dentro"
+
+msgid "`git init` failed, so the project is not a repository yet"
+msgstr "o `git init` falhou, por isso o projecto ainda não é um repositório"
+
+msgid "the files could not be staged"
+msgstr "não foi possível preparar os ficheiros para commit"
+
+msgid "the commit could not be run"
+msgstr "não foi possível correr o commit"
+
+msgid "git repository created on `main` and everything staged, but the commit needs an author:\n  git config user.name  \"Your Name\"\n  git config user.email you@example.com\n  git commit -m \"chore: scaffold\""
+msgstr "repositório git criado em `main` e tudo preparado, mas o commit precisa de um autor:\n  git config user.name  \"O Teu Nome\"\n  git config user.email tu@exemplo.com\n  git commit -m \"chore: scaffold\""
+
+msgid "git repository created on `main` and everything staged, but the commit failed: {why}"
+msgstr "repositório git criado em `main` e tudo preparado, mas o commit falhou: {why}"

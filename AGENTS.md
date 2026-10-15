@@ -3419,6 +3419,84 @@ tem a secção «On the internet without a public IP», e o fim do `--up` aponta
   Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
   ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
 
+## Um projecto gerado nasce como repositório (2026-10-15)
+
+Pedido do dono: o projecto do `init` deve nascer pronto para git, para que o
+passo seguinte seja acrescentar o remote e empurrar, e não quatro comandos de
+preparação. `git_init` (`cmd/scaffold.rs`) corre depois de o projecto estar
+completo — ficheiros e certificado — e **nunca em modo de adopção**, porque
+esse projecto tem história sua.
+
+**Quatro recusas, cada uma porque o contrário é pior**: sem `git` no PATH
+diz-o e segue (um scaffold não falha por uma ferramenta que o projecto não
+precisa para construir); sobre um `.git` que já existe não toca em nada;
+**dentro de uma work tree existente** recusa criar um repositório aninhado — num
+subdirectório de monorepo essa armadilha só aparece quando alguém empurra e os
+ficheiros não estão lá, e `git rev-parse --is-inside-work-tree` é a única forma
+honesta de perguntar; e sem autor configurado deixa tudo STAGED e imprime os
+dois `git config`, em vez de inventar um nome e um endereço que ficariam na
+história de todos os projectos gerados aqui. O `--initial-branch` precisa de
+git 2.28; sem ele, `git init` + `symbolic-ref`.
+
+**E `.git` é metadados, não conteúdo gerado — todo o walker sobre um projecto
+tem de concordar com isso.** Dois testes chumbaram no instante em que o
+repositório passou a existir: um lê cada ficheiro do projecto como UTF-8 (os
+objectos do git são binários) e o outro compara ficheiro a ficheiro o que dois
+templates geram (os objectos diferem byte a byte entre duas corridas do MESMO
+template). Os dois walkers saltam `.git`. O `grep -r` de tokens por substituir
+da bateria não foi afectado — medido, não suposto.
+
+**Empurrar para uma plataforma NÃO entra aqui**, e a razão é o portão: o
+`CONSUMER_NAMES` do `scripts/arch_fitness.py` recusa `delonixctl`,
+`ngolacloud` e `paas` em `crates/`, `bins/` e `proto/` — e os templates vivem em
+`bins/delonix-runtime-bin/templates/`, com `.md`/`.yaml`/`.sh` dentro da
+varredura. O que o motor entrega é a precondição (o repositório em `main` com
+um commit); o nome do remote e a plataforma pertencem a quem o consome.
+
+**O portão funcional recusou a primeira versão, e cinco dos seis achados eram
+reais.** O mais grave com consequência de credencial: o `odoo` era o **único**
+dos onze sem `.gitignore`, e tanto o README como o comentário do manifesto
+mandam mover a password da base de dados para `.secrets.env`, «a file you keep
+OUT of git». Enquanto não havia repositório a promessa era só imprecisa; com o
+repositório a existir desde o primeiro segundo, quem a seguisse punha a
+password num ficheiro que o git já estava a ver. **O `.dockerignore` mantém um
+ficheiro fora de uma IMAGEM — não é o mesmo ficheiro nem a mesma promessa.**
+Gate: `no_template_tells_you_to_keep_a_secret_in_a_file_git_is_watching`
+(verificado a chumbar com o `.gitignore` do odoo removido).
+
+Os outros quatro, todos corrigidos e medidos:
+
+- **Culpava o autor por QUALQUER falha de commit.** Uma chave de assinatura
+  ausente, um hook herdado do `init.templateDir`, um object store só de leitura
+  — todos davam «the commit needs an author» e dois `git config` que não
+  resolvem nada. Mesma família do «o ENOENT de um `Command::status()` não é um
+  ficheiro em falta». Agora o autor só é nomeado quando falta mesmo, e nos
+  outros casos citam-se as palavras do próprio git (medido: `fatal: cannot
+  exec '/nao/existe'`).
+- **O scaffold genérico (sem `-t`) ficava de fora.** Escreve o mesmo tipo de
+  artefacto e não ganhava repositório, sem uma linha a dizê-lo.
+- **O `--help` dos `init` não prometia nada disto**, e é o oráculo: o comando
+  passa a criar `.git/` e um commit no directório de quem chama.
+- **A sonda do `git --version` lia o `Err` do spawn e não o estado de saída** —
+  respondia «o git arranca», não «o git serve».
+
+E as cinco mensagens novas não tinham entrada no `pt.po`. O
+`help_i18n_tests::todo_o_help_de_comando_tem_traducao_pt` apanhou a mudança do
+`--help` sozinho; as mensagens de `po::t` **não têm portão** — é a lacuna que
+o próprio relatório nomeia, e fica escrita aqui.
+
+**Por fazer, pedido no mesmo dia**: um `VMfile` por template, com unit systemd
+activada no arranque, para `delonix vm build` produzir uma VM que já corre o
+projecto. A gramática serve (`FROM`/`SIZE`/`RUN`/`COPY`/`USER`/`CLOUDINIT`/
+`VCPUS`, sem `CMD` porque uma VM arranca um init, e `COPY <dir>` copia os
+FILHOS para o destino), mas três coisas precisam de medição antes de escrever
+onze receitas: o runtime da distro contra o pin do template (o Ubuntu 24.04 traz
+Go 1.22 e os templates pinam 1.26, logo um `go build` chumba em `go.mod requires
+go >= 1.26`), o `tls/` que um `COPY .` levaria para DENTRO da imagem — o oposto
+do que estes templates prometem, e a saída é uma unit one-shot que gera o
+certificado no primeiro arranque de cada VM — e a validação, que é um
+`vm build --network` por template.
+
 ## Os 11 templates revistos, e o contrato passou a ter portão (2026-10-15)
 
 A seguir ao bug da porta privilegiada, os ONZE templates foram gerados com a

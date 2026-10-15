@@ -75,6 +75,12 @@ pub enum StackCmd {
     /// (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written,
     /// the project's own code is never touched — a warning follows, since the
     /// Delonixfile still assumes the template's own file layout.
+    ///
+    /// The project is left as a git repository on `main`, with one commit
+    /// holding everything it was just given — so the next step is adding a
+    /// remote and pushing, not four commands of setup. Skipped inside an
+    /// existing work tree (a monorepo subdirectory), over an existing
+    /// `.git`, and when adopting a project that already has a history.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
