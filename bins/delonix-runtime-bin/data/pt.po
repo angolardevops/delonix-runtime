@@ -13,8 +13,8 @@ msgstr ""
 msgid "Delonix Engine — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
 msgstr "Delonix Engine — motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust). O motor open-source que alimenta o Delonix."
 
-msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand."
-msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Global — funciona antes de qualquer subcomando."
+msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `<command> --help` to get help in the chosen language"
+msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Usa com `--help` ou `<command> --help` para obter a ajuda na língua escolhida"
 
 msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
 msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."

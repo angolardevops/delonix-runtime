@@ -97,18 +97,6 @@ pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
 }
 
-/// Whether a template supports TLS (has `tls=` in its `template.meta`).
-/// Used by autocomplete to filter unsupported `--tls-port` / `--hostname` flags.
-pub(crate) fn template_supports_tls(template_name: &str) -> bool {
-    !template_meta(canonical_template(template_name)).tls_port.is_empty()
-}
-
-/// Whether a template has a version parameter (`version=` in its `template.meta`).
-/// Used by autocomplete to filter unsupported `-v` / `--template-version` flags.
-pub(crate) fn template_has_version(template_name: &str) -> bool {
-    template_meta(canonical_template(template_name)).has_version
-}
-
 /// Old template names that still answer, mapped to the directory that now
 /// holds the template. A rename does not change what the project IS, so the
 /// alias is silent — the same rule as a renamed Kind (`KIND_ALIASES`). `python`
@@ -3233,10 +3221,12 @@ mod tests {
 
     /// Every application template (go, node, nestjs, nextjs, fastapi, django, laravel)
     /// includes VM support: a VMfile, vm.yaml, cloud-init/user-data, and .delonixignore.
-    /// This allows `delonix vm build` to work out-of-the-box.
+    /// This allows `delonix vm image build` to work out-of-the-box.
     #[test]
     fn every_application_template_supports_vm_build() {
-        let vm_templates = ["go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel"];
+        let vm_templates = [
+            "go", "node", "nestjs", "nextjs", "fastapi", "django", "laravel",
+        ];
 
         for name in &vm_templates {
             let (_, files) = TEMPLATES
@@ -3266,11 +3256,7 @@ mod tests {
             let has_vm_support = TEMPLATE_KV
                 .iter()
                 .find(|(n, _)| *n == *name)
-                .map(|(_, pairs)| {
-                    pairs
-                        .iter()
-                        .any(|(k, v)| *k == "vm_support" && *v == "yes")
-                })
+                .map(|(_, pairs)| pairs.iter().any(|(k, v)| *k == "vm_support" && *v == "yes"))
                 .unwrap_or(false);
             assert!(
                 has_vm_support,

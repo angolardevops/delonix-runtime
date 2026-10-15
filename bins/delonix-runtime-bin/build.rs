@@ -19,8 +19,13 @@ fn main() {
     // version), the lock file of its package manager (`""`: none), how
     // many seconds `--up` waits for the health path (`wait=`, default 120),
     // and the TLS port (`""` when the template does not serve TLS).
+    // Named, for the same reason `TemplateFile` above is: an eight-field tuple
+    // written inline trips `clippy::type_complexity`, and `-D warnings` makes
+    // that an error in a file nobody can edit to silence it. `...Row` and not
+    // `TemplateMeta`: that name is already a STRUCT in `scaffold.rs`, which is
+    // what this raw generated row gets parsed into.
     let mut meta = String::from(
-        "pub static TEMPLATE_META: &[(&str, &str, &str, &str, &str, &str, u64, &str)] = &[\n",
+        "pub type TemplateMetaRow = (\n    &'static str,\n    &'static str,\n    &'static str,\n    &'static str,\n    &'static str,\n    &'static str,\n    u64,\n    &'static str,\n);\npub static TEMPLATE_META: &[TemplateMetaRow] = &[\n",
     );
     // Every `key=value` of each `template.meta`, verbatim. The tuple above
     // carries the keys the generator always needs; the optional ones (`tls=`,
