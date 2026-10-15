@@ -4872,14 +4872,12 @@ workers:
 
     #[test]
     fn nodes_com_enderecos_distintos_passam() {
-        assert!(
-            check_distinct_node_addresses(&[
-                ("lab-cp1", "192.168.122.10"),
-                ("lab-w1", "192.168.122.11"),
-                ("lab-w2", "192.168.122.12"),
-            ])
-            .is_ok()
-        );
+        assert!(check_distinct_node_addresses(&[
+            ("lab-cp1", "192.168.122.10"),
+            ("lab-w1", "192.168.122.11"),
+            ("lab-w2", "192.168.122.12"),
+        ])
+        .is_ok());
         // A one-node cluster, and the empty case, cannot collide.
         assert!(check_distinct_node_addresses(&[("solo", "192.168.122.10")]).is_ok());
         assert!(check_distinct_node_addresses(&[]).is_ok());
