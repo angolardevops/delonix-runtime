@@ -1,21 +1,16 @@
-# VMfile — a bootable qcow2, built from Ubuntu cloud image.
-#
-#   delonix vm build -t __NAME__:latest .
-
 FROM ubuntu:24.04
 
 SIZE 10G
 HOSTNAME __NAME__
 
-# Install Python and runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates python3-venv
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl
 
 # Copy the application and cloud-init configuration
 COPY ./dist/__NAME__ /usr/local/bin/__NAME__
 COPY ./cloud-init/user-data /etc/cloud/cloud.cfg.d/99-__NAME__.cfg
 
-ENV APP_ENV=production PYTHONUNBUFFERED=1
+ENV APP_ENV=production
 
 USER app
 VCPUS 2

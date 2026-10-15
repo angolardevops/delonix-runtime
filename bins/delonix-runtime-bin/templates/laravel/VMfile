@@ -1,15 +1,10 @@
-# VMfile — a bootable qcow2, built from Ubuntu cloud image.
-#
-#   delonix vm build -t __NAME__:latest .
-
 FROM ubuntu:24.04
 
 SIZE 10G
 HOSTNAME __NAME__
 
-# Install PHP and runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates php8.4-fpm php8.4-cli php8.4-mbstring php8.4-xml
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl
 
 # Copy the application and cloud-init configuration
 COPY ./dist/__NAME__ /usr/local/bin/__NAME__

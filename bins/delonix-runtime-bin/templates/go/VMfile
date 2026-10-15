@@ -1,8 +1,7 @@
-# VMfile — a bootable qcow2, built from Ubuntu cloud image.
-#
-#   delonix vm build -t __NAME__:latest .
-
 FROM ubuntu:24.04
+
+# VMfile — a bootable qcow2, built from Ubuntu cloud image.
+#   delonix vm build -t __NAME__:latest .
 
 SIZE 10G
 HOSTNAME __NAME__
