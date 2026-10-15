@@ -28,6 +28,12 @@ kind: Gateway
 metadata:
   name: __NAME__-tunnel
 spec:
+  # Three providers, same spec: replace the `type:` value and nothing else
+  # here changes. `cloudflare` (below) needs `cloudflared` on PATH; `pinggy`
+  # needs NOTHING extra (plain `ssh`, no account) and is the quickest way to
+  # check a tunnel works at all; `ngrok` needs the `ngrok` agent on PATH.
+  #   type: pinggy      # no extra binary, no account, ephemeral URL
+  #   type: ngrok       # needs `ngrok` on PATH; one ngrok tunnel per host
   provider:
     type: cloudflare
     # spec:

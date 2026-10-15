@@ -624,6 +624,27 @@ fn stop_process(rec: &TunnelRecord) {
     }
 }
 
+/// SIGTERM, then WAIT (bounded) for the agent to actually be gone.
+///
+/// [`stop_process`] only SIGNALS, and SIGTERM is asynchronous: a provider
+/// agent tears its tunnel down before exiting. `apply_one` replacing a
+/// tunnel used to spawn the new agent the instant it had signalled the old
+/// one, so for `ngrok` both agents briefly wanted the same fixed local API
+/// port ([`NGROK_WEB_ADDR`]) — reintroducing, from the other side, the exact
+/// cross-wire [`other_alive_ngrok`] exists to prevent.
+///
+/// Best-effort by design: an agent that outlives the ceiling does not fail
+/// the apply (the new one is what the operator asked for, and a provider
+/// hung in teardown is not a reason to refuse it), same posture as the
+/// URL-polling deadline in [`spawn_and_capture`].
+fn stop_and_await(rec: &TunnelRecord) {
+    stop_process(rec);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && is_alive(rec) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn which(bin: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
     std::env::split_paths(&paths).find_map(|dir| {
@@ -656,7 +677,9 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
             );
             return Ok(());
         }
-        stop_process(&existing);
+        // Awaited, not just signalled: the replacement agent is spawned a few
+        // lines down and (for ngrok) wants a local port this one still holds.
+        stop_and_await(&existing);
     }
 
     let now = output::now_unix();
@@ -955,14 +978,40 @@ fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> R
 /// even attempting a connection.
 const NGROK_WEB_ADDR: &str = "127.0.0.1:4040";
 
-/// The other ngrok record (if any) currently holding the fixed web API port
+/// The OTHER ngrok record (if any) currently holding the fixed web API port
 /// — pure lookup over the store, independent of actually spawning anything,
 /// so it is testable without an `ngrok` binary on `PATH`.
-fn other_alive_ngrok(store: &JsonStore<TunnelRecord>) -> Result<Option<TunnelRecord>> {
-    Ok(store
-        .list()?
+///
+/// `self_name` is the tunnel being applied right now, and is never its own
+/// rival. BUG FIXED: the name said "other" but the filter never excluded it,
+/// and `apply_one` arrives here having just signalled that very agent — so
+/// re-applying an ngrok tunnel (any edit: a new `localPort`, a token, or
+/// switching INTO ngrok from another provider and back) failed with
+/// "another ngrok tunnel is already running ('<itself>') … stop it first
+/// (`delonix delete gateways <itself>`)", telling the operator to delete the
+/// tunnel they were in the middle of changing. Its record is in the store,
+/// and for the moment SIGTERM takes to land still alive in `/proc`, PRECISELY
+/// because this is an update of it.
+fn other_alive_ngrok(
+    store: &JsonStore<TunnelRecord>,
+    self_name: &str,
+) -> Result<Option<TunnelRecord>> {
+    Ok(ngrok_rival(store.list()?, self_name, is_alive))
+}
+
+/// The rival-selection rule itself, PURE (liveness injected): `is_alive`
+/// reads `/proc` and cannot be faked from a test, while the rule — WHICH
+/// records count as a rival — is the part that was wrong, so it is the part
+/// that has to be coverable. Same split, for the same reason, as
+/// `cmd::cluster`'s `is_cluster_vm` against the store walk around it.
+fn ngrok_rival(
+    records: Vec<TunnelRecord>,
+    self_name: &str,
+    alive: impl Fn(&TunnelRecord) -> bool,
+) -> Option<TunnelRecord> {
+    records
         .into_iter()
-        .find(|r| r.provider == "ngrok" && is_alive(r)))
+        .find(|r| r.name != self_name && r.provider == "ngrok" && alive(r))
 }
 
 fn spawn_ngrok(
@@ -986,7 +1035,7 @@ fn spawn_ngrok(
     // tunnel itself would still connect), it would just make `poll_ngrok_api`
     // read whichever agent got there first — a silent cross-wire between two
     // unrelated tunnels, worse than refusing up front.
-    if let Some(other) = other_alive_ngrok(store)? {
+    if let Some(other) = other_alive_ngrok(store, &rec.name)? {
         return Err(Error::Invalid(super::po::tf(
             "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API \
              has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this \
@@ -1713,8 +1762,61 @@ mod tests {
         };
         store.save("other", &stale).unwrap();
         assert!(
-            other_alive_ngrok(&store).unwrap().is_none(),
+            other_alive_ngrok(&store, "mine").unwrap().is_none(),
             "o registo não está genuinamente vivo (cmdline não é ngrok)"
+        );
+    }
+
+    /// **BUG FIXED: re-applying an ngrok tunnel refused itself.**
+    ///
+    /// `apply_one` reaches `spawn_ngrok` having just signalled the agent of
+    /// the record it is REPLACING — same name, provider `ngrok`, and still
+    /// alive in `/proc` for as long as SIGTERM takes to land. The filter
+    /// said "other" but compared no name, so the tunnel being edited was
+    /// reported as its own rival: "another ngrok tunnel is already running
+    /// ('web') … stop it first (`delonix delete gateways web`)" — naming the
+    /// tunnel the operator was in the middle of changing, which is what made
+    /// an ngrok Gateway look like it could be created once and never edited.
+    ///
+    /// Liveness is forced TRUE here (the real `is_alive` needs a genuine
+    /// `/proc` entry whose argv is ngrok's, unfakeable from a test) so the
+    /// assertion is about the rule and nothing else. Dropping the
+    /// `r.name != self_name` clause in `ngrok_rival` makes this fail.
+    #[test]
+    fn ngrok_rival_never_counts_the_tunnel_being_applied() {
+        let rec = |name: &str, provider: &str| TunnelRecord {
+            name: name.to_string(),
+            provider: provider.to_string(),
+            local_port: 1234,
+            hostname: None,
+            config_hash: "x".to_string(),
+            pid: Some(std::process::id() as i32),
+            public_url: None,
+            created_unix: 0,
+            started_unix: None,
+            agent_web_port: Some(4040),
+            insecure_skip_tls_verify: false,
+        };
+        // Re-applying 'web' over its own live record: not a rival.
+        assert!(
+            ngrok_rival(vec![rec("web", "ngrok")], "web", |_| true).is_none(),
+            "o túnel a ser aplicado não é rival de si mesmo"
+        );
+        // A DIFFERENT live ngrok tunnel still is — the guard must keep working.
+        assert_eq!(
+            ngrok_rival(vec![rec("api", "ngrok")], "web", |_| true)
+                .map(|r| r.name)
+                .as_deref(),
+            Some("api"),
+            "um segundo túnel ngrok continua a ser recusado"
+        );
+        // And the own-record exemption is by NAME, not "first record wins":
+        // a rival hiding behind one's own record is still found.
+        assert_eq!(
+            ngrok_rival(vec![rec("web", "ngrok"), rec("api", "ngrok")], "web", |_| true)
+                .map(|r| r.name)
+                .as_deref(),
+            Some("api")
         );
     }
 
@@ -1736,6 +1838,6 @@ mod tests {
             insecure_skip_tls_verify: false,
         };
         store.save("p", &pinggy_rec).unwrap();
-        assert!(other_alive_ngrok(&store).unwrap().is_none());
+        assert!(other_alive_ngrok(&store, "mine").unwrap().is_none());
     }
 }
