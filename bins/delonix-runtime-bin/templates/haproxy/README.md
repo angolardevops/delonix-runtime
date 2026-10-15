@@ -196,6 +196,78 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy` talks plain HTTP to the port, so it does not fit this template, which the tunnel reaches on its HTTPS port.
 
+## Tests and CI
+
+```bash
+sh scripts/ci-check.sh        # builds the image, runs it, runs the smoke against it
+sh scripts/smoke.sh           # just the smoke, against something already up
+```
+
+`scripts/ci-check.sh` is what `.github/workflows/ci.yml` and `.gitlab-ci.yml`
+both run, so a green CI and a green local run mean the same thing. It needs
+`docker`, `curl` and `openssl`, and it probes the server from OUTSIDE the
+container on purpose — the status endpoint is restricted to the local machine,
+so a probe from inside answers 200 and the check written as "this must NOT be
+public" would fail against a configuration that is exactly right.
+
+`sonar-project.properties` is ready for a `sonar-scanner` run; `CONTRIBUTING.md`
+has the branching model, Conventional Commits and SemVer.
+
+## Architecture: where to take this
+
+**A rule before the menu: a configuration no test exercises is a guess.** This
+project ships the test — `scripts/smoke.sh`, run in CI by `scripts/ci-check.sh` against the real image — and it is the thing to extend when you take one
+of the paths below. An edge config is deployed far more often than it is read;
+the smoke is what stands between a typo and a silent outage.
+
+### What this project is today
+
+A layer-7 load balancer and edge: TLS termination, HTTP→HTTPS, security
+headers (`http-after-response`, so the proxy's OWN answers carry them too),
+request-id correlation and a Prometheus endpoint. It balances; it does not
+decide what an answer means.
+
+### Path 1 — balance one application across instances
+
+Replace the standalone backend with `server` lines and a health check. This is
+what HAProxy is for, and it is a config change, not an architecture change.
+*Patterns:* Health-checked pool, connection draining on reload (`SIGUSR2`
+reloads config and certificate without dropping connections).
+
+### Path 2 — API gateway with routing rules
+
+`use_backend` on path or host ACLs, one backend per service. *Patterns:* API
+Gateway, Bulkhead, Circuit breaker (`observe layer7` with `on-error`).
+
+### Path 3 — blue/green and canary
+
+Two backends and a weighted or ACL-driven split, flipped by a config reload.
+*Patterns:* Canary release, feature-flag at the edge. **Decide where the
+rollback switch lives before you need it** — a canary with no fast way back is
+a slow outage.
+### Choosing
+
+| If your problem is… | Put it… | The sign you chose wrong |
+|---|---|---|
+| TLS, HTTP/2, compression, redirects | here, at the edge | the application has TLS code in it |
+| who may call what, per user | in the application | the proxy config encodes business rules |
+| rate limiting a whole site | here | each service re-implements it, differently |
+| rate limiting one tenant's quota | in the application | the proxy needs to know about accounts |
+| routing to several services | here (gateway) | the browser knows every service's address |
+| shaping a response for one screen | in a BFF service behind this | the proxy rewrites JSON |
+
+### What not to do yet
+
+- **Do not put business rules in the proxy config.** It is not tested like code
+  and it is deployed on another cadence; the day the rule is wrong, nobody
+  looks here.
+- **Do not terminate TLS twice.** Terminate once, here, and speak plain HTTP
+  (or a separately-trusted mTLS) to the backends.
+- **Do not grow one shared config for every service.** One file, many teams, is
+  the merge conflict that becomes an outage.
+- **Do not skip the smoke after a config change.** `scripts/smoke.sh` is the
+  only thing standing between a typo and a silent 500.
+
 ## Troubleshooting
 
 - **The build fails at `haproxy -c`** — the message names the line.

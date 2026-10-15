@@ -34,6 +34,10 @@ This project follows <https://semver.org/>: `MAJOR.MINOR.PATCH`.
 - A commit with `feat:` bumps MINOR.
 - A commit with `!` or a `BREAKING CHANGE:` footer bumps MAJOR.
 
+`commitlint.config.mjs` already extends `@commitlint/config-conventional` — it
+just needs `pnpm add -D @commitlint/cli @commitlint/config-conventional`
+before `pnpm exec commitlint` (or a `commit-msg` hook) can enforce it.
+
 That mapping is exactly what tools like `semantic-release`/`standard-version`
 automate from Conventional Commits — none is wired up here to avoid assuming
 a package manager step you have not run; add one when you are ready.

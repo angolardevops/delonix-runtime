@@ -267,6 +267,66 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — the dependency-direction suite under `test/`, run by `pnpm test` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+Ports & adapters: `src/notes/` holds the rules, the use cases and the ports;
+`src/http/` and the Fastify factory in `src/app.ts` are the transport;
+`src/index.ts` is the only module that builds everything and wires it together.
+Nothing in `src/notes/` imports Fastify.
+
+### Path 1 — a real database, same shape
+
+A new module implementing the store port, constructed in `src/index.ts`. Keep
+the driver's types out of `src/notes/` — if a use case signature mentions a row
+type, the boundary already leaked. *Patterns:* Adapter, Repository.
+
+### Path 2 — one folder per bounded area (modular monolith)
+
+`src/<area>/` per area with an `index.ts` as the only public surface, and a
+test that forbids deep imports (`src/a/internal/...` from `src/b`). *Patterns:*
+Facade, domain events. This is the cheapest decoupling available in a Node
+codebase and the one most often skipped.
+
+### Path 3 — vertical slices
+
+If the areas are many and small, `src/features/<verb-noun>/` with handler,
+validation, access and test in one folder reads better than three layers of
+indirection. *Patterns:* Command/Query handler, per-slice validator. **Accept
+the duplication between slices** — that is the trade you are making, not a
+defect to refactor away.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

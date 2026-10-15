@@ -317,6 +317,68 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — `tests/test_architecture.py`, run by `pytest` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+Ports & adapters inside `src/__MODULE__/`: the rules and use cases declare the
+ports they need, the adapters implement them, and the FastAPI routers are one
+transport. `tests/test_architecture.py` holds the import rules, and it is the
+file that makes the shape real rather than aspirational.
+
+### Path 1 — a real database, same shape
+
+Add an adapter module next to the in-memory one and bind it where the
+application is composed. Keep SQLAlchemy (or whatever you pick) out of the use
+cases entirely — a `from sqlalchemy import` inside the capability is the exact
+import `tests/test_architecture.py` exists to refuse. *Patterns:* Adapter,
+Repository, Unit of Work if you need one transaction across two writes.
+
+### Path 2 — one package per bounded area (modular monolith)
+
+`src/__MODULE__/<area>/` per area, each with its own rules, use cases and
+adapters, and a thin public module as the only way in. *Patterns:* Facade,
+domain events. *Test:* add a cross-area import rule — `import-linter` contracts
+or the existing test, whichever you prefer; what matters is that it fails.
+
+### Path 3 — background work (events and the outbox)
+
+FastAPI's `BackgroundTasks` is fine for best-effort. The moment the effect must
+not be lost, write the event in the SAME transaction as the state (outbox) and
+let a worker drain it. *Patterns:* Outbox, Idempotent consumer. The Standard
+Webhooks dispatcher already in this project is the minimal version of this —
+start from it, do not invent a second mechanism beside it.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

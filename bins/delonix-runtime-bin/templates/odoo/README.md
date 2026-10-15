@@ -238,6 +238,86 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Tests and CI
+
+```bash
+pre-commit run --all-files    # pylint (OCA rules), ruff, prettier, XML checks
+sh scripts/smoke.sh           # against a running instance
+```
+
+`pre-commit` is what `.github/workflows/ci.yml` and `.gitlab-ci.yml` both run.
+It covers the addons you write under `addons/`; the Delonix/CI glue this
+template generates is excluded in `.pre-commit-config.yaml`, because those
+files are not addon code.
+
+Addon TESTS need a live database and are deliberately not in that gate — run
+them with `--test-tags /<addon>` against a running instance (above).
+
+`sonar-project.properties` is ready for a `sonar-scanner` run; `CONTRIBUTING.md`
+has the branching model, Conventional Commits and SemVer.
+
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — `pre-commit run --all-files` (OCA's own rules), run in CI — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+An Odoo deployment, not an application you wrote: the ERP is the image, the
+database and the network are in `delonix-manifest.yaml`, and `addons/` is where
+YOUR code goes. The architectural decisions here are about what belongs in an
+addon, what belongs outside Odoo, and how you keep upgrades survivable.
+
+### Path 1 — one addon per bounded area
+
+An addon is already a module boundary with a manifest and declared
+dependencies. Use it: one addon per area, depending on the standard modules and
+on each other explicitly. *Patterns:* Module per area, explicit dependency in
+`__manifest__.py`. **Do not create one `custom` addon that grows forever** — it
+is the single most common Odoo mistake and it makes every upgrade a rewrite.
+
+### Path 2 — extend, do not fork
+
+Inherit (`_inherit`, view inheritance) instead of copying standard code.
+*Patterns:* Open/closed by inheritance, delegation. *The sign you chose wrong:*
+an upgrade of Odoo means re-applying your diffs by hand.
+
+### Path 3 — integrations outside the ERP
+
+For anything that is not an ERP concern — a public API, a high-traffic
+front-end, a heavy integration — put a separate service beside Odoo on the same
+Delonix network and talk to it over its API, rather than growing an addon that
+serves HTTP to the world. *Patterns:* Anti-corruption layer, Outbox for events
+leaving Odoo. **Keep the ERP's web surface private**; the templates `nginx` and
+`haproxy` are the edge for anything public.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 - **"Odoo database manager has been disabled"** — you are on the production

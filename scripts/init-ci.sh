@@ -19,16 +19,27 @@
 # before_script, which install the same toolchain. Everything the workflows
 # execute themselves is executed.
 #
+# The four templates with no application code of their own are run DIFFERENTLY,
+# because their CI cannot run inside the job image:
+#   nginx/httpd/haproxy — their CI builds the project's image and probes it
+#     from OUTSIDE (the status endpoint is restricted to the local machine, so
+#     a probe from inside answers 200 and the check written as "this must NOT
+#     be public" fails against a correct config). That needs docker, so the
+#     job's own command, `scripts/ci-check.sh`, runs on the HOST.
+#   odoo — its gate is `pre-commit`, which runs in the python image its
+#     .gitlab-ci.yml names, with no project-specific toolchain to install.
+#
 # Uses the caller's DELONIX_ROOT / DELONIX_NET_RUNTIME_DIR; set both to keep
 # the run away from the machine's real state. Needs network (registries and
-# package indexes) and python3 with PyYAML.
+# package indexes) and python3 with PyYAML; the three edge templates also need
+# docker, curl and openssl on the host.
 set -u
 B="${1:?usage: init-ci.sh <delonix-binary> <work-dir> [template ...]}"
 W="${2:?usage: init-ci.sh <delonix-binary> <work-dir> [template ...]}"
 shift 2
 mkdir -p "$W"
 W=$(cd "$W" && pwd)
-TEMPLATES="${*:-go node nestjs nextjs fastapi django laravel}"
+TEMPLATES="${*:-go node nestjs nextjs fastapi django laravel nginx httpd haproxy odoo}"
 pass=0; fail=0
 
 # The command that creates the lock, per template (a generated project has
@@ -51,6 +62,42 @@ for t in $TEMPLATES; do
   if ! "$B" init -t "$t" --name "ci-$t" "$p" </dev/null >"$W/ci-$t.gen.log" 2>&1; then
     echo "FAIL  $t: generation ($(tail -1 "$W/ci-$t.gen.log"))"; fail=$((fail+1)); continue
   fi
+  # The edge templates: their CI's own command, on the host (see the header).
+  case "$t" in
+    nginx|httpd|haproxy)
+      t0=$(date +%s)
+      ( cd "$p" && sh scripts/ci-check.sh ) >"$W/ci-$t.run.log" 2>&1
+      rc=$?
+      secs=$(( $(date +%s) - t0 ))
+      oks=$(grep -c '^ok  ' "$W/ci-$t.run.log")
+      if [ $rc = 0 ]; then
+        pass=$((pass+1)); echo "PASS  $t: scripts/ci-check.sh, $oks smoke checks (${secs}s)"
+      else
+        fail=$((fail+1)); echo "FAIL  $t: rc=$rc (${secs}s) — see $W/ci-$t.run.log"
+        tail -5 "$W/ci-$t.run.log" | sed 's/^/        /'
+      fi
+      continue ;;
+    odoo)
+      # pre-commit refuses to run outside a work tree, and a generated project
+      # is not one yet — the CI's own checkout makes it one.
+      ( cd "$p" && git init -q . && git add -A \
+        && git -c user.email=ci@example.invalid -c user.name=ci commit -qm init ) >/dev/null 2>&1
+      t0=$(date +%s)
+      "$B" container run --rm --net host -v "$p:/builds/project" -w /builds/project python:3.12 \
+        sh -c 'git config --global --add safe.directory /builds/project
+               pip install --quiet pre-commit
+               pre-commit run --all-files --show-diff-on-failure' \
+        >"$W/ci-$t.run.log" 2>&1
+      rc=$?
+      secs=$(( $(date +%s) - t0 ))
+      if [ $rc = 0 ]; then
+        pass=$((pass+1)); echo "PASS  $t: pre-commit run --all-files (${secs}s)"
+      else
+        fail=$((fail+1)); echo "FAIL  $t: rc=$rc (${secs}s) — see $W/ci-$t.run.log"
+        tail -8 "$W/ci-$t.run.log" | sed 's/^/        /'
+      fi
+      continue ;;
+  esac
   # One shell script from the two workflow files; the image on the first line.
   if ! python3 - "$p" "$(lock_cmd "$t")" >"$W/ci-$t.job.sh" <<'EOF'
 import sys, yaml

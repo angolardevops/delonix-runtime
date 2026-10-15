@@ -252,6 +252,72 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — `internal/archtest/`, run by `make test` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+Ports & adapters. `internal/notes/` owns the rules, the use cases and the
+PORTS they need (`Store`, `Publisher`); `internal/memstore/` and
+`internal/webhook/` implement them; `internal/httpapi/` is one transport among
+possible others; `cmd/__NAME__/main.go` is the only place that knows all of
+them. The arrow is inverted on purpose — the capability imports nothing of
+the transport or the adapters, and that is exactly what `archtest` measures.
+
+### Path 1 — a real database, same shape
+
+Add `internal/pgstore/` implementing `notes.Store`, and change the one line in
+`cmd/__NAME__/main.go` that builds the store. Nothing in `internal/notes/`
+moves. *Patterns:* Adapter, Repository. *Test:* `archtest` already forbids
+`internal/notes` importing a driver — add `internal/pgstore` to the adapter
+list and keep it there.
+
+### Path 2 — more than one bounded area (modular monolith)
+
+When `notes` stops being the only capability, give each its own
+`internal/<area>/` with the same inner shape, and let them talk only through
+an exported surface — never by reaching into each other's types. *Patterns:*
+Facade per area, domain events for what needs no answer. *Test:* add a rule
+that `internal/<a>` may not import `internal/<b>`; it is the single most
+valuable line you will add, and the easiest.
+
+### Path 3 — a second transport (CLI, queue consumer)
+
+Add `cmd/<name>/` with its own composition root reusing the same use cases.
+If the two transports need different input/output shapes, that is the moment
+Clean's explicit use-case boundaries start to pay — not before. *Patterns:*
+Use Case/Interactor, Boundary DTO. *Test:* the new `cmd` is a composition
+root, so it may import everything; nothing else may import it.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules and `AGENTS.md` for the working agreements.
+
 ## Troubleshooting
 
 | Symptom | Cause |

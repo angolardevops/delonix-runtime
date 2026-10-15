@@ -309,6 +309,67 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — `tests/Architecture`, run by `php artisan test` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+Ports & adapters laid over Laravel's own folders: `app/Notes/` is plain PHP —
+the entity, the use cases and the port (`NoteRepository`) — and knows nothing of
+Eloquent or HTTP; `app/Persistence/` adapts it, `app/Http/` is the transport and
+`app/Providers/` is the composition root that binds port to adapter.
+`tests/Architecture` is what keeps the framework out of the capability.
+
+### Path 1 — swap or add persistence
+
+A second implementation of `NoteRepository` in `app/Persistence/` and one
+binding changed in `app/Providers/`. Nothing in `app/Notes/` moves. *Patterns:*
+Adapter, Repository. *Test:* the rule that `App\\Notes` may not reference
+`Illuminate\\*` is the one that makes this cheap — keep it.
+
+### Path 2 — one namespace per bounded area (modular monolith)
+
+`app/<Area>/` with the same inner split, a facade class as the only public
+entry, and events for what needs no answer. *Patterns:* Facade,
+Anti-corruption layer between areas with different vocabularies. *Test:* add a
+cross-area rule to `tests/Architecture`.
+
+### Path 3 — queued work you cannot lose
+
+`app/Jobs/` already carries the outbound webhook. For an effect that must not be
+lost when the queue is down, write the intent in the same transaction as the
+state and dispatch from there. *Patterns:* Outbox, Idempotent consumer —
+`webhook_receipts` is already the de-duplication table for the inbound side.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

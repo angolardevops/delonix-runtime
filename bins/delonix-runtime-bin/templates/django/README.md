@@ -374,6 +374,70 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — the architecture test in `tests/`, run by `pytest` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+A Django project with the capability kept OUT of the framework's reflexes:
+`notes/` separates `services.py` (use cases) from `models.py` (the ORM rows) and
+`views.py` (transport); `core/` holds the cross-cutting pieces; `config/`
+builds settings from a typed, validated `env.py`. The architecture test is what
+stops a view from reaching into the ORM and a service from importing a
+request.
+
+### Path 1 — keep services thin, keep the ORM in its place
+
+The usual Django drift is a `views.py` that queries and a `models.py` with
+business methods. Resist both: the view maps HTTP to a call, the service holds
+the rule, the model is a row. *Patterns:* Service Layer, Query object for the
+complicated reads. *Test:* a rule that `views` does not import `models`
+directly.
+
+### Path 2 — one app per bounded area (modular monolith)
+
+Django apps are already a module boundary; what is missing by default is the
+rule that one app does not import another's internals. Add it, and use signals
+or an explicit facade between them. *Patterns:* Facade, domain events —
+Django's `signals.py` is already wired for the inbound side.
+
+### Path 3 — a read model for the expensive page
+
+When one listing drives the load, give it its own denormalised table updated on
+write, and read it directly. *Patterns:* Read model, Projection. **Do this with
+a measured number, not a feeling** — two models to keep in step is a real cost
+and `select_related`/`prefetch_related` solves most of what looks like it needs
+CQRS.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

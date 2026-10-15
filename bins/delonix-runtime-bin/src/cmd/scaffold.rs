@@ -638,12 +638,16 @@ fn ensure_tls_with(dir: &Path, hosts: &[String], mkcert: &str) -> Result<CertSou
 /// AND uses the template's package manager (its lock file is present):
 /// measured before, an npm project with its own workflow received a pnpm
 /// `ci.yml` and `.gitlab-ci.yml` that could not run.
-const CI_FILES: [&str; 5] = [
+const CI_FILES: [&str; 6] = [
     ".github/workflows/ci.yml",
     ".github/dependabot.yml",
     ".gitlab-ci.yml",
     "sonar-project.properties",
     "commitlint.config.js",
+    // `.mjs` where the package is CommonJS (nextjs, nestjs): without it the
+    // commitlint config was written into an adopted project whose CI was
+    // deliberately skipped — a config for a gate that is not there.
+    "commitlint.config.mjs",
 ];
 
 /// Why the CI files must not be written into the adopted project at `dir`,
@@ -3118,5 +3122,90 @@ mod tests {
         assert!(msg.contains("--tls-port 8943"), "{msg}");
         assert!(!msg.contains("--port 8943"), "{msg}");
         assert!(msg.contains("--low-ports"), "{msg}");
+    }
+
+    /// The contract of ADR-0061, as a gate: a project generated from ANY
+    /// template is born with the engineering pieces, not with a promise that
+    /// someone will add them. Measured before this test: `nginx`, `httpd`,
+    /// `haproxy` and `odoo` had no CI, no SonarQube and no CONTRIBUTING at
+    /// all, and `nestjs` had lost its commitlint config while its two
+    /// siblings kept theirs — nothing said so.
+    #[test]
+    fn every_template_is_born_with_the_engineering_contract() {
+        for (name, files) in TEMPLATES {
+            let has = |rel: &str| files.iter().any(|(r, _, _)| *r == rel);
+            let body = |rel: &str| {
+                files
+                    .iter()
+                    .find(|(r, _, _)| *r == rel)
+                    .map(|(_, c, _)| *c)
+                    .unwrap_or("")
+            };
+            for rel in [
+                ".github/workflows/ci.yml",
+                ".gitlab-ci.yml",
+                "sonar-project.properties",
+                "CONTRIBUTING.md",
+                "README.md",
+            ] {
+                assert!(has(rel), "{name} ships no {rel}");
+            }
+            // The CI is two CIs, and they have to be the same gate: the
+            // GitLab one says so in its first lines.
+            assert!(
+                body(".gitlab-ci.yml").contains(".github/workflows/ci.yml"),
+                "{name}: .gitlab-ci.yml does not say it is the same gate as the GitHub one"
+            );
+            // Conventional Commits: a config where the ecosystem is Node,
+            // documented everywhere — never a tool the project assumes is
+            // installed.
+            assert!(
+                body("CONTRIBUTING.md").contains("conventionalcommits.org"),
+                "{name}: CONTRIBUTING.md does not document Conventional Commits"
+            );
+            // The advisory architecture section: what this project is, where
+            // it can go, and what NOT to do yet.
+            let readme = body("README.md");
+            for needle in [
+                "## Architecture: where to take this",
+                "### What not to do yet",
+            ] {
+                assert!(
+                    readme.contains(needle),
+                    "{name}: README.md has no {needle:?} section"
+                );
+            }
+        }
+    }
+
+    /// A Node package gets the commitlint config, and the extension has to
+    /// match the package's module system — a bare `.js` in a CommonJS package
+    /// is parsed as CommonJS and the `export default` inside never loads.
+    #[test]
+    fn the_node_templates_carry_a_commitlint_config() {
+        for name in ["node", "nestjs", "nextjs"] {
+            let files = TEMPLATES
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, f)| *f)
+                .unwrap_or_else(|| panic!("no template {name}"));
+            assert!(
+                files
+                    .iter()
+                    .any(|(r, _, _)| r.starts_with("commitlint.config.")),
+                "{name} ships no commitlint config"
+            );
+            // And whatever its extension, the adopt path must treat it as a
+            // CI file: otherwise it lands in a project whose CI was skipped.
+            let rel = files
+                .iter()
+                .map(|(r, _, _)| *r)
+                .find(|r| r.starts_with("commitlint.config."))
+                .unwrap();
+            assert!(
+                CI_FILES.contains(&rel),
+                "{name}: {rel} is not in CI_FILES, so adoption writes it without the CI"
+            );
+        }
     }
 }

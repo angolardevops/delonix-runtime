@@ -29,7 +29,12 @@ fi
 
 check "/healthz answers ok over HTTP"   sh -c "curl -fsS '$PLAIN/healthz' | grep -qx ok"
 check "/ answers 200 over HTTPS"        curl -kfsS -o /dev/null "$BASE/"
-check "HTTP redirects to HTTPS (308)"   sh -c "curl -s -o /dev/null -D - '$PLAIN/some/page?x=1' | tr -d '\r' | grep -qix 'location: https://127.0.0.1:__TLS_PORT__/some/page?x=1'"
+# Built from $BASE, never a hardcoded 127.0.0.1: this script takes the two base
+# URLs as arguments and every other check honours them. Measured — run against
+# any address that is not the loopback (a staging host, a tunnel, a CI
+# container) this one check reported FAIL against a server redirecting exactly
+# as configured.
+check "HTTP redirects to HTTPS (308)"   sh -c "curl -s -o /dev/null -D - '$PLAIN/some/page?x=1' | tr -d '\r' | grep -qix 'location: $BASE/some/page?x=1'"
 check "HTTP/2 is negotiated"            sh -c "[ \"\$(curl -ks -o /dev/null -w '%{http_version}' '$BASE/')\" = 2 ]"
 check "TLS 1.1 is refused"              sh -c "curl -ks -o /dev/null --tlsv1.2 '$BASE/' && ! curl -ks -o /dev/null --tls-max 1.1 '$BASE/'"
 check "the private key is not world-readable" sh -c "[ \"\$(stat -c %a tls/tls.key)\" = 600 ]"
