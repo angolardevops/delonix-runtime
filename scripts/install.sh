@@ -1799,6 +1799,10 @@ echo
 if [ "$FAIL" = 0 ]; then
   msg "ready"
   echo "    delonix container run -d -p 8080:80 nginx && curl localhost:8080"
+  echo
+  msg "downloads and documentation:"
+  echo "    https://github.com/$REPO/releases/tag/$VERSION"
+  [ "$VERSION" != latest ] || echo "    https://github.com/$REPO/releases/latest"
 else
   warn "installation finished with warnings — review the FAILED lines above"
 fi
