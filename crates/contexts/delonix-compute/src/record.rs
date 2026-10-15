@@ -906,11 +906,13 @@ impl Container {
         &self.id[..n]
     }
 
-    /// The path of this container's dedicated cgroup. It is NESTED under the
-    /// `delonix.slice` (the parent cgroup with the AGGREGATE limits of all of Delonix),
-    /// so that the sum of all containers never exhausts the host.
+    /// The path of this container's dedicated cgroup in ROOT mode. It is NESTED under
+    /// the `delonix.slice` (the parent cgroup with the AGGREGATE limits of all of
+    /// Delonix), so that the sum of all containers never exhausts the host — and,
+    /// when the container belongs to a group ([`Container::cgroup_parent`]), under
+    /// that group's level too. See [`root_cgroup_path`].
     pub fn cgroup(&self) -> String {
-        format!("{}/delonix-{}", DELONIX_SLICE, self.id)
+        root_cgroup_path(&self.id, self.cgroup_parent.as_ref())
     }
 }
 
@@ -1281,6 +1283,35 @@ impl Vm {
 /// an excess of containers (robustness protection).
 pub const DELONIX_SLICE: &str = "/sys/fs/cgroup/delonix.slice";
 
+/// The `pids.max` every container leaf gets (anti fork-bomb), in both privilege
+/// modes. Public so a caller that sizes something against it — a group's
+/// [`CgroupParent::pids_max`], a process leaf — names the engine's number instead
+/// of copying it.
+pub const DEFAULT_PIDS_MAX: u64 = 512;
+
+/// Where a container's cgroup lives in ROOT mode. PURE.
+///
+/// `delonix.slice/delonix-<id>`, or `delonix.slice/<group>/delonix-<id>` when the
+/// container belongs to a group. Before the group level existed here, root mode
+/// built the flat path whatever the container asked for: a caller that put all of
+/// its containers under one group to cap them in aggregate got no cap at all as
+/// root, with nothing saying so (the rootless path always honoured it).
+///
+/// A group name that is not a safe single segment ([`safe_cgroup_segment`]) yields
+/// the flat path. That is NOT the name being dropped: `setup_cgroup` refuses such a
+/// container before it is placed anywhere, so the flat path only ever names where
+/// nothing is — and it can never be a path outside the slice, which is what
+/// `remove_container_cgroup` later deletes.
+pub fn root_cgroup_path(id: &str, parent: Option<&CgroupParent>) -> String {
+    // Bound to a local, not inlined as `{DELONIX_SLICE}`: `scripts/dev_docs.py` reads
+    // every `DELONIX_*` inside a string literal as an environment variable.
+    let slice = DELONIX_SLICE;
+    match parent.and_then(|p| safe_cgroup_segment(&p.name)) {
+        Some(group) => format!("{slice}/{group}/delonix-{id}"),
+        None => format!("{slice}/delonix-{id}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// ADR-0055: a record written before the anti-spoofing opt-out existed
@@ -1484,6 +1515,42 @@ mod tests {
             "/sys/fs/cgroup/delonix.slice/delonix-0123456789abcdef"
         );
         assert_eq!(c.status, Status::Created);
+    }
+
+    /// Root mode honours the group: the container's cgroup is nested under
+    /// `delonix.slice/<group>/`, which is where the group's aggregate ceiling is.
+    /// Before, root mode built the flat path whatever the container asked for.
+    #[test]
+    fn a_container_of_a_group_nests_under_the_group_in_root_mode() {
+        let mut c = sample("0123456789abcdef", "step");
+        c.cgroup_parent = Some(CgroupParent {
+            name: "build-42".into(),
+            memory_max: Some("1073741824".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            c.cgroup(),
+            "/sys/fs/cgroup/delonix.slice/build-42/delonix-0123456789abcdef"
+        );
+    }
+
+    /// An unsafe group name never yields a path outside the slice: the flat path
+    /// is all it can name (the container itself is refused before placement).
+    #[test]
+    fn an_unsafe_group_name_never_leaves_the_slice() {
+        for bad in ["..", "../x", "/abs", "a/b", "-rf"] {
+            let p = root_cgroup_path(
+                "00000000deadbeef",
+                Some(&CgroupParent {
+                    name: bad.into(),
+                    ..Default::default()
+                }),
+            );
+            assert_eq!(
+                p, "/sys/fs/cgroup/delonix.slice/delonix-00000000deadbeef",
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

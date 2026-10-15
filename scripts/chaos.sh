@@ -1606,6 +1606,89 @@ scen_control_restart() {
   dlx container rm -f cr1 >/dev/null 2>&1
 }
 
+# ADR-0066: a VIP over three backends while things break under it. Judged by
+# WHICH backend answered each connection, not by «the client got answers» — a
+# VIP serving one backend would answer too. Three of the ADR's five parts:
+# (1) a backend killed with no restart, (3) a backend whose port closes while
+# its process stays up, (4) the control plane killed (the pin keeps the
+# ruleset, so traffic must not stop). Parts (2) health probe and (5) pin
+# rebuild are covered by the battery section and by a measured run.
+scen_service_lb() {
+  head_ "service-lb — o VIP sob falhas: morte, porta fechada, controlo morto (ADR-0066)"
+  local img=busybox:1.36 dir="$SANDBOX/service-lb" vip pool="${DELONIX_CHAOS_VIP_POOL:-10.96.0.0/24}"
+  if ! dlx image pull "$img" >/dev/null 2>&1; then skip "service-lb" "não foi possível puxar $img"; return; fi
+  if ! dlx network vip-pool set "$pool" >/dev/null 2>&1; then
+    skip "service-lb" "o conjunto $pool sobrepõe-se a algo neste host"; return
+  fi
+  mkdir -p "$dir/s1" "$dir/s2" "$dir/s3"
+  for b in s1 s2 s3; do echo "$b" > "$dir/$b/index.html"; done
+  dlx container run -d --name s1 --restart no --net chaosnet --label app=slb -v "$dir/s1:/www" "$img" httpd -f -p 8080 -h /www >/dev/null 2>&1
+  dlx container run -d --name s2 --net chaosnet --label app=slb -v "$dir/s2:/www" "$img" sleep 600 >/dev/null 2>&1
+  dlx container exec s2 httpd -p 8080 -h /www >/dev/null 2>&1
+  dlx container run -d --name s3 --net chaosnet --label app=slb -v "$dir/s3:/www" "$img" httpd -f -p 8080 -h /www >/dev/null 2>&1
+  dlx container run -d --name slc --net chaosnet "$img" sleep 600 >/dev/null 2>&1
+  printf 'apiVersion: networking.delonix.io/v1alpha1\nkind: Service\nmetadata: {name: slb}\nspec:\n  selector: {matchLabels: {app: slb}}\n  port: 8080\n  type: VirtualIP\n' > "$dir/slb.yaml"
+  dlx apply -f "$dir/slb.yaml" >/dev/null 2>&1
+  vip=$(dlx get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r["vip"] for r in json.load(sys.stdin) if r["name"]=="slb"))' 2>/dev/null)
+  local cleanup='dlx container rm -f s1 s2 s3 slc >/dev/null 2>&1; dlx delete services default/slb >/dev/null 2>&1; dlx network vip-pool clear >/dev/null 2>&1'
+  slb_count() { for _ in $(seq 1 "$1"); do dlx container exec slc wget -qO- -T 2 "http://$vip:8080/" 2>&1 | head -1; done | sed 's/^wget:.*/ERR/' | sort | uniq -c | tr '\n' ' '; }
+  slb_ready() { dlx get services -o json 2>/dev/null | python3 -c 'import json,sys;print(next(r.get("ready") or 0 for r in json.load(sys.stdin) if r["name"]=="slb"))' 2>/dev/null; }
+  local t
+  for t in $(seq 1 50); do [ "$(slb_ready)" = 3 ] && break; sleep 0.2; done
+  if [ -z "$vip" ] || [ "$(slb_ready)" != 3 ]; then
+    skip "service-lb" "o serviço não chegou a 3 backends prontos (vip=${vip:-?})"; eval "$cleanup"; return
+  fi
+  local base; base=$(slb_count 60)
+  log "base: $base"
+  if [[ "$base" =~ ERR ]] || ! [[ "$base" =~ s1 && "$base" =~ s2 && "$base" =~ s3 ]]; then
+    bad "service-lb" "a base não espalha pelos três backends: $base"; eval "$cleanup"; return
+  fi
+  # (1) kill -9 of a backend with no restart. The listener goes with the
+  # process at once, but the death is recorded only when the process has
+  # finished exiting — and a PID 1 exit waits for the disk (measured here: 12 s
+  # under load). Until one of the two signals arrives the address is in the
+  # map and its netns answers with a reset. The TCP probe bounds that window
+  # at failureThreshold × interval (+ one 500 ms round): 4.5 s by default;
+  # the ceiling here is 6 s. After it, zero errors and no `s1`.
+  local p1 t0 t1; p1=$(cpid s1); kill -9 "$p1" 2>/dev/null; t0=$(date +%s%N)
+  for t in $(seq 1 100); do [ "$(slb_ready)" = 2 ] && break; sleep 0.1; done
+  t1=$(date +%s%N)
+  local after1; after1=$(slb_count 40)
+  log "(1) kill -9 s1: fora da rotação em $(( (t1-t0)/1000000 )) ms; depois: $after1"
+  if [ $(( (t1-t0)/1000000 )) -gt 6000 ] || [[ "$after1" =~ ERR || "$after1" =~ s1 ]]; then
+    bad "service-lb (1) backend morto" "fora em $(( (t1-t0)/1000000 )) ms (tecto 6000); depois: $after1"
+  else
+    ok "service-lb (1) um backend morto sai da rotação em $(( (t1-t0)/1000000 )) ms"
+  fi
+  # (3) the port closes, the process stays: ejected within
+  # failureThreshold × interval + 1 s = 5 s by default.
+  dlx container exec s2 killall httpd >/dev/null 2>&1
+  local t0 t1; t0=$(date +%s%N)
+  for t in $(seq 1 60); do [ "$(slb_ready)" = 1 ] && break; sleep 0.2; done
+  t1=$(date +%s%N)
+  local after3; after3=$(slb_count 30)
+  log "(3) porta de s2 fechada: fora em $(( (t1-t0)/1000000 )) ms; depois: $after3"
+  if [ $(( (t1-t0)/1000000 )) -gt 5000 ] || [[ "$after3" =~ ERR || "$after3" =~ s2 ]]; then
+    bad "service-lb (3) porta fechada" "fora em $(( (t1-t0)/1000000 )) ms (tecto 5000); depois: $after3"
+  else
+    ok "service-lb (3) um backend de porta fechada sai em $(( (t1-t0)/1000000 )) ms"
+  fi
+  # (4) the control plane killed: the pin keeps the ruleset.
+  local pin0 ctl; pin0=$(holder_pid); ctl=$(control_pid)
+  kill -9 "$ctl" 2>/dev/null; sleep 0.5
+  local during; during=$(slb_count 20)
+  dlx net netns up >/dev/null 2>&1
+  for t in $(seq 1 50); do [ "$(slb_ready)" = 1 ] && break; sleep 0.2; done
+  local after4; after4=$(slb_count 20)
+  log "(4) controlo $ctl morto: durante $during; depois $after4; pin $pin0→$(holder_pid)"
+  if [[ "$during" =~ ERR ]] || ! [[ "$during" =~ s3 ]] || [[ "$after4" =~ ERR ]] || [ "$pin0" != "$(holder_pid)" ]; then
+    bad "service-lb (4) controlo morto" "durante: $during; depois: $after4"
+  else
+    ok "service-lb (4) com o controlo morto o VIP continua a servir"
+  fi
+  eval "$cleanup"
+}
+
 # ------------------------------------------------------------------- driver --
 
 # The declarative cycle has to converge WITHOUT restarting the workload, and has
@@ -2280,7 +2363,7 @@ voltou ABERTO depois do respawn do holder"
   rm -rf "$dir"
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill rm_during_start aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply policy_hold policy_hold_pod service_lb truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

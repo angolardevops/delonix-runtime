@@ -4,6 +4,8 @@ Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em R
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
 [README.md](README.md) para a arquitectura dos 34 crates.
 
+**Neste ramo `develop`: escrever `consolidado` quer dizer ler o [CONSOLIDADO.md](CONSOLIDADO.md)** — o que a consolidação de 2026-10-14 juntou, o que ficou de fora e porquê, e o que falta por ordem. Esse ficheiro e esta linha vivem só na `develop` e nunca vão para a `main`.
+
 ## Identidade e fronteira do motor (ler primeiro)
 
 Esta secção é a fonte canónica: agentes, skills, ADRs e revisões remetem para aqui, e uma
@@ -3739,6 +3741,87 @@ vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
 
+## Auditoria de segurança #4 (2026-10-12) — OWASP K8s/Docker Top 10, Kinds e providers
+
+Lente: OWASP Kubernetes Top 10 (K01 configuração de workload, K04 política centralizada,
+K08 segredos) e Docker Top 10 (D04/D05), aplicados à admissão do nó, ao CRI, aos Kinds e
+aos providers. **Os dois defaults que a skill `delonix-runtime-sec` dava como abertos já
+estavam fechados** (tecto de caps do CRI seguro por omissão; unpack limitado a 64 GiB e
+4 M entradas) — a baseline da skill está desactualizada. Sete achados novos, todos
+corrigidos, cada um medido antes (vermelho) e depois (verde, ao vivo quando o caminho o
+permitia, com os dois roots isolados):
+
+1. **ALTO — `kubectl exec <pod> -- -u 0 sh` corria como root no container.** A CLI lê
+   opções DEPOIS do nome do container (`container exec x -u` responde «a value is
+   required for '--user'»), e o CRI passava o comando do utilizador logo a seguir ao
+   nome — nos dois caminhos, streaming e `ExecSync`. Contornava `runAsNonRoot`/
+   `runAsUser` com só `pods/exec`. Agora `exec <nome> -- <cmd>`; um teste da CLI faz o
+   parse do argv exacto que o CRI constrói e exige `user == None`.
+2. **ALTO — `denyPrivileged` julgava UMA flag.** Medido: `--cap-add ALL --security-opt
+   seccomp=unconfined --host-pid -v /:/host --device /dev/sda` passava a admissão de um
+   nó com `denyPrivileged: true`. Campo novo, opt-in, `workloadSecurity: baseline` — o
+   perfil *baseline* dos Pod Security Standards no ÚNICO ponto de admissão (CLI,
+   manifesto, compose, Docker API e CRI convergem em `cmd_run`): caps fora da lista
+   baseline, `--host-pid/--host-ipc`, `seccomp/apparmor=unconfined`, bind de caminho do
+   host e `--device`. Regras `ADM-BASELINE-*`. A rede do host fica com `denyHostNetwork`
+   (é a rede por omissão do motor); `restricted` é recusado pelo nome (precisa do
+   utilizador efectivo da imagem, que a admissão não tem). Uma política só com
+   `denyPrivileged` passa a denunciar o próprio buraco (`POLICY-PRIVILEGE-EQUIVALENTS-OPEN`).
+3. **ALTO — `kind: VirtualMachine` não passava pela admissão.** Só o `vm create` da CLI
+   chamava `policy::enforce`; o mesmo VM por manifesto contornava `denyDevicePassthrough`,
+   `denyLatestVmImage` e `allowedImageUrlHosts`. E um manifesto tem mais portas de
+   passthrough do que a CLI: `devices`, um `extraDisks` com origem num dispositivo do host,
+   e XML cru do libvirt (não validado — conta sempre). O `vm update --disk-add` (hotplug)
+   também. A detecção segue symlinks (`./innocent.qcow2 → /dev/sda` é recusado, medido).
+4. **MÉDIO — o proxy L7 deixava o cliente escrever `X-Forwarded-*`.** Era a borda e não
+   escrevia os seus; um backend que confia neles (os templates do `init` mandam
+   `TRUSTED_PROXY=*` atrás do túnel) aceitava IP e `https` forjados. Os do cliente são
+   descartados e o proxy escreve peer, esquema do listener e Host. Medido com o
+   `ingress-proxy` e um backend de eco.
+5. **MÉDIO — credenciais de túnel no argv** (`--token`, `--authtoken`, `token@host`):
+   legíveis por qualquer utilizador local em `/proc/<pid>/cmdline`. Passam por ambiente
+   (`TUNNEL_TOKEN`, `NGROK_AUTHTOKEN`, medidos nos binários reais) ou por um ssh config
+   `0600` (pinggy); o log do agente é `0600` porque o ngrok escreve lá o authtoken quando
+   o recusa.
+6. **MÉDIO — o cliente OPNsense aceitava `http://` e userinfo** e mandava key/secret em
+   claro; os outros três providers já recusavam. DX-1349, validado dentro do `connect`.
+7. **BAIXO — o MCP passava o `name` do modelo ao argv sem `--`** (o modelo pode ter lido
+   logs controlados por um atacante).
+
+**O portão funcional (`cli-tester`) chumbou a primeira versão, e com razão:** o
+*baseline* fechava o `run` e deixava três portas abertas no mesmo nó —
+`container update --volume-add /etc:/x` (o container leu o hostname do host),
+`--gpus dri` (nós `/dev/dri` crus) e `--masked-path /x` (uma lista própria SUBSTITUI a de
+omissão, e `/proc/interrupts` voltou a ter 142 linhas). Fechadas as três; o
+`--masked-path` exige o núcleo que todo o kubelet manda, **sem** o
+`/sys/devices/virtual/powercap`, que só os kubelets recentes mandam — exigi-lo recusaria
+todos os pods de um kubelet mais antigo num nó *baseline*. `--gpus nvidia` e um
+`--device` CDI continuam permitidos (são o *device plugin* do motor). Também: o disco de
+arranque de uma VM que seja um dispositivo conta como passthrough, e o DX-1349 chegava ao
+operador como DX-1000 (passava por `into_root`, que deita fora o número). A bateria
+`scripts/e2e.sh` tem agora uma secção que fixa tudo isto pela MENSAGEM da política.
+
+**Dois defeitos de correcção apanhados de caminho, os dois silenciosos:** o
+`hot_fields(RuntimePolicy)` listava 8 dos 12 campos comparados, por isso ligar
+`denyPrivateEgress` num manifesto já aplicado planeava um `Replace` impossível (há agora um
+teste que exige as duas listas iguais); e um `devices: ['0000:01:00.0']` plano num
+`kind: VirtualMachine` era deitado fora (`merge_device_options` fazia `remove` dentro de um
+`let … else` antes de o padrão falhar — o dry-run imprimia `devices: []`, rc 0).
+
+**Lição de método, a reter:** a classe dos achados 1 e 7 é a mesma que a auditoria #1
+fechou para `ssh`/`virsh` — um valor de outro lado no argv de um binário com opções — e
+reapareceu na CLI do PRÓPRIO motor, porque «é o nosso binário» lia-se como «é seguro».
+Qualquer argv construído para `delonix …` a partir de um valor de fora leva `--` antes
+dele. E a classe dos achados 2 e 3 é «o portão tem uma segunda porta»: uma regra de
+política vale o que vale o caminho MENOS guardado até ela.
+
+**Por fazer, com a razão:** o `delonix drift` ignora o `RuntimePolicy` (não tem dono,
+e a deriva só compara recursos carimbados) — um `policy.json` editado à mão não aparece,
+enquanto o `stack plan` o vê; é anterior a esta auditoria. Verificação de assinatura no pull exigida pela política
+(`image verify` existe e é manual — ligá-lo à admissão é uma feature com chave do nó, não
+uma linha); o perfil `restricted`; e `ExecSync`/streaming provados por teste do parser
+real e não por um `crictl exec` contra um kubelet (o argv é o mesmo).
+
 ## CRI num nó kubeadm: eviction sem estatísticas e `kubeadm reset` com órfãos (2026-09-15)
 
 Os dois defeitos foram medidos contra um kubelet real (VM da `delonix-vm-k8s:1.36`, k8s 1.36.4)
@@ -5070,6 +5153,9 @@ senão um documento removido do manifesto nunca aparecia como candidato a
 `Delete` para o `--prune` — a própria razão de existir deste Kind.
 
 ## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
+
+> **Desde 2026-10-12 «sem VIP» vale só para `type: DNS`** (a omissão): `type: VirtualIP` dá um
+> endereço L4 com prontidão — ver «kind: Service type VirtualIP» mais abaixo.
 
 Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
 restruturação da CLI. Desenho completo em
@@ -9631,3 +9717,123 @@ contado a cair** — a auditoria leu o ruleset e viu a regra lá.
   `denyHostNetwork: true` ao lado (a admissão conta ambos como rede do host). As VMs do
   libvirt na rede `nat` também não. O `vm create` não sincroniza a política (só lê o
   registo pelo `ensure_up`).
+
+## `kind: GitOpsSource` — a passagem de pull sem daemon (ADR-0021, 2026-10-12)
+
+- **Uma passagem, sem processo residente**: um timer systemd de utilizador por fonte
+  (`delonix-gitops-<ns>.<nome>`, `Type=oneshot`, com atraso aleatório) corre `gitops reconcile`:
+  fetch `--depth=1` do ref, verificação, `stack plan`, guarda, apply com os digests do plano,
+  registo do commit aplicado e um evento. Um segundo disparo com a passagem anterior viva SALTA
+  (`flock` não bloqueante por fonte) e di-lo. Verbos: `gitops reconcile|status|suspend|resume`;
+  `suspend` é uma marca local, fora do spec.
+- **Um commit recusado não aplica NADA e fica registado**: YAML com chave duplicada, um grafo
+  partido, um documento proibido ou uma acção que a política não permite (DX-1602/1604) deixam
+  a stack como estava, com o último commit aplicado intacto. Medido: quatro commits recusados,
+  o mesmo PID e o mesmo `memory.max`.
+- **A fonte é entrada não confiável** — a passagem de segurança está escrita no ADR-0021. O git
+  corre com `env_clear()`, HOME privado, sem config de sistema nem global, sem hooks, só
+  `file`/`https`/`ssh`, `fsckObjects`, sem redirects nem credential helpers, tecto de 120 s. Nada
+  é checked out: a árvore lê-se por `ls-tree`/`cat-file` e só ficheiros regulares passam
+  (symlinks, submódulos, ponteiros LFS e chaves privadas recusam o commit). Tectos: 4096
+  entradas, 256 manifestos, 1 MiB por ficheiro, 8 MiB no total, 512 documentos, 256 MiB de
+  espelho. Assinaturas só SSH (`allowed_signers`); GPG é recusado.
+- **O que um repo pode declarar**: `RuntimePolicy`, `Secret`, `App` e `Image` com `build:` nunca;
+  VM, SystemContainer, NetworkZone, NetworkGateway, StoragePool, Gateway e IPPool só listados em
+  `safety.kinds`. Um container não pede privilégio, rede/PID/IPC do host, bind mounts,
+  dispositivos, GPU, `capAdd`, perfis unconfined nem `envFile`; um Volume é local simples e uma
+  Network é bridge. Os documentos aterram na namespace da fonte. **Um container vindo de uma
+  fonte tem de nomear uma rede**: a forma plana sem rede é `host`, que a guarda recusa.
+- **Política do plano**: `Create`/`Update`/`NoOp` por omissão; `Adopt`/`Replace`/`Reboot` só com
+  `safety.allow`; `Conflict` sempre recusado; `Delete` só com `prune: true`, abaixo de
+  `maximumDeletes` e nunca sobre `protectedResources`. Uma fonte só se declara a si própria, e o
+  repo só lhe muda `ref`/`path`/`interval`; uma passagem nunca poda uma fonte. `Conflict` sempre
+  recusado, com UMA excepção: o registo da própria fonte, quando o repo se declara a si próprio
+  (ver a stack de bootstrap, abaixo).
+- **A stack de bootstrap e a das passagens são duas, nunca a mesma (2026-10-14).** Medido antes:
+  com a fonte aplicada por `stack apply --name <fonte>` e a stack das passagens a chamar-se, por
+  omissão, como a fonte, o `stack plan` dava rc=2 para sempre e um `apply --prune` apagava o
+  Volume que a passagem seguinte recriava VAZIO. Agora `spec.stack` vale, por omissão,
+  `gitops.<namespace>.<nome>` (um rótulo DNS não tem pontos, logo nenhum `spec.stack` nem um
+  `--name` normal o escrevem), e `stack apply`/`plan`/`prune`/`rollback`/`validate` recusam com
+  DX-1601, antes de ler a máquina, um manifesto que declare uma fonte cujas passagens caiam na
+  stack em que o comando age. Só a passagem fica isenta, por argumento explícito
+  (`Applier::Pass`), nunca por variável de ambiente. Quando o repo se declara a si próprio, a
+  passagem toma o registo da fonte à stack do bootstrap («taken over from stack …») e devolve-o se
+  o segundo olhar recusar o commit; daí em diante o bootstrap não é dono de nada, e mudar um campo
+  não mutável de uma fonte auto-gerida é `delete gitopssources` e voltar a fazer o bootstrap.
+- **Não validado**: um timer systemd real a disparar, a recuperação depois de um reboot, a
+  validação numa VM golden, e fetches `ssh://`/`https://` de ponta a ponta. Por fazer (recusados
+  como campos desconhecidos): `selfHeal`, `wait`, `healthTimeout`, backoff, métricas Prometheus,
+  e os verbos `gitops bootstrap`/`rm`/`history` do ADR.
+
+## `kind: Service type VirtualIP` — o VIP L4 com prontidão (ADR-0066, 2026-10-12)
+
+- **`type: DNS|VirtualIP`** (omissão `DNS`, que compara só `matchLabels`/`port` como antes). Um
+  `VirtualIP` aluga um endereço do pool (`<root>/ingress/vip-pool`, ou `DELONIX_SERVICE_VIP_CIDR`;
+  `network vip-pool set|clear|show`) como lease `svc:<ns>/<nome>` no IPAM, e o DNS responde UM
+  registo A — o VIP. `type`/`vip`/`readiness`/`publish` são campos QUENTES: mudar reescreve o
+  registo e o dataplane, sem recriar nada.
+- **O pool é recusado antes de servir**: IPv4 privado, `/16`–`/29`, bits de host a zero, sem
+  sobreposição com outro pool, com redes do motor, `subnet`s CNI, `podSubnet`/`serviceSubnet` do
+  kind, endereços e rotas do host (VPN e wg incluídos), o slirp `10.0.2.0/24` nem o `delonix0`
+  (DX-5360). Sem pool, DX-6360; VIP fora do pool, DX-1361; sem `bridge-nf-call-iptables`,
+  DX-6361 (o hairpin depende dele). A verificação de sobreposição corre no `apply`, não no `plan`.
+- **Quatro chains próprias no holder**, ao lado da ordem que já existia (`fwguard` -20,
+  `fwprivate` -15, `fwdeny` -10, `fwcont` -5, política 0): `svcpre`/`svcout` (nat, -101) fazem o
+  DNAT do VIP para os backends PRONTOS, `vipguard`/`vipguardout` (filter, -20) recusam o que o VIP
+  não serve. Reescritas com `flush` num só `nft -f`. Isolamento de namespace e anti-spoof
+  continuam a valer para o tráfego do VIP (medido: forjar a origem dá `svcpre` +0).
+- **Prontidão fail-closed**: um prober no processo de controlo (500 ms) lê os registos de
+  container em cada ronda e aplica `readiness.tcp` com `successThreshold`/`failureThreshold`;
+  só entra em rotação um backend `Running`, `healthy` se tiver health check, e com a porta a
+  responder. **Desvio do ADR (D7)**: a releitura de 500 ms substitui o disparo por evento. Verbos
+  do holder: `svcsync` e `svc-state` (só leitura); o `nsleave` tira o endereço de todos os mapas
+  antes de um detach devolver. Sem backend pronto o VIP recusa logo (RST), nunca pendura.
+- **`spec.publish`** leva portas do host ao mesmo conjunto de backends; o `start_slirp` volta a
+  publicá-las depois de um respawn.
+- **BREAKING para quem usa o `delonix-sdn` como biblioteca (D9)**: saíram `lbset`/`lbclear`,
+  `set_service_lb*`, `clear_service_lb` e `service_vip` (também no `delonix-net-rules`), e os
+  códigos DX-1329/DX-1330 (substituídos pelo DX-1361).
+- **Medido ao vivo** (roots isolados, backends busybox httpd): espalhamento 34/26 em 60 ligações,
+  `counter packets 60` no `svcpre`; porta fechada → ejectado em 2,6–3,9 s e 0/60 depois;
+  readmitido 0,66 s depois de reabrir; `container rm` → 0/60; plano de controlo morto → 30/30
+  servidos pelo ruleset do pin. Cenário de caos `service_lb`.
+- **Não validado**: a bateria inteira (só a secção nova), uma VM golden, o caminho `svcout` para um
+  cliente no próprio holder (o proxy L7). **ADR-0065 (IPv6) não começou**: a P1 passa todas as
+  regras a `table inet` e precisa de sessão própria.
+## O grupo de cgroup também vale como root, e o VMM do Cloud Hypervisor nasce numa folha (ADR-0078, proposto)
+
+**Dois tectos aceites e não aplicados, ambos com rc=0.** O `cgroup_parent` (ADR-0015) só existia
+no caminho rootless delegado: em modo root o `setup_cgroup` usava `Container::cgroup()` =
+`delonix.slice/delonix-<id>` e nunca lia o grupo — quem punha todos os passos de um trabalho sob
+um grupo para os limitar em conjunto não tinha tecto nenhum como root. E o VMM do Cloud
+Hypervisor corria no cgroup de quem o lançou: os vCPUs e a memória da VM não eram `cpu.max`/
+`memory.max` de ninguém.
+
+- **`Container::cgroup()` passou a ser `delonix.slice/<grupo>/delonix-<id>`** (`root_cgroup_path`,
+  pura). Como root, `ensure_root_group` cria o grupo, escreve o tecto (normalizado: `64Mi` vira
+  bytes) e passa `memory cpu pids` aos filhos ANTES da folha; qualquer falha é `DX-6102`. Como o
+  caminho estático mudou, a remoção, as estatísticas do CRI e o `container_pids` seguem sozinhos.
+- **Um grupo inválido é RECUSADO nos dois modos** (`DX-1116`), no topo do `spawn` (nada clonado)
+  e outra vez no `setup_cgroup`. Antes, o rootless DESCARTAVA o nome inseguro e arrancava o
+  container sem grupo — o teste `an_unsafe_group_name_*` mudou de «não escapa» para «é recusado».
+- **`DEFAULT_PIDS_MAX` é público** (`delonix_compute`, reexportado pelo `delonix-linux`).
+- **Folha de processo** (`delonix_compute::cgroup_leaf` + `delonix_linux::create_process_leaf`):
+  `Ok(None)` quando não há onde a criar (sessão SSH sem delegação), erro quando um tecto exigido
+  não pega (a folha é apagada). O provider chega-lhe pela porta `ProcessLeaves`, registada no
+  `main` da CLI e no `compose` da node API — um provider não pode depender do adaptador.
+- **O VMM entra na folha entre o `fork` e o `exec`** do lançador (`pre_exec`, um `write` num fd
+  aberto pelo pai): nasce lá dentro, nada do que aloca é cobrado noutro sítio. Tectos: vCPUs (ou
+  `vcpus_max`) em cores inteiros, memória (ou `memory_max_mib`) + 128 MiB, pids
+  `max(512, 2×vCPUs+64)`. Medido no CH v53.0: o VMM ocupa ~7 MiB com 256 MiB ou 2 GiB de guest,
+  7 threads para 2 vCPUs.
+- **Sem folha, a VM é RECUSADA antes da rede** (`DX-6515`, saída 69). Válvula: a mesma
+  `DELONIX_ALLOW_UNENFORCED_LIMITS` dos containers. **Mudança de comportamento:** uma VM CH
+  rootless numa sessão SSH sem `systemd-run --user --scope -p Delegate=yes` deixa de arrancar.
+
+**Por fazer:** libvirt de sessão (o QEMU é filho do daemon; o caminho limpo parece ser
+`virsh start --paused` → mover o pid → `resume`, por medir), rate limiters e filas do CH
+(`bw_*`/`ops_*`, `--rate-limit-group`, `num_queues`/`queue_size` existem no v53.0, mas exigem campo
+persistido para o `vm start`, campo de manifesto e flag), e o `OOMKilled` de uma VM. Provas por
+correr: `tests/cgroup_parent.rs` (`root_mode_*`, com sudo) e `tests/process_leaf.rs` (root ou
+scope delegado).

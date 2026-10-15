@@ -407,6 +407,15 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::rbackup::BackupCmd,
     },
+    /// Pull sources: one reconcile pass, status, suspend and resume (ADR-0021).
+    ///
+    /// A source is declared with `kind: GitOpsSource` and `stack apply`; this
+    /// group acts on one that already exists. Nothing here runs in the
+    /// background: a pass fetches, verifies, plans and applies, and exits.
+    Gitops {
+        #[command(subcommand)]
+        action: cmd::gitops::GitopsCmd,
+    },
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
     /// Idempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM
@@ -606,6 +615,10 @@ fn run() -> Result<()> {
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
         state_root: cmd::util::state_root(),
     }));
+    // Same port shape for the cgroup leaf a Cloud Hypervisor VMM starts in: the
+    // provider may not reach the cgroup adapter, so the composition root hands
+    // it over. Without it, every Cloud Hypervisor VM would be refused (DX-6515).
+    delonix_vm::set_process_leaves(Box::new(delonix_linux::HostProcessLeaves));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
@@ -697,6 +710,7 @@ fn run() -> Result<()> {
         }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
+        Cmd::Gitops { action } => cmd::gitops::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
@@ -1279,6 +1293,7 @@ mod cli_stability_classification_tests {
         "drift",
         "explain",
         "get",
+        "gitops",
         "hosts",
         "init",
         "man",
@@ -1719,5 +1734,56 @@ mod dead_command_reference_tests {
             bad.len(),
             bad.join("\n  ")
         );
+    }
+}
+
+#[cfg(test)]
+mod exec_separator_tests {
+    use super::{Cli, Cmd};
+    use crate::cmd::container::ContainerCmd;
+    use clap::Parser;
+
+    fn exec_of(argv: &[&str]) -> (Option<String>, Vec<String>, Vec<String>) {
+        let cli = Cli::try_parse_from(argv).expect("parses");
+        match cli.cmd {
+            Cmd::Container {
+                action:
+                    ContainerCmd::Exec {
+                        user, env, command, ..
+                    },
+            } => (user, env, command),
+            _ => panic!("not container exec"),
+        }
+    }
+
+    /// The argv the CRI builds for `kubectl exec <pod> -- -u 0 sh`
+    /// (`delonix_cri::streaming::subprocess_args`): the command stays the
+    /// command, and the container's own user stays in force.
+    #[test]
+    fn a_command_after_the_separator_is_never_an_option_of_exec() {
+        let (user, env, command) = exec_of(&[
+            "delonix",
+            "container",
+            "exec",
+            "cri-a",
+            "--",
+            "-u",
+            "0",
+            "-e",
+            "X=1",
+            "sh",
+        ]);
+        assert_eq!(user, None);
+        assert!(env.is_empty());
+        assert_eq!(command, ["-u", "0", "-e", "X=1", "sh"]);
+    }
+
+    /// Why the separator is needed: without it, the same tokens are options.
+    #[test]
+    fn without_the_separator_the_tokens_after_the_name_are_options() {
+        let (user, _, command) =
+            exec_of(&["delonix", "container", "exec", "cri-a", "-u", "0", "sh"]);
+        assert_eq!(user.as_deref(), Some("0"));
+        assert_eq!(command, ["sh"]);
     }
 }

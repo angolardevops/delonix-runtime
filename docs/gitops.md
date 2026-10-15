@@ -250,12 +250,36 @@ container como o Docker faria.
 
 ## O que este fluxo não faz
 
-* **Não reconcilia continuamente.** Converge quando lhe chamas. O repositório
-  não é consultado por ninguém no nó — quem corre o `apply` é o CI ou o
-  operador, e o que aqui existe é um gate de deriva. Fechar essa metade sem
-  trazer um daemon é o que o [ADR-0021](adr/0021-gitops-pull-reconciler.md)
-  propõe (`delonix gitops`, por timer e opt-in); enquanto estiver *Proposed*,
-  esta linha continua a ser o estado do motor.
+* **Não reconcilia continuamente por omissão.** Converge quando lhe chamas.
+  A metade pull existe desde 2026-10-12 e é opt-in: uma `kind: GitOpsSource`
+  ([ADR-0021](adr/0021-gitops-pull-reconciler.md),
+  `examples/full-gitopssource.yaml`) nomeia um repositório, uma ref e um
+  caminho, e com `sync.automated: true` um temporizador systemd corre UMA
+  passagem e sai — o motor continua sem daemon. `delonix gitops reconcile`
+  corre uma passagem à mão, `delonix gitops status` diz o commit que cada fonte
+  viu e o que está aplicado. Um commit que a guarda ou a política de segurança
+  recusam deixa a stack em execução intacta.
+
+  **São duas stacks, e nunca a mesma.** A stack que aplica a fonte à mão (o
+  bootstrap) declara só a fonte; a stack em que as passagens aplicam o
+  repositório é `spec.stack`, por omissão `gitops.<namespace>.<nome>`. Se fossem
+  a mesma, um `stack plan` do bootstrap daria rc=2 para sempre e um
+  `stack apply --prune` apagaria o que a passagem aplicou (e a passagem seguinte
+  recriava-o vazio). Por isso `stack apply`, `plan`, `prune`, `rollback` e
+  `validate` recusam (DX-1601) um manifesto que declare uma fonte cujas passagens
+  caiam na stack em que o comando age — dá outro `--name` ao bootstrap, ou
+  outra `spec.stack` à fonte:
+
+  ```bash
+  delonix stack apply -f source.yaml --name bootstrap   # regista a fonte
+  delonix gitops reconcile production --namespace production
+  delonix stack plan -f source.yaml --name bootstrap --detailed-exitcode   # 0
+  ```
+
+  Se o repositório se declarar a si próprio, a primeira passagem toma o registo
+  da fonte à stack do bootstrap («taken over from stack 'bootstrap'»), e a partir
+  daí é a stack das passagens que declara tudo; o bootstrap deixa de ser dono de
+  nada.
 * **Não tem rollback transaccional** (ver acima).
 * **Não gere frota.** É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.

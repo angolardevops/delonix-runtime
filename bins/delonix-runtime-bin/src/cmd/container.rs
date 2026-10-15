@@ -2089,9 +2089,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
         let hold = governed.contains(name.as_str());
-        // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
-        // flat spec. The two shapes never mix.
-        let pod_shaped = doc.spec.get("containers").is_some();
         // The typo warning used to live here, before the early-continue below, so
         // that re-applying against an existing resource still showed it. It now
         // runs in `manifest::load` — which every path arrives at, including this
@@ -2101,76 +2098,84 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             println!("container/{name}: already exists, nothing to do");
             continue;
         }
-        if pod_shaped {
-            let pod: PodSpec = manifest::spec_of(doc)?;
-            let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
-            opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
-            opts.policy_hold = hold;
-            cmd_run(&images, &store, opts)?;
-            println!("container/{name}: created");
-            continue;
-        }
-        let spec: ContainerSpec = container_spec_of(doc)?;
-        cmd_run(
-            &images,
-            &store,
-            RunOpts {
-                policy_hold: hold,
-                detach: spec.detach,
-                name: Some(name.clone()),
-                hostname: spec.hostname,
-                user: spec.user,
-                net: spec.network,
-                namespace: doc.metadata.namespace.clone(),
-                expose: spec.expose,
-                volumes: spec.volumes,
-                ports: spec.ports,
-                privileged: spec.privileged,
-                entrypoint: spec.entrypoint,
-                rm: false,
-                restart: spec.restart.clone(),
-                devices: spec.devices,
-                env: spec.env,
-                labels: with_metadata_labels(spec.labels, &doc.metadata.labels),
-                image: spec.image,
-                command: spec.command,
-                quiet: false,
-                memory: spec.memory,
-                cpus: spec.cpus,
-                cpu_weight: spec.cpu_weight,
-                cpuset: spec.cpuset,
-                cgroup_parent: spec.cgroup_parent.map(Into::into),
-                io_weight: spec.io_weight,
-                io_max: None,
-                read_only: spec.read_only,
-                cap_add: spec.cap_add,
-                cap_drop: spec.cap_drop,
-                security_opt: spec.security_opt,
-                apparmor: spec.apparmor,
-                selinux: spec.selinux,
-                userns: spec.userns,
-                host_pid: spec.host_pid,
-                host_ipc: spec.host_ipc,
-                detect: spec.detect,
-                secret: spec.secret,
-                secret_files: spec.secret_files,
-                env_file: spec.env_file,
-                tmpfs: spec.tmpfs,
-                ulimit: spec.ulimit,
-                sysctl: spec.sysctl,
-                gpus: spec.gpus,
-                network_alias: spec.network_alias,
-                add_host: spec.add_host,
-                knows: spec.knows,
-                net_bps: spec.net_bps,
-                net_burst: spec.net_burst,
-                log_driver: spec.log_driver,
-                ..Default::default()
-            },
-        )?;
+        let mut opts = doc_run_opts(doc)?;
+        opts.policy_hold = hold;
+        cmd_run(&images, &store, opts)?;
         println!("container/{name}: created");
     }
     Ok(())
+}
+
+/// What a `kind: Container` document asks `container run` for — the ONE
+/// mapping from either shape of spec to [`RunOpts`].
+///
+/// `apply` runs it, and the pull-source guard (`cmd::gitops`, ADR-0021) reads
+/// it to decide whether a document asks for host access. Two copies of this
+/// mapping would let the guard approve a field the apply then honours
+/// differently, so there is one.
+pub(crate) fn doc_run_opts(doc: &ManifestDoc) -> Result<RunOpts> {
+    let name = &doc.metadata.name;
+    // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
+    // flat spec. The two shapes never mix.
+    if doc.spec.get("containers").is_some() {
+        let pod: PodSpec = manifest::spec_of(doc)?;
+        let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+        opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
+        return Ok(opts);
+    }
+    let spec: ContainerSpec = container_spec_of(doc)?;
+    Ok(RunOpts {
+        detach: spec.detach,
+        name: Some(name.clone()),
+        hostname: spec.hostname,
+        user: spec.user,
+        net: spec.network,
+        namespace: doc.metadata.namespace.clone(),
+        expose: spec.expose,
+        volumes: spec.volumes,
+        ports: spec.ports,
+        privileged: spec.privileged,
+        entrypoint: spec.entrypoint,
+        rm: false,
+        restart: spec.restart.clone(),
+        devices: spec.devices,
+        env: spec.env,
+        labels: with_metadata_labels(spec.labels, &doc.metadata.labels),
+        image: spec.image,
+        command: spec.command,
+        quiet: false,
+        memory: spec.memory,
+        cpus: spec.cpus,
+        cpu_weight: spec.cpu_weight,
+        cpuset: spec.cpuset,
+        cgroup_parent: spec.cgroup_parent.map(Into::into),
+        io_weight: spec.io_weight,
+        io_max: None,
+        read_only: spec.read_only,
+        cap_add: spec.cap_add,
+        cap_drop: spec.cap_drop,
+        security_opt: spec.security_opt,
+        apparmor: spec.apparmor,
+        selinux: spec.selinux,
+        userns: spec.userns,
+        host_pid: spec.host_pid,
+        host_ipc: spec.host_ipc,
+        detect: spec.detect,
+        secret: spec.secret,
+        secret_files: spec.secret_files,
+        env_file: spec.env_file,
+        tmpfs: spec.tmpfs,
+        ulimit: spec.ulimit,
+        sysctl: spec.sysctl,
+        gpus: spec.gpus,
+        network_alias: spec.network_alias,
+        add_host: spec.add_host,
+        knows: spec.knows,
+        net_bps: spec.net_bps,
+        net_burst: spec.net_burst,
+        log_driver: spec.log_driver,
+        ..Default::default()
+    })
 }
 
 /// `--user <uid[:gid]|name[:group]>` resolved against the image rootfs
@@ -2817,6 +2822,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // No policy file = no ceiling, byte for byte the old behaviour. A file that
     // exists and does not parse is an ERROR: somebody's intent is unknown, and
     // running anyway is the silent degradation this engine refuses elsewhere.
+    //
+    // The hardening the request asks to relax goes in too, read from the same
+    // fields the run will honour: a policy that judged `--privileged` alone
+    // admitted the same container as `--cap-add ALL -v /:/host`.
+    let security = delonix_compute::run::parse_security_opts(&opts.security_opt)?;
+    let apparmor_unconfined = security.apparmor.as_deref() == Some("unconfined")
+        || opts.apparmor.as_deref() == Some("unconfined");
     super::policy::enforce(
         &super::util::state_root(),
         opts.name.as_deref().unwrap_or(&opts.image),
@@ -2824,7 +2836,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             &opts.image,
             opts.privileged,
             opts.net.is_empty() || opts.net == "host",
-        ),
+        )
+        .with_hardening(super::policy::ContainerHardening {
+            cap_add: &opts.cap_add,
+            host_pid: opts.host_pid,
+            host_ipc: opts.host_ipc,
+            seccomp_unconfined: security.seccomp_unconfined,
+            apparmor_unconfined,
+            volumes: &opts.volumes,
+            devices: &opts.devices,
+            gpus: opts.gpus.as_deref(),
+            masked_paths: &opts.masked_path,
+            readonly_paths: &opts.readonly_path,
+        }),
     )?;
     // The anti-spoofing GRANTS (`--allow-source`, `--no-source-check`): unlike
     // the ceiling above, absent from the policy means NOT granted.
@@ -6179,6 +6203,26 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         for one in delonix_sdn::expand_publish_range(spec)? {
             publish_live(store, &mut c, &one)?;
         }
+    }
+    // A hot-added host path is a bind mount like `run -v /…`, judged by the
+    // same `workloadSecurity` rule — the CLI gate found `update --volume-add
+    // /etc:/x` reading the host's files on a baseline node. Asked only when a
+    // host path is named, so a named volume logs no admission event. The
+    // image is not part of the question: an update does not pull anything.
+    if !delonix_security_runtime::admission::host_path_sources(&o.volume_add).is_empty() {
+        super::policy::enforce(
+            &super::util::state_root(),
+            &c.name,
+            &super::policy::Request {
+                image: None,
+                ..super::policy::Request::container("", false, false).with_hardening(
+                    super::policy::ContainerHardening {
+                        volumes: &o.volume_add,
+                        ..Default::default()
+                    },
+                )
+            },
+        )?;
     }
     for spec in &o.volume_add {
         let mounts = delonix_compute::ports::StorageProvider::resolve_mounts(

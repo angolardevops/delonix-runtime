@@ -159,15 +159,6 @@ pub enum Error {
     #[error("{0}")]
     IngressBridgeProtected(String),
 
-    /// A load-balancer VIP outside the ingress address space.
-    #[error("{0}")]
-    VipOutsideIngressSpace(String),
-
-    /// An `lbset` backend list: a bad weight, a backend with no port, or an
-    /// empty list.
-    #[error("{0}")]
-    InvalidLbSpec(String),
-
     /// A port string (publish/unpublish/lbset) that is not `1..65535`.
     #[error("{0}")]
     InvalidPort(String),
@@ -211,6 +202,15 @@ pub enum Error {
     /// An `attach_container_on_ip` IP outside the target network's subnet.
     #[error("{0}")]
     IpNotInSubnet(String),
+
+    /// A VIP pool that is not a private IPv4 prefix between `/16` and `/29`,
+    /// or two pools that overlap (ADR-0066 D2).
+    #[error("{0}")]
+    VipPoolInvalid(String),
+
+    /// A `spec.vip` outside every configured pool, or not a usable host of it.
+    #[error("{0}")]
+    VipOutsidePool(String),
 
     // ---- not found ----------------------------------------------------
     /// No `NetworkRoute` between the given pair.
@@ -259,10 +259,25 @@ pub enum Error {
     #[error("{0}")]
     IpInUse(String),
 
+    /// A VIP pool that shares addresses with something this node routes or
+    /// serves — a network, a CNI or kind range, a host address or route.
+    #[error("{0}")]
+    VipPoolOverlap(String),
+
     // ---- unavailable ------------------------------------------------------
     /// The `wg` binary is missing from the host.
     #[error("{0}")]
     WgMissing(String),
+
+    /// `type: VirtualIP` on a node with no VIP pool configured.
+    #[error("{0}")]
+    VipPoolUnconfigured(String),
+
+    /// `type: VirtualIP` where the holder does not run bridged traffic through
+    /// netfilter — hairpin to a backend on the client's own network would time
+    /// out (ADR-0066 D5).
+    #[error("{0}")]
+    VipHairpinUnavailable(String),
 
     // ---- system failure -----------------------------------------------
     /// A host tool this crate shells out to (`ip`, `nft`, `wg`, `bridge`, a
@@ -337,8 +352,6 @@ impl Error {
             Error::InvalidHex(_) => 1326,
             Error::InvalidFdbDst(_) => 1327,
             Error::IngressBridgeProtected(_) => 1328,
-            Error::VipOutsideIngressSpace(_) => 1329,
-            Error::InvalidLbSpec(_) => 1330,
             Error::InvalidPort(_) => 1331,
             Error::InvalidProto(_) => 1332,
             Error::InvalidEgressPolicy(_) => 1333,
@@ -349,6 +362,8 @@ impl Error {
             Error::FirewallEncodeFailed(_) => 1338,
             Error::NoFreeIngressPrefix(_) => 1339,
             Error::IpNotInSubnet(_) => 1340,
+            Error::VipPoolInvalid(_) => 1360,
+            Error::VipOutsidePool(_) => 1361,
             Error::RouteNotFound(_) => 4301,
             Error::ServiceNotFound(_) => 4302,
             Error::IngressNetworkNotRealized(_) => 4303,
@@ -359,7 +374,10 @@ impl Error {
             Error::BaseOctetTaken(_) => 5305,
             Error::NetworkPrefixConflict(_) => 5306,
             Error::IpInUse(_) => 5308,
+            Error::VipPoolOverlap(_) => 5360,
             Error::WgMissing(_) => 6301,
+            Error::VipPoolUnconfigured(_) => 6360,
+            Error::VipHairpinUnavailable(_) => 6361,
             Error::Command { .. } => 9301,
             Error::Engine(e) => e.number(),
         }
@@ -405,8 +423,11 @@ impl From<Error> for Dx {
             | Error::NetworkSubnetImmutable(text)
             | Error::BaseOctetTaken(text)
             | Error::NetworkPrefixConflict(text)
-            | Error::IpInUse(text) => Dx::Conflict(text),
-            Error::WgMissing(text) => Dx::Unavailable(text),
+            | Error::IpInUse(text)
+            | Error::VipPoolOverlap(text) => Dx::Conflict(text),
+            Error::WgMissing(text)
+            | Error::VipPoolUnconfigured(text)
+            | Error::VipHairpinUnavailable(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
             e => Dx::Invalid(e.to_string()),
@@ -451,8 +472,6 @@ mod tests {
             Error::InvalidHex("invalid hex".into()),
             Error::InvalidFdbDst("invalid FDB dst: 'x'".into()),
             Error::IngressBridgeProtected("the default ingress bridge cannot be removed".into()),
-            Error::VipOutsideIngressSpace("VIP fora do espaço de ingress: x".into()),
-            Error::InvalidLbSpec("lbset sem backends".into()),
             Error::InvalidPort("invalid port".into()),
             Error::InvalidProto("invalid proto: x".into()),
             Error::InvalidEgressPolicy("invalid egress policy: x".into()),
@@ -473,6 +492,11 @@ mod tests {
             Error::BaseOctetTaken("10.50.0.0/16 is already used by network 'x'".into()),
             Error::NetworkPrefixConflict("network 'x' is already realized on 10.50".into()),
             Error::IpInUse("IP 10.50.3.3 is already leased to 'x'".into()),
+            Error::VipPoolInvalid("VIP pool \"8.8.8.0/24\" is not private".into()),
+            Error::VipOutsidePool("spec.vip 10.1.2.3 is outside the VIP pool".into()),
+            Error::VipPoolOverlap("VIP pool 10.90.0.0/16 overlaps engine network x".into()),
+            Error::VipPoolUnconfigured("no VIP pool is configured on this node".into()),
+            Error::VipHairpinUnavailable("bridge-nf-call-iptables is 0".into()),
             Error::WgMissing("'wg' is not available on this host".into()),
             Error::Command {
                 context: "spawn",

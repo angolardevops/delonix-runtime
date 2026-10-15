@@ -45,6 +45,29 @@ pub enum Mode {
     Warn,
 }
 
+/// A named profile of container hardening the node requires, on top of the
+/// individual fields of [`SecurityPolicy`].
+///
+/// The vocabulary is the Kubernetes Pod Security Standards' on purpose: an
+/// operator who knows what `baseline` refuses there knows what it refuses
+/// here, and the OWASP Kubernetes Top 10 (K01, insecure workload
+/// configuration) points at exactly that profile. Only `baseline` exists:
+/// `restricted` needs the image's effective user at admission time, which this
+/// gate runs before resolving, and a variant this engine cannot enforce would
+/// be a promise in a type.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkloadSecurity {
+    /// Refuses what lets a container out of its own isolation without being
+    /// called `--privileged`: capabilities beyond the Pod Security baseline
+    /// set (`--cap-add ALL`, `SYS_ADMIN`, …), the host's PID or IPC namespace,
+    /// `seccomp=unconfined`/`apparmor=unconfined`, a bind mount of a host
+    /// path, and a host device. `--privileged` itself is refused too. The
+    /// host NETWORK is not part of it: it is this engine's default network
+    /// mode, and [`SecurityPolicy::deny_host_network`] already decides it.
+    Baseline,
+}
+
 /// What this node refuses to run.
 ///
 /// Every field defaults to «no opinion», so a policy file states only what it
@@ -75,6 +98,14 @@ pub struct SecurityPolicy {
     /// Only these registries may be pulled from. Empty = no opinion.
     #[serde(default)]
     pub allowed_registries: Vec<String>,
+    /// A hardening profile every container must meet. Absent = no opinion.
+    ///
+    /// `denyPrivileged` refuses one flag; this refuses what that flag is made
+    /// of. Measured before it existed: a node with `denyPrivileged: true`
+    /// admitted `--cap-add ALL --security-opt seccomp=unconfined --pid host
+    /// -v /:/host`, which is the same container under four other names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_security: Option<WorkloadSecurity>,
 
     // ---- VM path. New, and the reason this struct exists.
     /// Refuse `vm create --device` (VFIO PCI passthrough).
@@ -183,6 +214,7 @@ impl SecurityPolicy {
             && !self.deny_host_network
             && !self.deny_latest_tag
             && self.allowed_registries.is_empty()
+            && self.workload_security.is_none()
             && !self.deny_device_passthrough
             && !self.deny_latest_vm_image
             && self.allowed_image_url_hosts.is_empty()
@@ -219,6 +251,7 @@ impl SecurityPolicy {
                     || self.deny_host_network
                     || self.deny_latest_tag
                     || !self.allowed_registries.is_empty()
+                    || self.workload_security.is_some()
             }
             Workload::VirtualMachine => {
                 self.deny_device_passthrough
@@ -248,6 +281,21 @@ impl SecurityPolicy {
                           unless passthrough is deliberate here",
                 severity: Severity::High,
                 workload: Some(Workload::VirtualMachine),
+            });
+        }
+
+        // `denyPrivileged` alone reads like «no privileged containers» and
+        // refuses one flag: every capability, the host's namespaces and its
+        // filesystem stay reachable under other names. The node says so.
+        if self.deny_privileged && self.workload_security.is_none() {
+            out.push(Lint {
+                id: "POLICY-PRIVILEGE-EQUIVALENTS-OPEN",
+                field: "workloadSecurity",
+                message: "this node refuses `--privileged` but admits what it is made of \
+                          (`--cap-add ALL`, `--pid host`, `seccomp=unconfined`, `-v /:/host`, \
+                          `--device`) — set `workloadSecurity: baseline` to refuse those too",
+                severity: Severity::High,
+                workload: Some(Workload::Container),
             });
         }
 
@@ -392,7 +440,9 @@ mod tests {
             .filter(|l| l.applies_to(Workload::Container))
             .map(|l| l.id)
             .collect();
-        assert_eq!(em_container, Vec::<&str>::new());
+        // The one container lint is about the container path itself: the
+        // shipped policy refuses `--privileged` and admits its equivalents.
+        assert_eq!(em_container, ["POLICY-PRIVILEGE-EQUIVALENTS-OPEN"]);
         let em_vm: Vec<_> = p
             .lint()
             .into_iter()
@@ -416,7 +466,7 @@ mod tests {
         let p = SecurityPolicy::parse(
             r#"{
                 "denyPrivileged": true, "denyHostNetwork": true, "denyLatestTag": true,
-                "allowedRegistries": ["ghcr.io"],
+                "allowedRegistries": ["ghcr.io"], "workloadSecurity": "baseline",
                 "denyDevicePassthrough": true, "denyLatestVmImage": true,
                 "allowedImageUrlHosts": ["cloud.debian.org"]
             }"#,
@@ -535,5 +585,52 @@ mod tests {
             Mode::Warn
         );
         assert_eq!(SecurityPolicy::parse("{}").unwrap().mode, Mode::Enforce);
+    }
+
+    #[test]
+    fn workload_security_parses_by_its_manifest_name_and_only_as_baseline() {
+        let p = SecurityPolicy::parse(r#"{"workloadSecurity": "baseline"}"#).unwrap();
+        assert_eq!(p.workload_security, Some(WorkloadSecurity::Baseline));
+        assert!(p.constrains(Workload::Container));
+        assert!(!p.constrains(Workload::VirtualMachine));
+        assert!(!p.is_silent());
+        // `restricted` is not something this gate can enforce: refused, never
+        // read as a weaker profile.
+        assert!(SecurityPolicy::parse(r#"{"workloadSecurity": "restricted"}"#).is_err());
+    }
+
+    /// Absent stays absent on the way back out: a `policy.json` written by
+    /// this build for a node that never asked for the field is byte for byte
+    /// what the previous build wrote.
+    #[test]
+    fn an_unset_workload_security_is_not_written() {
+        let p = SecurityPolicy {
+            deny_privileged: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("workloadSecurity"), "{json}");
+    }
+
+    #[test]
+    fn deny_privileged_without_a_profile_names_the_equivalents_it_admits() {
+        let p = SecurityPolicy {
+            deny_privileged: true,
+            ..Default::default()
+        };
+        let ids: Vec<_> = p.lint().iter().map(|l| l.id).collect();
+        assert!(
+            ids.contains(&"POLICY-PRIVILEGE-EQUIVALENTS-OPEN"),
+            "{ids:?}"
+        );
+        let closed = SecurityPolicy {
+            workload_security: Some(WorkloadSecurity::Baseline),
+            ..p
+        };
+        let ids: Vec<_> = closed.lint().iter().map(|l| l.id).collect();
+        assert!(
+            !ids.contains(&"POLICY-PRIVILEGE-EQUIVALENTS-OPEN"),
+            "{ids:?}"
+        );
     }
 }
