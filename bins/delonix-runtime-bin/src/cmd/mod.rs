@@ -47,6 +47,8 @@ pub mod migrate;
 pub use delonix_model::names;
 pub mod namespace;
 pub mod net;
+pub mod net_profiles;
+pub mod net_profiles_install;
 pub mod netns;
 pub mod netroute;
 pub mod network;
