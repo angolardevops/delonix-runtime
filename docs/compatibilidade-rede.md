@@ -97,6 +97,14 @@ Kubernetes suportada. Construí-la exige o laboratório da §5.
 | 12 | Testes unitários e de contrato | `cargo test -p delonix-runtime-bin --bin delonix` (suites afectadas) | **PASS** — 212 testes |
 | 13 | Requisitos de CRI do agente Cilium | inspecção do DaemonSet renderizado | **PASS por leitura** — ver §3.1 |
 | 14 | `fmt`, gate da superfície da CLI, schema publicado, traduções PT | `cargo fmt --check`, `scripts/cli-tree.sh --gate`, os testes de deriva | **PASS** — 273 folhas batem com a linha de base |
+| 15 | **Build da golden a sério** (era B1) | `delonix vm image build -t k8s-golden --k8s-version 1.34 --offline`, raiz isolada `/var/tmp/delonix-lab`, binários release deste ramo, sob um piso de disco de 8 GiB | **PASS** — `rc=0`, 608 MiB, 49 passos de `virt-customize`, nunca chegou ao piso |
+| 16 | `/etc/machine-id` da golden | `virt-ls -l -a … /etc/` | **PASS** — **0 bytes**. A golden de 2026-07-17 tinha **33** (`6bd6963d409a14986c04b3b6eed4c818`) — é o DX-6702 medido no artefacto |
+| 17 | Os 10 plugins de referência, e só eles | `virt-ls -a … /opt/cni/bin` | **PASS** — `bandwidth bridge firewall host-device host-local ipvlan loopback macvlan portmap tuning`. Os 8 excluídos e o `LICENSE`/`README.md` ausentes — ver §4.1, porque à primeira NÃO foi |
+| 18 | Preflight instalado como COMANDO | `virt-ls -l -a … /usr/local/bin` | **PASS** — `delonix-node-preflight`, `0755`, ao lado de `delonix` e `delonix-cri` |
+| 19 | Proveniência na imagem | `virt-cat -a … /etc/delonix-image-release` | **PASS** — `DELONIX_CNI_PLUGINS="v1.9.1 (amd64, sha256:b98f74a0f8522f0a)"` e `DELONIX_NET_PROFILES="cilium:1.20.2,calico:3.33.0,flannel:0.28.10,multus:4.3.1"` |
+| 20 | Módulos e sysctls dos perfis persistidos | `virt-cat` de `/etc/modules-load.d/delonix-cni.conf` e `/etc/sysctl.d/delonix-cni.conf` | **PASS** — os 9 módulos (`vxlan geneve ipip ip_tables nf_conntrack ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh`) e os 4 sysctls |
+| 21 | Diagnóstico de rede na golden | `virt-ls` de `/usr/bin` e `/usr/sbin` | **PASS** — `tcpdump`, `ethtool`, `conntrack` |
+| 22 | A golden não leva conflist | `virt-ls -l -a … /etc/cni/net.d` | **PASS** — só `.kubernetes-cni-keep`, 0 bytes, do `.deb`. Não é `*.conflist`/`*.conf`, e o `cni::list_conf_files` filtra por extensão, logo é invisível à camada CNI |
 
 ### 3.1 Requisitos de CRI do agente Cilium — PASS por leitura, não medido ao vivo
 

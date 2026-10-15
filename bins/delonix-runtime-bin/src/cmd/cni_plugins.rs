@@ -198,16 +198,39 @@ pub(crate) fn fetch_reference_plugins(store_dir: &Path, arch: &str) -> Result<Pa
 /// in isolation.
 ///
 /// Extraction is by NAME, one `tar` invocation listing exactly the members
-/// wanted. Not `tar -xzf` followed by deleting the rest: a build that unpacks
-/// everything and then removes some of it leaves the removed ones in a layer's
-/// history on any format that has layers, and — more practically — a tarball
-/// that grows a new member would silently start shipping it.
+/// wanted — a tarball that grows a new member must not silently start
+/// shipping it.
+///
+/// **And then the directory is PRUNED to that same set.** Extraction alone was
+/// not enough, and only building the image showed it: `kubernetes-cni` arrives
+/// as a `kubelet` dependency and owns 21 paths under `/opt/cni/bin` — all 18
+/// upstream plugins plus `LICENSE` and `README.md`. So the first version of
+/// this function extracted its ten verified binaries over the deb's copies and
+/// left the other eight (`dhcp`, `dummy`, `ptp`, `sbr`, `static`, `tap`,
+/// `vlan`, `vrf`) sitting there, while this module's own header and ADR-0078
+/// both claimed they do not ship. The claim was false on the built artefact,
+/// and no unit test could see it: the tests assert the CONTENTS of
+/// `REFERENCE_PLUGINS`, and the extra files come from a `.deb` the test never
+/// runs. Measured on a real golden (`virt-ls /opt/cni/bin` → 20 entries).
+///
+/// The prune makes the delivered image match the documented claim, which is
+/// the direction this repo resolves that kind of mismatch in. The cost, said
+/// plainly: `dpkg` still believes `kubernetes-cni` owns the removed files, so
+/// `dpkg --verify` reports them missing and a reinstall of that package would
+/// bring them back. That is the same trade `k8s_node_debloat_steps` already
+/// makes when it purges packages out of the image, and it is preferable to
+/// shipping binaries nothing can reach on a machine handed to a tenant.
 pub(crate) fn install_ops(tarball: &Path) -> Vec<CustomizeOp> {
-    let members = REFERENCE_PLUGINS
+    let names: Vec<&str> = REFERENCE_PLUGINS.iter().map(|(n, _)| *n).collect();
+    let members = names
         .iter()
-        .map(|(n, _)| format!("./{n}"))
+        .map(|n| format!("./{n}"))
         .collect::<Vec<_>>()
         .join(" ");
+    // The keep-list for the prune, as a space-delimited haystack so the `case`
+    // match below cannot partially match a name (`" bridge "` never matches
+    // `host-bridge`).
+    let keep = format!(" {} ", names.join(" "));
     let name = tarball
         .file_name()
         .unwrap_or_default()
@@ -218,7 +241,15 @@ pub(crate) fn install_ops(tarball: &Path) -> Vec<CustomizeOp> {
         CustomizeOp::CopyIn(tarball.to_path_buf(), "/tmp/cni-plugins".to_string()),
         CustomizeOp::RunCommand(format!(
             "tar -xzf /tmp/cni-plugins/{name} -C /opt/cni/bin {members} && \
-             chmod 0755 /opt/cni/bin/* && rm -rf /tmp/cni-plugins"
+             rm -rf /tmp/cni-plugins"
+        )),
+        // Prune, then chmod what remains. `for f in *` with a `case` test is
+        // POSIX sh and needs no `find`; the quotes keep a name with a space
+        // (none today) from splitting.
+        CustomizeOp::RunCommand(format!(
+            "cd /opt/cni/bin && for f in *; do \
+             case \"{keep}\" in *\" $f \"*) ;; *) rm -rf \"$f\" ;; esac; done && \
+             chmod 0755 /opt/cni/bin/*"
         )),
     ]
 }
@@ -338,7 +369,77 @@ mod tests {
         }
         // The tarball does not stay in the image.
         assert!(tar.contains("rm -rf /tmp/cni-plugins"), "{tar}");
-        assert!(tar.contains("chmod 0755"), "{tar}");
+
+        // And the PRUNE, which is what makes the claim true on the built
+        // artefact: `kubernetes-cni` puts all 18 plugins there as a kubelet
+        // dependency, so extracting ten over them leaves eight behind.
+        let prune = &cmds[3];
+        assert!(prune.contains("cd /opt/cni/bin"), "{prune}");
+        assert!(prune.contains("rm -rf \"$f\""), "{prune}");
+        assert!(prune.contains("chmod 0755"), "{prune}");
+        // Every kept name is in the keep-list, space-delimited on both sides
+        // so no name can partially match another.
+        for (n, _) in REFERENCE_PLUGINS {
+            assert!(prune.contains(&format!(" {n} ")), "{n} not kept: {prune}");
+        }
+        // And nothing outside the set is named as kept.
+        for unwanted in ["dhcp", "vlan", "vrf", "LICENSE", "README.md"] {
+            assert!(
+                !prune.contains(&format!(" {unwanted} ")),
+                "{unwanted} is in the keep-list: {prune}"
+            );
+        }
+    }
+
+    /// The prune is shell that runs in a `virt-customize` chroot, where a
+    /// syntax error is a failed build with a confusing message. Run the real
+    /// thing against a directory that mimics what the image actually has:
+    /// the deb's 18 plugins + LICENSE + README.md.
+    #[test]
+    fn the_prune_keeps_exactly_the_reference_set() {
+        let tmp = match tempfile::tempdir() {
+            Ok(t) => t,
+            Err(e) => panic!("tempdir: {e}"),
+        };
+        let bin = tmp.path().join("opt/cni/bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        // What `kubernetes-cni` really ships, measured off a built golden.
+        let shipped = [
+            "bandwidth", "bridge", "dhcp", "dummy", "firewall", "host-device", "host-local",
+            "ipvlan", "LICENSE", "loopback", "macvlan", "portmap", "ptp", "README.md", "sbr",
+            "static", "tap", "tuning", "vlan", "vrf",
+        ];
+        for f in shipped {
+            std::fs::write(bin.join(f), b"x").expect("write");
+        }
+        // The prune command, with the absolute path swapped for the fixture.
+        let ops = install_ops(Path::new("/cache/x.tgz"));
+        let prune = match &ops[3] {
+            CustomizeOp::RunCommand(c) => c.replace("/opt/cni/bin", &bin.to_string_lossy()),
+            other => panic!("expected a RunCommand, got {other:?}"),
+        };
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&prune)
+            .output()
+            .expect("sh");
+        assert!(
+            out.status.success(),
+            "the prune failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut left: Vec<String> = std::fs::read_dir(&bin)
+            .expect("readdir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let mut want: Vec<String> = REFERENCE_PLUGINS
+            .iter()
+            .map(|(n, _)| (*n).to_string())
+            .collect();
+        want.sort();
+        assert_eq!(left, want, "the directory is not exactly the reference set");
     }
 
     /// Provenance has to name the version AND enough of the digest to tell two
