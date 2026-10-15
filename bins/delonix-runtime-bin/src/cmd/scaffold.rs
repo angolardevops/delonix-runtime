@@ -445,9 +445,31 @@ fn valid_cert_host(h: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '*'))
 }
 
+/// Settles what a template leaves to the person generating the project, and
+/// then says whether this host can publish what was settled.
+///
+/// The warning lives HERE and not only in the `--up` preflight because the
+/// common flow is to generate now and `stack apply` later: there the refusal
+/// lands long after the flag was given, with the image already built. A
+/// warning and not a refusal, because a project may legitimately be generated
+/// for a host whose threshold is lower than this one's.
+fn plan_for(tname: &str, interactive: bool, edge: &EdgeArgs) -> Result<Plan> {
+    let plan = settle_plan(tname, interactive, edge)?;
+    for (flag, port) in std::iter::once(("--port", &plan.port))
+        .chain(plan.tls_port.iter().map(|t| ("--tls-port", t)))
+    {
+        if let Ok(n) = port.parse::<u16>() {
+            if !delonix_sdn::can_bind_host_port("127.0.0.1", n, delonix_sdn::Proto::Tcp) {
+                super::output::warn(&privileged_port_message(flag, port));
+            }
+        }
+    }
+    Ok(plan)
+}
+
 /// Settles what a template leaves to the person generating the project.
 /// Nothing is asked off a terminal: the defaults are the answer there.
-fn plan_for(tname: &str, interactive: bool, edge: &EdgeArgs) -> Result<Plan> {
+fn settle_plan(tname: &str, interactive: bool, edge: &EdgeArgs) -> Result<Plan> {
     let mut plan = Plan::defaults(tname);
     // A flag is an answer: what it settles is neither asked nor second-guessed.
     plan.port = match edge.port {
@@ -747,6 +769,7 @@ fn render_planned(
     for (dest, _, _) in &outputs {
         refuse_symlinks(&o.dir, dest)?;
     }
+    refuse_foreign_project(&outputs, tname, &o.name, &o.dir, o.force)?;
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
     for (dest, content, exec) in &outputs {
@@ -1189,10 +1212,143 @@ fn wait_secs(tname: &str) -> u64 {
     template_meta(tname).wait_secs
 }
 
-/// A port this project is about to publish that something else already holds.
-/// Said BEFORE the build, with the owner's name: found only at `stack apply`,
-/// it costs the whole build first.
-fn refuse_busy_ports(plan: &Plan, name: &str) -> Result<()> {
+/// The two files that decide what gets BUILT and STARTED here: the image
+/// recipe and the declaration applied from it. Config and code are
+/// deliberately not in this set — a hand-edited `nginx.conf` is the normal
+/// state of a generated project and must never stop anything.
+fn is_build_glue(dest: &Path) -> bool {
+    matches!(
+        dest.file_name().and_then(|n| n.to_str()),
+        Some("Delonixfile") | Some("delonix-manifest.yaml")
+    )
+}
+
+/// The `FROM`s of a Delonixfile, in order — what identifies the project a
+/// recipe builds, independently of ports, names and comments.
+///
+/// Compared as BYTES and never as `&l[..5]`: a Delonixfile is someone else's
+/// file and a line may well start with a multi-byte character (our own
+/// templates open with `# Delonixfile — …`), where slicing by byte index
+/// panics mid-character.
+fn from_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| {
+            let b = l.as_bytes();
+            b.len() > 5 && b[..5].eq_ignore_ascii_case(b"from ")
+        })
+        .collect()
+}
+
+/// Refuses when the glue already on disk is not the glue this command would
+/// write. Measured in production: `delonix init -t odoo <dir>` over a
+/// directory already holding an nginx project wrote nothing, printed
+/// "nothing to do (everything already existed)" — and then `--up` went on to
+/// build and start the NGINX project, waiting for odoo's health path on
+/// odoo's port. The command reported success for something it had not done.
+///
+/// Scoped to [`is_build_glue`] so that editing the generated config, or the
+/// adopted project's own code, never trips it; and skipped under `--force`,
+/// which is the answer to this refusal. A re-run with the SAME template and
+/// the SAME flags renders byte-identical glue and goes through untouched —
+/// that is the idempotent second `--up`, which has to keep working.
+fn refuse_foreign_project(
+    outputs: &[(PathBuf, String, bool)],
+    tname: &str,
+    name: &str,
+    dir: &Path,
+    force: bool,
+) -> Result<()> {
+    if force {
+        return Ok(());
+    }
+    for (dest, content, _) in outputs {
+        if !is_build_glue(dest) {
+            continue;
+        }
+        // Absent → it is about to be written; there is nothing to conflict with.
+        let Ok(on_disk) = std::fs::read_to_string(dest) else {
+            continue;
+        };
+        if on_disk == *content {
+            continue;
+        }
+        let (have, want) = (from_lines(&on_disk), from_lines(content));
+        let detail = if have.is_empty() || want.is_empty() || have == want {
+            String::new()
+        } else {
+            super::po::tf(
+                " (it builds `{have}`, the '{tname}' template builds `{want}`)",
+                &[
+                    ("have", &have.join(", ")),
+                    ("tname", tname),
+                    ("want", &want.join(", ")),
+                ],
+            )
+        };
+        return Err(Error::Conflict(super::po::tf(
+            "{file} already in {dir} is not the one this command would write{detail} — \
+             build what is there with `delonix build -t {name}:dev . && delonix stack apply`, \
+             pass --force to overwrite it with the '{tname}' template, or pick another directory",
+            &[
+                (
+                    "file",
+                    dest.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Delonixfile"),
+                ),
+                ("dir", &dir.display().to_string()),
+                ("detail", &detail),
+                ("name", name),
+                ("tname", tname),
+            ],
+        )));
+    }
+    Ok(())
+}
+
+/// Why a port below the host's threshold cannot be published here, and the two
+/// ways out. Shares its shape with the engine's own refusal in
+/// `cmd::container` — the same fact, said at the moment the flag is given
+/// instead of after a whole image has been built for it.
+///
+/// The threshold is read through `cmd::system`'s reader and not a second one
+/// of our own: two readers of the same sysctl are two numbers that can
+/// disagree. Unreadable → the sentence is still true, it just loses the
+/// number.
+fn privileged_port_message(flag: &str, port: &str) -> String {
+    let n: u32 = port.parse().unwrap_or(0);
+    let have = match super::system::read_sysctl("net.ipv4.ip_unprivileged_port_start") {
+        Some(v) => super::po::tf(" (this host starts at {start})", &[("start", &v)]),
+        None => String::new(),
+    };
+    super::po::tf(
+        "{flag} {port} needs privilege to bind on this host — rootless cannot publish \
+         ports below net.ipv4.ip_unprivileged_port_start{have}\n\
+         \n\
+         fix it with ONE of these:\n\
+         \x20 {flag} {alt}    # generate the project on an unprivileged port\n\
+         \x20 curl -fsSL {url} | bash -s -- --low-ports    # or lower the threshold for good (host-wide)",
+        &[
+            ("flag", flag),
+            ("port", port),
+            ("have", &have),
+            // 80 → 8080, 443 → 8443, 943 → 8943; always inside u16.
+            ("alt", &(n + 8000).to_string()),
+            (
+                "url",
+                "https://github.com/angolardevops/delonix-runtime/\
+                 releases/latest/download/install.sh",
+            ),
+        ],
+    )
+}
+
+/// A port this project is about to publish that this host will not hand out:
+/// one something else already holds, or one below the host's privileged-port
+/// threshold. Said BEFORE the build, with the owner's name or the way out:
+/// found only at `stack apply`, it costs the whole build first.
+fn refuse_unusable_ports(plan: &Plan, name: &str) -> Result<()> {
     // A port held by THIS project's own running container is not a conflict:
     // `--up` run a second time on a project that is already up has to reach
     // `stack apply`, which converges it. Measured: it stopped here, naming the
@@ -1202,8 +1358,18 @@ fn refuse_busy_ports(plan: &Plan, name: &str) -> Result<()> {
         super::container::port_owner(&store, port).ok().flatten()
     };
     let is_ours = |owner: &str| owner == name || owner.starts_with(&format!("{name}-"));
-    for port in std::iter::once(&plan.port).chain(plan.tls_port.iter()) {
+    for (flag, port) in std::iter::once(("--port", &plan.port))
+        .chain(plan.tls_port.iter().map(|t| ("--tls-port", t)))
+    {
         let Ok(n) = port.parse::<u16>() else { continue };
+        // Privilege first, and it is a different question from "taken": the
+        // probe answers `true` for EADDRINUSE on purpose, so the two never
+        // mask each other. `stack apply` refuses this one too, but only after
+        // the whole image has been built for a port it was never going to
+        // publish.
+        if !delonix_sdn::can_bind_host_port("127.0.0.1", n, delonix_sdn::Proto::Tcp) {
+            return Err(Error::Invalid(privileged_port_message(flag, port)));
+        }
         if !delonix_sdn::host_port_busy("127.0.0.1", n, delonix_sdn::Proto::Tcp) {
             continue;
         }
@@ -1250,7 +1416,7 @@ fn build_and_up(
 ) -> Result<()> {
     let health = template_meta(tname).health;
     let port = plan.port.as_str();
-    refuse_busy_ports(plan, name)?;
+    refuse_unusable_ports(plan, name)?;
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
 
@@ -2865,5 +3031,92 @@ mod tests {
             ..Default::default()
         };
         assert!(plan_for("nginx", false, &bad).is_err());
+    }
+
+    /// What identifies the project a recipe builds. Case and the rest of the
+    /// line do not matter; a `FROM` that is only part of a word does not count.
+    #[test]
+    fn from_lines_reads_the_base_images_and_nothing_else() {
+        assert_eq!(
+            from_lines("# c\nFROM nginx:1.30-alpine\nCOPY a b\n"),
+            vec!["FROM nginx:1.30-alpine"]
+        );
+        assert_eq!(
+            from_lines("FROM golang:1.25 AS build\nFROM alpine:3.22\n"),
+            vec!["FROM golang:1.25 AS build", "FROM alpine:3.22"]
+        );
+        assert!(from_lines("FROMAGE is not a stage\nCOPY a b\n").is_empty());
+        // A line whose byte 5 falls INSIDE a character: `&l[..5]` panics on
+        // these two (measured — an em dash happens to land on a boundary and
+        // would NOT have caught it), and a Delonixfile is someone else's file.
+        assert_eq!(
+            from_lines("日本語 nota\nFROM alpine:3.22\n"),
+            vec!["FROM alpine:3.22"]
+        );
+        assert!(from_lines("ãéíóú\n").is_empty());
+    }
+
+    /// The production bug: `init -t odoo` over a directory that already holds
+    /// an nginx project wrote nothing, said "nothing to do" and then `--up`
+    /// built the nginx project. Refused now, naming both base images.
+    #[test]
+    fn a_directory_holding_another_project_is_refused_and_names_both() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let dfile = dir.join("Delonixfile");
+        std::fs::write(&dfile, "FROM nginx:1.30-alpine\nCOPY html /x\n").expect("write");
+        let outputs = vec![(
+            dfile.clone(),
+            "FROM odoo:20.0\nCOPY addons /mnt\n".to_string(),
+            false,
+        )];
+        let err = refuse_foreign_project(&outputs, "odoo", "demo", dir, false)
+            .expect_err("a foreign Delonixfile is a conflict");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("nginx:1.30-alpine"),
+            "names what is there: {msg}"
+        );
+        assert!(msg.contains("odoo:20.0"), "names what was asked: {msg}");
+        // `--force` is the answer the refusal offers, so it must go through.
+        assert!(refuse_foreign_project(&outputs, "odoo", "demo", dir, true).is_ok());
+    }
+
+    /// The idempotent second `--up` has to keep working: the same template
+    /// with the same flags renders byte-identical glue. And a hand-edited
+    /// config is the normal state of a generated project — it is not glue and
+    /// must never stop anything.
+    #[test]
+    fn the_same_project_again_goes_through_and_config_is_not_glue() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        let dfile = dir.join("Delonixfile");
+        let same = "FROM nginx:1.30-alpine\nCOPY html /x\n".to_string();
+        std::fs::write(&dfile, &same).expect("write");
+        assert!(
+            refuse_foreign_project(&[(dfile, same, false)], "nginx", "demo", dir, false).is_ok()
+        );
+
+        let conf = dir.join("nginx.conf");
+        std::fs::write(&conf, "worker_processes 2;\n").expect("write");
+        assert!(refuse_foreign_project(
+            &[(conf, "worker_processes 8;\n".to_string(), false)],
+            "nginx",
+            "demo",
+            dir,
+            false
+        )
+        .is_ok());
+    }
+
+    /// The remedy names the flag that was actually given — `--tls-port 943`
+    /// must not be answered with advice about `--port`.
+    #[test]
+    fn the_privileged_port_remedy_names_the_flag_that_was_given() {
+        let msg = privileged_port_message("--tls-port", "943");
+        assert!(msg.contains("--tls-port 943"), "{msg}");
+        assert!(msg.contains("--tls-port 8943"), "{msg}");
+        assert!(!msg.contains("--port 8943"), "{msg}");
+        assert!(msg.contains("--low-ports"), "{msg}");
     }
 }

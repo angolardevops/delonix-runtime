@@ -3348,6 +3348,74 @@ tem a secção «On the internet without a public IP», e o fim do `--up` aponta
   Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
   ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
 
+## Uma porta privilegiada no `init` tornava o projecto impossível de construir (2026-10-15)
+
+Bug de produção: `delonix init -t nginx --port 9000 --tls-port 943 <dir>` gerava o projecto
+e o `build` morria SEMPRE em `nginx: [emerg] bind() to 0.0.0.0:943 failed (13: Permission
+denied)`, no passo que só devia verificar a sintaxe da configuração. Reproduzido aqui com a
+porta deslocada para o limiar deste host (`ip_unprivileged_port_start` = 80, logo `--tls-port
+79`): mesma falha, mesmo passo.
+
+**Quatro medições, e cada uma mudou o desenho da correcção:**
+
+1. **O container de trabalho do `build` corre na netns do HOST** — `readlink /proc/self/ns/net`
+   dá o MESMO inode do host (o `work_launch` di-lo: «on the host's network (a `RUN` fetches
+   packages)»). A nossa userns não é dona dessa netns, logo o `CAP_NET_BIND_SERVICE` que o
+   container tem em `CapEff` não vale lá, e quem decide é o `ip_unprivileged_port_start` do host.
+2. **`nginx -t` BINDA cada `listen` que lê** — não é só um parser. É por isso que o passo falha.
+3. **E tolera EADDRINUSE: só o EACCES é fatal.** Medido dentro do container, com a porta
+   ocupada por um `nc` na mesma netns: `rc=0`. Ou seja o gate óbvio — «ocupa a porta e constrói»
+   — passaria sobre o binário defeituoso. **É privilégio, e só privilégio, que morde**, e por
+   isso a porta do gate sai do limiar REAL do host em vez de ser um número escolhido à mão.
+4. **Só o nginx tem este problema.** `httpd -t` e `haproxy -c` construíram com `--port 79
+   --tls-port 78` sem uma queixa — não bindam. A correcção é do template do nginx, não dos três.
+
+**E a porta não é inutilizável — era só o CHECK.** Dentro da sua própria netns (a que um
+container com `-p` recebe, e que a userns dele possui) o mesmo `nginx -t` com `listen 943`
+devolve `rc=0`, mesmo com o `ip_unprivileged_port_start` dessa netns em 1024: ali a capability
+vale. O que falha de verdade é publicar `943:943` no HOST, e isso o motor já recusa com a saída
+que nomeia o `--low-ports`.
+
+**A correcção, em três sítios:**
+
+- **O check corre sobre uma cópia sem portas.** Os dois `listen` passam a sockets unix
+  (`/tmp/chk-{http,tls}.sock`) na cópia que o `nginx -t` lê — sem privilégio e sem tocar numa
+  porta do host. É a mesma disciplina que já tirava de lá as duas linhas do certificado, que
+  também não existe no tempo do build. Verificado que o check **continua a apanhar um erro**:
+  um `gzip` com argumentos a mais chumba o build na mesma.
+- **O `init` AVISA no momento em que a flag é dada** (`plan_for`), porque o fluxo comum é gerar
+  agora e `stack apply` depois, onde a recusa chega tarde. Aviso e não recusa: o projecto pode
+  muito bem ser para um host com o limiar mais baixo.
+- **O `--up` RECUSA antes de construir** (`refuse_unusable_ports`, que era
+  `refuse_busy_ports`). É o argumento que o próprio doc-comment dessa função já fazia para a
+  porta ocupada — «achada só no `stack apply`, custa o build inteiro primeiro» — aplicado à
+  porta privilegiada, que estava de fora.
+
+**Segundo bug, do mesmo relato: `init -t odoo` construía o projecto NGINX.** Sobre um
+directório que já tinha um projecto gerado, o `init` escrevia nada, imprimia «nothing to do
+(everything already existed)» **e seguia para o `--up`**, a construir e arrancar o Delonixfile
+que lá estava, à espera do health path do odoo, na porta do odoo. O comando reportava sucesso
+por algo que não fez. `refuse_foreign_project` compara, ANTES da primeira escrita, as duas
+peças que decidem o que é construído — `Delonixfile` e `delonix-manifest.yaml` — com o que este
+comando escreveria, e recusa (classe 5) a nomear os dois `FROM`. **Âmbito estreito de
+propósito**: uma `nginx.conf` editada à mão não é glue e nunca trava nada, o mesmo template com
+as mesmas flags renderiza byte a byte igual e passa (o 2.º `--up` idempotente continua a
+funcionar), e `--force` é a saída que a própria recusa oferece.
+
+**Gate**: a secção «uma porta PRIVILEGIADA» do `scripts/e2e.sh`, 10 checks. Verificado pela
+regra da casa — **10/10 com a correcção, 4/10 contra o binário publicado (5.0.2)**, e os seis
+que chumbam são exactamente as seis facetas. Dois defeitos meus apanhados a medi-lo, os dois já
+catalogados neste ficheiro: o `if timeout … ; then … else skip` lia uma falha REAL do build
+como «o ambiente não deu» (só o 124 é ambiente, qualquer outro rc é o bug), e as duas
+verificações do `--up` passavam pelo rc=1 — que o binário defeituoso também devolve, só que
+depois do build inteiro ter falhado; julgam agora a RAZÃO e a ausência de qualquer build.
+
+**E o `| grep -q` matou duas medições desta sessão**, a armadilha que este ficheiro já regista:
+o aviso sai cedo, o `grep -q` fecha o pipe no primeiro casamento e o `init` morre com SIGPIPE
+antes de escrever o projecto — uma vez no gate (o build seguinte não tinha o que construir) e
+outra numa validação à mão, que me deu um directório com o template trocado e quase me fez
+concluir que a recusa não funcionava. Captura-se a saída e procura-se nela.
+
 ## O `USER` da imagem, e o `chown` que entrega o rootfs ao utilizador (ADR-0062, 2026-10-01)
 
 Encontrado no template `odoo` e medido com `haproxy:3.4-alpine` (15 MB, `USER haproxy`).

@@ -6199,6 +6199,79 @@ check "init --port/--tls-port/--hostname entram no projecto e no certificado" ok
    && { ! command -v openssl >/dev/null || openssl x509 -in '$SCAFDIR/flags-$PFX/tls/tls.crt' -noout -ext subjectAltName | grep -q 'shop.test'; }"
 check "--tls-port num template sem TLS é recusado e não escreve nada" ok bash -c \
   "! '$BIN' stack init -t go --tls-port 19443 '$SCAFDIR/noflags-$PFX' >/dev/null 2>&1 && [ ! -e '$SCAFDIR/noflags-$PFX' ]"
+
+# ---- uma porta PRIVILEGIADA (bug de produção, 2026-10-15) ----------------
+# Reportado: `delonix init -t nginx --port 9000 --tls-port 943` gerava o
+# projecto e o build morria sempre em `nginx: [emerg] bind() to 0.0.0.0:943
+# failed (13: Permission denied)`. Medido: o container de trabalho do build
+# partilha a netns do HOST (mesmo inode), onde a nossa userns não tem
+# CAP_NET_BIND_SERVICE, e `nginx -t` BINDA cada `listen` que lê. Uma porta
+# apenas OCUPADA passa (o `nginx -t` tolera EADDRINUSE) — é o privilégio que
+# morde, por isso a porta do teste sai do limiar REAL deste host.
+LOWTHR=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024)
+if [ "${LOWTHR:-0}" -gt 1 ] 2>/dev/null; then
+  LOWP=$((LOWTHR - 1))
+  # 1) O aviso sai no momento em que a flag é dada — a maioria dos projectos é
+  #    gerada agora e aplicada depois, onde a recusa chegaria tarde demais.
+  # A saída é CAPTURADA antes de se procurar nela: `| grep -q` sai no primeiro
+  # casamento, fecha o pipe e mata o gerador com SIGPIPE — o aviso sai cedo, por
+  # isso o projecto ficava por escrever e o build seguinte não tinha o que construir.
+  check "init: uma porta que este host não publica é dita ao gerar" ok bash -c \
+    "out=\$('$BIN' stack init -t nginx --port 19082 --tls-port $LOWP --hostname lp '$SCAFDIR/low-$PFX' 2>&1); \
+     printf '%s' \"\$out\" | grep -q -- '--tls-port $LOWP needs privilege to bind'"
+  # 2) E o build do projecto gerado PASSA: o check de config deixou de bindar
+  #    as portas reais. É este o bug reportado, medido pelo efeito.
+  #    Só o 124 do `timeout` é ambiente; QUALQUER outro rc é a falha que este
+  #    check existe para apanhar e tem de aparecer como FAIL, não como SKIP —
+  #    o binário publicado morre aqui com `bind() ... Permission denied`.
+  LOWLOG="${TMPDIR:-/tmp}/e2e-lowport-build.log"
+  timeout 400 "$BIN" build -t "low-$PFX:dev" "$SCAFDIR/low-$PFX" >"$LOWLOG" 2>&1
+  LOWRC=$?
+  if [ "$LOWRC" = 124 ]; then
+    skip "build com porta privilegiada" \
+      "o build não completou em 400s neste ambiente — ver $LOWLOG"
+  else
+    check "build: o check de config do nginx não binda a porta privilegiada" ok bash -c \
+      "[ '$LOWRC' = 0 ] && grep -q 'test is successful' '$LOWLOG' && ! grep -q 'Permission denied' '$LOWLOG'"
+    check "build: e o check ainda corre mesmo (não foi removido)" ok bash -c \
+      "grep -q 'syntax is ok' '$LOWLOG'"
+    "$BIN" image rm "low-$PFX:dev" >/dev/null 2>&1 || true
+  fi
+  # 3) `--up` recusa ANTES do build: achada só no `stack apply`, custa o build
+  #    inteiro primeiro — a mesma razão que já justifica a recusa de porta ocupada.
+  #    O rc sozinho não distingue nada (o binário publicado também sai 1, só que
+  #    depois de o build inteiro ter falhado), por isso o que se julga é a RAZÃO
+  #    e a ausência de qualquer build.
+  LOWUPLOG="${TMPDIR:-/tmp}/e2e-lowport-up.log"
+  timeout 300 "$BIN" stack init -t nginx --port 19083 --tls-port "$LOWP" --hostname lp --up \
+    "$SCAFDIR/lowup-$PFX" >"$LOWUPLOG" 2>&1
+  check "--up: a recusa é a porta, não uma falha do build" ok bash -c \
+    "grep -q -- '--tls-port $LOWP needs privilege to bind' '$LOWUPLOG' && ! grep -q 'RUN failed' '$LOWUPLOG'"
+  check "--up: o build nem chegou a começar" ok bash -c \
+    "! grep -q 'Building image' '$LOWUPLOG' && ! '$BIN' image ls | grep -q 'lowup-$PFX'"
+else
+  skip "porta privilegiada no init" \
+    "este host não tem portas privilegiadas (ip_unprivileged_port_start=$LOWTHR) — não há o que exercitar"
+fi
+
+# ---- o template que `--up` constrói é o que foi PEDIDO -------------------
+# Reportado no mesmo dia: `delonix init -t odoo <dir>` sobre um directório que
+# já tinha um projecto nginx escreveu nada, disse «nothing to do (everything
+# already existed)» — e `--up` foi construir e arrancar o projecto NGINX,
+# à espera do health path do odoo, na porta do odoo.
+FGN="$SCAFDIR/foreign-$PFX"
+check "um projecto nginx para a pergunta seguinte" ok \
+  "$BIN" stack init -t nginx --port 19085 --tls-port 19446 --hostname fg "$FGN"
+check "init -t <outro> sobre um projecto existente é recusado (classe 5)" 5 \
+  "$BIN" stack init -t odoo --port 19086 "$FGN"
+check "a recusa nomeia o que está lá E o que foi pedido" ok bash -c \
+  "out=\$('$BIN' stack init -t odoo --port 19086 '$FGN' 2>&1); \
+   printf '%s' \"\$out\" | grep -q 'FROM nginx' && printf '%s' \"\$out\" | grep -q 'FROM odoo'"
+check "o mesmo template com as mesmas flags continua a passar (2.º --up idempotente)" ok \
+  "$BIN" stack init -t nginx --port 19085 --tls-port 19446 --hostname fg "$FGN"
+check "uma config editada à mão NÃO é glue e não trava nada" ok bash -c \
+  "printf 'worker_processes 1;\\n' >> '$FGN/nginx.conf' && \
+   '$BIN' stack init -t nginx --port 19085 --tls-port 19446 --hostname fg '$FGN'"
 if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
     >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
   check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \

@@ -4,12 +4,26 @@ FROM nginx:__TEMPLATE_VERSION__-alpine
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY html /usr/share/nginx/html
 # Syntax-check the config at build time — a typo fails the build, not the
-# first request. The certificate is mounted at run time and never enters the
-# image, so the check runs on a copy with the two certificate lines removed and
-# the TLS listener made plain; everything else is checked as written.
+# first request. The check runs on a COPY, because two things in the real file
+# cannot be exercised here. The certificate is mounted at run time and never
+# enters the image, so its two lines are dropped. And `nginx -t` BINDS every
+# `listen` it reads, in a build container that shares the HOST's network
+# namespace (measured: same `net:[...]` inode) where our user namespace holds
+# no CAP_NET_BIND_SERVICE — so a port below the host's
+# `net.ipv4.ip_unprivileged_port_start` failed the build over a config that is
+# perfectly correct, which is exactly what `--tls-port 943` did in production.
+# A port that is merely TAKEN is fine (measured: `nginx -t` tolerates
+# EADDRINUSE and only EACCES is fatal); it is privilege alone that bites. So
+# both listeners move onto unix sockets for the check — no privilege, no host
+# port — and everything else, directives, blocks, paths and server names, is
+# checked exactly as written.
 RUN mkdir -p /var/www/acme && \
-    sed -e '/ssl_certificate/d' -e 's/ ssl backlog=/ backlog=/' /etc/nginx/nginx.conf > /tmp/check.conf && \
-    nginx -t -c /tmp/check.conf && rm /tmp/check.conf
+    sed -e '/ssl_certificate/d' \
+        -e 's|^\([[:space:]]*\)listen[[:space:]]\+[0-9][^;]*ssl[^;]*;|\1listen unix:/tmp/chk-tls.sock;|' \
+        -e 's|^\([[:space:]]*\)listen[[:space:]]\+[0-9][^;]*;|\1listen unix:/tmp/chk-http.sock;|' \
+        /etc/nginx/nginx.conf > /tmp/check.conf && \
+    nginx -t -c /tmp/check.conf && \
+    rm -f /tmp/check.conf /tmp/chk-tls.sock /tmp/chk-http.sock
 EXPOSE __PORT__ __TLS_PORT__
 # Delonix extension: the runtime probes this to mark the container healthy.
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/healthz || exit 1

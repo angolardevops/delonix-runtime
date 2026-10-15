@@ -15960,3 +15960,16 @@ msgstr "Proxmox VE:"
 
 msgid "not named by the node"
 msgstr "não indicado pelo nó"
+
+# ---- init: porta privilegiada e projecto estrangeiro (bug de produção 2026-10-15) ----
+msgid " (this host starts at {start})"
+msgstr " (este host começa em {start})"
+
+msgid "{flag} {port} needs privilege to bind on this host — rootless cannot publish ports below net.ipv4.ip_unprivileged_port_start{have}\n\nfix it with ONE of these:\n  {flag} {alt}    # generate the project on an unprivileged port\n  curl -fsSL {url} | bash -s -- --low-ports    # or lower the threshold for good (host-wide)"
+msgstr "{flag} {port} precisa de privilégio para ligar neste host — em rootless não se publicam portas abaixo de net.ipv4.ip_unprivileged_port_start{have}\n\nresolve com UMA destas:\n  {flag} {alt}    # gera o projecto numa porta sem privilégio\n  curl -fsSL {url} | bash -s -- --low-ports    # ou baixa o limiar de vez (em todo o host)"
+
+msgid " (it builds `{have}`, the '{tname}' template builds `{want}`)"
+msgstr " (constrói `{have}`, e o template '{tname}' constrói `{want}`)"
+
+msgid "{file} already in {dir} is not the one this command would write{detail} — build what is there with `delonix build -t {name}:dev . && delonix stack apply`, pass --force to overwrite it with the '{tname}' template, or pick another directory"
+msgstr "o {file} que já está em {dir} não é o que este comando escreveria{detail} — constrói o que lá está com `delonix build -t {name}:dev . && delonix stack apply`, passa --force para o substituir pelo template '{tname}', ou escolhe outro directório"

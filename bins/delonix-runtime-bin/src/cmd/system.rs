@@ -2004,7 +2004,10 @@ struct Check {
     silent: bool,
 }
 
-fn read_sysctl(name: &str) -> Option<String> {
+/// Reads one sysctl as text. `pub(crate)` because `cmd::scaffold` asks it for
+/// `net.ipv4.ip_unprivileged_port_start` when it refuses a privileged port: a
+/// second reader of the same file is a second number that can disagree.
+pub(crate) fn read_sysctl(name: &str) -> Option<String> {
     let path = format!("/proc/sys/{}", name.replace('.', "/"));
     std::fs::read_to_string(path)
         .ok()
