@@ -2757,7 +2757,10 @@ pub(crate) fn cmd_build(
     // aqui?» não pode obrigar a montar a imagem. Best-effort — uma imagem sem
     // inventário é pior que uma com, mas muito melhor que um build chumbado por
     // causa dele.
-    let (packages, packages_sha256) = match std::process::Command::new("virt-cat")
+    // The inventory answers for TWO things: the package count and the k8s
+    // version the image actually carries (`k8s_version_from_inventory`), which
+    // is what makes that field answerable when no `--k8s-version` was passed.
+    let (packages, packages_sha256, k8s_installed) = match std::process::Command::new("virt-cat")
         .args([
             "-a",
             &work_qcow2.to_string_lossy(),
@@ -2797,9 +2800,9 @@ platform cannot learn a VM's address and a backup is not quiesced",
                 "{}",
                 super::po::tf("package inventory: {n} packages", &[("n", &n.to_string())])
             );
-            (Some(n), Some(sha))
+            (Some(n), Some(sha), k8s_version_from_inventory(&tsv))
         }
-        None => (None, None),
+        None => (None, None, None),
     };
 
     // Shrink the artifact. Measured on a 24.04 golden (2.38 GiB → 677 MiB, −72%):
@@ -2863,7 +2866,11 @@ platform cannot learn a VM's address and a backup is not quiesced",
         digest,
         size,
         ubuntu_release: Some(release.to_string()),
-        k8s_version,
+        // An explicit `--k8s-version` wins: it is the version the operator
+        // ASKED for, it already passed `valid_version`, and keeping it keeps
+        // `--k8s-version 1.34` → `"1.34"` instead of silently widening to the
+        // patch the repo happened to carry. The inventory only fills the null.
+        k8s_version: k8s_version.or(k8s_installed),
         created_unix: now_unix(),
         kernel_version,
         distro: Some(distro.as_str().to_string()),
@@ -3004,6 +3011,44 @@ pub(crate) fn guest_installed_packages(img: &Path) -> std::collections::BTreeSet
 pub(crate) fn inventory_has(tsv: &str, pkg: &str) -> bool {
     tsv.lines()
         .any(|l| l.split('\t').next().map(str::trim) == Some(pkg))
+}
+
+/// The Kubernetes version a built image CARRIES, read from `kubeadm`'s row in
+/// the image's own package inventory rather than from the flag that asked for
+/// it. `None` when the image has no kubeadm (a `--no-k8s` build) — never a
+/// guess, same contract as `detect_kernel_version`.
+///
+/// This is what makes the field answerable when no `--k8s-version` was given,
+/// and the flag is OPTIONAL: `k8s_version` used to be recorded straight from
+/// the flag, so the plain `delonix vm image build` recorded `k8s_version:
+/// null` on an image that does ship kubeadm/kubelet/kubectl. Measured on an
+/// `--offline` build 2026-10-15 — `virt-ls /usr/bin` listed all three while the
+/// record said `null`. Two consequences, one of them silent: `vm image ls`
+/// printed `-` in the K8S column, and `official_repo_for` routed `vm image
+/// push` to the `base` repository instead of `k8s`, since it decides on
+/// `k8s_version.is_some()`. The image is the thing that knows, which is also
+/// why this reads the artefact instead of threading the version out of
+/// `download_k8s_debs`: the offline path resolves a version and the online one
+/// lets apt resolve it in the guest, and only the inventory covers BOTH.
+///
+/// The dpkg epoch and revision are DROPPED (`1.31.14-1.1` → `1.31.14`):
+/// every consumer feeds this field back into a `pkgs.k8s.io` URL or a kubeadm
+/// flag through `cluster::valid_version`, which accepts digits and dots ONLY,
+/// so recording the raw dpkg version would store a value the rest of the
+/// pipeline then rejects. A row that does not survive that check is discarded
+/// rather than recorded dirty.
+pub(crate) fn k8s_version_from_inventory(tsv: &str) -> Option<String> {
+    let raw = tsv.lines().find_map(|l| {
+        let mut cols = l.split('\t');
+        if cols.next().map(str::trim) != Some("kubeadm") {
+            return None;
+        }
+        cols.next().map(str::trim)
+    })?;
+    // `1:1.31.14-1.1` → strip the epoch, then the revision.
+    let no_epoch = raw.rsplit_once(':').map_or(raw, |(_, v)| v);
+    let version = no_epoch.split_once('-').map_or(no_epoch, |(v, _)| v);
+    super::cluster::valid_version(version).then(|| version.to_string())
 }
 
 /// Picks the partition to grow out of `virt-filesystems --parts --long --csv`.
@@ -6882,6 +6927,60 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(!inventory_has(tsv, "qemu-guest-agent-dbg"));
         assert!(!inventory_has(tsv, "qemu"));
         assert!(!inventory_has("", "qemu-guest-agent"));
+    }
+
+    /// The reported defect: a build that installs Kubernetes but records
+    /// `k8s_version: null`, because the flag is optional and the record was
+    /// written from the FLAG. The inventory of such an image lists kubeadm, so
+    /// the version is recoverable — and the recorded value has to be one the
+    /// rest of the pipeline accepts, hence the `valid_version` assertions.
+    #[test]
+    fn the_k8s_version_comes_from_the_installed_kubeadm_not_from_the_flag() {
+        // Real `dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n'`
+        // shape, as written to /usr/share/delonix/packages.tsv by the build.
+        let tsv = "kubeadm\t1.31.14-1.1\tamd64\n\
+                   kubectl\t1.31.14-1.1\tamd64\n\
+                   kubelet\t1.31.14-1.1\tamd64\n\
+                   qemu-guest-agent\t1:8.2.2+ds-0ubuntu1\tamd64\n";
+        let got = k8s_version_from_inventory(tsv);
+        // NOT null — this is the whole bug.
+        assert_eq!(got.as_deref(), Some("1.31.14"));
+        // The dpkg revision is dropped, so the value survives the check every
+        // consumer puts it through before building a repo URL or a kubeadm flag.
+        let recorded = got.as_deref().unwrap();
+        assert!(super::super::cluster::valid_version(recorded));
+
+        // An epoch is dropped too (`1:1.32.0-1.1`), same reason.
+        assert_eq!(
+            k8s_version_from_inventory("kubeadm\t1:1.32.0-1.1\tamd64\n").as_deref(),
+            Some("1.32.0")
+        );
+        // A bare version with no revision is unchanged.
+        assert_eq!(
+            k8s_version_from_inventory("kubeadm\t1.34\tamd64\n").as_deref(),
+            Some("1.34")
+        );
+
+        // A `--no-k8s` image carries no kubeadm: the field stays null, which is
+        // the CORRECT answer there and what `official_repo_for` reads to keep
+        // such an image out of the `k8s` repository.
+        assert_eq!(
+            k8s_version_from_inventory("qemu-guest-agent\t1:8.2.2\tamd64\n"),
+            None
+        );
+        assert_eq!(k8s_version_from_inventory(""), None);
+        // Prefix matching would answer for the wrong package.
+        assert_eq!(
+            k8s_version_from_inventory("kubeadm-dbg\t1.31.14-1.1\tamd64\n"),
+            None
+        );
+        // Unparseable/absent version columns are discarded, never recorded dirty.
+        assert_eq!(k8s_version_from_inventory("kubeadm\n"), None);
+        assert_eq!(k8s_version_from_inventory("kubeadm\t\tamd64\n"), None);
+        assert_eq!(
+            k8s_version_from_inventory("kubeadm\tnot-a-version\tamd64\n"),
+            None
+        );
     }
 
     #[test]
