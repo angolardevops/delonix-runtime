@@ -2331,6 +2331,24 @@ pub(crate) fn cmd_build(
                     .into(),
             ));
         }
+        // REFUSED, not ignored. `rootless_customization_steps` has no
+        // `extra_packages` parameter — it installs a fixed list — so every
+        // `--no-k8s --extra-package X` built an image without X while still
+        // stamping `DELONIX_EXTRA_PACKAGES=X` into
+        // `/etc/delonix-image-release`. Same accept-and-drop the golden-recipe
+        // check above already refuses for a `vm.yaml`, and the same reason:
+        // silently ignoring it lets someone believe the flag took effect.
+        // A `vm.yaml`/`VMfile` (`packages.install`) is the supported way to add
+        // packages to a non-k8s image today.
+        if !extra_packages.is_empty() {
+            return Err(Error::Invalid(
+                super::po::t(
+                    "--no-k8s does not support --extra-package (the rootless recipe installs a \
+                     fixed package list) — use a vm.yaml with `packages.install` instead",
+                )
+                .into(),
+            ));
+        }
     }
     // NOTA: `--delonix-bin` já foi rejeitado no caminho k8s ("only applies with
     // --no-k8s"). Deixou de o ser, e a razão é um defeito medido: a golden k8s
@@ -2361,6 +2379,19 @@ pub(crate) fn cmd_build(
             return Err(Error::Invalid(super::po::tf(
                 "--k8s-version '{v}' invalid (only digits and dots, e.g.: '1.31')",
                 &[("v", v)],
+            )));
+        }
+    }
+    // Same finding, same reason, one flag over: `--extra-package` is interpolated
+    // into the `apt-get install` of `k8s_host_recipes` and into the offline
+    // `dpkg -s` assertion, both of which become `virt-customize --run-command`.
+    // The `vm.yaml` path already validated these names (`vmspec::valid_pkg`);
+    // the CLI flag reached the same shell lines unchecked.
+    for p in &extra_packages {
+        if !super::vmspec::valid_pkg(p) {
+            return Err(Error::Invalid(super::po::tf(
+                "--extra-package '{p}' invalid (a package name: letters, digits and +._:=~-)",
+                &[("p", p)],
             )));
         }
     }
@@ -2466,7 +2497,7 @@ pub(crate) fn cmd_build(
                 "{}",
                 super::po::t("offline mode: getting the k8s .deb on the host...")
             );
-            let mut debs = download_k8s_debs(
+            let (mut debs, archive_extras) = download_k8s_debs(
                 &work_dir,
                 &work_dir.join("debs"),
                 k8s_version.as_deref(),
@@ -2499,6 +2530,25 @@ pub(crate) fn cmd_build(
                     &[("codename", &codename)]
                 )
             );
+            // The `--extra-package` names the k8s repo did not carry are DISTRO
+            // packages, so they are fetched through the SAME verified archive chain
+            // as the guest agent (signed InRelease → SHA256 of the index → SHA256 of
+            // each `.deb`) and in the same call, so `deb_closure` pulls their
+            // dependencies too. `download_archive_debs` ERRORS on a root it cannot
+            // find, which is what makes a typo'd `--extra-package` fail the build
+            // instead of vanishing — the whole point of installing offline is that
+            // the guest cannot go looking for what we forgot.
+            let mut archive_wanted: Vec<&str> = vec!["qemu-guest-agent"];
+            archive_wanted.extend(archive_extras.iter().map(|s| s.as_str()));
+            if !archive_extras.is_empty() {
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "offline mode: extra packages from the archive: {pkgs}",
+                        &[("pkgs", &archive_extras.join(" "))]
+                    )
+                );
+            }
             // **O retorno TEM de ser recolhido.** A receita não copia o
             // DIRECTÓRIO para dentro do convidado — faz um `--copy-in` por
             // ficheiro, a partir deste vector (`for d in debs`). Descartá-lo
@@ -2525,7 +2575,7 @@ pub(crate) fn cmd_build(
                 // e do que a imagem base já tem (`liburing2` estava aqui à
                 // mão, e o `ubuntu-virt` que a 26.04 acrescentou não estava —
                 // era essa a golden que saía sem agente configurado).
-                &["qemu-guest-agent"],
+                &archive_wanted,
                 &guest_installed_packages(&work_qcow2),
             )?;
             debs.extend(agent_debs);
@@ -2550,6 +2600,7 @@ pub(crate) fn cmd_build(
                 });
             k8s_customization_steps_offline(
                 &debs,
+                &extra_packages,
                 &extra_run,
                 &cri,
                 &delonix,
@@ -3988,14 +4039,23 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
 
 /// Downloads to `dest_dir` the k8s `.deb` files (repo closure: kubeadm/kubelet/
 /// kubectl + `kubernetes-cni`), with the full apt chain verified on the host.
-/// Returns the local paths. `arch` is the Debian architecture (e.g. "amd64").
+/// `arch` is the Debian architecture (e.g. "amd64").
+///
+/// Returns `(local paths, extras this repo does NOT carry)`. A `--extra-package`
+/// is looked up here because the k8s repo genuinely has some (`cri-tools`), but
+/// most are DISTRO packages and absent from this index — so a name not found is
+/// handed BACK to the caller to fetch from the archive, never dropped. It used to
+/// be dropped: the name went into `wanted`, the existence check below covered only
+/// the 4 core names, so `--extra-package htop` downloaded nothing, failed nothing,
+/// and the build still stamped `DELONIX_EXTRA_PACKAGES=htop` into the image —
+/// an image claiming a package it did not have.
 fn download_k8s_debs(
     work: &Path,
     dest_dir: &Path,
     k8s_version: Option<&str>,
     arch: &str,
     extra_packages: &[String],
-) -> Result<Vec<PathBuf>> {
+) -> Result<(Vec<PathBuf>, Vec<String>)> {
     let repo = super::k8s_recipes::k8s_repo_version(k8s_version);
     let repo_base = format!("https://pkgs.k8s.io/core:/{repo}/deb");
     std::fs::create_dir_all(dest_dir)?;
@@ -4055,6 +4115,14 @@ fn download_k8s_debs(
         }
     }
 
+    // Computed from the PARSED index (not from filenames): the extras this repo
+    // actually resolved are installed from here, the rest go back to the caller.
+    let from_archive: Vec<String> = extra_packages
+        .iter()
+        .filter(|p| !debs.iter().any(|d| d.name == **p))
+        .cloned()
+        .collect();
+
     let mut out = Vec::new();
     for d in &debs {
         let file_name = d.filename.rsplit('/').next().unwrap_or(&d.filename);
@@ -4075,7 +4143,7 @@ fn download_k8s_debs(
         }
         out.push(dest);
     }
-    Ok(out)
+    Ok((out, from_archive))
 }
 
 /// Where the DISTRO's own archive keyring lives on the build host.
@@ -4808,6 +4876,13 @@ pub(crate) enum CustomizeOp {
 /// `dpkg -i`. The remaining recipes (swap/modules/sysctls) are the SAME as the online
 /// path (`k8s_recipes::k8s_config_recipes`) — they do not diverge.
 ///
+/// `extra_packages` are NOT re-fetched here — their `.deb` files already arrived in
+/// `debs` (the k8s repo for the few it carries, the distro archive for the rest; see
+/// the call in `cmd_build`) and the single `dpkg -i` below installs them with
+/// everything else. What this function adds for them is a `dpkg -s` assertion per
+/// name, so an extra package that failed to make it into `debs` fails the BUILD
+/// rather than shipping an image whose manifest claims it.
+///
 /// `dpkg -i` instead of `apt-get install ./*.deb`: apt would need to contact
 /// the lists to resolve deps; the kubelet deps outside the k8s repo
 /// (iptables/mount/util-linux/libc6) already come in the cloud image. If any is
@@ -4822,6 +4897,7 @@ pub(crate) enum CustomizeOp {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn k8s_customization_steps_offline(
     debs: &[PathBuf],
+    extra_packages: &[String],
     extra_run: &[String],
     cri_bin: &Path,
     delonix_bin: &Path,
@@ -4840,6 +4916,19 @@ pub(crate) fn k8s_customization_steps_offline(
         "dpkg -i /tmp/k8s-debs/*.deb && apt-mark hold kubeadm kubelet kubectl && rm -rf /tmp/k8s-debs"
             .into(),
     ));
+    // `--extra-package` is installed by the `dpkg -i` above (its `.deb` is in
+    // `debs`, fetched host-side), so this is not the install — it is the PROOF.
+    // The image stamps `DELONIX_EXTRA_PACKAGES` into
+    // `/etc/delonix-image-release` unconditionally, and the one failure mode
+    // that matters here is the manifest claiming a package the guest does not
+    // have. A `dpkg -s` per name costs nothing and converts that lie into a
+    // failed build. Named one-per-package so the error says WHICH package.
+    for p in extra_packages {
+        ops.push(CustomizeOp::RunCommand(format!(
+            "dpkg -s {p} >/dev/null 2>&1 || {{ echo \"delonix: --extra-package {p} was \
+             requested but is not installed in the image\" >&2; exit 1; }}"
+        )));
+    }
     ops.extend(
         super::k8s_recipes::k8s_config_recipes()
             .into_iter()
@@ -5908,6 +5997,97 @@ mod tests {
         assert!(install_step.contains("htop"));
     }
 
+    /// O espelho offline do teste acima. `--offline --extra-package htop`
+    /// ACEITAVA-E-DESCARTAVA: o `k8s_customization_steps_offline` não tinha
+    /// sequer um parâmetro `extra_packages`, o nome só entrava na lista do
+    /// índice do `pkgs.k8s.io` (onde um pacote da distro nunca está) e a
+    /// verificação de existência cobria apenas os 4 nomes do núcleo — nada
+    /// falhava, e a imagem saía a declarar `DELONIX_EXTRA_PACKAGES=htop` sem
+    /// o ter. Aqui garante-se que o nome aparece na lista de operações.
+    #[test]
+    fn customization_steps_offline_incluem_pacotes_extra() {
+        let ops = k8s_customization_steps_offline(
+            &[PathBuf::from("/tmp/x/htop_3.3.0-4build1_amd64.deb")],
+            &["htop".to_string()],
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            None,
+            Distro::Ubuntu,
+            None,
+        );
+        // O `.deb` obtido e verificado no host entra no convidado...
+        assert!(
+            ops.iter().any(|o| matches!(
+                o,
+                CustomizeOp::CopyIn(p, dest)
+                    if p.ends_with("htop_3.3.0-4build1_amd64.deb") && dest == "/tmp/k8s-debs"
+            )),
+            "o .deb do pacote extra tem de ser copiado para dentro da imagem"
+        );
+        // ...é instalado pelo `dpkg -i` que já existia...
+        assert!(
+            ops.iter().any(|o| matches!(
+                o,
+                CustomizeOp::RunCommand(c) if c.contains("dpkg -i /tmp/k8s-debs/*.deb")
+            )),
+            "o dpkg -i tem de instalar o directório todo"
+        );
+        // ...e a sua ausência passa a FALHAR o build, em vez de ser silenciosa.
+        let check = ops
+            .iter()
+            .find_map(|op| match op {
+                CustomizeOp::RunCommand(c) if c.starts_with("dpkg -s htop") => Some(c),
+                _ => None,
+            })
+            .expect("devia haver uma asserção `dpkg -s` por pacote extra");
+        assert!(check.contains("exit 1"), "a asserção tem de falhar o build");
+    }
+
+    /// Sem `--extra-package` não aparece asserção nenhuma: o caminho offline
+    /// que já existia fica byte-por-byte o que era.
+    #[test]
+    fn offline_sem_pacotes_extra_nao_acrescenta_assercoes() {
+        let ops = k8s_customization_steps_offline(
+            &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            None,
+            Distro::Ubuntu,
+            None,
+        );
+        assert!(!ops.iter().any(|o| matches!(
+            o,
+            CustomizeOp::RunCommand(c) if c.starts_with("dpkg -s")
+        )));
+    }
+
+    /// Um `--extra-package` que o `pkgs.k8s.io` não tem é DEVOLVIDO para o
+    /// chamador o encaminhar para o arquivo da distro (onde um nome que não
+    /// existe dá erro), e um que ele tem (`cri-tools`) não é pedido duas vezes.
+    #[test]
+    fn extras_ausentes_do_indice_k8s_sao_devolvidos_para_o_arquivo() {
+        let index = "\
+Package: kubeadm\nVersion: 1.34.9-1.1\nArchitecture: amd64\nFilename: pool/kubeadm.deb\nSHA256: aa\n
+Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri-tools.deb\nSHA256: bb\n";
+        let extras = ["cri-tools".to_string(), "htop".to_string()];
+        let mut wanted: Vec<&str> = vec!["kubeadm"];
+        wanted.extend(extras.iter().map(|s| s.as_str()));
+        let debs = parse_packages_index(index, "amd64", "", &wanted, &["kubeadm"]);
+        // A mesma expressão que o `download_k8s_debs` usa para decidir.
+        let from_archive: Vec<String> = extras
+            .iter()
+            .filter(|p| !debs.iter().any(|d| d.name == **p))
+            .cloned()
+            .collect();
+        assert_eq!(from_archive, vec!["htop".to_string()]);
+        assert!(debs.iter().any(|d| d.name == "cri-tools"));
+    }
+
     #[test]
     fn debloat_purga_a_superficie_e_poupa_o_storage_csi() {
         let ops = k8s_node_debloat_steps(Distro::Ubuntu);
@@ -5959,8 +6139,17 @@ mod tests {
         let online =
             k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         assert!(has_purge(&online), "the online path must purge");
-        let offline =
-            k8s_customization_steps_offline(&[], &[], &cri, &eng, &svc, None, Distro::Ubuntu, None);
+        let offline = k8s_customization_steps_offline(
+            &[],
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            None,
+            Distro::Ubuntu,
+            None,
+        );
         assert!(has_purge(&offline), "the offline path must purge");
     }
 
@@ -6105,6 +6294,7 @@ mod tests {
             k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
+                &[],
                 &[],
                 &cri,
                 &eng,
@@ -6273,6 +6463,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let ops = k8s_customization_steps_offline(
             &[PathBuf::from("/tmp/x/qemu-guest-agent_8.2.2_amd64.deb")],
             &[],
+            &[],
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
@@ -6306,6 +6497,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let debs = vec![PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")];
         let ops = k8s_customization_steps_offline(
             &debs,
+            &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix"),
@@ -6347,6 +6539,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let preseed_root = PathBuf::from("/tmp/preseed-images");
         let ops = k8s_customization_steps_offline(
             &debs,
+            &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix"),
