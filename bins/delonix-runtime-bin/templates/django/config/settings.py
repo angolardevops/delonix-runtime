@@ -35,6 +35,10 @@ DEBUG = False
 ALLOWED_HOSTS = list(APP.allowed_hosts)
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
     "notes.apps.NotesConfig",
     "webhooks.apps.WebhooksConfig",
 ]
@@ -49,9 +53,10 @@ MIDDLEWARE = [
     "core.middleware.access_log",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
-    # Kept for any browser-facing view added later; the JSON API views are
-    # csrf_exempt on purpose (see ARCHITECTURE.md, "CSRF").
     "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.json_errors",
 ]
@@ -70,6 +75,22 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = APP.max_body_bytes
 USE_TZ = True
 TIME_ZONE = "UTC"
 USE_I18N = False
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
 
 # --- Transport security -----------------------------------------------------
 # Production defaults: redirect plain HTTP to https and send HSTS. Behind a

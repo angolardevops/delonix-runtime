@@ -242,6 +242,68 @@ fn check_cni(mode: &str, cni: &str, nodes: u32) -> Result<()> {
     Ok(())
 }
 
+/// Refuses a cluster whose nodes did not resolve to DISTINCT addresses
+/// (DX-6702), before a single host is prepared.
+///
+/// BUG FOUND LIVE (`cluster kubeadm`, 3 VMs cloned from `k8s-golden`): the
+/// image carried a non-empty `/etc/machine-id` — 33 bytes, byte-identical in
+/// the image and in a booted clone, while the Ubuntu cloud base it was built
+/// from ships that file EMPTY on purpose. systemd derives its DHCP client
+/// identifier from machine-id, so all three clones presented ONE identifier
+/// (RFC 4361 `ff` + IAID + DUID-EN, systemd's enterprise number 43793 —
+/// decoded off the wire), and dnsmasq keys leases by client identifier
+/// whenever one is present. Three distinct MACs were therefore treated as a
+/// single client: `virbr0.status` held exactly ONE lease for three running
+/// domains, and it migrated to whichever clone had asked last. Each clone had
+/// genuinely held that address at its own create time and persisted it, so all
+/// three VM records named 192.168.122.176 — and all three were still holding
+/// it at once, with ARP for it answering the FIRST clone's MAC while the lease
+/// named the LAST one's.
+///
+/// Why the check is here and not left to the failure downstream: with every
+/// node target pointing at one machine, "Preparing N host(s)" opened N
+/// concurrent SSH sessions to that one machine, which then raced each other on
+/// the shared remote temp paths. The operator saw
+/// `mv: cannot stat '/tmp/delonix-cri'` from `delonix-cri` install — a message
+/// that names neither the real host nor the real cause, and sends the reader
+/// into the CRI deploy code instead of at the image. Refused here, the
+/// diagnostic names the shared client identifier and the nodes that collided.
+///
+/// Pure, so it is testable without libvirt or SSH. `nodes` is `(label,
+/// address)` in provisioning order; collisions are reported in first-seen
+/// order so the same cluster reads the same way twice.
+fn check_distinct_node_addresses(nodes: &[(&str, &str)]) -> Result<()> {
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for &(label, addr) in nodes {
+        match groups.iter_mut().find(|(a, _)| *a == addr) {
+            Some((_, labels)) => labels.push(label),
+            None => groups.push((addr, vec![label])),
+        }
+    }
+    let shared: Vec<String> = groups
+        .iter()
+        .filter(|(_, labels)| labels.len() > 1)
+        .map(|(addr, labels)| format!("{} -> {addr}", labels.join(", ")))
+        .collect();
+    if shared.is_empty() {
+        return Ok(());
+    }
+    Err(Error::coded(
+        6702,
+        Error::Unavailable(super::po::tf(
+            "these nodes did not get distinct addresses: {groups}. A kubeadm bootstrap opens one \
+             SSH session per node, so several would configure the SAME machine and the rest none \
+             at all. The usual cause is a golden image with a baked-in identity: a non-empty \
+             /etc/machine-id, from which systemd derives one DHCP client identifier shared by \
+             every clone, and a DHCP server keys leases by that identifier — so one lease exists \
+             at a time and migrates between the clones. Nothing was bootstrapped. Rebuild the \
+             image with `delonix vm image build` (it empties /etc/machine-id as its last step) \
+             and create the cluster again — `delonix explain DX-6702` has the detail",
+            &[("groups", &shared.join("; "))],
+        )),
+    ))
+}
+
 /// Whether `apply_ssh` installs the default CNI itself: only for a cluster of
 /// exactly one node (`check_cni` refuses `default` above that). One function
 /// for the plan line and the step, so the two cannot disagree.
@@ -2755,6 +2817,31 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         }
         p.ok();
     }
+
+    // Every machine this cluster will touch has to own its address. See
+    // `check_distinct_node_addresses` for the shared-DHCP-client-id incident
+    // this catches and why it is refused HERE — the moment every address is
+    // known and before any host is prepared. The load balancer and the etcd
+    // nodes are included because they are configured over SSH exactly like the
+    // control-planes and workers, so a collision on them breaks the bootstrap
+    // just as thoroughly.
+    let lb_label = format!("{}-lb", args.name);
+    let mut provisioned: Vec<(&str, &str)> = control_plane
+        .iter()
+        .chain(worker_hosts.iter())
+        .chain(etcd_hosts.iter())
+        .map(|h| {
+            (
+                h.hostname.as_deref().unwrap_or(h.ip.as_str()),
+                h.ip.as_str(),
+            )
+        })
+        .collect();
+    if let Some(lb_ip) = control_plane_endpoint.as_deref() {
+        provisioned.push((lb_label.as_str(), lb_ip));
+    }
+    check_distinct_node_addresses(&provisioned)?;
+
     let etcd_spec = if etcd_hosts.is_empty() {
         EtcdSpec::default()
     } else {
@@ -4749,6 +4836,73 @@ workers:
             ..spec
         };
         assert!(validate(&one).is_ok(), "one node keeps the default bridge");
+    }
+
+    /// REGRESSION, found live with 3 VMs cloned from `k8s-golden`: the image
+    /// shipped a non-empty `/etc/machine-id`, every clone derived the same
+    /// systemd DHCP client identifier from it, and dnsmasq — which keys leases
+    /// by that identifier — gave three distinct MACs ONE migrating lease. All
+    /// three nodes resolved to 192.168.122.176, so host prep opened three
+    /// sessions to one machine and they raced on the shared remote temp paths,
+    /// surfacing as `mv: cannot stat '/tmp/delonix-cri'`. The refusal has to
+    /// come first, and has to name the cause.
+    #[test]
+    fn nodes_que_partilham_endereco_sao_recusados_com_a_causa() {
+        let shared = "192.168.122.176";
+        let err = check_distinct_node_addresses(&[
+            ("lab-cp1", shared),
+            ("lab-w1", shared),
+            ("lab-w2", shared),
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.number(), 6702, "{err}");
+        let msg = err.to_string();
+        // The three colliding nodes and the address are all named: the operator
+        // must not have to guess WHICH hosts collided.
+        for node in ["lab-cp1", "lab-w1", "lab-w2", shared] {
+            assert!(msg.contains(node), "{node} missing from: {msg}");
+        }
+        // ...and so is the real cause, instead of the downstream `mv` noise.
+        assert!(
+            msg.contains("/etc/machine-id"),
+            "the diagnostic must name the baked-in identity: {msg}"
+        );
+    }
+
+    #[test]
+    fn nodes_com_enderecos_distintos_passam() {
+        assert!(
+            check_distinct_node_addresses(&[
+                ("lab-cp1", "192.168.122.10"),
+                ("lab-w1", "192.168.122.11"),
+                ("lab-w2", "192.168.122.12"),
+            ])
+            .is_ok()
+        );
+        // A one-node cluster, and the empty case, cannot collide.
+        assert!(check_distinct_node_addresses(&[("solo", "192.168.122.10")]).is_ok());
+        assert!(check_distinct_node_addresses(&[]).is_ok());
+    }
+
+    /// Only the colliding group is reported — a cluster where two of five
+    /// nodes share a lease must not drag the three healthy ones into the
+    /// message, or the operator cannot tell which machines to look at.
+    #[test]
+    fn apenas_o_grupo_em_colisao_entra_no_diagnostico() {
+        let err = check_distinct_node_addresses(&[
+            ("lab-cp1", "192.168.122.10"),
+            ("lab-w1", "192.168.122.176"),
+            ("lab-w2", "192.168.122.176"),
+            ("lab-etcd1", "192.168.122.12"),
+        ])
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("lab-w1") && msg.contains("lab-w2"), "{msg}");
+        assert!(
+            !msg.contains("lab-cp1") && !msg.contains("lab-etcd1"),
+            "healthy nodes must stay out of the message: {msg}"
+        );
     }
 
     /// `none` is the operator saying they bring their own CNI: accepted at any
