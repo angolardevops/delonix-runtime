@@ -3348,6 +3348,68 @@ tem a secção «On the internet without a public IP», e o fim do `--up` aponta
   Cloudflare) e os templates node, nestjs, nextjs, fastapi, laravel e odoo pelo túnel (o
   ficheiro e a porta estão no teste `every_template_ships_an_opt_in_tunnel`).
 
+## Os 11 templates revistos, e o contrato passou a ter portão (2026-10-15)
+
+A seguir ao bug da porta privilegiada, os ONZE templates foram gerados com a
+porta adversarial deste host (`--port 79`, e `--tls-port 78` nos três que servem
+TLS) e **construídos**: **11/11 rc=0**. O `nginx` era o único a chumbar e chumbava
+sempre; `httpd -t` e `haproxy -c` não bindam (medido, não deduzido). A tabela
+com os tempos está em `references/estado.md` da skill `delonix-template`.
+
+**Um achado da própria varredura, ainda ABERTO.** A primeira passagem usou o
+nome do template como nome do directório e três projectos não construíram, com
+exit 0 na geração: `init -t go ./go` dá `invalid module path: "go"`, e
+`-t django ./django` / `-t fastapi ./fastapi` dão um pacote que **depende de si
+próprio**. O `check_project_name` valida a FORMA (rótulo DNS) e não a colisão
+com o nome que o ecossistema vai declarar como dependência. A correcção tem de
+ser estreita — o nome que ESTE template declara, nunca «qualquer pacote do
+PyPI» — e é trabalho próprio.
+
+**Uma chave desconhecida no `template.meta` era ignorada em silêncio.** Esse
+ficheiro é a interface entre um template e o gerador, e um `tsl=8443` por
+`tls=8443` dava um template sem TLS, sem certificado e sem `--tls-port`, com
+nada a dizê-lo — a classe «aceite-e-ignorado» que o resto do motor recusa. O
+`build.rs` passa a **parar o build** com o nome da chave e a lista das
+conhecidas, como o `wait=` já fazia para um valor que não parseia.
+
+**O contrato do ADR-0061 passou a ter portão.** Antes: `nginx`, `httpd`,
+`haproxy` e `odoo` tinham **zero** CI, SonarQube e `CONTRIBUTING.md`; o `nestjs`
+tinha perdido o `commitlint` que os dois irmãos têm; e nenhum dos 11 tinha a
+secção aconselhadora de arquitectura. Nada disso dizia que faltava. Agora o
+`every_template_is_born_with_the_engineering_contract` exige, de TODO o
+template, os dois CIs (com o do GitLab a declarar-se o mesmo portão que o do
+GitHub), o `sonar-project.properties`, o `CONTRIBUTING.md` a documentar
+Conventional Commits, e o `README.md` com as secções «Architecture: where to
+take this» e «What not to do yet»; e o
+`the_node_templates_carry_a_commitlint_config` exige o config nos três de Node
+**e** que ele esteja no `CI_FILES` — senão a adopção escreve-o num projecto cujo
+CI foi deliberadamente saltado. Verificado a chumbar com um ficheiro removido.
+
+**O CI dos três de edge corre o binário verdadeiro contra a config verdadeira**
+(`scripts/ci-check.sh`: constrói a imagem e sonda-a **de fora**), e as duas
+formas anteriores foram descartadas POR MEDIÇÃO, não por gosto: de dentro da
+imagem por loopback, o `/nginx_status` (`allow 127.0.0.1`) responde 200 e o
+check «não é público» chumba contra uma config certa; com o endereço eth0 do
+container, o `Require local` do httpd conta os endereços DO PRÓPRIO servidor, e
+o haproxy corre como não-root e nem o certificado consegue escrever. Ao vivo:
+nginx 15/15, httpd 15/15, haproxy 11 ok + 1 skip honesto, rc=0 nos três.
+
+**E correr o CI em vez de o ler encontrou dois bugs reais nos projectos
+gerados:** o `smoke.sh` dos três aceita os URLs como argumento e **ignorava-os**
+num check, com `127.0.0.1` escrito à mão — contra qualquer endereço que não o
+loopback (um host de estágio, um túnel, um container de CI) dava FAIL contra um
+servidor a redireccionar exactamente como configurado; e o último check do
+`haproxy` chama `delonix container exec <nome>`, que fora de um container gerido
+pelo delonix não tem como passar — passou a **skip com a razão**, porque dizer
+FAIL ali seria tão desonesto como dizer ok.
+
+**A doutrina destes templates está na skill `delonix-template`** (plugin
+`delonix-runtime` do harness): o contrato, o procedimento de revisão medido, o
+catálogo de má prática por stack, a tabela completa dos parâmetros
+(`references/parametros.md`), o catálogo de arquitecturas que o README
+aconselha (`references/arquiteturas.md`) e o estado datado
+(`references/estado.md`).
+
 ## Uma porta privilegiada no `init` tornava o projecto impossível de construir (2026-10-15)
 
 Bug de produção: `delonix init -t nginx --port 9000 --tls-port 943 <dir>` gerava o projecto

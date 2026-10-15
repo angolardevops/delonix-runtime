@@ -55,8 +55,44 @@ fn main() {
         let mut pairs: Vec<(String, String)> = Vec::new();
         if let Ok(txt) = std::fs::read_to_string(tdir.join("template.meta")) {
             for line in txt.lines() {
-                if let Some((k, v)) = line.trim().split_once('=') {
-                    pairs.push((k.trim().to_string(), v.trim().to_string()));
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                // A key the generator does not read was accepted in SILENCE, and
+                // this file is the interface between a template and the generator:
+                // `tsl=8443` for `tls=8443` gave a template with no TLS, no
+                // certificate and no `--tls-port`, with nothing saying so — the
+                // accepted-and-ignored class the rest of the engine refuses. The
+                // build stops, like `wait=` already does for a value it cannot
+                // parse. Keep this list and `references/parametros.md` of the
+                // `delonix-template` skill in step.
+                const KNOWN: &[&str] = &[
+                    "port",
+                    "health",
+                    "version",
+                    "versions",
+                    "lock",
+                    "wait",
+                    "tls",
+                    "open",
+                    "login",
+                    "password",
+                    "up_secret",
+                ];
+                match line.split_once('=') {
+                    Some((k, v)) => {
+                        let k = k.trim();
+                        if !KNOWN.contains(&k) {
+                            panic!(
+                                "{name}/template.meta: unknown key {k:?} — the generator \
+                                 never reads it. Known keys: {}",
+                                KNOWN.join(", ")
+                            );
+                        }
+                        pairs.push((k.to_string(), v.trim().to_string()));
+                    }
+                    None => panic!("{name}/template.meta: {line:?} is not `key=value`"),
                 }
                 if let Some(v) = line.trim().strip_prefix("port=") {
                     port = v.trim().to_string();

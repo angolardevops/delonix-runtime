@@ -209,6 +209,75 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy` talks plain HTTP to the port, so it does not fit this template, which the tunnel reaches on its HTTPS port.
 
+## Tests and CI
+
+```bash
+sh scripts/ci-check.sh        # builds the image, runs it, runs the smoke against it
+sh scripts/smoke.sh           # just the smoke, against something already up
+```
+
+`scripts/ci-check.sh` is what `.github/workflows/ci.yml` and `.gitlab-ci.yml`
+both run, so a green CI and a green local run mean the same thing. It needs
+`docker`, `curl` and `openssl`, and it probes the server from OUTSIDE the
+container on purpose — the status endpoint is restricted to the local machine,
+so a probe from inside answers 200 and the check written as "this must NOT be
+public" would fail against a configuration that is exactly right.
+
+`sonar-project.properties` is ready for a `sonar-scanner` run; `CONTRIBUTING.md`
+has the branching model, Conventional Commits and SemVer.
+
+## Architecture: where to take this
+
+**A rule before the menu: a configuration no test exercises is a guess.** This
+project ships the test — `scripts/smoke.sh`, run in CI by `scripts/ci-check.sh` against the real image — and it is the thing to extend when you take one
+of the paths below. An edge config is deployed far more often than it is read;
+the smoke is what stands between a typo and a silent outage.
+
+### What this project is today
+
+An edge: TLS termination, HTTP→HTTPS, security headers, request-id
+correlation, the ACME challenge path and a static site, with `conf/delonix.conf`
+as the one file you edit. No application logic lives here, by design.
+
+### Path 1 — reverse proxy in front of one application
+
+Enable `mod_proxy`/`mod_proxy_http` and the commented block, pointing at a
+container on the same Delonix network. *Patterns:* Reverse proxy. **Forward the
+request id** that this edge already mints.
+
+### Path 2 — API gateway for several services
+
+A `ProxyPass` per service with its own timeouts, and `mod_proxy_balancer` when
+one service has several instances. *Patterns:* API Gateway, Bulkhead.
+
+### Path 3 — classic server-rendered app on the same host
+
+httpd's strength is serving files and running a language runtime beside them.
+If that is where you are going, keep the `delonix.conf` split: the edge
+concerns stay in it and the application's own config goes in its own file.
+### Choosing
+
+| If your problem is… | Put it… | The sign you chose wrong |
+|---|---|---|
+| TLS, HTTP/2, compression, redirects | here, at the edge | the application has TLS code in it |
+| who may call what, per user | in the application | the proxy config encodes business rules |
+| rate limiting a whole site | here | each service re-implements it, differently |
+| rate limiting one tenant's quota | in the application | the proxy needs to know about accounts |
+| routing to several services | here (gateway) | the browser knows every service's address |
+| shaping a response for one screen | in a BFF service behind this | the proxy rewrites JSON |
+
+### What not to do yet
+
+- **Do not put business rules in the proxy config.** It is not tested like code
+  and it is deployed on another cadence; the day the rule is wrong, nobody
+  looks here.
+- **Do not terminate TLS twice.** Terminate once, here, and speak plain HTTP
+  (or a separately-trusted mTLS) to the backends.
+- **Do not grow one shared config for every service.** One file, many teams, is
+  the merge conflict that becomes an outage.
+- **Do not skip the smoke after a config change.** `scripts/smoke.sh` is the
+  only thing standing between a typo and a silent 500.
+
 ## Troubleshooting
 
 - **The build fails at `httpd -t`** — the message names the file and line.

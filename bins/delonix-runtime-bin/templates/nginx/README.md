@@ -211,6 +211,80 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy` talks plain HTTP to the port, so it does not fit this template, which the tunnel reaches on its HTTPS port.
 
+## Tests and CI
+
+```bash
+sh scripts/ci-check.sh        # builds the image, runs it, runs the smoke against it
+sh scripts/smoke.sh           # just the smoke, against something already up
+```
+
+`scripts/ci-check.sh` is what `.github/workflows/ci.yml` and `.gitlab-ci.yml`
+both run, so a green CI and a green local run mean the same thing. It needs
+`docker`, `curl` and `openssl`, and it probes the server from OUTSIDE the
+container on purpose — the status endpoint is restricted to the local machine,
+so a probe from inside answers 200 and the check written as "this must NOT be
+public" would fail against a configuration that is exactly right.
+
+`sonar-project.properties` is ready for a `sonar-scanner` run; `CONTRIBUTING.md`
+has the branching model, Conventional Commits and SemVer.
+
+## Architecture: where to take this
+
+**A rule before the menu: a configuration no test exercises is a guess.** This
+project ships the test — `scripts/smoke.sh`, run in CI by `scripts/ci-check.sh` against the real image — and it is the thing to extend when you take one
+of the paths below. An edge config is deployed far more often than it is read;
+the smoke is what stands between a typo and a silent outage.
+
+### What this project is today
+
+An edge: TLS termination, HTTP→HTTPS, security headers, request-id
+correlation, the ACME challenge path and a static site. It has no application
+logic, and that is the architectural decision — everything here is about what
+arrives and what leaves, never about what the answer means.
+
+### Path 1 — reverse proxy in front of one application
+
+Uncomment the `upstream`/`proxy_pass` block and point it at a container on the
+same Delonix network by name. *Patterns:* Reverse proxy, health-checked
+upstream. **Keep the request id**: it is already minted here, and forwarding it
+is what makes one request traceable across the edge and the app.
+
+### Path 2 — API gateway for several services
+
+One `location` per service, each with its own upstream and timeouts.
+*Patterns:* API Gateway, Bulkhead (separate upstream pools so one slow service
+does not exhaust the others). *Watch for:* the gateway becoming the place
+routing rules are invented — keep it a map, not a program.
+
+### Path 3 — edge cache / static front for a dynamic app
+
+`proxy_cache` for what is safe to cache, with explicit `Cache-Control` from the
+application. *Patterns:* Cache-aside at the edge, stale-while-revalidate.
+**Let the application own the policy**; a cache whose rules live only here is a
+cache nobody can reason about.
+### Choosing
+
+| If your problem is… | Put it… | The sign you chose wrong |
+|---|---|---|
+| TLS, HTTP/2, compression, redirects | here, at the edge | the application has TLS code in it |
+| who may call what, per user | in the application | the proxy config encodes business rules |
+| rate limiting a whole site | here | each service re-implements it, differently |
+| rate limiting one tenant's quota | in the application | the proxy needs to know about accounts |
+| routing to several services | here (gateway) | the browser knows every service's address |
+| shaping a response for one screen | in a BFF service behind this | the proxy rewrites JSON |
+
+### What not to do yet
+
+- **Do not put business rules in the proxy config.** It is not tested like code
+  and it is deployed on another cadence; the day the rule is wrong, nobody
+  looks here.
+- **Do not terminate TLS twice.** Terminate once, here, and speak plain HTTP
+  (or a separately-trusted mTLS) to the backends.
+- **Do not grow one shared config for every service.** One file, many teams, is
+  the merge conflict that becomes an outage.
+- **Do not skip the smoke after a config change.** `scripts/smoke.sh` is the
+  only thing standing between a typo and a silent 500.
+
 ## Troubleshooting
 
 - **The build fails at `RUN nginx -t`** — the message names the file and line.

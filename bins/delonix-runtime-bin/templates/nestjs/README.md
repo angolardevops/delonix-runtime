@@ -296,6 +296,68 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — `src/architecture.spec.ts`, run by `pnpm test` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+Nest modules used as a real boundary, not just as DI wiring: `src/notes/`
+holds the entity, the rules and the use cases; `src/http/` carries the request
+id, the validation pipe and the single error shape; `src/main.ts` is the
+composition root. `src/architecture.spec.ts` is what keeps `@nestjs/common`
+decorators out of the places that should be plain TypeScript.
+
+### Path 1 — a provider per port
+
+Nest's DI is already a ports-and-adapters container: declare the port as an
+injection token, give it two providers (in-memory, database) and pick one in
+the module. *Patterns:* Adapter, Dependency Inversion via tokens — **use a
+token, not a concrete class, as the injection key**, or the swap you planned
+for is a refactor.
+
+### Path 2 — a module per bounded area (modular monolith)
+
+One Nest module per area, `exports` as the public surface, and a rule in
+`architecture.spec.ts` that an area does not import another's internals.
+*Patterns:* Facade (the module's exported service), domain events via an event
+emitter.
+
+### Path 3 — CQRS, if and only if you have the number
+
+`@nestjs/cqrs` makes command/query buses cheap to add, which is exactly why
+they get added without a reason. Adopt it when read and write genuinely pull
+apart — and write the measurement into the ADR. *Patterns:* Command handler,
+Query handler, Saga for compensating flows.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

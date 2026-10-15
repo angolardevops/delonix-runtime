@@ -1,0 +1,13 @@
+# Same gate as .github/workflows/ci.yml: both run scripts/ci-check.sh, which
+# starts the real server and runs scripts/smoke.sh against it.
+image: haproxy:__TEMPLATE_VERSION__
+
+stages:
+  - check
+
+check:
+  stage: check
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl openssl
+  script:
+    - sh scripts/ci-check.sh

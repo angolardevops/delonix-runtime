@@ -17,6 +17,10 @@ check() { # check <description> <command...>
     desc=$1; shift
     if "$@" >/dev/null 2>&1; then echo "ok   $desc"; else echo "FAIL $desc"; fail=1; fi
 }
+# A check whose PRECONDITION is not met here is not a failure — saying FAIL
+# would be as dishonest as saying ok. It is named, with the reason, and the
+# run's verdict is unaffected.
+skip() { echo "skip $1 — $2"; }
 
 # Nothing listening is one finding, not a dozen: without this, every check
 # below fails for the same reason, and the two written as "this must NOT
@@ -29,7 +33,12 @@ fi
 
 check "/healthz answers ok over HTTP"   sh -c "curl -fsS '$PLAIN/healthz' | grep -qx ok"
 check "/ answers 200 over HTTPS"        curl -kfsS -o /dev/null "$BASE/"
-check "HTTP redirects to HTTPS (308)"   sh -c "curl -s -o /dev/null -D - '$PLAIN/some/page?x=1' | tr -d '\r' | grep -qix 'location: https://127.0.0.1:__TLS_PORT__/some/page?x=1'"
+# Built from $BASE, never a hardcoded 127.0.0.1: this script takes the two base
+# URLs as arguments and every other check honours them. Measured — run against
+# any address that is not the loopback (a staging host, a tunnel, a CI
+# container) this one check reported FAIL against a server redirecting exactly
+# as configured.
+check "HTTP redirects to HTTPS (308)"   sh -c "curl -s -o /dev/null -D - '$PLAIN/some/page?x=1' | tr -d '\r' | grep -qix 'location: $BASE/some/page?x=1'"
 check "HTTP/2 is negotiated"            sh -c "[ \"\$(curl -ks -o /dev/null -w '%{http_version}' '$BASE/')\" = 2 ]"
 check "TLS 1.1 is refused"              sh -c "curl -ks -o /dev/null --tlsv1.2 '$BASE/' && ! curl -ks -o /dev/null --tls-max 1.1 '$BASE/'"
 check "the private key is not world-readable" sh -c "[ \"\$(stat -c %a tls/tls.key)\" = 600 ]"
@@ -38,7 +47,16 @@ check "a request id is minted"          sh -c "curl -kfsS -o /dev/null -D - '$BA
 check "a caller's request id is kept"   sh -c "curl -kfsS -o /dev/null -D - -H 'X-Request-ID: smoke-123' '$BASE/' | tr -d '\r' | grep -qix 'x-request-id: smoke-123'"
 check "the /healthz answer carries the headers too" sh -c "curl -fsS -o /dev/null -D - '$PLAIN/healthz' | grep -qi '^x-content-type-options:'"
 check "no Server header"                sh -c "h=\$(curl -kfsS -o /dev/null -D - '$BASE/') && ! echo \"\$h\" | grep -qi '^server:'"
-check "the worker runs as haproxy, not root" sh -c "delonix container exec __NAME__ sh -c 'for p in /proc/[0-9]*; do grep -qs ^haproxy \$p/comm && awk \"/^Uid:/{print \\\$2}\" \$p/status; done' | grep -qvx 0"
+# This one needs to look INSIDE the container, which only works when the
+# project is the one `delonix stack apply` started, under the manifest's name.
+# Run against anything else — a plain `docker run` in CI, a staging host, a
+# tunnel — the precondition is absent and a FAIL would say something untrue
+# about the server.
+if command -v delonix >/dev/null 2>&1 && delonix container inspect __NAME__ >/dev/null 2>&1; then
+    check "the worker runs as haproxy, not root" sh -c "delonix container exec __NAME__ sh -c 'for p in /proc/[0-9]*; do grep -qs ^haproxy \$p/comm && awk \"/^Uid:/{print \\\$2}\" \$p/status; done' | grep -qvx 0"
+else
+    skip "the worker runs as haproxy, not root" "no delonix container named __NAME__ here"
+fi
 
 if curl -fsS -o /dev/null "https://localhost:__TLS_PORT__/" 2>/dev/null; then
     echo "note this machine trusts the certificate"

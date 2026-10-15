@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# Read-only token: this workflow checks, it publishes nothing.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # The REAL server binary against this repo's REAL config — not a YAML
+    # parse and not a lint. Same image the Delonixfile builds FROM, in its
+    # debian variant: `actions/checkout` needs glibc and the alpine one has
+    # none.
+    container:
+      image: haproxy:__TEMPLATE_VERSION__
+    steps:
+      # Actions pinned by commit SHA (the tag is in the comment); Dependabot
+      # (.github/dependabot.yml) proposes the updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: tools the published image deliberately does not ship
+        run: apt-get update -qq && apt-get install -y -qq curl openssl
+      - run: sh scripts/ci-check.sh

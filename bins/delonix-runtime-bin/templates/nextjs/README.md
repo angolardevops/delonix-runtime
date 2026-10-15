@@ -324,6 +324,70 @@ routes from there, not from this file.
   One ngrok tunnel at a time per machine.
 - `pinggy`: nothing to install (plain `ssh`), a URL valid for 60 minutes, and a warning page shown to browsers before the site.
 
+## Architecture: where to take this
+
+**A rule before the menu: an architecture no test enforces is not an
+architecture, it is an intention.** This project ships one — the dependency-direction test under `tests/`, run by `pnpm test` — and the
+paths below each say what changes *in that test*. Move the folders without
+moving the test and the dependency direction is back to where it was within a
+few sprints.
+
+### What this project is today
+
+The capability lives in `lib/notes/` — rules, use cases and ports
+(`NoteStore`, `NotePublisher`) — and knows nothing of React, of the request or
+of a Route Handler. `app/` is the transport (Server Components and Route
+Handlers) and `lib/server/runtime.ts` is the composition root. That separation
+is the whole reason a Server Component can call a use case directly without the
+page becoming the application.
+
+### Path 1 — a real database behind the same port
+
+Implement `NoteStore` against your database and build it in
+`lib/server/runtime.ts`. The pages and the Route Handlers do not change — that
+is the point of the port. *Patterns:* Adapter, Repository. **Keep the adapter
+server-only**; an accidental import from a Client Component is the failure mode
+here, and the test is what catches it.
+
+### Path 2 — one folder per bounded area
+
+`lib/<area>/` per area with its own ports, and route segments under `app/`
+mirroring them. *Patterns:* Facade, domain events. *Test:* forbid cross-area
+imports, and forbid `app/` from importing an adapter directly — it must go
+through the runtime.
+
+### Path 3 — a BFF in front of real services
+
+When the data comes from services you do not own, keep `lib/notes/` as the
+shape your UI needs and add adapters that call them. *Patterns:*
+Anti-corruption layer, Circuit breaker, request-scoped caching.
+**Do not let the upstream's payload become your UI's model** — that is the
+coupling a BFF exists to prevent.
+### Choosing
+
+| If your problem is… | Go to | The sign you chose wrong |
+|---|---|---|
+| "a CRUD endpoint takes all afternoon" | nothing — the layout is not the problem | you are adding folders and the endpoint still takes all afternoon |
+| "I cannot test a rule without a database" | you already have the answer: keep rules off the adapters | a unit test that needs Docker |
+| "two features keep breaking each other" | modular: one folder per bounded area, public surface only | a fix in one area ships a regression in another |
+| "the read path and the write path pull in opposite directions" | split the read model (CQRS), with a number to back it | two models to keep in step and nobody remembers why |
+| "this side effect does not belong in the request" | events + outbox | the user waits for something they did not ask for |
+| "two teams block each other on every deploy" | separate services — AFTER the modules are clean | a deploy of one service breaks another |
+
+### What not to do yet
+
+- **Do not add a layer because it reads well.** Every indirection is paid on
+  every change; add one when a concrete change is hard, not before.
+- **Do not go distributed to get modularity.** A module boundary that a test
+  enforces gives you the decoupling; a network hop gives you retries,
+  timeouts, partial failures and a tracing bill.
+- **Do not let the persistence shape the rules.** The moment a use case
+  mentions a column name, the next storage decision is a rewrite.
+- **Do not change the architecture and the architecture test in different
+  commits.** They are one change.
+
+See also the local `ARCHITECTURE.md` for this project's current rules.
+
 ## Troubleshooting
 
 | Symptom | Cause |

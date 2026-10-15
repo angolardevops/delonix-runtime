@@ -1,0 +1,12 @@
+# Same gate as .github/workflows/ci.yml.
+image: python:3.12
+
+stages:
+  - lint
+
+lint:
+  stage: lint
+  before_script:
+    - pip install --quiet pre-commit
+  script:
+    - pre-commit run --all-files --show-diff-on-failure
