@@ -232,6 +232,13 @@ impl VmImageStore {
         Ok(Self { root })
     }
 
+    /// The store's own directory — where the build caches what it downloads
+    /// (`_base/` for the cloud images, `_cni-plugins/` for the reference
+    /// plugin tarball), so a second build verifies instead of re-fetching.
+    pub(crate) fn dir(&self) -> &Path {
+        &self.root
+    }
+
     fn sanitize(name: &str) -> String {
         name.chars()
             .map(|c| {
@@ -1448,6 +1455,17 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
 /// deixam de ser a omissão.
 pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
 
+/// The architecture the Kubernetes golden image is built for.
+///
+/// One constant rather than the three separate `"amd64"` literals this file
+/// already carries (the k8s `.deb` download, the archive `.deb` download, and
+/// now the CNI plugins): they have to agree, and a build that fetched amd64
+/// debs and arm64 plugin binaries would produce an image whose plugins do not
+/// execute — a failure that surfaces as `NetworkReady: plugin not found` on a
+/// node, far from here. ADR-0018 is the decision that the VM images stay
+/// amd64; this is where that decision is spelled.
+pub(crate) const GOLDEN_ARCH: &str = "amd64";
+
 /// Tamanho VIRTUAL do disco da golden, em GiB.
 ///
 /// A imagem base do Ubuntu vem com 3,5 GiB (≈2,4 GB de raiz utilizável), e isso
@@ -2459,6 +2477,21 @@ pub(crate) fn cmd_build(
         // `current_exe()` (este comando JÁ está a correr como `delonix`).
         let delonix = resolve_delonix_bin(delonix_bin)?;
         let service_unit = workspace_dist_file("delonix-cri.service")?;
+        // The reference CNI plugins and the node preflight — fetched and
+        // VERIFIED on the host, like every other download this build makes, so
+        // the offline path stays offline.
+        //
+        // This FAILS the build rather than warning. Until now the only thing
+        // that put anything in `/opt/cni/bin` was the `kubernetes-cni` `.deb`
+        // arriving as a kubelet dependency, unnamed, unpinned and unasserted —
+        // so an image's plugin set was whatever `pkgs.k8s.io` published that
+        // day. A golden that silently lacks `portmap` is indistinguishable
+        // from one that has it until a `hostPort` is refused on a real node,
+        // which is the same argument the guest-agent download below already
+        // makes for itself.
+        let cni_plugins_tarball =
+            super::cni_plugins::fetch_reference_plugins(store.dir(), GOLDEN_ARCH)?;
+        let node_preflight = workspace_dist_file("delonix-node-preflight.sh")?;
         if offline {
             // Everything that needs network happens HERE, on the host (verified), so the
             // appliance can run with `--no-network`.
@@ -2525,7 +2558,18 @@ pub(crate) fn cmd_build(
                 // e do que a imagem base já tem (`liburing2` estava aqui à
                 // mão, e o `ubuntu-virt` que a 26.04 acrescentou não estava —
                 // era essa a golden que saía sem agente configurado).
-                &["qemu-guest-agent"],
+                //
+                // The three after the agent are the NETWORK DIAGNOSTIC tools a
+                // node needs to answer the questions a pod network raises, and
+                // the cloud image ships none of them: `ethtool` reads the link
+                // MTU and offloads (the first thing to check when large
+                // packets vanish and small ones do not), `conntrack` shows the
+                // table kube-proxy and Calico program, `tcpdump` is how you
+                // find out whether a VXLAN frame left the node at all. They
+                // are deliberately a SHORT list: this build also debloats the
+                // image, and every tool here has to earn its place by
+                // answering a question the mandatory network tests ask.
+                &["qemu-guest-agent", "ethtool", "conntrack", "tcpdump"],
                 &guest_installed_packages(&work_qcow2),
             )?;
             debs.extend(agent_debs);
@@ -2557,6 +2601,8 @@ pub(crate) fn cmd_build(
                 preseed_root.as_deref(),
                 distro,
                 root_password.as_deref(),
+                Some(&cni_plugins_tarball),
+                Some(&node_preflight),
             )
         } else {
             k8s_customization_steps(
@@ -2568,6 +2614,8 @@ pub(crate) fn cmd_build(
                 &service_unit,
                 distro,
                 root_password.as_deref(),
+                Some(&cni_plugins_tarball),
+                Some(&node_preflight),
             )
         }
     };
@@ -2626,6 +2674,29 @@ pub(crate) fn cmd_build(
                 .unwrap_or_else(|| "none".into()),
         ),
         ("DELONIX_EXTRA_PACKAGES", extra_packages.join(" ")),
+        // Provenance of the network half, so a node can answer "which plugin
+        // set do I carry" without anyone mounting the qcow2 — and so two
+        // goldens built a month apart can be told apart by more than a date.
+        // `none` on a `--no-k8s` image, which has no kubelet to serve.
+        (
+            "DELONIX_CNI_PLUGINS",
+            if no_k8s {
+                "none".to_string()
+            } else {
+                super::cni_plugins::provenance(GOLDEN_ARCH)
+            },
+        ),
+        // Which profiles THIS image is prepared for, with the version each
+        // one would install. A node that says it is ready for a profile the
+        // binary no longer knows is a mismatch worth seeing.
+        (
+            "DELONIX_NET_PROFILES",
+            if no_k8s {
+                "none".to_string()
+            } else {
+                super::net_profiles::provenance()
+            },
+        ),
     ]);
     let ops = splice_before_machine_id(
         ops,
@@ -4762,6 +4833,12 @@ fn find_workspace_root() -> Option<PathBuf> {
 /// since the content already ships inside us.
 const DELONIX_CRI_SERVICE_UNIT: &str = include_str!("../../../../dist/delonix-cri.service");
 
+/// Embedded fallback for `dist/delonix-node-preflight.sh`, for the same reason
+/// and on the same terms as the unit above: static, version-independent, and
+/// needed by a `delonix` running outside a source checkout. The golden image
+/// installs it; `cluster apply` runs it on every node before `kubeadm`.
+const DELONIX_NODE_PREFLIGHT: &str = include_str!("../../../../dist/delonix-node-preflight.sh");
+
 pub(crate) fn workspace_dist_file(name: &str) -> Result<PathBuf> {
     if let Some(root) = find_workspace_root() {
         let p = root.join("dist").join(name);
@@ -4769,11 +4846,15 @@ pub(crate) fn workspace_dist_file(name: &str) -> Result<PathBuf> {
             return Ok(p);
         }
     }
-    if name == "delonix-cri.service" {
+    if let Some(embedded) = match name {
+        "delonix-cri.service" => Some(DELONIX_CRI_SERVICE_UNIT),
+        "delonix-node-preflight.sh" => Some(DELONIX_NODE_PREFLIGHT),
+        _ => None,
+    } {
         let cached = cri_cache_dir().join(name);
         if !cached.exists() {
             std::fs::create_dir_all(cri_cache_dir())?;
-            std::fs::write(&cached, DELONIX_CRI_SERVICE_UNIT)?;
+            std::fs::write(&cached, embedded)?;
         }
         return Ok(cached);
     }
@@ -4829,6 +4910,8 @@ pub(crate) fn k8s_customization_steps_offline(
     preseed_images_root: Option<&Path>,
     distro: Distro,
     root_password: Option<&str>,
+    cni_plugins_tarball: Option<&Path>,
+    node_preflight: Option<&Path>,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
     // `--copy-in` requires the target directory to ALREADY exist in the guest.
@@ -4847,6 +4930,7 @@ pub(crate) fn k8s_customization_steps_offline(
     );
     ops.extend(k8s_node_debloat_steps(distro));
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
+    ops.extend(cni_steps(cni_plugins_tarball, node_preflight));
     ops.extend(shared_account_steps(extra_run, distro, root_password));
     if let Some(root) = preseed_images_root {
         ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
@@ -4870,6 +4954,8 @@ pub(crate) fn k8s_customization_steps(
     cri_service: &Path,
     distro: Distro,
     root_password: Option<&str>,
+    cni_plugins_tarball: Option<&Path>,
+    node_preflight: Option<&Path>,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> =
         super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
@@ -4878,7 +4964,49 @@ pub(crate) fn k8s_customization_steps(
             .collect();
     ops.extend(k8s_node_debloat_steps(distro));
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
+    ops.extend(cni_steps(cni_plugins_tarball, node_preflight));
     ops.extend(shared_account_steps(extra_run, distro, root_password));
+    ops
+}
+
+/// The network half of a Kubernetes golden image: the reference CNI plugins
+/// and the node preflight.
+///
+/// Shared by the online and offline paths, in this one function, for the same
+/// reason `k8s_recipes` exists: the two must not diverge. An image whose
+/// offline build carries `portmap` and whose online build does not is a
+/// `hostPort` that works on one golden and is refused on the other, and
+/// nothing in a build log would say so.
+///
+/// Both arguments are `Option` because `--no-k8s` images get neither (there is
+/// no kubelet to serve) and because a build that could not obtain the plugins
+/// must not silently produce an image that claims to have them — the CALLER
+/// decides, and `cmd_build` turns a failed fetch into a failed build.
+pub(crate) fn cni_steps(
+    cni_plugins_tarball: Option<&Path>,
+    node_preflight: Option<&Path>,
+) -> Vec<CustomizeOp> {
+    let mut ops = Vec::new();
+    if let Some(t) = cni_plugins_tarball {
+        ops.extend(super::cni_plugins::install_ops(t));
+    }
+    if let Some(p) = node_preflight {
+        ops.push(CustomizeOp::CopyIn(
+            p.to_path_buf(),
+            "/usr/local/bin".to_string(),
+        ));
+        // `--copy-in` keeps the file name, and the script is `*.sh` in `dist/`
+        // because that is what shellcheck and the repo's own gates expect of a
+        // shell file. On a node it is a COMMAND, so it loses the extension —
+        // the name `cluster apply` invokes and the one the image installs are
+        // the same string, asserted by `the_preflight_lands_as_a_command`.
+        ops.push(CustomizeOp::RunCommand(
+            "mv /usr/local/bin/delonix-node-preflight.sh \
+             /usr/local/bin/delonix-node-preflight && \
+             chmod 0755 /usr/local/bin/delonix-node-preflight"
+                .into(),
+        ));
+    }
     ops
 }
 
@@ -5896,6 +6024,8 @@ mod tests {
             &svc,
             Distro::Ubuntu,
             None,
+            None,
+            None,
         );
         let install_step = ops
             .iter()
@@ -5956,11 +6086,31 @@ mod tests {
             ops.iter()
                 .any(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains("apt-get purge")))
         };
-        let online =
-            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let online = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            None,
+            None,
+            None,
+        );
         assert!(has_purge(&online), "the online path must purge");
-        let offline =
-            k8s_customization_steps_offline(&[], &[], &cri, &eng, &svc, None, Distro::Ubuntu, None);
+        let offline = k8s_customization_steps_offline(
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            None,
+            Distro::Ubuntu,
+            None,
+            None,
+            None,
+        );
         assert!(has_purge(&offline), "the offline path must purge");
     }
 
@@ -5971,7 +6121,18 @@ mod tests {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            None,
+            None,
+            None,
+        );
         let at = |needle: &str| {
             ops.iter()
                 .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
@@ -5979,6 +6140,111 @@ mod tests {
         };
         assert!(at("apt-get purge") < at("packages.tsv"));
         assert!(at("apt-get purge") < at("apt-get clean"));
+    }
+
+    /// The network half must land IDENTICALLY on the online and offline paths.
+    /// This is the same guarantee `k8s_recipes` exists for, one level up: an
+    /// image whose offline build carries `portmap` and whose online build does
+    /// not is a `hostPort` that works on one golden and is refused on the
+    /// other, and no build log would say so.
+    #[test]
+    fn os_dois_caminhos_instalam_o_mesmo_meio_de_rede() {
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
+        let svc = PathBuf::from("/tmp/delonix-cri.service");
+        let tgz = PathBuf::from("/cache/cni-plugins-linux-amd64-v1.9.1.tgz");
+        let pre = PathBuf::from("/src/dist/delonix-node-preflight.sh");
+        let online = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            None,
+            Some(&tgz),
+            Some(&pre),
+        );
+        let offline = k8s_customization_steps_offline(
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            None,
+            Distro::Ubuntu,
+            None,
+            Some(&tgz),
+            Some(&pre),
+        );
+        let net_ops = |ops: &[CustomizeOp]| -> Vec<CustomizeOp> {
+            ops.iter()
+                .filter(|o| match o {
+                    CustomizeOp::RunCommand(c) => {
+                        c.contains("/opt/cni/bin") || c.contains("delonix-node-preflight")
+                    }
+                    CustomizeOp::CopyIn(s, _) => {
+                        let n = s.to_string_lossy();
+                        n.contains("cni-plugins") || n.contains("node-preflight")
+                    }
+                    _ => false,
+                })
+                .cloned()
+                .collect()
+        };
+        let a = net_ops(&online);
+        assert!(!a.is_empty(), "the online path installs no network half");
+        assert_eq!(a, net_ops(&offline), "os dois caminhos divergiram");
+    }
+
+    /// `--no-k8s` images get neither: there is no kubelet to serve, and a CNI
+    /// plugin set on a machine with no Kubernetes is dead weight on an
+    /// artefact that is handed to someone else.
+    #[test]
+    fn uma_imagem_sem_k8s_nao_leva_plugins_cni_nem_preflight() {
+        let eng = PathBuf::from("/tmp/delonix");
+        let ops = rootless_customization_steps(&[], &eng, Distro::Ubuntu, None);
+        for op in &ops {
+            if let CustomizeOp::RunCommand(c) = op {
+                assert!(!c.contains("/opt/cni/bin"), "{c}");
+                assert!(!c.contains("delonix-node-preflight"), "{c}");
+            }
+        }
+        // And `cni_steps(None, None)` is empty rather than half-done: the
+        // CALLER decides, and a failed fetch has to fail the build.
+        assert!(cni_steps(None, None).is_empty());
+    }
+
+    /// The preflight is a COMMAND on a node, and `cluster apply` invokes it by
+    /// the name without the extension. The file in `dist/` keeps `.sh` because
+    /// that is what shellcheck and this repo's own gates expect, so the rename
+    /// is load-bearing: miss it and every node reports "preflight not found".
+    #[test]
+    fn the_preflight_lands_as_a_command() {
+        let pre = PathBuf::from("/src/dist/delonix-node-preflight.sh");
+        let ops = cni_steps(None, Some(&pre));
+        let cmds: Vec<&String> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        let mv = cmds
+            .iter()
+            .find(|c| c.contains("mv /usr/local/bin/delonix-node-preflight.sh"))
+            .expect("the .sh has to be renamed to the command name");
+        assert!(
+            mv.contains("/usr/local/bin/delonix-node-preflight &&"),
+            "{mv}"
+        );
+        assert!(mv.contains("chmod 0755"), "{mv}");
+        // And the path `cluster apply` runs is the one installed here.
+        assert!(
+            mv.contains(super::super::cluster::REMOTE_NODE_PREFLIGHT),
+            "the installed path and the one the bootstrap invokes diverged: {mv}"
+        );
     }
 
     #[test]
@@ -6015,6 +6281,8 @@ mod tests {
             &eng,
             &svc,
             Distro::Ubuntu,
+            None,
+            None,
             None,
         );
         // `--extra-run` runs after all base steps; only the apt cleanup
@@ -6102,7 +6370,18 @@ mod tests {
         // Both build paths (online + offline) share `common_customization_steps`,
         // so the kubectl UX must be present in both.
         for ops in [
-            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None),
+            k8s_customization_steps(
+                None,
+                &[],
+                &[],
+                &cri,
+                &eng,
+                &svc,
+                Distro::Ubuntu,
+                None,
+                None,
+                None,
+            ),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
                 &[],
@@ -6111,6 +6390,8 @@ mod tests {
                 &svc,
                 None,
                 Distro::Ubuntu,
+                None,
+                None,
                 None,
             ),
         ] {
@@ -6279,6 +6560,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             None,
             Distro::Ubuntu,
             None,
+            None,
+            None,
         );
         let cmds: Vec<&str> = ops
             .iter()
@@ -6312,6 +6595,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri.service"),
             None,
             Distro::Ubuntu,
+            None,
+            None,
             None,
         );
         let cmds: Vec<&str> = ops
@@ -6354,6 +6639,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Some(&preseed_root),
             Distro::Ubuntu,
             None,
+            None,
+            None,
         );
         for sub in ["images", "layers", "containers", "blobs"] {
             assert!(
@@ -6378,7 +6665,18 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            None,
+            None,
+            None,
+        );
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         // Tem de correr DEPOIS de tudo o que instala pacotes (incluindo o
         // `--extra-run`) e ANTES do reset do machine-id, que é o último passo.
@@ -6654,7 +6952,18 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            None,
+            None,
+            None,
+        );
         // No account may carry a password that is written down in this repository.
         assert!(!ops
             .iter()
@@ -6685,6 +6994,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &svc,
             Distro::Ubuntu,
             Some("segredo"),
+            None,
+            None,
         );
         assert!(ops
             .iter()
@@ -6865,6 +7176,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
             None,
+            None,
+            None,
         );
         assert!(hardened(&k8s), "a golden k8s também tem de vir endurecida");
     }
@@ -6932,6 +7245,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
+            None,
+            None,
             None,
         )));
     }

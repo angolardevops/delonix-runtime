@@ -323,6 +323,23 @@ pub(crate) struct Artefact {
     pub file_name: &'static str,
 }
 
+/// One line naming every profile this binary can install and the version it
+/// would install — for the golden image's own `/etc/delonix-image-release`.
+///
+/// Recorded IN the image because the alternative is asking a node which
+/// profiles it supports and getting the answer from whatever `delonix` happens
+/// to be on the machine asking. An image that says `cilium:1.20.2` and a
+/// binary that would install 1.21 is a mismatch worth seeing, and this is what
+/// makes it visible.
+pub(crate) fn provenance() -> String {
+    [Profile::Cilium, Profile::Calico, Profile::Flannel]
+        .iter()
+        .map(|p| format!("{}:{}", p.name(), p.version()))
+        .chain(std::iter::once(format!("multus:{MULTUS_VERSION}")))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// The Multus artefact, when the extension is asked for.
 pub(crate) fn multus_artefact() -> Artefact {
     Artefact {
@@ -863,10 +880,13 @@ fn parse_cidr_field(field: &str, value: &str) -> Result<Cidr4> {
         None
     };
     let cidr = parsed.ok_or_else(|| {
-        Error::Invalid(super::po::tf(
-            "{field} '{value}' is not an IPv4 CIDR (expected a.b.c.d/len, len 0-32)",
-            &[("field", field), ("value", value)],
-        ))
+        Error::coded(
+            1704,
+            Error::Invalid(super::po::tf(
+                "{field} '{value}' is not an IPv4 CIDR (expected a.b.c.d/len, len 0-32)",
+                &[("field", field), ("value", value)],
+            )),
+        )
     })?;
     // `10.244.0.1/16` is almost always a typo for `10.244.0.0/16`, and
     // accepting it after masking means the manifest and the cluster disagree
@@ -880,12 +900,15 @@ fn parse_cidr_field(field: &str, value: &str) -> Result<Cidr4> {
         cidr.prefix
     );
     if reparsed != value {
-        return Err(Error::Invalid(super::po::tf(
-            "{field} '{value}' has bits set outside its prefix — did you mean '{fixed}'? It is \
-             refused rather than masked, so the manifest and the cluster cannot disagree about \
-             what was asked",
-            &[("field", field), ("value", value), ("fixed", &reparsed)],
-        )));
+        return Err(Error::coded(
+            1704,
+            Error::Invalid(super::po::tf(
+                "{field} '{value}' has bits set outside its prefix — did you mean '{fixed}'? It \
+                 is refused rather than masked, so the manifest and the cluster cannot disagree \
+                 about what was asked",
+                &[("field", field), ("value", value), ("fixed", &reparsed)],
+            )),
+        ));
     }
     Ok(cidr)
 }
@@ -1252,6 +1275,20 @@ mod tests {
         r.pod_subnet = "10.244.0.1/16".into();
         let e = validate(&r).unwrap_err();
         assert!(e.to_string().contains("10.244.0.0/16"), "{e}");
+        // The CODE matters as much as the text: DX-1704's own dictionary entry
+        // documents host bits, so a generic DX-1000 here would send a reader
+        // looking up a code whose meaning says nothing about this.
+        assert_eq!(e.number(), 1704, "{e}");
+    }
+
+    /// Every CIDR refusal on this path carries DX-1704, for the same reason.
+    #[test]
+    fn a_malformed_cidr_also_carries_the_cidr_code() {
+        for bad in ["9", "1.2.3.4", "10.244.0.0/33", ""] {
+            let mut r = req("cilium");
+            r.pod_subnet = bad.to_string();
+            assert_eq!(validate(&r).unwrap_err().number(), 1704, "{bad:?}");
+        }
     }
 
     #[test]

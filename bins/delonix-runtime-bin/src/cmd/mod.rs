@@ -4,6 +4,7 @@ pub mod boot;
 pub mod build;
 pub mod capture;
 pub mod cluster;
+pub mod cni_plugins;
 pub mod compatibility;
 pub mod complete;
 pub mod compose;

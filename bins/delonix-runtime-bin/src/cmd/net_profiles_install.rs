@@ -182,18 +182,44 @@ pub(crate) fn substitute_manifest(plan: &NetworkPlan, text: &str) -> String {
     out
 }
 
-/// The two Flannel lines that have to change.
+/// The Flannel `net-conf.json` lines that have to change.
+///
+/// BUG FOUND BY `the_substitution_lands_on_the_real_upstream_manifests`, and
+/// the reason that test exists: this function used to REPLACE a `"MTU":` line.
+/// The real `kube-flannel.yml` v0.28.10 has no `MTU` key at all —
+/// `net-conf.json` is `Network`, `EnableNFTables` and `Backend` and nothing
+/// else. So the MTU substitution matched nothing, Flannel autodetected the
+/// NODE MTU, and every pod paid the 50-byte VXLAN header twice: large packets
+/// silently dropped, which reads as unexplained slowness. Exactly the failure
+/// `encap_overhead` was written to prevent, defeated by a substitution that
+/// assumed a key the file does not have. The excerpt tests passed throughout,
+/// because the excerpt was written from the assumption.
+///
+/// So the MTU is INSERTED, anchored on the `"Network":` line that does exist,
+/// and the backend type is set from the plan.
 fn flannel_line(plan: &NetworkPlan, trimmed: &str, indent: &str) -> Option<String> {
     if trimmed.starts_with("\"Network\":") {
+        // One output line per input line is not a constraint here — the pass
+        // writes whatever this returns — so the insert rides along with the
+        // anchor and keeps its indentation.
         return Some(format!(
-            "{indent}\"Network\": \"{}\",",
-            cidr_text(plan.pod_subnet)
+            "{indent}\"Network\": \"{}\",\n{indent}\"MTU\": {},",
+            cidr_text(plan.pod_subnet),
+            plan.mtu
         ));
     }
-    // Flannel writes the MTU into its own conflist through this key; without
-    // it the pods get the node MTU and the VXLAN header is paid twice.
+    // An MTU key DOES exist in some older releases and in a manifest an
+    // operator has already edited. Replace it then, so the insert above and a
+    // pre-existing key cannot both end up in the document.
     if trimmed.starts_with("\"MTU\":") {
-        return Some(format!("{indent}\"MTU\": {},", plan.mtu));
+        return Some(String::new());
+    }
+    // `Backend.Type` is the dataplane. Flannel ships `vxlan`, which is also
+    // the only mode this engine renders for it — but reading it from the plan
+    // rather than trusting the default is what makes a future second mode a
+    // one-line change instead of a silent mismatch.
+    if trimmed.starts_with("\"Type\":") {
+        return Some(format!("{indent}\"Type\": \"{}\"", plan.dataplane));
     }
     None
 }
@@ -618,23 +644,67 @@ mod tests {
         }
     }
 
-    /// The pod CIDR and the MTU must reach Flannel's ConfigMap, because the
-    /// shipped manifest hardcodes `10.244.0.0/16` and leaves the MTU to be
-    /// autodetected as the NODE MTU — which pays the VXLAN header twice.
+    /// The pod CIDR and the MTU must reach Flannel's ConfigMap. The MTU is
+    /// INSERTED, because the shipped `net-conf.json` has no `MTU` key — see
+    /// `flannel_line`'s own comment for the bug that taught this.
     #[test]
-    fn the_flannel_substitution_sets_the_cidr_and_the_mtu() {
+    fn the_flannel_substitution_inserts_the_mtu_and_sets_the_cidr() {
         let mut p = plan("flannel", None);
         p.pod_subnet = net_profiles::Cidr4::parse("10.99.0.0/16").unwrap();
-        let src = "  net-conf.json: |\n    {\n      \"Network\": \"10.244.0.0/16\",\n      \
-                   \"EnableNFTables\": false,\n      \"MTU\": 1500,\n      \"Backend\": {\n";
+        // The REAL shape: Network, EnableNFTables, Backend.Type. No MTU.
+        let src = concat!(
+            "  net-conf.json: |\n",
+            "    {\n",
+            "      \"Network\": \"10.244.0.0/16\",\n",
+            "      \"EnableNFTables\": false,\n",
+            "      \"Backend\": {\n",
+            "        \"Type\": \"vxlan\"\n",
+            "      }\n",
+            "    }\n",
+        );
         let out = substitute_manifest(&p, src);
         assert!(out.contains("\"Network\": \"10.99.0.0/16\","), "{out}");
-        assert!(out.contains("\"MTU\": 1450,"), "{out}");
-        // Indentation is preserved — this is YAML inside a string value, and
-        // losing the indent loses the document.
+        assert!(
+            out.contains("\"MTU\": 1450,"),
+            "the MTU was not inserted: {out}"
+        );
+        // Indentation is preserved on BOTH — this is JSON inside a YAML block
+        // scalar, and losing the indent loses the document.
         assert!(out.contains("      \"Network\""), "{out}");
+        assert!(out.contains("      \"MTU\""), "{out}");
         // Untouched lines survive byte for byte.
         assert!(out.contains("\"EnableNFTables\": false,"), "{out}");
+        // And it stays valid JSON once the block scalar is unwrapped.
+        let json: String = out
+            .lines()
+            .skip_while(|l| !l.trim_start().starts_with('{'))
+            .map(|l| l.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        let v: serde_json::Value =
+            serde_json::from_str(&json).unwrap_or_else(|e| panic!("not JSON: {e}\n{json}"));
+        assert_eq!(v["MTU"], 1450);
+        assert_eq!(v["Network"], "10.99.0.0/16");
+        assert_eq!(v["Backend"]["Type"], "vxlan");
+    }
+
+    /// A manifest that ALREADY has an MTU key must not end up with two.
+    #[test]
+    fn a_preexisting_flannel_mtu_is_not_duplicated() {
+        let p = plan("flannel", None);
+        let src = concat!(
+            "    {\n",
+            "      \"Network\": \"10.244.0.0/16\",\n",
+            "      \"MTU\": 1500,\n",
+            "      \"Backend\": {\n",
+            "        \"Type\": \"vxlan\"\n",
+            "      }\n",
+            "    }\n",
+        );
+        let out = substitute_manifest(&p, src);
+        assert_eq!(out.matches("\"MTU\"").count(), 1, "{out}");
+        assert!(out.contains("\"MTU\": 1450,"), "{out}");
+        assert!(!out.contains("1500"), "{out}");
     }
 
     /// Calico's two encapsulation switches are a matched pair: exactly one is
@@ -769,6 +839,111 @@ mod tests {
             let (ns, ds) = agent_daemonset(p);
             assert!(!ns.is_empty() && !ds.is_empty(), "{}", p.name());
         }
+    }
+
+    /// The substitution, run over the REAL upstream manifests.
+    ///
+    /// The tests above use hand-written excerpts, which prove the algorithm
+    /// and nothing about the actual files: upstream can rename a key, move the
+    /// MTU, or stop shipping an env var, and a passing excerpt test would say
+    /// everything is fine while the substitution quietly matched nothing. This
+    /// one reads the pinned artefact from the local cache and asserts the
+    /// result — the only version of this check that can catch that.
+    ///
+    /// SKIPS with a reason when the cache is absent (CI, a fresh checkout)
+    /// rather than downloading inside a unit test. Populate it with
+    /// `delonix cluster network fetch`.
+    #[test]
+    fn the_substitution_lands_on_the_real_upstream_manifests() {
+        let dir = cache_dir();
+        for (cni, file) in [
+            ("flannel", "kube-flannel-v0.28.10.yml"),
+            ("calico", "calico-v3.33.0.yaml"),
+        ] {
+            let path = dir.join(file);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                eprintln!(
+                    "SKIP {cni}: {} not cached — run `delonix cluster network fetch`",
+                    path.display()
+                );
+                continue;
+            };
+            let p = plan(cni, None);
+            let out = substitute_manifest(&p, &text);
+            // The substitution has to have CHANGED something. A no-op over a
+            // 700 KiB manifest is the failure mode this test exists for.
+            assert_ne!(out, text, "{cni}: the substitution matched nothing");
+            // The MTU is the value both profiles would otherwise autodetect as
+            // the NODE MTU, paying the VXLAN header twice.
+            assert!(
+                out.contains("1450"),
+                "{cni}: the computed MTU (1450) is not in the output"
+            );
+            if cni == "flannel" {
+                // The decisive check: parse the REAL document as YAML, pull
+                // `net-conf.json` out of the ConfigMap, and parse THAT as
+                // JSON. Substring assertions cannot tell a valid document
+                // from one whose block-scalar indentation was broken by the
+                // insert — and a broken one is rejected by the apiserver with
+                // a message that points nowhere near this function.
+                let conf = yaml_docs(&out)
+                    .into_iter()
+                    .find_map(|d| {
+                        d.get("data")?
+                            .get("net-conf.json")?
+                            .as_str()
+                            .map(str::to_owned)
+                    })
+                    .expect("the flannel manifest has a net-conf.json");
+                let v: serde_json::Value = serde_json::from_str(&conf).unwrap_or_else(|e| {
+                    panic!("net-conf.json is not JSON after substitution: {e}\n{conf}")
+                });
+                assert_eq!(v["Network"], "10.244.0.0/16");
+                assert_eq!(v["MTU"], 1450, "the MTU was not inserted: {conf}");
+                assert_eq!(v["Backend"]["Type"], "vxlan");
+            } else {
+                assert!(
+                    out.contains("veth_mtu: \"1450\""),
+                    "calico veth_mtu not set"
+                );
+                // Exactly one of the two encapsulation switches is `Always`.
+                let value_after = |name: &str| -> Option<String> {
+                    out.split(name).nth(1)?.lines().find_map(|l| {
+                        let t = l.trim();
+                        t.strip_prefix("value:").map(|v| v.trim().to_string())
+                    })
+                };
+                assert_eq!(
+                    value_after("CALICO_IPV4POOL_VXLAN").as_deref(),
+                    Some("\"Always\"")
+                );
+                assert_eq!(
+                    value_after("CALICO_IPV4POOL_IPIP").as_deref(),
+                    Some("\"Never\"")
+                );
+            }
+            // Every document still parses, and there are as many as before: a
+            // substitution that breaks one object's indentation can merge it
+            // into its neighbour, and the count is what notices.
+            let before = yaml_docs(&text).len();
+            let after = yaml_docs(&out);
+            assert_eq!(after.len(), before, "{cni}: the document count changed");
+            assert!(before > 1, "{cni}: expected a multi-document manifest");
+        }
+    }
+
+    /// Parses a multi-document manifest, skipping the empty documents a
+    /// trailing `---` produces. A parse failure PANICS rather than yielding
+    /// fewer documents: "it did not parse" and "it had fewer objects" are
+    /// different findings and must not look the same.
+    fn yaml_docs(text: &str) -> Vec<serde_yaml::Value> {
+        serde_yaml::Deserializer::from_str(text)
+            .map(|d| {
+                serde_yaml::Value::deserialize(d)
+                    .unwrap_or_else(|e| panic!("a document did not parse after substitution: {e}"))
+            })
+            .filter(|v| !v.is_null())
+            .collect()
     }
 
     /// Offline with an empty cache is a named refusal, not a silent download.

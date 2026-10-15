@@ -722,6 +722,238 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// `delonix cluster network …` — the operation side
+// ---------------------------------------------------------------------------
+
+fn cmd_network(cmd: NetworkCmd) -> Result<()> {
+    use super::net_profiles::{Profile, Support};
+    match cmd {
+        NetworkCmd::Profiles => {
+            for p in [Profile::Cilium, Profile::Calico, Profile::Flannel] {
+                let a = p.artefact();
+                println!("{}", p.name());
+                println!("  version      {}", p.version());
+                println!(
+                    "  support      {}",
+                    match p.support() {
+                        Support::Supported => "supported".to_string(),
+                        Support::Experimental(_) => "EXPERIMENTAL".to_string(),
+                    }
+                );
+                if let Support::Experimental(why) = p.support() {
+                    println!("  why          {why}");
+                }
+                // The default is MARKED, not left to be inferred from the
+                // order: an operator reading a list cannot tell which one they
+                // get by omission, and the one they get by omission is the one
+                // most clusters will run.
+                println!(
+                    "  dataplanes   {}",
+                    p.dataplanes()
+                        .iter()
+                        .map(|d| if *d == p.default_dataplane() {
+                            format!("{d} (default)")
+                        } else {
+                            (*d).to_string()
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                println!(
+                    "  kube-proxy   {} (default: {})",
+                    p.kube_proxy_modes().join(", "),
+                    p.kube_proxy_modes().first().copied().unwrap_or("")
+                );
+                // What the NODE has to carry for this profile's default
+                // dataplane — the thing the golden image persists and the
+                // preflight verifies.
+                let mods = p.required_modules(p.default_dataplane());
+                if !mods.is_empty() {
+                    println!("  modules      {}", mods.join(", "));
+                }
+                println!(
+                    "  NetworkPolicy {}",
+                    if p.enforces_network_policy() {
+                        "enforced by this profile"
+                    } else {
+                        "NOT enforced — a NetworkPolicy here is accepted by the apiserver and \
+                         enforced by nobody"
+                    }
+                );
+                println!("  plugins      {}", p.required_plugins().join(", "));
+                if let Some(a) = a {
+                    println!("  artefact     {}", a.url);
+                    println!("  sha256       {}", a.sha256);
+                }
+                println!();
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "multus {version} is available as an EXTENSION over any of the above \
+                     (`spec.network.multus: true`), never as a primary pod network.",
+                    &[("version", super::net_profiles::MULTUS_VERSION)]
+                )
+            );
+            Ok(())
+        }
+        NetworkCmd::Status { name } => cmd_network_status(name),
+        NetworkCmd::Fetch { cni } => {
+            let wanted: Vec<super::net_profiles::Artefact> = match cni.as_deref() {
+                Some("multus") => vec![super::net_profiles::multus_artefact()],
+                Some(other) => {
+                    let p = Profile::parse(other)
+                        .and_then(|p| p.artefact())
+                        .ok_or_else(|| {
+                            Error::Invalid(super::po::tf(
+                                "'{cni}' is not a profile with an artefact to fetch",
+                                &[("cni", other)],
+                            ))
+                        })?;
+                    vec![p]
+                }
+                None => [Profile::Cilium, Profile::Calico, Profile::Flannel]
+                    .iter()
+                    .filter_map(|p| p.artefact())
+                    .chain(std::iter::once(super::net_profiles::multus_artefact()))
+                    .collect(),
+            };
+            for a in &wanted {
+                // `offline: false` — this command exists precisely to be the
+                // one run WITH reach.
+                let path = net_profiles_install::fetch_artefact(a, false)?;
+                println!("{}  {}", &a.sha256[..16], path.display());
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "{n} artefact(s) verified in {dir} — copy that directory to the machine that \
+                     will bootstrap, and pass `--cni-offline` (or `spec.network.offline: true`)",
+                    &[
+                        ("n", &wanted.len().to_string()),
+                        (
+                            "dir",
+                            &net_profiles_install::cache_dir().display().to_string()
+                        ),
+                    ]
+                )
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Desired vs observed, and a non-zero exit when they differ.
+///
+/// The desired side is this engine's own record; the observed side is the live
+/// cluster. Reading only one of them is how a status command starts agreeing
+/// with itself: the record says what we meant, and a CNI an operator applied
+/// by hand is invisible to it.
+fn cmd_network_status(name: Option<String>) -> Result<()> {
+    let name = resolve_kubeconfig_name(name)?;
+    let record = net_profiles_install::read_record(&name);
+    // The same cached file `cluster kubeconfig` prints, derived the same way
+    // (`<root>/clusters/<name>-kubeconfig.yaml`) — both modes write there.
+    let kubeconfig = state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    if !kubeconfig.exists() {
+        return Err(Error::NotFound(super::po::tf(
+            "no cached kubeconfig for cluster \"{name}\" — nothing to ask",
+            &[("name", &name)],
+        )));
+    }
+    // Observed through the cached kubeconfig, with the system `kubectl`: the
+    // same boundary `drain`/`uncordon` already use, so this works for every
+    // cluster family rather than only the ones with a container to exec into.
+    let observed = observed_profile_via_kubectl(&kubeconfig);
+
+    match &record {
+        Some(r) => {
+            println!("desired   {} {}", r.cni, r.version);
+            println!("  dataplane   {}", r.dataplane);
+            println!("  kube-proxy  {}", r.kube_proxy);
+            println!("  mtu         {}", r.mtu);
+            println!("  pod CIDR    {}", r.pod_subnet);
+            println!("  artefact    sha256:{}", r.artefact_sha256);
+            if r.multus {
+                println!("  multus      installed");
+            }
+            if r.hubble {
+                println!("  hubble      installed");
+            }
+        }
+        None => println!(
+            "desired   {}",
+            super::po::t(
+                "unknown — this engine has no record of installing a pod network on this \
+                 cluster (it was created with `cni: none`, by an older release, or by hand)"
+            )
+        ),
+    }
+    println!(
+        "observed  {}",
+        if observed.is_empty() {
+            super::po::t("none — no pod-network agent DaemonSet found in the cluster").to_string()
+        } else {
+            observed.clone()
+        }
+    );
+
+    // The one thing this command exists to catch.
+    let desired = record.as_ref().map(|r| r.cni.clone()).unwrap_or_default();
+    if !desired.is_empty() && !observed.is_empty() && desired != observed {
+        return Err(Error::coded(
+            6703,
+            Error::Unavailable(super::po::tf(
+                "drift: this engine installed '{desired}' and the cluster is running \
+                 '{observed}'. Nothing was changed. Either the pod network was replaced outside \
+                 this engine, or the record belongs to a different cluster of the same name",
+                &[("desired", &desired), ("observed", &observed)],
+            )),
+        ));
+    }
+    if !desired.is_empty() && observed.is_empty() {
+        return Err(Error::coded(
+            6704,
+            Error::Unavailable(super::po::tf(
+                "drift: this engine installed '{desired}' and the cluster has no pod-network \
+                 agent at all — the DaemonSet is gone. Pods will not get addresses. Re-run \
+                 `delonix cluster apply` with the same manifest: the install path is idempotent \
+                 and will reinstate it",
+                &[("desired", &desired)],
+            )),
+        ));
+    }
+    Ok(())
+}
+
+/// Which pod network the live cluster runs, asked through the cached
+/// kubeconfig rather than over SSH — so it answers for a kind-mode cluster
+/// too, and needs no reachable control-plane host.
+fn observed_profile_via_kubectl(kubeconfig: &std::path::Path) -> String {
+    let out = Command::new("kubectl")
+        .env("KUBECONFIG", kubeconfig)
+        .args(["get", "daemonset", "--all-namespaces", "-o", "name"])
+        .output();
+    let text = match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => return String::new(),
+    };
+    for (needle, name) in [
+        ("cilium", "cilium"),
+        ("calico-node", "calico"),
+        ("kube-flannel", "flannel"),
+        ("kindnet", "default"),
+    ] {
+        if text.contains(needle) {
+            return name.to_string();
+        }
+    }
+    String::new()
+}
+
 /// Refuses a cluster CIDR that overlaps a network this host already uses.
 ///
 /// Best-effort by design: the list of known networks is what the engine can
@@ -1037,6 +1269,10 @@ pub enum ClusterCmd {
         /// Cluster name. Omit when there is only one.
         name: Option<String>,
     },
+    /// Inspect the pod-network profiles: what exists, what a cluster runs,
+    /// and pre-fetch the artefacts for an offline install.
+    #[command(subcommand)]
+    Network(NetworkCmd),
     /// Cordon a node and evict its pods.
     ///
     /// The manual step before touching a control-plane/worker host (upgrade,
@@ -1123,6 +1359,50 @@ pub enum ClusterCmd {
         /// Snapshot file written by `cluster backup`.
         #[arg(long, value_hint = clap::ValueHint::FilePath)]
         from: PathBuf,
+    },
+}
+
+/// `delonix cluster network …` — the OPERATION side of a pod-network profile.
+///
+/// Three questions an operator has after a cluster exists, none of which had
+/// an answer before: what can I install, what is this cluster actually
+/// running, and can I install it without network reach.
+#[derive(Subcommand)]
+pub enum NetworkCmd {
+    /// List the pod-network profiles, their pinned versions and their support
+    /// level.
+    ///
+    /// Prints what this binary would install, not what a web page says: the
+    /// version, the artefact digest, the dataplanes rendered, the kube-proxy
+    /// modes, whether the profile enforces `NetworkPolicy`, and — for an
+    /// experimental one — the reason it is experimental.
+    Profiles,
+    /// What pod network a cluster is ACTUALLY running, and whether it is what
+    /// was asked for.
+    ///
+    /// Reads both sides: the record this engine wrote when it installed
+    /// (desired) and the live cluster's own DaemonSets (observed). A
+    /// divergence between them is reported as one, and exits non-zero — a
+    /// status that returns 0 over a cluster running a different CNI than its
+    /// manifest declares is the dishonest reporting this repo removes
+    /// elsewhere.
+    Status {
+        /// Cluster name. Omit when there is only one cached.
+        #[arg(add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
+        name: Option<String>,
+    },
+    /// Download and verify the install artefacts into the local cache, for an
+    /// offline install later.
+    ///
+    /// Run it on a machine with reach, then copy `<root>/net-profiles/` to the
+    /// machine that will bootstrap the cluster and pass `--cni-offline`. Every
+    /// artefact is verified against the digest this release pins; a mismatch
+    /// fails and caches nothing.
+    Fetch {
+        /// Which profile's artefacts. Omit for every profile this release
+        /// ships, plus Multus.
+        #[arg(long, value_parser = ["cilium", "calico", "flannel", "multus"])]
+        cni: Option<String>,
     },
 }
 
@@ -1325,6 +1605,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 cri_bin,
             })
         }
+        ClusterCmd::Network(cmd) => cmd_network(cmd),
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
         ClusterCmd::Health { name } => cmd_health(name.as_deref()),
         ClusterCmd::Drain {
@@ -2043,6 +2324,12 @@ fn apply_ssh(
     let cli_bin = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .map_err(|e| Error::Invalid(format!("resolving this CLI's own binary path: {e}")))?;
+    // The node preflight, for a host whose golden predates it. Best-effort on
+    // purpose: a `delonix` that cannot produce the script must not refuse to
+    // bootstrap a node that already carries one — `run_node_preflight` is
+    // where the "neither" case is reported, and it reports it instead of
+    // passing in silence.
+    let preflight_script = vmimage::workspace_dist_file("delonix-node-preflight.sh").ok();
 
     let all_hosts: Vec<&HostSpec> = spec
         .control_plane
@@ -2096,6 +2383,7 @@ fn apply_ssh(
                 let cri_bin = &cri_bin;
                 let cri_service = &cri_service;
                 let cli_bin = &cli_bin;
+                let preflight = preflight_script.as_deref();
                 scope.spawn(move || {
                     prepare_host(
                         &target,
@@ -2104,6 +2392,8 @@ fn apply_ssh(
                         cri_bin,
                         cri_service,
                         cli_bin,
+                        &spec.cni,
+                        preflight,
                     )
                 })
             })
@@ -3341,6 +3631,8 @@ fn prepare_host(
     cri_bin: &std::path::Path,
     cri_service: &std::path::Path,
     cli_bin: &std::path::Path,
+    profile: &str,
+    preflight_script: Option<&std::path::Path>,
 ) -> Result<()> {
     for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
@@ -3352,7 +3644,82 @@ fn prepare_host(
 
     install_cri(target, label, cri_bin, cri_service)?;
     install_cli(target, label, cli_bin)?;
+    run_node_preflight(target, label, profile, preflight_script)?;
     Ok(())
+}
+
+/// Where the golden image installs the node preflight, and where
+/// `prepare_host` looks for it. One constant, asserted by
+/// `vmimage::the_preflight_lands_as_a_command` against the install step, so
+/// the two cannot drift into "preflight not found" on every node.
+pub(crate) const REMOTE_NODE_PREFLIGHT: &str = "/usr/local/bin/delonix-node-preflight";
+
+/// Runs the node preflight for `profile`, AFTER the recipes have been applied
+/// and the CRI is up — so it measures the node the bootstrap actually built,
+/// not the one it inherited.
+///
+/// Why it is here and not only in the image: the image can persist a module
+/// list and a sysctl file, but it cannot know whether the kernel of the
+/// machine it was cloned onto has `vxlan`, whether systemd mounted bpffs, or
+/// whether the CRI came up. Those are properties of a RUNNING node, and the
+/// alternative to checking them is `kubeadm init` failing later with a message
+/// about containerd, or — worse — a cluster that comes up and routes nothing
+/// between nodes.
+///
+/// A host that does not carry the script yet (an older golden) gets it pushed:
+/// a node prepared by this version is measured by this version, rather than
+/// skipping the check because the image predates it. That is the same class of
+/// fix as `install_cli`'s own (a golden bakes a binary from the day it was
+/// built, and the bootstrap must not inherit it silently).
+fn run_node_preflight(
+    target: &SshTarget,
+    label: &str,
+    profile: &str,
+    script: Option<&std::path::Path>,
+) -> Result<()> {
+    if !remote::ssh_check(target, &format!("test -x {REMOTE_NODE_PREFLIGHT}")) {
+        let Some(local) = script else {
+            // Nothing to push and nothing installed: say so rather than
+            // reporting a preflight that never ran as a pass.
+            output::warn(&super::po::tf(
+                "[{label}] node preflight skipped: {path} is not on the node and this run has no \
+                 copy to push. The node was prepared; its network prerequisites were NOT verified",
+                &[("label", label), ("path", REMOTE_NODE_PREFLIGHT)],
+            ));
+            return Ok(());
+        };
+        remote::scp_to(target, local, "/tmp/delonix-node-preflight")
+            .map_err(|e| Error::Invalid(format!("[{label}] node preflight: {e}")))?;
+        remote::ssh_run(
+            target,
+            &format!(
+                "mv /tmp/delonix-node-preflight {REMOTE_NODE_PREFLIGHT} && \
+                 chmod 0755 {REMOTE_NODE_PREFLIGHT}"
+            ),
+        )
+        .map_err(|e| Error::Invalid(format!("[{label}] node preflight: {e}")))?;
+    }
+    let out = remote::ssh_run(target, &format!("{REMOTE_NODE_PREFLIGHT} {profile}"));
+    match out {
+        Ok(_) => Ok(()),
+        // The script prints one line per check and exits non-zero naming what
+        // is missing. Its output IS the diagnostic, so it is carried into the
+        // error rather than replaced by "preflight failed".
+        Err(e) => Err(Error::coded(
+            6704,
+            Error::Unavailable(super::po::tf(
+                "[{label}] the node does not meet the prerequisites of the '{profile}' pod \
+                 network:\n{detail}\nNothing was bootstrapped on this host. Each FAIL line names \
+                 what is missing; a node built from a golden older than this release may simply \
+                 need rebuilding (`delonix vm image build`)",
+                &[
+                    ("label", label),
+                    ("profile", profile),
+                    ("detail", &e.to_string()),
+                ],
+            )),
+        )),
+    }
 }
 
 /// Remote path the `delonix` CLI lives at (the golden image's own convention —
