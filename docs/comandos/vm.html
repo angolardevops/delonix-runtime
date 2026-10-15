@@ -157,7 +157,7 @@ cloud-init: <code>--hostname</code>, <code>--ssh-key</code> and <code>--user-dat
 NoCloud ISO automatically. It's the layer <code>delonix cluster kubeadm</code> uses to provision
 nodes.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs"><code>cmd/vm.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix vm &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   cloud-init       Change a STOPPED VM&#x27;s cloud-init — hostname, user, SSH keys — for its next boot
@@ -188,6 +188,9 @@ Commands:
   help             Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -237,6 +240,9 @@ Options:
   -l, --user &lt;USER&gt;
           Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account)
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -i, --identity &lt;IDENTITY&gt;
           Private key to authenticate with (`ssh -i`)
 
@@ -265,6 +271,9 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix vm default-backend [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --set &lt;SET&gt;
           Set `defaultProvider` in the providers file (`libvirt`, `cloud-hypervisor`, or a configured `proxmox`)
 
@@ -294,7 +303,7 @@ SEE ALSO:
 <h2 id='snapshot'><code>vm snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk).</p>
 <p class='intro'>libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a <code>vm stop</code>/<code>vm start</code>. cloud-hypervisor: stopped VMs only, because the running vmm holds the disk exclusively and CH has no live disk-snapshot API — it says so instead of writing nothing.</p>
-<div class='help'><pre><code>Usage: delonix vm snapshot &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create   Take a named snapshot (memory + disk if the VM is running, disk-only if it is stopped)
@@ -304,6 +313,9 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -326,13 +338,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Checkpoint de sistema (memória + disco) de uma VM A CORRER</div><div class='cap lang-en'>System checkpoint (memory + disk) of a RUNNING VM</div><pre><code>delonix vm snapshot create dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Com a VM parada é só do disco — e a VM continua parada</div><div class='cap lang-en'>Of a stopped one it is disk-only — and it stays stopped</div><pre><code>delonix vm snapshot create dev copia-fria</code></pre></div><div class="ex"><div class='cap lang-pt'>Listar os checkpoints de uma VM (também com ela parada)</div><div class='cap lang-en'>List a VM&#x27;s checkpoints (with the VM stopped too)</div><pre><code>delonix vm snapshot ls dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm snapshot restore dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um checkpoint (o estado dele sai do disco)</div><div class='cap lang-en'>Delete a checkpoint (its state leaves the disk)</div><pre><code>delonix vm snapshot rm dev antes-do-upgrade</code></pre></div>
 <h2 id='restart'><code>vm restart</code></h2>
 <p class='intro'>Stop (if running) then start — always a real reboot, unlike <code>start</code>. Same recovered-fields limits as <code>start</code></p>
-<div class='help'><pre><code>Usage: delonix vm restart &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm restart [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -349,13 +364,16 @@ SEE ALSO:
 <h2 id='start'><code>vm start</code></h2>
 <p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op).</p>
 <p class='intro'>Reboots with everything recorded at its last <code>create</code>/<code>start</code> — base disk/vcpus/memory/network/backend AND the boot shape (custom kernel/seed/volumes/static IP/VNC/TPM/CPU topology/extra disks and NICs/advanced libvirt knobs) — reusing the same overlay, so disk state is preserved. A VM created before the engine persisted that shape has none recorded; re-run its original <code>vm create</code> (idempotent) once to stamp it.</p>
-<div class='help'><pre><code>Usage: delonix vm start &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm start [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -379,6 +397,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --vm-subnet &lt;VM_SUBNET&gt;
           VM subnet(s) to close as well (default: the ones `vm bridge` recorded). Repeatable
 
@@ -414,6 +435,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --vm-subnet &lt;VM_SUBNET&gt;
           VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable
 
@@ -444,9 +468,12 @@ SEE ALSO:
 <h2 id='reach'><code>vm reach</code></h2>
 <p class='intro'>Which published ports a VM can actually reach, and how to fix the rest.</p>
 <p class='intro'>A port published to the default <code>127.0.0.1</code> is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command.</p>
-<div class='help'><pre><code>Usage: delonix vm reach
+<div class='help'><pre><code>Usage: delonix vm reach [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -463,13 +490,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que portas de container é que as VMs conseguem alcançar</div><div class='cap lang-en'>Which container ports VMs can reach</div><pre><code>delonix vm reach</code></pre></div>
 <h2 id='vnc'><code>vm vnc</code></h2>
 <p class='intro'>Print the VNC address of a graphical VM (created with <code>--vnc</code>, libvirt)</p>
-<div class='help'><pre><code>Usage: delonix vm vnc &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm vnc [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -496,6 +526,9 @@ Options:
   -e, --escape &lt;ESCAPE&gt;
           Key that detaches the console, as `^X` (default `^D`). Also settable via `$DELONIX_CONSOLE_ESCAPE`
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -512,7 +545,7 @@ SEE ALSO:
 <h2 id='image'><code>vm image</code></h2>
 <p class='intro'>VM image management — build/pull/push/ls/rm/describe/import/convert/init/ls-remote.</p>
 <p class='intro'>Everything about the DISK, never a running instance — one nested group instead of flat verbs, so <code>vm ls</code>/<code>vm rm</code> never have to answer &quot;an instance or an image?&quot; (<code>image vm</code> retired, folded in here together with the five verbs that were already flat directly under <code>vm</code> — <code>build</code>/<code>convert</code>/<code>ls-remote</code>/<code>pull</code>/<code>push</code> — which is why those five no longer have their own <code>VmCmd</code> variant; see AGENTS.md&#x27;s &quot;image vm → vm image&quot; section).</p>
-<div class='help'><pre><code>Usage: delonix vm image &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix vm image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   pull       Pull a VM image from an OCI registry
@@ -528,6 +561,9 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -571,6 +607,9 @@ Arguments:
           [default: .]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --name &lt;NAME&gt;
           Project name (default: the directory name)
 
@@ -617,6 +656,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --url-img &lt;URL_IMG&gt;
           Absolute URL of a qcow2 cloud image to boot this VM from.
           
@@ -757,6 +799,9 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix vm ls [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --ports
           Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM&#x27;s IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM
 
@@ -808,13 +853,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
 <h2 id='stop'><code>vm stop</code></h2>
 <p class='intro'>Stop the VM (preserves disk, record and snapshots)</p>
-<div class='help'><pre><code>Usage: delonix vm stop &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix vm stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -837,6 +885,9 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

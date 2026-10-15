@@ -164,7 +164,7 @@ it to answer again), stopped if it was stopped. What the rollback changed shows 
 <code>plan</code> as drift from the manifest. <strong>Not stable</strong> — see
 <code>docs/cli-stability.md</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/system_container.rs"><code>cmd/system_container.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix systemcontainer &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix systemcontainer [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   clone     A full copy of a system container under a new name, registered here
@@ -173,6 +173,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

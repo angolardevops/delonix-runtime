@@ -172,7 +172,7 @@ arquivo truncado custa então zero — e recusa-se enquanto o recurso estiver a 
 posicional: o arquivo já regista o que leva, e o <code>--kind</code> continua a existir para quem
 quiser que uma discordância seja recusada.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/rbackup.rs"><code>cmd/rbackup.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix backup &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix backup [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   inspect   What an archive holds, without unpacking it
@@ -184,6 +184,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

@@ -181,7 +181,7 @@ the two equal. A remote provider (Proxmox, OPNsense) declares and does not conne
 contract's <code>ProviderInfo</code>. <strong>Not stable</strong> — see
 <code>docs/cli-stability.md</code>; capability names and states follow the catalog version.</p>
 
-<div class='help'><pre><code>Usage: delonix provider &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix provider [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   config    The node&#x27;s providers file (ADR-0054): what it says, and whether it is valid
@@ -191,6 +191,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

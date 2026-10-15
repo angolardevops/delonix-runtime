@@ -172,7 +172,7 @@ generated: the documented install is <code>curl … | bash</code>, with no repos
 and a grammar kept anywhere else drifts from the parser it is meant to describe.
 <code>scripts/install.sh</code> installs it wherever it finds one of these editors.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs"><code>cmd/complete.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix completion &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix completion [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   editor  VMfile syntax highlighting for an editor (vim/vscode)
@@ -180,6 +180,9 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -199,7 +202,7 @@ SEE ALSO:
   delonix › completion</code></pre></div>
 <h2 id='shell'><code>completion shell</code></h2>
 <p class='intro'>Print the shell autocompletion script (bash/zsh/fish/...)</p>
-<div class='help'><pre><code>Usage: delonix completion shell &lt;SHELL&gt;
+<div class='help'><pre><code>Usage: delonix completion shell [OPTIONS] &lt;SHELL&gt;
 
 Arguments:
   &lt;SHELL&gt;
@@ -208,6 +211,9 @@ Arguments:
           [possible values: bash, zsh, fish, elvish, powershell]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -239,6 +245,9 @@ Arguments:
 Options:
       --dir &lt;DIR&gt;
           Write the editor&#x27;s files into this directory instead of printing one to stdout
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

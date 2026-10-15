@@ -159,7 +159,7 @@ todos os comandos reportam sucesso, e as namespaces <strong>não isolam</strong>
 <code>ls</code> diz isso em voz alta quando o host não está a filtrar, e o <code>describe</code>
 distingue <em>não</em> de <em>não sei</em>.</p>
 
-<div class='help'><pre><code>Usage: delonix system namespace &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix system namespace [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   describe  What is inside ONE namespace, by Kind, `kubectl describe` style
@@ -167,6 +167,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -190,6 +193,9 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix system namespace ls [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005)
           
@@ -220,6 +226,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005)
           

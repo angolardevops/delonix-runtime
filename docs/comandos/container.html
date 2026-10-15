@@ -162,7 +162,7 @@ inside the container's own user namespace: the image layers are shared by every 
 each one has its own <em>persistent</em> writable layer — writes survive
 <code>stop</code>/<code>start</code>, just like in Docker.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs"><code>cmd/container.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix container &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   kill         Send a signal to one or more containers (default SIGKILL)
@@ -195,6 +195,9 @@ Commands:
   help         Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -234,6 +237,9 @@ Arguments:
 Options:
   -d, --detach
           Run in the background and print the ID
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
       --name &lt;NAME&gt;
           Container name (default: `dlx-&lt;id&gt;`)
@@ -498,6 +504,9 @@ Options:
   -a, --all
           Include stopped/failed ones
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -q, --quiet
           Print only the IDs (to compose with `stop`/`rm`)
 
@@ -541,13 +550,16 @@ SEE ALSO:
 <h2 id='start'><code>container start</code></h2>
 <p class='intro'>(Re)start stopped/crashed containers. Always detached.</p>
 <p class='intro'>Reuses the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original <code>run</code>.</p>
-<div class='help'><pre><code>Usage: delonix container start &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -576,6 +588,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -t, --time &lt;TIME&gt;
           Seconds until SIGKILL
           
@@ -607,6 +622,9 @@ Arguments:
 Options:
   -f, --force
           Force (kill it if running)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -641,6 +659,9 @@ Arguments:
 Options:
   -i, --interactive
           Interactive (attaches stdin)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -t, --tty
           Allocate a pseudo-terminal
@@ -684,6 +705,9 @@ Options:
   -f, --follow
           Follow the log continuously (exits when the container stops)
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --tail &lt;TAIL&gt;
           Show only the last N lines. Requires the container to have been run with `--log-cri` (per-line timestamps needed to find &quot;the last N&quot; — see `--timestamps`&#x27;s doc for why)
 
@@ -713,13 +737,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Seguir em contínuo (sai quando o container parar)</div><div class='cap lang-en'>Follow continuously (exits when the container stops)</div><pre><code>delonix container logs -f web</code></pre></div>
 <h2 id='inspect'><code>container inspect</code></h2>
 <p class='intro'>Show the full spec of one or more containers (Store JSON)</p>
-<div class='help'><pre><code>Usage: delonix container inspect &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -735,13 +762,16 @@ SEE ALSO:
 <h2 id='stats'><code>container stats</code></h2>
 <p class='intro'>Resource usage (CPU/memory/PIDs) of the running containers.</p>
 <p class='intro'>One sample and exits (no stream). With no IDs, shows all running ones.</p>
-<div class='help'><pre><code>Usage: delonix container stats [IDS]...
+<div class='help'><pre><code>Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -773,6 +803,9 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -800,6 +833,9 @@ Arguments:
           [default: .]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --name &lt;NAME&gt;
           Project name (default: the directory name)
 
@@ -849,6 +885,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -s, --signal &lt;SIGNAL&gt;
           Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix optional) or number (`9`)
           
@@ -876,13 +915,16 @@ next observation.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Sinal arbitrário, sem forçar `Stopped`</div><div class='cap lang-en'>Arbitrary signal, without forcing `Stopped`</div><pre><code>delonix container kill -s USR1 web</code></pre></div>
 <h2 id='wait'><code>container wait</code></h2>
 <p class='intro'>Block until one or more containers exit, then print their exit code (one per line, in the order given)</p>
-<div class='help'><pre><code>Usage: delonix container wait &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container wait [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -912,6 +954,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -t, --time &lt;TIME&gt;
           Seconds until SIGKILL, for the `stop` half
           
@@ -931,7 +976,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Pára e arranca de novo, mesma configuração</div><div class='cap lang-en'>Stop and start again, same configuration</div><pre><code>delonix container restart web</code></pre></div>
 <h2 id='rename'><code>container rename</code></h2>
 <p class='intro'>Give a container a new name</p>
-<div class='help'><pre><code>Usage: delonix container rename &lt;ID&gt; &lt;NEW_NAME&gt;
+<div class='help'><pre><code>Usage: delonix container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
 
 Arguments:
   &lt;ID&gt;
@@ -941,6 +986,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -955,13 +1003,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix container rename web frontend</code></pre></div>
 <h2 id='port'><code>container port</code></h2>
 <p class='intro'>Published ports of a container (<code>hostPort/proto -&gt; containerPort</code>)</p>
-<div class='help'><pre><code>Usage: delonix container port &lt;ID&gt;
+<div class='help'><pre><code>Usage: delonix container port [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -977,13 +1028,16 @@ SEE ALSO:
 <h2 id='pause'><code>container pause</code></h2>
 <p class='intro'>Suspend a container&#x27;s processes (cgroup v2 freezer).</p>
 <p class='intro'>The state stays in memory, unlike <code>stop</code>. Resume with <code>unpause</code>.</p>
-<div class='help'><pre><code>Usage: delonix container pause &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container pause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -998,13 +1052,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Suspende os processos (cgroup v2 freezer)</div><div class='cap lang-en'>Suspends the processes (cgroup v2 freezer)</div><pre><code>delonix container pause web</code></pre></div>
 <h2 id='unpause'><code>container unpause</code></h2>
 <p class='intro'>Resume a container suspended with <code>pause</code></p>
-<div class='help'><pre><code>Usage: delonix container unpause &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container unpause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1019,7 +1076,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Resume um container suspenso</div><div class='cap lang-en'>Resumes a suspended container</div><pre><code>delonix container unpause web</code></pre></div>
 <h2 id='commit'><code>container commit</code></h2>
 <p class='intro'>Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)</p>
-<div class='help'><pre><code>Usage: delonix container commit &lt;ID&gt; &lt;TAG&gt;
+<div class='help'><pre><code>Usage: delonix container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
 
 Arguments:
   &lt;ID&gt;
@@ -1029,6 +1086,9 @@ Arguments:
           Tag for the new image (e.g. `app:v2`)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1043,13 +1103,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cria uma imagem a partir do rootfs actual do container</div><div class='cap lang-en'>Creates an image from the container&#x27;s current rootfs</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
 <h2 id='healthcheck'><code>container healthcheck</code></h2>
 <p class='intro'>Run the image&#x27;s <code>HEALTHCHECK</code> inside the container. Exits with 1 if <code>unhealthy</code> — usable in a script/CI</p>
-<div class='help'><pre><code>Usage: delonix container healthcheck &lt;ID&gt;
+<div class='help'><pre><code>Usage: delonix container healthcheck [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1065,13 +1128,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Corre o HEALTHCHECK da imagem, exit 1 se unhealthy (usável em CI)</div><div class='cap lang-en'>Runs the image&#x27;s HEALTHCHECK, exit 1 if unhealthy (usable in CI)</div><pre><code>delonix container healthcheck web</code></pre></div>
 <h2 id='top'><code>container top</code></h2>
 <p class='intro'>Processes running inside a container (read from <code>cgroup.procs</code>)</p>
-<div class='help'><pre><code>Usage: delonix container top &lt;ID&gt;
+<div class='help'><pre><code>Usage: delonix container top [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1086,13 +1152,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Processos a correr dentro do container</div><div class='cap lang-en'>Processes running inside the container</div><pre><code>delonix container top web</code></pre></div>
 <h2 id='diff'><code>container diff</code></h2>
 <p class='intro'>Files changed relative to the image: <code>A</code> = created/changed, <code>D</code> = deleted</p>
-<div class='help'><pre><code>Usage: delonix container diff &lt;ID&gt;
+<div class='help'><pre><code>Usage: delonix container diff [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1108,7 +1177,7 @@ SEE ALSO:
 <h2 id='cp'><code>container cp</code></h2>
 <p class='intro'>Copy files between the host and a container.</p>
 <p class='intro'>Exactly one side is <code>container:/path</code> (e.g. <code>delonix container cp web:/etc/nginx.conf .</code>).</p>
-<div class='help'><pre><code>Usage: delonix container cp &lt;SRC&gt; &lt;DST&gt;
+<div class='help'><pre><code>Usage: delonix container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
 
 Arguments:
   &lt;SRC&gt;
@@ -1118,6 +1187,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1136,13 +1208,16 @@ SEE ALSO:
 <h2 id='describe'><code>container describe</code></h2>
 <p class='intro'>Human-readable detail of one or more containers, <code>kubectl describe</code>-style.</p>
 <p class='intro'>For humans; use <code>inspect</code> for script-consumable JSON.</p>
-<div class='help'><pre><code>Usage: delonix container describe &lt;IDS&gt;...
+<div class='help'><pre><code>Usage: delonix container describe [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1167,6 +1242,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -p, --publish-add &lt;SPEC&gt;
           Publish one more port hot, `hostPort:contPort[/tcp|udp]`. Repeatable
 
@@ -1242,6 +1320,9 @@ Arguments:
 Options:
   -i, --interactive
           Refused: stdin forwarding isn&#x27;t supported (see the command&#x27;s own doc above)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

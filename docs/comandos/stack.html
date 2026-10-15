@@ -165,7 +165,7 @@ and <code>plan</code> marks them <code>!</code> rather than hiding them. Still f
 <strong>without rollback</strong>: whatever was applied stays, and the next <code>plan</code> is
 what shows the rest. Full CI and drift guide in <a href="../gitops.html">GitOps &amp; CI</a>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs"><code>cmd/stack.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix stack &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)
@@ -182,6 +182,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -235,6 +238,9 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --strict
           Fail (exit != 0) when a field was ignored, instead of only warning about it — for CI
 
@@ -265,6 +271,9 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -289,6 +298,9 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -318,6 +330,9 @@ Arguments:
           [default: .]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --name &lt;NAME&gt;
           Project name (default: the directory name)
 
@@ -391,6 +406,9 @@ tokens get replaced with the project name.</p></div>
 <div class='help'><pre><code>Usage: delonix stack apply [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --name &lt;NAME&gt;
           Stack name (the owner stamped on every resource). Default: a `kind: Stack`&#x27;s name, else the manifest&#x27;s directory
 
@@ -451,6 +469,9 @@ Options:
   -f, --file &lt;FILE&gt;
           
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --name &lt;NAME&gt;
           Stack name (owner of the resources). Default: a `kind: Stack`&#x27;s name, else the manifest&#x27;s directory
 
@@ -505,6 +526,9 @@ não convergente.</p>
 Options:
   -f, --file &lt;FILE&gt;
           
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
       --name &lt;NAME&gt;
           Stack name. Default: a `kind: Stack`&#x27;s name, else the manifest&#x27;s directory

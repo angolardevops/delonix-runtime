@@ -163,7 +163,7 @@ achievable without host privilege. <code>macvlan</code>/<code>ipvlan</code> only
 the store — <code>create</code> WARNS loudly that the network wasn't physically realized (they
 need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless model).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs"><code>cmd/network.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix network &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   connect     Connect a RUNNING container to an additional network, hot
@@ -182,6 +182,9 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -209,13 +212,16 @@ SEE ALSO:
 <h2 id='describe'><code>network describe</code></h2>
 <p class='intro'>Readable detail of one or more networks, <code>kubectl describe</code> style.</p>
 <p class='intro'>For humans; use <code>inspect</code> for the usual compact view.</p>
-<div class='help'><pre><code>Usage: delonix network describe &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: delonix network describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -234,7 +240,7 @@ SEE ALSO:
 <h2 id='node'><code>network node</code></h2>
 <p class='intro'>WireGuard identity of THIS node, for the encrypted overlay between nodes.</p>
 <p class='intro'>The VXLAN overlay of <code>network create --driver overlay</code>. The private key stays 0600 in <code>&lt;root&gt;/wg/node.key</code>; the public one is what you hand out to the peers.</p>
-<div class='help'><pre><code>Usage: delonix network node &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix network node [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   key   Print only the public key (for composing in scripts)
@@ -242,6 +248,9 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -274,6 +283,9 @@ Options:
           `bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT filtered, see warning) | `overlay` (inter-node VXLAN)
           
           [default: bridge]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
       --parent &lt;PARENT&gt;
           Host parent NIC (required for macvlan/ipvlan)
@@ -322,7 +334,7 @@ SEE ALSO:
 <h2 id='connect'><code>network connect</code></h2>
 <p class='intro'>Connect a RUNNING container to an additional network, hot.</p>
 <p class='intro'>Multi-homing — the container keeps its primary network, this adds another. Moved here from <code>container update --net-connect</code> (Sprint 5 of the CLI restructuring): this is Docker&#x27;s own verb and argument order (<code>docker network connect NETWORK CONTAINER</code>), for the one operation that is about a NETWORK&#x27;s membership, not a container&#x27;s ports/volumes/ limits — <code>container update</code> keeps those, which Docker cannot do hot at all.</p>
-<div class='help'><pre><code>Usage: delonix network connect &lt;NETWORK&gt; &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: delonix network connect [OPTIONS] &lt;NETWORK&gt; &lt;CONTAINER&gt;
 
 Arguments:
   &lt;NETWORK&gt;
@@ -332,6 +344,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -348,7 +363,7 @@ SEE ALSO:
 <h2 id='disconnect'><code>network disconnect</code></h2>
 <p class='intro'>Disconnect a container from an additional network, hot.</p>
 <p class='intro'>Refuses on the PRIMARY network — that one only goes away with the container itself.</p>
-<div class='help'><pre><code>Usage: delonix network disconnect &lt;NETWORK&gt; &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: delonix network disconnect [OPTIONS] &lt;NETWORK&gt; &lt;CONTAINER&gt;
 
 Arguments:
   &lt;NETWORK&gt;
@@ -358,6 +373,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -375,6 +393,9 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix network ls [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005)
           
@@ -409,6 +430,9 @@ Arguments:
           Destination network
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --rm
           Close the path instead of opening it
 
@@ -442,6 +466,9 @@ Arguments:
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default, the historical text) or `json` (ADR-0005)
           
@@ -462,13 +489,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network inspect backend</code></pre></div>
 <h2 id='rm'><code>network rm</code></h2>
 <p class='intro'>Remove a network</p>
-<div class='help'><pre><code>Usage: delonix network rm &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix network rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -489,6 +519,9 @@ SEE ALSO:
 Options:
   -f, --file &lt;FILE&gt;
           
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

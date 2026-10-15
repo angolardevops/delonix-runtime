@@ -159,7 +159,7 @@ or the VM engine, so you can manage both as one thing. <strong>Creation stays de
 lowers to the matching Kind in <code>manifest::load</code>; see
 <a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs"><code>cmd/workload.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix workload &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix workload [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   rm        Remove a workload by name
@@ -169,6 +169,9 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -194,6 +197,9 @@ SEE ALSO:
 <div class='help'><pre><code>Usage: delonix workload ls [OPTIONS]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default, human) or `json` (machine, stable field names — see ADR-0005). `-o json | jq` is the automation path
           
@@ -225,13 +231,16 @@ doesn't exist gives <code>no such workload</code>; a container AND a vm with the
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Containers E VMs numa só tabela</div><div class='cap lang-en'>Containers AND VMs in one table</div><pre><code>delonix workload ls</code></pre></div><div class="ex"><div class='cap lang-pt'>Saída estruturada para automação (chaves estáveis, independentes de língua)</div><div class='cap lang-en'>Structured output for automation (stable keys, language-independent)</div><pre><code>delonix workload ls -o json | jq &#x27;.[] | select(.type==&quot;vm&quot;)&#x27;</code></pre></div>
 <h2 id='describe'><code>workload describe</code></h2>
 <p class='intro'>Describe a workload by name (routed to the owning backend, kubectl-style)</p>
-<div class='help'><pre><code>Usage: delonix workload describe &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix workload describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           Workload name
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -246,13 +255,16 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe do workload, com routing automático para o motor certo</div><div class='cap lang-en'>Workload detail, auto-routed to the right engine</div><pre><code>delonix workload describe web</code></pre></div>
 <h2 id='stop'><code>workload stop</code></h2>
 <p class='intro'>Stop a workload by name (routed to the owning backend)</p>
-<div class='help'><pre><code>Usage: delonix workload stop &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix workload stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
           Workload name
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -277,6 +289,9 @@ Arguments:
 Options:
   -f, --force
           Force removal even if running / if backend cleanup refuses
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

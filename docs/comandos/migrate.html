@@ -160,13 +160,16 @@ answer costs one file read. It exists because <code>compose up</code> is deliber
 (it stops at the first key it does not understand rather than ignoring it), which is right for
 RUNNING and wrong for DECIDING: a migration needs the whole list at once.</p>
 
-<div class='help'><pre><code>Usage: delonix migrate &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix migrate [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   assess  Score a `docker-compose.yml` against what this engine serves
   help    Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

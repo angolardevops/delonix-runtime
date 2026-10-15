@@ -159,7 +159,7 @@ the ingress chain. <code>ingress</code> governs INBOUND traffic: allow/deny rule
 containers on a custom network (they have an IP on <code>delonix0</code>); <code>--net host</code>
 is refused.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net ingress &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net ingress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   ls         Show the inbound firewall (policy + rules) and published ports
@@ -173,6 +173,9 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -199,13 +202,16 @@ SEE ALSO:
   delonix › net › ingress</code></pre></div>
 <h2 id='clear'><code>ingress clear</code></h2>
 <p class='intro'>Remove all inbound rules (keeps published ports)</p>
-<div class='help'><pre><code>Usage: delonix net ingress clear &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: delonix net ingress clear [OPTIONS] &lt;CONTAINER&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
           Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -235,6 +241,9 @@ Options:
       --from &lt;FROM&gt;
           Only rules from this source CIDR (default: any recorded source)
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -253,7 +262,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar UMA regra, sem limpar as outras</div><div class='cap lang-en'>Remove ONE rule, without clearing the others</div><pre><code>delonix net ingress rm web tcp/80</code></pre></div>
 <h2 id='unpublish'><code>ingress unpublish</code></h2>
 <p class='intro'>Remove a published host port</p>
-<div class='help'><pre><code>Usage: delonix net ingress unpublish &lt;CONTAINER&gt; &lt;HOST_PORT&gt;
+<div class='help'><pre><code>Usage: delonix net ingress unpublish [OPTIONS] &lt;CONTAINER&gt; &lt;HOST_PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
@@ -263,6 +272,9 @@ Arguments:
           The HOST port to stop publishing — this one IS the host&#x27;s, because a publish is `hostPort:containerPort` and the host side is its identity
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -290,6 +302,9 @@ Arguments:
 Options:
       --from &lt;FROM&gt;
           Only from this source CIDR (default: anywhere)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
 
       --note &lt;NOTE&gt;
           Free-form note kept with the rule
@@ -333,6 +348,9 @@ Options:
       --from &lt;FROM&gt;
           
 
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
       --note &lt;NOTE&gt;
           
 
@@ -358,7 +376,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bloquear uma porta específica</div><div class='cap lang-en'>Block a specific port</div><pre><code>delonix net ingress deny web tcp/22</code></pre></div>
 <h2 id='policy'><code>ingress policy</code></h2>
 <p class='intro'>Set the default inbound policy when no rule matches</p>
-<div class='help'><pre><code>Usage: delonix net ingress policy &lt;CONTAINER&gt; &lt;POLICY&gt;
+<div class='help'><pre><code>Usage: delonix net ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
@@ -368,6 +386,9 @@ Arguments:
           [possible values: allow, deny]
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -386,7 +407,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Default-deny (allowlist)</div><div class='cap lang-en'>Default-deny (allowlist)</div><pre><code>delonix net ingress policy db deny</code></pre></div>
 <h2 id='publish'><code>ingress publish</code></h2>
 <p class='intro'>Publish a host port to the container (DNAT through the ingress)</p>
-<div class='help'><pre><code>Usage: delonix net ingress publish &lt;CONTAINER&gt; &lt;SPEC&gt;
+<div class='help'><pre><code>Usage: delonix net ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
 
 Arguments:
   &lt;CONTAINER&gt;
@@ -396,6 +417,9 @@ Arguments:
           `[hostIp:]hostPort:containerPort[/tcp|udp]` or just `port`. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from another machine. Name the address to widen it: `0.0.0.0:5070:5070/udp` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). The resolved address is RECORDED, so it survives a `container start`
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -433,6 +457,9 @@ Arguments:
           Container to inspect (omit to list every container&#x27;s inbound state)
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Use with `--help` or `&lt;command&gt; --help` to get help in the chosen language
+
   -o, --output &lt;OUTPUT&gt;
           Output format: `table` (default) or `json` (ADR-0005). `json` carries `governed` as its own field — a container off the SDN cannot HAVE a firewall, and a script must tell that from «open» without parsing a human sentence
           
