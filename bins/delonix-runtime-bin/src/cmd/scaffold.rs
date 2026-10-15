@@ -225,6 +225,26 @@ pub(crate) fn check_project_name(name: &str) -> Result<()> {
 /// `canonicalize` cannot be used: the directory may not exist yet (it is
 /// `init` that creates it). `.`/empty resolve to the cwd; a new path uses its
 /// basename.
+/// The line `init` prints when every file it would write is already there.
+///
+/// `{dir}` is `.` on the commonest invocation of all — `delonix init` with no
+/// argument — and the sentence puts a full stop right after it, so the line
+/// came out as `already exist in ..`: a path and a punctuation mark that read
+/// as a typo, or as a parent directory. Canonicalizing names the directory the
+/// message is actually talking about, which is the useful thing to print
+/// anyway; `.` told the operator nothing they did not type.
+///
+/// Unlike [`project_name`] above, canonicalize is safe here: this line is only
+/// reached once the files have been found ON DISK, so the directory exists. It
+/// still falls back to the path as given rather than refusing to print.
+fn already_complete_line(dir: &Path) -> String {
+    let shown = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    super::po::tf(
+        "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force",
+        &[("dir", &shown.display().to_string())],
+    )
+}
+
 pub(crate) fn project_name(explicit: Option<String>, dir: &Path) -> String {
     if let Some(n) = explicit {
         return n;
@@ -828,11 +848,7 @@ fn render_planned(
         None => None,
     };
     if n == 0 {
-        let msg = super::po::tf(
-            "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force",
-            &[("dir", &o.dir.display().to_string())],
-        );
-        eprintln!("{}", msg);
+        eprintln!("{}", already_complete_line(&o.dir));
         return Ok(cert);
     }
     if adopt {
@@ -1719,11 +1735,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         }
     }
     if n == 0 {
-        let msg = super::po::tf(
-            "nothing to do — all files already exist in {dir}. To update them, use --force:\n  delonix init --force",
-            &[("dir", &o.dir.display().to_string())],
-        );
-        eprintln!("{}", msg);
+        eprintln!("{}", already_complete_line(&o.dir));
         return Ok(());
     }
     println!("{}", next_steps(target, o));
@@ -2151,6 +2163,40 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("project");
         (tmp, dir)
+    }
+
+    /// `delonix init` with no argument passes `.`, and the message puts a full
+    /// stop straight after the directory — which printed `already exist in ..`,
+    /// read as a typo and told the operator nothing. The line has to name a
+    /// real directory.
+    /// Passing `.` is the whole point: an absolute path never showed the bug,
+    /// so a test built on a `tempdir()` path would pass against the broken
+    /// version too and prove nothing. `delonix init` with no argument is what
+    /// reaches this, and it passes `.`.
+    #[test]
+    fn the_nothing_to_do_line_names_the_directory_instead_of_a_bare_dot() {
+        let cwd = std::fs::canonicalize(".").unwrap();
+
+        let line = already_complete_line(Path::new("."));
+        assert!(
+            !line.contains(" in .."),
+            "the path's dot collided with the sentence's: {line}"
+        );
+        assert!(
+            line.contains(&cwd.display().to_string()),
+            "the line has to name the directory: {line}"
+        );
+    }
+
+    /// A path the filesystem cannot resolve still has to produce a line — the
+    /// fallback prints what it was given rather than swallowing the message.
+    #[test]
+    fn the_nothing_to_do_line_survives_a_path_that_does_not_resolve() {
+        let line = already_complete_line(Path::new("/definitely/does/not/exist"));
+        assert!(
+            line.contains("/definitely/does/not/exist"),
+            "with no canonicalize, it shows the path as given: {line}"
+        );
     }
 
     #[test]
