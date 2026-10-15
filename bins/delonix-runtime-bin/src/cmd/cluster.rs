@@ -661,11 +661,13 @@ pub enum ClusterCmd {
     /// containers, and a VM-provisioned one (`cluster kubeadm` / `mode: vm`),
     /// whose nodes are VMs — its load balancer and etcd members included.
     ///
-    /// What becomes of the NETWORK is the one real difference, and it
-    /// follows who created it: a kind-mode cluster's `dlx-<name>` was made
-    /// FOR it and goes with it, while the `--network` a VM cluster was given
-    /// is yours and is left alone. Volumes are never touched either, on
-    /// purpose, same as `docker`.
+    /// What becomes of the NETWORK is the one real difference, and the rule
+    /// is the same in both families: whoever created it owns it. A kind-mode
+    /// cluster's `dlx-<name>` was made FOR it and goes with it. A VM cluster
+    /// built WITHOUT `--network` was given one of its own, named
+    /// `<cluster>-<hash>`, and that one goes with it too. A network you named
+    /// in `--network` is yours, and is left alone. Volumes are never touched
+    /// either, on purpose, same as `docker`.
     ///
     /// A cluster whose nodes are already gone is still removable by name:
     /// what gets collected is the state directory, the exported kubeconfig
@@ -810,9 +812,13 @@ pub enum ClusterCmd {
         /// only local image that exists.
         #[arg(long = "vm-image", add = ArgValueCandidates::new(super::complete::vm_images))]
         vm_image: Option<String>,
-        /// Already-created network (`delonix network create`) — no magic default.
+        /// Network the nodes attach to. Omit and the cluster gets its OWN,
+        /// created here and named `<cluster>-<hash>` — and removed again by
+        /// `cluster destroy`. Name one that already exists (`delonix network
+        /// create`) to attach to it instead; that one is never removed, because
+        /// you created it.
         #[arg(long, add = ArgValueCandidates::new(super::complete::networks))]
-        network: String,
+        network: Option<String>,
         /// Private SSH key to use. Omit = generates a new ed25519 pair in
         /// `<root>/clusters/<name>/id_ed25519`.
         #[arg(value_hint = clap::ValueHint::FilePath, long = "ssh-key")]
@@ -1124,6 +1130,21 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             let name = match name {
                 Some(n) => n,
                 None => random_kubeadm_cluster_name(&state_root())?,
+            };
+            // BUG FIXED HERE, found by running it: the pod-network refusal
+            // below promises "Nothing was created", and creating the cluster's
+            // network before it made that promise FALSE — a refused
+            // `cluster kubeadm` left a network behind, and leaked one more on
+            // every retry. `check_cni` is pure and `provision_and_apply` calls
+            // it again for its other callers, so asking here costs nothing and
+            // keeps the guarantee the message makes.
+            check_cni("vm", &cni, control_plane.saturating_add(workers))?;
+            // `--network` omitted: the cluster gets its own, the same way kind
+            // mode has always given each cluster one (`cluster_net`). Resolved
+            // BEFORE `name` moves into the args below.
+            let network = match network {
+                Some(n) => n,
+                None => ensure_cluster_network(&name)?,
             };
             provision_and_apply(ProvisionArgs {
                 name,
@@ -2262,11 +2283,83 @@ pub(crate) fn cluster_vm_names(cluster_name: &str) -> Result<Vec<String>> {
 /// (`docs/discovery/naas-kaas-caas-auditoria-2026-10-08.md` §4.6) had to do,
 /// which is how this gap went from "known" to "fixed".
 ///
-/// Deliberately leaves the network alone: `--network` names a network the
-/// OPERATOR created (`cluster kubeadm`'s own `--help` says so — "no magic
-/// default"), so it is never this command's to remove, the same way
-/// kind-mode's own `delete` only removes the network IT created
-/// (`cluster_net(name)`) and never a user's.
+/// Name of the network a VM cluster gets when `--network` is omitted.
+///
+/// DETERMINISTIC from the cluster name, and that is the whole design: it is
+/// what lets [`destroy_vm_cluster`] recompute the name and recognize its own
+/// network without persisting a "the engine owns this one" flag anywhere. A
+/// random suffix would need that flag, and a flag that goes missing leaks a
+/// network per create/destroy cycle.
+///
+/// The suffix also keeps the name out of the way of an operator's own: a bare
+/// `lab` could collide with a network someone already has, and silently
+/// attaching a cluster to it would be worse than a clumsy name. Kind mode
+/// solves the same problem with a `dlx-` PREFIX (`cluster_net`); this path
+/// uses a suffix instead, so a cluster's network sorts next to its own name.
+fn cluster_vm_net(name: &str) -> String {
+    let h = vmimage::hex_sha256(name.as_bytes());
+    format!("{name}-{}", &h[..8])
+}
+
+/// Makes sure the cluster's OWN network exists, and returns its name.
+///
+/// Idempotent, because [`cluster_vm_net`] is deterministic: a second
+/// `cluster kubeadm` for the same name finds the network already there and
+/// reuses it instead of failing on a conflict.
+///
+/// Goes through [`super::network::create_network`] — the same entry point kind
+/// mode uses — and NOT `infra::network_create` alone, which would leave the
+/// `NetworkStore` without a record (see that function's own doc-comment for
+/// what breaks then). The subnet is left to the allocator, exactly as a bare
+/// `delonix network create` would.
+fn ensure_cluster_network(cluster: &str) -> Result<String> {
+    let net = cluster_vm_net(cluster);
+    let store = delonix_sdn::NetworkStore::open(state_root())?;
+    if store.get(&net).is_ok() {
+        return Ok(net);
+    }
+    super::network::create_network(&store, &net, "bridge", None, None, "", None, vec![], None)?;
+    output::info(&super::po::tf(
+        "created network \"{net}\" for cluster \"{cluster}\" (removed again by `cluster destroy`)",
+        &[("net", &net), ("cluster", cluster)],
+    ));
+    Ok(net)
+}
+
+/// Whether a network named exactly [`cluster_vm_net`] exists — i.e. whether
+/// this cluster has one of ITS OWN to remove. Asked before the confirmation
+/// prompt so the prompt can say which case the operator is in.
+fn owns_cluster_network(name: &str) -> bool {
+    delonix_sdn::NetworkStore::open(state_root())
+        .map(|s| s.get(&cluster_vm_net(name)).is_ok())
+        .unwrap_or(false)
+}
+
+/// Removes the cluster's own network — and ONLY its own.
+///
+/// The test is the name: [`cluster_vm_net`] is deterministic, so a network
+/// called exactly that is one [`ensure_cluster_network`] created. A network
+/// the operator passed in `--network` has any other name and is left alone,
+/// because they created it and this command did not.
+///
+/// Both stores, in the order kind mode's own prune uses: the declarative
+/// record first, then the physical plane. Best-effort throughout — a cluster
+/// whose VMs are gone must not stay undeletable because a bridge refused to.
+fn remove_cluster_network(name: &str) {
+    if !owns_cluster_network(name) {
+        return;
+    }
+    let net = cluster_vm_net(name);
+    if let Ok(store) = delonix_sdn::NetworkStore::open(state_root()) {
+        let _ = store.remove(&net);
+        delonix_sdn::infra::network_remove(&net);
+    }
+}
+
+/// Removes the network only when this command CREATED it — see
+/// [`remove_cluster_network`]. A network named in `--network` belongs to the
+/// operator and is never touched, the same way kind-mode's own `delete` only
+/// removes the network IT created (`cluster_net(name)`) and never a user's.
 fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
     if !super::prune::confirm(
         force,
@@ -2277,9 +2370,29 @@ fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
         ),
         Some(super::po::tf(
             "This will remove {n} VM(s) of cluster '{name}', its cached kubeconfig, and the \
-             matching ~/.kube/config entries. The network it used is left alone — you created \
-             it, this command did not.",
-            &[("n", &vms.len().to_string()), ("name", name)],
+             matching ~/.kube/config entries.{net}",
+            &[
+                ("n", &vms.len().to_string()),
+                ("name", name),
+                // Says which of the two cases this cluster is in, instead of
+                // one sentence that is wrong half the time: a network this
+                // command created goes with it, a network the operator named
+                // does not.
+                (
+                    "net",
+                    &match owns_cluster_network(name) {
+                        true => super::po::tf(
+                            " Its own network '{net}' goes too.",
+                            &[("net", &cluster_vm_net(name))],
+                        ),
+                        false => super::po::t(
+                            " The network it used is left alone — you created it, this command \
+                             did not.",
+                        )
+                        .to_string(),
+                    },
+                ),
+            ],
         )),
         super::po::t("Continue? [y/N]"),
     )? {
@@ -2297,6 +2410,22 @@ fn destroy_vm_cluster(name: &str, vms: &[String], force: bool) -> Result<()> {
             "🗑️",
         );
         vm::cmd_rm(&base, vm_name, true)?;
+        p.ok();
+    }
+    // AFTER the VMs: a bridge with interfaces still on it is one the kernel
+    // may refuse to take down. Only when the network is this command's own —
+    // and only then is the step even shown, so the progress does not announce
+    // work it is not doing.
+    if owns_cluster_network(name) {
+        p.step(
+            &format!(
+                "{} '{}'",
+                super::po::t("Removing network"),
+                cluster_vm_net(name)
+            ),
+            "🕸️",
+        );
+        remove_cluster_network(name);
         p.ok();
     }
     p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
@@ -2932,6 +3061,12 @@ fn create_and_wait(
         vcpus: args.vcpus,
         memory: args.memory.clone(),
         network: args.network.clone(),
+        // The subnet the operator DECLARED for this network, resolved here
+        // because a provider may not read the registry (docs/discovery/61).
+        // Without it the libvirt backend had nothing to define the network
+        // WITH, so `--network` was accepted and then silently ignored — every
+        // node landed on libvirt's `default` instead of the network asked for.
+        network_subnet: super::network::subnet_of(&args.network),
         kernel: None,
         initrd: None,
         firmware: None,
@@ -3796,6 +3931,30 @@ mod tests {
     }
 
     use super::*;
+
+    /// DETERMINISM is the contract. `destroy` recomputes this name to decide
+    /// whether a network is the engine's own, so the same cluster name must
+    /// always give the same network name — otherwise `destroy` stops
+    /// recognizing what `kubeadm` created and leaks one network per cycle.
+    #[test]
+    fn the_cluster_network_name_is_deterministic() {
+        assert_eq!(cluster_vm_net("lab"), cluster_vm_net("lab"));
+        assert_ne!(cluster_vm_net("lab"), cluster_vm_net("lab2"));
+    }
+
+    /// Shape: the cluster name, then a hash suffix. The prefix is what makes it
+    /// readable in `network ls`; the suffix is what keeps it from colliding
+    /// with a network the operator already has called exactly `lab`.
+    #[test]
+    fn the_cluster_network_name_is_the_cluster_plus_a_suffix() {
+        let net = cluster_vm_net("lab");
+        assert!(net.starts_with("lab-"), "{net}");
+        assert_ne!(net, "lab", "must not shadow an operator's own 'lab'");
+        // 8 hex chars of sha256 — enough to not collide, short enough to type.
+        let suffix = net.strip_prefix("lab-").expect("prefixed");
+        assert_eq!(suffix.len(), 8, "{net}");
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{net}");
+    }
 
     /// The node's CRI must be able to run the cluster's own privileged system
     /// pods, so the bootstrap writes an explicit ceiling drop-in next to the

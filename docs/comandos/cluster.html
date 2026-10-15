@@ -441,7 +441,7 @@ project's offensive audit, with tests replicating the exploit.</p></div>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap.</p>
 <p class='intro'>From zero to a working cluster, without writing a manifest by hand.</p>
-<div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
+<div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS]
 
 Options:
       --name &lt;NAME&gt;
@@ -457,7 +457,7 @@ Options:
           Tag of the golden VM image (`delonix vm image ls`). Omit = uses the only local image that exists
 
       --network &lt;NETWORK&gt;
-          Already-created network (`delonix network create`) — no magic default
+          Network the nodes attach to. Omit and the cluster gets its OWN, created here and named `&lt;cluster&gt;-&lt;hash&gt;` — and removed again by `cluster destroy`. Name one that already exists (`delonix network create`) to attach to it instead; that one is never removed, because you created it
 
       --ssh-key &lt;SSH_KEY&gt;
           Private SSH key to use. Omit = generates a new ed25519 pair in `&lt;root&gt;/clusters/&lt;name&gt;/id_ed25519`

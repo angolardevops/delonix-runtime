@@ -85,6 +85,32 @@ pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] = &[
 /// Both sides of the diff go through it. Without it, writing the derived address
 /// explicitly in the manifest put a value on the desired side and nothing on the
 /// actual one — drift proposed forever over a network nobody had changed.
+/// The CIDR declared for the delonix network `name`, or `None` when the
+/// registry has no entry for it.
+///
+/// Lives here, and not next to either caller, because BOTH `vm create` and
+/// `cluster kubeadm` need it and neither should depend on the other.
+///
+/// This is the one hop that makes `--network <name>` mean something to the
+/// libvirt backend: that provider cannot open this registry itself (a provider
+/// may not depend on an adapter — `docs/discovery/61`), so the subnet is
+/// resolved on this side and travels down in `VmConfig::network_subnet`.
+/// Until it did, `cfg.network` had zero readers in that provider: the name was
+/// accepted, recorded, shown by `vm ls`, and then dropped, so the VM landed on
+/// libvirt's own `default` NAT network whatever was asked for.
+///
+/// Best-effort on purpose. A missing registry, an unreadable store or an
+/// unknown name all yield `None`, and the backend then warns and leaves the
+/// network to libvirt rather than failing the provision outright — the same
+/// outcome as before, just no longer silent.
+pub(crate) fn subnet_of(name: &str) -> Option<String> {
+    NetworkStore::open(state_root())
+        .ok()?
+        .get(name)
+        .ok()
+        .map(|n| n.subnet)
+}
+
 fn normalized_gateway(gateway: &str, subnet: Option<&str>) -> Option<String> {
     if gateway.is_empty() {
         return None;
