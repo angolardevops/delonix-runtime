@@ -2896,11 +2896,27 @@ platform cannot learn a VM's address and a backup is not quiesced",
         digest,
         size,
         ubuntu_release: Some(release.to_string()),
-        // An explicit `--k8s-version` wins: it is the version the operator
-        // ASKED for, it already passed `valid_version`, and keeping it keeps
-        // `--k8s-version 1.34` → `"1.34"` instead of silently widening to the
-        // patch the repo happened to carry. The inventory only fills the null.
-        k8s_version: k8s_version.or(k8s_installed),
+        // The RESOLVED version wins, not the raw CLI `Option`. `declared_k8s`
+        // is what this build actually installed — the same single resolution
+        // that fed the apt repo URL, the `.deb` prefix and the release file —
+        // so the record agrees with all three by construction, and an omitted
+        // `--k8s-version` no longer records `null` on an image that ships
+        // kubeadm. An explicit `--k8s-version 1.34` still records `"1.34"`
+        // rather than widening to the patch the repo happened to carry,
+        // because `build_k8s_versions` passes the operator's string through.
+        //
+        // The inventory is kept STRICTLY as the fallback, which is the only
+        // case it still has to answer: with `--no-k8s`, `declared_k8s` is
+        // `None` and the inventory is `None` too (no kubeadm row), so the
+        // field stays null, correctly.
+        //
+        // RECONCILIATION (2026-10-15): #865 landed this line reading the raw
+        // flag while #848 made the release file read the RESOLVED version, so
+        // for a few commits a default build recorded one number in
+        // `/etc/delonix-image-release` and a different one (or null, whenever
+        // `virt-cat` failed) in the image record. One resolution, every
+        // consumer — that is the whole point of `build_k8s_versions`.
+        k8s_version: declared_k8s.clone().or(k8s_installed),
         created_unix: now_unix(),
         kernel_version,
         distro: Some(distro.as_str().to_string()),
