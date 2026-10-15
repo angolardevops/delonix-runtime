@@ -2287,6 +2287,28 @@ fn image_type_label(cloud_init: Option<&str>) -> String {
     }
 }
 
+/// The k8s version a build INSTALLS, and the one the image gets to DECLARE
+/// about itself in `/etc/delonix-image-release` — both derived from a SINGLE
+/// resolution, which is the whole point of this function.
+///
+/// Returns `(installed, declared)`. `declared` is `None` only for `--no-k8s`,
+/// where "none" in the release file is the truth; for every other build it is
+/// exactly the version that went into the apt repo URL.
+///
+/// BUG FOUND (2026-10-15, live `delonix vm image build -t k8s-golden`): the
+/// release file was built from the RAW CLI `Option<String>`, so a golden built
+/// without `--k8s-version` wrote `DELONIX_K8S_VERSION="none"` into an image
+/// that HAD kubeadm/kubelet/kubectl installed — defeating the point of the
+/// release file ("a imagem passa a dizer o que tem dentro") and making the
+/// artefact unidentifiable. Meanwhile the repo URL read a second, independent
+/// default (see `k8s_recipes::resolve_k8s_version`). One resolution, two
+/// consumers, no drift.
+fn build_k8s_versions(no_k8s: bool, requested: Option<&str>) -> (String, Option<String>) {
+    let installed = super::k8s_recipes::resolve_k8s_version(requested);
+    let declared = (!no_k8s).then(|| installed.clone());
+    (installed, declared)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn cmd_build(
     store: &VmImageStore,
@@ -2395,6 +2417,12 @@ pub(crate) fn cmd_build(
     check_cri_bin(cri_bin.as_deref())?;
     check_delonix_bin(delonix_bin.as_deref())?;
 
+    // Resolved ONCE, here, AFTER validating what the caller typed: from this
+    // line on the build has a concrete k8s version, and `installed_k8s` is the
+    // only thing that feeds the apt repo URL, the `.deb` version prefix and
+    // the image's own release file. See `build_k8s_versions`.
+    let (installed_k8s, declared_k8s) = build_k8s_versions(no_k8s, k8s_version.as_deref());
+
     let release = match distro {
         Distro::Ubuntu => ubuntu_release,
         Distro::Debian => debian_release,
@@ -2494,7 +2522,7 @@ pub(crate) fn cmd_build(
             let (mut debs, archive_extras) = download_k8s_debs(
                 &work_dir,
                 &work_dir.join("debs"),
-                k8s_version.as_deref(),
+                &installed_k8s,
                 "amd64",
                 &extra_packages,
             )?;
@@ -2605,7 +2633,7 @@ pub(crate) fn cmd_build(
             )
         } else {
             k8s_customization_steps(
-                k8s_version.as_deref(),
+                &installed_k8s,
                 &extra_packages,
                 &extra_run,
                 &cri,
@@ -2659,8 +2687,10 @@ pub(crate) fn cmd_build(
             base_sha256.clone().unwrap_or_else(|| "unknown".into()),
         ),
         (
+            // The RESOLVED version, not the raw CLI `Option` — an image that
+            // installs k8s never says "none" about itself again.
             "DELONIX_K8S_VERSION",
-            k8s_version.clone().unwrap_or_else(|| "none".into()),
+            declared_k8s.clone().unwrap_or_else(|| "none".into()),
         ),
         ("DELONIX_OFFLINE", offline.to_string()),
         (
@@ -4091,7 +4121,7 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
 fn download_k8s_debs(
     work: &Path,
     dest_dir: &Path,
-    k8s_version: Option<&str>,
+    k8s_version: &str,
     arch: &str,
     extra_packages: &[String],
 ) -> Result<(Vec<PathBuf>, Vec<String>)> {
@@ -4140,10 +4170,11 @@ fn download_k8s_debs(
     for p in extra_packages {
         wanted.push(p.as_str());
     }
-    let version_prefix = match k8s_version {
-        Some(v) if v != "stable" => format!("{v}."),
-        _ => String::new(),
-    };
+    // Third consumer of the resolved version, and it had the same latent
+    // divergence: an omitted `--k8s-version` left this prefix EMPTY ("take
+    // whatever is newest in the repo") while the repo URL was pinned to its
+    // own stale default. Now the pin always matches the repo it reads from.
+    let version_prefix = format!("{k8s_version}.");
     let debs = parse_packages_index(&index, arch, &version_prefix, &wanted, &VERSIONED);
     for base in ["kubeadm", "kubelet", "kubectl", "kubernetes-cni"] {
         if !debs.iter().any(|d| d.name == base) {
@@ -4990,7 +5021,7 @@ pub(crate) fn k8s_customization_steps_offline(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn k8s_customization_steps(
-    k8s_version: Option<&str>,
+    k8s_version: &str,
     extra_packages: &[String],
     extra_run: &[String],
     cri_bin: &Path,
@@ -6038,7 +6069,7 @@ mod tests {
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(
-            None,
+            DEFAULT_K8S_VERSION,
             &["htop".to_string()],
             &[],
             &cri,
@@ -6285,7 +6316,7 @@ Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri
                 .any(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains("apt-get purge")))
         };
         let online =
-            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+            k8s_customization_steps(DEFAULT_K8S_VERSION, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         assert!(has_purge(&online), "the online path must purge");
         let offline = k8s_customization_steps_offline(
             &[],
@@ -6308,7 +6339,7 @@ Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(DEFAULT_K8S_VERSION, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         let at = |needle: &str| {
             ops.iter()
                 .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
@@ -6345,7 +6376,7 @@ Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(
-            None,
+            DEFAULT_K8S_VERSION,
             &[],
             &["echo oi".to_string()],
             &cri,
@@ -6439,7 +6470,7 @@ Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri
         // Both build paths (online + offline) share `common_customization_steps`,
         // so the kubectl UX must be present in both.
         for ops in [
-            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None),
+            k8s_customization_steps(DEFAULT_K8S_VERSION, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
                 &[],
@@ -6719,7 +6750,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(DEFAULT_K8S_VERSION, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         // Tem de correr DEPOIS de tudo o que instala pacotes (incluindo o
         // `--extra-run`) e ANTES do reset do machine-id, que é o último passo.
@@ -7054,7 +7085,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let ops = k8s_customization_steps(DEFAULT_K8S_VERSION, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         // No account may carry a password that is written down in this repository.
         assert!(!ops
             .iter()
@@ -7077,7 +7108,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         );
         // With --root-password, and only then, the image carries one.
         let ops = k8s_customization_steps(
-            None,
+            DEFAULT_K8S_VERSION,
             &[],
             &[],
             &cri,
@@ -7283,7 +7314,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // A golden k8s partilha os mesmos passos de conta, logo também vem
         // endurecida — é a que corre em nós de produção.
         let k8s = k8s_customization_steps(
-            None,
+            DEFAULT_K8S_VERSION,
             &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
@@ -7357,7 +7388,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             );
         }
         assert!(!has_lowports(&k8s_customization_steps(
-            None,
+            DEFAULT_K8S_VERSION,
             &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
@@ -7571,6 +7602,98 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Some(DEFAULT_K8S_VERSION),
             "o pull por omissão tem de puxar a mesma"
         );
+    }
+
+    /// Uma golden construída SEM `--k8s-version` tem de instalar
+    /// `DEFAULT_K8S_VERSION` **e dizer que foi isso que instalou** — as duas
+    /// coisas no mesmo teste, de propósito.
+    ///
+    /// REGRESSÃO (2026-10-15), encontrada a ler a linha de comando do
+    /// `virt-customize` de um build vivo, não em revisão de código. Um
+    /// `delonix vm image build -t k8s-golden` simples fazia duas coisas
+    /// erradas de uma só vez:
+    ///
+    ///   1. ia buscar `.../core:/stable:/v1.31/deb/Release.key` — quatro
+    ///      versões menores atrás do default documentado — porque o URL do
+    ///      repositório tinha um default INDEPENDENTE de 1.31 que ninguém
+    ///      actualizou com `DEFAULT_K8S_VERSION`;
+    ///   2. escrevia `DELONIX_K8S_VERSION="none"` em
+    ///      `/etc/delonix-image-release`, porque o ficheiro era construído a
+    ///      partir do `Option` cru do CLI e não da versão RESOLVIDA — numa
+    ///      imagem que tinha kubeadm/kubelet/kubectl instalados.
+    ///
+    /// Os testes de então passavam porque cada default só era verificado em
+    /// ISOLAMENTO. Este amarra os dois consumidores à mesma resolução, que é
+    /// a única coisa que impede a divergência de voltar.
+    #[test]
+    fn build_sem_k8s_version_instala_e_declara_a_versao_por_omissao() {
+        let (installed, declared) = build_k8s_versions(false, None);
+
+        // (1) o que a imagem INSTALA: o repositório apt real da receita.
+        assert_eq!(installed, DEFAULT_K8S_VERSION);
+        let recipes = super::super::k8s_recipes::k8s_host_recipes(&installed, &[]);
+        let repo_step = recipes
+            .iter()
+            .find(|r| r.name.contains("repositório"))
+            .expect("receita do repositório");
+        assert!(
+            repo_step
+                .apply
+                .contains(&format!("stable:/v{DEFAULT_K8S_VERSION}/deb")),
+            "o repo tem de ser o da versão por omissão: {}",
+            repo_step.apply
+        );
+        assert!(
+            !repo_step.apply.contains("v1.31"),
+            "o default independente de 1.31 voltou: {}",
+            repo_step.apply
+        );
+
+        // (2) o que a imagem DIZ de si: o mesmo número, nunca "none".
+        assert_eq!(declared.as_deref(), Some(DEFAULT_K8S_VERSION));
+        let manifest = build_manifest(&[(
+            "DELONIX_K8S_VERSION",
+            declared.clone().unwrap_or_else(|| "none".into()),
+        )]);
+        assert!(
+            manifest.contains(&format!("DELONIX_K8S_VERSION=\"{DEFAULT_K8S_VERSION}\"")),
+            "a imagem tem de dizer o que tem dentro: {manifest}"
+        );
+        assert!(!manifest.contains("none"), "{manifest}");
+
+        // E o par não pode divergir: é UMA resolução, dois consumidores.
+        assert_eq!(declared.as_deref(), Some(installed.as_str()));
+    }
+
+    /// O contrapeso do teste acima: com `--no-k8s` o `"none"` é a VERDADE, e
+    /// resolver a versão não o pode transformar numa alegação falsa de que a
+    /// imagem traz Kubernetes.
+    #[test]
+    fn build_no_k8s_continua_a_declarar_none() {
+        let (_installed, declared) = build_k8s_versions(true, None);
+        assert_eq!(declared, None);
+        let manifest = build_manifest(&[(
+            "DELONIX_K8S_VERSION",
+            declared.unwrap_or_else(|| "none".into()),
+        )]);
+        assert!(manifest.contains("DELONIX_K8S_VERSION=\"none\""), "{manifest}");
+    }
+
+    /// Uma versão explícita continua a mandar nos dois consumidores (e o
+    /// truncamento major.minor do repo não contamina o que a imagem declara:
+    /// `1.31.2` instala-se do repo `v1.31` mas declara-se `1.31.2`).
+    #[test]
+    fn build_com_k8s_version_explicita_usa_a_pedida() {
+        let (installed, declared) = build_k8s_versions(false, Some("1.34"));
+        assert_eq!(installed, "1.34");
+        assert_eq!(declared.as_deref(), Some("1.34"));
+
+        let (installed, declared) = build_k8s_versions(false, Some("1.31.2"));
+        assert_eq!(
+            super::super::k8s_recipes::k8s_repo_version(&installed),
+            "stable:/v1.31"
+        );
+        assert_eq!(declared.as_deref(), Some("1.31.2"));
     }
 
     /// 1.34 e 1.35 deixam de ser a omissão mas continuam construíveis — o
