@@ -2331,11 +2331,11 @@ pub(crate) fn cmd_build(
                     .into(),
             ));
         }
-        // NOTA: `--extra-package` esteve aqui, REJEITADO em vez de ignorado,
-        // enquanto `rootless_customization_steps` instalava uma lista fixa e o
-        // nome só aparecia no `DELONIX_EXTRA_PACKAGES` do
-        // `/etc/delonix-image-release`. Deixou de precisar de rejeição: a
-        // receita rootless recebe agora `extra_packages` e acrescenta-os ao seu
+        // NOTE: `--extra-package` used to be REFUSED here rather than ignored,
+        // back when `rootless_customization_steps` installed a fixed list and the
+        // name only ever showed up in the `DELONIX_EXTRA_PACKAGES` of
+        // `/etc/delonix-image-release`. The refusal is no longer needed: the
+        // rootless recipe now takes `extra_packages` and appends them to its own
         // `apt-get`/`dnf install`.
     }
     // NOTA: `--delonix-bin` já foi rejeitado no caminho k8s ("only applies with
@@ -5355,24 +5355,23 @@ pub(crate) fn rootless_customization_steps(
                 .to_string()
         }
     };
-    // `--extra-package` ACEITAVA-E-DESCARTAVA aqui também, pela mesma razão que
-    // no caminho k8s: esta função não tinha sequer um parâmetro
-    // `extra_packages`, logo um `--no-k8s --extra-package htop` construía uma
-    // imagem SEM htop e ainda assim estampava `DELONIX_EXTRA_PACKAGES=htop` no
-    // `/etc/delonix-image-release`. Chegou a ser REJEITADO em `cmd_build` para
-    // não mentir; agora instala.
+    // `--extra-package` was ACCEPTED-AND-DROPPED here too, for the same reason as
+    // on the k8s path: this function had no `extra_packages` parameter at all, so
+    // a `--no-k8s --extra-package htop` built an image WITHOUT htop and still
+    // stamped `DELONIX_EXTRA_PACKAGES=htop` into `/etc/delonix-image-release`. It
+    // was briefly REFUSED in `cmd_build` so it would not lie; now it installs.
     //
-    // Vão na MESMA invocação da lista fixa, não num segundo `install`: uma só
-    // transacção resolve as dependências de uma vez, e um nome inexistente faz
-    // o `apt-get`/`dnf` sair diferente de zero — ou seja, FALHA o build, que é
-    // exactamente o que um `--extra-package` com um typo deve fazer (o caminho
-    // offline precisa de um `dpkg -s` explícito para isso só porque lá o
-    // `dpkg -i` instala um directório de `.deb`; aqui o gestor de pacotes já o
-    // diz). Esta receita é sempre ONLINE (`--no-k8s` rejeita `--offline`), por
-    // isso não há nada a obter no host primeiro.
+    // They go in the SAME invocation as the fixed list, not a second `install`: one
+    // transaction resolves the dependencies in a single pass, and a nonexistent
+    // name makes `apt-get`/`dnf` exit non-zero — that is, it FAILS the build, which
+    // is exactly what a typo'd `--extra-package` should do. (The offline path needs
+    // an explicit `dpkg -s` for that only because there `dpkg -i` installs a
+    // directory of `.deb` files; here the package manager says so itself.) This
+    // recipe is always ONLINE (`--no-k8s` rejects `--offline`), so there is nothing
+    // to fetch on the host first.
     //
-    // Interpolação directa é segura: `cmd_build` já validou cada nome com
-    // `vmspec::valid_pkg` antes de chegar aqui.
+    // Direct interpolation is safe: `cmd_build` already validated every name with
+    // `vmspec::valid_pkg` before reaching here.
     for p in extra_packages {
         pkg_install_cmd.push(' ');
         pkg_install_cmd.push_str(p);
@@ -6014,15 +6013,15 @@ mod tests {
         assert!(install_step.contains("htop"));
     }
 
-    /// O espelho offline do teste acima. `--offline --extra-package htop`
-    /// ACEITAVA-E-DESCARTAVA: o `k8s_customization_steps_offline` não tinha
-    /// sequer um parâmetro `extra_packages`, o nome só entrava na lista do
-    /// índice do `pkgs.k8s.io` (onde um pacote da distro nunca está) e a
-    /// verificação de existência cobria apenas os 4 nomes do núcleo — nada
-    /// falhava, e a imagem saía a declarar `DELONIX_EXTRA_PACKAGES=htop` sem
-    /// o ter. Aqui garante-se que o nome aparece na lista de operações.
+    /// The offline mirror of the test above. `--offline --extra-package htop`
+    /// used to ACCEPT-AND-DROP: `k8s_customization_steps_offline` had no
+    /// `extra_packages` parameter at all, the name only reached the
+    /// `pkgs.k8s.io` index list (where a distro package never is) and the
+    /// existence check covered just the 4 core names — nothing failed, and the
+    /// image shipped declaring `DELONIX_EXTRA_PACKAGES=htop` without having it.
+    /// This asserts the name reaches the operation list.
     #[test]
-    fn customization_steps_offline_incluem_pacotes_extra() {
+    fn offline_customization_steps_include_extra_packages() {
         let ops = k8s_customization_steps_offline(
             &[PathBuf::from("/tmp/x/htop_3.3.0-4build1_amd64.deb")],
             &["htop".to_string()],
@@ -6034,38 +6033,41 @@ mod tests {
             Distro::Ubuntu,
             None,
         );
-        // O `.deb` obtido e verificado no host entra no convidado...
+        // The `.deb` fetched and verified on the host goes into the guest...
         assert!(
             ops.iter().any(|o| matches!(
                 o,
                 CustomizeOp::CopyIn(p, dest)
                     if p.ends_with("htop_3.3.0-4build1_amd64.deb") && dest == "/tmp/k8s-debs"
             )),
-            "o .deb do pacote extra tem de ser copiado para dentro da imagem"
+            "the extra package's .deb must be copied into the image"
         );
-        // ...é instalado pelo `dpkg -i` que já existia...
+        // ...is installed by the `dpkg -i` that already existed...
         assert!(
             ops.iter().any(|o| matches!(
                 o,
                 CustomizeOp::RunCommand(c) if c.contains("dpkg -i /tmp/k8s-debs/*.deb")
             )),
-            "o dpkg -i tem de instalar o directório todo"
+            "the dpkg -i must install the whole directory"
         );
-        // ...e a sua ausência passa a FALHAR o build, em vez de ser silenciosa.
+        // ...and its absence now FAILS the build instead of being silent.
         let check = ops
             .iter()
             .find_map(|op| match op {
                 CustomizeOp::RunCommand(c) if c.starts_with("dpkg -s htop") => Some(c),
                 _ => None,
             })
-            .expect("devia haver uma asserção `dpkg -s` por pacote extra");
-        assert!(check.contains("exit 1"), "a asserção tem de falhar o build");
+            .expect("there should be a `dpkg -s` assertion per extra package");
+        assert!(
+            check.contains("exit 1"),
+            "the assertion must fail the build"
+        );
     }
 
-    /// Sem `--extra-package` não aparece asserção nenhuma: o caminho offline
-    /// que já existia fica byte-por-byte o que era.
+    /// Without `--extra-package` no assertion appears at all: the offline path
+    /// that already existed stays byte-for-byte what it was.
     #[test]
-    fn offline_sem_pacotes_extra_nao_acrescenta_assercoes() {
+    fn offline_without_extra_packages_adds_no_assertions() {
         let ops = k8s_customization_steps_offline(
             &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
             &[],
@@ -6083,23 +6085,23 @@ mod tests {
         )));
     }
 
-    /// O espelho rootless dos dois testes acima — a TERCEIRA receita que
-    /// aceitava-e-descartava `--extra-package`. `rootless_customization_steps`
-    /// instalava uma lista fixa e não tinha parâmetro `extra_packages`, logo um
-    /// `--no-k8s --extra-package htop` saía sem htop a declarar
-    /// `DELONIX_EXTRA_PACKAGES=htop`; chegou a ser rejeitado em `cmd_build` por
-    /// isso. Aqui garante-se que o nome entra na MESMA linha de install da
-    /// lista fixa, nas duas famílias de gestor de pacotes.
+    /// The rootless mirror of the two tests above — the THIRD recipe that
+    /// accepted-and-dropped `--extra-package`. `rootless_customization_steps`
+    /// installed a fixed list and had no `extra_packages` parameter, so a
+    /// `--no-k8s --extra-package htop` shipped without htop while declaring
+    /// `DELONIX_EXTRA_PACKAGES=htop`; it was briefly refused in `cmd_build` for
+    /// that reason. This asserts the name lands on the SAME install line as the
+    /// fixed list, for both package-manager families.
     #[test]
-    fn rootless_customization_steps_incluem_pacotes_extra() {
-        // (distro, agulha que identifica a linha de install, um nome da lista fixa)
-        let casos = [
+    fn rootless_customization_steps_include_extra_packages() {
+        // (distro, needle identifying the install line, a name from the fixed list)
+        let cases = [
             (Distro::Ubuntu, "apt-get install", "slirp4netns"),
             (Distro::Debian, "apt-get install", "slirp4netns"),
             (Distro::Rocky, "dnf install", "shadow-utils"),
             (Distro::Fedora, "dnf install", "shadow-utils"),
         ];
-        for (distro, agulha, fixo) in casos {
+        for (distro, needle, fixed) in cases {
             let ops = rootless_customization_steps(
                 &["htop".to_string(), "jq".to_string()],
                 &[],
@@ -6110,38 +6112,38 @@ mod tests {
             let install_step = ops
                 .iter()
                 .find_map(|op| match op {
-                    CustomizeOp::RunCommand(c) if c.contains(agulha) => Some(c),
+                    CustomizeOp::RunCommand(c) if c.contains(needle) => Some(c),
                     _ => None,
                 })
-                .unwrap_or_else(|| panic!("{distro:?}: devia haver um RunCommand de {agulha}"));
-            // A lista fixa continua lá: os extras ACRESCENTAM, não substituem.
+                .unwrap_or_else(|| panic!("{distro:?}: there should be a {needle} RunCommand"));
+            // The fixed list is still there: extras ADD, they do not replace.
             assert!(
-                install_step.contains(fixo),
-                "{distro:?}: a lista fixa tem de sobreviver ({fixo} em falta): {install_step}"
+                install_step.contains(fixed),
+                "{distro:?}: the fixed list must survive ({fixed} missing): {install_step}"
             );
             for p in ["htop", "jq"] {
                 assert!(
                     install_step.contains(p),
-                    "{distro:?}: o pacote extra {p} tem de entrar na linha de install: {install_step}"
+                    "{distro:?}: the extra package {p} must reach the install line: {install_step}"
                 );
             }
-            // Na mesma invocação, não num segundo `install` acrescentado à cauda:
-            // uma só transacção resolve dependências, e é o código de saída dela
-            // que faz um nome com typo falhar o build.
+            // In the same invocation, not a second `install` appended at the tail:
+            // one transaction resolves dependencies, and it is its exit code that
+            // makes a typo'd name fail the build.
             assert_eq!(
                 ops.iter()
-                    .filter(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains(agulha)))
+                    .filter(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains(needle)))
                     .count(),
                 1,
-                "{distro:?}: os extras não podem abrir uma segunda linha de install"
+                "{distro:?}: extras must not open a second install line"
             );
         }
     }
 
-    /// Sem `--extra-package` a receita rootless fica byte-por-byte o que era —
-    /// o par do `offline_sem_pacotes_extra_nao_acrescenta_assercoes`.
+    /// Without `--extra-package` the rootless recipe stays byte-for-byte what it
+    /// was — the counterpart of `offline_without_extra_packages_adds_no_assertions`.
     #[test]
-    fn rootless_sem_pacotes_extra_fica_inalterado() {
+    fn rootless_without_extra_packages_is_unchanged() {
         for distro in [
             Distro::Ubuntu,
             Distro::Debian,
@@ -6149,29 +6151,29 @@ mod tests {
             Distro::Fedora,
         ] {
             let bin = PathBuf::from("/tmp/delonix");
-            let antes = rootless_customization_steps(&[], &[], &bin, distro, None);
-            let com = rootless_customization_steps(&["htop".to_string()], &[], &bin, distro, None);
-            // Mesmo número de operações: um extra não cria passos novos.
+            let without = rootless_customization_steps(&[], &[], &bin, distro, None);
+            let with = rootless_customization_steps(&["htop".to_string()], &[], &bin, distro, None);
+            // Same number of operations: an extra creates no new steps.
             assert_eq!(
-                antes.len(),
-                com.len(),
-                "{distro:?}: um pacote extra não devia acrescentar operações"
+                without.len(),
+                with.len(),
+                "{distro:?}: an extra package should not add operations"
             );
             assert!(
-                !antes.iter().any(|o| matches!(
+                !without.iter().any(|o| matches!(
                     o,
                     CustomizeOp::RunCommand(c) if c.contains("htop")
                 )),
-                "{distro:?}: sem extras nada menciona htop"
+                "{distro:?}: without extras nothing mentions htop"
             );
         }
     }
 
-    /// Um `--extra-package` que o `pkgs.k8s.io` não tem é DEVOLVIDO para o
-    /// chamador o encaminhar para o arquivo da distro (onde um nome que não
-    /// existe dá erro), e um que ele tem (`cri-tools`) não é pedido duas vezes.
+    /// An `--extra-package` the `pkgs.k8s.io` index does not have is RETURNED to
+    /// the caller to route to the distro archive (where a name that does not
+    /// exist errors), and one it does have (`cri-tools`) is not asked for twice.
     #[test]
-    fn extras_ausentes_do_indice_k8s_sao_devolvidos_para_o_arquivo() {
+    fn extras_missing_from_the_k8s_index_are_returned_for_the_archive() {
         let index = "\
 Package: kubeadm\nVersion: 1.34.9-1.1\nArchitecture: amd64\nFilename: pool/kubeadm.deb\nSHA256: aa\n
 Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri-tools.deb\nSHA256: bb\n";
@@ -6179,7 +6181,7 @@ Package: cri-tools\nVersion: 1.34.0-1.1\nArchitecture: amd64\nFilename: pool/cri
         let mut wanted: Vec<&str> = vec!["kubeadm"];
         wanted.extend(extras.iter().map(|s| s.as_str()));
         let debs = parse_packages_index(index, "amd64", "", &wanted, &["kubeadm"]);
-        // A mesma expressão que o `download_k8s_debs` usa para decidir.
+        // The same expression `download_k8s_debs` uses to decide.
         let from_archive: Vec<String> = extras
             .iter()
             .filter(|p| !debs.iter().any(|d| d.name == **p))
