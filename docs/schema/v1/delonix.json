@@ -114,7 +114,14 @@
       "properties": {
         "cni": {
           "default": "default",
-          "description": "The pod network. `default` = the engine's own: kindnet in `mode: kind`,\na node-local bridge in `mode: vm`/`ssh`, which only serves a ONE-node\ncluster (more nodes are refused before anything is created); `none` =\ninstall nothing, and every node stays `NotReady` until you apply your\nown CNI.",
+          "description": "The pod network. `default` = the engine's own: kindnet in `mode: kind`,\na node-local bridge in `mode: vm`/`ssh`, which only serves a ONE-node\ncluster (more nodes are refused before anything is created); `none` =\ninstall nothing, and every node stays `NotReady` until you apply your\nown CNI; `cilium`/`calico`/`flannel` = a selectable profile, pinned to a\nversion and an artefact digest, installed and waited for by the\nbootstrap itself (see `cmd::net_profiles`).\n\nThe accepted set is carried into the published JSON Schema as an\n`enum`, not only enforced at runtime: before this, `cni` was a plain\n`\"type\": \"string\"` there, so an editor validated `cni: cilum` as fine\nand the operator found out from DX-1701 after writing the manifest.\nKept in step with `net_profiles::CNI_CHOICES` by\n`the_published_schema_offers_the_same_cni_values_as_the_code`.",
+          "enum": [
+            "default",
+            "none",
+            "cilium",
+            "calico",
+            "flannel"
+          ],
           "type": "string"
         },
         "controlPlane": {
@@ -142,6 +149,10 @@
           "default": "kind",
           "description": "**The discriminator**: `kind` (containers here), `vm` (golden VMs) or\n`ssh` (remote hosts already live). One Kind, three paths — the common\nfields (k8sVersion/podSubnet/cni) are shared, the specific ones live in\nthe mode's block.",
           "type": "string"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkBlock",
+          "description": "How the chosen pod network is configured. Only read when `cni` names a\nprofile that reads it — a knob set on `cni: default`/`none` is REFUSED\nrather than ignored (DX-1702), because a dropped network setting is\nindistinguishable from one that was honoured until the traffic fails."
         },
         "podSubnet": {
           "default": "10.244.0.0/16",
@@ -1573,6 +1584,84 @@
         "direction",
         "port"
       ],
+      "type": "object"
+    },
+    "NetworkBlock": {
+      "description": "`spec.network` — the configuration of the pod network named by `spec.cni`.\n\nFlat on purpose: every field here answers one question the bootstrap must\nhave an answer to before it runs, and each is validated by\n`net_profiles::validate` against the chosen profile BEFORE any machine is\ncreated. Nothing in this block has a per-profile default of its own; the\ndefaults live in the profile table, so there is exactly one place where\n\"the operator did not choose\" becomes a value.",
+      "properties": {
+        "dataplane": {
+          "default": null,
+          "description": "Encapsulation / forwarding mode. Omit for the profile's default\n(`vxlan` everywhere it exists — the only mode that asks nothing of the\nnetwork between the nodes).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "experimental": {
+          "default": false,
+          "description": "Acknowledge that the chosen profile is experimental in this release.\nWithout it, an experimental profile is refused (DX-1705) rather than\nsilently used.",
+          "type": "boolean"
+        },
+        "hubble": {
+          "default": false,
+          "description": "Install Hubble (Cilium's observability component).",
+          "type": "boolean"
+        },
+        "interface": {
+          "default": null,
+          "description": "The node interface the dataplane should use, when autodetection is\nambiguous. Omit to let the profile detect it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ipFamily": {
+          "default": null,
+          "description": "`ipv4` (the only one implemented on this path — see DX-1706).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kubeProxy": {
+          "default": null,
+          "description": "`iptables` (default), `ipvs`, or `none` — the last meaning the CNI\nreplaces kube-proxy, which changes the `kubeadm init` call itself and\ntherefore cannot be turned on after the cluster exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mtu": {
+          "default": null,
+          "description": "Pod MTU. Omit to have it computed from `nodeMtu` and the encapsulation\noverhead — an MTU that does not fit drops large packets in silence.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "multus": {
+          "default": false,
+          "description": "Install Multus as an EXTENSION over the primary CNI (secondary\ninterfaces through `NetworkAttachmentDefinition`).",
+          "type": "boolean"
+        },
+        "nodeMtu": {
+          "default": null,
+          "description": "The nodes' own MTU, when it is not 1500. Only used to compute and\nbound `mtu`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offline": {
+          "default": false,
+          "description": "Install from the local artefact cache only, never from the network.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "NetworkGatewaySpec": {

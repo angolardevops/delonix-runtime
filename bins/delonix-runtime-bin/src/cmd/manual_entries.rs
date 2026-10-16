@@ -137,6 +137,42 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["cluster create", "cluster kubeadm", "cluster apply", "get"],
     },
     Entry {
+        path: "cluster network",
+        group: "Clusters",
+        examples: &[
+            ("what pod networks exist, pinned version and support level of each", "delonix cluster network profiles"),
+            ("what this cluster is ACTUALLY running, and whether it drifted", "delonix cluster network status lab"),
+            ("verify the artefacts now, install without reach later", "delonix cluster network fetch"),
+        ],
+        see_also: &["cluster apply", "cluster kubeadm", "vm image build"],
+    },
+    Entry {
+        path: "cluster network profiles",
+        group: "Interact",
+        examples: &[
+            ("the table: versions, digests, dataplanes, support level", "delonix cluster network profiles"),
+        ],
+        see_also: &["cluster network status", "cluster apply", "cluster kubeadm"],
+    },
+    Entry {
+        path: "cluster network status",
+        group: "Interact",
+        examples: &[
+            ("the one cluster you have — no name needed", "delonix cluster network status"),
+            ("desired against observed; non-zero when they differ", "delonix cluster network status lab"),
+        ],
+        see_also: &["cluster network profiles", "cluster health", "cluster kubeconfig"],
+    },
+    Entry {
+        path: "cluster network fetch",
+        group: "Lifecycle",
+        examples: &[
+            ("every profile's artefact, verified into the local cache", "delonix cluster network fetch"),
+            ("just the one you will install", "delonix cluster network fetch --cni cilium"),
+        ],
+        see_also: &["cluster network profiles", "cluster apply", "vm image pull"],
+    },
+    Entry {
         path: "cluster health",
         group: "Interact",
         examples: &[

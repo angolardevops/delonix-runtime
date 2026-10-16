@@ -1507,10 +1507,17 @@ and you never need to set them:</p>
   proving that reading a process environ matches whole names, not prefixes.</li>
 <li><code>DELONIX_IMAGE</code>, <code>DELONIX_DISTRO</code>, <code>DELONIX_RELEASE</code>, <code>DELONIX_BUILT_BY</code>, <code>DELONIX_BASE_IMAGE</code>,
   <code>DELONIX_BASE_SHA256</code>, <code>DELONIX_K8S_VERSION</code>, <code>DELONIX_OFFLINE</code>, <code>DELONIX_NODE_EXPORTER</code>,
-  <code>DELONIX_EXTRA_PACKAGES</code> — keys of the provenance file <code>/etc/delonix-image-release</code> that
-  <code>vm image build</code> writes <strong>inside</strong> a built VM image (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>).
+  <code>DELONIX_EXTRA_PACKAGES</code>, <code>DELONIX_CNI_PLUGINS</code>, <code>DELONIX_NET_PROFILES</code> — keys of the
+  provenance file <code>/etc/delonix-image-release</code> that <code>vm image build</code> writes <strong>inside</strong> a built
+  VM image (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>).
   Read them in the guest with <code>cat /etc/delonix-image-release</code>; no process reads them.</li>
 </ul>
+<p>The last two carry the network half's provenance, so a node can answer "which
+  plugin set do I carry" and "which profiles is this image prepared for" without
+  anyone mounting the qcow2: <code>DELONIX_CNI_PLUGINS</code> is the pinned reference plugin
+  set with its digest (<code>cni_plugins::provenance</code>), <code>DELONIX_NET_PROFILES</code> is each
+  profile with the version it would install (<code>net_profiles::provenance</code>). Both are
+  <code>none</code> on a <code>--no-k8s</code> image, which has no kubelet to serve.</p>
 <hr />
 <p><strong>Next:</strong> <a href="glossary.html">Glossary</a> — the terms you meet in this repository, with their Delonix meaning and where each is explained.</p>
 <nav class="pager"><a href="cloud-native-standards.html"><span>← Previous</span>Cloud native standards, layer by layer</a><a class="next" href="glossary.html"><span>Next →</span>Glossary</a></nav>

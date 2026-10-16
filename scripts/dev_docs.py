@@ -319,6 +319,8 @@ NOT_ENV = {
     "DELONIX_OFFLINE": "key of /etc/delonix-image-release written inside a built VM image",
     "DELONIX_NODE_EXPORTER": "key of /etc/delonix-image-release written inside a built VM image",
     "DELONIX_EXTRA_PACKAGES": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_CNI_PLUGINS": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_NET_PROFILES": "key of /etc/delonix-image-release written inside a built VM image",
 }
 
 

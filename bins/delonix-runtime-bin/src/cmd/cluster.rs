@@ -25,7 +25,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{etcd, k8s_recipes, kubeadm_config, lb, vm, vmimage};
+use super::{etcd, k8s_recipes, kubeadm_config, lb, net_profiles_install, vm, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -121,6 +121,7 @@ pub(crate) const CLUSTER_SPEC_FIELDS: &[&str] = &[
     "k8sVersion",
     "kind",
     "mode",
+    "network",
     "podSubnet",
     "serviceSubnet",
     "ssh",
@@ -156,14 +157,98 @@ pub(crate) struct ClusterSpec {
     /// a node-local bridge in `mode: vm`/`ssh`, which only serves a ONE-node
     /// cluster (more nodes are refused before anything is created); `none` =
     /// install nothing, and every node stays `NotReady` until you apply your
-    /// own CNI.
+    /// own CNI; `cilium`/`calico`/`flannel` = a selectable profile, pinned to a
+    /// version and an artefact digest, installed and waited for by the
+    /// bootstrap itself (see `cmd::net_profiles`).
+    ///
+    /// The accepted set is carried into the published JSON Schema as an
+    /// `enum`, not only enforced at runtime: before this, `cni` was a plain
+    /// `"type": "string"` there, so an editor validated `cni: cilum` as fine
+    /// and the operator found out from DX-1701 after writing the manifest.
+    /// Kept in step with `net_profiles::CNI_CHOICES` by
+    /// `the_published_schema_offers_the_same_cni_values_as_the_code`.
     #[serde(default = "default_cni")]
+    #[schemars(extend("enum" = ["default", "none", "cilium", "calico", "flannel"]))]
     cni: String,
+    /// How the chosen pod network is configured. Only read when `cni` names a
+    /// profile that reads it — a knob set on `cni: default`/`none` is REFUSED
+    /// rather than ignored (DX-1702), because a dropped network setting is
+    /// indistinguishable from one that was honoured until the traffic fails.
+    #[serde(default)]
+    network: NetworkBlock,
     #[serde(default)]
     kind: KindModeSpec,
     #[serde(default)]
     vm: VmModeSpec,
 }
+
+/// `spec.network` — the configuration of the pod network named by `spec.cni`.
+///
+/// Flat on purpose: every field here answers one question the bootstrap must
+/// have an answer to before it runs, and each is validated by
+/// `net_profiles::validate` against the chosen profile BEFORE any machine is
+/// created. Nothing in this block has a per-profile default of its own; the
+/// defaults live in the profile table, so there is exactly one place where
+/// "the operator did not choose" becomes a value.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub(crate) struct NetworkBlock {
+    /// Encapsulation / forwarding mode. Omit for the profile's default
+    /// (`vxlan` everywhere it exists — the only mode that asks nothing of the
+    /// network between the nodes).
+    #[serde(default)]
+    dataplane: Option<String>,
+    /// `iptables` (default), `ipvs`, or `none` — the last meaning the CNI
+    /// replaces kube-proxy, which changes the `kubeadm init` call itself and
+    /// therefore cannot be turned on after the cluster exists.
+    #[serde(rename = "kubeProxy", default)]
+    kube_proxy: Option<String>,
+    /// Pod MTU. Omit to have it computed from `nodeMtu` and the encapsulation
+    /// overhead — an MTU that does not fit drops large packets in silence.
+    #[serde(default)]
+    mtu: Option<u32>,
+    /// The nodes' own MTU, when it is not 1500. Only used to compute and
+    /// bound `mtu`.
+    #[serde(rename = "nodeMtu", default)]
+    node_mtu: Option<u32>,
+    /// `ipv4` (the only one implemented on this path — see DX-1706).
+    #[serde(rename = "ipFamily", default)]
+    ip_family: Option<String>,
+    /// The node interface the dataplane should use, when autodetection is
+    /// ambiguous. Omit to let the profile detect it.
+    #[serde(default)]
+    interface: Option<String>,
+    /// Install Multus as an EXTENSION over the primary CNI (secondary
+    /// interfaces through `NetworkAttachmentDefinition`).
+    #[serde(default)]
+    multus: bool,
+    /// Install Hubble (Cilium's observability component).
+    #[serde(default)]
+    hubble: bool,
+    /// Acknowledge that the chosen profile is experimental in this release.
+    /// Without it, an experimental profile is refused (DX-1705) rather than
+    /// silently used.
+    #[serde(default)]
+    experimental: bool,
+    /// Install from the local artefact cache only, never from the network.
+    #[serde(default)]
+    offline: bool,
+}
+
+/// Field names accepted inside `spec.network`, for the nested unknown-field
+/// guard. Kept aligned with [`NetworkBlock`] by
+/// `net_profiles_block_fields_match_the_struct`.
+pub(crate) const CLUSTER_NETWORK_FIELDS: &[&str] = &[
+    "dataplane",
+    "experimental",
+    "hubble",
+    "interface",
+    "ipFamily",
+    "kubeProxy",
+    "mtu",
+    "multus",
+    "nodeMtu",
+    "offline",
+];
 
 /// MANUAL `Default`, mirroring EXACTLY the `#[serde(default = ...)]` above
 /// — a `ClusterSpec::default()` has to be indistinguishable from a deserialized
@@ -183,6 +268,7 @@ impl Default for ClusterSpec {
             pod_subnet: default_pod_subnet(),
             service_subnet: default_service_subnet(),
             cni: default_cni(),
+            network: NetworkBlock::default(),
             kind: KindModeSpec::default(),
             vm: VmModeSpec::default(),
         }
@@ -196,50 +282,79 @@ fn default_cni() -> String {
     "default".to_string()
 }
 
-/// Every value `spec.cni`/`--cni` may take, in every mode.
-const CNI_CHOICES: &[&str] = &["default", "none"];
+/// Every value `spec.cni`/`--cni` may take, in every mode — the profile
+/// table's own list, so the flag and the manifest cannot drift apart.
+pub(crate) use super::net_profiles::CNI_CHOICES;
 
 /// The pod-network question, answered before any machine exists (#799).
 ///
 /// Pure, and shared by `validate()` (every manifest path) and the first line
 /// of `provision_and_apply` (`cluster kubeadm`, which creates its VMs BEFORE
-/// the spec it builds reaches `validate()`). Two refusals:
+/// the spec it builds reaches `validate()`).
 ///
-/// * a value that is not a CNI this engine knows (DX-1701). It used to be
-///   accepted and then installed nothing, with every node `NotReady`.
-/// * `default` on a kubeadm cluster of more than one node (DX-6701). On that
-///   path the default CNI is a node-local bridge with nothing that routes pod
-///   traffic BETWEEN nodes, so the cluster bootstrapped, reported success and
-///   stayed `NotReady` on every node. A cross-node CNI is not implemented
-///   here; until it is, the operator says `none` and brings their own.
+/// It used to live here as two hand-written refusals over a two-value list.
+/// The list is now a table of PROFILES (`cmd::net_profiles`), and everything
+/// this function used to decide — plus the dataplane, the kube-proxy mode, the
+/// MTU, the CIDR arithmetic and the support level — is decided there, once,
+/// and unit-tested without a host. What stays here is the call and the shape
+/// of the request, because `provision_and_apply` has to ask the question
+/// before it has a `ClusterSpec` to ask it with.
 ///
-/// `mode: kind` is not refused: there `default` is kindnet, which routes
-/// between nodes.
-fn check_cni(mode: &str, cni: &str, nodes: u32) -> Result<()> {
-    if !CNI_CHOICES.contains(&cni) {
-        return Err(Error::coded(
-            1701,
-            Error::Invalid(super::po::tf(
-                "spec.cni '{cni}' is not a CNI this engine installs — use `default` (the \
-                 engine's own) or `none` (install nothing, then apply your own CNI)",
-                &[("cni", cni)],
-            )),
-        ));
+/// The two historical refusals are unchanged in meaning: an unknown value is
+/// DX-1701, and `default` on a kubeadm cluster of more than one node is
+/// DX-6701 (a node-local bridge routes nothing between nodes). `mode: kind` is
+/// not refused for `default`: there it is kindnet, which does.
+fn network_request(spec: &ClusterSpec, nodes: u32) -> super::net_profiles::NetworkRequest {
+    network_request_parts(
+        &spec.cni,
+        &spec.network,
+        &spec.pod_subnet,
+        &spec.service_subnet,
+        &spec.mode,
+        nodes,
+    )
+}
+
+/// The same request, from the loose parts, for the callers that do not have a
+/// `ClusterSpec` yet.
+///
+/// Two of them: `provision_and_apply`, which creates its VMs before the spec
+/// it builds reaches `validate()`, and the `cluster kubeadm` arm, which has to
+/// ask BEFORE it creates the cluster's own network. Both used to carry their
+/// own copy of this sixteen-field literal; a field added to `NetworkRequest`
+/// and missed in one of them is a refusal that silently stops applying on one
+/// path, so there is one builder.
+fn network_request_parts(
+    cni: &str,
+    net: &NetworkBlock,
+    pod_subnet: &str,
+    service_subnet: &str,
+    mode: &str,
+    nodes: u32,
+) -> super::net_profiles::NetworkRequest {
+    super::net_profiles::NetworkRequest {
+        cni: cni.to_string(),
+        dataplane: net.dataplane.clone(),
+        kube_proxy: net.kube_proxy.clone(),
+        mtu: net.mtu,
+        node_mtu: net.node_mtu,
+        ip_family: net.ip_family.clone(),
+        interface: net.interface.clone(),
+        multus: net.multus,
+        hubble: net.hubble,
+        experimental: net.experimental,
+        offline: net.offline,
+        pod_subnet: pod_subnet.to_string(),
+        service_subnet: service_subnet.to_string(),
+        mode: mode.to_string(),
+        nodes,
     }
-    if mode != "kind" && cni == "default" && nodes > 1 {
-        return Err(Error::coded(
-            6701,
-            Error::Unavailable(super::po::tf(
-                "a kubeadm cluster of {n} nodes cannot use the default CNI: it is a node-local \
-                 bridge with nothing that routes pod traffic between nodes, so every node would \
-                 stay NotReady (a cross-node CNI is not implemented on this path yet). Nothing \
-                 was created. Pass `--cni none` (or `spec.cni: none`) and apply your own CNI \
-                 after the bootstrap, or create a one-node cluster (`--workers 0`)",
-                &[("n", &nodes.to_string())],
-            )),
-        ));
-    }
-    Ok(())
+}
+
+/// The resolved network plan of a spec, or the refusal that stops the run
+/// before anything is created.
+fn network_plan(spec: &ClusterSpec, nodes: u32) -> Result<super::net_profiles::NetworkPlan> {
+    super::net_profiles::validate(&network_request(spec, nodes))
 }
 
 /// Refuses a cluster whose nodes did not resolve to DISTINCT addresses
@@ -305,16 +420,32 @@ fn check_distinct_node_addresses(nodes: &[(&str, &str)]) -> Result<()> {
 }
 
 /// Whether `apply_ssh` installs the default CNI itself: only for a cluster of
-/// exactly one node (`check_cni` refuses `default` above that). One function
-/// for the plan line and the step, so the two cannot disagree.
+/// exactly one node (`net_profiles::validate` refuses `default` above that).
+/// One function for the plan line and the step, so the two cannot disagree.
 fn installs_default_cni(spec: &ClusterSpec) -> bool {
     spec.cni == "default" && spec.control_plane.hosts.len() + spec.workers.hosts.len() == 1
+}
+
+/// Whether `apply_ssh` installs a selectable pod-network PROFILE
+/// (`cilium`/`calico`/`flannel`) — the step that did not exist and is the
+/// reason a multi-node kubeadm cluster could not be brought up here.
+fn installs_profile(spec: &ClusterSpec) -> bool {
+    super::net_profiles::Profile::parse(&spec.cni).is_some_and(|p| p.is_addon())
 }
 
 /// Whether `apply_ssh` waits for every node to be `Ready`. Never with
 /// `cni: none`: the operator has not applied a CNI yet, so no node can be
 /// `Ready`, and waiting would only end in the «0 nodes Ready» error.
+///
+/// A PROFILE always waits, whatever `wait_ready` says. The flag exists to
+/// preserve the historical `cluster apply -f` timing for a path that installed
+/// no CNI at all; a path that just installed one and did not look is the
+/// «reports success, does nothing» failure in its purest form — the install is
+/// only finished when the nodes are `Ready`.
 fn waits_for_ready(spec: &ClusterSpec, wait_ready: bool) -> bool {
+    if installs_profile(spec) {
+        return true;
+    }
     wait_ready && spec.cni != "none"
 }
 
@@ -333,6 +464,19 @@ fn bootstrap_plan(spec: &ClusterSpec, wait_ready: bool) -> Vec<String> {
     plan.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
     if installs_default_cni(spec) {
         plan.push(super::po::t("Installing the default CNI (bridge, single node)").to_string());
+    }
+    // Right after `kubeadm init` and BEFORE the joins, which is what the
+    // kubeadm documentation asks for: a node that joins a cluster with a pod
+    // network already installed gets the agent scheduled onto it, instead of
+    // sitting `NotReady` until something notices.
+    if installs_profile(spec) {
+        plan.push(super::po::tf(
+            "Installing the {cni} pod network",
+            &[("cni", &spec.cni)],
+        ));
+        if spec.network.multus {
+            plan.push(super::po::t("Installing Multus").to_string());
+        }
     }
     if spec.control_plane.hosts.len() > 1 {
         plan.push(super::po::tf(
@@ -587,14 +731,278 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             )));
         }
     }
-    check_cni(
-        &spec.mode,
-        &spec.cni,
+    // The whole network question at once — profile, support level, dataplane,
+    // kube-proxy mode, MTU and the CIDR arithmetic — before a machine exists.
+    // The plan is recomputed (not threaded through) by the paths that need it;
+    // it is pure and cheap, and one source of truth beats one cached copy.
+    let plan = network_plan(
+        spec,
         spec.control_plane
             .count()
             .saturating_add(spec.workers.count()),
     )?;
+    // And against the networks this host already has. Done here rather than
+    // inside `net_profiles` so that module stays pure: reading the engine's
+    // own networks is I/O, and a validation that cannot run offline is a
+    // validation that gets skipped.
+    check_env_overlap(&plan)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `delonix cluster network …` — the operation side
+// ---------------------------------------------------------------------------
+
+fn cmd_network(cmd: NetworkCmd) -> Result<()> {
+    use super::net_profiles::{Profile, Support};
+    match cmd {
+        NetworkCmd::Profiles => {
+            for p in [Profile::Cilium, Profile::Calico, Profile::Flannel] {
+                let a = p.artefact();
+                println!("{}", p.name());
+                // The label column is a WIDTH, not spaces typed into the
+                // literal: `no_message_carries_the_indentation_of_its_source_line`
+                // refuses a run of six or more spaces baked into a message,
+                // because alignment done that way drifts the moment a label
+                // changes length and cannot be seen in a diff.
+                println!("  {:<13}{}", "version", p.version());
+                println!(
+                    "  {:<13}{}",
+                    "support",
+                    match p.support() {
+                        Support::Supported => "supported".to_string(),
+                        Support::Experimental(_) => "EXPERIMENTAL".to_string(),
+                    }
+                );
+                if let Support::Experimental(why) = p.support() {
+                    println!("  {:<13}{why}", "why");
+                }
+                // The default is MARKED, not left to be inferred from the
+                // order: an operator reading a list cannot tell which one they
+                // get by omission, and the one they get by omission is the one
+                // most clusters will run.
+                println!(
+                    "  dataplanes   {}",
+                    p.dataplanes()
+                        .iter()
+                        .map(|d| if *d == p.default_dataplane() {
+                            format!("{d} (default)")
+                        } else {
+                            (*d).to_string()
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                println!(
+                    "  kube-proxy   {} (default: {})",
+                    p.kube_proxy_modes().join(", "),
+                    p.kube_proxy_modes().first().copied().unwrap_or("")
+                );
+                // What the NODE has to carry for this profile's default
+                // dataplane — the thing the golden image persists and the
+                // preflight verifies.
+                let mods = p.required_modules(p.default_dataplane());
+                if !mods.is_empty() {
+                    println!("  {:<13}{}", "modules", mods.join(", "));
+                }
+                println!(
+                    "  NetworkPolicy {}",
+                    if p.enforces_network_policy() {
+                        "enforced by this profile"
+                    } else {
+                        "NOT enforced — a NetworkPolicy here is accepted by the apiserver and \
+                         enforced by nobody"
+                    }
+                );
+                println!("  {:<13}{}", "plugins", p.required_plugins().join(", "));
+                if let Some(a) = a {
+                    println!("  {:<13}{}", "artefact", a.url);
+                    println!("  {:<13}{}", "sha256", a.sha256);
+                }
+                println!();
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "multus {version} is available as an EXTENSION over any of the above \
+                     (`spec.network.multus: true`), never as a primary pod network.",
+                    &[("version", super::net_profiles::MULTUS_VERSION)]
+                )
+            );
+            Ok(())
+        }
+        NetworkCmd::Status { name } => cmd_network_status(name),
+        NetworkCmd::Fetch { cni } => {
+            let wanted: Vec<super::net_profiles::Artefact> = match cni.as_deref() {
+                Some("multus") => vec![super::net_profiles::multus_artefact()],
+                Some(other) => {
+                    let p = Profile::parse(other)
+                        .and_then(|p| p.artefact())
+                        .ok_or_else(|| {
+                            Error::Invalid(super::po::tf(
+                                "'{cni}' is not a profile with an artefact to fetch",
+                                &[("cni", other)],
+                            ))
+                        })?;
+                    vec![p]
+                }
+                None => [Profile::Cilium, Profile::Calico, Profile::Flannel]
+                    .iter()
+                    .filter_map(|p| p.artefact())
+                    .chain(std::iter::once(super::net_profiles::multus_artefact()))
+                    .collect(),
+            };
+            for a in &wanted {
+                // `offline: false` — this command exists precisely to be the
+                // one run WITH reach.
+                let path = net_profiles_install::fetch_artefact(a, false)?;
+                println!("{}  {}", &a.sha256[..16], path.display());
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "{n} artefact(s) verified in {dir} — copy that directory to the machine that \
+                     will bootstrap, and pass `--cni-offline` (or `spec.network.offline: true`)",
+                    &[
+                        ("n", &wanted.len().to_string()),
+                        (
+                            "dir",
+                            &net_profiles_install::cache_dir().display().to_string()
+                        ),
+                    ]
+                )
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Desired vs observed, and a non-zero exit when they differ.
+///
+/// The desired side is this engine's own record; the observed side is the live
+/// cluster. Reading only one of them is how a status command starts agreeing
+/// with itself: the record says what we meant, and a CNI an operator applied
+/// by hand is invisible to it.
+fn cmd_network_status(name: Option<String>) -> Result<()> {
+    let name = resolve_kubeconfig_name(name)?;
+    let record = net_profiles_install::read_record(&name);
+    // The same cached file `cluster kubeconfig` prints, derived the same way
+    // (`<root>/clusters/<name>-kubeconfig.yaml`) — both modes write there.
+    let kubeconfig = state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    if !kubeconfig.exists() {
+        return Err(Error::NotFound(super::po::tf(
+            "no cached kubeconfig for cluster \"{name}\" — nothing to ask",
+            &[("name", &name)],
+        )));
+    }
+    // Observed through the cached kubeconfig, with the system `kubectl`: the
+    // same boundary `drain`/`uncordon` already use, so this works for every
+    // cluster family rather than only the ones with a container to exec into.
+    let observed = observed_profile_via_kubectl(&kubeconfig);
+
+    match &record {
+        Some(r) => {
+            println!("desired   {} {}", r.cni, r.version);
+            println!("  dataplane   {}", r.dataplane);
+            println!("  kube-proxy  {}", r.kube_proxy);
+            println!("  {:<12}{}", "mtu", r.mtu);
+            println!("  pod CIDR    {}", r.pod_subnet);
+            println!("  artefact    sha256:{}", r.artefact_sha256);
+            if r.multus {
+                println!("  {:<12}installed", "multus");
+            }
+            if r.hubble {
+                println!("  {:<12}installed", "hubble");
+            }
+        }
+        None => println!(
+            "desired   {}",
+            super::po::t(
+                "unknown — this engine has no record of installing a pod network on this \
+                 cluster (it was created with `cni: none`, by an older release, or by hand)"
+            )
+        ),
+    }
+    println!(
+        "observed  {}",
+        if observed.is_empty() {
+            super::po::t("none — no pod-network agent DaemonSet found in the cluster").to_string()
+        } else {
+            observed.clone()
+        }
+    );
+
+    // The one thing this command exists to catch.
+    let desired = record.as_ref().map(|r| r.cni.clone()).unwrap_or_default();
+    if !desired.is_empty() && !observed.is_empty() && desired != observed {
+        return Err(Error::coded(
+            6703,
+            Error::Unavailable(super::po::tf(
+                "drift: this engine installed '{desired}' and the cluster is running \
+                 '{observed}'. Nothing was changed. Either the pod network was replaced outside \
+                 this engine, or the record belongs to a different cluster of the same name",
+                &[("desired", &desired), ("observed", &observed)],
+            )),
+        ));
+    }
+    if !desired.is_empty() && observed.is_empty() {
+        return Err(Error::coded(
+            6704,
+            Error::Unavailable(super::po::tf(
+                "drift: this engine installed '{desired}' and the cluster has no pod-network \
+                 agent at all — the DaemonSet is gone. Pods will not get addresses. Re-run \
+                 `delonix cluster apply` with the same manifest: the install path is idempotent \
+                 and will reinstate it",
+                &[("desired", &desired)],
+            )),
+        ));
+    }
+    Ok(())
+}
+
+/// Which pod network the live cluster runs, asked through the cached
+/// kubeconfig rather than over SSH — so it answers for a kind-mode cluster
+/// too, and needs no reachable control-plane host.
+fn observed_profile_via_kubectl(kubeconfig: &std::path::Path) -> String {
+    let out = Command::new("kubectl")
+        .env("KUBECONFIG", kubeconfig)
+        .args(["get", "daemonset", "--all-namespaces", "-o", "name"])
+        .output();
+    let text = match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => return String::new(),
+    };
+    for (needle, name) in [
+        ("cilium", "cilium"),
+        ("calico-node", "calico"),
+        ("kube-flannel", "flannel"),
+        ("kindnet", "default"),
+    ] {
+        if text.contains(needle) {
+            return name.to_string();
+        }
+    }
+    String::new()
+}
+
+/// Refuses a cluster CIDR that overlaps a network this host already uses.
+///
+/// Best-effort by design: the list of known networks is what the engine can
+/// read without asking anyone (its own declared networks). A network it cannot
+/// enumerate is not a reason to refuse the cluster — so a failure to read is
+/// skipped, never turned into a false conflict.
+fn check_env_overlap(plan: &super::net_profiles::NetworkPlan) -> Result<()> {
+    let mut known: Vec<(String, String)> = Vec::new();
+    if let Ok(store) = delonix_sdn::NetworkStore::open(state_root()) {
+        if let Ok(nets) = store.list() {
+            for n in nets {
+                known.push((format!("network \"{}\"", n.name), n.subnet));
+            }
+        }
+    }
+    super::net_profiles::check_env_overlap(plan, &known)
 }
 
 fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
@@ -836,9 +1244,50 @@ pub enum ClusterCmd {
         /// Pod network. `default` = the engine's node-local bridge, which only
         /// serves a ONE-node cluster: with more nodes it is refused before any VM
         /// is created. `none` = install nothing; every node stays NotReady until
-        /// you apply your own CNI (Cilium, Calico...).
-        #[arg(long, default_value = "default", value_parser = ["default", "none"])]
+        /// you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable
+        /// profile, pinned to a version and an artefact digest, installed and
+        /// waited for by the bootstrap itself (`delonix cluster network
+        /// profiles` lists them with their support level).
+        #[arg(long, default_value = "default", value_parser = CNI_CHOICES.to_vec())]
         cni: String,
+        /// Encapsulation / forwarding mode of the chosen profile. Omit for its
+        /// default (`vxlan`, the only mode that asks nothing of the network
+        /// between the nodes). `spec.network.dataplane` in a manifest.
+        #[arg(long = "cni-dataplane")]
+        cni_dataplane: Option<String>,
+        /// `iptables` (default), `ipvs`, or `none` — the last meaning the CNI
+        /// replaces kube-proxy, which changes the `kubeadm init` call itself
+        /// and so cannot be turned on later. `spec.network.kubeProxy`.
+        #[arg(long = "kube-proxy")]
+        kube_proxy: Option<String>,
+        /// Pod MTU. Omit to compute it from the node MTU and the encapsulation
+        /// overhead — an MTU that does not fit drops large packets in silence.
+        #[arg(long = "cni-mtu")]
+        cni_mtu: Option<u32>,
+        /// The nodes' own MTU, when it is not 1500. Only used to compute and
+        /// bound `--cni-mtu`.
+        #[arg(long = "node-mtu")]
+        node_mtu: Option<u32>,
+        /// Node interface the dataplane should use, when autodetection is
+        /// ambiguous. Omit to let the profile detect it.
+        #[arg(long = "cni-interface")]
+        cni_interface: Option<String>,
+        /// Also install Multus, as an EXTENSION over the primary CNI
+        /// (secondary pod interfaces through `NetworkAttachmentDefinition`).
+        #[arg(long)]
+        multus: bool,
+        /// Also install Hubble (Cilium's observability component).
+        #[arg(long)]
+        hubble: bool,
+        /// Acknowledge that the chosen profile is experimental in this
+        /// release. Without it, an experimental profile is REFUSED (DX-1705)
+        /// rather than silently used.
+        #[arg(long = "experimental-cni")]
+        experimental_cni: bool,
+        /// Install the pod network from the local artefact cache only, never
+        /// from the network. Populate it with `delonix cluster network fetch`.
+        #[arg(long = "cni-offline")]
+        cni_offline: bool,
         /// Seconds to wait for each VM to become reachable over SSH.
         #[arg(long, default_value_t = 300)]
         boot_timeout: u64,
@@ -883,6 +1332,13 @@ pub enum ClusterCmd {
         /// Cluster name. Omit when there is only one.
         name: Option<String>,
     },
+    /// Inspect and prepare the pod-network profiles.
+    ///
+    /// What exists and at what support level, what a given cluster is
+    /// ACTUALLY running (and whether that drifted from what was asked), and a
+    /// verified pre-fetch of the install artefacts for an offline bootstrap.
+    #[command(subcommand)]
+    Network(NetworkCmd),
     /// Cordon a node and evict its pods.
     ///
     /// The manual step before touching a control-plane/worker host (upgrade,
@@ -969,6 +1425,50 @@ pub enum ClusterCmd {
         /// Snapshot file written by `cluster backup`.
         #[arg(long, value_hint = clap::ValueHint::FilePath)]
         from: PathBuf,
+    },
+}
+
+/// `delonix cluster network …` — the OPERATION side of a pod-network profile.
+///
+/// Three questions an operator has after a cluster exists, none of which had
+/// an answer before: what can I install, what is this cluster actually
+/// running, and can I install it without network reach.
+#[derive(Subcommand)]
+pub enum NetworkCmd {
+    /// List the pod-network profiles, their pinned versions and their support
+    /// level.
+    ///
+    /// Prints what this binary would install, not what a web page says: the
+    /// version, the artefact digest, the dataplanes rendered, the kube-proxy
+    /// modes, whether the profile enforces `NetworkPolicy`, and — for an
+    /// experimental one — the reason it is experimental.
+    Profiles,
+    /// What pod network a cluster is ACTUALLY running, and whether it is what
+    /// was asked for.
+    ///
+    /// Reads both sides: the record this engine wrote when it installed
+    /// (desired) and the live cluster's own DaemonSets (observed). A
+    /// divergence between them is reported as one, and exits non-zero — a
+    /// status that returns 0 over a cluster running a different CNI than its
+    /// manifest declares is the dishonest reporting this repo removes
+    /// elsewhere.
+    Status {
+        /// Cluster name. Omit when there is only one cached.
+        #[arg(add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
+        name: Option<String>,
+    },
+    /// Download and verify the install artefacts into the local cache, for an
+    /// offline install later.
+    ///
+    /// Run it on a machine with reach, then copy `<root>/net-profiles/` to the
+    /// machine that will bootstrap the cluster and pass `--cni-offline`. Every
+    /// artefact is verified against the digest this release pins; a mismatch
+    /// fails and caches nothing.
+    Fetch {
+        /// Which profile's artefacts. Omit for every profile this release
+        /// ships, plus Multus.
+        #[arg(long, value_parser = ["cilium", "calico", "flannel", "multus"])]
+        cni: Option<String>,
     },
 }
 
@@ -1122,6 +1622,15 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             pod_subnet,
             service_subnet,
             cni,
+            cni_dataplane,
+            kube_proxy,
+            cni_mtu,
+            node_mtu,
+            cni_interface,
+            multus,
+            hubble,
+            experimental_cni,
+            cni_offline,
             boot_timeout,
             copy_kubeconfig,
             etcd_cluster,
@@ -1131,14 +1640,43 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 Some(n) => n,
                 None => random_kubeadm_cluster_name(&state_root())?,
             };
+            // The flags and `spec.network` are the SAME block, built here
+            // once — so a value the manifest accepts cannot be a value the
+            // flag silently drops. Built BEFORE the refusal below, because
+            // the refusal needs it.
+            let net_block = NetworkBlock {
+                dataplane: cni_dataplane,
+                kube_proxy,
+                mtu: cni_mtu,
+                node_mtu,
+                ip_family: None,
+                interface: cni_interface,
+                multus,
+                hubble,
+                experimental: experimental_cni,
+                offline: cni_offline,
+            };
             // BUG FIXED HERE, found by running it: the pod-network refusal
-            // below promises "Nothing was created", and creating the cluster's
+            // promises "Nothing was created", and creating the cluster's own
             // network before it made that promise FALSE — a refused
             // `cluster kubeadm` left a network behind, and leaked one more on
-            // every retry. `check_cni` is pure and `provision_and_apply` calls
-            // it again for its other callers, so asking here costs nothing and
-            // keeps the guarantee the message makes.
-            check_cni("vm", &cni, control_plane.saturating_add(workers))?;
+            // every retry.
+            //
+            // It asks the WHOLE network question and not just the CNI name,
+            // because every part of it can refuse: the dataplane, the
+            // kube-proxy mode, the MTU against the encapsulation, the CIDR
+            // arithmetic, the support level. `net_profiles::validate` is pure
+            // and `provision_and_apply` runs it again for its other callers,
+            // so asking here costs nothing and keeps the promise the message
+            // makes.
+            super::net_profiles::validate(&network_request_parts(
+                &cni,
+                &net_block,
+                &pod_subnet,
+                &service_subnet,
+                "vm",
+                control_plane.saturating_add(workers),
+            ))?;
             // `--network` omitted: the cluster gets its own, the same way kind
             // mode has always given each cluster one (`cluster_net`). Resolved
             // BEFORE `name` moves into the args below.
@@ -1159,12 +1697,14 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 pod_subnet,
                 service_subnet,
                 cni,
+                net_block,
                 boot_timeout,
                 copy_kubeconfig,
                 etcd_cluster,
                 cri_bin,
             })
         }
+        ClusterCmd::Network(cmd) => cmd_network(cmd),
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
         ClusterCmd::Health { name } => cmd_health(name.as_deref()),
         ClusterCmd::Drain {
@@ -1735,6 +2275,12 @@ pub fn apply(docs: &[ManifestDoc], cri_bin: Option<&std::path::Path>) -> Result<
     for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
+        // The top-level guard only ever looks at the spec's own keys, so a
+        // typo INSIDE `spec.network` (`kubeproxy:` for `kubeProxy:`) was
+        // swallowed and simply became "the default" — a network setting that
+        // reads as honoured and was not, which is the whole class of bug this
+        // block exists to stop.
+        manifest::warn_unknown_fields_in(doc, "network", CLUSTER_NETWORK_FIELDS);
         validate(&spec)?;
         // `cluster apply` (manifest-driven) keeps the historical timing: no
         // wait for node Ready. `cluster kubeadm --copy-kubeconfig` is the
@@ -1827,6 +2373,18 @@ fn apply_vm(
         pod_subnet: spec.pod_subnet.clone(),
         service_subnet: spec.service_subnet.clone(),
         cni: spec.cni.clone(),
+        net_block: NetworkBlock {
+            dataplane: spec.network.dataplane.clone(),
+            kube_proxy: spec.network.kube_proxy.clone(),
+            mtu: spec.network.mtu,
+            node_mtu: spec.network.node_mtu,
+            ip_family: spec.network.ip_family.clone(),
+            interface: spec.network.interface.clone(),
+            multus: spec.network.multus,
+            hubble: spec.network.hubble,
+            experimental: spec.network.experimental,
+            offline: spec.network.offline,
+        },
         boot_timeout,
         copy_kubeconfig: wait_ready,
         // `mode: vm` (manifest-driven) doesn't auto-provision a dedicated etcd
@@ -1865,6 +2423,12 @@ fn apply_ssh(
     let cli_bin = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .map_err(|e| Error::Invalid(format!("resolving this CLI's own binary path: {e}")))?;
+    // The node preflight, for a host whose golden predates it. Best-effort on
+    // purpose: a `delonix` that cannot produce the script must not refuse to
+    // bootstrap a node that already carries one — `run_node_preflight` is
+    // where the "neither" case is reported, and it reports it instead of
+    // passing in silence.
+    let preflight_script = vmimage::workspace_dist_file("delonix-node-preflight.sh").ok();
 
     let all_hosts: Vec<&HostSpec> = spec
         .control_plane
@@ -1915,19 +2479,15 @@ fn apply_ssh(
             .map(|h| {
                 let target = target_for(h, &spec.ssh);
                 let label = h.label();
-                let cri_bin = &cri_bin;
-                let cri_service = &cri_service;
-                let cli_bin = &cli_bin;
-                scope.spawn(move || {
-                    prepare_host(
-                        &target,
-                        &label,
-                        spec.k8s_version.as_deref(),
-                        cri_bin,
-                        cri_service,
-                        cli_bin,
-                    )
-                })
+                let prep = HostPrep {
+                    k8s_version: spec.k8s_version.as_deref(),
+                    cri_bin: &cri_bin,
+                    cri_service: &cri_service,
+                    cli_bin: &cli_bin,
+                    profile: &spec.cni,
+                    preflight_script: preflight_script.as_deref(),
+                };
+                scope.spawn(move || prepare_host(&target, &label, &prep))
             })
             .collect();
         handles
@@ -1994,9 +2554,9 @@ fn apply_ssh(
     // bridge CNI gives that one node working pod networking (the same
     // conflist delonix-cri's own root-CNI path uses for every pod sandbox —
     // ADR-0074), but has nothing that routes pod traffic BETWEEN nodes. A
-    // multi-node cluster with `cni: default` never gets here: `check_cni`
-    // refuses it before any machine is created (#799), and `cni: none` is
-    // the operator saying they bring their own.
+    // multi-node cluster with `cni: default` never gets here:
+    // `net_profiles::validate` refuses it before any machine is created
+    // (#799), and `cni: none` is the operator saying they bring their own.
     if installs_default_cni(spec) {
         p.step(
             super::po::t("Installing the default CNI (bridge, single node)"),
@@ -2004,6 +2564,15 @@ fn apply_ssh(
         );
         ensure_single_node_cni(&cp1_target, &spec.pod_subnet)?;
         p.ok();
+    }
+
+    // The selectable profiles — the step that closes the gap above for more
+    // than one node. HERE, between `init` and the joins, on purpose: a node
+    // that joins a cluster whose pod network is already installed gets the
+    // agent scheduled onto it as part of joining, instead of sitting
+    // `NotReady` until something notices.
+    if installs_profile(spec) {
+        install_network_profile(&cp1_target, name, spec, &endpoint, &mut p)?;
     }
 
     if spec.control_plane.hosts.len() > 1 {
@@ -2043,8 +2612,43 @@ fn apply_ssh(
     // never checked (the historical `cluster apply -f` timing, which passes
     // `wait_ready: false` on purpose — see `apply()`'s own comment); `Some`
     // = checked, with the true/false from `wait_for_cluster_ready` itself.
-    let confirmed_ready = if waits_for_ready(spec, wait_ready) {
-        let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
+    let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
+    let confirmed_ready = if installs_profile(spec) {
+        // A profile waits on BOTH halves — its own agent on every node and
+        // every node `Ready` — and a timeout is an ERROR, not a warning. The
+        // engine installed this pod network; "I applied it and did not look"
+        // is not a report it is allowed to make. The deadline is longer than
+        // the historical 180s because the first thing a fresh agent does is
+        // pull its own image on every node.
+        let profile = super::net_profiles::Profile::parse(&spec.cni)
+            .unwrap_or(super::net_profiles::Profile::None);
+        p.step(
+            &super::po::tf(
+                "Waiting for the {cni} pod network and all nodes to be Ready",
+                &[("cni", &spec.cni)],
+            ),
+            "⏳",
+        );
+        let r = net_profiles_install::wait_until_ready(
+            &cp1_target,
+            name,
+            profile,
+            expected as u32,
+            Duration::from_secs(420),
+        )?;
+        p.ok();
+        output::info(&super::po::tf(
+            "{cni} agent Ready on {ar}/{ad} node(s); {nr}/{nt} node(s) Ready",
+            &[
+                ("cni", &spec.cni),
+                ("ar", &r.agents_ready.to_string()),
+                ("ad", &r.agents_desired.to_string()),
+                ("nr", &r.nodes_ready.to_string()),
+                ("nt", &r.nodes_total.to_string()),
+            ],
+        ));
+        Some(true)
+    } else if waits_for_ready(spec, wait_ready) {
         p.step(super::po::t("Waiting for all nodes to be Ready"), "⏳");
         let ready = wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
         p.ok();
@@ -2207,6 +2811,108 @@ fn ensure_single_node_cni(cp1: &SshTarget, pod_subnet: &str) -> Result<()> {
     Ok(())
 }
 
+/// Installs the selected pod-network PROFILE on a freshly `kubeadm init`-ed
+/// control-plane, and records what was installed.
+///
+/// Order, and why each step is where it is:
+///
+/// 1. **Refuse a profile change first.** A cluster that already runs another
+///    CNI is left exactly as it is (DX-6703) — before an artefact is fetched,
+///    before a byte is sent. There is no in-place migration here, and
+///    discovering that halfway through would leave two owners of the pod
+///    network.
+/// 2. **A re-run of the SAME profile is allowed through**, because
+///    `kubectl apply` is idempotent and re-applying is how a half-finished
+///    install is resumed. This is the idempotency this step offers: not a
+///    `check` that skips, but an apply that converges.
+/// 3. **Fetch and verify, then render, then apply.** The artefact is proven
+///    against its pinned digest on the HOST (`fetch_artefact`), so nothing
+///    unverified ever reaches a node.
+/// 4. **Record last.** The record is what this engine MEANT; it is written
+///    after the apply so a failed apply does not leave a record claiming
+///    success. The live cluster is always the authority
+///    (`observed_profile`), and the two together are what `cluster network
+///    status` compares.
+///
+/// The control-plane taint is removed only for a single-node cluster, mirroring
+/// `ensure_single_node_cni`: with workers present, a tainted control-plane is
+/// the correct, intended topology.
+fn install_network_profile(
+    cp1: &SshTarget,
+    name: &str,
+    spec: &ClusterSpec,
+    endpoint: &str,
+    p: &mut output::Progress,
+) -> Result<()> {
+    let nodes = spec
+        .control_plane
+        .count()
+        .saturating_add(spec.workers.count());
+    let plan = network_plan(spec, nodes)?;
+    let profile = plan.profile;
+
+    // (1) the cluster's own answer wins over our manifest.
+    let installed = net_profiles_install::observed_profile(cp1);
+    super::net_profiles::check_profile_change(&installed, profile)?;
+
+    p.step(
+        &super::po::tf(
+            "Installing the {cni} pod network",
+            &[("cni", profile.name())],
+        ),
+        "🔌",
+    );
+    let artefact = profile
+        .artefact()
+        .ok_or_else(|| Error::Invalid("profile has no artefact".to_string()))?;
+    let path = net_profiles_install::fetch_artefact(&artefact, plan.offline)?;
+    let mut yaml = net_profiles_install::render(&plan, &path)?;
+    // Cilium's kube-proxy replacement cannot reach the apiserver through a
+    // Service it is replacing, so it has to be told the real endpoint. That
+    // is a CLUSTER fact, not a profile fact, which is why it is appended here
+    // and not inside the (host-agnostic) value list.
+    if profile == super::net_profiles::Profile::Cilium && plan.skips_kube_proxy() {
+        yaml = net_profiles_install::with_api_server(&yaml, endpoint);
+    }
+    net_profiles_install::apply_manifest(cp1, profile.name(), &yaml)?;
+    if nodes == 1 {
+        remote::ssh_run(
+            cp1,
+            "KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+             node-role.kubernetes.io/control-plane- >/dev/null 2>&1; true",
+        )
+        .map_err(|e| Error::Invalid(format!("removing the control-plane taint: {e}")))?;
+    }
+    p.ok();
+
+    if plan.multus {
+        p.step(super::po::t("Installing Multus"), "🧩");
+        let m = super::net_profiles::multus_artefact();
+        let mpath = net_profiles_install::fetch_artefact(&m, plan.offline)?;
+        let myaml = std::fs::read_to_string(&mpath)
+            .map_err(|e| Error::Invalid(format!("reading the Multus manifest: {e}")))?;
+        net_profiles_install::apply_manifest(cp1, "multus", &myaml)?;
+        p.ok();
+    }
+
+    net_profiles_install::write_record(
+        name,
+        &net_profiles_install::ProfileRecord {
+            cni: profile.name().to_string(),
+            version: profile.version().to_string(),
+            dataplane: plan.dataplane.to_string(),
+            kube_proxy: plan.kube_proxy.to_string(),
+            mtu: plan.mtu,
+            pod_subnet: net_profiles_install::cidr_text(plan.pod_subnet),
+            service_subnet: net_profiles_install::cidr_text(plan.service_subnet),
+            multus: plan.multus,
+            hubble: plan.hubble,
+            artefact_sha256: artefact.sha256.to_string(),
+        },
+    )?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // `delonix cluster kubeadm` — provisions VMs + calls `apply_one`
 // ---------------------------------------------------------------------------
@@ -2223,8 +2929,15 @@ struct ProvisionArgs {
     k8s_version: Option<String>,
     pod_subnet: String,
     service_subnet: String,
-    /// `--cni`/`spec.cni`, checked by `check_cni` before any VM is created.
+    /// `--cni`/`spec.cni`, validated by `net_profiles::validate` before any VM
+    /// is created.
     cni: String,
+    /// The `spec.network` equivalents of the `--cni-*` flags. Named `net_block`
+    /// and not `network` because `network` here is already the name of the VM
+    /// network the nodes are attached to — two different networks, and the
+    /// collision is exactly the kind that produces a cluster wired to the
+    /// wrong one.
+    net_block: NetworkBlock,
     boot_timeout: u64,
     copy_kubeconfig: bool,
     /// `None`/`Some(0)` = stacked etcd (default, unchanged). `Some(n >= 1)` =
@@ -2832,11 +3545,27 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     // first VM is created: the spec this function builds reaches `validate()`
     // only after all of that, and a refusal there would leave the VMs behind.
     // The etcd and load-balancer VMs are not Kubernetes nodes.
-    check_cni(
-        "vm",
+    // The WHOLE network question, not just the CNI name: the dataplane, the
+    // kube-proxy mode, the MTU against the encapsulation, the CIDR
+    // arithmetic, the support level. `cluster kubeadm` is the path where this
+    // matters most — it is the one that creates machines, so a refusal that
+    // arrived after `validate()` would arrive after the VMs existed.
+    let plan = super::net_profiles::validate(&network_request_parts(
         &args.cni,
+        &args.net_block,
+        &args.pod_subnet,
+        &args.service_subnet,
+        "vm",
         args.control_plane.saturating_add(args.workers),
-    )?;
+    ))?;
+    check_env_overlap(&plan)?;
+    // And, for a profile, that the artefact can actually be obtained — BEFORE
+    // the VMs exist. Discovering an unreachable publisher (or an empty
+    // offline cache) after five machines were created is the failure that
+    // leaves the operator with the cleanup.
+    if let Some(a) = plan.profile.artefact() {
+        net_profiles_install::fetch_artefact(&a, plan.offline)?;
+    }
     let base = state_root();
     let vm_store = VmImageStore::open(&base)?;
     // The whole "resolve, and download the official one if nothing is local"
@@ -3029,6 +3758,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         pod_subnet: args.pod_subnet,
         service_subnet: args.service_subnet,
         cni: args.cni,
+        network: args.net_block,
         kind: KindModeSpec::default(),
         vm: VmModeSpec::default(),
     };
@@ -3094,18 +3824,29 @@ fn create_and_wait(
 /// owns the visible line now (`apply_ssh`'s "Preparing N host(s) 🔧") — but
 /// it still tags every error, so a failure is self-contained (which host,
 /// which recipe) instead of relying on a scrolled-away "applying..." line.
-fn prepare_host(
-    target: &SshTarget,
-    label: &str,
-    k8s_version: Option<&str>,
-    cri_bin: &std::path::Path,
-    cri_service: &std::path::Path,
-    cli_bin: &std::path::Path,
-) -> Result<()> {
+/// What preparing a node needs. A struct and not eight positional arguments:
+/// three of them are `&Path` to different binaries and two are the network
+/// profile, so a call that swapped `cri_bin` and `cli_bin` — or `cri_service`
+/// and the preflight — would compile and install the wrong file.
+pub(crate) struct HostPrep<'a> {
+    /// What the caller ASKED for — `None` when the manifest said nothing.
+    /// Resolved to a concrete version inside `prepare_host`, never here, so
+    /// there is one resolution and not one per field reader.
+    pub k8s_version: Option<&'a str>,
+    pub cri_bin: &'a std::path::Path,
+    pub cri_service: &'a std::path::Path,
+    pub cli_bin: &'a std::path::Path,
+    /// `spec.cni` — which profile's prerequisites the preflight measures.
+    pub profile: &'a str,
+    /// The preflight to push when the node's golden predates it.
+    pub preflight_script: Option<&'a std::path::Path>,
+}
+
+fn prepare_host(target: &SshTarget, label: &str, prep: &HostPrep) -> Result<()> {
     // Same single resolution the image build uses: a manifest with no
     // `spec.k8sVersion` used to configure a `stable:/v1.31` apt repo on hosts
     // that `resolve_vm_image` had meanwhile defaulted to the 1.36 golden.
-    let k8s_version = k8s_recipes::resolve_k8s_version(k8s_version);
+    let k8s_version = k8s_recipes::resolve_k8s_version(prep.k8s_version);
     for r in k8s_recipes::k8s_host_recipes(&k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
             continue;
@@ -3114,9 +3855,129 @@ fn prepare_host(
             .map_err(|e| Error::Invalid(format!("[{label}] {}: {e}", r.name)))?;
     }
 
-    install_cri(target, label, cri_bin, cri_service)?;
-    install_cli(target, label, cli_bin)?;
+    install_cri(target, label, prep.cri_bin, prep.cri_service)?;
+    install_cli(target, label, prep.cli_bin)?;
+    run_node_preflight(target, label, prep.profile, prep.preflight_script)?;
     Ok(())
+}
+
+/// Where the golden image installs the node preflight, and where
+/// `prepare_host` looks for it. One constant, asserted by
+/// `vmimage::the_preflight_lands_as_a_command` against the install step, so
+/// the two cannot drift into "preflight not found" on every node.
+pub(crate) const REMOTE_NODE_PREFLIGHT: &str = "/usr/local/bin/delonix-node-preflight";
+
+/// Runs the node preflight for `profile`, AFTER the recipes have been applied
+/// and the CRI is up — so it measures the node the bootstrap actually built,
+/// not the one it inherited.
+///
+/// Why it is here and not only in the image: the image can persist a module
+/// list and a sysctl file, but it cannot know whether the kernel of the
+/// machine it was cloned onto has `vxlan`, whether systemd mounted bpffs, or
+/// whether the CRI came up. Those are properties of a RUNNING node, and the
+/// alternative to checking them is `kubeadm init` failing later with a message
+/// about containerd, or — worse — a cluster that comes up and routes nothing
+/// between nodes.
+///
+/// A host that does not carry the script yet (an older golden) gets it pushed:
+/// a node prepared by this version is measured by this version, rather than
+/// skipping the check because the image predates it. That is the same class of
+/// fix as `install_cli`'s own (a golden bakes a binary from the day it was
+/// built, and the bootstrap must not inherit it silently).
+fn run_node_preflight(
+    target: &SshTarget,
+    label: &str,
+    profile: &str,
+    script: Option<&std::path::Path>,
+) -> Result<()> {
+    if !remote::ssh_check(target, &format!("test -x {REMOTE_NODE_PREFLIGHT}")) {
+        let Some(local) = script else {
+            // Nothing to push and nothing installed: say so rather than
+            // reporting a preflight that never ran as a pass.
+            output::warn(&super::po::tf(
+                "[{label}] node preflight skipped: {path} is not on the node and this run has no \
+                 copy to push. The node was prepared; its network prerequisites were NOT verified",
+                &[("label", label), ("path", REMOTE_NODE_PREFLIGHT)],
+            ));
+            return Ok(());
+        };
+        // Staged like every other upload (#846), not written to a fixed
+        // `/tmp/delonix-node-preflight`: `apply_ssh` prepares nodes inside a
+        // `thread::scope`, so a shared name races — two nodes staging at once
+        // and one `mv` finding the file already moved — and a predictable
+        // path in a world-writable directory is a symlink someone else can
+        // plant first. `no_upload_targets_a_fixed_remote_tmp_path` is the
+        // gate that caught this one.
+        stage_and_install(target, local, "node-preflight", |staged| {
+            format!("mv {staged} {REMOTE_NODE_PREFLIGHT} && chmod 0755 {REMOTE_NODE_PREFLIGHT}")
+        })
+        .map_err(|e| Error::Invalid(format!("[{label}] node preflight: {e}")))?;
+    }
+    let out = remote::ssh_run(target, &format!("{REMOTE_NODE_PREFLIGHT} {profile}"));
+    match out {
+        Ok(_) => Ok(()),
+        // The script prints one line per check and exits non-zero naming what
+        // is missing. Its output IS the diagnostic, so it is carried into the
+        // error rather than replaced by "preflight failed".
+        Err(e) => Err(Error::coded(
+            6704,
+            Error::Unavailable(super::po::tf(
+                "[{label}] the node does not meet the prerequisites of the '{profile}' pod \
+                 network:\n{detail}\nNothing was bootstrapped on this host. Each FAIL line names \
+                 what is missing; a node built from a golden older than this release may simply \
+                 need rebuilding (`delonix vm image build`)",
+                &[
+                    ("label", label),
+                    ("profile", profile),
+                    ("detail", &e.to_string()),
+                ],
+            )),
+        )),
+    }
+}
+
+/// What to pass to kubeadm's `--kubernetes-version`, or `None` to pass nothing.
+///
+/// **BUG FOUND LIVE** (`cluster kubeadm --k8s-version 1.34`, 2026-10-15, first
+/// real two-node run of this path): the engine built the flag as
+/// `--kubernetes-version=v{spec.k8sVersion}` verbatim, and `kubeadm` answered
+///
+/// ```text
+/// error: version "v1.34" doesn't match patterns for neither semantic version
+/// nor labels (stable, latest, ...)
+/// ```
+///
+/// kubeadm requires a FULL semver there. `valid_version` accepts major.minor,
+/// every shipped example uses it (`k8sVersion: "1.34"` in
+/// `cluster-vm.yaml`, `cluster-ssh.yaml`, `cluster-kind.yaml`,
+/// `full-kubernetescluster.yaml`), and the flag's own help says "minor
+/// version" — so EVERY documented invocation of this path failed at
+/// `kubeadm init`, after the VMs were created and the hosts prepared.
+///
+/// It is the exact MIRROR of the bug `k8s_repo_version` records: there a patch
+/// version broke the apt repo URL, which only exists at minor level, and the
+/// fix truncated for the repo path. Nobody checked the other direction, and
+/// the two consumers of one field want opposite shapes.
+///
+/// **Why `None` and not `v{major}.{minor}.0`.** Appending `.0` would be worse
+/// than the bug: measured on the golden this very run built, the installed
+/// kubeadm is `1.34.12` and `preseed_k8s_images` cached `registry.k8s.io/...:
+/// v1.34.12`. Asking for `v1.34.0` would make kubeadm request images that are
+/// NOT in the node's store — turning a working offline node into one that
+/// silently reaches for the network, or fails. Omitting the flag makes kubeadm
+/// use its OWN version, which is by construction the one the golden installed
+/// and the one that was pre-seeded.
+///
+/// A full semver is passed through untouched: an operator who pinned a patch
+/// meant it, and `valid_version` already restricts the alphabet to digits and
+/// dots so nothing here can reach a shell as anything else.
+pub(crate) fn kubeadm_version_arg(spec_version: Option<&str>) -> Option<String> {
+    let v = spec_version?;
+    // Three dot-separated numeric components = a full semver kubeadm accepts.
+    if v.split('.').count() >= 3 && v.split('.').all(|c| !c.is_empty()) {
+        return Some(format!("v{v}"));
+    }
+    None
 }
 
 /// Remote path the `delonix` CLI lives at (the golden image's own convention —
@@ -3463,18 +4324,39 @@ fn kubeadm_init(
     if remote::ssh_check(cp1, "test -f /etc/kubernetes/admin.conf") {
         return recover_join_info(cp1);
     }
-    // External etcd needs `ClusterConfiguration.etcd.external`, which only
-    // exists in kubeadm's `--config` YAML — flat flags can't express it. The
-    // `stacked` (default) path below is byte-for-byte unchanged.
-    if !etcd_endpoints.is_empty() {
-        let yaml = kubeadm_config::render_init_config(
-            spec.k8s_version.as_deref(),
-            endpoint,
-            &spec.pod_subnet,
-            &spec.service_subnet,
-            DELONIX_CRI_SOCKET,
-            etcd_endpoints,
-        )?;
+    // Two things need kubeadm's `--config` YAML, because flat flags cannot
+    // express either: external etcd (`ClusterConfiguration.etcd.external`)
+    // and a kube-proxy that is not the default — `addon/kube-proxy` skipped
+    // when the pod network replaces it, or a `KubeProxyConfiguration` for
+    // `ipvs`. The `stacked` + `iptables` path below is byte-for-byte
+    // unchanged, which is what keeps the default free of regression risk.
+    //
+    // The kube-proxy mode is taken from the resolved PLAN, never from the raw
+    // spec field: the plan is where "the operator did not choose" became a
+    // value, and reading the raw field here would be a second place that
+    // decides the same thing.
+    let nodes = spec
+        .control_plane
+        .count()
+        .saturating_add(spec.workers.count());
+    let kube_proxy = network_plan(spec, nodes)
+        .map(|p| p.kube_proxy)
+        .unwrap_or("iptables");
+    // The SAME resolution as the flat-flag path below, for the same reason:
+    // `ClusterConfiguration.kubernetesVersion` is validated by kubeadm with
+    // the identical semver rule that refused `v1.34` on the command line.
+    let kubeadm_version = kubeadm_version_arg(spec.k8s_version.as_deref());
+    let init_cfg = kubeadm_config::InitConfig {
+        k8s_version: kubeadm_version.as_deref(),
+        control_plane_endpoint: endpoint,
+        pod_subnet: &spec.pod_subnet,
+        service_subnet: &spec.service_subnet,
+        cri_socket: DELONIX_CRI_SOCKET,
+        etcd_endpoints,
+        kube_proxy,
+    };
+    if kubeadm_config::needed(&init_cfg) {
+        let yaml = kubeadm_config::render_init_config(&init_cfg)?;
         // `write_private_temp`, not `fs::write` to a pid-derived name: `/tmp` is
         // world-writable and the name was guessable, so another local user could
         // pre-plant a symlink there and redirect the write, or simply read the
@@ -3500,10 +4382,8 @@ fn kubeadm_init(
         let out = outcome.map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
         return parse_join_info(&out);
     }
-    let k8s_ver_flag = spec
-        .k8s_version
-        .as_ref()
-        .map(|v| format!(" --kubernetes-version=v{v}"))
+    let k8s_ver_flag = kubeadm_version_arg(spec.k8s_version.as_deref())
+        .map(|v| format!(" --kubernetes-version={v}"))
         .unwrap_or_default();
     let cmd = format!(
         "kubeadm init --control-plane-endpoint={endpoint} --upload-certs \
@@ -5442,16 +6322,175 @@ workers:
         assert!(validate(&spec).is_ok());
     }
 
+    /// REGRESSION, found by the first real two-node run: the engine passed
+    /// `--kubernetes-version=v{spec.k8sVersion}` verbatim, kubeadm demands a
+    /// full semver there, and every shipped example uses major.minor — so
+    /// every documented invocation of this path died at `kubeadm init`, after
+    /// the VMs existed and the hosts were prepared.
+    #[test]
+    fn a_minor_k8s_version_is_not_passed_to_kubeadm_as_a_version() {
+        // The shape that broke it. kubeadm answers «"v1.34" doesn't match
+        // patterns for neither semantic version nor labels».
+        assert_eq!(kubeadm_version_arg(Some("1.34")), None);
+        assert_eq!(kubeadm_version_arg(Some("1.36")), None);
+        // Omitted, not faked to `.0`: measured on the golden this was found
+        // with, the installed kubeadm is 1.34.12 and `preseed_k8s_images`
+        // cached v1.34.12 images. Asking for v1.34.0 would make kubeadm want
+        // images the node does not have.
+        assert_ne!(kubeadm_version_arg(Some("1.34")), Some("v1.34.0".into()));
+        // A full semver is the operator pinning a patch, and travels through.
+        assert_eq!(
+            kubeadm_version_arg(Some("1.34.12")),
+            Some("v1.34.12".into())
+        );
+        assert_eq!(kubeadm_version_arg(None), None);
+    }
+
+    /// The generated `--config` carried the identical bug, because it took the
+    /// raw `spec.k8sVersion` and prepended `v` itself.
+    #[test]
+    fn the_generated_kubeadm_config_uses_the_same_resolution() {
+        let etcd = ["https://10.0.1.1:2379".to_string()];
+        let resolved = kubeadm_version_arg(Some("1.34"));
+        let yaml = kubeadm_config::render_init_config(&kubeadm_config::InitConfig {
+            k8s_version: resolved.as_deref(),
+            control_plane_endpoint: "10.0.0.1:6443",
+            pod_subnet: "10.244.0.0/16",
+            service_subnet: "10.96.0.0/12",
+            cri_socket: DELONIX_CRI_SOCKET,
+            etcd_endpoints: &etcd,
+            kube_proxy: "iptables",
+        })
+        .expect("a config for external etcd");
+        // No `kubernetesVersion` at all, rather than an invalid one.
+        assert!(!yaml.contains("kubernetesVersion"), "{yaml}");
+        assert!(!yaml.contains("v1.34\n"), "{yaml}");
+    }
+
     /// A CNI the engine does not know used to install nothing and say nothing.
+    ///
+    /// This test used to use `"calico"` as the unknown value — `calico` is now
+    /// a profile this engine installs, so the test would have kept passing for
+    /// the WRONG reason (it was asserting the code, and `calico` now gets a
+    /// different, also-refusing code). The unknown value has to be one that is
+    /// genuinely unknown.
     #[test]
     fn an_unknown_cni_is_refused_by_name() {
         let spec = ClusterSpec {
-            cni: "calico".into(),
+            cni: "weave".into(),
             ..spec_ssh_1cp()
         };
         let err = validate(&spec).unwrap_err();
         assert_eq!(err.number(), 1701, "{err}");
-        assert!(err.to_string().contains("calico"), "{err}");
+        assert!(err.to_string().contains("weave"), "{err}");
+        // And it lists the ones that DO exist, rather than only saying no.
+        for p in ["cilium", "calico", "flannel", "none"] {
+            assert!(err.to_string().contains(p), "{p} not offered: {err}");
+        }
+    }
+
+    /// A profile this release has not measured end to end is refused unless
+    /// the manifest says so by name. The whole-spec path is tested here (the
+    /// per-field logic has its own tests in `cmd::net_profiles`), because this
+    /// is the path a real manifest takes.
+    #[test]
+    fn an_experimental_profile_is_refused_through_the_manifest_path() {
+        let spec = ClusterSpec {
+            cni: "cilium".into(),
+            ..spec_ssh_1cp()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(err.number(), 1705, "{err}");
+        // With the opt-in, the same manifest resolves.
+        let ok = ClusterSpec {
+            cni: "cilium".into(),
+            network: NetworkBlock {
+                experimental: true,
+                ..Default::default()
+            },
+            ..spec_ssh_1cp()
+        };
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok).err());
+    }
+
+    /// `spec.network` is only read by a profile that reads it. A knob left on
+    /// `cni: none` would be dropped in silence, and a dropped network setting
+    /// is indistinguishable from an honoured one until the traffic fails.
+    #[test]
+    fn a_network_knob_on_a_profileless_cluster_is_refused() {
+        let spec = ClusterSpec {
+            cni: "none".into(),
+            network: NetworkBlock {
+                mtu: Some(1400),
+                ..Default::default()
+            },
+            ..spec_ssh_1cp()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert_eq!(err.number(), 1702, "{err}");
+        assert!(err.to_string().contains("mtu"), "{err}");
+    }
+
+    /// The schema's `enum` and the code's list cannot drift. A hardcoded
+    /// literal in the `#[schemars]` attribute is the only way to express it
+    /// (the attribute takes no expressions), so this is what keeps it true.
+    #[test]
+    fn the_published_schema_offers_the_same_cni_values_as_the_code() {
+        let schema = serde_json::to_value(schemars::schema_for!(ClusterSpec)).unwrap();
+        let from_schema = schema["properties"]["cni"]["enum"]
+            .as_array()
+            .expect("spec.cni has to carry an enum, or an editor validates a typo as fine")
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(from_schema, CNI_CHOICES.to_vec());
+    }
+
+    /// The `spec.network` field list and the struct cannot drift: a field in
+    /// the struct and not the allowlist is warned about as "unknown" in every
+    /// manifest that sets it, and a field in the allowlist and not the struct
+    /// is accepted and then ignored.
+    #[test]
+    fn net_profiles_block_fields_match_the_struct() {
+        // The struct's serde names with a value each type accepts. There is
+        // no reflection for this, so the list IS the test — and every entry
+        // is deserialized, because a rename typo in the struct would make the
+        // field silently inert while still appearing in the allowlist.
+        let from_struct = [
+            ("dataplane", "vxlan"),
+            ("kubeProxy", "ipvs"),
+            ("mtu", "1400"),
+            ("nodeMtu", "1500"),
+            ("ipFamily", "ipv4"),
+            ("interface", "eth0"),
+            ("multus", "true"),
+            ("hubble", "true"),
+            ("experimental", "true"),
+            ("offline", "true"),
+        ];
+        let mut a: Vec<&str> = from_struct.iter().map(|(k, _)| *k).collect();
+        let mut b: Vec<&str> = CLUSTER_NETWORK_FIELDS.to_vec();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(a, b);
+        for (f, v) in from_struct {
+            let block: NetworkBlock = serde_yaml::from_str(&format!("{f}: {v}"))
+                .unwrap_or_else(|e| panic!("{f}: {v} did not deserialize: {e}"));
+            // And it actually LANDED — a field that parses into the default
+            // is a field that does nothing.
+            let json = serde_json::to_value(
+                serde_yaml::from_str::<serde_yaml::Value>(&format!("{f}: {v}")).unwrap(),
+            )
+            .unwrap();
+            assert!(json.get(f).is_some(), "{f}");
+            let _ = block;
+        }
+        // The one that matters most, checked by value rather than by parse:
+        // `kubeProxy` is renamed, so a serde typo there is invisible to a
+        // round-trip that only asserts "it parsed".
+        let b: NetworkBlock = serde_yaml::from_str("kubeProxy: ipvs\nnodeMtu: 9000").unwrap();
+        assert_eq!(b.kube_proxy.as_deref(), Some("ipvs"));
+        assert_eq!(b.node_mtu, Some(9000));
     }
 
     /// The plan of a one-node default-CNI cluster announces the CNI step, and

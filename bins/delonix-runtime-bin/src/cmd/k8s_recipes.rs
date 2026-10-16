@@ -139,7 +139,7 @@ pub(crate) fn k8s_host_recipes(k8s_version: &str, extra_packages: &[String]) -> 
 /// run with `--no-network`. `k8s_host_recipes` = the 2 network ones + these, so
 /// `cluster apply` (live hosts) keeps seeing the full catalogue.
 pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
-    vec![
+    let mut all = vec![
         HostRecipe {
             name: "swap desligado",
             check: "! swapon --show | grep -q .".to_string(),
@@ -166,6 +166,94 @@ pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
             offline: Some(
                 "printf 'net.bridge.bridge-nf-call-iptables=1\\nnet.ipv4.ip_forward=1\\n\
                  net.bridge.bridge-nf-call-ip6tables=1\\n' > /etc/sysctl.d/k8s.conf"
+                    .to_string(),
+            ),
+        },
+    ];
+    all.extend(cni_prereq_recipes());
+    all
+}
+
+/// The node prerequisites a pod-network PROFILE needs, on top of the kubelet's
+/// own (swap off, `overlay`/`br_netfilter`, the three sysctls above).
+///
+/// Part of `k8s_config_recipes` — the no-network subset — for the one reason
+/// this file exists: the golden image and a host prepared live by
+/// `cluster apply` must end up IDENTICAL. A module the bootstrap loads but the
+/// image lacks is a cluster that works on a re-prepared host and fails on a
+/// fresh one, which is the hardest class of difference to see.
+///
+/// The set is the UNION over every profile and dataplane, because the image is
+/// built long before a cluster chooses one. A loaded module nobody uses costs
+/// a few hundred KiB; a missing one costs a dataplane.
+///
+/// **What it deliberately does NOT do.** It does not mount bpffs and it does
+/// not move anything to cgroup v2. Both are already true on the distros this
+/// image is built from (systemd auto-mounts `/sys/fs/bpf`; the unified
+/// hierarchy has been the default since Ubuntu 22.04), and writing over a
+/// working system to satisfy a checklist is how a build breaks something it
+/// did not need to touch. They are VERIFIED instead, by the node preflight —
+/// a check that fails loudly beats a change that silently did nothing.
+pub(crate) fn cni_prereq_recipes() -> Vec<HostRecipe> {
+    // Named explicitly rather than computed from the profile table, so this
+    // file reads as what actually lands on a node. The test
+    // `the_modules_cover_every_profile` proves the two agree, which is the
+    // part that would otherwise rot.
+    let modules = [
+        "vxlan",        // cilium / calico / flannel VXLAN
+        "geneve",       // cilium geneve
+        "ipip",         // calico ipip
+        "ip_tables",    // calico and flannel program iptables directly
+        "nf_conntrack", // and both read conntrack
+        // kube-proxy in `ipvs` mode needs the scheduler modules. Without them
+        // it starts, logs a line nobody reads, and silently serves iptables —
+        // a mode that reports itself as configured and is not.
+        "ip_vs",
+        "ip_vs_rr",
+        "ip_vs_wrr",
+        "ip_vs_sh",
+    ];
+    const MODULES_FILE: &str = "/etc/modules-load.d/delonix-cni.conf";
+    let lines = modules.join("\\n");
+    // The check reads the FILE, not `lsmod`: a module can be built into the
+    // kernel (never listed by `lsmod`) and `modprobe` still succeeds, so
+    // checking `lsmod` would re-run the recipe forever on such a kernel.
+    let check = format!("test -f {MODULES_FILE}");
+    vec![
+        HostRecipe {
+            name: "network-profile kernel modules persisted",
+            check,
+            apply: format!(
+                "printf '{lines}\\n' > {MODULES_FILE} && \
+                 for m in {}; do modprobe $m || true; done",
+                modules.join(" ")
+            ),
+            // `|| true` on the modprobe and ONLY there: a kernel with one of
+            // these built in, or without the ipvs schedulers, must not fail
+            // the whole host preparation — the profile that needs a missing
+            // module is refused by the preflight, by name, which is a better
+            // place to say it than here.
+            offline: Some(format!("printf '{lines}\\n' > {MODULES_FILE}")),
+        },
+        HostRecipe {
+            name: "network-profile sysctls applied",
+            // One file for every profile, so the IMAGE does not have to know
+            // which one it will run. `rp_filter=0` is Calico's own documented
+            // requirement (its `calico-node` refuses to start otherwise); the
+            // two arp_* values are what a VXLAN/IPVS node needs to answer ARP
+            // for a service address on the right interface.
+            check: "test -f /etc/sysctl.d/delonix-cni.conf".to_string(),
+            apply: "printf 'net.ipv4.conf.all.rp_filter=0\\n\
+                    net.ipv4.conf.default.rp_filter=0\\n\
+                    net.ipv4.conf.all.arp_announce=2\\n\
+                    net.ipv4.conf.all.arp_ignore=1\\n' > /etc/sysctl.d/delonix-cni.conf && \
+                    sysctl --system"
+                .to_string(),
+            offline: Some(
+                "printf 'net.ipv4.conf.all.rp_filter=0\\n\
+                 net.ipv4.conf.default.rp_filter=0\\n\
+                 net.ipv4.conf.all.arp_announce=2\\n\
+                 net.ipv4.conf.all.arp_ignore=1\\n' > /etc/sysctl.d/delonix-cni.conf"
                     .to_string(),
             ),
         },
@@ -259,14 +347,25 @@ mod tests {
     }
 
     #[test]
-    fn cinco_receitas_por_omissao() {
-        assert_eq!(k8s_host_recipes(ANY, &[]).len(), 5);
+    fn seven_recipes_by_default() {
+        // 2 that need the network (repo + packages) + 5 that do not (swap, the
+        // kubelet's modules and sysctls, the profiles' modules and sysctls).
+        //
+        // `ANY` and not `None`: #848 made `k8s_host_recipes` take a CONCRETE
+        // version, so "the caller did not choose" is resolved once by
+        // `resolve_k8s_version` and never again in here. The catalogue's SIZE
+        // does not depend on the version, so any pinned value serves.
+        assert_eq!(k8s_host_recipes(ANY, &[]).len(), 7);
     }
 
     #[test]
     fn config_recipes_sao_o_subconjunto_sem_rede() {
         let config = k8s_config_recipes();
-        assert_eq!(config.len(), 3, "swap + módulos + sysctls");
+        assert_eq!(
+            config.len(),
+            5,
+            "swap + the kubelet's modules/sysctls + the network profiles' modules/sysctls"
+        );
         // The guarantee that matters to the offline build: NONE touches the network.
         for r in &config {
             let cmd = r.apply_offline();
@@ -275,9 +374,48 @@ mod tests {
                 "receita '{}' precisa de rede: {cmd}",
                 r.name
             );
+            // And none of them has a live effect in the virt-customize chroot,
+            // whose kernel is the BUILD HOST's: a `modprobe` or a `sysctl
+            // --system` there configures the wrong machine.
+            assert!(
+                !cmd.contains("modprobe") && !cmd.contains("sysctl --system"),
+                "recipe '{}' has a live effect on the offline path: {cmd}",
+                r.name
+            );
         }
         // And they are exactly the tail of the full catalogue (they do not diverge).
         let all = k8s_host_recipes(ANY, &[]);
-        assert_eq!(&all[2..], &config[..], "as 3 finais têm de ser as mesmas");
+        assert_eq!(&all[2..], &config[..], "the last 5 have to be the same");
+    }
+
+    /// The module list is written out by hand so the file reads as what lands
+    /// on a node. This is what stops it rotting: every module any profile
+    /// declares it needs has to be in it, for every dataplane that profile
+    /// renders.
+    #[test]
+    fn the_modules_cover_every_profile() {
+        use super::super::net_profiles::Profile;
+        let recipes = cni_prereq_recipes();
+        let modules = &recipes
+            .iter()
+            .find(|r| r.name.contains("kernel modules"))
+            .unwrap()
+            .apply;
+        for p in [Profile::Cilium, Profile::Calico, Profile::Flannel] {
+            for dp in p.dataplanes() {
+                for m in p.required_modules(dp) {
+                    assert!(
+                        modules.contains(m),
+                        "{} needs module {m} on {dp} and the recipe does not persist it: {modules}",
+                        p.name()
+                    );
+                }
+            }
+        }
+        // And the ipvs schedulers, which no profile declares (they belong to
+        // kube-proxy, not to a CNI) but `kubeProxy: ipvs` needs.
+        for m in ["ip_vs", "ip_vs_rr", "ip_vs_wrr", "ip_vs_sh"] {
+            assert!(modules.contains(m), "{m}: {modules}");
+        }
     }
 }

@@ -182,6 +182,7 @@ Commands:
   apply       Apply the `kind: KubernetesCluster` document(s) of a manifest
   kube        Generate a Kubernetes manifest from a container/pod already running locally
   prune       Reclaim the state of clusters that have no nodes left
+  network     Inspect and prepare the pod-network profiles
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -194,6 +195,7 @@ COMMAND MAP:
   Interact     ls · load · kubeconfig · health · drain · uncordon
   Declarative  kube · apply
   Maintenance  prune
+  Clusters     network
 
 EXAMPLES:
   # a local Kubernetes cluster with no manifest and no Docker
@@ -478,10 +480,37 @@ Options:
           [default: 10.96.0.0/12]
 
       --cni &lt;CNI&gt;
-          Pod network. `default` = the engine&#x27;s node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI (Cilium, Calico...)
+          Pod network. `default` = the engine&#x27;s node-local bridge, which only serves a ONE-node cluster: with more nodes it is refused before any VM is created. `none` = install nothing; every node stays NotReady until you apply your own CNI. `cilium`/`calico`/`flannel` = a selectable profile, pinned to a version and an artefact digest, installed and waited for by the bootstrap itself (`delonix cluster network profiles` lists them with their support level)
           
           [default: default]
-          [possible values: default, none]
+          [possible values: default, none, cilium, calico, flannel]
+
+      --cni-dataplane &lt;CNI_DATAPLANE&gt;
+          Encapsulation / forwarding mode of the chosen profile. Omit for its default (`vxlan`, the only mode that asks nothing of the network between the nodes). `spec.network.dataplane` in a manifest
+
+      --kube-proxy &lt;KUBE_PROXY&gt;
+          `iptables` (default), `ipvs`, or `none` — the last meaning the CNI replaces kube-proxy, which changes the `kubeadm init` call itself and so cannot be turned on later. `spec.network.kubeProxy`
+
+      --cni-mtu &lt;CNI_MTU&gt;
+          Pod MTU. Omit to compute it from the node MTU and the encapsulation overhead — an MTU that does not fit drops large packets in silence
+
+      --node-mtu &lt;NODE_MTU&gt;
+          The nodes&#x27; own MTU, when it is not 1500. Only used to compute and bound `--cni-mtu`
+
+      --cni-interface &lt;CNI_INTERFACE&gt;
+          Node interface the dataplane should use, when autodetection is ambiguous. Omit to let the profile detect it
+
+      --multus
+          Also install Multus, as an EXTENSION over the primary CNI (secondary pod interfaces through `NetworkAttachmentDefinition`)
+
+      --hubble
+          Also install Hubble (Cilium&#x27;s observability component)
+
+      --experimental-cni
+          Acknowledge that the chosen profile is experimental in this release. Without it, an experimental profile is REFUSED (DX-1705) rather than silently used
+
+      --cni-offline
+          Install the pod network from the local artefact cache only, never from the network. Populate it with `delonix cluster network fetch`
 
       --boot-timeout &lt;BOOT_TIMEOUT&gt;
           Seconds to wait for each VM to become reachable over SSH

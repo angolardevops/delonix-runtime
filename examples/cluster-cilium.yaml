@@ -1,0 +1,82 @@
+# A multi-node kubeadm cluster whose pod network the bootstrap installs.
+#
+#   delonix vm image build -t k8s-golden --offline    # once
+#   delonix network create lab-net
+#   delonix cluster network profiles                  # what exists, and the state of each
+#   delonix cluster apply -f examples/cluster-cilium.yaml
+#
+# WHAT CHANGES against `cluster-vm.yaml`: there, `cni: default` is a node-local
+# bridge and serves exactly one node. Here `spec.cni` names a PROFILE, and the
+# bootstrap does three things it did not do before:
+#
+#   1. runs the preflight on every node (modules, sysctls, bpffs, cgroup v2,
+#      the CRI socket, the CNI plugins this profile's chain execs) and REFUSES
+#      a host that does not meet them, naming what is missing;
+#   2. downloads the profile's artefact, VERIFIES it against the digest this
+#      release pins, renders it with the pod CIDR and the computed MTU, and
+#      applies it;
+#   3. WAITS for its agent to be Ready on every node AND every node to be
+#      Ready — and fails with the counts if that does not happen. A `kubectl
+#      apply` that exits 0 is not the success condition.
+#
+# READ FIRST, before using this anywhere that matters:
+# `docs/network-compatibility.md` — what was measured, what was not, and why
+# these profiles are EXPERIMENTAL in this release.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: lab-cilium
+spec:
+  mode: vm
+
+  k8sVersion: "1.36"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+
+  # The profile. `delonix cluster network profiles` prints the pinned version,
+  # the artefact digest, the dataplanes rendered and the support level.
+  cni: cilium
+
+  network:
+    # Encapsulation. Omit for `vxlan`, the only mode that asks nothing of the
+    # network between the nodes. The routed modes (`native`, BGP) are absent on
+    # purpose: they need the surrounding network to carry pod routes, and this
+    # engine does not configure it.
+    dataplane: vxlan
+
+    # Pod MTU. OMITTING is recommended: it is computed from the node MTU minus
+    # the encapsulation overhead (VXLAN = 50 bytes, so 1450 on 1500). A value
+    # that does not fit is REFUSED (DX-1703) rather than silently dropping the
+    # large packets.
+    # mtu: 1450
+    # nodeMtu: 1500      # declare the nodes' real MTU when it is not 1500
+
+    # kube-proxy. `iptables` (the default) is the measured mode. `ipvs`
+    # generates a KubeProxyConfiguration; `none` (Cilium only) skips kubeadm's
+    # `addon/kube-proxy` phase — and therefore cannot be turned on after the
+    # cluster exists.
+    kubeProxy: iptables
+
+    # An explicit acknowledgement that this profile is experimental in this
+    # release. Without it the manifest is REFUSED (DX-1705) with the reason.
+    # Not bureaucracy: it is the difference between an operator who chose and
+    # an operator who was not told.
+    experimental: true
+
+    # Optional:
+    # hubble: true       # Cilium's observability (more pods, more resources)
+    # multus: false      # extra interfaces; an EXTENSION, never the primary network
+    # offline: true      # install only from the local cache (`cluster network fetch`)
+    # interface: ens3    # when interface autodetection is ambiguous
+
+  controlPlane:
+    replicas: 1
+  workers:
+    replicas: 2          # possible now: the profile routes pods between nodes
+
+  vm:
+    image: k8s-golden
+    network: lab-net
+    vcpus: 2
+    memory: 4G           # the Cilium agent asks for more than a bridge does
+    bootTimeout: 300s
