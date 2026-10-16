@@ -760,16 +760,22 @@ fn cmd_network(cmd: NetworkCmd) -> Result<()> {
             for p in [Profile::Cilium, Profile::Calico, Profile::Flannel] {
                 let a = p.artefact();
                 println!("{}", p.name());
-                println!("  version      {}", p.version());
+                // The label column is a WIDTH, not spaces typed into the
+                // literal: `no_message_carries_the_indentation_of_its_source_line`
+                // refuses a run of six or more spaces baked into a message,
+                // because alignment done that way drifts the moment a label
+                // changes length and cannot be seen in a diff.
+                println!("  {:<13}{}", "version", p.version());
                 println!(
-                    "  support      {}",
+                    "  {:<13}{}",
+                    "support",
                     match p.support() {
                         Support::Supported => "supported".to_string(),
                         Support::Experimental(_) => "EXPERIMENTAL".to_string(),
                     }
                 );
                 if let Support::Experimental(why) = p.support() {
-                    println!("  why          {why}");
+                    println!("  {:<13}{why}", "why");
                 }
                 // The default is MARKED, not left to be inferred from the
                 // order: an operator reading a list cannot tell which one they
@@ -797,7 +803,7 @@ fn cmd_network(cmd: NetworkCmd) -> Result<()> {
                 // preflight verifies.
                 let mods = p.required_modules(p.default_dataplane());
                 if !mods.is_empty() {
-                    println!("  modules      {}", mods.join(", "));
+                    println!("  {:<13}{}", "modules", mods.join(", "));
                 }
                 println!(
                     "  NetworkPolicy {}",
@@ -808,10 +814,10 @@ fn cmd_network(cmd: NetworkCmd) -> Result<()> {
                          enforced by nobody"
                     }
                 );
-                println!("  plugins      {}", p.required_plugins().join(", "));
+                println!("  {:<13}{}", "plugins", p.required_plugins().join(", "));
                 if let Some(a) = a {
-                    println!("  artefact     {}", a.url);
-                    println!("  sha256       {}", a.sha256);
+                    println!("  {:<13}{}", "artefact", a.url);
+                    println!("  {:<13}{}", "sha256", a.sha256);
                 }
                 println!();
             }
@@ -901,14 +907,14 @@ fn cmd_network_status(name: Option<String>) -> Result<()> {
             println!("desired   {} {}", r.cni, r.version);
             println!("  dataplane   {}", r.dataplane);
             println!("  kube-proxy  {}", r.kube_proxy);
-            println!("  mtu         {}", r.mtu);
+            println!("  {:<12}{}", "mtu", r.mtu);
             println!("  pod CIDR    {}", r.pod_subnet);
             println!("  artefact    sha256:{}", r.artefact_sha256);
             if r.multus {
-                println!("  multus      installed");
+                println!("  {:<12}{}", "multus", "installed");
             }
             if r.hubble {
-                println!("  hubble      installed");
+                println!("  {:<12}{}", "hubble", "installed");
             }
         }
         None => println!(
