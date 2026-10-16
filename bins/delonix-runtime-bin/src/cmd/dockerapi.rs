@@ -2586,6 +2586,35 @@ mod containers_json_tests {
         assert!(!query_flag(&q(""), "all"));
     }
 
+    /// **G-027**: the create answers with the id while the workload is still
+    /// running, and must never wait for it to end.
+    ///
+    /// What makes that true is the run being DETACHED. `handle_create` hands the
+    /// mapped `RunOpts` to `spawn_run_via_reexec`, which waits for the `__apirun`
+    /// child; that child returns early only because `cmd_run` detaches. Flip
+    /// `detach` and the child stays for the container's whole life, so the HTTP
+    /// answer does too — which is the hang the matrix recorded against `docker
+    /// run -d` (rc=124 at 60 s, measured 2026-09-16). It no longer reproduces:
+    /// re-measured on the raw HTTP path 2026-10-16, the create answered in
+    /// 0.055–0.494 s for a `sleep 300` container, three times, with the
+    /// container still running when the answer landed.
+    ///
+    /// `no_supervisor: false` is part of the same answer: the supervisor is the
+    /// container's parent, and without one `POST /wait` has no exit code to give.
+    #[test]
+    fn the_create_maps_to_a_detached_run_so_the_id_comes_back_first() {
+        let cfg = json!({"Image": "alpine:latest", "Cmd": ["sleep", "300"]});
+        let opts = docker_config_to_run_opts("probe".into(), &cfg).expect("maps to run opts");
+        assert!(
+            opts.detach,
+            "a foreground run holds the HTTP answer until the container ends (G-027)"
+        );
+        assert!(
+            !opts.no_supervisor,
+            "without a supervisor nobody reaps the container, so `POST /wait` has no code"
+        );
+    }
+
     /// docker-py sends Python's `True`/`False`. The daemon reads them as
     /// booleans, and a remove with `force=True` has to force.
     #[test]

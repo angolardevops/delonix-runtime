@@ -48,8 +48,20 @@ try:
 except Exception:
     pass
 
+t0 = time.monotonic()
 cid = c.api.create_container(IMAGE, command=["sleep", "60"], name=NAME)["Id"]
+create_took = time.monotonic() - t0
 check("create returns an Id", bool(cid), cid[:12])
+# G-027: the answer must come back while the workload is still running. A create
+# that waits for the container tracks its lifetime instead — that is how `docker
+# run -d` came back rc=124 at 60 s (measured 2026-09-16) with the container up.
+# The budget is 5 s against a 60 s workload, so a regression cannot pass by being
+# fast: it would have to wait ~60 s.
+check(f"create answers in under 5s (took {create_took:.3f}s)", create_took < 5.0)
+check(
+    "the container is still running when the create answers",
+    c.api.inspect_container(cid)["State"]["Running"] is True,
+)
 c.api.start(cid)
 # `start` on an already-running container must be idempotent: `create` here
 # also starts, and a client that then calls `start` must not get an error.
